@@ -74,7 +74,12 @@ struct AppModelEventTests {
         var afterInteraction = snapshot
         afterInteraction.eventSequence = 90
         await model.handle(event(topic: "session.editorText", snapshot: afterInteraction, sequence: 91, data: editor))
-        #expect(model.editorRequest?.fullText == "replacement")
+        let unmountedTarget = AppModel.SessionPresentationTarget(
+            sessionID: snapshot.sessionId,
+            generation: 1
+        )
+        #expect(model.editorRequest(for: unmountedTarget) == nil)
+        #expect(model.selectedSnapshot?.extensionUI.editorText == "replacement")
         #expect(model.selectedSnapshot?.eventSequence == 91)
     }
 
@@ -122,6 +127,11 @@ struct AppModelEventTests {
             mountedGeneration: 8,
             requestedGeneration: 7
         ))
+        #expect(!AppModel.admitsPresentationIntake(
+            mountedGeneration: 7,
+            requestedGeneration: 7,
+            isRevoked: true
+        ))
         #expect(AppModel.ownsSubscription(
             sessionID: "session",
             subscribedSessionID: "session",
@@ -134,8 +144,15 @@ struct AppModelEventTests {
             installedToken: "replacement",
             requestedToken: "stale"
         ))
-        #expect(AppModel.soleMountedSessionID(["session": 7]) == "session")
-        #expect(AppModel.soleMountedSessionID(["old": 7, "new": 8]) == nil)
+        let departing = AppModel.SessionPresentationTarget(sessionID: "old", generation: 7)
+        #expect(AppModel.soleAdmittedPresentationTarget(
+            generations: ["old": 7],
+            revoked: [departing]
+        ) == nil)
+        #expect(AppModel.soleAdmittedPresentationTarget(
+            generations: ["old": 7, "new": 8],
+            revoked: [departing]
+        ) == AppModel.SessionPresentationTarget(sessionID: "new", generation: 8))
     }
 
     @Test("fresh presentation replaces expanded history while reconnect preserves it")

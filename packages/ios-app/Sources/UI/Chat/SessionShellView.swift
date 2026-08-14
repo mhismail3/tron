@@ -19,7 +19,7 @@ struct SessionShellView: View {
         dashboardNavigation
         .sheet(isPresented: $showNewSession) {
             NewSessionSheet {
-                presentedSession = AppModel.SessionNavigationRoute(sessionID: $0, editorText: nil)
+                present(AppModel.SessionNavigationRoute(sessionID: $0, editorText: nil))
             }
                 .tronTopBlur(.sheet)
                 .presentationDetents([.medium, .large], selection: $newSessionDetent)
@@ -84,10 +84,18 @@ struct SessionShellView: View {
                 ChatView(
                     sessionID: route.sessionID,
                     initialEditorText: route.editorText,
-                    onForkCreated: { presentedSession = $0 }
+                    onForkCreated: present
                 )
                 .id(route.sessionID)
             }
+    }
+
+    private func present(_ route: AppModel.SessionNavigationRoute) {
+        if let current = presentedSession,
+           let target = model.presentationTarget(for: current.sessionID) {
+            model.revokePresentationIntake(target)
+        }
+        presentedSession = route
     }
 
     private var newSessionButton: some View {
@@ -149,7 +157,7 @@ struct SessionShellView: View {
         Task {
             do {
                 let sessionID = try await model.importSession(from: url, cwd: cwd)
-                presentedSession = AppModel.SessionNavigationRoute(sessionID: sessionID, editorText: nil)
+                present(AppModel.SessionNavigationRoute(sessionID: sessionID, editorText: nil))
             }
             catch { model.lastError = error.localizedDescription }
         }
@@ -224,7 +232,7 @@ struct SessionShellView: View {
 
     private func sessionButton(_ session: SessionSummary) -> some View {
         return Button {
-            presentedSession = AppModel.SessionNavigationRoute(sessionID: session.id, editorText: nil)
+            present(AppModel.SessionNavigationRoute(sessionID: session.id, editorText: nil))
         } label: {
             HistoricalSessionRow(session: session)
         }

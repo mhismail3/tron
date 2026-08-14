@@ -145,11 +145,13 @@ struct ChatView: View {
                 cancelAttachmentPresentation(includingActive: false)
             }
         }
-        .onChange(of: model.editorRequest) { _, request in
-            guard let request, request.sessionId == sessionID else { return }
+        .onChange(of: routedEditorRequest) { _, request in
+            guard let request,
+                  let target = presentationTarget,
+                  request.presentationGeneration == target.generation else { return }
             if text.isEmpty {
                 text = request.action == .paste ? text + request.text : request.fullText
-                model.editorRequest = nil
+                model.consumeEditorRequest(request, for: target)
             } else {
                 pendingEditorRequest = request
             }
@@ -161,7 +163,9 @@ struct ChatView: View {
             Button("Use Extension Text") {
                 if let request = pendingEditorRequest {
                     text = request.action == .paste ? text + request.text : request.fullText
-                    model.editorRequest = nil
+                    if let target = presentationTarget {
+                        model.consumeEditorRequest(request, for: target)
+                    }
                 }
                 pendingEditorRequest = nil
             }
@@ -171,6 +175,7 @@ struct ChatView: View {
         }
         .task(id: sessionID) { await beginOpeningPresentation() }
         .onDisappear {
+            if let target = presentationTarget { model.revokePresentationIntake(target) }
             openingTask?.cancel()
             openingTask = nil
             pagingOwner.cancel()
@@ -318,6 +323,20 @@ struct ChatView: View {
 
     private var selectedAuthoritativeSnapshot: SessionSnapshot? {
         model.authoritativeSnapshot(for: sessionID)
+    }
+
+    private var presentationTarget: AppModel.SessionPresentationTarget? {
+        modelPresentationGeneration.map {
+            AppModel.SessionPresentationTarget(sessionID: sessionID, generation: $0)
+        }
+    }
+
+    private var pendingAttachments: [AppModel.PendingAttachment] {
+        presentationTarget.map(model.pendingAttachments(for:)) ?? []
+    }
+
+    private var routedEditorRequest: AppModel.EditorRequest? {
+        presentationTarget.flatMap(model.editorRequest(for:))
     }
 
     private var responseState: ChatResponseState? {
@@ -709,12 +728,14 @@ struct ChatView: View {
                 }
             }
 
-            if !model.pendingAttachments.isEmpty {
+            if !pendingAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(model.pendingAttachments) { attachment in
+                        ForEach(pendingAttachments) { attachment in
                             PendingAttachmentChip(attachment: attachment) {
-                                model.removeAttachment(attachment.id)
+                                if let target = presentationTarget {
+                                    model.removeAttachment(attachment.id, target: target)
+                                }
                             }
                         }
                     }
@@ -891,7 +912,7 @@ struct ChatView: View {
         ChatComposerPolicy.trailingMode(
             phase: selectedAuthoritativeSnapshot?.phase,
             hasContent: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !model.pendingAttachments.isEmpty
+                || !pendingAttachments.isEmpty
         )
     }
 
@@ -1001,7 +1022,8 @@ struct ChatView: View {
 
     private func send() async {
         let outgoing = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !outgoing.isEmpty || !model.pendingAttachments.isEmpty else { return }
+        guard !outgoing.isEmpty || !pendingAttachments.isEmpty,
+              let target = presentationTarget else { return }
         let behavior = ChatComposerPolicy.submissionBehavior(phase: selectedAuthoritativeSnapshot?.phase)
         text = ""
         if !ChatComposerPolicy.preservesFocus(submissionBehavior: behavior) {
@@ -1010,7 +1032,7 @@ struct ChatView: View {
         }
         sending = true
         defer { sending = false }
-        do { try await model.send(outgoing, sessionID: sessionID, behavior: behavior) }
+        do { try await model.send(outgoing, target: target, behavior: behavior) }
         catch {
             text = ChatComposerPolicy.restoredDraft(outgoing: outgoing, currentDraft: text)
             model.lastError = error.localizedDescription
@@ -1018,31 +1040,53 @@ struct ChatView: View {
     }
 
     private func importCameraImage(_ image: UIImage) async {
+        guard let target = presentationTarget else { return }
         guard let data = image.jpegData(compressionQuality: 0.92) else {
             model.lastError = "The captured photo could not be prepared."
             return
         }
-        do { try await model.upload(name: "photo.jpg", mimeType: "image/jpeg", data: data) }
+        do {
+            try await model.upload(
+                name: "photo.jpg",
+                mimeType: "image/jpeg",
+                data: data,
+                target: target
+            )
+        }
         catch { model.lastError = error.localizedDescription }
     }
 
     private func importPhotos(_ values: [PhotosPickerItem]) async {
         photos = []
+        guard let target = presentationTarget else { return }
         for item in values {
             guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-            do { try await model.upload(name: "photo.jpg", mimeType: item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg", data: data) }
+            do {
+                try await model.upload(
+                    name: "photo.jpg",
+                    mimeType: item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg",
+                    data: data,
+                    target: target
+                )
+            }
             catch { model.lastError = error.localizedDescription }
         }
     }
 
     private func importFiles(_ result: Result<[URL], Error>) async {
-        guard case .success(let urls) = result else { return }
+        guard case .success(let urls) = result,
+              let target = presentationTarget else { return }
         for url in urls.prefix(10) {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
                 let data = try Data(contentsOf: url, options: .mappedIfSafe)
-                try await model.upload(name: url.lastPathComponent, mimeType: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream", data: data)
+                try await model.upload(
+                    name: url.lastPathComponent,
+                    mimeType: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream",
+                    data: data,
+                    target: target
+                )
             } catch { model.lastError = error.localizedDescription }
         }
     }

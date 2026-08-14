@@ -56,14 +56,20 @@ final class AppModel {
         var id: String { sessionID }
     }
 
+    struct SessionPresentationTarget: Hashable {
+        let sessionID: String
+        let generation: Int
+    }
+
     struct EditorRequest: Identifiable, Hashable {
         enum Action: String { case set, paste }
         let sessionId: String
+        let presentationGeneration: Int
         let revision: Int
         let action: Action
         let text: String
         let fullText: String
-        var id: String { "\(sessionId):\(revision)" }
+        var id: String { "\(sessionId):\(presentationGeneration):\(revision)" }
     }
 
     struct SessionOpenResponse: Decodable {
@@ -134,10 +140,17 @@ final class AppModel {
     var legacyImportedCount = 0
     var workspace: WorkspaceListing?
     var defaultWorkspace: String?
-    var pendingAttachments: [PendingAttachment] = []
+    private var revokedPresentationTargets = Set<SessionPresentationTarget>()
+    private var pendingAttachmentsByTarget = PresentationOwnedStore<
+        SessionPresentationTarget,
+        [PendingAttachment]
+    >()
     var authPrompt: AuthPromptState?
     var authEvent: AuthEventState?
-    var editorRequest: EditorRequest?
+    private var editorRequestByTarget = PresentationOwnedStore<
+        SessionPresentationTarget,
+        EditorRequest
+    >()
     var notifications: [String] = []
     var lastError: String?
     var onboardingError: String?
@@ -251,12 +264,57 @@ final class AppModel {
         mountedPresentationGenerationBySession[sessionID]
     }
 
-    var mountedSessionID: String? {
-        Self.soleMountedSessionID(mountedPresentationGenerationBySession)
+    func presentationTarget(for sessionID: String) -> SessionPresentationTarget? {
+        mountedPresentationGenerationBySession[sessionID].map {
+            SessionPresentationTarget(sessionID: sessionID, generation: $0)
+        }
     }
 
-    static func soleMountedSessionID(_ generations: [String: Int]) -> String? {
-        generations.count == 1 ? generations.keys.first : nil
+    func ownsPresentation(_ target: SessionPresentationTarget) -> Bool {
+        Self.admitsPresentationIntake(
+            mountedGeneration: mountedPresentationGenerationBySession[target.sessionID],
+            requestedGeneration: target.generation,
+            isRevoked: revokedPresentationTargets.contains(target)
+        )
+    }
+
+    func revokePresentationIntake(_ target: SessionPresentationTarget) {
+        guard Self.ownsPresentation(
+            mountedGeneration: mountedPresentationGenerationBySession[target.sessionID],
+            requestedGeneration: target.generation
+        ) else { return }
+        revokedPresentationTargets.insert(target)
+    }
+
+    func pendingAttachments(for target: SessionPresentationTarget) -> [PendingAttachment] {
+        pendingAttachmentsByTarget[target] ?? []
+    }
+
+    func editorRequest(for target: SessionPresentationTarget) -> EditorRequest? {
+        editorRequestByTarget[target]
+    }
+
+    func consumeEditorRequest(_ request: EditorRequest, for target: SessionPresentationTarget) {
+        guard editorRequestByTarget[target]?.id == request.id else { return }
+        editorRequestByTarget[target] = nil
+    }
+
+    var mountedPresentationTarget: SessionPresentationTarget? {
+        Self.soleAdmittedPresentationTarget(
+            generations: mountedPresentationGenerationBySession,
+            revoked: revokedPresentationTargets
+        )
+    }
+
+    static func soleAdmittedPresentationTarget(
+        generations: [String: Int],
+        revoked: Set<SessionPresentationTarget>
+    ) -> SessionPresentationTarget? {
+        let targets = generations.compactMap { sessionID, generation in
+            let target = SessionPresentationTarget(sessionID: sessionID, generation: generation)
+            return revoked.contains(target) ? nil : target
+        }
+        return targets.count == 1 ? targets[0] : nil
     }
 
     func sessionStructureRevision(for sessionID: String) -> Int {
@@ -657,6 +715,8 @@ final class AppModel {
             throw GatewayFailure(code: "sync_failed", message: "Tron could not synchronize this session.", retryable: true, details: nil)
         }
         authoritativeSessionIDs.insert(id)
+        let target = SessionPresentationTarget(sessionID: id, generation: generation)
+        revokedPresentationTargets.remove(target)
         mountedPresentationGenerationBySession[id] = generation
         Task { [weak self] in
             guard let self else { return }
@@ -668,6 +728,10 @@ final class AppModel {
     }
 
     func closeSessionPresentation(_ id: String, generation: Int) async {
+        let target = SessionPresentationTarget(sessionID: id, generation: generation)
+        revokedPresentationTargets.remove(target)
+        pendingAttachmentsByTarget.removeValue(for: target)
+        editorRequestByTarget.removeValue(for: target)
         guard Self.ownsPresentation(
             mountedGeneration: mountedPresentationGenerationBySession[id],
             requestedGeneration: generation
@@ -782,6 +846,17 @@ final class AppModel {
         mountedGeneration == requestedGeneration
     }
 
+    static func admitsPresentationIntake(
+        mountedGeneration: Int?,
+        requestedGeneration: Int,
+        isRevoked: Bool
+    ) -> Bool {
+        !isRevoked && ownsPresentation(
+            mountedGeneration: mountedGeneration,
+            requestedGeneration: requestedGeneration
+        )
+    }
+
     static func ownsSubscription(
         sessionID: String,
         subscribedSessionID: String?,
@@ -800,6 +875,36 @@ final class AppModel {
     }
 
     func send(_ text: String, sessionID: String, behavior: String? = nil) async throws {
+        try await send(text, sessionID: sessionID, uploadIDs: [], behavior: behavior)
+    }
+
+    func sendSharedContent(
+        _ text: String,
+        target: SessionPresentationTarget
+    ) async throws {
+        guard ownsPresentation(target) else { throw CancellationError() }
+        try await send(text, sessionID: target.sessionID, uploadIDs: [], behavior: nil)
+    }
+
+    func send(
+        _ text: String,
+        target: SessionPresentationTarget,
+        behavior: String? = nil
+    ) async throws {
+        guard ownsPresentation(target) else { throw CancellationError() }
+        let sentIDs = pendingAttachments(for: target).map(\.id)
+        try await send(text, sessionID: target.sessionID, uploadIDs: sentIDs, behavior: behavior)
+        guard var attachments = pendingAttachmentsByTarget[target] else { return }
+        attachments.removeAll { sentIDs.contains($0.id) }
+        pendingAttachmentsByTarget[target] = attachments.isEmpty ? nil : attachments
+    }
+
+    private func send(
+        _ text: String,
+        sessionID: String,
+        uploadIDs: [String],
+        behavior: String?
+    ) async throws {
         struct Params: Codable {
             let sessionId: String
             let text: String
@@ -809,11 +914,16 @@ final class AppModel {
         }
         struct Response: Codable { let operationId: String }
         let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, text: text, uploadIds: pendingAttachments.map(\.id), behavior: behavior, commandId: commandID)
+        let params = Params(
+            sessionId: sessionID,
+            text: text,
+            uploadIds: uploadIDs,
+            behavior: behavior,
+            commandId: commandID
+        )
         let _: Response = try await confirmedMutation(method: "session.prompt", commandId: commandID) {
             try await client.request("session.prompt", params, as: Response.self, timeout: .seconds(15))
         }
-        pendingAttachments.removeAll()
     }
 
     func abort(sessionID: String, kind: String = "agent") async {
@@ -923,6 +1033,7 @@ final class AppModel {
         replaceInstructions: Bool = false,
         label: String? = nil
     ) async throws -> String? {
+        let editorTarget = presentationTarget(for: sessionID)
         struct Params: Codable {
             let sessionId, entryId: String
             let summarize: Bool
@@ -937,8 +1048,17 @@ final class AppModel {
         let response: Response = try await confirmedMutation(method: "session.navigate", commandId: commandID) {
             try await client.request("session.navigate", params, timeout: .seconds(300))
         }
-        if let editorText = response.editorText {
-            editorRequest = .init(sessionId: sessionID, revision: Int(Date.now.timeIntervalSince1970 * 1_000), action: .set, text: editorText, fullText: editorText)
+        if let editorText = response.editorText,
+           let editorTarget,
+           ownsPresentation(editorTarget) {
+            editorRequestByTarget[editorTarget] = .init(
+                sessionId: sessionID,
+                presentationGeneration: editorTarget.generation,
+                revision: Int(Date.now.timeIntervalSince1970 * 1_000),
+                action: .set,
+                text: editorText,
+                fullText: editorText
+            )
         }
         await loadTree(sessionID: sessionID)
         return response.editorText
@@ -1076,18 +1196,31 @@ final class AppModel {
         if selectedSessionID == id { selectedSessionID = visibleSessions.first?.id }
     }
 
-    func upload(name: String, mimeType: String, data: Data) async throws {
+    func upload(
+        name: String,
+        mimeType: String,
+        data: Data,
+        target: SessionPresentationTarget
+    ) async throws {
+        guard ownsPresentation(target) else { throw CancellationError() }
         let id = try await client.upload(name: name, mimeType: mimeType, data: data)
-        pendingAttachments.append(PendingAttachment(
+        guard ownsPresentation(target) else { return }
+        var attachments = pendingAttachmentsByTarget[target] ?? []
+        attachments.append(PendingAttachment(
             id: id,
             name: name,
             mimeType: mimeType,
             size: data.count,
             previewData: mimeType.hasPrefix("image/") ? data : nil
         ))
+        pendingAttachmentsByTarget[target] = attachments
     }
 
-    func removeAttachment(_ id: String) { pendingAttachments.removeAll { $0.id == id } }
+    func removeAttachment(_ id: String, target: SessionPresentationTarget) {
+        guard var attachments = pendingAttachmentsByTarget[target] else { return }
+        attachments.removeAll { $0.id == id }
+        pendingAttachmentsByTarget[target] = attachments.isEmpty ? nil : attachments
+    }
 
     @discardableResult
     func refreshProviders(target: ProviderCatalogTarget) async -> Bool {
@@ -1638,7 +1771,17 @@ final class AppModel {
                   var snapshot = snapshots[sessionID] else { break }
             snapshot.extensionUI.editorRevision = editorRevision
             snapshot.extensionUI.editorText = fullText
-            editorRequest = .init(sessionId: sessionID, revision: editorRevision, action: action, text: text, fullText: fullText)
+            if let target = presentationTarget(for: sessionID),
+               ownsPresentation(target) {
+                editorRequestByTarget[target] = .init(
+                    sessionId: sessionID,
+                    presentationGeneration: target.generation,
+                    revision: editorRevision,
+                    action: action,
+                    text: text,
+                    fullText: fullText
+                )
+            }
             advance(&snapshot, envelope)
             snapshots[sessionID] = snapshot
         case "session.notification":

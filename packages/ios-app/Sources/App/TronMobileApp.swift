@@ -26,9 +26,17 @@ struct TronMobileApp: App {
                         }
                     } else if url.host == "share",
                               let shared = pendingShares.load()?.buildSharePrompt(),
-                              let sessionID = model.mountedSessionID {
-                        pendingShares.clear()
-                        Task { try? await model.send(shared.prompt, sessionID: sessionID) }
+                              let target = model.mountedPresentationTarget {
+                        Task {
+                            do {
+                                try await model.sendSharedContent(shared.prompt, target: target)
+                                pendingShares.clear()
+                            } catch is CancellationError {
+                                return
+                            } catch {
+                                model.lastError = error.localizedDescription
+                            }
+                        }
                     }
                 }
                 .onChange(of: scenePhase) { _, phase in

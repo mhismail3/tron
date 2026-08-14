@@ -88,7 +88,9 @@ and `SnapshotCacheTests`. `AppModelPerformanceSignpostTests` drives raw Gateway
 frames through visible open, synchronization/resynchronization, uncertain receipt,
 and terminal replay boundaries. The same suite proves a mounted route wins over divergent
 dashboard selection, secondary reads cannot create hidden subscriptions, and create/fork return
-navigation identity without opening it implicitly. It intentionally records each current resync attempt;
+navigation identity without opening it implicitly. `PresentationOwnedStoreTests` prove session and
+same-session-generation isolation for disposable attachment/editor state; event tests prove departing
+routes are excluded from share admission. It intentionally records each current resync attempt;
 Phase 2 owns removal of redundant synchronization work after the baseline is frozen.
 
 ```bash

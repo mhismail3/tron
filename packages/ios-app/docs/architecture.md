@@ -327,7 +327,12 @@ a same-session reopen, and cannot silently open another session. Presentation te
 ownership per session rather than against an unrelated route's newer generation; share intake is
 admitted only when exactly one presentation remains mounted. Create, import, and fork return navigation results; they do not rewrite
 selection or claim subscription ownership before the destination mounts. Fork-restored editor
-text travels in that route result rather than through selection-backed global state. Dashboard
+text travels in that route result rather than through selection-backed global state. Uploaded
+attachments and extension editor requests are stored by session plus presentation generation;
+late uploads, stale same-session editor events, removal, and send completion cannot cross a reopen.
+Closing or replacing a route synchronously revokes its intake lease and disposes its transient
+state. Share intake captures the sole admitted presentation target, never consumes that target's
+staged uploads, and clears the shared payload only after confirmed prompt admission. Dashboard
 imports use the explicit default workspace rather than a hidden transcript selection. Dashboard search autofocuses in a
 floating bottom safe-area bar immediately above the keyboard. The dashboard shows only
 user sessions, including ordinary user forks; classified subagent backing sessions remain hidden.
