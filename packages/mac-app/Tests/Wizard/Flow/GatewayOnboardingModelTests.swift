@@ -22,25 +22,6 @@ struct GatewayOnboardingModelTests {
         #expect(!model.isRefreshing)
     }
 
-    @Test("forward and backward navigation publish matching directions")
-    func navigationDirection() throws {
-        let root = try TestTempDir.make()
-        defer { TestTempDir.cleanup(root) }
-        let dependencies = GatewayTestDependencies.make(root: root)
-        let model = GatewayOnboardingModel(
-            dependencies: dependencies,
-            coordinator: GatewayLifecycleCoordinator(dependencies: dependencies)
-        )
-
-        model.advanceFromWelcome()
-        #expect(model.step == .tailscale)
-        #expect(model.slideDirection == .forward)
-
-        model.goBack()
-        #expect(model.step == .welcome)
-        #expect(model.slideDirection == .backward)
-    }
-
     @Test("observed truth resumes at the earliest incomplete step")
     func interruptedRecovery() async throws {
         let root = try TestTempDir.make()

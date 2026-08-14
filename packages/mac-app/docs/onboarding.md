@@ -24,8 +24,10 @@ Every step uses one fixed 480 by 440 point window and the same header, body, and
 footer regions. Step content cannot resize or recenter the shell; titles retain
 priority over the fixed progress pill, forward pages push in from the right,
 Back pushes in from the left, and card shadows can render into the window's
-horizontal gutters without being clipped. Navigation controls remain pinned to
-the same bottom inset.
+horizontal gutters without being clipped. Motion is derived from each actual
+source and destination page, so the first direction reversal cannot inherit a
+stale transition from the prior navigation. Navigation controls remain pinned
+to the same bottom inset.
 
 ## Interrupted setup
 

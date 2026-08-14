@@ -67,6 +67,19 @@ struct WizardShell<Content: View>: View {
     @ViewBuilder var content: (WizardStep) -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AccessibilityFocusState private var headerFocused: Bool
+    @State private var visibleStep: WizardStep
+    @State private var departingStep: WizardStep?
+    @State private var pageMotion: WizardPageMotion?
+    @State private var transitionProgress: CGFloat = 1
+
+    init(
+        model: GatewayOnboardingModel,
+        @ViewBuilder content: @escaping (WizardStep) -> Content
+    ) {
+        self.model = model
+        self.content = content
+        _visibleStep = State(initialValue: model.step)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -83,7 +96,6 @@ struct WizardShell<Content: View>: View {
             height: WizardLayout.height,
             alignment: .topLeading
         )
-        .animation(reduceMotion ? nil : WizardLayout.transitionAnimation, value: model.step)
         .configureHostingWindow { window in
             let size = NSSize(width: WizardLayout.width, height: WizardLayout.height)
             window.isMovableByWindowBackground = true
@@ -91,20 +103,34 @@ struct WizardShell<Content: View>: View {
             window.contentMaxSize = size
             if window.contentLayoutRect.size != size { window.setContentSize(size) }
         }
-        .onAppear { headerFocused = true }
-        .onChange(of: model.step) { _, _ in headerFocused = true }
+        .onAppear {
+            visibleStep = model.step
+            headerFocused = true
+        }
+        .onChange(of: model.step) { _, nextStep in
+            animatePage(to: nextStep)
+            headerFocused = true
+        }
     }
 
     private var stepBody: some View {
         ZStack(alignment: .topLeading) {
-            content(model.step)
-                .frame(
-                    width: WizardLayout.contentWidth,
-                    height: WizardLayout.bodyHeight,
-                    alignment: .topLeading
-                )
-                .id(model.step)
-                .transition(stepTransition)
+            if let departingStep, let pageMotion {
+                page(departingStep)
+                    .offset(x: reduceMotion ? 0 : pageMotion.outgoingOffset(
+                        progress: transitionProgress,
+                        distance: WizardLayout.contentWidth
+                    ))
+                    .opacity(pageMotion.outgoingOpacity(progress: transitionProgress))
+                    .allowsHitTesting(false)
+            }
+
+            page(visibleStep)
+                .offset(x: reduceMotion ? 0 : pageMotion?.incomingOffset(
+                    progress: transitionProgress,
+                    distance: WizardLayout.contentWidth
+                ) ?? 0)
+                .opacity(pageMotion?.incomingOpacity(progress: transitionProgress) ?? 1)
         }
         .frame(
             width: WizardLayout.contentWidth,
@@ -113,10 +139,20 @@ struct WizardShell<Content: View>: View {
         )
     }
 
+    private func page(_ step: WizardStep) -> some View {
+        content(step)
+            .frame(
+                width: WizardLayout.contentWidth,
+                height: WizardLayout.bodyHeight,
+                alignment: .topLeading
+            )
+            .id(step)
+    }
+
     private var headerBar: some View {
         HStack(spacing: WizardLayout.headerItemSpacing) {
             stepIcon
-            Text(model.step.displayTitle)
+            Text(visibleStep.displayTitle)
                 .font(TronTypography.wizardTitle)
                 .foregroundStyle(Color.tronEmerald)
                 .lineLimit(1)
@@ -136,7 +172,7 @@ struct WizardShell<Content: View>: View {
 
     @ViewBuilder
     private var stepIcon: some View {
-        switch model.step.headerIcon {
+        switch visibleStep.headerIcon {
         case .asset(let name):
             Image(name)
                 .renderingMode(.template)
@@ -188,7 +224,7 @@ struct WizardShell<Content: View>: View {
 
     @ViewBuilder
     private var primaryButton: some View {
-        switch model.step {
+        switch visibleStep {
         case .welcome:
             primary("Get started") { model.advanceFromWelcome() }
         case .tailscale:
@@ -234,7 +270,7 @@ struct WizardShell<Content: View>: View {
 
     private var progressPill: some View {
         let steps = WizardStep.allCases
-        let current = (steps.firstIndex(of: model.step) ?? 0) + 1
+        let current = (steps.firstIndex(of: visibleStep) ?? 0) + 1
         let fraction = Double(current) / Double(steps.count)
         return HStack(spacing: 8) {
             Text("\(current) / \(steps.count)")
@@ -250,12 +286,33 @@ struct WizardShell<Content: View>: View {
         .background(Capsule().fill(Color.tronEmerald.opacity(0.06)))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Setup step \(current) of \(steps.count)")
+        .animation(reduceMotion ? nil : WizardLayout.progressAnimation, value: visibleStep)
     }
 
-    private var stepTransition: AnyTransition {
-        guard !reduceMotion else { return .opacity }
-        let source: Edge = model.slideDirection == .forward ? .trailing : .leading
-        return .push(from: source)
-            .combined(with: .opacity)
+    private func animatePage(to nextStep: WizardStep) {
+        guard nextStep != visibleStep else { return }
+
+        let previousStep = visibleStep
+        let nextMotion = WizardPageMotion(source: previousStep, destination: nextStep)
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            departingStep = previousStep
+            visibleStep = nextStep
+            pageMotion = nextMotion
+            transitionProgress = 0
+        }
+
+        let animation = reduceMotion
+            ? Animation.easeOut(duration: 0.16)
+            : WizardLayout.transitionAnimation
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
+            transitionProgress = 1
+        } completion: {
+            guard visibleStep == nextStep else { return }
+            departingStep = nil
+            pageMotion = nil
+            transitionProgress = 1
+        }
     }
 }

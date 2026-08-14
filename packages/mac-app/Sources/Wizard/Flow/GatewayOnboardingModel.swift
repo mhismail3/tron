@@ -2,11 +2,6 @@ import AppKit
 import Foundation
 import Observation
 
-enum WizardSlideDirection: Sendable, Equatable {
-    case forward
-    case backward
-}
-
 enum InstallOutcome: Equatable, Sendable {
     case ready
     case failed(GatewayLifecycleFailure)
@@ -28,7 +23,6 @@ final class GatewayOnboardingModel {
     let dependencies: GatewayDependencies
     let coordinator: GatewayLifecycleCoordinator
     var step: WizardStep
-    var slideDirection: WizardSlideDirection = .forward
     var tailscaleStatus: TailscaleStatus?
     var permissionStatuses: [Permission: PermissionStatus] = [:]
     var installStatus: GatewayInstallStatus = .none
@@ -89,11 +83,11 @@ final class GatewayOnboardingModel {
             guard case .valid(let stored) = dependencies.stateStore.read(),
                   !stored.onboardingCompleted else { return }
             guard observedTailscale.isReady else {
-                navigate(to: .tailscale, direction: .forward)
+                navigate(to: .tailscale)
                 return
             }
             guard observedRegistration == .enabled else {
-                navigate(to: .install, direction: .forward)
+                navigate(to: .install)
                 return
             }
             let health = await dependencies.healthChecker.check(
@@ -101,18 +95,15 @@ final class GatewayOnboardingModel {
             )
             guard accept(ticket) else { return }
             guard case .success = health else {
-                navigate(to: .install, direction: .forward)
+                navigate(to: .install)
                 return
             }
             installOutcome = .ready
-            navigate(
-                to: permissionsAreReady ? .connectIPhone : .permissions,
-                direction: .forward
-            )
+            navigate(to: permissionsAreReady ? .connectIPhone : .permissions)
         }
     }
 
-    func advanceFromWelcome() { navigate(to: .tailscale, direction: .forward) }
+    func advanceFromWelcome() { navigate(to: .tailscale) }
 
     func verifyTailscaleAndContinue() {
         startProbe { [weak self] ticket in
@@ -120,7 +111,7 @@ final class GatewayOnboardingModel {
             let status = await dependencies.requirements.tailscaleStatus()
             guard accept(ticket) else { return }
             tailscaleStatus = status
-            if status.isReady { navigate(to: .install, direction: .forward) }
+            if status.isReady { navigate(to: .install) }
         }
     }
 
@@ -157,7 +148,7 @@ final class GatewayOnboardingModel {
 
     func continueAfterInstall() {
         guard installIsReady, !isMutating else { return }
-        navigate(to: .permissions, direction: .forward)
+        navigate(to: .permissions)
     }
 
     func restartAfterPermissions() {
@@ -169,7 +160,7 @@ final class GatewayOnboardingModel {
             switch result {
             case .succeeded:
                 error = nil
-                navigate(to: .connectIPhone, direction: .forward)
+                navigate(to: .connectIPhone)
             case .failed(let failure):
                 error = failure
             case .busy:
@@ -224,7 +215,7 @@ final class GatewayOnboardingModel {
 
     func continueAfterPairing() {
         guard pairingPayload != nil else { return }
-        navigate(to: .done, direction: .forward)
+        navigate(to: .done)
     }
 
     func completeOnboarding() {
@@ -242,7 +233,7 @@ final class GatewayOnboardingModel {
               let index = WizardStep.allCases.firstIndex(of: step),
               index > 0 else { return }
         cancelProbe()
-        navigate(to: WizardStep.allCases[index - 1], direction: .backward)
+        navigate(to: WizardStep.allCases[index - 1])
     }
 
     func cancelAll() {
@@ -299,10 +290,7 @@ final class GatewayOnboardingModel {
         ticket == generation && !Task.isCancelled
     }
 
-    private func navigate(to next: WizardStep, direction: WizardSlideDirection) {
-        slideDirection = direction
-        step = next
-    }
+    private func navigate(to next: WizardStep) { step = next }
 
     private static func installStatus(
         _ status: GatewayServiceRegistrationStatus

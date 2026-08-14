@@ -22,4 +22,23 @@ struct WizardLayoutTests {
         #expect(WizardLayout.headerTitleAvailableWidth >= 220)
         #expect(WizardStep.connectIPhone.displayTitle == "Connect your iPhone")
     }
+
+    @Test("the first backward and forward reversals use their page pair")
+    func firstReversalDirectionIsDeterministic() {
+        let backward = WizardPageMotion(
+            source: .connectIPhone,
+            destination: .permissions
+        )
+        #expect(backward.direction == .backward)
+        #expect(backward.incomingOffset(progress: 0, distance: 100) == -100)
+        #expect(backward.outgoingOffset(progress: 1, distance: 100) == 100)
+
+        let forward = WizardPageMotion(
+            source: .permissions,
+            destination: .connectIPhone
+        )
+        #expect(forward.direction == .forward)
+        #expect(forward.incomingOffset(progress: 0, distance: 100) == 100)
+        #expect(forward.outgoingOffset(progress: 1, distance: 100) == -100)
+    }
 }

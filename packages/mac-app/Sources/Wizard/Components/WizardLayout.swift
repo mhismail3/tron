@@ -43,6 +43,51 @@ enum WizardLayout {
     static let progressAnimation = transitionAnimation
 }
 
+enum WizardPageDirection: Equatable, Sendable {
+    case forward
+    case backward
+}
+
+/// Deterministic geometry for a single page-to-page animation.
+///
+/// Direction belongs to the source/destination pair, never to persistent
+/// onboarding state. That prevents a departing SwiftUI view from reusing the
+/// previous command's direction on the first forward/backward reversal.
+struct WizardPageMotion: Equatable, Sendable {
+    let direction: WizardPageDirection
+
+    init(source: WizardStep, destination: WizardStep) {
+        let steps = WizardStep.allCases
+        let sourceIndex = steps.firstIndex(of: source) ?? 0
+        let destinationIndex = steps.firstIndex(of: destination) ?? 0
+        direction = destinationIndex >= sourceIndex ? .forward : .backward
+    }
+
+    func incomingOffset(progress: CGFloat, distance: CGFloat) -> CGFloat {
+        let progress = clamped(progress)
+        let startingOffset = direction == .forward ? distance : -distance
+        return startingOffset * (1 - progress)
+    }
+
+    func outgoingOffset(progress: CGFloat, distance: CGFloat) -> CGFloat {
+        let progress = clamped(progress)
+        let endingOffset = direction == .forward ? -distance : distance
+        return endingOffset * progress
+    }
+
+    func incomingOpacity(progress: CGFloat) -> Double {
+        Double(clamped(progress))
+    }
+
+    func outgoingOpacity(progress: CGFloat) -> Double {
+        Double(1 - clamped(progress))
+    }
+
+    private func clamped(_ progress: CGFloat) -> CGFloat {
+        min(1, max(0, progress))
+    }
+}
+
 /// Shared geometry for icon-led cards inside wizard pages.
 ///
 /// The important invariant is optical balance: the space from the card's
