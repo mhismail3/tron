@@ -60,6 +60,38 @@ struct AppModelPerformanceSignpostTests {
         }
     }
 
+    @Test("reconnect restoration opens only the still-mounted presentation")
+    func reconnectRestoresMountedPresentation() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let snapshot = try SessionScenarioBuilder(seed: 43).openingTail(targetEncodedBytes: 8_192)
+            let openingResponder = Task {
+                try await respondToSessionSynchronization(
+                    socket: harness.socket,
+                    firstFrameIndex: 1,
+                    snapshot: snapshot
+                )
+                try await respondToPresentationRefreshes(socket: harness.socket, firstFrameIndex: 3)
+            }
+            defer { openingResponder.cancel() }
+
+            _ = try await harness.model.openSessionPresentation(snapshot.sessionId)
+            try await valueOfOwnedTask(openingResponder)
+            let reconnectResponder = Task {
+                try await respondToSessionSynchronization(
+                    socket: harness.socket,
+                    firstFrameIndex: 6,
+                    snapshot: snapshot
+                )
+            }
+            defer { reconnectResponder.cancel() }
+            await harness.model.restoreMountedPresentationAfterReconnect()
+            try await valueOfOwnedTask(reconnectResponder)
+            #expect(await MainActor.run { harness.model.selectedSessionID } == snapshot.sessionId)
+            await harness.client.close()
+        }
+    }
+
     @Test("cancelled presentation closes both open and sync intervals")
     func cancelledSessionOpen() async throws {
         try await withTestWatchdog {
@@ -118,6 +150,49 @@ struct AppModelPerformanceSignpostTests {
                 .begin(.receiptResolution),
                 .end(.receiptResolution, .success, .none),
             ])
+            await harness.client.close()
+        }
+    }
+
+    @Test("dashboard refresh cannot open or infer a transcript subscription")
+    func dashboardRefreshHasNoSessionOpen() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            await MainActor.run { harness.model.selectedSessionID = "stale-dashboard-selection" }
+            let refreshing = Task { await harness.model.refreshAll() }
+            defer { refreshing.cancel() }
+
+            let list = try await request(in: harness.socket, frameIndex: 1)
+            #expect(list.method == "session.list")
+            await harness.socket.enqueue(successResponse(
+                id: list.id,
+                result: .object([
+                    "sessions": .array([]),
+                    "nextCursor": .null,
+                    "listRevision": .number(1),
+                ])
+            ))
+
+            var expected = Set(["provider.list", "model.list", "settings.get", "device.list"])
+            for index in 2...5 {
+                let next = try await request(in: harness.socket, frameIndex: index)
+                #expect(expected.remove(next.method) != nil)
+                let result: JSONValue
+                switch next.method {
+                case "provider.list": result = .object(["providers": .array([])])
+                case "model.list": result = .object(["models": .array([]), "nextCursor": .null])
+                case "settings.get": result = .object(["effective": .object([:])])
+                case "device.list": result = .object(["devices": .array([])])
+                default:
+                    Issue.record("unexpected dashboard refresh: \(next.method)")
+                    return
+                }
+                await harness.socket.enqueue(successResponse(id: next.id, result: result))
+            }
+            await refreshing.value
+            #expect(expected.isEmpty)
+            #expect(await harness.socket.sentFrames().count == 6)
+            #expect(await MainActor.run { harness.model.selectedSessionID } == nil)
             await harness.client.close()
         }
     }

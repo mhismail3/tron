@@ -1,19 +1,18 @@
 import Foundation
 
-/// Reconciles canonical session discovery with a newly created empty session.
-/// Pi does not include an empty session in `session.list` until its first user
-/// message, so absence from discovery alone cannot immediately clear selection.
+/// Reconciles the explicitly mounted session with canonical discovery.
+/// An empty session is absent from `session.list` until its first user message,
+/// but dashboard discovery must never select a transcript implicitly.
 enum SessionSelectionPolicy {
     static func reconcile(
         selected: String?,
         visibleIDs: Set<String>,
-        locallyCreatedUnindexedIDs: Set<String>,
-        firstVisibleID: String?
+        locallyCreatedUnindexedIDs: Set<String>
     ) -> String? {
-        guard let selected else { return firstVisibleID }
+        guard let selected else { return nil }
         if visibleIDs.contains(selected) || locallyCreatedUnindexedIDs.contains(selected) {
             return selected
         }
-        return firstVisibleID
+        return nil
     }
 }

@@ -8,21 +8,24 @@ struct SessionSelectionPolicyTests {
         let selected = SessionSelectionPolicy.reconcile(
             selected: "new-empty",
             visibleIDs: ["older"],
-            locallyCreatedUnindexedIDs: ["new-empty"],
-            firstVisibleID: "older"
+            locallyCreatedUnindexedIDs: ["new-empty"]
         )
         #expect(selected == "new-empty")
     }
 
-    @Test("stale selection falls back to canonical discovery")
-    func replacesStaleSelection() {
+    @Test("dashboard discovery never mounts a fallback transcript")
+    func clearsStaleSelectionWithoutFallback() {
         let selected = SessionSelectionPolicy.reconcile(
             selected: "deleted",
             visibleIDs: ["canonical"],
-            locallyCreatedUnindexedIDs: [],
-            firstVisibleID: "canonical"
+            locallyCreatedUnindexedIDs: []
         )
-        #expect(selected == "canonical")
+        #expect(selected == nil)
+        #expect(SessionSelectionPolicy.reconcile(
+            selected: nil,
+            visibleIDs: ["canonical"],
+            locallyCreatedUnindexedIDs: []
+        ) == nil)
     }
 
     @Test("indexed selection remains stable")
@@ -30,8 +33,7 @@ struct SessionSelectionPolicyTests {
         let selected = SessionSelectionPolicy.reconcile(
             selected: "selected",
             visibleIDs: ["first", "selected"],
-            locallyCreatedUnindexedIDs: [],
-            firstVisibleID: "first"
+            locallyCreatedUnindexedIDs: []
         )
         #expect(selected == "selected")
     }

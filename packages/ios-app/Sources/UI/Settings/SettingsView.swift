@@ -100,9 +100,8 @@ struct SettingsView: View {
         .gatewayGlobalSheets()
         .task {
             await model.refreshAll(
-                projectSessionID: projectSessionID,
-                projectCWD: projectCWD,
-                useSelectedProject: scope == .project
+                settingsTarget: projectCWD.map(SettingsTarget.project(cwd:)) ?? .global,
+                providerTarget: projectSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
             )
         }
         .tronPresentation()

@@ -14,6 +14,7 @@ struct SessionShellView: View {
     @State private var sessionToRename: SessionSummary?
     @State private var renameName = ""
     @State private var collapsedWorkspaces = Set<String>()
+    @State private var navigationOwner = DashboardNavigationOwner()
 
     var body: some View {
         dashboardNavigation
@@ -91,6 +92,7 @@ struct SessionShellView: View {
     }
 
     private func present(_ route: AppModel.SessionNavigationRoute) {
+        navigationOwner.invalidate()
         if let current = presentedSession,
            let target = model.presentationTarget(for: current.sessionID) {
             model.revokePresentationIntake(target)
@@ -154,12 +156,16 @@ struct SessionShellView: View {
             model.lastError = "Choose a workspace by creating a session before importing."
             return
         }
+        let navigationGeneration = navigationOwner.begin()
         Task {
             do {
                 let sessionID = try await model.importSession(from: url, cwd: cwd)
+                guard navigationOwner.admit(navigationGeneration) else { return }
                 present(AppModel.SessionNavigationRoute(sessionID: sessionID, editorText: nil))
+            } catch {
+                guard navigationOwner.admit(navigationGeneration) else { return }
+                model.lastError = error.localizedDescription
             }
-            catch { model.lastError = error.localizedDescription }
         }
     }
 

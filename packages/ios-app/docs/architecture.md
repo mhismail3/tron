@@ -318,9 +318,10 @@ same 28-point status-icon anchor: 16 points of outer row inset plus 12 points of
 card content padding. Selectable app-owned cards have one full-card
 hit region and no decorative disclosure chevron. Dashboard session rows never
 retain a selected tint; their trailing swipe actions rename or delete the exact
-swiped canonical session without changing navigation selection. Canonical session selection is
-kept separate from dashboard navigation intent, so opening Settings or search
-cannot reveal a previously selected session. The mounted chat route supplies an immutable
+swiped canonical session without changing navigation selection. Dashboard discovery and refresh never select or open a transcript and global Settings never
+infer project scope. Catalog loads are latest-generation-owned, and an asynchronous import may
+navigate only while its exact dashboard intent is still current. Reconnect restores only the
+still-mounted presentation; it never uses a dashboard row as a subscription fallback. The mounted chat route supplies an immutable
 session ID to every prompt, runtime mutation, extension response, terminal operation, and
 secondary read. Those reads capture the route's exact subscription token, reject publication after
 a same-session reopen, and cannot silently open another session. Presentation teardown compares
@@ -333,7 +334,10 @@ late uploads, stale same-session editor events, removal, and send completion can
 Closing or replacing a route synchronously revokes its intake lease and disposes its transient
 state. Share intake captures the sole admitted presentation target, never consumes that target's
 staged uploads, and clears the shared payload only after confirmed prompt admission. Dashboard
-imports use the explicit default workspace rather than a hidden transcript selection. Dashboard search autofocuses in a
+imports use the explicit default workspace rather than a hidden transcript selection. Global
+notice projection is disposable and bounded to eight entries, 4 KiB per message, and 16 KiB total.
+Replaceable package, restart, and catch-up progress coalesces by owner, and profile teardown clears
+it. Dashboard search autofocuses in a
 floating bottom safe-area bar immediately above the keyboard. The dashboard shows only
 user sessions, including ordinary user forks; classified subagent backing sessions remain hidden.
 Disposable caches from before session-kind classification are invalidated rather than briefly

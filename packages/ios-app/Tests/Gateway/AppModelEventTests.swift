@@ -351,7 +351,7 @@ struct AppModelEventTests {
         ])))
 
         #expect(model.selectedSnapshot?.eventSequence == 89)
-        #expect(model.notifications.last == "Caught up")
+        #expect(model.latestNotice == "Caught up")
     }
 
     @Test("configured default model is preferred over catalog order")
@@ -403,20 +403,6 @@ struct AppModelEventTests {
             retryable: false,
             details: nil
         )))
-    }
-
-    @Test("successful session synchronization removes only its temporary catch-up notice")
-    func sessionCatchUpNoticeLifecycle() {
-        let notices = [
-            "Package operation completed",
-            AppModel.sessionCatchUpNotice,
-            "Provider login completed",
-            AppModel.sessionCatchUpNotice,
-        ]
-        #expect(AppModel.removingSessionCatchUpNotice(from: notices) == [
-            "Package operation completed",
-            "Provider login completed",
-        ])
     }
 
     @Test("cached active dashboard rows never masquerade as live after relaunch")

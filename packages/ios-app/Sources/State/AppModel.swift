@@ -151,7 +151,8 @@ final class AppModel {
         SessionPresentationTarget,
         EditorRequest
     >()
-    var notifications: [String] = []
+    private var noticeStore = GlobalNoticeStore()
+    var latestNotice: String? { noticeStore.latest }
     var lastError: String?
     var onboardingError: String?
     var settingsByTarget: [SettingsTarget: JSONValue] = [:]
@@ -202,6 +203,7 @@ final class AppModel {
     private var attachedTerminalIDs: Set<String> = []
     private var reconcilingTerminalIDs: Set<String> = []
     private var workspaceLoadGeneration = 0
+    private var sessionCatalogLoadOwner = SessionCatalogLoadOwner()
     private var presentationOpenGeneration = 0
     private var mountedPresentationGenerationBySession: [String: Int] = [:]
 
@@ -354,6 +356,18 @@ final class AppModel {
         SessionSummary.dashboardSessions(sessions).filter { !hiddenSessionIDs.contains($0.id) }
     }
 
+    func postNotice(_ message: String, replacing key: GlobalNoticeKey? = nil) {
+        noticeStore.post(message, replacing: key)
+    }
+
+    func removeNotice(_ key: GlobalNoticeKey) {
+        noticeStore.remove(key)
+    }
+
+    func dismissNotices() {
+        noticeStore.removeAll()
+    }
+
     func start() async {
         guard connectionState != .connecting, connectionState != .connected, connectionState != .reconnecting else { return }
         guard let profile = profiles.selected, let token = profileTokenLookup(profile) else {
@@ -502,6 +516,7 @@ final class AppModel {
                     self.pendingAuthoritativeResyncSessionIDs.removeAll()
                     self.pendingBranchReplacementSessionIDs.removeAll()
                     await self.refreshAll()
+                    await self.restoreMountedPresentationAfterReconnect()
                     await self.reattachTerminals()
                     self.connectionState = .connected
                     self.reconnectTask = nil
@@ -520,13 +535,27 @@ final class AppModel {
         }
     }
 
+    func restoreMountedPresentationAfterReconnect() async {
+        guard let target = mountedPresentationTarget,
+              selectedSessionID == target.sessionID else { return }
+        _ = await synchronizeSession(
+            target.sessionID,
+            replacingVisibleTranscript: true,
+            presentationGeneration: target.generation
+        )
+    }
+
     private func reconcileForegroundState() async {
         do {
             try await client.ensureResponsive()
             guard await refreshSessions(surfacingErrors: false) else {
                 throw GatewayFailure(code: "disconnected", message: "The Mac gateway connection is resuming.", retryable: true, details: nil)
             }
-            if let selectedSessionID, !(await synchronizeSession(selectedSessionID)) {
+            if let target = mountedPresentationTarget,
+               !(await synchronizeSession(
+                    target.sessionID,
+                    presentationGeneration: target.generation
+               )) {
                 throw GatewayFailure(code: "sync_failed", message: "The live session is resuming.", retryable: true, details: nil)
             }
             await reattachTerminals()
@@ -544,23 +573,22 @@ final class AppModel {
         }
     }
 
-    func refreshAll(projectSessionID: String? = nil, projectCWD: String? = nil, useSelectedProject: Bool = true) async {
+    func refreshAll(
+        settingsTarget: SettingsTarget = .global,
+        providerTarget: ProviderCatalogTarget = .global
+    ) async {
         await refreshSessions()
-        let effectiveSessionID = projectSessionID ?? (useSelectedProject ? selectedSessionID : nil)
-        let effectiveCWD = projectCWD ?? (useSelectedProject ? selectedSnapshot?.cwd : nil)
-        let settingsTarget = effectiveCWD.map(SettingsTarget.project(cwd:)) ?? .global
-        let providerTarget = effectiveSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global
         async let providerLoad: Bool = refreshProviders(target: providerTarget)
         async let settingLoad: Bool = refreshSettings(target: settingsTarget)
         async let deviceLoad: Void = refreshDevices()
         _ = await (providerLoad, settingLoad, deviceLoad)
-        if let effectiveSessionID { try? await openSession(effectiveSessionID) }
     }
 
     @discardableResult
     func refreshSessions(surfacingErrors: Bool = true) async -> Bool {
         struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
         struct Response: Decodable { let sessions: [SessionSummary]; let nextCursor: String?; let listRevision: Int }
+        let loadGeneration = sessionCatalogLoadOwner.begin()
         do {
             var all: [SessionSummary] = []
             var cursor: String?
@@ -571,6 +599,7 @@ final class AppModel {
                     "session.list",
                     Params(cursor: cursor, limit: 200, scope: "all")
                 )
+                guard sessionCatalogLoadOwner.admits(loadGeneration) else { return false }
                 if let expectedRevision, expectedRevision != response.listRevision {
                     throw GatewayFailure(
                         code: "pagination_changed",
@@ -591,6 +620,7 @@ final class AppModel {
                     )
                 }
             } while cursor != nil
+            guard sessionCatalogLoadOwner.admits(loadGeneration) else { return false }
             let ids = Set(all.map(\.id))
             liveSessionSummaryUpdates = liveSessionSummaryUpdates.filter { ids.contains($0.key) }
             sessions = all.map { summary in
@@ -603,6 +633,7 @@ final class AppModel {
             saveCache()
             return true
         } catch {
+            guard sessionCatalogLoadOwner.admits(loadGeneration) else { return false }
             if surfacingErrors { surface(error) }
             return false
         }
@@ -628,6 +659,7 @@ final class AppModel {
             pairedDevices.removeAll { $0.id == id }
             if let profile = profiles.selected, profile.deviceId == id {
                 profiles.remove(profile)
+                noticeStore.removeAll()
                 connectionState = .unpaired
                 await client.close()
             }
@@ -652,7 +684,7 @@ final class AppModel {
             try await client.request("legacy.import", params, timeout: .seconds(600))
         }
         legacyImportedCount += response.imported
-        notifications.append("Imported \(response.imported) legacy session\(response.imported == 1 ? "" : "s"); skipped \(response.skipped).")
+        postNotice("Imported \(response.imported) legacy session\(response.imported == 1 ? "" : "s"); skipped \(response.skipped).")
         await refreshSessions()
     }
 
@@ -738,6 +770,7 @@ final class AppModel {
         ) else { return }
         mountedPresentationGenerationBySession[id] = nil
         authoritativeSessionIDs.remove(id)
+        if selectedSessionID == id { selectedSessionID = nil }
         await closeSubscription(id, expectedPresentationGeneration: generation)
     }
 
@@ -1105,7 +1138,7 @@ final class AppModel {
         sessionResourceRevisions.removeValue(forKey: id)
         locallyCreatedUnindexedSessionIDs.remove(id)
         sessions.removeAll { $0.id == id }
-        if selectedSessionID == id { selectedSessionID = visibleSessions.first?.id }
+        if selectedSessionID == id { selectedSessionID = nil }
         saveCache()
     }
 
@@ -1193,7 +1226,7 @@ final class AppModel {
         // canonical session deletion and labels it accurately.
         hiddenSessionIDs.insert(id)
         persistHidden()
-        if selectedSessionID == id { selectedSessionID = visibleSessions.first?.id }
+        if selectedSessionID == id { selectedSessionID = nil }
     }
 
     func upload(
@@ -1488,9 +1521,12 @@ final class AppModel {
             try await client.request("gateway.restart", Params(commandId: commandID))
         }
         if response.scheduled {
-            notifications.append("Gateway restart scheduled after \(response.activeSessionIds.count) active agent run\(response.activeSessionIds.count == 1 ? "" : "s") finishes.")
+            postNotice(
+                "Gateway restart scheduled after \(response.activeSessionIds.count) active agent run\(response.activeSessionIds.count == 1 ? "" : "s") finishes.",
+                replacing: .gatewayRestart
+            )
         } else {
-            notifications.append("Gateway is restarting. Tron will reconnect automatically.")
+            postNotice("Gateway is restarting. Tron will reconnect automatically.", replacing: .gatewayRestart)
         }
     }
 
@@ -1664,7 +1700,7 @@ final class AppModel {
             reconnectTask = nil
             scheduleReconnect()
         case "transport.resyncRequired":
-            if let sessionID = event.sessionId ?? selectedSessionID {
+            if let sessionID = event.sessionId ?? subscribedSessionID {
                 pendingAuthoritativeResyncSessionIDs.insert(sessionID)
                 _ = await synchronizeSession(sessionID, operation: .sessionResync)
             }
@@ -1683,7 +1719,6 @@ final class AppModel {
                     _ = await synchronizeSession(snapshot.sessionId, operation: .sessionResync)
                 } else {
                     apply(snapshot)
-                    if snapshot.sessionId == selectedSessionID { subscribedSessionID = snapshot.sessionId }
                 }
             } else if let snapshot = try? event.payload.decode(SessionSnapshot.self) {
                 apply(snapshot)
@@ -1786,7 +1821,7 @@ final class AppModel {
             snapshots[sessionID] = snapshot
         case "session.notification":
             guard let (sessionID, envelope) = admitSessionEvent(event) else { break }
-            if let message = envelope.data.objectValue?["message"]?.stringValue { notifications.append(message) }
+            if let message = envelope.data.objectValue?["message"]?.stringValue { postNotice(message) }
             advanceSessionCursor(sessionID, envelope)
         case "session.operationFailed", "session.extensionError":
             guard let (sessionID, envelope) = admitSessionEvent(event) else { break }
@@ -1839,7 +1874,10 @@ final class AppModel {
         case "models.customChanged":
             customModelInvalidationGeneration &+= 1
         case "packages.progress", "packages.completed":
-            notifications.append(event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…")
+            postNotice(
+                event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…",
+                replacing: .packageProgress
+            )
         case "terminal.output":
             if let object = event.payload.objectValue,
                let terminalID = object["terminalId"]?.stringValue,
@@ -2020,7 +2058,7 @@ final class AppModel {
                     operation: .sessionResync
                 )
             }
-            notifications = Self.removingSessionCatchUpNotice(from: notifications)
+            removeNotice(.sessionCatchUp)
             result = .success
             metrics = PerformanceMetrics(itemCount: replay.count)
             return true
@@ -2038,9 +2076,7 @@ final class AppModel {
                 // A failed attempt is not an invalidation that arrived during a
                 // successful baseline. Leaving a pending marker here makes a
                 // manual Retry immediately perform a redundant second open.
-                if !notifications.contains(Self.sessionCatchUpNotice) {
-                    notifications.append(Self.sessionCatchUpNotice)
-                }
+                postNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
             } else {
                 surface(error)
             }
@@ -2265,6 +2301,8 @@ final class AppModel {
     }
 
     private func clearLiveConnectionState() {
+        sessionCatalogLoadOwner.invalidate()
+        noticeStore.removeAll()
         liveSessionSummaryUpdates.removeAll()
         attachedTerminalIDs.removeAll()
         reconcilingTerminalIDs.removeAll()
@@ -2320,8 +2358,7 @@ final class AppModel {
         selectedSessionID = SessionSelectionPolicy.reconcile(
             selected: selectedSessionID,
             visibleIDs: Set(visibleSessions.map(\.id)),
-            locallyCreatedUnindexedIDs: locallyCreatedUnindexedSessionIDs,
-            firstVisibleID: visibleSessions.first?.id
+            locallyCreatedUnindexedIDs: locallyCreatedUnindexedSessionIDs
         )
     }
 
@@ -2438,10 +2475,6 @@ final class AppModel {
     }
 
     static let sessionCatchUpNotice = "Live session view is catching up; the run continues on your Mac."
-
-    static func removingSessionCatchUpNotice(from notifications: [String]) -> [String] {
-        notifications.filter { $0 != sessionCatchUpNotice }
-    }
 
     static func shouldSurface(_ error: Error) -> Bool {
         if error is CancellationError { return false }
