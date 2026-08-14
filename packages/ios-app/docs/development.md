@@ -79,6 +79,13 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests/GatewayClientTransportTests
 ```
 
+Performance intervals use `SystemPerformanceSignposts`; tests inject
+`RecordingPerformanceSignposts` at the owning boundary. Metadata accepts only a
+closed result code and nonnegative item/byte counts. Never add identifiers, paths,
+methods, filenames, model names, prompts, transcript content, or other strings.
+Gateway and cache interval contracts are owned by `GatewayClientTransportTests`
+and `SnapshotCacheTests`.
+
 Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`
 feed raw HTTP response bytes and inspect the exact `/v1/pair` request.
 `AppModelPairingAttemptTests` use barriers whose late responses intentionally

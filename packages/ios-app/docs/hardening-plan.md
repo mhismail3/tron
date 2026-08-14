@@ -1,6 +1,6 @@
 # Tron iOS hardening plan
 
-Status: implementation in progress — milestones 0A–0B.3 and the separate provisional UI removal milestone are complete; milestones 0B.4–0B.5 and 1–9 are pending
+Status: implementation in progress — milestones 0A–0B.3 and the separate provisional UI removal milestone are complete; milestone 0B.4 is in progress; milestones 0B.5 and 1–9 are pending
 
 Audit baseline: `cee85b64a`
 
@@ -9,9 +9,10 @@ Provisional UI removal baseline: `03aa3b9a6`
 Implementation baseline for 0B.2: `4bac0090d`
 Implementation baseline for 0B.3a: `028e39a5e`
 Implementation baseline for 0B.3b: `67dd6825b`
+Implementation baseline for 0B.4: `259952614`
 Scope: all handwritten iOS app, share-extension, test, project, and owning documentation code under `packages/ios-app`, narrowly required Gateway contract work, and iOS release policy where repository rules require manual delivery.
 
-Milestone 0A began from clean tracked HEAD `cee85b64a`. Milestone 0B.1 began from clean tracked HEAD `fb009f311`. The user-directed provisional UI removal began as a separate serial milestone from clean tracked HEAD `03aa3b9a6`. Milestone 0B.2 began from clean tracked HEAD `4bac0090d`, and milestone 0B.3a began from clean tracked HEAD `028e39a5e`; untracked `.pi` runtime artifacts are outside these implementation baselines. No audit artifact or historical line number overrides source at these baselines.
+Milestone 0A began from clean tracked HEAD `cee85b64a`. Milestone 0B.1 began from clean tracked HEAD `fb009f311`. The user-directed provisional UI removal began as a separate serial milestone from clean tracked HEAD `03aa3b9a6`. Milestone 0B.2 began from clean tracked HEAD `4bac0090d`, milestone 0B.3a from `028e39a5e`, milestone 0B.3b from `67dd6825b`, and milestone 0B.4 from `259952614`; untracked `.pi` runtime artifacts are outside these implementation baselines. No audit artifact or historical line number overrides source at these baselines.
 
 ## Goal
 
@@ -62,7 +63,9 @@ Eight independent read-only audits covered state architecture, chat scrolling/pe
 
 **0B.3b — Hosted presented-frame scroll harness: complete.** Test builds can admit a synthetic snapshot through the existing authoritative read gate and bypass only network opening. The harness mounts the real `ChatView`, lazy transcript, composer inset, and native scroll view; semantic row frames, visibility, and geometry are coalesced to one latest sample per `CADisplayLink` frame. Focused tests prove native-scroll fidelity, latest-tail visibility, authority gating, watchdog-bounded waits, and at-most-one recorded sample per presented frame. No test hook ships in Beta or production.
 
-**0B.4–0B.5 and milestones 1–9: pending.** Privacy-safe instrumentation, device performance evidence, remaining system-service seams, runtime hardening, and later owner refactors remain pending under the plan below.
+**0B.4 — Privacy-safe instrumentation and performance evidence: in progress.** The typed signpost vocabulary is installed, and Gateway connection plus disposable cache load/save intervals now expose only result codes, item counts, and byte counts. Focused spies characterize success/failure boundaries without admitting profile IDs, session IDs, paths, command IDs, model names, prompts, transcript content, or filenames. Session/receipt/chat/terminal intervals and simulator/device evidence remain pending within this milestone.
+
+**0B.5 and milestones 1–9: pending.** Remaining system-service seams, runtime hardening, and later owner refactors remain pending under the plan below.
 
 ### Verified correctness priorities
 

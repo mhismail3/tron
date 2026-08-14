@@ -29,7 +29,10 @@ identity generation. The production transport is an actor-confined ephemeral
 `URLSession` owner and preserves the existing data frames, headers, deadlines, and
 random UUID behavior. Scripted test sockets contain no protocol, session, receipt,
 or event-admission policy; `GatewayClient` remains the only decoder and client
-runtime. `AppModel` is the MainActor state owner. It shares those clock/UUID seams
+runtime. Gateway connection and disposable cache intervals use the shared typed
+performance-signpost boundary. Signpost metadata is structurally limited to result
+codes, item counts, and byte counts; identifiers, paths, methods, filenames, model
+names, prompts, and transcript content are never recorded. `AppModel` is the MainActor state owner. It shares those clock/UUID seams
 for Gateway reconnect, synchronization, receipt, debounce, and command-ID work.
 It loads a bounded disposable cache first, connects, fetches
 cursor-paginated sessions and model catalogs, and replaces local state with
@@ -358,7 +361,8 @@ rounded UIKit fields, or system search and segmented styles.
 
 `SnapshotCache` admits snapshots only for the bounded session summary set,
 limits transcript size and session count, strips transient interactions and
-streaming state, and rewrites active phases to `interrupted`. It is disposable
+streaming state, and rewrites active phases to `interrupted`. Load/save signposts
+report only admitted aggregate item and encoded-byte counts. It is disposable
 presentation state, not session truth.
 
 ## Removed architecture

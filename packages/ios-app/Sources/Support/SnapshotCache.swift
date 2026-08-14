@@ -15,8 +15,13 @@ actor SnapshotCache {
     }
 
     private let root: URL
+    private let performanceSignposts: any PerformanceSignposting
 
-    init(root: URL? = nil) {
+    init(
+        root: URL? = nil,
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
+    ) {
+        self.performanceSignposts = performanceSignposts
         if let root { self.root = root }
         else {
             self.root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -25,17 +30,35 @@ actor SnapshotCache {
     }
 
     func load(profileID: String) -> Value {
+        let interval = performanceSignposts.begin(.cacheLoad)
         do {
             let data = try Data(contentsOf: path(profileID))
             let document = try JSONDecoder.gateway.decode(Document.self, from: data)
-            guard document.version == 3 else { return .empty }
+            guard document.version == 3 else {
+                performanceSignposts.end(
+                    interval,
+                    result: .discarded,
+                    metrics: PerformanceMetrics(byteCount: data.count)
+                )
+                return .empty
+            }
+            performanceSignposts.end(
+                interval,
+                result: .success,
+                metrics: PerformanceMetrics(
+                    itemCount: document.sessions.count + document.snapshots.count,
+                    byteCount: data.count
+                )
+            )
             return Value(sessions: document.sessions, snapshots: document.snapshots)
         } catch {
+            performanceSignposts.end(interval, result: .discarded, metrics: .none)
             return .empty
         }
     }
 
     func save(profileID: String, sessions: [SessionSummary], snapshots: [SessionSnapshot]) {
+        let interval = performanceSignposts.begin(.cacheSave)
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             let limitedSessions = Array(sessions.prefix(250))
@@ -48,7 +71,16 @@ actor SnapshotCache {
                 [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
                 ofItemAtPath: destination.path
             )
+            performanceSignposts.end(
+                interval,
+                result: .success,
+                metrics: PerformanceMetrics(
+                    itemCount: limitedSessions.count + limitedSnapshots.count,
+                    byteCount: data.count
+                )
+            )
         } catch {
+            performanceSignposts.end(interval, result: .failure, metrics: .none)
             // This cache is disposable. Live gateway snapshots remain canonical.
         }
     }

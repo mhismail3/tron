@@ -7,7 +7,8 @@ struct SnapshotCacheTests {
     @Test("turns in-flight state into interrupted offline state")
     func storesBoundedSnapshot() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        let cache = SnapshotCache(root: root)
+        let signposts = RecordingPerformanceSignposts()
+        let cache = SnapshotCache(root: root, performanceSignposts: signposts)
         let snapshot = SessionSnapshot(
             sessionId: "session", runtimeGeneration: "generation", revision: 1, eventSequence: 3,
             phase: .running, name: nil, cwd: "/workspace", parentSessionId: nil,
@@ -33,6 +34,21 @@ struct SnapshotCacheTests {
         #expect(loaded.snapshots.first?.phase == .interrupted)
         #expect(loaded.snapshots.first?.transcriptStart == 10)
         #expect(loaded.snapshots.first?.transcriptTotal == 12)
+        let events = signposts.events()
+        #expect(events.count == 4)
+        #expect(events[0] == .begin(.cacheSave))
+        guard case .end(.cacheSave, .success, let saveMetrics) = events[1] else {
+            Issue.record("cache save interval did not complete successfully")
+            return
+        }
+        #expect(saveMetrics.itemCount == 2)
+        #expect(saveMetrics.byteCount > 0)
+        #expect(events[2] == .begin(.cacheLoad))
+        guard case .end(.cacheLoad, .success, let loadMetrics) = events[3] else {
+            Issue.record("cache load interval did not complete successfully")
+            return
+        }
+        #expect(loadMetrics == saveMetrics)
     }
 
     @Test("rejects caches from before session-kind classification")
@@ -50,8 +66,35 @@ struct SnapshotCacheTests {
         document["version"] = 2
         try JSONSerialization.data(withJSONObject: document).write(to: file, options: .atomic)
 
-        let loaded = await cache.load(profileID: "profile")
+        let signposts = RecordingPerformanceSignposts()
+        let instrumentedCache = SnapshotCache(root: root, performanceSignposts: signposts)
+        let loaded = await instrumentedCache.load(profileID: "profile")
         #expect(loaded.sessions.isEmpty)
         #expect(loaded.snapshots.isEmpty)
+        let events = signposts.events()
+        #expect(events.count == 2)
+        #expect(events[0] == .begin(.cacheLoad))
+        guard case .end(.cacheLoad, .discarded, let metrics) = events[1] else {
+            Issue.record("obsolete cache load was not recorded as discarded")
+            return
+        }
+        #expect(metrics.itemCount == 0)
+        #expect(metrics.byteCount > 0)
+    }
+
+    @Test("records unwritable cache destinations as failed saves")
+    func recordsFailedSave() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .notDirectory)
+        try Data("not a directory".utf8).write(to: root)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let signposts = RecordingPerformanceSignposts()
+        let cache = SnapshotCache(root: root, performanceSignposts: signposts)
+
+        await cache.save(profileID: "profile", sessions: [], snapshots: [])
+
+        #expect(signposts.events() == [
+            .begin(.cacheSave),
+            .end(.cacheSave, .failure, .none),
+        ])
     }
 }

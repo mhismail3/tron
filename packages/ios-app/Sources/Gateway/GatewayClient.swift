@@ -11,6 +11,7 @@ actor GatewayClient {
     private let socketFactory: GatewaySocketFactory
     private let clock: MonotonicClock
     private let uuidSource: UUIDSource
+    private let performanceSignposts: any PerformanceSignposting
     private var socket: (any GatewaySocketConnection)?
     private var receiveTask: Task<Void, Never>?
     private var livenessTask: Task<Void, Never>?
@@ -28,11 +29,13 @@ actor GatewayClient {
     init(
         socketFactory: GatewaySocketFactory = .urlSession,
         clock: MonotonicClock = .continuous,
-        uuidSource: UUIDSource = .random
+        uuidSource: UUIDSource = .random,
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
     ) {
         self.socketFactory = socketFactory
         self.clock = clock
         self.uuidSource = uuidSource
+        self.performanceSignposts = performanceSignposts
         var continuation: AsyncStream<GatewayEvent>.Continuation!
         events = AsyncStream(bufferingPolicy: .bufferingNewest(512)) { continuation = $0 }
         eventContinuation = continuation
@@ -48,6 +51,21 @@ actor GatewayClient {
     }
 
     func connect(profile: GatewayProfile, token: String) async throws -> GatewayInfo {
+        let interval = performanceSignposts.begin(.gatewayConnect)
+        do {
+            let info = try await establishConnection(profile: profile, token: token)
+            performanceSignposts.end(interval, result: .success, metrics: .none)
+            return info
+        } catch {
+            let result: PerformanceResult = Task.isCancelled || error is CancellationError
+                ? .cancelled
+                : .failure
+            performanceSignposts.end(interval, result: result, metrics: .none)
+            throw error
+        }
+    }
+
+    private func establishConnection(profile: GatewayProfile, token: String) async throws -> GatewayInfo {
         await disconnect(
             reason: GatewayFailure(code: "replaced", message: "Connection replaced", retryable: true, details: nil),
             intentional: true

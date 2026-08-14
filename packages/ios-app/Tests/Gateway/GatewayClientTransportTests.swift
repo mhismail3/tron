@@ -22,7 +22,12 @@ struct GatewayClientTransportTests {
                 UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
                 UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
             ])
-            let client = GatewayClient(socketFactory: factory.factory, uuidSource: ids.source)
+            let signposts = RecordingPerformanceSignposts()
+            let client = GatewayClient(
+                socketFactory: factory.factory,
+                uuidSource: ids.source,
+                performanceSignposts: signposts
+            )
             await socket.enqueue(helloFrame())
 
             let info = try await client.connect(profile: profile, token: "token")
@@ -56,6 +61,10 @@ struct GatewayClientTransportTests {
                 result: .object(["answer": .string("ok")])
             ))
             #expect(try await valueOfOwnedTask(request).objectValue?["answer"]?.stringValue == "ok")
+            #expect(signposts.events() == [
+                .begin(.gatewayConnect),
+                .end(.gatewayConnect, .success, .none),
+            ])
             await client.close()
         }
     }
@@ -94,12 +103,14 @@ struct GatewayClientTransportTests {
         try await withTestWatchdog {
             let clock = ManualClock()
             let socket = ScriptedGatewaySocket()
+            let signposts = RecordingPerformanceSignposts()
             let client = GatewayClient(
                 socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
                 clock: clock.clock,
                 uuidSource: SequenceUUIDSource([
                     UUID(uuidString: "00000000-0000-0000-0000-000000000020")!,
-                ]).source
+                ]).source,
+                performanceSignposts: signposts
             )
 
             let connection = Task { try await client.connect(profile: profile, token: "token") }
@@ -116,6 +127,38 @@ struct GatewayClientTransportTests {
             } catch {
                 Issue.record("unexpected handshake error: \(error)")
             }
+            #expect(signposts.events() == [
+                .begin(.gatewayConnect),
+                .end(.gatewayConnect, .failure, .none),
+            ])
+            await client.close()
+        }
+    }
+
+    @Test("cancelled handshake closes its signpost as cancelled")
+    func cancelledHandshakeSignpost() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let signposts = RecordingPerformanceSignposts()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000023")!,
+                ]).source,
+                performanceSignposts: signposts
+            )
+
+            let connection = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            connection.cancel()
+            do {
+                _ = try await valueOfOwnedTask(connection)
+                Issue.record("cancelled handshake unexpectedly succeeded")
+            } catch is CancellationError {}
+            #expect(signposts.events() == [
+                .begin(.gatewayConnect),
+                .end(.gatewayConnect, .cancelled, .none),
+            ])
             await client.close()
         }
     }
