@@ -95,6 +95,25 @@ final class AppModel {
     private struct PairingAttempt {
         let id: UUID
         let task: Task<Void, Error>
+        let previousConnectionState: ConnectionState
+    }
+
+    private enum ConnectionLifecyclePhase {
+        case active(Int)
+        case transitioning(Int)
+        case tornDown(Int)
+
+        var generation: Int {
+            switch self {
+            case .active(let generation), .transitioning(let generation), .tornDown(let generation):
+                generation
+            }
+        }
+
+        var admitsWork: Bool {
+            if case .active = self { return true }
+            return false
+        }
     }
 
     typealias PairingCommit = @MainActor @Sendable (GatewayProfile, String) throws -> Void
@@ -115,6 +134,7 @@ final class AppModel {
     /// unresolved. The UI must not infer "unpaired" from the temporary default.
     var hasResolvedLaunchState = false
     var gatewayInfo: GatewayInfo?
+    private var gatewayConnectionID: Int?
     var sessions: [SessionSummary] = []
     var selectedSessionID: String? {
         didSet {
@@ -181,6 +201,9 @@ final class AppModel {
         }
     }
 
+    private var lifecyclePhase: ConnectionLifecyclePhase = .active(0)
+    private var completedLifecycleTransitionGeneration = 0
+    private var lifecycleTransitionWaiters: [Int: [CheckedContinuation<Void, Never>]] = [:]
     private var eventTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var pairingAttempt: PairingAttempt?
@@ -190,6 +213,8 @@ final class AppModel {
     private var packageLoadGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
     private var packageUpdateGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
     private var customModelLoadGenerationByTarget: [CustomModelTarget: Int] = [:]
+    private var deviceLoadGeneration = 0
+    private var legacyImportLoadGeneration = 0
     private var foregroundReconciliationTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var subscribedSessionID: String?
@@ -239,7 +264,9 @@ final class AppModel {
         #endif
         let events = client.events
         eventTask = Task { [weak self, events] in
-            for await event in events { await self?.handle(event) }
+            for await delivery in events {
+                await self?.handle(delivery.event, connectionID: delivery.connectionID)
+            }
         }
     }
 
@@ -257,6 +284,14 @@ final class AppModel {
         selectedSessionID = snapshot.sessionId
         snapshots[snapshot.sessionId] = snapshot
         authoritativeSessionIDs.insert(snapshot.sessionId)
+    }
+
+    func connectHostedGateway(profile: GatewayProfile, token: String) async throws {
+        let connection = try await client.connectForLifecycle(profile: profile, token: token)
+        gatewayConnectionID = connection.id
+        try await client.activateEvents(connectionID: connection.id)
+        gatewayInfo = connection.info
+        connectionState = .connected
     }
     #endif
 
@@ -367,18 +402,25 @@ final class AppModel {
     }
 
     func start() async {
-        guard connectionState != .connecting, connectionState != .connected, connectionState != .reconnecting else { return }
+        guard lifecyclePhase.admitsWork,
+              connectionState != .connecting,
+              connectionState != .connected,
+              connectionState != .reconnecting else { return }
         guard let profile = profiles.selected, let token = profileTokenLookup(profile) else {
             connectionState = .unpaired
             hasResolvedLaunchState = true
             return
         }
-        await loadCache(profileID: profile.id)
-        await connect(profile: profile, token: token)
+        let generation = lifecyclePhase.generation
+        await loadCache(profileID: profile.id, lifecycleGeneration: generation)
+        guard admitsLifecycle(generation) else { return }
+        await connect(profile: profile, token: token, lifecycleGeneration: generation)
+        guard admitsLifecycle(generation) else { return }
         hasResolvedLaunchState = true
     }
 
     func becameActive() {
+        guard lifecyclePhase.admitsWork else { return }
         guard connectionState == .connected else {
             if connectionState != .connecting, connectionState != .reconnecting { scheduleReconnect(immediate: true) }
             return
@@ -387,27 +429,43 @@ final class AppModel {
         // paths are also resuming. One reconciliation owns that boundary so two
         // session.open handshakes cannot race each other.
         guard foregroundReconciliationTask == nil else { return }
+        let generation = lifecyclePhase.generation
         foregroundReconciliationTask = Task { [weak self] in
-            await self?.reconcileForegroundState()
-            self?.foregroundReconciliationTask = nil
+            await self?.reconcileForegroundState(lifecycleGeneration: generation)
+            guard let self, self.admitsLifecycle(generation) else { return }
+            self.foregroundReconciliationTask = nil
         }
     }
 
     func pair(_ invitation: PairingInvitation) async throws {
+        guard lifecyclePhase.admitsWork else { throw CancellationError() }
+        let previousConnectionState = pairingAttempt?.previousConnectionState ?? connectionState
         invalidatePairingAttempt()
+        let lifecycleGeneration = lifecyclePhase.generation
         let attemptID = uuidSource.next()
         let task = Task { @MainActor [weak self] in
             guard let self else { throw CancellationError() }
             try await self.performPair(invitation, attemptID: attemptID)
         }
-        pairingAttempt = PairingAttempt(id: attemptID, task: task)
+        pairingAttempt = PairingAttempt(
+            id: attemptID,
+            task: task,
+            previousConnectionState: previousConnectionState
+        )
         defer {
             if pairingAttempt?.id == attemptID { pairingAttempt = nil }
         }
-        try await withTaskCancellationHandler {
-            try await task.value
-        } onCancel: {
-            task.cancel()
+        do {
+            try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        } catch {
+            if pairingAttempt?.id == attemptID, admitsLifecycle(lifecycleGeneration) {
+                connectionState = previousConnectionState
+            }
+            throw error
         }
     }
 
@@ -418,8 +476,18 @@ final class AppModel {
         try requirePairingAttempt(attemptID)
         try pairingCommit(profile, token)
         try requirePairingAttempt(attemptID)
-        await connect(profile: profile, token: token, pairingAttemptID: attemptID)
+        let generation = await beginConnectionTransition(invalidatePairing: false)
         try requirePairingAttempt(attemptID)
+        guard lifecyclePhase.generation == generation else { throw CancellationError() }
+        finishConnectionTransition(generation)
+        await connect(
+            profile: profile,
+            token: token,
+            pairingAttemptID: attemptID,
+            lifecycleGeneration: generation
+        )
+        try requirePairingAttempt(attemptID)
+        try requireLifecycle(generation)
         hasResolvedLaunchState = true
     }
 
@@ -434,95 +502,266 @@ final class AppModel {
         task?.cancel()
     }
 
+    private func admitsLifecycle(_ generation: Int) -> Bool {
+        lifecyclePhase.admitsWork && lifecyclePhase.generation == generation
+    }
+
+    private func requireLifecycle(_ generation: Int) throws {
+        try Task.checkCancellation()
+        guard admitsLifecycle(generation) else { throw CancellationError() }
+    }
+
+    private func requireConnection(_ connectionID: Int?) throws {
+        try Task.checkCancellation()
+        guard let connectionID, gatewayConnectionID == connectionID else { throw CancellationError() }
+    }
+
+    @discardableResult
+    private func beginConnectionTransition(
+        final: Bool = false,
+        invalidatePairing: Bool = true
+    ) async -> Int {
+        let generation = lifecyclePhase.generation &+ 1
+        lifecyclePhase = final ? .tornDown(generation) : .transitioning(generation)
+        if invalidatePairing { invalidatePairingAttempt() }
+
+        let reconnect = reconnectTask
+        let foreground = foregroundReconciliationTask
+        let refresh = refreshTask
+        let events = final ? eventTask : nil
+        reconnectTask = nil
+        foregroundReconciliationTask = nil
+        refreshTask = nil
+        reconnect?.cancel()
+        foreground?.cancel()
+        refresh?.cancel()
+        if final {
+            events?.cancel()
+            eventTask = nil
+        }
+
+        invalidateProfileScopedLoads()
+        invalidateSessionConnectionOwnership()
+        clearGatewayProjection()
+        await client.close()
+        await reconnect?.value
+        await foreground?.value
+        await refresh?.value
+        await events?.value
+        completeLifecycleTransition(generation)
+        return generation
+    }
+
+    private func waitForLifecycleTransition(_ generation: Int) async {
+        guard completedLifecycleTransitionGeneration < generation else { return }
+        await withCheckedContinuation { continuation in
+            lifecycleTransitionWaiters[generation, default: []].append(continuation)
+        }
+    }
+
+    private func completeLifecycleTransition(_ generation: Int) {
+        completedLifecycleTransitionGeneration = max(completedLifecycleTransitionGeneration, generation)
+        let completed = lifecycleTransitionWaiters.keys.filter { $0 <= generation }
+        for key in completed {
+            let waiters = lifecycleTransitionWaiters.removeValue(forKey: key) ?? []
+            for waiter in waiters { waiter.resume() }
+        }
+    }
+
+    private func finishConnectionTransition(_ generation: Int) {
+        guard case .transitioning(let currentGeneration) = lifecyclePhase,
+              currentGeneration == generation else { return }
+        lifecyclePhase = .active(generation)
+    }
+
+    private func cancelReconnect() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
+    }
+
+    private func finishReconnect(_ generation: Int) {
+        guard admitsLifecycle(generation) else { return }
+        reconnectTask = nil
+    }
+
+    private func invalidateProfileScopedLoads() {
+        sessionCatalogLoadOwner.invalidate()
+        workspaceLoadGeneration &+= 1
+        deviceLoadGeneration &+= 1
+        legacyImportLoadGeneration &+= 1
+        settingsLoadGenerationByTarget = settingsLoadGenerationByTarget.mapValues { $0 &+ 1 }
+        providerLoadGenerationByTarget = providerLoadGenerationByTarget.mapValues { $0 &+ 1 }
+        packageLoadGenerationByTarget = packageLoadGenerationByTarget.mapValues { $0 &+ 1 }
+        packageUpdateGenerationByTarget = packageUpdateGenerationByTarget.mapValues { $0 &+ 1 }
+        customModelLoadGenerationByTarget = customModelLoadGenerationByTarget.mapValues { $0 &+ 1 }
+    }
+
+    private func clearGatewayProjection() {
+        gatewayInfo = nil
+        gatewayConnectionID = nil
+        sessions.removeAll()
+        snapshots.removeAll()
+        authoritativeSessionIDs.removeAll()
+        selectedSessionID = nil
+        pairedDevices.removeAll()
+        legacyImportAvailable = false
+        legacyImportedCount = 0
+        workspace = nil
+        hiddenSessionIDs.removeAll()
+        locallyCreatedUnindexedSessionIDs.removeAll()
+        providerCatalogByTarget.removeAll()
+        settingsByTarget.removeAll()
+        packageInventoryByTarget.removeAll()
+        packageUpdatesByTarget.removeAll()
+        customModelsByTarget.removeAll()
+        providerCatalogTargetByAuthOperation.removeAll()
+        authPrompt = nil
+        authEvent = nil
+        lastError = nil
+        onboardingError = nil
+        presentationOpenGeneration &+= 1
+        mountedPresentationGenerationBySession.removeAll()
+        revokedPresentationTargets.removeAll()
+        pendingAttachmentsByTarget = .init()
+        editorRequestByTarget = .init()
+        clearLiveConnectionProjection()
+    }
+
     func switchGateway(_ profile: GatewayProfile) async {
-        invalidatePairingAttempt()
+        if case .tornDown = lifecyclePhase { return }
+        let generation = await beginConnectionTransition()
+        guard lifecyclePhase.generation == generation else { return }
         guard let token = profileTokenLookup(profile) else {
+            finishConnectionTransition(generation)
             connectionState = .unpaired
             hasResolvedLaunchState = true
             lastError = "This gateway no longer has a Keychain token. Pair it again."
             return
         }
         profiles.select(profile)
-        sessions = []
-        snapshots = [:]
-        authoritativeSessionIDs = []
-        selectedSessionID = nil
-        invalidateSessionConnectionOwnership()
-        clearLiveConnectionState()
-        await loadCache(profileID: profile.id)
-        await connect(profile: profile, token: token)
+        finishConnectionTransition(generation)
+        await loadCache(profileID: profile.id, lifecycleGeneration: generation)
+        guard admitsLifecycle(generation) else { return }
+        await connect(profile: profile, token: token, lifecycleGeneration: generation)
     }
 
-    func forgetCurrentGateway() {
-        invalidatePairingAttempt()
+    func forgetCurrentGateway() async {
+        if case .tornDown = lifecyclePhase { return }
+        let generation = await beginConnectionTransition()
+        guard lifecyclePhase.generation == generation else { return }
         if let profile = profiles.selected { profiles.remove(profile) }
-        Task { await client.close() }
-        gatewayInfo = nil
-        sessions = []
-        snapshots = [:]
-        authoritativeSessionIDs = []
-        selectedSessionID = nil
-        invalidateSessionConnectionOwnership()
-        clearLiveConnectionState()
+        finishConnectionTransition(generation)
         setupComplete = false
         connectionState = .unpaired
         hasResolvedLaunchState = true
     }
 
-    private func connect(profile: GatewayProfile, token: String, pairingAttemptID: UUID? = nil) async {
+    func teardown() async {
+        if case .tornDown(let generation) = lifecyclePhase {
+            await waitForLifecycleTransition(generation)
+            return
+        }
+        let generation = await beginConnectionTransition(final: true)
+        guard case .tornDown(let currentGeneration) = lifecyclePhase,
+              currentGeneration == generation else { return }
+        connectionState = .unpaired
+        hasResolvedLaunchState = true
+    }
+
+    private func connect(
+        profile: GatewayProfile,
+        token: String,
+        pairingAttemptID: UUID? = nil,
+        lifecycleGeneration: Int? = nil
+    ) async {
+        let generation = lifecycleGeneration ?? lifecyclePhase.generation
+        guard admitsLifecycle(generation) else { return }
         connectionState = .connecting
         do {
-            let connectedInfo = try await client.connect(profile: profile, token: token)
+            let connection = try await client.connectForLifecycle(profile: profile, token: token)
+            try requireLifecycle(generation)
             if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
-            gatewayInfo = connectedInfo
+            gatewayConnectionID = connection.id
+            try await client.activateEvents(connectionID: connection.id)
+            try requireLifecycle(generation)
+            gatewayInfo = connection.info
             invalidateSessionConnectionOwnership()
-            reconnectTask?.cancel()
-            reconnectTask = nil
+            cancelReconnect()
             await refreshAll()
+            try requireLifecycle(generation)
             if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
             await reattachTerminals()
+            try requireLifecycle(generation)
             if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
             connectionState = .connected
         } catch {
+            guard admitsLifecycle(generation) else { return }
             if let pairingAttemptID, (try? requirePairingAttempt(pairingAttemptID)) == nil { return }
             if let failure = error as? GatewayFailure, failure.code == "unauthenticated" {
                 connectionState = .unauthorized
                 lastError = failure.message
-            } else {
+            } else if !(error is CancellationError) {
                 connectionState = .offline(error.localizedDescription)
                 scheduleReconnect()
             }
         }
     }
 
+    private func requestReconnect(immediate: Bool = false, replaceExisting: Bool = false) {
+        guard lifecyclePhase.admitsWork, profiles.selected != nil else { return }
+        if replaceExisting { cancelReconnect() }
+        guard reconnectTask == nil else { return }
+        connectionState = .reconnecting
+        scheduleReconnect(immediate: immediate)
+    }
+
     private func scheduleReconnect(immediate: Bool = false) {
-        guard profiles.selected != nil, reconnectTask == nil else { return }
+        guard lifecyclePhase.admitsWork, profiles.selected != nil, reconnectTask == nil else { return }
+        let generation = lifecyclePhase.generation
         let clock = self.clock
         reconnectTask = Task { [weak self] in
-            if !immediate { try? await clock.sleep(.seconds(2)) }
-            var delay = 2.0
-            while !Task.isCancelled {
-                guard let self else { return }
-                self.connectionState = .reconnecting
-                do {
-                    self.gatewayInfo = try await self.client.reconnect()
-                    self.invalidateSessionConnectionOwnership()
-                    await self.refreshAll()
-                    await self.restoreMountedPresentationAfterReconnect()
-                    await self.reattachTerminals()
-                    self.connectionState = .connected
-                    self.reconnectTask = nil
-                    return
-                } catch let failure as GatewayFailure where failure.code == "unauthenticated" {
-                    self.connectionState = .unauthorized
-                    self.lastError = failure.message
-                    self.reconnectTask = nil
-                    return
-                } catch {
-                    self.connectionState = .offline(error.localizedDescription)
-                    try? await clock.sleep(.seconds(delay))
-                    delay = min(delay * 1.7, 15)
+            do {
+                if !immediate { try await clock.sleep(.seconds(2)) }
+                var delay = 2.0
+                while !Task.isCancelled {
+                    guard let self, self.admitsLifecycle(generation) else { return }
+                    self.connectionState = .reconnecting
+                    do {
+                        let connection = try await self.client.reconnectForLifecycle()
+                        try self.requireLifecycle(generation)
+                        self.gatewayConnectionID = connection.id
+                        try await self.client.activateEvents(connectionID: connection.id)
+                        try self.requireLifecycle(generation)
+                        self.gatewayInfo = connection.info
+                        self.invalidateSessionConnectionOwnership()
+                        await self.refreshAll()
+                        try self.requireLifecycle(generation)
+                        await self.restoreMountedPresentationAfterReconnect()
+                        try self.requireLifecycle(generation)
+                        await self.reattachTerminals()
+                        try self.requireLifecycle(generation)
+                        self.connectionState = .connected
+                        self.finishReconnect(generation)
+                        return
+                    } catch let failure as GatewayFailure where failure.code == "unauthenticated" {
+                        guard self.admitsLifecycle(generation) else { return }
+                        self.connectionState = .unauthorized
+                        self.lastError = failure.message
+                        self.finishReconnect(generation)
+                        return
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        guard self.admitsLifecycle(generation) else { return }
+                        self.connectionState = .offline(error.localizedDescription)
+                        try await clock.sleep(.seconds(delay))
+                        delay = min(delay * 1.7, 15)
+                    }
                 }
+            } catch is CancellationError {
+                return
+            } catch {
+                return
             }
         }
     }
@@ -535,12 +774,14 @@ final class AppModel {
         )
     }
 
-    private func reconcileForegroundState() async {
+    private func reconcileForegroundState(lifecycleGeneration: Int) async {
         do {
             try await client.ensureResponsive()
+            try requireLifecycle(lifecycleGeneration)
             guard await refreshSessions(surfacingErrors: false) else {
                 throw GatewayFailure(code: "disconnected", message: "The Mac gateway connection is resuming.", retryable: true, details: nil)
             }
+            try requireLifecycle(lifecycleGeneration)
             if let target = mountedPresentationTarget,
                !(await synchronizeSession(
                     target.sessionID,
@@ -548,15 +789,15 @@ final class AppModel {
                )) {
                 throw GatewayFailure(code: "sync_failed", message: "The live session is resuming.", retryable: true, details: nil)
             }
+            try requireLifecycle(lifecycleGeneration)
             await reattachTerminals()
+            try requireLifecycle(lifecycleGeneration)
         } catch is CancellationError {
             return
         } catch {
-            connectionState = .reconnecting
+            guard admitsLifecycle(lifecycleGeneration) else { return }
             invalidateSessionConnectionOwnership()
-            reconnectTask?.cancel()
-            reconnectTask = nil
-            scheduleReconnect(immediate: true)
+            requestReconnect(immediate: true, replaceExisting: true)
         }
     }
 
@@ -628,10 +869,16 @@ final class AppModel {
 
     func refreshDevices() async {
         struct Response: Decodable { let devices: [PairedDevice] }
+        deviceLoadGeneration &+= 1
+        let generation = deviceLoadGeneration
         do {
             let response: Response = try await client.request("device.list", EmptyParams())
+            guard deviceLoadGeneration == generation else { return }
             pairedDevices = response.devices
-        } catch { surface(error) }
+        } catch {
+            guard deviceLoadGeneration == generation else { return }
+            surface(error)
+        }
     }
 
     func revokeDevice(_ id: String) async throws {
@@ -645,21 +892,29 @@ final class AppModel {
         if response.revoked {
             pairedDevices.removeAll { $0.id == id }
             if let profile = profiles.selected, profile.deviceId == id {
+                let generation = await beginConnectionTransition()
+                guard lifecyclePhase.generation == generation else { return }
                 profiles.remove(profile)
-                noticeStore.removeAll()
+                finishConnectionTransition(generation)
                 connectionState = .unpaired
-                await client.close()
+                hasResolvedLaunchState = true
             }
         }
     }
 
     func inspectLegacyImport() async {
         struct Response: Decodable { let available: Bool; let importedCount: Int }
+        legacyImportLoadGeneration &+= 1
+        let generation = legacyImportLoadGeneration
         do {
             let response: Response = try await client.request("legacy.inspect", EmptyParams())
+            guard legacyImportLoadGeneration == generation else { return }
             legacyImportAvailable = response.available
             legacyImportedCount = response.importedCount
-        } catch { surface(error) }
+        } catch {
+            guard legacyImportLoadGeneration == generation else { return }
+            surface(error)
+        }
     }
 
     func importLegacySessions(port: Int = 9849) async throws {
@@ -1545,12 +1800,19 @@ final class AppModel {
     }
 
     func listTerminals(sessionID: String) async throws -> [TerminalSummary] {
-        guard subscribedSessionID == sessionID else {
+        let lifecycleGeneration = lifecyclePhase.generation
+        let connectionID = gatewayConnectionID
+        let subscriptionToken = subscriptionTokenBySession[sessionID]
+        guard subscribedSessionID == sessionID, subscriptionToken != nil else {
             throw GatewayFailure(code: "sync_failed", message: "Open the session before listing terminals.", retryable: true, details: nil)
         }
         struct Params: Codable { let sessionId: String }
         struct Response: Decodable { let terminals: [TerminalSummary] }
         let response: Response = try await client.request("terminal.list", Params(sessionId: sessionID))
+        try requireLifecycle(lifecycleGeneration)
+        try requireConnection(connectionID)
+        guard subscribedSessionID == sessionID,
+              subscriptionTokenBySession[sessionID] == subscriptionToken else { throw CancellationError() }
         let attached = terminals.filter { attachedTerminalIDs.contains($0.id) }
         terminals = response.terminals + attached.filter { terminal in
             !response.terminals.contains { $0.id == terminal.id }
@@ -1579,10 +1841,14 @@ final class AppModel {
     }
 
     func attachTerminal(_ id: String, after: Int) async throws -> TerminalSummary {
-        try await measure(.terminalAttachReplay) {
+        let lifecycleGeneration = lifecyclePhase.generation
+        let connectionID = gatewayConnectionID
+        return try await measure(.terminalAttachReplay) {
             struct Params: Codable { let terminalId: String; let afterSequence: Int }
             struct Response: Decodable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
             let response: Response = try await client.request("terminal.attach", Params(terminalId: id, afterSequence: after))
+            try requireLifecycle(lifecycleGeneration)
+            try requireConnection(connectionID)
             let installedCount = installTerminalReplay(
                 response.chunks,
                 terminal: response.terminal,
@@ -1615,7 +1881,10 @@ final class AppModel {
     func detachTerminal(_ id: String) async {
         struct Params: Codable { let terminalId: String }
         struct Response: Decodable { let detached: Bool }
+        let lifecycleGeneration = lifecyclePhase.generation
+        let connectionID = gatewayConnectionID
         let _: Response? = try? await client.request("terminal.detach", Params(terminalId: id))
+        guard admitsLifecycle(lifecycleGeneration), gatewayConnectionID == connectionID else { return }
         attachedTerminalIDs.remove(id)
     }
 
@@ -1650,6 +1919,12 @@ final class AppModel {
     }
 
     func handle(_ event: GatewayEvent) async {
+        await handle(event, connectionID: nil)
+    }
+
+    private func handle(_ event: GatewayEvent, connectionID: Int?) async {
+        guard lifecyclePhase.admitsWork else { return }
+        if let connectionID, gatewayConnectionID != connectionID { return }
         if event.topic.hasPrefix("session."), event.topic != "session.listChanged", event.topic != "session.summary" {
             switch sessionSynchronization.admit(event) {
             case .deliver(let event):
@@ -1667,13 +1942,11 @@ final class AppModel {
     private func handleDeliveredEvent(_ event: GatewayEvent) async {
         switch event.topic {
         case "transport.disconnected", "system.stopping":
+            gatewayConnectionID = nil
             invalidateSessionConnectionOwnership()
             liveSessionSummaryUpdates.removeAll()
             sessions = sessions.map(\.safeCachedProjection)
-            connectionState = .reconnecting
-            reconnectTask?.cancel()
-            reconnectTask = nil
-            scheduleReconnect()
+            requestReconnect()
         case "transport.resyncRequired":
             if let sessionID = event.sessionId ?? subscribedSessionID {
                 _ = await synchronizeSession(sessionID, operation: .sessionResync)
@@ -2372,16 +2645,21 @@ final class AppModel {
     }
 
     private func scheduleSessionListRefresh() {
+        guard lifecyclePhase.admitsWork else { return }
         refreshTask?.cancel()
+        let generation = lifecyclePhase.generation
         let clock = self.clock
         refreshTask = Task { [weak self] in
-            try? await clock.sleep(.milliseconds(150))
-            await self?.refreshSessions()
+            do { try await clock.sleep(.milliseconds(150)) }
+            catch { return }
+            guard let self, self.admitsLifecycle(generation) else { return }
+            await self.refreshSessions()
+            guard self.admitsLifecycle(generation) else { return }
+            self.refreshTask = nil
         }
     }
 
-    private func clearLiveConnectionState() {
-        sessionCatalogLoadOwner.invalidate()
+    private func clearLiveConnectionProjection() {
         noticeStore.removeAll()
         liveSessionSummaryUpdates.removeAll()
         attachedTerminalIDs.removeAll()
@@ -2462,10 +2740,15 @@ final class AppModel {
         commandId: String,
         send: () async throws -> JSONValue
     ) async throws -> JSONValue {
-        do { return try await send() }
-        catch let uncertain as GatewayPossiblySentError {
+        let lifecycleGeneration = lifecyclePhase.generation
+        try requireLifecycle(lifecycleGeneration)
+        do {
+            let value = try await send()
+            try requireLifecycle(lifecycleGeneration)
+            return value
+        } catch let uncertain as GatewayPossiblySentError {
             let original = uncertain.failure
-            if Task.isCancelled {
+            if Task.isCancelled || !admitsLifecycle(lifecycleGeneration) {
                 throw Self.uncertainMutationOutcome(
                     method: method,
                     commandId: commandId,
@@ -2481,7 +2764,7 @@ final class AppModel {
             let deadline = clock.now() + .seconds(90)
             var lastFailure: GatewayFailure = original
             while clock.now() < deadline {
-                if Task.isCancelled {
+                if Task.isCancelled || !admitsLifecycle(lifecycleGeneration) {
                     result = .cancelled
                     throw Self.uncertainMutationOutcome(
                         method: method,
@@ -2489,13 +2772,17 @@ final class AppModel {
                         lastFailure: lastFailure
                     )
                 }
-                guard await waitForConnected(until: deadline) else { break }
+                guard await waitForConnected(
+                    until: deadline,
+                    lifecycleGeneration: lifecycleGeneration
+                ) else { break }
                 do {
                     let status: CommandStatusResponse = try await client.request(
                         "command.status",
                         CommandStatusParams(method: method, commandId: commandId),
                         timeout: .seconds(10)
                     )
+                    try requireLifecycle(lifecycleGeneration)
                     switch status.status {
                     case "completed":
                         guard let resolved = status.result else {
@@ -2505,7 +2792,8 @@ final class AppModel {
                         return resolved
                     case "missing":
                         do {
-                            guard Self.admitsReceiptReplay(taskIsCancelled: Task.isCancelled) else {
+                            guard admitsLifecycle(lifecycleGeneration),
+                                  Self.admitsReceiptReplay(taskIsCancelled: Task.isCancelled) else {
                                 throw Self.uncertainMutationOutcome(
                                     method: method,
                                     commandId: commandId,
@@ -2513,6 +2801,7 @@ final class AppModel {
                                 )
                             }
                             let resolved = try await send()
+                            try requireLifecycle(lifecycleGeneration)
                             result = .success
                             return resolved
                         }
@@ -2527,7 +2816,8 @@ final class AppModel {
                 } catch let failure as GatewayPossiblySentError {
                     lastFailure = failure.failure
                 }
-                try? await clock.sleep(.milliseconds(250))
+                do { try await clock.sleep(.milliseconds(250)) }
+                catch { break }
             }
             if Task.isCancelled { result = .cancelled }
             throw Self.uncertainMutationOutcome(
@@ -2538,12 +2828,17 @@ final class AppModel {
         }
     }
 
-    private func waitForConnected(until deadline: ContinuousClock.Instant) async -> Bool {
+    private func waitForConnected(
+        until deadline: ContinuousClock.Instant,
+        lifecycleGeneration: Int
+    ) async -> Bool {
         while clock.now() < deadline {
+            guard !Task.isCancelled, admitsLifecycle(lifecycleGeneration) else { return false }
             if connectionState == .connected { return true }
             if connectionState == .unauthorized || connectionState == .unpaired { return false }
             if reconnectTask == nil { scheduleReconnect(immediate: true) }
-            try? await clock.sleep(.milliseconds(100))
+            do { try await clock.sleep(.milliseconds(100)) }
+            catch { return false }
         }
         return false
     }
@@ -2613,8 +2908,9 @@ final class AppModel {
         lastError = error.localizedDescription
     }
 
-    private func loadCache(profileID: String) async {
+    private func loadCache(profileID: String, lifecycleGeneration: Int) async {
         let value = await cache.load(profileID: profileID)
+        guard admitsLifecycle(lifecycleGeneration), profiles.selected?.id == profileID else { return }
         sessions = value.sessions.map(\.safeCachedProjection)
         snapshots = Dictionary(uniqueKeysWithValues: value.snapshots.map { ($0.sessionId, $0) })
         reconcileSelection()

@@ -27,8 +27,8 @@ actor GatewayClient {
         var info: GatewayInfo?
     }
 
-    nonisolated let events: AsyncStream<GatewayEvent>
-    private let eventContinuation: AsyncStream<GatewayEvent>.Continuation
+    nonisolated let events: AsyncStream<GatewayEventDelivery>
+    private let eventContinuation: AsyncStream<GatewayEventDelivery>.Continuation
     private let socketFactory: GatewaySocketFactory
     private let clock: MonotonicClock
     private let uuidSource: UUIDSource
@@ -50,7 +50,7 @@ actor GatewayClient {
         self.clock = clock
         self.uuidSource = uuidSource
         self.performanceSignposts = performanceSignposts
-        var continuation: AsyncStream<GatewayEvent>.Continuation!
+        var continuation: AsyncStream<GatewayEventDelivery>.Continuation!
         events = AsyncStream(bufferingPolicy: .bufferingNewest(512)) { continuation = $0 }
         eventContinuation = continuation
     }
@@ -65,11 +65,27 @@ actor GatewayClient {
     }
 
     func connect(profile: GatewayProfile, token: String) async throws -> GatewayInfo {
+        try await establish(profile: profile, token: token, activateEvents: true).info
+    }
+
+    func connectForLifecycle(profile: GatewayProfile, token: String) async throws -> GatewayConnectionIdentity {
+        try await establish(profile: profile, token: token, activateEvents: false)
+    }
+
+    private func establish(
+        profile: GatewayProfile,
+        token: String,
+        activateEvents: Bool
+    ) async throws -> GatewayConnectionIdentity {
         let interval = performanceSignposts.begin(.gatewayConnect)
         do {
-            let info = try await establishConnection(profile: profile, token: token)
+            let identity = try await establishConnection(
+                profile: profile,
+                token: token,
+                activateEvents: activateEvents
+            )
             performanceSignposts.end(interval, result: .success, metrics: .none)
-            return info
+            return identity
         } catch {
             let result = PerformanceResult.forFailure(error)
             performanceSignposts.end(interval, result: result, metrics: .none)
@@ -77,7 +93,11 @@ actor GatewayClient {
         }
     }
 
-    private func establishConnection(profile: GatewayProfile, token: String) async throws -> GatewayInfo {
+    private func establishConnection(
+        profile: GatewayProfile,
+        token: String,
+        activateEvents: Bool
+    ) async throws -> GatewayConnectionIdentity {
         generation &+= 1
         let epochID = generation
         await detachConnection(
@@ -112,9 +132,11 @@ actor GatewayClient {
             epoch.info = decoded.info
             epoch.lastInboundAt = clock.now()
             connection = epoch
-            startReceive(epochID: epochID)
-            startLivenessWait(epochID: epochID)
-            return decoded.info
+            if activateEvents {
+                startReceive(epochID: epochID)
+                startLivenessWait(epochID: epochID)
+            }
+            return GatewayConnectionIdentity(id: epochID, info: decoded.info)
         } catch {
             await detachConnection(epochID: epochID, reason: Self.transportFailure(error))
             throw error
@@ -122,10 +144,20 @@ actor GatewayClient {
     }
 
     func reconnect() async throws -> GatewayInfo {
+        try await reconnectForLifecycle(activateEvents: true).info
+    }
+
+    func reconnectForLifecycle(activateEvents: Bool = false) async throws -> GatewayConnectionIdentity {
         guard let profile, let token else {
             throw GatewayFailure(code: "not_paired", message: "No paired gateway is selected.", retryable: false, details: nil)
         }
-        return try await connect(profile: profile, token: token)
+        return try await establish(profile: profile, token: token, activateEvents: activateEvents)
+    }
+
+    func activateEvents(connectionID: Int) throws {
+        try requireEpoch(connectionID)
+        startReceive(epochID: connectionID)
+        startLivenessWait(epochID: connectionID)
     }
 
     func close() async {
@@ -379,11 +411,14 @@ actor GatewayClient {
 
     private func disconnectEpoch(epochID: Int, failure: GatewayFailure) async {
         guard await detachConnection(epochID: epochID, reason: failure) else { return }
-        eventContinuation.yield(GatewayEvent(
-            type: "event",
-            topic: "transport.disconnected",
-            sessionId: nil,
-            payload: .object(["message": .string(failure.message)])
+        eventContinuation.yield(GatewayEventDelivery(
+            connectionID: epochID,
+            event: GatewayEvent(
+                type: "event",
+                topic: "transport.disconnected",
+                sessionId: nil,
+                payload: .object(["message": .string(failure.message)])
+            )
         ))
     }
 
@@ -410,7 +445,10 @@ actor GatewayClient {
         case "event":
             let event = try JSONDecoder.gateway.decode(GatewayEvent.self, from: data)
             try requireEpoch(epochID)
-            if case .dropped = eventContinuation.yield(event) {
+            if case .dropped = eventContinuation.yield(GatewayEventDelivery(
+                connectionID: epochID,
+                event: event
+            )) {
                 guard var current = connection,
                       current.id == epochID,
                       !current.overflowResyncSignaled else { return }

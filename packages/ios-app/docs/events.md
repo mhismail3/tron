@@ -2,7 +2,9 @@
 
 Tron events are transient presentation and invalidation signals delivered by
 `GatewayClient`. They are not a durable journal and are not reconstructed into a
-local database.
+local database. Each delivery carries the local connection-epoch identity; `AppModel`
+admits only the identity installed before receive activation, so buffered frames from a
+retired profile cannot mutate its replacement.
 
 `AppModel.handle(_:)` owns routing:
 
@@ -34,7 +36,8 @@ local database.
 - terminal output is sequence-checked and deduplicated; a gap or reconnect uses
   `terminal.attach(afterSequence:)` to replay the bounded authoritative PTY tail,
   while terminal exit updates both controls and status;
-- stopping/restart topics move connection state into reconnect mode.
+- stopping/restart topics request the single lifecycle-owned reconnect loop; duplicate
+  transport signals cannot replace that owner or revive work after profile teardown.
 
 A newly navigated chat opens exactly once and replaces any disposable cached or
 previously expanded projection with a fresh bounded authoritative latest tail.
@@ -64,7 +67,11 @@ overlay to an interrupted chip; it does not expose a fake Stop action for extens
 work. Current Gateways project that background work separately through extension UI state. Tron
 does not mount the retired `pi-subagents` async/fleet editor widgets; the run continues on the Mac
 and the app catches up without presenting transport errors as modal alerts. Foreground activation
-coalesces to one responsiveness/list/session reconciliation; an aborted or resumed network path
+coalesces to one responsiveness/list/session reconciliation. Switch, forget, current-device revoke,
+and final teardown invalidate that reconciliation, reconnect/debounce tasks, profile-scoped reads,
+and presentation intake before awaiting transport close; a late old-profile completion is discarded.
+Possibly-sent mutation reconciliation is also lifecycle-bound and cannot query or replay a command on
+the replacement profile. Ordinary scene backgrounding is not teardown. An aborted or resumed network path
 enters the ordinary reconnect loop. Compatible reconnect requests share one typed result instead of polling mutable tokens. Fresh
 presentation and reconnect intents arbitrate serially, and at most three immediate authoritative
 attempts are retained for a continuous gap/overflow burst before the bounded catch-up state wins.

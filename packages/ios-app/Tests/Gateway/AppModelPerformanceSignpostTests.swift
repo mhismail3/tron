@@ -592,19 +592,6 @@ struct AppModelPerformanceSignpostTests {
             uuidSource: SequenceUUIDSource(gatewayIDs).source,
             performanceSignposts: signposts
         )
-        await socket.enqueue(helloFrame())
-        _ = try await client.connect(
-            profile: GatewayProfile(
-                id: "machine",
-                label: "Mac",
-                host: "gateway.test",
-                port: 9_847,
-                machineId: "machine",
-                deviceId: "device"
-            ),
-            token: "token"
-        )
-        signposts.reset()
         let model = AppModel(
             client: client,
             cache: SnapshotCache(
@@ -616,7 +603,19 @@ struct AppModelPerformanceSignpostTests {
             ]).source,
             performanceSignposts: signposts
         )
-        model.connectionState = .connected
+        await socket.enqueue(helloFrame())
+        try await model.connectHostedGateway(
+            profile: GatewayProfile(
+                id: "machine",
+                label: "Mac",
+                host: "gateway.test",
+                port: 9_847,
+                machineId: "machine",
+                deviceId: "device"
+            ),
+            token: "token"
+        )
+        signposts.reset()
         return Harness(socket: socket, client: client, model: model, signposts: signposts)
     }
 

@@ -22,9 +22,10 @@ final class GatewayProfileStore {
     func save(_ profile: GatewayProfile, token: String) throws {
         var values = profiles.filter { $0.id != profile.id }
         values.append(profile)
-        defaults.set(try JSONEncoder.gateway.encode(values), forKey: profilesKey)
-        defaults.set(profile.id, forKey: selectedKey)
+        let encoded = try JSONEncoder.gateway.encode(values)
         try GatewayTokenStore.save(token, profileID: profile.id)
+        defaults.set(encoded, forKey: profilesKey)
+        defaults.set(profile.id, forKey: selectedKey)
     }
 
     func select(_ profile: GatewayProfile) { defaults.set(profile.id, forKey: selectedKey) }

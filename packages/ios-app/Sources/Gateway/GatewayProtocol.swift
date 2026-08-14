@@ -39,6 +39,16 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
     let payload: JSONValue
 }
 
+struct GatewayEventDelivery: Sendable, Equatable {
+    let connectionID: Int
+    let event: GatewayEvent
+}
+
+struct GatewayConnectionIdentity: Sendable, Equatable {
+    let id: Int
+    let info: GatewayInfo
+}
+
 struct GatewayHello: Decodable, Sendable {
     let type: String
     let gatewayVersion: String

@@ -26,7 +26,7 @@ struct AppModelPairingAttemptTests {
             let pairing = fixture.startPairing(self.firstInvitation)
             try await fixture.http.waitForRequests(1)
 
-            fixture.model.forgetCurrentGateway()
+            await fixture.model.forgetCurrentGateway()
             try await fixture.http.succeed(request: 0, machineID: "stale-machine", token: "stale-token")
             await expectCancellation(pairing)
 
@@ -63,6 +63,32 @@ struct AppModelPairingAttemptTests {
             #expect(fixture.commit.saved.isEmpty)
             #expect(fixture.store.profiles.isEmpty)
             #expect(fixture.socketFactory.requests.isEmpty)
+            #expect(fixture.model.connectionState == .unpaired)
+        }
+    }
+
+    @Test("a failed pairing commit restores the prior lifecycle instead of stranding transition")
+    func failedCommitRestoresLifecycle() async throws {
+        try await withFixture(ids: [uuid(1)], commitFails: true) { fixture in
+            let pairing = fixture.startPairing(self.firstInvitation)
+            try await fixture.http.waitForRequests(1)
+            try await fixture.http.succeed(request: 0, machineID: "uncommitted-machine", token: "uncommitted-token")
+
+            do {
+                try await valueOfOwnedTask(pairing)
+                Issue.record("failed commit unexpectedly succeeded")
+            } catch is PairingCommitFixtureError {
+                // The injected commit failure is expected.
+            } catch {
+                Issue.record("unexpected commit error: \(error)")
+            }
+            #expect(fixture.model.connectionState == .unpaired)
+            #expect(fixture.store.profiles.isEmpty)
+            #expect(fixture.socketFactory.requests.isEmpty)
+
+            await fixture.model.start()
+            #expect(fixture.model.connectionState == .unpaired)
+            #expect(fixture.model.hasResolvedLaunchState)
         }
     }
 
@@ -107,7 +133,7 @@ struct AppModelPairingAttemptTests {
 
             #expect(fixture.commit.saved.map(\.token) == ["accepted-token"])
             #expect(fixture.socketFactory.requests.count == 1)
-            fixture.model.forgetCurrentGateway()
+            await fixture.model.forgetCurrentGateway()
             await expectCancellation(pairing)
 
             #expect(fixture.model.connectionState == .unpaired)
@@ -141,9 +167,10 @@ struct AppModelPairingAttemptTests {
 
     private func withFixture(
         ids: [UUID],
+        commitFails: Bool = false,
         operation: @escaping @MainActor @Sendable (PairingFixture) async throws -> Void
     ) async throws {
-        let fixture = makeFixture(ids: ids)
+        let fixture = makeFixture(ids: ids, commitFails: commitFails)
         let http = fixture.http
         do {
             try await withTestWatchdog {
@@ -160,7 +187,7 @@ struct AppModelPairingAttemptTests {
         await fixture.cleanup()
     }
 
-    private func makeFixture(ids: [UUID]) -> PairingFixture {
+    private func makeFixture(ids: [UUID], commitFails: Bool) -> PairingFixture {
         let suite = "AppModelPairingAttemptTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
@@ -178,7 +205,10 @@ struct AppModelPairingAttemptTests {
             cache: SnapshotCache(root: cacheRoot),
             uuidSource: SequenceUUIDSource(ids).source,
             pairer: GatewayPairer(transport: http.transport),
-            pairingCommit: { profile, token in commit.record(profile: profile, token: token) },
+            pairingCommit: { profile, token in
+                if commitFails { throw PairingCommitFixtureError() }
+                commit.record(profile: profile, token: token)
+            },
             profileTokenLookup: { profile in tokenLookup.token(for: profile) }
         )
         return PairingFixture(
@@ -424,6 +454,8 @@ private actor LateResultPairingHTTPTransport {
         for waiter in ready { waiter.continuation.resume() }
     }
 }
+
+private struct PairingCommitFixtureError: Error {}
 
 private enum PairingTransportFixtureError: Error {
     case missingRequest(Int)

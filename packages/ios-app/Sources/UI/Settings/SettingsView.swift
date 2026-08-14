@@ -395,7 +395,9 @@ private struct ConnectionsSettingsView: View {
         .tronNavigationTitle("Connections")
         .alert("Forget this Mac?", isPresented: $confirmForget) {
             Button("Cancel", role: .cancel) {}
-            Button("Forget Mac", role: .destructive) { model.forgetCurrentGateway() }
+            Button("Forget Mac", role: .destructive) {
+                Task { await model.forgetCurrentGateway() }
+            }
         } message: {
             Text("The pairing token will be removed from this iPhone. You must pair again to reconnect.")
         }

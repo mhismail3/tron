@@ -27,7 +27,10 @@ request correlation, deadlines, and event delivery. One private connection epoch
 exact socket, receive/liveness tasks, pending requests, liveness timestamp, overflow state,
 and handshake projection. Connect and close invalidate older attempts across every suspension;
 late hello, frame, failure, liveness, completion, and close callbacks can only detach or publish
-for their captured epoch. Idle transport tasks do not retain an otherwise unowned client. Its
+for their captured epoch. Event deliveries carry that non-wire connection identity. App lifecycle
+connects prepare the epoch without starting receive/liveness work, install the returned identity,
+then activate delivery; buffered events from a retired profile therefore cannot cross a switch.
+Idle transport tasks do not retain an otherwise unowned client. Its
 injectable transport ends at WebSocket bytes, and its monotonic-clock and UUID inputs control only time and
 identity generation. The production transport is an actor-confined ephemeral
 `URLSession` owner and preserves the existing data frames, headers, deadlines, and
@@ -38,8 +41,19 @@ performance-signpost boundary. Signpost metadata is structurally limited to resu
 codes, item counts, and byte counts; identifiers, paths, methods, filenames, model
 names, prompts, transcript content, and terminal output are never recorded. `AppModel`
 is the shrinking MainActor composition façade; narrow typed owners retain lifecycle and
-coordination state instead of routing facts through unrelated façade fields. It shares the
-clock/UUID seams for Gateway reconnect, receipt, debounce, and command-ID work. Its visible-open interval
+coordination state instead of routing facts through unrelated façade fields. One monotonic
+connection-lifecycle phase now owns reconnect, foreground reconciliation, debounced catalog refresh,
+pairing replacement, profile switch/forget/revoke, and final teardown admission. A profile boundary
+first invalidates those tasks plus profile-scoped load generations and presentation intake, then awaits
+the exact transport close before another profile may connect. Pairing pre-encodes profile metadata and
+commits the Keychain token before selecting that profile, so credential failure cannot leave selected
+metadata without its owned secret. Every suspended connect/reconnect/cache boundary revalidates that
+lifecycle generation. Mutation receipt reconciliation captures the same generation, so an uncertain
+old-profile command can report an unknown outcome but can never poll or replay through a replacement
+profile. Final teardown cancels and joins the event listener and
+shares one completion across concurrent callers; scene backgrounding deliberately does not tear down
+accepted Gateway-owned work. It shares the clock/UUID seams for Gateway reconnect, receipt, debounce,
+and command-ID work. Its visible-open interval
 contains independently measured authoritative synchronization attempts; invalidated
 attempts end as discarded rather than being mislabeled as successful. Receipt timing
 begins only after an uncertain mutation response, never for an ordinary confirmed

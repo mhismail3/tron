@@ -96,8 +96,31 @@ struct GatewayClientTransportTests {
             var iterator = client.events.makeAsyncIterator()
             await socket.enqueue(eventFrame(topic: "test.changed", payload: .object(["revision": .number(3)])))
             let event = await iterator.next()
-            #expect(event?.topic == "test.changed")
-            #expect(event?.payload.objectValue?["revision"]?.intValue == 3)
+            #expect(event?.event.topic == "test.changed")
+            #expect(event?.event.payload.objectValue?["revision"]?.intValue == 3)
+            await client.close()
+        }
+    }
+
+    @Test("lifecycle connection activates event delivery only under its returned identity")
+    func lifecycleConnectionIdentity() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000091")!,
+                ]).source
+            )
+            await socket.enqueue(helloFrame())
+            let connection = try await client.connectForLifecycle(profile: profile, token: "token")
+            var iterator = client.events.makeAsyncIterator()
+            await socket.enqueue(eventFrame(topic: "identity.changed", payload: .number(1)))
+            try await client.activateEvents(connectionID: connection.id)
+
+            let delivery = await iterator.next()
+            #expect(delivery?.connectionID == connection.id)
+            #expect(delivery?.event.topic == "identity.changed")
             await client.close()
         }
     }
@@ -309,7 +332,7 @@ struct GatewayClientTransportTests {
             clock.advance(by: .seconds(1))
             try await socket.waitUntilClosed()
             let event = await eventIterator.next()
-            #expect(event?.topic == "transport.disconnected")
+            #expect(event?.event.topic == "transport.disconnected")
             #expect(await socket.closeInvocationCount() == 1)
             #expect(await socket.closeTransitionCount() == 1)
             #expect(await client.info == nil)
@@ -332,7 +355,7 @@ struct GatewayClientTransportTests {
             var iterator = client.events.makeAsyncIterator()
             await socket.failPendingReceivers(CancellationError())
             let event = await iterator.next()
-            #expect(event?.topic == "transport.disconnected")
+            #expect(event?.event.topic == "transport.disconnected")
             #expect(await client.info == nil)
             #expect(await socket.closed())
         }
@@ -476,7 +499,7 @@ struct GatewayClientTransportTests {
             await oldSocket.enqueue(eventFrame(topic: "stale.changed", payload: .number(1)))
             await replacementSocket.enqueue(eventFrame(topic: "current.changed", payload: .number(2)))
             let event = await iterator.next()
-            #expect(event?.topic == "current.changed")
+            #expect(event?.event.topic == "current.changed")
             #expect(await client.info?.machineId == "machine")
             await client.close()
         }
@@ -510,7 +533,7 @@ struct GatewayClientTransportTests {
             await oldSocket.releaseClose()
             await replacementSocket.enqueue(eventFrame(topic: "current.changed", payload: .number(2)))
             let event = await iterator.next()
-            #expect(event?.topic == "current.changed")
+            #expect(event?.event.topic == "current.changed")
             #expect(await client.info?.machineId == "machine")
             await client.close()
         }
@@ -595,8 +618,8 @@ struct GatewayClientTransportTests {
                 var iterator = client.events.makeAsyncIterator()
                 var events: [GatewayEvent] = []
                 for index in 0..<513 {
-                    guard let event = await iterator.next() else { break }
-                    events.append(event)
+                    guard let delivery = await iterator.next() else { break }
+                    events.append(delivery.event)
                     if index == 511 {
                         bufferDrainedContinuation.yield(())
                         bufferDrainedContinuation.finish()

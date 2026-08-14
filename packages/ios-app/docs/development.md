@@ -66,7 +66,12 @@ xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Fast' \
 ```
 
 Gateway transport tests inject `ManualClock`, `SequenceUUIDSource`, and
-`ScriptedGatewaySocket` below `GatewayClient`. Advance the manual clock only
+`ScriptedGatewaySocket` below `GatewayClient`. `AppModelLifecycleTests` owns the façade
+boundary above it: switch must close the old socket before replacement connect, forget must
+await close, concurrent final teardown callers share completion, retired profile loads cannot
+publish errors or values, and no event/reconnect work is admitted after final teardown.
+`AppModelPairingAttemptTests` also requires enrollment/commit failure to restore the lifecycle
+state that existed before the first superseded pairing attempt. Advance the manual clock only
 after the expected sleeper/barrier is registered. Test-owned unstructured tasks
 must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
 the test watchdog propagates cancellation. Scripts enqueue and inspect raw frame
