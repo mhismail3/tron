@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SessionContextSheet: View {
     let sessionID: String
+    let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var showRaw = false
@@ -65,20 +66,27 @@ struct SessionContextSheet: View {
             }
             .task {
                 await model.refreshSessions(surfacingErrors: false)
-                try? await model.openSession(sessionID)
-                await model.loadContext()
-                await model.loadResources()
+                await model.loadContext(sessionID: sessionID)
+                await model.loadResources(sessionID: sessionID)
                 await loadGit(snapshot: model.snapshots[sessionID])
             }
-            .task(id: model.selectedSessionContextRevision) { await model.loadContext() }
-            .task(id: model.selectedSessionResourceRevision) { await model.loadResources() }
+            .task(id: model.sessionContextRevision(for: sessionID)) {
+                await model.loadContext(sessionID: sessionID)
+            }
+            .task(id: model.sessionResourceRevision(for: sessionID)) {
+                await model.loadResources(sessionID: sessionID)
+            }
             .sheet(isPresented: $showRaw) { runtimeContextSheet }
-            .sheet(isPresented: $showFork) { ForkSheet() }
-            .sheet(isPresented: $showTree) { SessionTreeSheet() }
-            .sheet(isPresented: $showTerminal) { TerminalSheet() }
+            .sheet(isPresented: $showFork) {
+                ForkSheet(sessionID: sessionID, onCreated: handleForkCreated)
+            }
+            .sheet(isPresented: $showTree) {
+                SessionTreeSheet(sessionID: sessionID, onForkCreated: handleForkCreated)
+            }
+            .sheet(isPresented: $showTerminal) { TerminalSheet(sessionID: sessionID) }
             .alert("Rename Session", isPresented: $showRename) {
                 TextField("Name", text: $name)
-                Button("Save") { Task { try? await model.rename(name) } }
+                Button("Save") { Task { try? await model.renameSession(sessionID, name: name) } }
                 Button("Cancel", role: .cancel) {}
             }
         }
@@ -137,7 +145,10 @@ struct SessionContextSheet: View {
                 Spacer()
                 Button(compacting ? "Compacting…" : "Compact Now") {
                     compacting = true
-                    Task { defer { compacting = false }; try? await model.compact() }
+                    Task {
+                        defer { compacting = false }
+                        try? await model.compact(sessionID: sessionID)
+                    }
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(Color.tronTextPrimary)
@@ -201,7 +212,7 @@ struct SessionContextSheet: View {
                 Menu {
                     ForEach(model.providerCatalog(for: .session(id: sessionID))?.models.filter(\.available) ?? []) { candidate in
                         Button {
-                            Task { try? await model.setModel(candidate.ref) }
+                            Task { try? await model.setModel(candidate.ref, sessionID: sessionID) }
                         } label: {
                             if snapshot.model == candidate.ref {
                                 Label(candidate.name, systemImage: "checkmark")
@@ -224,7 +235,7 @@ struct SessionContextSheet: View {
                 Menu {
                     ForEach(snapshot.availableThinkingLevels, id: \.self) { level in
                         Button {
-                            Task { try? await model.setThinking(level) }
+                            Task { try? await model.setThinking(level, sessionID: sessionID) }
                         } label: {
                             if snapshot.thinkingLevel == level { Label(level.capitalized, systemImage: "checkmark") }
                             else { Text(level.capitalized) }
@@ -290,7 +301,7 @@ struct SessionContextSheet: View {
         TronSettingsGroup("Runtime", accent: .tronAmber) {
             VStack(spacing: 0) {
                 NavigationLink {
-                    ProjectResourcesView()
+                    ProjectResourcesView(sessionID: sessionID)
                 } label: {
                     TronSettingsRow(
                         icon: "shippingbox",
@@ -303,9 +314,9 @@ struct SessionContextSheet: View {
                 TronSettingsDivider(accent: .tronAmber)
                 manageRow(icon: "arrow.clockwise", title: "Reload Resources", subtitle: "Reload extensions, skills, prompts, and project resources", accent: .tronAmber) {
                     Task {
-                        try? await model.reloadResources()
-                        await model.loadContext()
-                        await model.loadResources()
+                        try? await model.reloadResources(sessionID: sessionID)
+                        await model.loadContext(sessionID: sessionID)
+                        await model.loadResources(sessionID: sessionID)
                     }
                 }
                 TronSettingsDivider(accent: .tronAmber)
@@ -393,17 +404,24 @@ struct SessionContextSheet: View {
         gitDirty = object["dirty"]?.boolValue ?? false
     }
 
+    private func handleForkCreated(_ route: AppModel.SessionNavigationRoute) {
+        dismiss()
+        onForkCreated(route)
+    }
+
     private func prepareExport(_ format: String) {
         exporting = true
         Task {
             defer { exporting = false }
-            do { exportedURL = try await model.exportSession(format: format) }
+            do { exportedURL = try await model.exportSession(sessionID: sessionID, format: format) }
             catch { model.lastError = error.localizedDescription }
         }
     }
 }
 
 struct ForkSheet: View {
+    let sessionID: String
+    let onCreated: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var selectedNode: SessionTreeNode?
@@ -473,8 +491,14 @@ struct ForkSheet: View {
                     .accessibilityLabel("Done")
                 }
             }
-            .task(id: model.selectedSessionStructureRevision) { await load() }
-            .sheet(item: $selectedNode) { node in ForkConfirmationSheet(node: node) }
+            .task(id: model.sessionStructureRevision(for: sessionID)) { await load() }
+            .sheet(item: $selectedNode) { node in
+                ForkConfirmationSheet(
+                    sessionID: sessionID,
+                    node: node,
+                    onCreated: onCreated
+                )
+            }
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
@@ -484,7 +508,7 @@ struct ForkSheet: View {
     private func load() async {
         reloading = true
         defer { reloading = false }
-        await model.loadTree()
+        await model.loadTree(sessionID: sessionID)
     }
 
     private func reload() {

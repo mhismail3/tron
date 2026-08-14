@@ -320,7 +320,15 @@ hit region and no decorative disclosure chevron. Dashboard session rows never
 retain a selected tint; their trailing swipe actions rename or delete the exact
 swiped canonical session without changing navigation selection. Canonical session selection is
 kept separate from dashboard navigation intent, so opening Settings or search
-cannot reveal a previously selected session. Dashboard search autofocuses in a
+cannot reveal a previously selected session. The mounted chat route supplies an immutable
+session ID to every prompt, runtime mutation, extension response, terminal operation, and
+secondary read. Those reads capture the route's exact subscription token, reject publication after
+a same-session reopen, and cannot silently open another session. Presentation teardown compares
+ownership per session rather than against an unrelated route's newer generation; share intake is
+admitted only when exactly one presentation remains mounted. Create, import, and fork return navigation results; they do not rewrite
+selection or claim subscription ownership before the destination mounts. Fork-restored editor
+text travels in that route result rather than through selection-backed global state. Dashboard
+imports use the explicit default workspace rather than a hidden transcript selection. Dashboard search autofocuses in a
 floating bottom safe-area bar immediately above the keyboard. The dashboard shows only
 user sessions, including ordinary user forks; classified subagent backing sessions remain hidden.
 Disposable caches from before session-kind classification are invalidated rather than briefly

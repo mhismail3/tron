@@ -231,8 +231,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
             encoding: .utf8
         )
-        #expect(shell.contains("@State private var presentedSessionID: String?"))
-        #expect(shell.contains(".navigationDestination(item: $presentedSessionID)"))
+        #expect(shell.contains("@State private var presentedSession: AppModel.SessionNavigationRoute?"))
+        #expect(shell.contains(".navigationDestination(item: $presentedSession)"))
+        #expect(shell.contains("initialEditorText: route.editorText"))
+        #expect(shell.contains("onForkCreated: { presentedSession = $0 }"))
         #expect(!shell.contains("NavigationSplitView"))
         #expect(!shell.contains("List(selection:"))
         #expect(!shell.contains(".onChange(of: model.selectedSessionID)"))
@@ -278,7 +280,7 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/AgentExtensionSettings.swift"),
             encoding: .utf8
         )
-        #expect(context.contains("ProjectResourcesView()"))
+        #expect(context.contains("ProjectResourcesView(sessionID: sessionID)"))
         #expect(context.contains("snapshot.stats.latestCacheHitRate"))
         #expect(context.contains("let sessionID: String"))
         for title in ["Extensions", "Prompts", "Skills", "Context Files", "Tools"] {
@@ -565,7 +567,7 @@ struct PresentationStyleGuardTests {
         #expect(transcript.contains(".frame(minWidth: 48, alignment: .trailing)"))
         #expect(transcript.contains(".fixedSize(horizontal: true, vertical: false)"))
         #expect(!transcript.contains(".frame(width: 48, alignment: .trailing)"))
-        #expect(chat.contains("SessionContextSheet(sessionID: sessionID)"))
+        #expect(chat.contains("SessionContextSheet(sessionID: sessionID, onForkCreated: onForkCreated)"))
         #expect(!chat.contains("ChatTranscriptPresentation.liveToolRun"))
         #expect(chat.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
         #expect(!chat.contains("composer.fixedSize(horizontal: false, vertical: true)"))

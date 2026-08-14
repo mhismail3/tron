@@ -10,6 +10,7 @@ private enum ChatAttachmentDestination: Hashable {
 
 struct ChatView: View {
     let sessionID: String
+    private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     private let displayFrameScheduler: DisplayFrameScheduler
     private let performanceSignposts: any PerformanceSignposting
     #if HOSTED_TEST
@@ -19,7 +20,7 @@ struct ChatView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
-    @State private var text = ""
+    @State private var text: String
     @State private var photos: [PhotosPickerItem] = []
     @State private var attachmentDestination: ChatAttachmentDestination?
     @State private var queuedAttachmentDestination: ChatAttachmentDestination?
@@ -49,26 +50,34 @@ struct ChatView: View {
     #if HOSTED_TEST
     init(
         sessionID: String,
+        initialEditorText: String? = nil,
+        onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         hostedProbe: ChatHostedProbe? = nil,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
     ) {
         self.sessionID = sessionID
+        self.onForkCreated = onForkCreated
         self.hostedProbe = hostedProbe
         self.displayFrameScheduler = displayFrameScheduler
         self.performanceSignposts = performanceSignposts
+        _text = State(initialValue: initialEditorText ?? "")
         _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
     }
     #else
     init(
         sessionID: String,
+        initialEditorText: String? = nil,
+        onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
     ) {
         self.sessionID = sessionID
+        self.onForkCreated = onForkCreated
         self.displayFrameScheduler = displayFrameScheduler
         self.performanceSignposts = performanceSignposts
+        _text = State(initialValue: initialEditorText ?? "")
         _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
     }
@@ -98,7 +107,9 @@ struct ChatView: View {
         .toolbar {
             toolbar(titleWidth: ChatToolbarTitleLayout.width(containerWidth: toolbarContainerWidth))
         }
-        .sheet(isPresented: $showContext) { SessionContextSheet(sessionID: sessionID) }
+        .sheet(isPresented: $showContext) {
+            SessionContextSheet(sessionID: sessionID, onForkCreated: onForkCreated)
+        }
         .sheet(isPresented: $showSettings) {
             SettingsView(
                 scope: .project,
@@ -116,7 +127,9 @@ struct ChatView: View {
             maxSelectionCount: 5,
             matching: .images
         )
-        .sheet(item: interactionBinding) { interaction in ExtensionInteractionSheet(interaction: interaction) }
+        .sheet(item: interactionBinding) { interaction in
+            ExtensionInteractionSheet(sessionID: sessionID, interaction: interaction)
+        }
         .fileImporter(
             isPresented: attachmentPresentationBinding(for: .files),
             allowedContentTypes: [.item],
@@ -133,7 +146,7 @@ struct ChatView: View {
             }
         }
         .onChange(of: model.editorRequest) { _, request in
-            guard let request, request.sessionId == model.selectedSessionID else { return }
+            guard let request, request.sessionId == sessionID else { return }
             if text.isEmpty {
                 text = request.action == .paste ? text + request.text : request.fullText
                 model.editorRequest = nil
@@ -599,7 +612,10 @@ struct ChatView: View {
                         scrollCoordinator.endPrependingHistory(preserveScrolledAway: wasScrolledAway)
                     }
                 }
-                await model.loadEarlierTranscript(presentationGeneration: presentationGeneration)
+                await model.loadEarlierTranscript(
+                    sessionID: sessionID,
+                    presentationGeneration: presentationGeneration
+                )
                 guard !Task.isCancelled,
                       modelPresentationGeneration == presentationGeneration else { return }
                 guard let current = model.authoritativeSnapshot(for: sessionID),
@@ -780,7 +796,7 @@ struct ChatView: View {
                     mode: composerTrailingMode,
                     isDisabled: sending || !isTranscriptReady,
                     onSend: { Task { await send() } },
-                    onAbort: { Task { await model.abort() } }
+                    onAbort: { Task { await model.abort(sessionID: sessionID) } }
                 )
                 .transition(
                     reduceMotion
@@ -994,7 +1010,7 @@ struct ChatView: View {
         }
         sending = true
         defer { sending = false }
-        do { try await model.send(outgoing, behavior: behavior) }
+        do { try await model.send(outgoing, sessionID: sessionID, behavior: behavior) }
         catch {
             text = ChatComposerPolicy.restoredDraft(outgoing: outgoing, currentDraft: text)
             model.lastError = error.localizedDescription

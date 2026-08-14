@@ -16,17 +16,18 @@ private final class TerminalController {
         return terminal.exitedAt == nil && !model.terminalExited.contains(terminal.id)
     }
 
-    func start(model: AppModel) async {
+    func start(sessionID: String, model: AppModel) async {
         guard terminal == nil else { return }
         connectionPhase = .connecting
         error = nil
         do {
-            let terminals = try await model.listTerminals().sorted { $0.createdAt > $1.createdAt }
+            let terminals = try await model.listTerminals(sessionID: sessionID)
+                .sorted { $0.createdAt > $1.createdAt }
             history = terminals
             if let existing = terminals.first(where: { $0.exitedAt == nil }) {
                 terminal = try await model.attachTerminal(existing.id, after: 0)
             } else {
-                terminal = try await model.openTerminal(columns: 80, rows: 24)
+                terminal = try await model.openTerminal(sessionID: sessionID, columns: 80, rows: 24)
             }
             history.removeAll { $0.id == terminal?.id }
             connectionPhase = .connected
@@ -50,14 +51,14 @@ private final class TerminalController {
         }
     }
 
-    func openLive(model: AppModel) async {
+    func openLive(sessionID: String, model: AppModel) async {
         if let current = terminal { await model.detachTerminal(current.id) }
         error = nil
         connectionPhase = .connecting
         terminal = nil
         do {
-            terminal = try await model.openTerminal(columns: 80, rows: 24)
-            history = try await model.listTerminals()
+            terminal = try await model.openTerminal(sessionID: sessionID, columns: 80, rows: 24)
+            history = try await model.listTerminals(sessionID: sessionID)
             history.removeAll { $0.id == terminal?.id }
             connectionPhase = .connected
         } catch {
@@ -254,6 +255,7 @@ private struct TerminalExtendedKey: Equatable {
 }
 
 struct TerminalSheet: View {
+    let sessionID: String
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var controller = TerminalController()
@@ -313,8 +315,7 @@ struct TerminalSheet: View {
             }
         }
         .task {
-            if let id = model.selectedSessionID { try? await model.openSession(id) }
-            await controller.start(model: model)
+            await controller.start(sessionID: sessionID, model: model)
         }
         .onDisappear {
             if let id = controller.terminal?.id { Task { await model.detachTerminal(id) } }
@@ -336,7 +337,7 @@ struct TerminalSheet: View {
         Menu {
             if !controller.isRunning(model: model) {
                 Button("Open Live Terminal", systemImage: "terminal") {
-                    Task { await controller.openLive(model: model) }
+                    Task { await controller.openLive(sessionID: sessionID, model: model) }
                 }
             }
             if !controller.history.isEmpty {

@@ -50,6 +50,12 @@ final class AppModel {
         var id: String { operationId }
     }
 
+    struct SessionNavigationRoute: Identifiable, Hashable {
+        let sessionID: String
+        let editorText: String?
+        var id: String { sessionID }
+    }
+
     struct EditorRequest: Identifiable, Hashable {
         enum Action: String { case set, paste }
         let sessionId: String
@@ -245,16 +251,24 @@ final class AppModel {
         mountedPresentationGenerationBySession[sessionID]
     }
 
-    var selectedSessionStructureRevision: Int {
-        selectedSessionID.flatMap { sessionStructureRevisions[$0] } ?? 0
+    var mountedSessionID: String? {
+        Self.soleMountedSessionID(mountedPresentationGenerationBySession)
     }
 
-    var selectedSessionContextRevision: Int {
-        selectedSessionID.flatMap { sessionContextRevisions[$0] } ?? 0
+    static func soleMountedSessionID(_ generations: [String: Int]) -> String? {
+        generations.count == 1 ? generations.keys.first : nil
     }
 
-    var selectedSessionResourceRevision: Int {
-        selectedSessionID.flatMap { sessionResourceRevisions[$0] } ?? 0
+    func sessionStructureRevision(for sessionID: String) -> Int {
+        sessionStructureRevisions[sessionID] ?? 0
+    }
+
+    func sessionContextRevision(for sessionID: String) -> Int {
+        sessionContextRevisions[sessionID] ?? 0
+    }
+
+    func sessionResourceRevision(for sessionID: String) -> Int {
+        sessionResourceRevisions[sessionID] ?? 0
     }
 
     func settings(for target: SettingsTarget) -> JSONValue? {
@@ -584,43 +598,35 @@ final class AppModel {
         await refreshSessions()
     }
 
-    func importSession(from url: URL, cwd: String) async throws {
+    func importSession(from url: URL, cwd: String) async throws -> String {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
         let uploadID = try await client.upload(name: url.lastPathComponent, mimeType: "application/x-ndjson", data: data)
         struct Params: Codable { let uploadId, cwd, commandId: String }
         typealias Response = SessionMutationResponse
-        await closeCurrentSubscription()
         let commandID = uuidSource.next().uuidString
         let params = Params(uploadId: uploadID, cwd: cwd, commandId: commandID)
         let response: Response = try await confirmedMutation(method: "session.import", commandId: commandID) {
             try await client.request("session.import", params, timeout: .seconds(120))
         }
-        selectedSessionID = response.sessionId
-        guard await synchronizeSession(response.sessionId) else {
-            throw GatewayFailure(code: "sync_failed", message: "Tron imported the session but could not synchronize it.", retryable: true, details: nil)
-        }
         await refreshSessions()
+        return response.sessionId
     }
 
-    func createSession(cwd: String) async throws {
+    func createSession(cwd: String) async throws -> String {
         struct Params: Codable { let cwd: String; let commandId: String }
         typealias Response = SessionMutationResponse
-        await closeCurrentSubscription()
         let commandID = uuidSource.next().uuidString
         let params = Params(cwd: cwd, commandId: commandID)
         let response: Response = try await confirmedMutation(method: "session.create", commandId: commandID) {
             try await client.request("session.create", params, timeout: .seconds(60))
         }
         locallyCreatedUnindexedSessionIDs.insert(response.sessionId)
-        selectedSessionID = response.sessionId
-        guard await synchronizeSession(response.sessionId) else {
-            throw GatewayFailure(code: "sync_failed", message: "Tron created the session but could not synchronize it.", retryable: true, details: nil)
-        }
         defaultWorkspace = cwd
         UserDefaults.standard.set(cwd, forKey: "defaultWorkspace.v1")
         await refreshSessions()
+        return response.sessionId
     }
 
     /// Starts a new mounted chat presentation. Unlike reconnect synchronization,
@@ -662,8 +668,10 @@ final class AppModel {
     }
 
     func closeSessionPresentation(_ id: String, generation: Int) async {
-        guard generation == presentationOpenGeneration,
-              mountedPresentationGenerationBySession[id] == generation else { return }
+        guard Self.ownsPresentation(
+            mountedGeneration: mountedPresentationGenerationBySession[id],
+            requestedGeneration: generation
+        ) else { return }
         mountedPresentationGenerationBySession[id] = nil
         authoritativeSessionIDs.remove(id)
         await closeSubscription(id, expectedPresentationGeneration: generation)
@@ -680,13 +688,12 @@ final class AppModel {
         }
         authoritativeSessionIDs.insert(id)
         async let providerRefresh: Bool = refreshProviders(target: .session(id: id))
-        async let commandRefresh: Void = loadCommands()
+        async let commandRefresh: Void = loadCommands(sessionID: id)
         _ = await (providerRefresh, commandRefresh)
     }
 
-    func loadEarlierTranscript(presentationGeneration: Int) async {
+    func loadEarlierTranscript(sessionID: String, presentationGeneration: Int) async {
         guard !loadingEarlierTranscript,
-              let sessionID = selectedSessionID,
               let current = snapshots[sessionID],
               let before = current.transcriptStart,
               before > 0 else { return }
@@ -768,6 +775,22 @@ final class AppModel {
         if subscribedSessionID == sessionID { subscribedSessionID = nil }
     }
 
+    static func ownsPresentation(
+        mountedGeneration: Int?,
+        requestedGeneration: Int
+    ) -> Bool {
+        mountedGeneration == requestedGeneration
+    }
+
+    static func ownsSubscription(
+        sessionID: String,
+        subscribedSessionID: String?,
+        installedToken: String?,
+        requestedToken: String
+    ) -> Bool {
+        subscribedSessionID == sessionID && installedToken == requestedToken
+    }
+
     static func shouldClearSubscription(
         installedToken: String?,
         closingToken: String,
@@ -776,8 +799,7 @@ final class AppModel {
         gatewayClosed && installedToken == closingToken
     }
 
-    func send(_ text: String, behavior: String? = nil) async throws {
-        guard let sessionID = selectedSessionID else { return }
+    func send(_ text: String, sessionID: String, behavior: String? = nil) async throws {
         struct Params: Codable {
             let sessionId: String
             let text: String
@@ -794,8 +816,7 @@ final class AppModel {
         pendingAttachments.removeAll()
     }
 
-    func abort(kind: String = "agent") async {
-        guard let sessionID = selectedSessionID else { return }
+    func abort(sessionID: String, kind: String = "agent") async {
         struct Params: Codable { let sessionId, kind, commandId: String }
         struct Response: Codable { let aborted: Bool }
         let commandID = uuidSource.next().uuidString
@@ -807,8 +828,7 @@ final class AppModel {
         } catch { surface(error) }
     }
 
-    func clearQueue() async throws -> SessionSnapshot.QueuedMessages {
-        guard let sessionID = selectedSessionID else { return .init(steering: [], followUp: []) }
+    func clearQueue(sessionID: String) async throws -> SessionSnapshot.QueuedMessages {
         struct Params: Codable { let sessionId, commandId: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, commandId: commandID)
@@ -822,8 +842,7 @@ final class AppModel {
         return cleared
     }
 
-    func executeBash(_ command: String, excludeFromContext: Bool = false) async throws {
-        guard let sessionID = selectedSessionID else { return }
+    func executeBash(_ command: String, sessionID: String, excludeFromContext: Bool = false) async throws {
         struct Params: Codable { let sessionId, command: String; let excludeFromContext: Bool; let commandId: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, command: command, excludeFromContext: excludeFromContext, commandId: commandID)
@@ -832,8 +851,7 @@ final class AppModel {
         }
     }
 
-    func setModel(_ model: ModelRef) async throws {
-        guard let sessionID = selectedSessionID else { return }
+    func setModel(_ model: ModelRef, sessionID: String) async throws {
         struct Params: Codable { let sessionId, provider, modelId, commandId: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, provider: model.provider, modelId: model.id, commandId: commandID)
@@ -842,19 +860,13 @@ final class AppModel {
         }
     }
 
-    func setThinking(_ level: String) async throws {
-        guard let sessionID = selectedSessionID else { return }
+    func setThinking(_ level: String, sessionID: String) async throws {
         struct Params: Codable { let sessionId, level, commandId: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, level: level, commandId: commandID)
         let _: MutationResponse = try await confirmedMutation(method: "session.setThinking", commandId: commandID) {
             try await client.request("session.setThinking", params)
         }
-    }
-
-    func rename(_ name: String) async throws {
-        guard let sessionID = selectedSessionID else { return }
-        try await renameSession(sessionID, name: name)
     }
 
     func renameSession(_ sessionID: String, name: String) async throws {
@@ -866,8 +878,7 @@ final class AppModel {
         }
     }
 
-    func compact(instructions: String? = nil) async throws {
-        guard let sessionID = selectedSessionID else { return }
+    func compact(sessionID: String, instructions: String? = nil) async throws {
         struct Params: Codable { let sessionId: String; let instructions: String?; let commandId: String }
         struct Response: Codable { let compacted: Bool }
         let commandID = uuidSource.next().uuidString
@@ -877,8 +888,7 @@ final class AppModel {
         }
     }
 
-    func setTools(_ tools: [String]) async throws {
-        guard let sessionID = selectedSessionID else { return }
+    func setTools(_ tools: [String], sessionID: String) async throws {
         struct Params: Codable { let sessionId: String; let tools: [String]; let commandId: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, tools: tools, commandId: commandID)
@@ -887,9 +897,11 @@ final class AppModel {
         }
     }
 
-    @discardableResult
-    func fork(entryID: String, position: String = "before") async throws -> String? {
-        guard let sessionID = selectedSessionID else { return nil }
+    func fork(
+        sessionID: String,
+        entryID: String,
+        position: String = "before"
+    ) async throws -> SessionNavigationRoute {
         struct Params: Codable { let sessionId, entryId, position, commandId: String }
         struct Response: Codable { let sessionId: String; let selectedText: String? }
         let commandID = uuidSource.next().uuidString
@@ -897,19 +909,20 @@ final class AppModel {
         let response: Response = try await confirmedMutation(method: "session.fork", commandId: commandID) {
             try await client.request("session.fork", params, timeout: .seconds(120))
         }
-        selectedSessionID = response.sessionId
-        subscribedSessionID = response.sessionId
-        try await openSession(response.sessionId)
-        if let selectedText = response.selectedText {
-            editorRequest = .init(sessionId: response.sessionId, revision: Int(Date.now.timeIntervalSince1970 * 1_000), action: .set, text: selectedText, fullText: selectedText)
-        }
+        locallyCreatedUnindexedSessionIDs.insert(response.sessionId)
         await refreshSessions()
-        return response.selectedText
+        return SessionNavigationRoute(sessionID: response.sessionId, editorText: response.selectedText)
     }
 
     @discardableResult
-    func navigate(entryID: String, summarize: Bool, instructions: String? = nil, replaceInstructions: Bool = false, label: String? = nil) async throws -> String? {
-        guard let sessionID = selectedSessionID else { return nil }
+    func navigate(
+        sessionID: String,
+        entryID: String,
+        summarize: Bool,
+        instructions: String? = nil,
+        replaceInstructions: Bool = false,
+        label: String? = nil
+    ) async throws -> String? {
         struct Params: Codable {
             let sessionId, entryId: String
             let summarize: Bool
@@ -927,24 +940,22 @@ final class AppModel {
         if let editorText = response.editorText {
             editorRequest = .init(sessionId: sessionID, revision: Int(Date.now.timeIntervalSince1970 * 1_000), action: .set, text: editorText, fullText: editorText)
         }
-        await loadTree()
+        await loadTree(sessionID: sessionID)
         return response.editorText
     }
 
-    func setLabel(entryID: String, label: String?) async throws {
-        guard let sessionID = selectedSessionID else { return }
+    func setLabel(sessionID: String, entryID: String, label: String?) async throws {
         struct Params: Codable { let sessionId, entryId: String; let label: String?; let commandId: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, entryId: entryID, label: label, commandId: commandID)
         let _: MutationResponse = try await confirmedMutation(method: "session.label", commandId: commandID) {
             try await client.request("session.label", params)
         }
-        await loadTree()
+        await loadTree(sessionID: sessionID)
     }
 
-    func exportSession(format: String) async throws -> URL {
-        guard let sessionID = selectedSessionID else { throw GatewayFailure(code: "no_session", message: "Select a session first.", retryable: false, details: nil) }
-        if subscribedSessionID != sessionID, !(await synchronizeSession(sessionID)) {
+    func exportSession(sessionID: String, format: String) async throws -> URL {
+        guard subscribedSessionID == sessionID else {
             throw GatewayFailure(code: "sync_failed", message: "Open the session before exporting it.", retryable: true, details: nil)
         }
         struct Params: Codable { let sessionId, format: String }
@@ -978,57 +989,76 @@ final class AppModel {
         saveCache()
     }
 
-    func loadContext() async {
-        guard let sessionID = selectedSessionID else { return }
-        if subscribedSessionID != sessionID, !(await synchronizeSession(sessionID)) { return }
+    func loadContext(sessionID: String) async {
+        guard subscribedSessionID == sessionID,
+              let subscriptionToken = subscriptionTokenBySession[sessionID] else { return }
         struct Params: Codable { let sessionId: String }
         do {
             let loaded = try await client.requestValue("session.context", Params(sessionId: sessionID), timeout: .seconds(60))
-            guard selectedSessionID == sessionID else { return }
+            guard Self.ownsSubscription(
+                sessionID: sessionID,
+                subscribedSessionID: subscribedSessionID,
+                installedToken: subscriptionTokenBySession[sessionID],
+                requestedToken: subscriptionToken
+            ) else { return }
             context = loaded
         } catch { surface(error) }
     }
 
-    func loadTree() async {
-        guard let sessionID = selectedSessionID else { return }
-        if subscribedSessionID != sessionID, !(await synchronizeSession(sessionID)) { return }
+    func loadTree(sessionID: String) async {
+        guard subscribedSessionID == sessionID,
+              let subscriptionToken = subscriptionTokenBySession[sessionID] else { return }
         struct Params: Codable { let sessionId: String }
         do {
             let loaded: [SessionTreeNode] = try await client.request("session.tree", Params(sessionId: sessionID))
-            guard selectedSessionID == sessionID else { return }
+            guard Self.ownsSubscription(
+                sessionID: sessionID,
+                subscribedSessionID: subscribedSessionID,
+                installedToken: subscriptionTokenBySession[sessionID],
+                requestedToken: subscriptionToken
+            ) else { return }
             sessionTree = loaded
         } catch { surface(error) }
     }
 
-    func loadCommands() async {
-        guard let sessionID = selectedSessionID else { return }
+    func loadCommands(sessionID: String) async {
         await loadCommands(for: sessionID)
     }
 
     private func loadCommands(for sessionID: String) async {
-        if subscribedSessionID != sessionID, !(await synchronizeSession(sessionID)) { return }
+        guard subscribedSessionID == sessionID,
+              let subscriptionToken = subscriptionTokenBySession[sessionID] else { return }
         struct Params: Codable { let sessionId: String }
         struct Response: Decodable { let commands: [CommandInfo] }
         do {
             let response: Response = try await client.request("session.commands", Params(sessionId: sessionID))
-            guard selectedSessionID == sessionID else { return }
+            guard Self.ownsSubscription(
+                sessionID: sessionID,
+                subscribedSessionID: subscribedSessionID,
+                installedToken: subscriptionTokenBySession[sessionID],
+                requestedToken: subscriptionToken
+            ) else { return }
             commands = response.commands
         } catch { surface(error) }
     }
 
-    func loadResources() async {
-        guard let sessionID = selectedSessionID else { return }
-        if subscribedSessionID != sessionID, !(await synchronizeSession(sessionID)) { return }
+    func loadResources(sessionID: String) async {
+        guard subscribedSessionID == sessionID,
+              let subscriptionToken = subscriptionTokenBySession[sessionID] else { return }
         struct Params: Codable { let sessionId: String }
         do {
             let loaded = try await client.requestValue("session.resources", Params(sessionId: sessionID), timeout: .seconds(60))
-            guard selectedSessionID == sessionID else { return }
+            guard Self.ownsSubscription(
+                sessionID: sessionID,
+                subscribedSessionID: subscribedSessionID,
+                installedToken: subscriptionTokenBySession[sessionID],
+                requestedToken: subscriptionToken
+            ) else { return }
             resources = loaded
         } catch { surface(error) }
     }
 
-    func reloadResources() async throws {
-        guard let sessionID = selectedSessionID else { return }
+    func reloadResources(sessionID: String) async throws {
         struct Params: Codable { let sessionId, commandId: String }
         struct Response: Codable { let reloaded: Bool }
         let commandID = uuidSource.next().uuidString
@@ -1352,8 +1382,12 @@ final class AppModel {
         defaultWorkspace = response.path
     }
 
-    func answerInteraction(_ interaction: ExtensionInteraction, value: JSONValue?, cancelled: Bool) async throws {
-        guard let sessionID = selectedSessionID else { return }
+    func answerInteraction(
+        _ interaction: ExtensionInteraction,
+        sessionID: String,
+        value: JSONValue?,
+        cancelled: Bool
+    ) async throws {
         struct Params: Codable { let sessionId, interactionId: String; let value: JSONValue?; let cancelled: Bool; let commandId: String }
         struct Response: Codable { let answered: Bool }
         let commandID = uuidSource.next().uuidString
@@ -1363,9 +1397,8 @@ final class AppModel {
         }
     }
 
-    func listTerminals() async throws -> [TerminalSummary] {
-        guard let sessionID = selectedSessionID else { return [] }
-        if subscribedSessionID != sessionID, !(await synchronizeSession(sessionID)) {
+    func listTerminals(sessionID: String) async throws -> [TerminalSummary] {
+        guard subscribedSessionID == sessionID else {
             throw GatewayFailure(code: "sync_failed", message: "Open the session before listing terminals.", retryable: true, details: nil)
         }
         struct Params: Codable { let sessionId: String }
@@ -1378,8 +1411,7 @@ final class AppModel {
         return response.terminals
     }
 
-    func openTerminal(columns: Int, rows: Int) async throws -> TerminalSummary {
-        guard let sessionID = selectedSessionID else { throw GatewayFailure(code: "no_session", message: "Select a session first.", retryable: false, details: nil) }
+    func openTerminal(sessionID: String, columns: Int, rows: Int) async throws -> TerminalSummary {
         return try await measure(.terminalAttachReplay) {
             struct Params: Codable { let sessionId: String; let columns, rows: Int; let commandId: String }
             struct Replay: Codable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }

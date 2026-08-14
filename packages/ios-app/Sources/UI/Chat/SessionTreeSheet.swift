@@ -18,6 +18,8 @@ private struct SessionHistorySelection: Identifiable {
 }
 
 struct SessionTreeSheet: View {
+    let sessionID: String
+    let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var filter: SessionHistoryFilter = .conversation
@@ -54,7 +56,7 @@ struct SessionTreeSheet: View {
                         emptyState
                     } else {
                         ForEach(visibleNodes) { node in
-                            TreeNodeRow(node: node, leafID: model.selectedSnapshot?.leafEntryId) {
+                            TreeNodeRow(node: node, leafID: model.snapshots[sessionID]?.leafEntryId) {
                                 selection = SessionHistorySelection(node: node, action: .navigate)
                             } fork: {
                                 selection = SessionHistorySelection(node: node, action: .fork)
@@ -85,11 +87,17 @@ struct SessionTreeSheet: View {
                     .accessibilityLabel("Done")
                 }
             }
-            .task(id: model.selectedSessionStructureRevision) { await load() }
+            .task(id: model.sessionStructureRevision(for: sessionID)) { await load() }
             .sheet(item: $selection) { selection in
                 switch selection.action {
-                case .navigate: NavigationSheet(node: selection.node)
-                case .fork: ForkConfirmationSheet(node: selection.node)
+                case .navigate:
+                    NavigationSheet(sessionID: sessionID, node: selection.node)
+                case .fork:
+                    ForkConfirmationSheet(
+                        sessionID: sessionID,
+                        node: selection.node,
+                        onCreated: onForkCreated
+                    )
                 }
             }
             .alert("Bookmark", isPresented: Binding(
@@ -155,8 +163,7 @@ struct SessionTreeSheet: View {
     private func load() async {
         reloading = true
         defer { reloading = false }
-        if let id = model.selectedSessionID { try? await model.openSession(id) }
-        await model.loadTree()
+        await model.loadTree(sessionID: sessionID)
     }
 
     private func reload() {
@@ -167,7 +174,7 @@ struct SessionTreeSheet: View {
     private func saveBookmark() {
         guard let node = labelNode else { return }
         Task {
-            do { try await model.setLabel(entryID: node.id, label: label) }
+            do { try await model.setLabel(sessionID: sessionID, entryID: node.id, label: label) }
             catch { model.lastError = error.localizedDescription }
         }
         labelNode = nil
@@ -176,7 +183,7 @@ struct SessionTreeSheet: View {
     private func removeBookmark() {
         guard let node = labelNode else { return }
         Task {
-            do { try await model.setLabel(entryID: node.id, label: nil) }
+            do { try await model.setLabel(sessionID: sessionID, entryID: node.id, label: nil) }
             catch { model.lastError = error.localizedDescription }
         }
         labelNode = nil
@@ -277,6 +284,7 @@ private struct TreeNodeRow: View {
 private struct NavigationSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    let sessionID: String
     let node: SessionTreeNode
     @State private var summarize = false
     @State private var instructions = ""
@@ -289,11 +297,11 @@ private struct NavigationSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     selectedPoint
                     if !node.isCurrentPath { abandonedBranchOptions }
-                    Button(working ? "Continuing…" : node.id == model.selectedSnapshot?.leafEntryId ? "Current Position" : "Continue From Here") {
+                    Button(working ? "Continuing…" : node.id == model.snapshots[sessionID]?.leafEntryId ? "Current Position" : "Continue From Here") {
                         navigate()
                     }
                     .buttonStyle(TronActionButtonStyle(role: .primary))
-                    .disabled(working || node.id == model.selectedSnapshot?.leafEntryId)
+                    .disabled(working || node.id == model.snapshots[sessionID]?.leafEntryId)
                 }
                 .padding(18)
             }
@@ -349,6 +357,7 @@ private struct NavigationSheet: View {
             defer { working = false }
             do {
                 _ = try await model.navigate(
+                    sessionID: sessionID,
                     entryID: node.id,
                     summarize: summarize,
                     instructions: instructions.isEmpty ? nil : instructions,
@@ -363,7 +372,9 @@ private struct NavigationSheet: View {
 struct ForkConfirmationSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    let sessionID: String
     let node: SessionTreeNode
+    let onCreated: (AppModel.SessionNavigationRoute) -> Void
     @State private var position = "before"
     @State private var working = false
 
@@ -415,8 +426,13 @@ struct ForkConfirmationSheet: View {
         Task {
             defer { working = false }
             do {
-                _ = try await model.fork(entryID: node.id, position: position)
+                let route = try await model.fork(
+                    sessionID: sessionID,
+                    entryID: node.id,
+                    position: position
+                )
                 dismiss()
+                onCreated(route)
             } catch { model.lastError = error.localizedDescription }
         }
     }

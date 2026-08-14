@@ -88,9 +88,10 @@ struct AppModelPerformanceSignpostTests {
     func receiptResolution() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
-            await MainActor.run { harness.model.selectedSessionID = "session" }
+            await MainActor.run { harness.model.selectedSessionID = "dashboard-selection" }
             let responder = Task {
                 let mutation = try await request(in: harness.socket, frameIndex: 1)
+                #expect(mutation.params?.objectValue?["sessionId"] == .string("mounted-route"))
                 await harness.socket.enqueue(errorResponse(
                     id: mutation.id,
                     code: "disconnected",
@@ -108,12 +109,95 @@ struct AppModelPerformanceSignpostTests {
             }
             defer { responder.cancel() }
 
-            try await harness.model.setModel(ModelRef(provider: "test", id: "model"))
+            try await harness.model.setModel(
+                ModelRef(provider: "test", id: "model"),
+                sessionID: "mounted-route"
+            )
             try await valueOfOwnedTask(responder)
             #expect(harness.signposts.events() == [
                 .begin(.receiptResolution),
                 .end(.receiptResolution, .success, .none),
             ])
+            await harness.client.close()
+        }
+    }
+
+    @Test("secondary reads cannot open a hidden subscription")
+    func secondaryReadRequiresOwnedSubscription() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            await harness.model.loadContext(sessionID: "unmounted-route")
+            #expect(await harness.socket.sentFrames().count == 1)
+            await harness.client.close()
+        }
+    }
+
+    @Test("create returns navigation identity without opening it implicitly")
+    func createRouteIdentity() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            await MainActor.run { harness.model.selectedSessionID = "dashboard-selection" }
+            let creating = Task { try await harness.model.createSession(cwd: "/workspace") }
+            defer { creating.cancel() }
+
+            let mutation = try await request(in: harness.socket, frameIndex: 1)
+            #expect(mutation.method == "session.create")
+            await harness.socket.enqueue(successResponse(
+                id: mutation.id,
+                result: .object(["sessionId": .string("created-route")])
+            ))
+            let refresh = try await request(in: harness.socket, frameIndex: 2)
+            #expect(refresh.method == "session.list")
+            await harness.socket.enqueue(errorResponse(
+                id: refresh.id,
+                code: "synthetic_refresh_failure",
+                retryable: false
+            ))
+
+            #expect(try await valueOfOwnedTask(creating) == "created-route")
+            let selectedAfterCreate = await MainActor.run { harness.model.selectedSessionID }
+            #expect(selectedAfterCreate == "dashboard-selection")
+            await harness.client.close()
+        }
+    }
+
+    @Test("fork returns navigation identity without replacing dashboard selection")
+    func forkRouteIdentity() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            await MainActor.run { harness.model.selectedSessionID = "dashboard-selection" }
+            let forking = Task {
+                try await harness.model.fork(
+                    sessionID: "mounted-route",
+                    entryID: "entry",
+                    position: "before"
+                )
+            }
+            defer { forking.cancel() }
+
+            let mutation = try await request(in: harness.socket, frameIndex: 1)
+            #expect(mutation.method == "session.fork")
+            #expect(mutation.params?.objectValue?["sessionId"] == .string("mounted-route"))
+            await harness.socket.enqueue(successResponse(
+                id: mutation.id,
+                result: .object([
+                    "sessionId": .string("forked-route"),
+                    "selectedText": .string("restored draft"),
+                ])
+            ))
+            let refresh = try await request(in: harness.socket, frameIndex: 2)
+            #expect(refresh.method == "session.list")
+            await harness.socket.enqueue(errorResponse(
+                id: refresh.id,
+                code: "synthetic_refresh_failure",
+                retryable: false
+            ))
+
+            let route = try await valueOfOwnedTask(forking)
+            #expect(route.sessionID == "forked-route")
+            #expect(route.editorText == "restored draft")
+            let selectedAfterFork = await MainActor.run { harness.model.selectedSessionID }
+            #expect(selectedAfterFork == "dashboard-selection")
             await harness.client.close()
         }
     }
@@ -191,6 +275,7 @@ struct AppModelPerformanceSignpostTests {
     private struct Request {
         let id: String
         let method: String
+        let params: JSONValue?
     }
 
     private func makeHarness() async throws -> Harness {
@@ -286,7 +371,8 @@ struct AppModelPerformanceSignpostTests {
         let object = try #require(frame.objectValue)
         return Request(
             id: try #require(object["id"]?.stringValue),
-            method: try #require(object["method"]?.stringValue)
+            method: try #require(object["method"]?.stringValue),
+            params: object["params"]
         )
     }
 

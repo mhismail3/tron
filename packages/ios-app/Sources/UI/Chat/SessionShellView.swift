@@ -9,7 +9,7 @@ struct SessionShellView: View {
     @State private var showImport = false
     @State private var search = ""
     @State private var showingSearch = false
-    @State private var presentedSessionID: String?
+    @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
     @State private var sessionToRename: SessionSummary?
     @State private var renameName = ""
@@ -18,7 +18,9 @@ struct SessionShellView: View {
     var body: some View {
         dashboardNavigation
         .sheet(isPresented: $showNewSession) {
-            NewSessionSheet { presentedSessionID = $0 }
+            NewSessionSheet {
+                presentedSession = AppModel.SessionNavigationRoute(sessionID: $0, editorText: nil)
+            }
                 .tronTopBlur(.sheet)
                 .presentationDetents([.medium, .large], selection: $newSessionDetent)
                 .presentationDragIndicator(.hidden)
@@ -78,9 +80,13 @@ struct SessionShellView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await model.refreshSessions() }
-            .navigationDestination(item: $presentedSessionID) { sessionID in
-                ChatView(sessionID: sessionID)
-                    .id(sessionID)
+            .navigationDestination(item: $presentedSession) { route in
+                ChatView(
+                    sessionID: route.sessionID,
+                    initialEditorText: route.editorText,
+                    onForkCreated: { presentedSession = $0 }
+                )
+                .id(route.sessionID)
             }
     }
 
@@ -135,15 +141,15 @@ struct SessionShellView: View {
 
     private func handleImport(_ result: Result<[URL], Error>) {
         guard case .success(let urls) = result, let url = urls.first else { return }
-        let cwd = model.selectedSnapshot?.cwd ?? model.defaultWorkspace
+        let cwd = model.defaultWorkspace
         guard let cwd else {
             model.lastError = "Choose a workspace by creating a session before importing."
             return
         }
         Task {
             do {
-                try await model.importSession(from: url, cwd: cwd)
-                presentedSessionID = model.selectedSessionID
+                let sessionID = try await model.importSession(from: url, cwd: cwd)
+                presentedSession = AppModel.SessionNavigationRoute(sessionID: sessionID, editorText: nil)
             }
             catch { model.lastError = error.localizedDescription }
         }
@@ -218,7 +224,7 @@ struct SessionShellView: View {
 
     private func sessionButton(_ session: SessionSummary) -> some View {
         return Button {
-            presentedSessionID = session.id
+            presentedSession = AppModel.SessionNavigationRoute(sessionID: session.id, editorText: nil)
         } label: {
             HistoricalSessionRow(session: session)
         }
@@ -601,9 +607,9 @@ private struct NewSessionSheet: View {
         creating = true
         defer { creating = false }
         do {
-            try await model.createSession(cwd: workspace)
-            if let selectedModel { try await model.setModel(selectedModel) }
-            if let sessionID = model.selectedSessionID { onCreated(sessionID) }
+            let sessionID = try await model.createSession(cwd: workspace)
+            if let selectedModel { try await model.setModel(selectedModel, sessionID: sessionID) }
+            onCreated(sessionID)
             dismiss()
         } catch { model.lastError = error.localizedDescription }
     }

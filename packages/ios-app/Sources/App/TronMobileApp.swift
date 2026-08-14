@@ -24,9 +24,11 @@ struct TronMobileApp: App {
                             catch is CancellationError { return }
                             catch { model.lastError = error.localizedDescription }
                         }
-                    } else if url.host == "share", let shared = pendingShares.load()?.buildSharePrompt() {
+                    } else if url.host == "share",
+                              let shared = pendingShares.load()?.buildSharePrompt(),
+                              let sessionID = model.mountedSessionID {
                         pendingShares.clear()
-                        Task { try? await model.send(shared.prompt) }
+                        Task { try? await model.send(shared.prompt, sessionID: sessionID) }
                     }
                 }
                 .onChange(of: scenePhase) { _, phase in

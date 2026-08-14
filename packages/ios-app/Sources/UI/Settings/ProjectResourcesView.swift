@@ -62,6 +62,7 @@ private struct ProjectResourceSelection: Identifiable {
 }
 
 struct ProjectResourcesView: View {
+    let sessionID: String
     @Environment(AppModel.self) private var model
     @State private var loading = false
     @State private var selected: ProjectResourceSelection?
@@ -109,7 +110,7 @@ struct ProjectResourcesView: View {
                 TronReloadToolbarButton(isReloading: loading, action: reload)
             }
         }
-        .task(id: model.selectedSessionResourceRevision) { await load() }
+        .task(id: model.sessionResourceRevision(for: sessionID)) { await load() }
         .sheet(item: $selected) { selection in
             NavigationStack {
                 ScrollView {
@@ -241,15 +242,15 @@ struct ProjectResourcesView: View {
         loading = true
         Task {
             defer { loading = false }
-            do { try await model.reloadResources() }
+            do { try await model.reloadResources(sessionID: sessionID) }
             catch { model.lastError = error.localizedDescription }
-            await model.loadResources()
+            await model.loadResources(sessionID: sessionID)
         }
     }
 
     private func load() async {
         loading = true
         defer { loading = false }
-        await model.loadResources()
+        await model.loadResources(sessionID: sessionID)
     }
 }

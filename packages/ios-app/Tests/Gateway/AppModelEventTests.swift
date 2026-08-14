@@ -114,6 +114,28 @@ struct AppModelEventTests {
         #expect(!AppModel.shouldClearSubscription(
             installedToken: "current", closingToken: "current", gatewayClosed: false
         ))
+        #expect(AppModel.ownsPresentation(
+            mountedGeneration: 7,
+            requestedGeneration: 7
+        ))
+        #expect(!AppModel.ownsPresentation(
+            mountedGeneration: 8,
+            requestedGeneration: 7
+        ))
+        #expect(AppModel.ownsSubscription(
+            sessionID: "session",
+            subscribedSessionID: "session",
+            installedToken: "current",
+            requestedToken: "current"
+        ))
+        #expect(!AppModel.ownsSubscription(
+            sessionID: "session",
+            subscribedSessionID: "session",
+            installedToken: "replacement",
+            requestedToken: "stale"
+        ))
+        #expect(AppModel.soleMountedSessionID(["session": 7]) == "session")
+        #expect(AppModel.soleMountedSessionID(["old": 7, "new": 8]) == nil)
     }
 
     @Test("fresh presentation replaces expanded history while reconnect preserves it")
@@ -275,14 +297,14 @@ struct AppModelEventTests {
         await model.handle(event(topic: "session.structureChanged", snapshot: snapshot, sequence: 88, data: .object([
             "branchChanged": .bool(false)
         ])))
-        #expect(model.selectedSessionStructureRevision == 1)
-        #expect(model.selectedSessionContextRevision == 1)
+        #expect(model.sessionStructureRevision(for: snapshot.sessionId) == 1)
+        #expect(model.sessionContextRevision(for: snapshot.sessionId) == 1)
 
         var advanced = snapshot
         advanced.eventSequence = 88
         await model.handle(event(topic: "session.resourcesChanged", snapshot: advanced, sequence: 89, data: .object([:])))
-        #expect(model.selectedSessionResourceRevision == 1)
-        #expect(model.selectedSessionContextRevision == 2)
+        #expect(model.sessionResourceRevision(for: snapshot.sessionId) == 1)
+        #expect(model.sessionContextRevision(for: snapshot.sessionId) == 2)
     }
 
     @Test("terminal output is deduplicated and ordered")

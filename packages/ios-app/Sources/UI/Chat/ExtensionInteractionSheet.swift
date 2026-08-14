@@ -3,6 +3,7 @@ import SwiftUI
 struct ExtensionInteractionSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    let sessionID: String
     let interaction: ExtensionInteraction
     @State private var text = ""
 
@@ -72,11 +73,27 @@ struct ExtensionInteractionSheet: View {
 
     private func answer(_ value: JSONValue) {
         Task {
-            do { try await model.answerInteraction(interaction, value: value, cancelled: false); dismiss() }
+            do {
+                try await model.answerInteraction(
+                    interaction,
+                    sessionID: sessionID,
+                    value: value,
+                    cancelled: false
+                )
+                dismiss()
+            }
             catch { model.lastError = error.localizedDescription }
         }
     }
     private func cancel() {
-        Task { try? await model.answerInteraction(interaction, value: nil, cancelled: true); dismiss() }
+        Task {
+            try? await model.answerInteraction(
+                interaction,
+                sessionID: sessionID,
+                value: nil,
+                cancelled: true
+            )
+            dismiss()
+        }
     }
 }

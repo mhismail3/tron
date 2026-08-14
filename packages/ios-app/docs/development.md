@@ -86,7 +86,9 @@ methods, filenames, model names, prompts, transcript content, or other strings.
 Gateway and cache interval contracts are owned by `GatewayClientTransportTests`
 and `SnapshotCacheTests`. `AppModelPerformanceSignpostTests` drives raw Gateway
 frames through visible open, synchronization/resynchronization, uncertain receipt,
-and terminal replay boundaries. It intentionally records each current resync attempt;
+and terminal replay boundaries. The same suite proves a mounted route wins over divergent
+dashboard selection, secondary reads cannot create hidden subscriptions, and create/fork return
+navigation identity without opening it implicitly. It intentionally records each current resync attempt;
 Phase 2 owns removal of redundant synchronization work after the baseline is frozen.
 
 ```bash
