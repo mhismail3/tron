@@ -511,21 +511,21 @@ private struct AgentDefaultsSettingsView: View {
     @State private var compaction = true
     @State private var retry = true
     @State private var trust = "ask"
-    @State private var scope = "global"
+    @State private var scope: SettingsScope = .global
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
                 TronSettingsGroup("Scope") {
                     TronValueRow(icon: "scope", title: "Settings Scope") {
-                        TronInlineMenu(scope == "project" ? "Current Project" : "Global Defaults") {
-                            Button("Global Defaults") { scope = "global" }
+                        TronInlineMenu(scope == .project ? "Current Project" : "Global Defaults") {
+                            Button("Global Defaults") { scope = .global }
                             if allowsProjectScope {
-                                Button("Current Project") { scope = "project" }
+                                Button("Current Project") { scope = .project }
                             }
                         }
                     }
-                    Text(scope == "project" ? "Overrides apply only to the trusted current workspace." : "Defaults apply to every Tron workspace on this Mac.")
+                    Text(scope == .project ? "Overrides apply only to the trusted current workspace." : "Defaults apply to every Tron workspace on this Mac.")
                         .font(TronTypography.bodySM)
                         .foregroundStyle(Color.tronTextPrimary)
                         .padding(.horizontal, 14)
@@ -582,23 +582,25 @@ private struct AgentDefaultsSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Models and Defaults")
-        .onChange(of: scope) { _, _ in Task { await refresh() } }
-        .task(id: model.settingsInvalidationGeneration) {
-            if !allowsProjectScope { scope = "global" }
+        .task(id: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration)) {
+            if !allowsProjectScope { scope = .global }
             await refresh()
         }
     }
 
-    private func refresh() async {
-        await model.refreshSettings(
-            cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil,
-            useSelectedProject: scope == "project"
-        )
-        load()
+    private var settingsTarget: SettingsTarget? {
+        SettingsTarget(scope: scope, projectCWD: model.selectedSnapshot?.cwd)
     }
 
-    private func load() {
-        guard let root = model.settings?.objectValue,
+    private func refresh() async {
+        guard let target = settingsTarget,
+              await model.refreshSettings(target: target),
+              target == settingsTarget else { return }
+        load(target: target)
+    }
+
+    private func load(target: SettingsTarget) {
+        guard let root = model.settings(for: target)?.objectValue,
               let value = root["effective"]?.objectValue else { return }
         if let object = value["defaultModel"]?.objectValue,
            let provider = object["provider"]?.stringValue, let id = object["id"]?.stringValue {
@@ -621,11 +623,8 @@ private struct AgentDefaultsSettingsView: View {
         ]
         if let selectedModel { patch["defaultModel"] = .object(["provider": .string(selectedModel.provider), "id": .string(selectedModel.id)]) }
         do {
-            try await model.updateSettings(
-                .object(patch),
-                scope: scope,
-                cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil
-            )
+            guard let target = settingsTarget else { return }
+            try await model.updateSettings(.object(patch), target: target)
         }
         catch { model.lastError = error.localizedDescription }
     }

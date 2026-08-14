@@ -322,13 +322,13 @@ struct AppModelEventTests {
             ModelSummary(provider: "openai-codex", id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", reasoning: true, input: ["text"], contextWindow: 1, maxTokens: 1, available: true),
             ModelSummary(provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true, input: ["text"], contextWindow: 1, maxTokens: 1, available: true),
         ]
-        model.settings = .object([
+        model.settingsByTarget[.global] = .object([
             "effective": .object([
                 "defaultModel": .object(["provider": .string("openai-codex"), "id": .string("gpt-5.6-sol")]),
             ]),
         ])
 
-        #expect(model.configuredDefaultModel?.id == "gpt-5.6-sol")
+        #expect(model.configuredDefaultModel(for: .global)?.id == "gpt-5.6-sol")
         #expect(model.preferredAvailableModel?.id == "gpt-5.6-sol")
     }
 

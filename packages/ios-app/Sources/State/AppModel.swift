@@ -136,7 +136,7 @@ final class AppModel {
     var notifications: [String] = []
     var lastError: String?
     var onboardingError: String?
-    var settings: JSONValue?
+    var settingsByTarget: [SettingsTarget: JSONValue] = [:]
     var context: JSONValue?
     var sessionTree: [SessionTreeNode] = []
     var loadingEarlierTranscript = false
@@ -165,6 +165,7 @@ final class AppModel {
     private var eventTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var pairingAttempt: PairingAttempt?
+    private var settingsLoadGenerationByTarget: [SettingsTarget: Int] = [:]
     private var foregroundReconciliationTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var subscribedSessionID: String?
@@ -252,8 +253,12 @@ final class AppModel {
         selectedSessionID.flatMap { sessionResourceRevisions[$0] } ?? 0
     }
 
-    var configuredDefaultModel: ModelRef? {
-        guard let model = settings?.objectValue?["effective"]?.objectValue?["defaultModel"]?.objectValue,
+    func settings(for target: SettingsTarget) -> JSONValue? {
+        settingsByTarget[target]
+    }
+
+    func configuredDefaultModel(for target: SettingsTarget) -> ModelRef? {
+        guard let model = settings(for: target)?.objectValue?["effective"]?.objectValue?["defaultModel"]?.objectValue,
               let provider = model["provider"]?.stringValue,
               let id = model["id"]?.stringValue else { return nil }
         return ModelRef(provider: provider, id: id)
@@ -463,8 +468,9 @@ final class AppModel {
         await refreshSessions()
         let effectiveSessionID = projectSessionID ?? (useSelectedProject ? selectedSessionID : nil)
         let effectiveCWD = projectCWD ?? (useSelectedProject ? selectedSnapshot?.cwd : nil)
+        let settingsTarget = effectiveCWD.map(SettingsTarget.project(cwd:)) ?? .global
         async let providerLoad: Void = refreshProviders(sessionID: effectiveSessionID, useSelectedProject: false)
-        async let settingLoad: Void = refreshSettings(cwd: effectiveCWD, useSelectedProject: false)
+        async let settingLoad: Bool = refreshSettings(target: settingsTarget)
         async let deviceLoad: Void = refreshDevices()
         _ = await (providerLoad, settingLoad, deviceLoad)
         if let effectiveSessionID { try? await openSession(effectiveSessionID) }
@@ -1136,26 +1142,34 @@ final class AppModel {
         await refreshProviders(sessionID: sessionID, useSelectedProject: false)
     }
 
-    func refreshSettings(cwd: String? = nil, useSelectedProject: Bool = true) async {
+    @discardableResult
+    func refreshSettings(target: SettingsTarget) async -> Bool {
         struct Params: Codable { let cwd: String?; let scope: String }
+        let generation = (settingsLoadGenerationByTarget[target] ?? 0) + 1
+        settingsLoadGenerationByTarget[target] = generation
         do {
-            settings = try await client.requestValue(
+            let value = try await client.requestValue(
                 "settings.get",
-                Params(cwd: cwd ?? (useSelectedProject ? selectedSnapshot?.cwd : nil), scope: useSelectedProject ? "project" : "global")
+                Params(cwd: target.cwd, scope: target.scope.rawValue)
             )
+            guard settingsLoadGenerationByTarget[target] == generation else { return false }
+            settingsByTarget[target] = value
+            return true
+        } catch {
+            guard settingsLoadGenerationByTarget[target] == generation else { return false }
+            surface(error)
+            return false
         }
-        catch { surface(error) }
     }
 
-    func updateSettings(_ patch: JSONValue, scope: String = "global", cwd: String? = nil) async throws {
+    func updateSettings(_ patch: JSONValue, target: SettingsTarget) async throws {
         struct Params: Codable { let patch: JSONValue; let scope: String; let cwd: String?; let commandId: String }
         let commandID = uuidSource.next().uuidString
-        let effectiveCWD = cwd ?? (scope == "project" ? selectedSnapshot?.cwd : nil)
-        let params = Params(patch: patch, scope: scope, cwd: effectiveCWD, commandId: commandID)
-        settings = try await confirmedMutationValue(method: "settings.update", commandId: commandID) {
+        let params = Params(patch: patch, scope: target.scope.rawValue, cwd: target.cwd, commandId: commandID)
+        let _: JSONValue = try await confirmedMutationValue(method: "settings.update", commandId: commandID) {
             try await client.requestValue("settings.update", params, timeout: .seconds(60))
         }
-        await refreshSettings(cwd: effectiveCWD, useSelectedProject: scope == "project")
+        _ = await refreshSettings(target: target)
     }
 
     func inspectTrust(cwd: String) async throws -> JSONValue {

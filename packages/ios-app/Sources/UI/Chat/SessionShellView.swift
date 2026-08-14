@@ -355,6 +355,7 @@ private struct NewSessionSheet: View {
     @State private var showModels = false
     @State private var creating = false
     @State private var trustInspection: JSONValue?
+    @State private var configurationOwner = NewSessionConfigurationOwner()
     let onCreated: (String) -> Void
 
     var body: some View {
@@ -367,7 +368,6 @@ private struct NewSessionSheet: View {
                                 ForEach(recentWorkspaces) { shortcut in
                                     Button {
                                         workspace = shortcut.path
-                                        Task { await inspectTrust() }
                                     } label: {
                                         Text(shortcut.title)
                                             .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
@@ -447,13 +447,12 @@ private struct NewSessionSheet: View {
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(Color.tronEmerald)
                     }
-                    .disabled(workspace.isEmpty || creating || needsTrust)
+                    .disabled(creating || !configurationOwner.permitsCreation(workspace: workspace, requiresTrust: needsTrust))
                 }
             }
             .sheet(isPresented: $showBrowser) {
                 WorkspaceBrowser(shortcuts: recentWorkspaces, initialPath: workspace) { value in
                     workspace = value
-                    Task { await inspectTrust() }
                 }
             }
             .sheet(isPresented: $showModels) {
@@ -477,13 +476,34 @@ private struct NewSessionSheet: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)
             }
-            .task {
-                workspace = model.defaultWorkspace ?? ""
-                await model.refreshSettings()
-                selectedModel = model.selectedSnapshot?.model
-                    ?? model.configuredDefaultModel
+            .task(id: workspace) {
+                configurationOwner.begin(workspace: workspace)
+                trustInspection = nil
+                selectedModel = nil
+                if workspace.isEmpty, let defaultWorkspace = model.defaultWorkspace, !defaultWorkspace.isEmpty {
+                    workspace = defaultWorkspace
+                    return
+                }
+                let requestedWorkspace = workspace
+                let settingsTarget = requestedWorkspace.isEmpty
+                    ? SettingsTarget.global
+                    : .project(cwd: requestedWorkspace)
+                async let settingsReady = model.refreshSettings(target: settingsTarget)
+                let trustReady: Bool
+                if requestedWorkspace.isEmpty {
+                    trustReady = true
+                } else {
+                    trustReady = await inspectTrust(cwd: requestedWorkspace)
+                }
+                let loadedSettings = await settingsReady
+                guard workspace == requestedWorkspace,
+                      configurationOwner.admit(
+                        workspace: requestedWorkspace,
+                        settingsReady: loadedSettings,
+                        trustReady: trustReady
+                      ) else { return }
+                selectedModel = model.configuredDefaultModel(for: settingsTarget)
                     ?? model.preferredAvailableModel
-                if !workspace.isEmpty { await inspectTrust() }
             }
         }
         .interactiveDismissDisabled(creating)
@@ -541,18 +561,35 @@ private struct NewSessionSheet: View {
         }
     }
 
-    private func inspectTrust() async {
-        guard !workspace.isEmpty else { return }
-        do { trustInspection = try await model.inspectTrust(cwd: workspace) }
-        catch { model.lastError = error.localizedDescription }
+    private func inspectTrust(cwd: String) async -> Bool {
+        do {
+            let inspection = try await model.inspectTrust(cwd: cwd)
+            guard workspace == cwd else { return false }
+            trustInspection = inspection
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            guard workspace == cwd else { return false }
+            model.lastError = error.localizedDescription
+            return false
+        }
     }
 
     private func trust(_ value: Bool) async {
-        do { trustInspection = try await model.setTrust(cwd: workspace, decision: value) }
-        catch { model.lastError = error.localizedDescription }
+        let cwd = workspace
+        do {
+            let inspection = try await model.setTrust(cwd: cwd, decision: value)
+            guard workspace == cwd else { return }
+            trustInspection = inspection
+        } catch {
+            guard workspace == cwd else { return }
+            model.lastError = error.localizedDescription
+        }
     }
 
     private func create() async {
+        guard configurationOwner.permitsCreation(workspace: workspace, requiresTrust: needsTrust) else { return }
         creating = true
         defer { creating = false }
         do {

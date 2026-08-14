@@ -127,14 +127,17 @@ Global configuration surfaces key their SwiftUI reload task to event-only invali
 generations. Successful settings, provider/model, package, and custom-model reads publish
 values without changing those generations. `AppModelInvalidationTests` scripts every
 successful response and proves publication cannot schedule its own next load; event tests
-separately prove one generation advance per canonical invalidation. Global settings requests
-must omit CWD, while project surfaces pass their selected project's CWD explicitly.
+separately prove one generation advance per canonical invalidation. Settings requests use a
+typed target: global requests omit CWD, while project requests carry their exact project CWD.
+The focused suite deliberately completes global/project and two same-target reads out of order;
+installed values must remain under their request key and the newest same-target request must win.
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/AppModelInvalidationTests \
-  -only-testing:TronMobileTests/AppModelEventTests/globalConfigurationInvalidations
+  -only-testing:TronMobileTests/AppModelEventTests/globalConfigurationInvalidations \
+  -only-testing:TronMobileTests/NewSessionConfigurationOwnerTests
 ```
 
 Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`

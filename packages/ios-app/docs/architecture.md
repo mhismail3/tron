@@ -109,8 +109,13 @@ Global settings, provider/model catalog, package, and custom-model event hints e
 advance a dedicated invalidation generation. Successful reads publish their projection
 without advancing that generation, so a visible `.task(id:)` performs one initial read
 and one read per actual invalidation rather than feeding its own reload loop. Settings
-surfaces pass their selected global/project scope and project CWD explicitly; global reads
-and writes never inherit the currently selected session's project path.
+surfaces use typed `.global` or `.project(cwd:)` targets; installed values and automatic
+reload tasks are keyed by that exact target. Global reads and writes never inherit the
+currently selected session's project path, different targets cannot overwrite each other,
+and a newer same-target read rejects an older completion. New-session defaults are loaded
+for the workspace being created rather than the previously selected session. Changing that
+workspace clears the prior trust/model projection and closes creation admission until matching
+settings and trust reads complete; stale workspace completions cannot reopen it.
 Chat uses one presentation timeline rather than separate canonical, streaming,
 and live-tool tails. Tool calls, progress, and results join by `toolCallId`; the
 Gateway supplies a monotonic per-run ordinal for parallel calls, and the grouped

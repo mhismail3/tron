@@ -3,7 +3,7 @@ import SwiftUI
 struct RuntimeBehaviorSettingsView: View {
     @Environment(AppModel.self) private var model
     let allowsProjectScope: Bool
-    @State private var scope = "global"
+    @State private var scope: SettingsScope = .global
     @State private var transport = "auto"
     @State private var steeringMode = "one-at-a-time"
     @State private var followUpMode = "one-at-a-time"
@@ -129,9 +129,8 @@ struct RuntimeBehaviorSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Runtime Behavior")
-        .onChange(of: scope) { _, _ in Task { await load() } }
-        .task(id: model.settingsInvalidationGeneration) {
-            if !allowsProjectScope { scope = "global" }
+        .task(id: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration)) {
+            if !allowsProjectScope { scope = .global }
             await load()
         }
     }
@@ -139,11 +138,11 @@ struct RuntimeBehaviorSettingsView: View {
     private var scopeGroup: some View {
         TronSettingsGroup("Scope") {
             VStack(spacing: 0) {
-                choiceRow("scope", "Settings Scope", scope == "project" ? "Current Project" : "Global Defaults") {
-                    Button("Global Defaults") { scope = "global" }
-                    if allowsProjectScope { Button("Current Project") { scope = "project" } }
+                choiceRow("scope", "Settings Scope", scope == .project ? "Current Project" : "Global Defaults") {
+                    Button("Global Defaults") { scope = .global }
+                    if allowsProjectScope { Button("Current Project") { scope = .project } }
                 }
-                Text(scope == "project" ? "These overrides apply only to the trusted current workspace." : "These defaults apply to every workspace on this Mac.")
+                Text(scope == .project ? "These overrides apply only to the trusted current workspace." : "These defaults apply to every workspace on this Mac.")
                     .font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).padding(14)
             }
         }
@@ -182,17 +181,20 @@ struct RuntimeBehaviorSettingsView: View {
     }
     private func queueLabel(_ value: String) -> String { value == "all" ? "Deliver all" : "One at a time" }
 
-    private func load() async {
-        await model.refreshSettings(
-            cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil,
-            useSelectedProject: scope == "project"
-        )
-        loadFromProjection()
+    private var settingsTarget: SettingsTarget? {
+        SettingsTarget(scope: scope, projectCWD: model.selectedSnapshot?.cwd)
     }
 
-    private func loadFromProjection() {
+    private func load() async {
+        guard let target = settingsTarget,
+              await model.refreshSettings(target: target),
+              target == settingsTarget else { return }
+        loadFromProjection(target: target)
+    }
+
+    private func loadFromProjection(target: SettingsTarget) {
         guard !saving,
-              let root = model.settings?.objectValue,
+              let root = model.settings(for: target)?.objectValue,
               let value = root["effective"]?.objectValue else { return }
         transport = value.string("transport", fallback: "auto")
         steeringMode = value.string("steeringMode", fallback: "one-at-a-time")
@@ -267,11 +269,8 @@ struct RuntimeBehaviorSettingsView: View {
             "enableAnalytics": .bool(analytics),
         ])
         do {
-            try await model.updateSettings(
-                patch,
-                scope: scope,
-                cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil
-            )
+            guard let target = settingsTarget else { return }
+            try await model.updateSettings(patch, target: target)
         }
         catch { model.lastError = error.localizedDescription }
     }
@@ -324,7 +323,7 @@ struct ResourceSettingsView: View {
 
     @Environment(AppModel.self) private var model
     let allowsProjectScope: Bool
-    @State private var scope = "global"
+    @State private var scope: SettingsScope = .global
     @State private var extensions = ""
     @State private var skills = ""
     @State private var prompts = ""
@@ -384,9 +383,8 @@ struct ResourceSettingsView: View {
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Resource Locations")
-        .onChange(of: scope) { _, _ in Task { await load() } }
-        .task(id: model.settingsInvalidationGeneration) {
-            if !allowsProjectScope { scope = "global" }
+        .task(id: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration)) {
+            if !allowsProjectScope { scope = .global }
             await load()
         }
         .sheet(item: $editor) { value in editorSheet(value) }
@@ -394,11 +392,11 @@ struct ResourceSettingsView: View {
 
     private var scopeGroup: some View {
         TronSettingsGroup("Applies To") {
-            TronValueRow(icon: "scope", title: scope == "project" ? "Current Project" : "Every Project", detail: scopeExplanation) {
+            TronValueRow(icon: "scope", title: scope == .project ? "Current Project" : "Every Project", detail: scopeExplanation) {
                 if allowsProjectScope {
-                    TronInlineMenu(scope == "project" ? "Project" : "Global") {
-                        Button("Every Project") { scope = "global" }
-                        Button("Current Project") { scope = "project" }
+                    TronInlineMenu(scope == .project ? "Project" : "Global") {
+                        Button("Every Project") { scope = .global }
+                        Button("Current Project") { scope = .project }
                     }
                 }
             }
@@ -406,7 +404,7 @@ struct ResourceSettingsView: View {
     }
 
     private var scopeExplanation: String {
-        scope == "project" ? "Saved in this trusted project's settings." : "Saved as defaults for this Mac."
+        scope == .project ? "Saved in this trusted project's settings." : "Saved as defaults for this Mac."
     }
 
     private func editorRow(_ value: Editor, icon: String, value text: String, accent: Color) -> some View {
@@ -419,7 +417,7 @@ struct ResourceSettingsView: View {
 
     private func summary(_ editor: Editor, text: String) -> String {
         if editor == .proxy, text.isEmpty,
-           model.settings?.objectValue?["effective"]?.objectValue?["httpProxyConfigured"]?.boolValue == true {
+           settingsTarget.flatMap({ model.settings(for: $0) })?.objectValue?["effective"]?.objectValue?["httpProxyConfigured"]?.boolValue == true {
             return "Configured · value hidden"
         }
         let values = editor.acceptsMultipleLines ? lines(text) : (text.isEmpty ? [] : [text])
@@ -501,17 +499,20 @@ struct ResourceSettingsView: View {
         }
     }
 
-    private func load() async {
-        await model.refreshSettings(
-            cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil,
-            useSelectedProject: scope == "project"
-        )
-        loadFromProjection()
+    private var settingsTarget: SettingsTarget? {
+        SettingsTarget(scope: scope, projectCWD: model.selectedSnapshot?.cwd)
     }
 
-    private func loadFromProjection() {
+    private func load() async {
+        guard let target = settingsTarget,
+              await model.refreshSettings(target: target),
+              target == settingsTarget else { return }
+        loadFromProjection(target: target)
+    }
+
+    private func loadFromProjection(target: SettingsTarget) {
         guard !saving, editor == nil,
-              let root = model.settings?.objectValue,
+              let root = model.settings(for: target)?.objectValue,
               let value = root["effective"]?.objectValue else { return }
         shellPath = value["shellPath"]?.stringValue ?? ""
         shellPrefix = value["shellCommandPrefix"]?.stringValue ?? ""
@@ -538,7 +539,10 @@ struct ResourceSettingsView: View {
             "npmCommand": npmCommand.isEmpty ? .null : .array(npmCommand.split(separator: " ").map { .string(String($0)) }),
         ]
         if !proxy.isEmpty { patch["httpProxy"] = .string(proxy) }
-        do { try await model.updateSettings(.object(patch), scope: scope, cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil) }
+        do {
+            guard let target = settingsTarget else { return }
+            try await model.updateSettings(.object(patch), target: target)
+        }
         catch { model.lastError = error.localizedDescription }
     }
 

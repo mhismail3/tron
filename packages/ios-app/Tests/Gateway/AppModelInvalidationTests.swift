@@ -14,7 +14,78 @@ struct AppModelInvalidationTests {
         }
     }
 
+    @Test("typed settings targets cannot encode project scope without a path")
+    func settingsTargetRequiresProjectPath() {
+        #expect(SettingsTarget(scope: .global, projectCWD: "/ignored") == .global)
+        #expect(SettingsTarget(scope: .project, projectCWD: nil) == nil)
+        #expect(SettingsTarget(scope: .project, projectCWD: "") == nil)
+        #expect(SettingsTarget(scope: .project, projectCWD: "/workspace/project") == .project(cwd: "/workspace/project"))
+        #expect(SettingsTarget.global.cwd == nil)
+        #expect(SettingsTarget.project(cwd: "/workspace/project").scope == .project)
+
+        let initial = SettingsLoadID(target: .global, invalidationGeneration: 0)
+        #expect(initial != SettingsLoadID(target: .project(cwd: "/workspace/project"), invalidationGeneration: 0))
+        #expect(initial != SettingsLoadID(target: .global, invalidationGeneration: 1))
+    }
+
+    @Test("out-of-order settings responses respect target and request ownership")
+    nonisolated func settingsResponsesRemainKeyed() async throws {
+        let scenario = Task { @MainActor in try await runSettingsOrderingScenario() }
+        defer { scenario.cancel() }
+        try await withTestWatchdog {
+            try await valueOfOwnedTask(scenario)
+        }
+    }
+
     private func runPublicationScenario() async throws {
+        try await withConnectedClient(exercisePublications)
+    }
+
+    private func runSettingsOrderingScenario() async throws {
+        try await withConnectedClient { client, socket in
+            let model = AppModel(client: client)
+            let project = SettingsTarget.project(cwd: "/workspace/project")
+            let globalValue = JSONValue.object(["effective": .object(["marker": .string("global")])])
+            let projectValue = JSONValue.object(["effective": .object(["marker": .string("project")])])
+
+            let globalLoad = Task { await model.refreshSettings(target: .global) }
+            try await socket.waitUntilSent(count: 2)
+            let projectLoad = Task { await model.refreshSettings(target: project) }
+            try await socket.waitUntilSent(count: 3)
+
+            let globalRequest = try await requestObject(at: 1, on: socket)
+            #expect(globalRequest["params"]?.objectValue?["scope"] == .string("global"))
+            #expect(globalRequest["params"]?.objectValue?["cwd"] == nil)
+            let projectRequest = try await requestObject(at: 2, on: socket)
+            #expect(projectRequest["params"]?.objectValue?["scope"] == .string("project"))
+            #expect(projectRequest["params"]?.objectValue?["cwd"] == .string("/workspace/project"))
+
+            try await respond(toFrameAt: 2, on: socket, result: projectValue)
+            _ = await projectLoad.value
+            try await respond(toFrameAt: 1, on: socket, result: globalValue)
+            _ = await globalLoad.value
+
+            #expect(model.settings(for: .global) == globalValue)
+            #expect(model.settings(for: project) == projectValue)
+
+            let olderValue = JSONValue.object(["effective": .object(["marker": .string("older")])])
+            let newerValue = JSONValue.object(["effective": .object(["marker": .string("newer")])])
+            let olderLoad = Task { await model.refreshSettings(target: .global) }
+            try await socket.waitUntilSent(count: 4)
+            let newerLoad = Task { await model.refreshSettings(target: .global) }
+            try await socket.waitUntilSent(count: 5)
+            try await respond(toFrameAt: 4, on: socket, result: newerValue)
+            _ = await newerLoad.value
+            try await respond(toFrameAt: 3, on: socket, result: olderValue)
+            _ = await olderLoad.value
+
+            #expect(model.settings(for: .global) == newerValue)
+        }
+    }
+
+    private func withConnectedClient(
+        _ operation: (GatewayClient, ScriptedGatewaySocket) async throws -> Void
+    ) async throws {
         let socket = ScriptedGatewaySocket()
         let client = GatewayClient(
             socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory
@@ -22,7 +93,7 @@ struct AppModelInvalidationTests {
         await socket.enqueue(helloFrame())
         _ = try await client.connect(profile: profile, token: "token")
         do {
-            try await exercisePublications(client: client, socket: socket)
+            try await operation(client, socket)
         } catch {
             await client.close()
             throw error
@@ -40,7 +111,7 @@ struct AppModelInvalidationTests {
         model.customModelInvalidationGeneration = 13
         model.providerInvalidationGeneration = 14
 
-        let settings = Task { await model.refreshSettings(useSelectedProject: false) }
+        let settings = Task { await model.refreshSettings(target: .global) }
         try await socket.waitUntilSent(count: 2)
         let settingsRequest = try await requestObject(at: 1, on: socket)
         #expect(settingsRequest["params"]?.objectValue?["scope"] == .string("global"))
@@ -50,7 +121,7 @@ struct AppModelInvalidationTests {
             on: socket,
             result: .object(["effective": .object([:])])
         )
-        await settings.value
+        _ = await settings.value
 
         let packages = Task { await model.loadPackages() }
         try await socket.waitUntilSent(count: 3)
@@ -93,7 +164,7 @@ struct AppModelInvalidationTests {
         #expect(model.packageInvalidationGeneration == 12)
         #expect(model.customModelInvalidationGeneration == 13)
         #expect(model.providerInvalidationGeneration == 14)
-        #expect(model.settings == .object(["effective": .object([:])]))
+        #expect(model.settings(for: .global) == .object(["effective": .object([:])]))
         #expect(model.packageState?.packages.isEmpty == true)
         #expect(model.customModels == .object(["providers": .object([:])]))
         #expect(model.providers.isEmpty)

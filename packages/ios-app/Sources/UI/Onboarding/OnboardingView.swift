@@ -164,8 +164,8 @@ struct OnboardingView: View {
             applyDetent()
             if value == .model, selectedModel == nil {
                 Task {
-                    await model.refreshSettings()
-                    selectedModel = model.configuredDefaultModel ?? model.preferredAvailableModel
+                    await model.refreshSettings(target: .global)
+                    selectedModel = model.configuredDefaultModel(for: .global) ?? model.preferredAvailableModel
                 }
             }
         }
@@ -429,7 +429,10 @@ struct OnboardingView: View {
         defer { finishing = false }
         do {
             model.onboardingError = nil
-            try await model.updateSettings(.object(["defaultModel": .object(["provider": .string(selectedModel.provider), "id": .string(selectedModel.id)])]))
+            try await model.updateSettings(
+                .object(["defaultModel": .object(["provider": .string(selectedModel.provider), "id": .string(selectedModel.id)])]),
+                target: .global
+            )
             model.setupComplete = true
             onComplete()
         } catch { model.onboardingError = error.localizedDescription }
