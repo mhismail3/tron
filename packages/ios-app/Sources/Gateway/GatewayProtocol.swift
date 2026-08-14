@@ -119,8 +119,8 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
 
     var isConsumableSessionReplay: Bool {
         switch preparation {
-        case .sessionSnapshot:
-            return true
+        case .sessionSnapshot(let snapshot):
+            return sessionId != nil && sessionId == snapshot.sessionId
         case .sessionEvent(let event):
             if case .invalid = event.data { return false }
             guard let object = event.envelope.data.objectValue else {

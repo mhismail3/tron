@@ -36,10 +36,12 @@ struct SessionEventSynchronizerTests {
         )
         #expect(leader.role == .leader)
         #expect(joined.role == .join)
+        #expect(coordinator.intent(sessionID: "session") == .reconnect(presentationGeneration: 3))
 
         let waiter = Task { await joined.sharedValue() }
         coordinator.complete(leader, outcome: true)
         #expect(await waiter.value)
+        #expect(coordinator.intent(sessionID: "session") == nil)
     }
 
     @Test("fresh presentation never inherits reconnect installation semantics")
@@ -171,7 +173,7 @@ struct SessionEventSynchronizerTests {
     }
 
     @Test("unknown sequenced topics remain consumable while malformed suffixes retry before publication")
-    func replayPreparationAdmission() {
+    func replayPreparationAdmission() throws {
         let unknown = GatewayEvent(
             type: "event",
             topic: "session.future",
@@ -221,6 +223,23 @@ struct SessionEventSynchronizerTests {
         )
         #expect(!SessionSynchronizationCoordinator.isContiguous(
             [malformedKnown, event(sequence: 12)],
+            after: .init(runtimeGeneration: "generation", eventSequence: 10)
+        ))
+
+        var mismatchedSnapshot = try SessionScenarioBuilder(seed: 53).openingTail(
+            targetEncodedBytes: 8_192
+        )
+        mismatchedSnapshot.runtimeGeneration = "generation"
+        mismatchedSnapshot.eventSequence = 11
+        let mismatched = GatewayEvent(
+            type: "event",
+            topic: "session.snapshot",
+            sessionId: "session",
+            payload: try JSONValue.encode(mismatchedSnapshot)
+        )
+        #expect(mismatchedSnapshot.sessionId != mismatched.sessionId)
+        #expect(!SessionSynchronizationCoordinator.isContiguous(
+            [mismatched],
             after: .init(runtimeGeneration: "generation", eventSequence: 10)
         ))
     }

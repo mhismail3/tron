@@ -183,6 +183,76 @@ struct AppModelPerformanceSignpostTests {
         }
     }
 
+    @Test("mounted live snapshots require exact runtime and next cursor")
+    func mountedLiveSnapshotAdmission() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let snapshot = try SessionScenarioBuilder(seed: 46).openingTail(targetEncodedBytes: 8_192)
+            let responder = Task {
+                try await respondToSessionSynchronization(
+                    socket: harness.socket,
+                    firstFrameIndex: 1,
+                    snapshot: snapshot
+                )
+                try await respondToPresentationRefreshes(socket: harness.socket, firstFrameIndex: 3)
+            }
+            defer { responder.cancel() }
+
+            let presentationGeneration = try await harness.model.openSessionPresentation(snapshot.sessionId)
+            try await valueOfOwnedTask(responder)
+
+            var duplicate = snapshot
+            duplicate.phase = .running
+            duplicate.name = "same-cursor replacement"
+            await harness.model.handle(GatewayEvent(
+                type: "event",
+                topic: "session.snapshot",
+                sessionId: snapshot.sessionId,
+                payload: try JSONValue.encode(duplicate)
+            ))
+            let afterDuplicate = await MainActor.run {
+                harness.model.authoritativeSnapshot(for: snapshot.sessionId)
+            }
+            #expect(afterDuplicate == snapshot)
+
+            var next = snapshot
+            next.eventSequence += 1
+            next.phase = .running
+            await harness.model.handle(GatewayEvent(
+                type: "event",
+                topic: "session.snapshot",
+                sessionId: snapshot.sessionId,
+                payload: try JSONValue.encode(next)
+            ))
+            let afterNext = await MainActor.run {
+                harness.model.authoritativeSnapshot(for: snapshot.sessionId)
+            }
+            #expect(afterNext?.eventSequence == next.eventSequence)
+            #expect(afterNext?.phase == .running)
+
+            let target = AppModel.SessionPresentationTarget(
+                sessionID: snapshot.sessionId,
+                generation: presentationGeneration
+            )
+            await MainActor.run { harness.model.revokePresentationIntake(target) }
+            var afterRevocation = next
+            afterRevocation.eventSequence += 1
+            afterRevocation.name = "revoked presentation"
+            await harness.model.handle(GatewayEvent(
+                type: "event",
+                topic: "session.snapshot",
+                sessionId: snapshot.sessionId,
+                payload: try JSONValue.encode(afterRevocation)
+            ))
+            let rejectedAfterRevocation = await MainActor.run {
+                harness.model.snapshots[snapshot.sessionId]
+            }
+            #expect(rejectedAfterRevocation?.eventSequence == next.eventSequence)
+            #expect(rejectedAfterRevocation?.name != "revoked presentation")
+            await harness.client.close()
+        }
+    }
+
     @Test("reconnect restoration opens only the still-mounted presentation")
     func reconnectRestoresMountedPresentation() async throws {
         try await withTestWatchdog {

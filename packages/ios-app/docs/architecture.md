@@ -135,9 +135,14 @@ work. Reconnect identity comes from the mounted presentation generation, never m
 selection. During an attempt, iOS quarantines that session's events, discards those covered by the new
 baseline, validates contiguity, and publishes the baseline plus drained suffix in one MainActor turn
 before completing all waiters. Retry and fresh-install invalidation stay in the same owner; one bounded
-three-attempt loop replaces recursive resynchronization. Gaps, runtime-generation changes,
-buffer overflow, oversized frames, reconnect, and foreground activation all
-converge through another authoritative open. Unknown sequenced session events
+three-attempt loop replaces recursive resynchronization. Outside that explicit install,
+a full `session.snapshot` hint requires the current subscription plus either mounted
+authority or its active synchronization lease, the same runtime generation, and exactly
+the next event sequence. Equal/lower cursors are discarded without merge, summary write,
+or cache save; gaps, runtime replacement, and missing baselines converge through another
+authoritative open. Missing live authority and route/payload mismatch are discarded without
+creating state. Buffer overflow,
+oversized frames, reconnect, and foreground activation use that same path. Unknown sequenced session events
 still advance the cursor so a newer app can add hints without forcing false gaps.
 Dashboard phase/name/count updates use a separate bounded global `session.summary`
 projection: every connected client sees active/settled rows without subscribing to

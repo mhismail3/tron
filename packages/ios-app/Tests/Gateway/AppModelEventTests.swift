@@ -116,6 +116,7 @@ struct AppModelEventTests {
         ))
         #expect(model.selectedSnapshot?.eventSequence == afterWidget.eventSequence)
 
+        let admittedBeforeSnapshot = afterWidget
         afterWidget.eventSequence += 1
         afterWidget.phase = .running
         await model.handle(GatewayEvent(
@@ -124,8 +125,41 @@ struct AppModelEventTests {
             sessionId: snapshot.sessionId,
             payload: try JSONValue.encode(afterWidget)
         ))
-        #expect(model.selectedSnapshot?.eventSequence == afterWidget.eventSequence)
-        #expect(model.selectedSnapshot?.phase == .running)
+        #expect(model.selectedSnapshot == admittedBeforeSnapshot)
+    }
+
+    @Test("live snapshot events reject stale, duplicate, replacement-runtime, and mismatched payloads")
+    func liveSnapshotAdmission() async throws {
+        let current = try loadSnapshot()
+        let model = AppModel()
+        model.selectedSessionID = current.sessionId
+        model.snapshots[current.sessionId] = current
+
+        var duplicate = current
+        duplicate.phase = current.phase == .running ? .idle : .running
+        duplicate.name = "duplicate cursor"
+        await model.handle(snapshotEvent(duplicate, sessionID: current.sessionId))
+        #expect(model.selectedSnapshot == current)
+
+        var stale = current
+        stale.eventSequence -= 1
+        stale.name = "stale cursor"
+        await model.handle(snapshotEvent(stale, sessionID: current.sessionId))
+        #expect(model.selectedSnapshot == current)
+
+        var replacement = current
+        replacement.runtimeGeneration = "replacement-runtime"
+        replacement.eventSequence = 1
+        replacement.name = "replacement without sync"
+        await model.handle(snapshotEvent(replacement, sessionID: current.sessionId))
+        #expect(model.selectedSnapshot == current)
+
+        var mismatched = current
+        mismatched.eventSequence += 1
+        mismatched.name = "wrong route"
+        await model.handle(snapshotEvent(mismatched, sessionID: "other-session"))
+        #expect(model.selectedSnapshot == current)
+        #expect(model.snapshots["other-session"] == nil)
     }
 
     @Test("older protocol-v2 opens reuse the sync token as subscription ownership")
@@ -516,6 +550,15 @@ struct AppModelEventTests {
         ))
         #expect(model.authEvent?.kind == .deviceCode)
         #expect(model.authEvent?.userCode == "ABCD-EFGH")
+    }
+
+    private func snapshotEvent(_ snapshot: SessionSnapshot, sessionID: String) -> GatewayEvent {
+        GatewayEvent(
+            type: "event",
+            topic: "session.snapshot",
+            sessionId: sessionID,
+            payload: try! JSONValue.encode(snapshot)
+        )
     }
 
     private func event(topic: String, snapshot: SessionSnapshot, sequence: Int, data: JSONValue) -> GatewayEvent {

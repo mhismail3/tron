@@ -105,8 +105,11 @@ Gateway and cache interval contracts are owned by `GatewayClientTransportTests`
 and `SnapshotCacheTests`. `AppModelPerformanceSignpostTests` drives raw Gateway
 frames through visible open, synchronization/resynchronization, uncertain receipt,
 and terminal replay boundaries. `SessionEventSynchronizerTests` own the intent-keyed shared
-outcome and event-quarantine invariants; the AppModel suite proves snapshots/tokens remain
-provisional through acknowledgement and stale routes close their exact provisional token. The same suite proves a mounted route wins over divergent
+outcome and event-quarantine invariants; `SessionSnapshotEventAdmissionTests` own the
+live full-snapshot matrix (authority, route identity, runtime, duplicate/stale/exact-next/gap
+cursor). Synchronizer coverage rejects a quarantined route/payload mismatch before baseline
+publication, while the AppModel suites prove snapshots/tokens remain provisional through
+acknowledgement, unmounted or synchronously revoked hints cannot create/advance state, and stale routes close their exact provisional token. The same suite proves a mounted route wins over divergent
 dashboard selection, dashboard refresh cannot open an inferred transcript, mounted reconnect restores
 the exact route, secondary reads cannot create hidden subscriptions, and create/fork return navigation
 identity without opening it implicitly. `DashboardStateOwnerTests` prove stale catalog/navigation

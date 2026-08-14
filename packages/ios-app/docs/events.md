@@ -19,8 +19,12 @@ bounded authoritative retry path.
   dashboard rows, so runs started by terminal or another mobile client show the
   active spinner without subscribing every device to every transcript; paginated
   list refreshes carry one revision and restart rather than install mixed pages;
-- session snapshot/change topics replace the corresponding authoritative
-  snapshot or trigger a paginated list refresh;
+- session snapshot/change topics update only the currently subscribed mounted or
+  synchronizing authority. Full snapshots install only at the exact next cursor for
+  the same runtime; duplicate/stale cursors are no-ops, gaps/runtime replacement/missing
+  baselines request authoritative synchronization, and missing authority or route/payload
+  mismatch is discarded without creating or caching state. Explicit acknowledged open/sync remains the only
+  path allowed to replace a cursor or runtime baseline;
 - provider, package, settings, trust, and custom-model mutation invalidations
   advance owner revisions across connected clients; each visible surface reloads
   its explicit global or project scope instead of sharing a wrong-scope payload;

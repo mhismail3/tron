@@ -117,6 +117,10 @@ final class SessionSynchronizationCoordinator {
         synchronizations[lease.sessionID]?.token == lease.token
     }
 
+    func intent(sessionID: String) -> Intent? {
+        synchronizations[sessionID]?.intent
+    }
+
     func admit(_ event: GatewayEvent) -> EventAdmission {
         guard let sessionID = event.sessionId,
               var synchronization = synchronizations[sessionID] else {

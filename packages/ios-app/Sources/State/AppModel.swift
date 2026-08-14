@@ -2111,17 +2111,22 @@ final class AppModel {
             scheduleSessionListRefresh()
         case "session.snapshot":
             guard case .sessionSnapshot(let snapshot) = event.preparation else { break }
-            if let current = snapshots[snapshot.sessionId] {
-                if snapshot.runtimeGeneration == current.runtimeGeneration,
-                   snapshot.eventSequence > current.eventSequence + 1 {
-                    if !sessionSynchronization.markRetryRequired(sessionID: snapshot.sessionId) {
-                        return snapshot.sessionId
-                    }
-                } else {
-                    apply(snapshot)
+            let current = event.sessionId.flatMap { snapshots[$0] }
+            let hasLiveAuthority = event.sessionId.map(ownsLiveSnapshotEvent) ?? false
+            switch SessionSnapshotEventAdmission.evaluate(
+                eventSessionID: event.sessionId,
+                hasLiveAuthority: hasLiveAuthority,
+                current: current,
+                incoming: snapshot
+            ) {
+            case .install:
+                installLiveSnapshot(snapshot)
+            case .ignore:
+                break
+            case .resynchronize(let sessionID):
+                if !sessionSynchronization.markRetryRequired(sessionID: sessionID) {
+                    return sessionID
                 }
-            } else {
-                apply(snapshot)
             }
         case "session.progress":
             guard let (sessionID, envelope) = admitSessionEvent(event),
@@ -2271,6 +2276,19 @@ final class AppModel {
             return nil
         }
         return (sessionID, envelope)
+    }
+
+    private func ownsLiveSnapshotEvent(sessionID: String) -> Bool {
+        guard subscribedSessionID == sessionID,
+              subscriptionTokenBySession[sessionID] != nil else { return false }
+        let ownsMountedAuthority = mountedPresentationGenerationBySession[sessionID].map {
+            authoritativeSessionIDs.contains(sessionID)
+                && ownsPresentation(SessionPresentationTarget(sessionID: sessionID, generation: $0))
+        } ?? false
+        let ownsSynchronization = sessionSynchronization.intent(sessionID: sessionID).map {
+            ownsSynchronizationIntent($0, sessionID: sessionID)
+        } ?? false
+        return ownsMountedAuthority || ownsSynchronization
     }
 
     private func isNewerToolState(_ candidate: ToolExecutionState, than current: ToolExecutionState) -> Bool {
@@ -2566,12 +2584,7 @@ final class AppModel {
         )
     }
 
-    private func apply(_ snapshot: SessionSnapshot) {
-        if let current = snapshots[snapshot.sessionId],
-           current.runtimeGeneration == snapshot.runtimeGeneration,
-           snapshot.eventSequence < current.eventSequence {
-            return
-        }
+    private func installLiveSnapshot(_ snapshot: SessionSnapshot) {
         let installed = snapshots[snapshot.sessionId].map { current in
             Self.mergingVisibleTranscript(current: current, authoritative: snapshot)
         } ?? snapshot
