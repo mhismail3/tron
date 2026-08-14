@@ -1,10 +1,123 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import TronMobile
 
 @MainActor
 @Suite("AppModel connection lifecycle ownership", .serialized)
 struct AppModelLifecycleTests {
+    @Test("the lifecycle owner revokes exact admissions across transitions and teardown")
+    func coordinatorRevokesAdmissions() async throws {
+        let suiteName = "GatewayLifecycleCoordinatorTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let coordinator = GatewayLifecycleCoordinator(
+            client: GatewayClient(),
+            profiles: GatewayProfileStore(defaults: defaults),
+            clock: .continuous,
+            reconnectDelayPolicy: .standard,
+            uuidSource: .random,
+            pairer: GatewayPairer(),
+            pairingCommit: { _, _ in },
+            profileTokenLookup: { _ in nil }
+        )
+
+        let initial = try #require(coordinator.generationAdmission)
+        #expect(initial.connectionID == nil)
+        #expect(coordinator.admits(initial))
+
+        #expect(await coordinator.forgetCurrentGateway())
+        let replacement = try #require(coordinator.generationAdmission)
+        #expect(replacement.generation > initial.generation)
+        #expect(!coordinator.admits(initial))
+        #expect(coordinator.admits(replacement))
+
+        await coordinator.teardown()
+        #expect(coordinator.generationAdmission == nil)
+        #expect(!coordinator.admits(replacement))
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @Test("concurrent profile transitions cannot connect before an earlier retirement closes")
+    func concurrentTransitionsSerializeRetirement() async throws {
+        try await withTestWatchdog {
+            try await performConcurrentTransitions()
+        }
+    }
+
+    private func performConcurrentTransitions() async throws {
+        let suiteName = "GatewayLifecycleTransitionTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let initial = profile(id: "initial", host: "initial.gateway.test")
+        let first = profile(id: "first", host: "first.gateway.test")
+        let second = profile(id: "second", host: "second.gateway.test")
+        defaults.set(
+            try JSONEncoder.gateway.encode([initial, first, second]),
+            forKey: "gatewayProfiles.v1"
+        )
+        defaults.set(initial.id, forKey: "selectedGateway.v1")
+        let store = GatewayProfileStore(defaults: defaults)
+        let socket = ScriptedGatewaySocket()
+        let socketFactory = ScriptedGatewaySocketFactory(socket: socket)
+        let client = GatewayClient(socketFactory: socketFactory.factory)
+        let coordinator = GatewayLifecycleCoordinator(
+            client: client,
+            profiles: store,
+            clock: .continuous,
+            reconnectDelayPolicy: .standard,
+            uuidSource: .random,
+            pairer: GatewayPairer(),
+            pairingCommit: { _, _ in },
+            profileTokenLookup: { _ in "token" }
+        )
+        let retirement = SuspendedLifecycleRetirement()
+        coordinator.delegate = retirement
+
+        let older = Task { await coordinator.switchGateway(first) }
+        await retirement.waitUntilFirstRetirement()
+        let newer = Task { await coordinator.switchGateway(second) }
+        await Task.yield()
+        #expect(socketFactory.requests.isEmpty)
+
+        retirement.releaseFirstRetirement()
+        await older.value
+        try await socket.waitUntilSent(count: 1)
+        #expect(store.selected?.id == second.id)
+        #expect(socketFactory.requests.map { $0.url?.host } == [second.host])
+
+        await coordinator.teardown()
+        await newer.value
+        await client.close()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    @Test("the AppModel lifecycle façade remains observable")
+    func lifecycleFacadeObservation() async {
+        let suiteName = "AppModelLifecycleObservationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let model = AppModel(
+            client: GatewayClient(),
+            profiles: GatewayProfileStore(defaults: defaults),
+            cache: SnapshotCache(
+                root: FileManager.default.temporaryDirectory.appending(path: suiteName)
+            )
+        )
+        let changed = Mutex(false)
+        withObservationTracking {
+            _ = model.hasResolvedLaunchState
+        } onChange: {
+            changed.withLock { $0 = true }
+        }
+
+        await model.start()
+        #expect(changed.withLock { $0 })
+        #expect(model.hasResolvedLaunchState)
+        await model.teardown()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
     @Test("forget awaits transport close and prevents the retired connect from restarting")
     func forgetOwnsConnectionShutdown() async throws {
         try await withFixture(socketCount: 1) { fixture in
@@ -265,6 +378,49 @@ struct AppModelLifecycleTests {
             machineId: "machine-\(id)",
             deviceId: "device-\(id)"
         )
+    }
+}
+
+@MainActor
+private final class SuspendedLifecycleRetirement: GatewayLifecycleProjectionDelegate {
+    private var firstRetirementStarted = false
+    private var firstRetirementStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private var firstRetirementContinuation: CheckedContinuation<Void, Never>?
+    private var retirementCount = 0
+
+    func waitUntilFirstRetirement() async {
+        if firstRetirementStarted { return }
+        await withCheckedContinuation { continuation in
+            firstRetirementStartWaiters.append(continuation)
+        }
+    }
+
+    func releaseFirstRetirement() {
+        firstRetirementContinuation?.resume()
+        firstRetirementContinuation = nil
+    }
+
+    func lifecycleLoadCache(
+        profileID: String,
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async {}
+    func lifecycleInvalidateSessionConnectionOwnership() {}
+    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
+    func lifecycleSurface(_ error: Error) {}
+
+    func lifecycleRetireProjection(final: Bool) async {
+        retirementCount += 1
+        guard retirementCount == 1 else { return }
+        firstRetirementStarted = true
+        let waiters = firstRetirementStartWaiters
+        firstRetirementStartWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+        await withCheckedContinuation { continuation in
+            firstRetirementContinuation = continuation
+        }
     }
 }
 

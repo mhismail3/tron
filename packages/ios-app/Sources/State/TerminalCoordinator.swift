@@ -33,6 +33,12 @@ struct TerminalDetachClaim: Equatable, Sendable {
     let connectionID: Int
 }
 
+enum TerminalOpenResponseDisposition: Equatable, Sendable {
+    case install
+    case reattach
+    case discard
+}
+
 enum TerminalOutputAdmission: Equatable, Sendable {
     case ignored
     case buffered
@@ -46,6 +52,17 @@ struct TerminalReplayInstallation: Equatable, Sendable {
 }
 
 struct TerminalCoordinator {
+    static func openResponseDisposition(
+        requestLifecycleGeneration: Int,
+        requestConnectionID: Int,
+        currentLifecycleGeneration: Int?,
+        currentConnectionID: Int?
+    ) -> TerminalOpenResponseDisposition {
+        guard currentLifecycleGeneration == requestLifecycleGeneration,
+              let currentConnectionID else { return .discard }
+        return currentConnectionID == requestConnectionID ? .install : .reattach
+    }
+
     private struct OperationKey: Hashable, Sendable {
         let terminalID: String
         let intent: TerminalPresentationIntent

@@ -52,8 +52,9 @@ bounded authoritative retry path.
   later lifecycle reconciliation; replay reset advances native renderer
   identity, and detach/revocation rejects buffered output and exit frames. Multiple
   presentations share the connection subscription until the final lease closes;
-- stopping/restart topics request the single lifecycle-owned reconnect loop; duplicate
-  transport signals cannot replace that owner or revive work after profile teardown. Its
+- stopping/restart topics enter the single `GatewayLifecycleCoordinator` reconnect loop with
+  the exact delivered local connection identity; duplicate transport signals cannot replace that
+  owner or revive work after profile teardown. Its
   nominal 2-second, ×1.7 backoff is independently jittered within a bounded 80–120%
   window and never exceeds 15 seconds; foreground activation accelerates a pending delay
   once without replacing an active handshake.
@@ -86,11 +87,15 @@ overlay to an interrupted chip; it does not expose a fake Stop action for extens
 work. Current Gateways project that background work separately through extension UI state. Tron
 does not mount the retired `pi-subagents` async/fleet editor widgets; the run continues on the Mac
 and the app catches up without presenting transport errors as modal alerts. Foreground activation
-coalesces to one responsiveness/list/session reconciliation. Switch, forget, current-device revoke,
-and final teardown invalidate that reconciliation, reconnect/debounce tasks, profile-scoped reads,
-and presentation intake before awaiting transport close; a late old-profile completion is discarded.
-Possibly-sent mutation reconciliation is also lifecycle-bound and cannot query or replay a command on
-the replacement profile. Ordinary scene backgrounding is not teardown. An aborted or resumed network path
+coalesces to one responsiveness/list/session reconciliation and releases its owned slot on success,
+failure, cancellation, or lifecycle replacement. Switch, forget, current-device revoke, and final
+teardown invalidate that reconciliation, reconnect/debounce tasks, profile-scoped reads, and
+presentation intake before entering the serial retire/close chain; a late old-profile completion is
+discarded and no newer handshake can start ahead of an older close. Possibly-sent mutation
+reconciliation uses generation-only lifecycle admission so same-profile reconnect may resolve it, but
+replacement-profile polling or replay is forbidden. A terminal-open result resolved after a
+same-lifecycle connection replacement attaches on the current connection before publishing replay;
+a profile-generation replacement discards it. Ordinary scene backgrounding is not teardown. An aborted or resumed network path
 enters the ordinary reconnect loop. Compatible reconnect requests share one typed result instead of polling mutable tokens. Fresh
 presentation and reconnect intents arbitrate serially, and at most three immediate authoritative
 attempts are retained for a continuous gap/overflow burst before the bounded catch-up state wins.

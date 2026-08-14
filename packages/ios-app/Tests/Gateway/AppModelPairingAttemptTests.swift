@@ -123,6 +123,63 @@ struct AppModelPairingAttemptTests {
         }
     }
 
+    @Test("cancellation after credential commit leaves an owned connection continuation")
+    func cancellationAfterCommitContinuesConnection() async throws {
+        try await withTestWatchdog {
+            try await performCancellationAfterCommit()
+        }
+    }
+
+    private func performCancellationAfterCommit() async throws {
+        let suite = "GatewayLifecyclePairingCancellationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let store = GatewayProfileStore(defaults: defaults)
+        let http = LateResultPairingHTTPTransport()
+        let socket = ScriptedGatewaySocket()
+        let socketFactory = ScriptedGatewaySocketFactory(socket: socket)
+        let client = GatewayClient(socketFactory: socketFactory.factory)
+        let commit = PairingCommitRecorder()
+        let coordinator = GatewayLifecycleCoordinator(
+            client: client,
+            profiles: store,
+            clock: .continuous,
+            reconnectDelayPolicy: .standard,
+            uuidSource: SequenceUUIDSource([uuid(1)]).source,
+            pairer: GatewayPairer(transport: http.transport),
+            pairingCommit: { profile, token in commit.record(profile: profile, token: token) },
+            profileTokenLookup: { _ in nil }
+        )
+        let retirement = SuspendedPairingRetirement()
+        coordinator.delegate = retirement
+
+        let pairing = Task { try await coordinator.pair(firstInvitation) }
+        try await http.waitForRequests(1)
+        try await http.succeed(
+            request: 0,
+            machineID: "committed-machine",
+            token: "committed-token"
+        )
+        await retirement.waitUntilFirstRetirement()
+        pairing.cancel()
+        retirement.releaseFirstRetirement()
+        await expectCancellation(pairing)
+
+        try await socket.waitUntilSent(count: 1)
+        await socket.enqueue(helloFrame())
+        for _ in 0..<20 where coordinator.connectionState != .connected {
+            await Task.yield()
+        }
+        #expect(coordinator.connectionState == .connected)
+        #expect(coordinator.hasResolvedLaunchState)
+        #expect(commit.saved.map(\.token) == ["committed-token"])
+
+        await coordinator.teardown()
+        await client.close()
+        await http.cancelAll()
+        defaults.removePersistentDomain(forName: suite)
+    }
+
     @Test("the exact attempt remains cancellable while Gateway connect is suspended")
     func ownershipThroughConnect() async throws {
         try await withFixture(ids: [uuid(1)]) { fixture in
@@ -241,6 +298,53 @@ struct AppModelPairingAttemptTests {
 
     private func uuid(_ value: Int) -> UUID {
         UUID(uuidString: String(format: "00000000-0000-0000-0000-%012d", value))!
+    }
+
+    private func helloFrame() -> Data {
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8)
+    }
+}
+
+@MainActor
+private final class SuspendedPairingRetirement: GatewayLifecycleProjectionDelegate {
+    private var firstRetirementStarted = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var retirementContinuation: CheckedContinuation<Void, Never>?
+    private var retirementCount = 0
+
+    func waitUntilFirstRetirement() async {
+        if firstRetirementStarted { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    func releaseFirstRetirement() {
+        retirementContinuation?.resume()
+        retirementContinuation = nil
+    }
+
+    func lifecycleLoadCache(
+        profileID: String,
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async {}
+    func lifecycleInvalidateSessionConnectionOwnership() {}
+    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
+    func lifecycleSurface(_ error: Error) {}
+
+    func lifecycleRetireProjection(final: Bool) async {
+        retirementCount += 1
+        guard retirementCount == 1 else { return }
+        firstRetirementStarted = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+        await withCheckedContinuation { continuation in
+            retirementContinuation = continuation
+        }
     }
 }
 

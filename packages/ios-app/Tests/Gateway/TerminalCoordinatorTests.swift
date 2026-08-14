@@ -4,6 +4,34 @@ import Testing
 
 @Suite("Terminal coordinator invariants")
 struct TerminalCoordinatorTests {
+    @Test("open responses install only on their request connection")
+    func openResponseConnectionDisposition() {
+        #expect(TerminalCoordinator.openResponseDisposition(
+            requestLifecycleGeneration: 3,
+            requestConnectionID: 7,
+            currentLifecycleGeneration: 3,
+            currentConnectionID: 7
+        ) == .install)
+        #expect(TerminalCoordinator.openResponseDisposition(
+            requestLifecycleGeneration: 3,
+            requestConnectionID: 7,
+            currentLifecycleGeneration: 3,
+            currentConnectionID: 8
+        ) == .reattach)
+        #expect(TerminalCoordinator.openResponseDisposition(
+            requestLifecycleGeneration: 3,
+            requestConnectionID: 7,
+            currentLifecycleGeneration: 4,
+            currentConnectionID: 8
+        ) == .discard)
+        #expect(TerminalCoordinator.openResponseDisposition(
+            requestLifecycleGeneration: 3,
+            requestConnectionID: 7,
+            currentLifecycleGeneration: 3,
+            currentConnectionID: nil
+        ) == .discard)
+    }
+
     @Test("pending output count is bounded and a dropped prefix requires replay")
     func pendingOutputCountBound() throws {
         var coordinator = TerminalCoordinator()

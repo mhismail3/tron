@@ -88,6 +88,67 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("foreground reconciliation releases its task slot after failure and reconnect")
+    func foregroundFailureReleasesOwnership() async throws {
+        try await withTestWatchdog {
+            try await performForegroundFailureRecovery()
+        }
+    }
+
+    private func performForegroundFailureRecovery() async throws {
+        let suiteName = "GatewayLifecycleForegroundTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let profile = GatewayProfile(
+            id: "gateway",
+            label: "Mac",
+            host: "gateway.test",
+            port: 9_847,
+            machineId: "machine",
+            deviceId: "device"
+        )
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let store = GatewayProfileStore(defaults: defaults)
+        let sockets = [ScriptedGatewaySocket(), ScriptedGatewaySocket()]
+        let factory = ScriptedGatewaySocketFactory(sockets: sockets)
+        let client = GatewayClient(socketFactory: factory.factory)
+        let coordinator = GatewayLifecycleCoordinator(
+            client: client,
+            profiles: store,
+            clock: .continuous,
+            reconnectDelayPolicy: .standard,
+            uuidSource: .random,
+            pairer: GatewayPairer(),
+            pairingCommit: { _, _ in },
+            profileTokenLookup: { _ in "token" }
+        )
+        let projection = FailFirstForegroundProjection()
+        coordinator.delegate = projection
+
+        let initial = Task { try await coordinator.connectHosted(profile: profile, token: "token") }
+        try await sockets[0].waitUntilSent(count: 1)
+        await sockets[0].enqueue(helloFrame())
+        try await initial.value
+
+        coordinator.becameActive()
+        await projection.waitForReconciliation(count: 1)
+        try await sockets[1].waitUntilSent(count: 1)
+        await sockets[1].enqueue(helloFrame())
+        for _ in 0..<20 where coordinator.connectionState != .connected {
+            await Task.yield()
+        }
+        #expect(coordinator.connectionState == .connected)
+
+        coordinator.becameActive()
+        await projection.waitForReconciliation(count: 2)
+        #expect(projection.reconciliationCount == 2)
+
+        await coordinator.teardown()
+        await client.close()
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
     @Test("active handshake ignores duplicate activation and stale unauthorized teardown completion")
     func activeHandshakeKeepsExactOwner() async throws {
         let units = SequenceReconnectUnits([0.5])
@@ -129,6 +190,10 @@ struct AppModelReconnectTests {
             #expect(fixture.socketFactory.requests.count == 2)
             #expect(await active.closeTransitionCount() == 1)
         }
+    }
+
+    private func helloFrame() -> Data {
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8)
     }
 
     private func failHandshake(_ socket: ScriptedGatewaySocket) async throws {
@@ -198,6 +263,47 @@ struct AppModelReconnectTests {
             client: client,
             model: model
         )
+    }
+}
+
+@MainActor
+private final class FailFirstForegroundProjection: GatewayLifecycleProjectionDelegate {
+    private(set) var reconciliationCount = 0
+    private var reconciliationWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    func waitForReconciliation(count: Int) async {
+        if reconciliationCount >= count { return }
+        await withCheckedContinuation { continuation in
+            reconciliationWaiters.append((count, continuation))
+        }
+    }
+
+    func lifecycleLoadCache(
+        profileID: String,
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async {}
+    func lifecycleInvalidateSessionConnectionOwnership() {}
+    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleRetireProjection(final: Bool) async {}
+    func lifecycleSurface(_ error: Error) {}
+
+    func lifecycleReconcileForeground(
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async throws {
+        reconciliationCount += 1
+        let ready = reconciliationWaiters.filter { reconciliationCount >= $0.count }
+        reconciliationWaiters.removeAll { reconciliationCount >= $0.count }
+        for waiter in ready { waiter.continuation.resume() }
+        if reconciliationCount == 1 {
+            throw GatewayFailure(
+                code: "disconnected",
+                message: "synthetic foreground failure",
+                retryable: true,
+                details: nil
+            )
+        }
     }
 }
 

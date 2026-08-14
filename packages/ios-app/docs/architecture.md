@@ -50,20 +50,26 @@ performance-signpost boundary. Signpost metadata is structurally limited to resu
 codes, item counts, and byte counts; identifiers, paths, methods, filenames, model
 names, prompts, transcript content, and terminal output are never recorded. `AppModel`
 is the shrinking MainActor composition façade; narrow typed owners retain lifecycle and
-coordination state instead of routing facts through unrelated façade fields. One monotonic
-connection-lifecycle phase now owns reconnect, foreground reconciliation, debounced catalog refresh,
-pairing replacement, profile switch/forget/revoke, and final teardown admission. A dedicated
+coordination state instead of routing facts through unrelated façade fields.
+`GatewayLifecycleCoordinator` is the sole owner of enrollment attempts, selected-profile lifecycle,
+connection state/info/identity, exact admissions, reconnect, foreground reconciliation, serial
+retire/close transitions, and final teardown. It composes `GatewayClient` without copying that actor's
+byte-transport epoch. `AppModel` supplies narrow projection hooks for cache installation, refresh,
+session/terminal reconciliation, and synchronous retirement; it no longer stores a parallel lifecycle
+phase, reconnect task, pairing attempt, connection identity, or transition waiters. A dedicated
 `SessionCatalogCoordinator` owns dashboard summaries, retained monotonic live-summary overlays,
 and typed latest-load admission. Cache/disconnect/authoritative installs and removals all enter that
 one disposable projection; hidden/local selection policy remains outside it and cannot mount a chat.
-A profile boundary
-first invalidates those tasks plus profile-scoped load generations and presentation intake, then awaits
-the exact transport close before another profile may connect. Pairing pre-encodes profile metadata and
+A profile boundary synchronously invalidates lifecycle admission, chains behind any preceding
+retirement, revokes profile-scoped loads and presentation intake, and awaits the exact transport close
+before another profile may connect. Pairing pre-encodes profile metadata and
 commits the Keychain token before selecting that profile, so credential failure cannot leave selected
 metadata without its owned secret. Every suspended connect/reconnect/cache boundary revalidates that
-lifecycle generation. Mutation receipt reconciliation captures the same generation, so an uncertain
-old-profile command can report an unknown outcome but can never poll or replay through a replacement
-profile. Reconnect retains the nominal 2-second, ×1.7, 15-second-cap progression. Each sleep is
+lifecycle admission. Mutation receipt reconciliation captures generation-only admission so it may
+resolve across a same-profile reconnect, but profile replacement invalidates it before any poll or
+replay. Connection-owned terminal-open results that resolve after a same-lifecycle reconnect must attach
+again on the current connection before replay can publish; a profile-generation change discards them. Reconnect retains the nominal 2-second, ×1.7,
+15-second-cap progression. Each sleep is
 independently sampled within 80–120% of its nominal value with a hard 15-second effective cap; the
 injected unit-interval source and monotonic clock make the exact schedule deterministic in tests.
 Foreground activation may cancel only a delay-owned retry and start one immediate attempt; repeated

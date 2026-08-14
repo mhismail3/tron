@@ -66,16 +66,21 @@ xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Fast' \
 ```
 
 Gateway transport tests inject `ManualClock`, `SequenceUUIDSource`, and
-`ScriptedGatewaySocket` below `GatewayClient`. `AppModelLifecycleTests` owns the façade
-boundary above it: switch must close the old socket before replacement connect, forget must
-await close, concurrent final teardown callers share completion, retired profile loads cannot
-publish errors or values, and no event/reconnect work is admitted after final teardown.
-`AppModelPairingAttemptTests` also requires enrollment/commit failure to restore the lifecycle
-state that existed before the first superseded pairing attempt. `AppModelReconnectTests` injects
+`ScriptedGatewaySocket` below `GatewayClient`. `AppModelLifecycleTests` owns the façade and
+`GatewayLifecycleCoordinator` boundary above it: exact admissions are revoked by transition,
+concurrent profile transitions chain retire/close work before any replacement handshake, switch
+closes the old socket before replacement connect, forget awaits close, concurrent final teardown
+callers share completion, retired profile loads cannot publish errors or values, and final teardown
+admits no event/reconnect work. `AppModelPairingAttemptTests` requires enrollment/commit failure
+to restore the prior lifecycle and proves cancellation after credential commit leaves a separately
+owned connection continuation rather than a stranded transitioning/connecting state.
+`AppModelReconnectTests` injects
 an ordered unit-interval source and records `ManualClock` sleeps to prove the nominal
 2/3.4/5.78/9.826/15-second progression, bounded effective delay, foreground acceleration,
-delay cancellation, and single-attempt ownership. Advance the manual clock only
-after the expected sleeper/barrier is registered. Test-owned unstructured tasks
+delay cancellation, single-attempt ownership, and foreground reconciliation slot release on every
+exit. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
+waits on a scripted orchestration barrier must run inside `withTestWatchdog`; never add an unbounded
+wait or a clock that collapses liveness sleeps into a hot loop. Test-owned unstructured tasks
 must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
 the test watchdog propagates cancellation. Scripts enqueue and inspect raw frame
 bytes; they must not implement protocol decoding, session state, receipt policy,
@@ -108,7 +113,8 @@ and terminal replay boundaries. `AppModelTerminalLifecycleTests` own presentatio
 revocation, stale-attach compensation, out-of-order reset rejection, pending-event quarantine,
 gap coalescing/follow-up, shared multi-presentation leases, post-detach rejection, and final teardown.
 `TerminalCoordinatorTests` pin the global 16-terminal, 256-chunk, and 1 MiB pending-event
-bounds plus the three-attempt immediate recovery ceiling.
+bounds, the three-attempt immediate recovery ceiling, and the install/reattach/discard decision for
+terminal-open responses that resolve on the same, a replacement, or no current connection.
 `SessionEventSynchronizerTests` own the intent-keyed shared outcome and event-quarantine
 invariants; `SessionSnapshotEventAdmissionTests` own the
 live full-snapshot matrix (authority, route identity, runtime, duplicate/stale/exact-next/gap
