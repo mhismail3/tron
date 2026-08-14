@@ -83,6 +83,51 @@ struct AppModelEventTests {
         #expect(model.selectedSnapshot?.eventSequence == 91)
     }
 
+    @Test("prepared snapshots install while malformed inner DTOs keep reducer semantics")
+    func preparedPayloadCompatibility() async throws {
+        var snapshot = try loadSnapshot()
+        snapshot.extensionUI.widgets = [ExtensionWidget(
+            key: "existing",
+            lines: ["old"],
+            placement: .aboveEditor
+        )]
+        let model = AppModel()
+        model.selectedSessionID = snapshot.sessionId
+        model.snapshots[snapshot.sessionId] = snapshot
+
+        await model.handle(event(
+            topic: "session.widget",
+            snapshot: snapshot,
+            sequence: snapshot.eventSequence + 1,
+            data: .object([
+                "key": .string("existing"),
+                "lines": .array([.string("malformed without placement")]),
+            ])
+        ))
+        #expect(model.selectedSnapshot?.extensionUI.widgets.isEmpty == true)
+        #expect(model.selectedSnapshot?.eventSequence == snapshot.eventSequence + 1)
+
+        var afterWidget = try #require(model.selectedSnapshot)
+        await model.handle(event(
+            topic: "session.toolProgress",
+            snapshot: afterWidget,
+            sequence: afterWidget.eventSequence + 1,
+            data: .object(["toolCallId": .string("incomplete")])
+        ))
+        #expect(model.selectedSnapshot?.eventSequence == afterWidget.eventSequence)
+
+        afterWidget.eventSequence += 1
+        afterWidget.phase = .running
+        await model.handle(GatewayEvent(
+            type: "event",
+            topic: "session.snapshot",
+            sessionId: snapshot.sessionId,
+            payload: try JSONValue.encode(afterWidget)
+        ))
+        #expect(model.selectedSnapshot?.eventSequence == afterWidget.eventSequence)
+        #expect(model.selectedSnapshot?.phase == .running)
+    }
+
     @Test("older protocol-v2 opens reuse the sync token as subscription ownership")
     func legacySessionOpenTokenFallback() throws {
         let snapshot = try loadSnapshot()

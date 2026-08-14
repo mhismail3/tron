@@ -36,7 +36,16 @@ identity generation. The production transport is an actor-confined ephemeral
 `URLSession` owner and preserves the existing data frames, headers, deadlines, and
 random UUID behavior. Scripted test sockets contain no protocol, session, receipt,
 or event-admission policy; `GatewayClient` remains the only decoder and client
-runtime. Gateway connection and disposable cache intervals use the shared typed
+runtime. Each inbound response/event frame crosses one discriminated `JSONDecoder`
+entry point. Typed event views decode directly from that original decoder's payload
+container; network bytes are not serialized and parsed again. The client actor best-effort
+prepares large session snapshots, summaries, envelopes, streaming items, tool states, interactions, and widgets before delivery, so
+the MainActor reducer installs typed `Sendable` values instead of re-encoding and
+decoding dynamic payloads. Raw event payloads remain attached for global extension
+points and unknown topics; malformed known event data preserves its former live-reducer
+no-op semantics rather than becoming a transport failure, while a non-consumable
+quarantined suffix forces another authoritative attempt before its baseline can publish.
+Gateway connection and disposable cache intervals use the shared typed
 performance-signpost boundary. Signpost metadata is structurally limited to result
 codes, item counts, and byte counts; identifiers, paths, methods, filenames, model
 names, prompts, transcript content, and terminal output are never recorded. `AppModel`

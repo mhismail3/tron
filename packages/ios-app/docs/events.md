@@ -4,7 +4,14 @@ Tron events are transient presentation and invalidation signals delivered by
 `GatewayClient`. They are not a durable journal and are not reconstructed into a
 local database. Each delivery carries the local connection-epoch identity; `AppModel`
 admits only the identity installed before receive activation, so buffered frames from a
-retired profile cannot mutate its replacement.
+retired profile cannot mutate its replacement. `GatewayClient` decodes every inbound
+response/event frame through one discriminator and prepares large session DTOs on its
+actor before crossing into `AppModel`. The raw event remains beside that typed preparation:
+unknown frame discriminators are ignored, valid unknown sequenced session topics still
+advance their cursor, and malformed known inner payloads retain their prior reducer-level
+no-op behavior instead of disconnecting the transport. A quarantined event that cannot
+advance the reducer cursor rejects the suffix before baseline publication and triggers the
+bounded authoritative retry path.
 
 `AppModel.handle(_:)` owns routing:
 

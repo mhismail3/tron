@@ -79,7 +79,13 @@ after the expected sleeper/barrier is registered. Test-owned unstructured tasks
 must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
 the test watchdog propagates cancellation. Scripts enqueue and inspect raw frame
 bytes; they must not implement protocol decoding, session state, receipt policy,
-retry policy, or event admission. The optional late-callback and suspended-close modes exist only
+retry policy, or event admission. `GatewayClientTransportTests` injects only the narrow
+frame-decoder function when proving one invocation per inbound response/event. Contract
+cases must retain ignored scalar/missing/non-string/future discriminators, strict failure
+for malformed recognized frames, raw unknown-topic payloads, typed large-session
+preparation, and exact epoch rejection. Synchronizer tests must pair a valid unknown
+envelope with malformed-envelope and malformed-known suffixes: only the valid unknown
+sequence may pass pre-publication contiguity. The optional late-callback and suspended-close modes exist only
 to prove that a retired epoch cannot install a hello/frame, emit a disconnect, or retain the client;
 they never alter production transport behavior. Send barriers exercise queued/sending/sent
 cancellation and cancellation-insensitive transports; only the local `GatewayPossiblySentError`

@@ -32,6 +32,7 @@ actor GatewayClient {
     private let socketFactory: GatewaySocketFactory
     private let clock: MonotonicClock
     private let uuidSource: UUIDSource
+    private let frameDecoder: GatewayFrameDecoder
     private let performanceSignposts: any PerformanceSignposting
     private var connection: ConnectionEpoch?
     private var generation = 0
@@ -44,11 +45,13 @@ actor GatewayClient {
         socketFactory: GatewaySocketFactory = .urlSession,
         clock: MonotonicClock = .continuous,
         uuidSource: UUIDSource = .random,
+        frameDecoder: GatewayFrameDecoder = .gateway,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
     ) {
         self.socketFactory = socketFactory
         self.clock = clock
         self.uuidSource = uuidSource
+        self.frameDecoder = frameDecoder
         self.performanceSignposts = performanceSignposts
         var continuation: AsyncStream<GatewayEventDelivery>.Continuation!
         events = AsyncStream(bufferingPolicy: .bufferingNewest(512)) { continuation = $0 }
@@ -424,13 +427,10 @@ actor GatewayClient {
 
     private func handle(_ data: Data, epochID: Int) async throws {
         try requireEpoch(epochID)
-        let value = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
+        let frame = try frameDecoder.decode(data)
         try requireEpoch(epochID)
-        guard let object = value.objectValue, let type = object["type"]?.stringValue else { return }
-        switch type {
-        case "response":
-            let response = try JSONDecoder.gateway.decode(GatewayResponse.self, from: data)
-            try requireEpoch(epochID)
+        switch frame {
+        case .response(let response):
             guard let waiter = removePending(id: response.id, epochID: epochID) else { return }
             if response.ok {
                 waiter.continuation.resume(returning: response.result ?? .null)
@@ -442,9 +442,7 @@ actor GatewayClient {
                     details: nil
                 ))
             }
-        case "event":
-            let event = try JSONDecoder.gateway.decode(GatewayEvent.self, from: data)
-            try requireEpoch(epochID)
+        case .event(let event):
             if case .dropped = eventContinuation.yield(GatewayEventDelivery(
                 connectionID: epochID,
                 event: event
@@ -464,7 +462,7 @@ actor GatewayClient {
                     )
                 )
             }
-        default:
+        case .unsupported:
             break
         }
     }

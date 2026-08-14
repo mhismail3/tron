@@ -2104,14 +2104,14 @@ final class AppModel {
     private func reduceSessionEvent(_ event: GatewayEvent) -> String? {
         switch event.topic {
         case "session.summary":
-            if let update = try? event.payload.decode(SessionSummaryUpdate.self) {
+            if case .sessionSummary(let update) = event.preparation {
                 apply(update)
             }
         case "session.listChanged":
             scheduleSessionListRefresh()
         case "session.snapshot":
-            if let snapshot = try? event.payload.decode(SessionSnapshot.self),
-               let current = snapshots[snapshot.sessionId] {
+            guard case .sessionSnapshot(let snapshot) = event.preparation else { break }
+            if let current = snapshots[snapshot.sessionId] {
                 if snapshot.runtimeGeneration == current.runtimeGeneration,
                    snapshot.eventSequence > current.eventSequence + 1 {
                     if !sessionSynchronization.markRetryRequired(sessionID: snapshot.sessionId) {
@@ -2120,20 +2120,19 @@ final class AppModel {
                 } else {
                     apply(snapshot)
                 }
-            } else if let snapshot = try? event.payload.decode(SessionSnapshot.self) {
+            } else {
                 apply(snapshot)
             }
         case "session.progress":
             guard let (sessionID, envelope) = admitSessionEvent(event),
-                  let message = envelope.data.objectValue?["message"], message != .null,
-                  let item = try? message.decode(TranscriptItem.self),
+                  case .progress(let item)? = event.preparedSessionEvent?.data,
                   var snapshot = snapshots[sessionID] else { break }
             snapshot.streaming = item
             advance(&snapshot, envelope)
             snapshots[sessionID] = snapshot
         case "session.toolProgress":
             guard let (sessionID, envelope) = admitSessionEvent(event),
-                  let tool = try? envelope.data.decode(ToolExecutionState.self),
+                  case .toolProgress(let tool)? = event.preparedSessionEvent?.data,
                   var snapshot = snapshots[sessionID] else { break }
             if let index = snapshot.toolExecutions.firstIndex(where: { $0.toolCallId == tool.toolCallId }) {
                 guard isNewerToolState(tool, than: snapshot.toolExecutions[index]) else {
@@ -2150,7 +2149,7 @@ final class AppModel {
             snapshots[sessionID] = snapshot
         case "session.interactions":
             guard let (sessionID, envelope) = admitSessionEvent(event),
-                  let interactions = try? envelope.data.decode([ExtensionInteraction].self),
+                  case .interactions(let interactions)? = event.preparedSessionEvent?.data,
                   var snapshot = snapshots[sessionID] else { break }
             snapshot.extensionUI.pendingInteractions = interactions
             advance(&snapshot, envelope)
@@ -2180,13 +2179,10 @@ final class AppModel {
             snapshots[sessionID] = snapshot
         case "session.widget":
             guard let (sessionID, envelope) = admitSessionEvent(event),
-                  let object = envelope.data.objectValue,
-                  let key = object["key"]?.stringValue,
+                  case .widget(let key, let widget)? = event.preparedSessionEvent?.data,
                   var snapshot = snapshots[sessionID] else { break }
             snapshot.extensionUI.widgets.removeAll { $0.key == key }
-            if object["lines"] != .null, let widget = try? envelope.data.decode(ExtensionWidget.self) {
-                snapshot.extensionUI.widgets.append(widget)
-            }
+            if let widget { snapshot.extensionUI.widgets.append(widget) }
             advance(&snapshot, envelope)
             snapshots[sessionID] = snapshot
         case "session.title":
@@ -2259,7 +2255,7 @@ final class AppModel {
 
     private func admitSessionEvent(_ event: GatewayEvent) -> (String, SessionEventEnvelope)? {
         guard let sessionID = event.sessionId,
-              let envelope = try? event.payload.decode(SessionEventEnvelope.self),
+              let envelope = event.preparedSessionEvent?.envelope,
               let snapshot = snapshots[sessionID] else { return nil }
         guard envelope.runtimeGeneration == snapshot.runtimeGeneration else {
             if !sessionSynchronization.markRetryRequired(sessionID: sessionID) {

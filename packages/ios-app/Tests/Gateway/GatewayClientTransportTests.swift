@@ -6,6 +6,26 @@ private final class WeakGatewayClient {
     weak var value: GatewayClient?
 }
 
+private final class CountingGatewayFrameDecoder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var decoder: GatewayFrameDecoder {
+        GatewayFrameDecoder { [self] data in
+            lock.lock()
+            count += 1
+            lock.unlock()
+            return try JSONDecoder().decode(GatewayInboundFrame.self, from: data)
+        }
+    }
+
+    func invocationCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+}
+
 @Suite("Gateway client byte transport")
 struct GatewayClientTransportTests {
     private let profile = GatewayProfile(
@@ -99,6 +119,106 @@ struct GatewayClientTransportTests {
             #expect(event?.event.topic == "test.changed")
             #expect(event?.event.payload.objectValue?["revision"]?.intValue == 3)
             await client.close()
+        }
+    }
+
+    @Test("each inbound response or event frame is decoded once and prepared before delivery")
+    func singleFrameDecodeAndPreparation() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let counter = CountingGatewayFrameDecoder()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000013")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000014")!,
+                ]).source,
+                frameDecoder: counter.decoder
+            )
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+
+            let request = Task { try await client.requestValue("test.value", EmptyParams()) }
+            defer { request.cancel() }
+            try await socket.waitUntilSent(count: 2)
+            await socket.enqueue(responseFrame(
+                id: "00000000-0000-0000-0000-000000000014",
+                result: .number(9)
+            ))
+            #expect(try await valueOfOwnedTask(request).intValue == 9)
+
+            var iterator = client.events.makeAsyncIterator()
+            let snapshot = try SessionScenarioBuilder(seed: 17).openingTail(
+                targetEncodedBytes: 64 * 1_024
+            )
+            await socket.enqueue(eventFrame(
+                topic: "session.snapshot",
+                payload: try JSONValue.encode(snapshot)
+            ))
+            let delivery = try #require(await iterator.next())
+            guard case .sessionSnapshot(let prepared) = delivery.event.preparation else {
+                Issue.record("large snapshot event was not prepared")
+                await client.close()
+                return
+            }
+            #expect(prepared.sessionId == snapshot.sessionId)
+            #expect(prepared.transcript == snapshot.transcript)
+            #expect(counter.invocationCount() == 2)
+            await client.close()
+        }
+    }
+
+    @Test("unknown and undiscriminated frame shapes remain forward-compatible")
+    func unknownFramesAreIgnored() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000015")!,
+                ]).source
+            )
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+
+            var iterator = client.events.makeAsyncIterator()
+            await socket.enqueue(Data("42".utf8))
+            await socket.enqueue(Data(#"{"future":"shape"}"#.utf8))
+            await socket.enqueue(Data(#"{"type":7,"payload":"future"}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"future","responseFieldsAreNotRequired":true}"#.utf8))
+            await socket.enqueue(eventFrame(topic: "future.changed", payload: .object([
+                "preserved": .bool(true),
+            ])))
+
+            let delivery = try #require(await iterator.next())
+            #expect(delivery.event.topic == "future.changed")
+            #expect(delivery.event.payload.objectValue?["preserved"]?.boolValue == true)
+            #expect(delivery.event.preparation == .none)
+            #expect(await client.info?.machineId == "machine")
+            #expect(await socket.closeInvocationCount() == 0)
+            await client.close()
+        }
+    }
+
+    @Test("malformed known frames retain strict transport failure")
+    func malformedKnownFrameDisconnects() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000016")!,
+                ]).source
+            )
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+
+            var iterator = client.events.makeAsyncIterator()
+            await socket.enqueue(Data(#"{"type":"event","topic":"known.malformed"}"#.utf8))
+            let delivery = try #require(await iterator.next())
+            #expect(delivery.event.topic == "transport.disconnected")
+            #expect(await client.info == nil)
+            #expect(await socket.closeTransitionCount() == 1)
         }
     }
 

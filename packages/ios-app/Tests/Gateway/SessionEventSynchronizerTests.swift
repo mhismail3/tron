@@ -170,6 +170,61 @@ struct SessionEventSynchronizerTests {
         #expect(await waiter.value == false)
     }
 
+    @Test("unknown sequenced topics remain consumable while malformed suffixes retry before publication")
+    func replayPreparationAdmission() {
+        let unknown = GatewayEvent(
+            type: "event",
+            topic: "session.future",
+            sessionId: "session",
+            payload: .object([
+                "runtimeGeneration": .string("generation"),
+                "eventSequence": .number(11),
+                "revision": .number(11),
+                "data": .object(["future": .bool(true)]),
+            ])
+        )
+        guard case .sessionEvent(let prepared) = unknown.preparation else {
+            Issue.record("unknown sequenced event did not preserve its envelope")
+            return
+        }
+        #expect(prepared.data == .raw)
+        #expect(SessionSynchronizationCoordinator.isContiguous(
+            [unknown],
+            after: .init(runtimeGeneration: "generation", eventSequence: 10)
+        ))
+
+        let malformedEnvelope = GatewayEvent(
+            type: "event",
+            topic: "session.future",
+            sessionId: "session",
+            payload: .object([
+                "runtimeGeneration": .string("generation"),
+                "eventSequence": .number(11),
+            ])
+        )
+        #expect(malformedEnvelope.preparation == .none)
+        #expect(!SessionSynchronizationCoordinator.isContiguous(
+            [malformedEnvelope],
+            after: .init(runtimeGeneration: "generation", eventSequence: 10)
+        ))
+
+        let malformedKnown = GatewayEvent(
+            type: "event",
+            topic: "session.toolProgress",
+            sessionId: "session",
+            payload: .object([
+                "runtimeGeneration": .string("generation"),
+                "eventSequence": .number(11),
+                "revision": .number(11),
+                "data": .object(["toolCallId": .string("incomplete")]),
+            ])
+        )
+        #expect(!SessionSynchronizationCoordinator.isContiguous(
+            [malformedKnown, event(sequence: 12)],
+            after: .init(runtimeGeneration: "generation", eventSequence: 10)
+        ))
+    }
+
     @Test("events for other sessions remain deliverable")
     func otherSession() {
         let coordinator = SessionSynchronizationCoordinator()
@@ -189,7 +244,7 @@ struct SessionEventSynchronizerTests {
     private func event(sequence: Int, generation: String = "generation") -> GatewayEvent {
         GatewayEvent(
             type: "event",
-            topic: "session.progress",
+            topic: "session.future",
             sessionId: "session",
             payload: .object([
                 "runtimeGeneration": .string(generation),

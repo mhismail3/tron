@@ -16,10 +16,7 @@ final class SessionSynchronizationCoordinator {
         case retryAfterCurrent
     }
 
-    struct Cursor: Equatable, Sendable {
-        let runtimeGeneration: String
-        let eventSequence: Int
-    }
+    typealias Cursor = GatewayEventCursor
 
     enum EventAdmission: Equatable, Sendable {
         case deliver(GatewayEvent)
@@ -208,6 +205,7 @@ final class SessionSynchronizationCoordinator {
     static func isContiguous(_ events: [GatewayEvent], after baseline: Cursor) -> Bool {
         var cursor = baseline
         for event in events {
+            guard event.isConsumableSessionReplay else { return false }
             guard let next = Self.cursor(for: event) else { continue }
             guard next.runtimeGeneration == cursor.runtimeGeneration,
                   next.eventSequence == cursor.eventSequence + 1 else { return false }
@@ -217,9 +215,6 @@ final class SessionSynchronizationCoordinator {
     }
 
     static func cursor(for event: GatewayEvent) -> Cursor? {
-        guard let object = event.payload.objectValue,
-              let runtimeGeneration = object["runtimeGeneration"]?.stringValue,
-              let eventSequence = object["eventSequence"]?.intValue else { return nil }
-        return Cursor(runtimeGeneration: runtimeGeneration, eventSequence: eventSequence)
+        event.sessionCursor
     }
 }
