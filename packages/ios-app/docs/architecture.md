@@ -105,6 +105,12 @@ projection: every connected client sees active/settled rows without subscribing 
 every transcript, while an opened chat receives the full sequenced snapshot and
 stream/tool events. Structure, context, and resource invalidations refresh any
 already-presented History, Fork, Manage Session, or Project Resources surface.
+Global settings, provider/model catalog, package, and custom-model event hints each
+advance a dedicated invalidation generation. Successful reads publish their projection
+without advancing that generation, so a visible `.task(id:)` performs one initial read
+and one read per actual invalidation rather than feeding its own reload loop. Settings
+surfaces pass their selected global/project scope and project CWD explicitly; global reads
+and writes never inherit the currently selected session's project path.
 Chat uses one presentation timeline rather than separate canonical, streaming,
 and live-tool tails. Tool calls, progress, and results join by `toolCallId`; the
 Gateway supplies a monotonic per-run ordinal for parallel calls, and the grouped

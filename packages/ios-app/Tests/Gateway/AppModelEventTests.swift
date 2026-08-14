@@ -341,10 +341,10 @@ struct AppModelEventTests {
         await model.handle(GatewayEvent(type: "event", topic: "models.customChanged", sessionId: nil, payload: .object([:])))
         // These events invalidate each scoped owner rather than being mistaken
         // for session-sequenced events. Visible surfaces then reload their scope.
-        #expect(model.settingsRevision == 1)
-        #expect(model.providerRevision == 1)
-        #expect(model.packageRevision == 1)
-        #expect(model.customModelRevision == 1)
+        #expect(model.settingsInvalidationGeneration == 1)
+        #expect(model.providerInvalidationGeneration == 1)
+        #expect(model.packageInvalidationGeneration == 1)
+        #expect(model.customModelInvalidationGeneration == 1)
         #expect(model.lastError == nil)
     }
 

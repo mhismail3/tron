@@ -129,12 +129,11 @@ struct RuntimeBehaviorSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Runtime Behavior")
-        .task {
+        .onChange(of: scope) { _, _ in Task { await load() } }
+        .task(id: model.settingsInvalidationGeneration) {
             if !allowsProjectScope { scope = "global" }
             await load()
         }
-        .onChange(of: scope) { _, _ in Task { await load() } }
-        .task(id: model.settingsRevision) { await load() }
     }
 
     private var scopeGroup: some View {
@@ -184,7 +183,10 @@ struct RuntimeBehaviorSettingsView: View {
     private func queueLabel(_ value: String) -> String { value == "all" ? "Deliver all" : "One at a time" }
 
     private func load() async {
-        await model.refreshSettings()
+        await model.refreshSettings(
+            cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil,
+            useSelectedProject: scope == "project"
+        )
         loadFromProjection()
     }
 
@@ -264,7 +266,13 @@ struct RuntimeBehaviorSettingsView: View {
             "enableInstallTelemetry": .bool(installTelemetry),
             "enableAnalytics": .bool(analytics),
         ])
-        do { try await model.updateSettings(patch, scope: scope) }
+        do {
+            try await model.updateSettings(
+                patch,
+                scope: scope,
+                cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil
+            )
+        }
         catch { model.lastError = error.localizedDescription }
     }
 }
@@ -376,12 +384,11 @@ struct ResourceSettingsView: View {
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Resource Locations")
-        .task {
+        .onChange(of: scope) { _, _ in Task { await load() } }
+        .task(id: model.settingsInvalidationGeneration) {
             if !allowsProjectScope { scope = "global" }
             await load()
         }
-        .onChange(of: scope) { _, _ in Task { await load() } }
-        .task(id: model.settingsRevision) { await load() }
         .sheet(item: $editor) { value in editorSheet(value) }
     }
 

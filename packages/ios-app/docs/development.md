@@ -123,6 +123,20 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
 packages/ios-app/scripts/verify-archive-privacy.sh <path-to-xcarchive>
 ```
 
+Global configuration surfaces key their SwiftUI reload task to event-only invalidation
+generations. Successful settings, provider/model, package, and custom-model reads publish
+values without changing those generations. `AppModelInvalidationTests` scripts every
+successful response and proves publication cannot schedule its own next load; event tests
+separately prove one generation advance per canonical invalidation. Global settings requests
+must omit CWD, while project surfaces pass their selected project's CWD explicitly.
+
+```bash
+xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/AppModelInvalidationTests \
+  -only-testing:TronMobileTests/AppModelEventTests/globalConfigurationInvalidations
+```
+
 Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`
 feed raw HTTP response bytes and inspect the exact `/v1/pair` request.
 `AppModelPairingAttemptTests` use barriers whose late responses intentionally

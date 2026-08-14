@@ -117,10 +117,10 @@ final class AppModel {
     var sessionStructureRevisions: [String: Int] = [:]
     var sessionContextRevisions: [String: Int] = [:]
     var sessionResourceRevisions: [String: Int] = [:]
-    var settingsRevision = 0
-    var providerRevision = 0
-    var packageRevision = 0
-    var customModelRevision = 0
+    var settingsInvalidationGeneration = 0
+    var providerInvalidationGeneration = 0
+    var packageInvalidationGeneration = 0
+    var customModelInvalidationGeneration = 0
     var trustRevision = 0
     var providers: [ProviderSummary] = []
     var models: [ModelSummary] = []
@@ -1073,7 +1073,6 @@ final class AppModel {
             } while cursor != nil
             providers = try await providerRequest.providers
             models = catalog
-            providerRevision &+= 1
         } catch { surface(error) }
     }
 
@@ -1144,7 +1143,6 @@ final class AppModel {
                 "settings.get",
                 Params(cwd: cwd ?? (useSelectedProject ? selectedSnapshot?.cwd : nil), scope: useSelectedProject ? "project" : "global")
             )
-            settingsRevision &+= 1
         }
         catch { surface(error) }
     }
@@ -1152,11 +1150,12 @@ final class AppModel {
     func updateSettings(_ patch: JSONValue, scope: String = "global", cwd: String? = nil) async throws {
         struct Params: Codable { let patch: JSONValue; let scope: String; let cwd: String?; let commandId: String }
         let commandID = uuidSource.next().uuidString
-        let params = Params(patch: patch, scope: scope, cwd: cwd ?? selectedSnapshot?.cwd, commandId: commandID)
+        let effectiveCWD = cwd ?? (scope == "project" ? selectedSnapshot?.cwd : nil)
+        let params = Params(patch: patch, scope: scope, cwd: effectiveCWD, commandId: commandID)
         settings = try await confirmedMutationValue(method: "settings.update", commandId: commandID) {
             try await client.requestValue("settings.update", params, timeout: .seconds(60))
         }
-        await refreshSettings(cwd: cwd)
+        await refreshSettings(cwd: effectiveCWD, useSelectedProject: scope == "project")
     }
 
     func inspectTrust(cwd: String) async throws -> JSONValue {
@@ -1177,7 +1176,6 @@ final class AppModel {
         struct Params: Codable { let cwd: String? }
         do {
             packageState = try await client.request("packages.list", Params(cwd: cwd), timeout: .seconds(120))
-            packageRevision &+= 1
         }
         catch { surface(error) }
     }
@@ -1205,7 +1203,6 @@ final class AppModel {
     func loadCustomModels() async {
         do {
             customModels = try await client.requestValue("models.custom.get", EmptyParams())
-            customModelRevision &+= 1
         }
         catch { surface(error) }
     }
@@ -1573,16 +1570,16 @@ final class AppModel {
                 lastError = event.payload.objectValue?["error"]?.stringValue
             }
         case "settings.changed":
-            settingsRevision &+= 1
+            settingsInvalidationGeneration &+= 1
         case "trust.changed":
             trustRevision &+= 1
-            settingsRevision &+= 1
+            settingsInvalidationGeneration &+= 1
         case "providers.changed":
-            providerRevision &+= 1
+            providerInvalidationGeneration &+= 1
         case "packages.changed":
-            packageRevision &+= 1
+            packageInvalidationGeneration &+= 1
         case "models.customChanged":
-            customModelRevision &+= 1
+            customModelInvalidationGeneration &+= 1
         case "packages.progress", "packages.completed":
             notifications.append(event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…")
         case "terminal.output":

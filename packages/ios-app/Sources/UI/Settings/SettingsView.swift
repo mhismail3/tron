@@ -488,7 +488,7 @@ private struct ProvidersSettingsView: View {
                 TronReloadToolbarButton(isReloading: reloading, action: reload)
             }
         }
-        .task(id: model.providerRevision) {
+        .task(id: model.providerInvalidationGeneration) {
             await model.refreshProviders(sessionID: sessionID, useSelectedProject: false)
         }
     }
@@ -582,13 +582,19 @@ private struct AgentDefaultsSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Models and Defaults")
-        .task {
+        .onChange(of: scope) { _, _ in Task { await refresh() } }
+        .task(id: model.settingsInvalidationGeneration) {
             if !allowsProjectScope { scope = "global" }
-            await model.refreshSettings()
-            load()
+            await refresh()
         }
-        .onChange(of: scope) { _, _ in Task { await model.refreshSettings(); load() } }
-        .task(id: model.settingsRevision) { await model.refreshSettings(); load() }
+    }
+
+    private func refresh() async {
+        await model.refreshSettings(
+            cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil,
+            useSelectedProject: scope == "project"
+        )
+        load()
     }
 
     private func load() {
@@ -614,7 +620,13 @@ private struct AgentDefaultsSettingsView: View {
             "defaultProjectTrust": .string(trust),
         ]
         if let selectedModel { patch["defaultModel"] = .object(["provider": .string(selectedModel.provider), "id": .string(selectedModel.id)]) }
-        do { try await model.updateSettings(.object(patch), scope: scope) }
+        do {
+            try await model.updateSettings(
+                .object(patch),
+                scope: scope,
+                cwd: scope == "project" ? model.selectedSnapshot?.cwd : nil
+            )
+        }
         catch { model.lastError = error.localizedDescription }
     }
 }

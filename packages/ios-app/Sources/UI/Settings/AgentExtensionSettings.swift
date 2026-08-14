@@ -99,7 +99,7 @@ struct PackagesSettingsView: View {
                 TronReloadToolbarButton(isReloading: reloading, action: reload)
             }
         }
-        .task(id: model.packageRevision) { await model.loadPackages(cwd: effectiveCWD) }
+        .task(id: model.packageInvalidationGeneration) { await model.loadPackages(cwd: effectiveCWD) }
         .confirmationDialog(
             "Remove this package?",
             isPresented: Binding(get: { packageToRemove != nil }, set: { if !$0 { packageToRemove = nil } }),
@@ -327,7 +327,7 @@ struct CustomModelsSettingsView: View {
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Custom Models")
-        .task(id: model.customModelRevision) { await load() }
+        .task(id: model.customModelInvalidationGeneration) { await load() }
         .alert(
             "Remove \(providerRemovalName)?",
             isPresented: Binding(get: { providerToRemove != nil }, set: { if !$0 { providerToRemove = nil } })
