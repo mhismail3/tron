@@ -10,6 +10,7 @@ See:
 - [Development and focused tests](docs/development.md)
 - [Onboarding](docs/onboarding.md)
 - [Gateway event policy](docs/events.md)
+- [iOS hardening plan](docs/hardening-plan.md)
 
 Generate the project with `xcodegen generate`; `project.yml` is the project
 source of truth. Provider secrets remain on the Mac, mobile tokens remain in
