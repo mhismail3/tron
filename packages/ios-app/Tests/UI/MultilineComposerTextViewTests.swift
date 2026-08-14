@@ -94,6 +94,21 @@ struct MultilineComposerTextViewTests {
         #expect(ChatComposerPolicy.isTextEditable(isTranscriptReady: false))
     }
 
+    @Test("activity waveform stays bounded and tapers completely to the right")
+    func activityWaveformTaper() {
+        #expect(TaperedActivityWaveProfile.envelope(at: -1) == 1)
+        #expect(TaperedActivityWaveProfile.envelope(at: 0) == 1)
+        #expect(TaperedActivityWaveProfile.envelope(at: 0.5) == 0.25)
+        #expect(TaperedActivityWaveProfile.envelope(at: 1) == 0)
+        #expect(TaperedActivityWaveProfile.envelope(at: 2) == 0)
+
+        for phase in [0.0, 1.3, 7.0] {
+            #expect(TaperedActivityWaveProfile.amplitude(at: 0, phase: phase) >= 0)
+            #expect(TaperedActivityWaveProfile.amplitude(at: 0, phase: phase) <= 1)
+            #expect(TaperedActivityWaveProfile.amplitude(at: 1, phase: phase) == 0)
+        }
+    }
+
     @Test("grows to eight lines then gives scrolling to the text view")
     func cappedGrowth() async throws {
         var text = ""

@@ -258,21 +258,6 @@ struct ChatView: View {
     private var isTranscriptReady: Bool { openPresentation.phase == .ready }
 
     @ViewBuilder private func runtimeRows(_ snapshot: SessionSnapshot) -> some View {
-        if snapshot.phase.isActive && snapshot.extensionUI.working.visible {
-            stableTranscriptRow(id: "runtime-working") {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(snapshot.extensionUI.working.message ?? statusText(snapshot.phase)).foregroundStyle(.secondary)
-                        if let retry = snapshot.retry {
-                            Text("Attempt \(retry.attempt)\(retry.maxAttempts.map { " of \($0)" } ?? "")")
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                }
-                .font(TronTypography.caption).padding(.vertical, 4)
-            }
-        }
         if !snapshot.extensionUI.statuses.isEmpty {
             ForEach(snapshot.extensionUI.statuses.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
                 stableTranscriptRow(id: "runtime-status-\(key)") {
@@ -650,6 +635,32 @@ struct ChatView: View {
         )
         .glassEffectID("chat-composer", in: composerGlassNamespace)
         .buttonStyle(.plain)
+        .overlay(alignment: .topLeading) {
+            if showsComposerActivity {
+                ComposerActivityWave(reduceMotion: reduceMotion)
+                    .offset(x: 13, y: -12)
+                    .transition(.opacity.combined(with: .scale(scale: 0.84, anchor: .leading)))
+                    .accessibilityLabel(composerActivityAccessibilityLabel)
+            }
+        }
+        .animation(
+            reduceMotion ? .easeOut(duration: 0.12) : .easeInOut(duration: 0.22),
+            value: showsComposerActivity
+        )
+    }
+
+    private var showsComposerActivity: Bool {
+        guard let snapshot = selectedAuthoritativeSnapshot else { return false }
+        return snapshot.phase.isActive && snapshot.extensionUI.working.visible
+    }
+
+    private var composerActivityAccessibilityLabel: String {
+        guard let snapshot = selectedAuthoritativeSnapshot else { return "Tron is working" }
+        var label = snapshot.extensionUI.working.message ?? statusText(snapshot.phase)
+        if let retry = snapshot.retry {
+            label += ", attempt \(retry.attempt)\(retry.maxAttempts.map { " of \($0)" } ?? "")"
+        }
+        return label
     }
 
     private var attachmentButton: some View {

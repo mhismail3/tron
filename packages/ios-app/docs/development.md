@@ -124,7 +124,8 @@ required together because default toolbar Liquid Glass can differ materially
 between the simulator and physical hardware. Chat checkpoints must also verify
 trailing alignment for user turns, historical transcript/tool insertion motion,
 the Settings gear in the chat toolbar, the context ring at the trailing edge of
-an empty idle composer, and emerald toolbar/sheet actions. Terminal checkpoints must exercise
+an empty idle composer, the tapered working waveform at the composer's upper-left edge,
+and emerald toolbar/sheet actions. Terminal checkpoints must exercise
 the native keyboard plus the floating shortcut and command-key surfaces rather
 than validating only PTY output.
 

@@ -224,6 +224,77 @@ struct SessionContextProgressButton: View {
     }
 }
 
+enum TaperedActivityWaveProfile {
+    static func envelope(at progress: CGFloat) -> CGFloat {
+        let bounded = min(max(progress, 0), 1)
+        let remaining = 1 - bounded
+        return remaining * remaining
+    }
+
+    static func amplitude(at progress: CGFloat, phase: Double) -> CGFloat {
+        let bounded = min(max(progress, 0), 1)
+        let pulse = 0.30 + 0.70 * ((sin(Double(bounded) * .pi * 7 - phase) + 1) / 2)
+        return envelope(at: bounded) * CGFloat(pulse)
+    }
+}
+
+private struct TaperedActivityWave: Shape {
+    let phase: Double
+
+    func path(in rect: CGRect) -> Path {
+        let sampleCount = 56
+        var upper: [CGPoint] = []
+        var lower: [CGPoint] = []
+        upper.reserveCapacity(sampleCount + 1)
+        lower.reserveCapacity(sampleCount + 1)
+
+        for sample in 0...sampleCount {
+            let progress = CGFloat(sample) / CGFloat(sampleCount)
+            let envelope = TaperedActivityWaveProfile.envelope(at: progress)
+            let amplitude = TaperedActivityWaveProfile.amplitude(at: progress, phase: phase)
+            let drift = sin(Double(progress) * .pi * 2 + phase * 0.35)
+            let center = rect.midY + rect.height * 0.06 * envelope * CGFloat(drift)
+            let halfHeight = rect.height * (0.10 * envelope + 0.38 * amplitude)
+            let x = rect.minX + rect.width * progress
+            upper.append(CGPoint(x: x, y: center - halfHeight))
+            lower.append(CGPoint(x: x, y: center + halfHeight))
+        }
+
+        var path = Path()
+        guard let first = upper.first else { return path }
+        path.move(to: first)
+        for point in upper.dropFirst() { path.addLine(to: point) }
+        for point in lower.reversed() { path.addLine(to: point) }
+        path.closeSubpath()
+        return path
+    }
+}
+
+struct ComposerActivityWave: View {
+    let reduceMotion: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 24.0, paused: reduceMotion)) { timeline in
+            let phase = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate * 2.4
+            TaperedActivityWave(phase: phase)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.tronEmerald.opacity(0.82),
+                            Color.tronEmerald.opacity(0.42),
+                            Color.tronEmerald.opacity(0.04)
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+        }
+        .frame(width: 104, height: 17)
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+    }
+}
+
 enum ComposerTrailingMode: Equatable {
     case stopAgent
     case send

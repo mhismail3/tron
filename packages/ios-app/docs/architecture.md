@@ -119,8 +119,9 @@ height measurements carry a latest-revision guard, so an older wrap measurement 
 a newer line count. Every stable row owns its horizontal inset instead of relying on
 transient ScrollView content margins, so prompt insertion cannot expose a flush-left frame.
 Existing rows never participate in stack-wide insertion or scale animations. Thinking,
-Markdown, tool, and
-working rows therefore remain stable above the composer while the user follows the tail. Terminal output has its own monotonic sequence and reconnect replay cursor.
+Markdown, and tool rows therefore remain stable above the composer while the user follows
+the tail. Ephemeral working state is not inserted into transcript geometry. Terminal output
+has its own monotonic sequence and reconnect replay cursor.
 Secondary live-runtime reads require that exact session to be opened first, so a
 stale selection cannot read or render another session's context, tree, resources,
 export, or terminal inventory.
@@ -140,7 +141,10 @@ assumed globally unique.
 The composer supports text, system-keyboard dictation, images, and bounded file
 uploads. It does not expose an app-owned microphone control until a proper voice mode exists.
 Drafting remains available while authoritative opening finishes and throughout
-an active turn; only submission waits for readiness. A non-empty active draft replaces the
+an active turn; only submission waits for readiness. Active working state draws a small,
+filled emerald waveform across the composer's upper-left edge. Its native shape tapers and
+fades toward the right, animates without changing transcript geometry, exposes the runtime
+message to VoiceOver, and becomes static when Reduce Motion is enabled. A non-empty active draft replaces the
 trailing Stop action with Send and is admitted as a steering message, while an empty active
 composer retains Stop. The keyboard remains focused after steering so multiple messages can
 be queued without waiting for the current turn to settle. Camera, photo, and file actions
