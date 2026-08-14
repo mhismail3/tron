@@ -32,7 +32,13 @@ or event-admission policy; `GatewayClient` remains the only decoder and client
 runtime. Gateway connection and disposable cache intervals use the shared typed
 performance-signpost boundary. Signpost metadata is structurally limited to result
 codes, item counts, and byte counts; identifiers, paths, methods, filenames, model
-names, prompts, and transcript content are never recorded. `AppModel` is the MainActor state owner. It shares those clock/UUID seams
+names, prompts, transcript content, and terminal output are never recorded. `AppModel`
+is the MainActor state owner. Its visible-open interval contains independently measured
+authoritative synchronization attempts; invalidated attempts end as discarded rather
+than being mislabeled as successful. Receipt timing begins only after an uncertain
+mutation response, never for an ordinary confirmed mutation. Terminal open/attach
+uses one replay installer and closes its interval only after reset or delta chunks are
+admitted. It shares those clock/UUID seams
 for Gateway reconnect, synchronization, receipt, debounce, and command-ID work.
 It loads a bounded disposable cache first, connects, fetches
 cursor-paginated sessions and model catalogs, and replaces local state with

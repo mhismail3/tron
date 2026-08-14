@@ -26,4 +26,8 @@ final class RecordingPerformanceSignposts: PerformanceSignposting, @unchecked Se
     func events() -> [Event] {
         lock.withLock { recorded }
     }
+
+    func reset() {
+        lock.withLock { recorded.removeAll() }
+    }
 }

@@ -84,7 +84,16 @@ Performance intervals use `SystemPerformanceSignposts`; tests inject
 closed result code and nonnegative item/byte counts. Never add identifiers, paths,
 methods, filenames, model names, prompts, transcript content, or other strings.
 Gateway and cache interval contracts are owned by `GatewayClientTransportTests`
-and `SnapshotCacheTests`.
+and `SnapshotCacheTests`. `AppModelPerformanceSignpostTests` drives raw Gateway
+frames through visible open, synchronization/resynchronization, uncertain receipt,
+and terminal replay boundaries. It intentionally records each current resync attempt;
+Phase 2 owns removal of redundant synchronization work after the baseline is frozen.
+
+```bash
+xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/AppModelPerformanceSignpostTests
+```
 
 Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`
 feed raw HTTP response bytes and inspect the exact `/v1/pair` request.

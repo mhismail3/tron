@@ -93,6 +93,7 @@ final class AppModel {
     private let cache: SnapshotCache
     private let clock: MonotonicClock
     private let uuidSource: UUIDSource
+    private let performanceSignposts: any PerformanceSignposting
     private let pairer: GatewayPairer
     private let pairingCommit: PairingCommit
     private let profileTokenLookup: ProfileTokenLookup
@@ -188,13 +189,15 @@ final class AppModel {
         uuidSource: UUIDSource = .random,
         pairer: GatewayPairer = GatewayPairer(),
         pairingCommit: PairingCommit? = nil,
-        profileTokenLookup: ProfileTokenLookup? = nil
+        profileTokenLookup: ProfileTokenLookup? = nil,
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
     ) {
         self.client = client
         self.profiles = profiles
         self.cache = cache
         self.clock = clock
         self.uuidSource = uuidSource
+        self.performanceSignposts = performanceSignposts
         self.pairer = pairer
         self.pairingCommit = pairingCommit ?? { profile, token in
             try profiles.save(profile, token: token)
@@ -609,6 +612,12 @@ final class AppModel {
     /// this always installs a fresh authoritative bounded tail and never carries
     /// an explicitly paged prefix across navigation lifetimes.
     func openSessionPresentation(_ id: String) async throws -> Int {
+        try await measure(.sessionOpen) {
+            (try await performSessionPresentationOpen(id), .none)
+        }
+    }
+
+    private func performSessionPresentationOpen(_ id: String) async throws -> Int {
         presentationOpenGeneration &+= 1
         let generation = presentationOpenGeneration
         if subscribedSessionID != id { await closeCurrentSubscription() }
@@ -1294,32 +1303,57 @@ final class AppModel {
 
     func openTerminal(columns: Int, rows: Int) async throws -> TerminalSummary {
         guard let sessionID = selectedSessionID else { throw GatewayFailure(code: "no_session", message: "Select a session first.", retryable: false, details: nil) }
-        struct Params: Codable { let sessionId: String; let columns, rows: Int; let commandId: String }
-        struct Replay: Codable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
-        struct Response: Codable { let terminal: TerminalSummary; let replay: Replay }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, columns: columns, rows: rows, commandId: commandID)
-        let response: Response = try await confirmedMutation(method: "terminal.open", commandId: commandID) {
-            try await client.request("terminal.open", params)
+        return try await measure(.terminalAttachReplay) {
+            struct Params: Codable { let sessionId: String; let columns, rows: Int; let commandId: String }
+            struct Replay: Codable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
+            struct Response: Codable { let terminal: TerminalSummary; let replay: Replay }
+            let commandID = uuidSource.next().uuidString
+            let params = Params(sessionId: sessionID, columns: columns, rows: rows, commandId: commandID)
+            let response: Response = try await confirmedMutation(method: "terminal.open", commandId: commandID) {
+                try await client.request("terminal.open", params)
+            }
+            let installedCount = installTerminalReplay(
+                response.replay.chunks,
+                terminal: response.terminal,
+                reset: true,
+                after: 0
+            )
+            return (response.terminal, PerformanceMetrics(itemCount: installedCount))
         }
-        terminalChunks[response.terminal.id] = response.replay.chunks
-        upsertTerminal(response.terminal)
-        attachedTerminalIDs.insert(response.terminal.id)
-        return response.terminal
     }
 
     func attachTerminal(_ id: String, after: Int) async throws -> TerminalSummary {
-        struct Params: Codable { let terminalId: String; let afterSequence: Int }
-        struct Response: Decodable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
-        let response: Response = try await client.request("terminal.attach", Params(terminalId: id, afterSequence: after))
-        if response.reset { terminalChunks[id] = response.chunks }
-        else {
-            let latest = terminalChunks[id]?.last?.sequence ?? after
-            terminalChunks[id, default: []].append(contentsOf: response.chunks.filter { $0.sequence > latest })
+        try await measure(.terminalAttachReplay) {
+            struct Params: Codable { let terminalId: String; let afterSequence: Int }
+            struct Response: Decodable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
+            let response: Response = try await client.request("terminal.attach", Params(terminalId: id, afterSequence: after))
+            let installedCount = installTerminalReplay(
+                response.chunks,
+                terminal: response.terminal,
+                reset: response.reset,
+                after: after
+            )
+            return (response.terminal, PerformanceMetrics(itemCount: installedCount))
         }
-        upsertTerminal(response.terminal)
-        attachedTerminalIDs.insert(id)
-        return response.terminal
+    }
+
+    @discardableResult
+    private func installTerminalReplay(
+        _ chunks: [TerminalChunk],
+        terminal: TerminalSummary,
+        reset: Bool,
+        after: Int
+    ) -> Int {
+        let latest = terminalChunks[terminal.id]?.last?.sequence ?? after
+        var admittedSequences = Set<Int>()
+        let admitted = chunks.filter {
+            (reset || $0.sequence > latest) && admittedSequences.insert($0.sequence).inserted
+        }
+        if reset { terminalChunks[terminal.id] = admitted }
+        else { terminalChunks[terminal.id, default: []].append(contentsOf: admitted) }
+        upsertTerminal(terminal)
+        attachedTerminalIDs.insert(terminal.id)
+        return admitted.count
     }
 
     func detachTerminal(_ id: String) async {
@@ -1367,7 +1401,7 @@ final class AppModel {
             case .buffered:
                 break
             case .overflow(let sessionID):
-                _ = await synchronizeSession(sessionID)
+                _ = await synchronizeSession(sessionID, operation: .sessionResync)
             }
             return
         }
@@ -1390,7 +1424,7 @@ final class AppModel {
         case "transport.resyncRequired":
             if let sessionID = event.sessionId ?? selectedSessionID {
                 pendingAuthoritativeResyncSessionIDs.insert(sessionID)
-                _ = await synchronizeSession(sessionID)
+                _ = await synchronizeSession(sessionID, operation: .sessionResync)
             }
         case "session.summary":
             if let update = try? event.payload.decode(SessionSummaryUpdate.self) {
@@ -1404,7 +1438,7 @@ final class AppModel {
                 if snapshot.runtimeGeneration == current.runtimeGeneration,
                    snapshot.eventSequence > current.eventSequence + 1 {
                     pendingAuthoritativeResyncSessionIDs.insert(snapshot.sessionId)
-                    _ = await synchronizeSession(snapshot.sessionId)
+                    _ = await synchronizeSession(snapshot.sessionId, operation: .sessionResync)
                 } else {
                     apply(snapshot)
                     if snapshot.sessionId == selectedSessionID { subscribedSessionID = snapshot.sessionId }
@@ -1600,14 +1634,14 @@ final class AppModel {
               let snapshot = snapshots[sessionID] else { return nil }
         guard envelope.runtimeGeneration == snapshot.runtimeGeneration else {
             if !sessionEventSynchronizer.isSynchronizing(sessionID: sessionID) {
-                Task { await synchronizeSession(sessionID) }
+                Task { await synchronizeSession(sessionID, operation: .sessionResync) }
             }
             return nil
         }
         guard envelope.eventSequence > snapshot.eventSequence else { return nil }
         guard envelope.eventSequence == snapshot.eventSequence + 1 else {
             if !sessionEventSynchronizer.isSynchronizing(sessionID: sessionID) {
-                Task { await synchronizeSession(sessionID) }
+                Task { await synchronizeSession(sessionID, operation: .sessionResync) }
             }
             return nil
         }
@@ -1648,7 +1682,8 @@ final class AppModel {
     private func synchronizeSession(
         _ sessionID: String,
         replacingVisibleTranscript: Bool = false,
-        presentationGeneration: Int? = nil
+        presentationGeneration: Int? = nil,
+        operation: PerformanceOperation = .sessionSync
     ) async -> Bool {
         if sessionEventSynchronizer.isSynchronizing(sessionID: sessionID) {
             let token = sessionEventSynchronizer.token(sessionID: sessionID)
@@ -1662,11 +1697,12 @@ final class AppModel {
                 return await synchronizeSession(
                     sessionID,
                     replacingVisibleTranscript: true,
-                    presentationGeneration: presentationGeneration
+                    presentationGeneration: presentationGeneration,
+                    operation: operation
                 )
             }
             if pendingAuthoritativeResyncSessionIDs.remove(sessionID) != nil {
-                return await synchronizeSession(sessionID)
+                return await synchronizeSession(sessionID, operation: .sessionResync)
             }
             return snapshots[sessionID] != nil
         }
@@ -1677,6 +1713,10 @@ final class AppModel {
             pendingAuthoritativeResyncSessionIDs.remove(sessionID)
         }
         let token = sessionEventSynchronizer.begin(sessionID: sessionID)
+        let interval = performanceSignposts.begin(operation)
+        var result = PerformanceResult.failure
+        var metrics = PerformanceMetrics.none
+        defer { performanceSignposts.end(interval, result: result, metrics: metrics) }
         var openedSubscriptionToken: String?
         do {
             struct Params: Codable { let sessionId: String }
@@ -1686,6 +1726,7 @@ final class AppModel {
                presentationGeneration != self.presentationOpenGeneration || selectedSessionID != sessionID {
                 sessionEventSynchronizer.cancel(sessionID: sessionID, token: token)
                 await closeSubscriptionIfOwned(sessionID, subscriptionToken: response.subscriptionToken)
+                result = .discarded
                 return false
             }
             subscribedSessionID = sessionID
@@ -1706,23 +1747,30 @@ final class AppModel {
                 eventSequence: installed.eventSequence
             )
             guard let replay = sessionEventSynchronizer.complete(sessionID: sessionID, token: token, baseline: cursor) else {
+                result = .discarded
                 return await synchronizeSession(
                     sessionID,
                     replacingVisibleTranscript: replacingVisibleTranscript,
-                    presentationGeneration: presentationGeneration
+                    presentationGeneration: presentationGeneration,
+                    operation: .sessionResync
                 )
             }
             for event in replay { await handleDeliveredEvent(event) }
             if pendingAuthoritativeResyncSessionIDs.remove(sessionID) != nil {
+                result = .discarded
                 return await synchronizeSession(
                     sessionID,
                     replacingVisibleTranscript: replacingVisibleTranscript,
-                    presentationGeneration: presentationGeneration
+                    presentationGeneration: presentationGeneration,
+                    operation: .sessionResync
                 )
             }
             notifications = Self.removingSessionCatchUpNotice(from: notifications)
+            result = .success
+            metrics = PerformanceMetrics(itemCount: replay.count)
             return true
         } catch {
+            if Task.isCancelled || error is CancellationError { result = .cancelled }
             // The failed baseline is not authoritative. Discard quarantined
             // events and let the next open replace it instead of applying them
             // against a stale cached snapshot or surfacing a transient sync race.
@@ -2044,10 +2092,19 @@ final class AppModel {
     ) async throws -> JSONValue {
         do { return try await send() }
         catch let original as GatewayFailure where Self.isUncertainTransportFailure(original) {
+            let interval = performanceSignposts.begin(.receiptResolution)
+            var result = PerformanceResult.failure
+            defer {
+                if Task.isCancelled { result = .cancelled }
+                performanceSignposts.end(interval, result: result, metrics: .none)
+            }
             let deadline = clock.now() + .seconds(90)
             var lastFailure: GatewayFailure = original
             while clock.now() < deadline {
-                if Task.isCancelled { throw CancellationError() }
+                if Task.isCancelled {
+                    result = .cancelled
+                    throw CancellationError()
+                }
                 guard await waitForConnected(until: deadline) else { break }
                 do {
                     let status: CommandStatusResponse = try await client.request(
@@ -2057,12 +2114,17 @@ final class AppModel {
                     )
                     switch status.status {
                     case "completed":
-                        guard let result = status.result else {
+                        guard let resolved = status.result else {
                             throw GatewayFailure(code: "invalid_response", message: "The completed command did not include a result.", retryable: false, details: nil)
                         }
-                        return result
+                        result = .success
+                        return resolved
                     case "missing":
-                        do { return try await send() }
+                        do {
+                            let resolved = try await send()
+                            result = .success
+                            return resolved
+                        }
                         catch let retry as GatewayFailure where Self.isUncertainTransportFailure(retry) {
                             lastFailure = retry
                         }
@@ -2076,6 +2138,7 @@ final class AppModel {
                 }
                 try? await clock.sleep(.milliseconds(250))
             }
+            if Task.isCancelled { result = .cancelled }
             throw GatewayFailure(
                 code: "outcome_unknown",
                 message: "Tron may have accepted this command. The session was refreshed without replaying it; verify the authoritative transcript before trying again.",
@@ -2101,6 +2164,24 @@ final class AppModel {
 
     private static func isUncertainTransportFailure(_ failure: GatewayFailure) -> Bool {
         failure.retryable || ["timeout", "disconnected", "closed", "replaced"].contains(failure.code)
+    }
+
+    private func measure<Value>(
+        _ operation: PerformanceOperation,
+        body: () async throws -> (Value, PerformanceMetrics)
+    ) async throws -> Value {
+        let interval = performanceSignposts.begin(operation)
+        do {
+            let (value, metrics) = try await body()
+            performanceSignposts.end(interval, result: .success, metrics: metrics)
+            return value
+        } catch {
+            let result: PerformanceResult = Task.isCancelled || error is CancellationError
+                ? .cancelled
+                : .failure
+            performanceSignposts.end(interval, result: result, metrics: .none)
+            throw error
+        }
     }
 
     static let sessionCatchUpNotice = "Live session view is catching up; the run continues on your Mac."
