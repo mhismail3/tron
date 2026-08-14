@@ -144,9 +144,8 @@ struct WizardPrimaryButtonStyle: ButtonStyle {
 }
 
 /// Tertiary CTA: borderless emerald text link that lifts on hover and
-/// dims on press. Used for "I already have Tron running" and similar
-/// secondary actions. Idle state is a softened emerald (so the link
-/// doesn't compete with the primary CTA), hover snaps to full emerald.
+/// dims on press. Idle state is a softened emerald so the link does not
+/// compete with the primary CTA; hover snaps to full emerald.
 struct WizardLinkButtonStyle: ButtonStyle {
     @State private var isHovering = false
 

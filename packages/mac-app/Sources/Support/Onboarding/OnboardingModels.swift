@@ -100,7 +100,7 @@ enum GatewayInstallStatus: Equatable, Sendable {
     case registered(version: String?)
 }
 
-/// Canonical `system::ping` projection needed by the wrapper after the decoder
+/// Canonical `system.info` projection needed by the wrapper after the decoder
 /// validates the complete required response shape.
 struct GatewayHealthInfo: Equatable, Sendable {
     var version: String
