@@ -621,13 +621,25 @@ struct AppModelPerformanceSignpostTests {
             }
             defer { responder.cancel() }
 
-            _ = try await harness.model.attachTerminal(terminal.id, after: 0)
-            let appendedChunks = await MainActor.run { harness.model.terminalChunks[terminal.id] }
-            #expect(appendedChunks == Array(chunks.prefix(2)))
-            _ = try await harness.model.attachTerminal(terminal.id, after: 2)
+            let presentation = await MainActor.run {
+                harness.model.beginTerminalPresentation(sessionID: terminal.sessionId)
+            }
+            let intent = try #require(await MainActor.run {
+                harness.model.beginTerminalIntent(for: presentation)
+            })
+            _ = try await harness.model.attachTerminal(terminal.id, after: 0, intent: intent)
+            let appendedReplay = await MainActor.run {
+                harness.model.terminalReplay(for: terminal.id)
+            }
+            #expect(appendedReplay.chunks == Array(chunks.prefix(2)))
+            #expect(appendedReplay.revision == 0)
+            _ = try await harness.model.attachTerminal(terminal.id, after: 2, intent: intent)
             try await valueOfOwnedTask(responder)
-            let resetResult = await MainActor.run { harness.model.terminalChunks[terminal.id] }
-            #expect(resetResult == Array(resetChunks.prefix(1)))
+            let resetReplay = await MainActor.run {
+                harness.model.terminalReplay(for: terminal.id)
+            }
+            #expect(resetReplay.chunks == Array(resetChunks.prefix(1)))
+            #expect(resetReplay.revision == 1)
             #expect(harness.signposts.events() == [
                 .begin(.terminalAttachReplay),
                 .end(.terminalAttachReplay, .success, PerformanceMetrics(itemCount: 2)),

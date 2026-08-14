@@ -44,9 +44,13 @@ bounded authoritative retry path.
   interval because Pi JSONL does not persist tool execution timing;
 - structure/context/resource invalidations reload an already-presented History,
   Fork, Manage Session, or Project Resources surface from the runtime;
-- terminal output is sequence-checked and deduplicated; a gap or reconnect uses
-  `terminal.attach(afterSequence:)` to replay the bounded authoritative PTY tail,
-  while terminal exit updates both controls and status;
+- terminal output is admitted only for a current presentation lease, sequence-checked,
+  and deduplicated; frames arriving during attach or gap recovery are held in a bounded
+  local quarantine and joined contiguously to `terminal.attach(afterSequence:)` replay.
+  A remaining gap schedules at most three immediate recovery attempts before waiting for
+  later lifecycle reconciliation; replay reset advances native renderer
+  identity, and detach/revocation rejects buffered output and exit frames. Multiple
+  presentations share the connection subscription until the final lease closes;
 - stopping/restart topics request the single lifecycle-owned reconnect loop; duplicate
   transport signals cannot replace that owner or revive work after profile teardown. Its
   nominal 2-second, ×1.7 backoff is independently jittered within a bounded 80–120%

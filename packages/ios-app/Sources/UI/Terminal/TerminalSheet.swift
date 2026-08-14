@@ -9,70 +9,101 @@ private final class TerminalController {
     var error: String?
     var connectionPhase: TerminalConnectionPhase = .connecting
     var history: [TerminalSummary] = []
+    private var presentation: TerminalPresentationTarget?
+    private var intent: TerminalPresentationIntent?
     private var resizeTask: Task<Void, Never>?
 
     func isRunning(model: AppModel) -> Bool {
         guard let terminal else { return false }
-        return terminal.exitedAt == nil && !model.terminalExited.contains(terminal.id)
+        return terminal.exitedAt == nil && !model.terminalHasExited(terminal.id)
     }
 
     func start(sessionID: String, model: AppModel) async {
-        guard terminal == nil else { return }
+        guard presentation == nil else { return }
+        let target = model.beginTerminalPresentation(sessionID: sessionID)
+        presentation = target
+        guard let intent = beginIntent(model: model) else { return }
         connectionPhase = .connecting
         error = nil
         do {
-            let terminals = try await model.listTerminals(sessionID: sessionID)
+            let terminals = try await model.listTerminals(intent: intent)
                 .sorted { $0.createdAt > $1.createdAt }
+            guard owns(intent, model: model) else { return }
             history = terminals
+            let selected: TerminalSummary
             if let existing = terminals.first(where: { $0.exitedAt == nil }) {
-                terminal = try await model.attachTerminal(existing.id, after: 0)
+                selected = try await model.attachTerminal(existing.id, after: 0, intent: intent)
             } else {
-                terminal = try await model.openTerminal(sessionID: sessionID, columns: 80, rows: 24)
+                selected = try await model.openTerminal(intent: intent, columns: 80, rows: 24)
             }
-            history.removeAll { $0.id == terminal?.id }
+            guard owns(intent, model: model) else { return }
+            terminal = selected
+            history.removeAll { $0.id == selected.id }
             connectionPhase = .connected
         } catch {
+            guard owns(intent, model: model) else { return }
             self.error = error.localizedDescription
             connectionPhase = .unavailable
         }
     }
 
     func show(_ selected: TerminalSummary, model: AppModel) async {
-        if let current = terminal { await model.detachTerminal(current.id) }
+        guard let intent = beginIntent(model: model) else { return }
         error = nil
         connectionPhase = .connecting
         terminal = nil
         do {
-            terminal = try await model.attachTerminal(selected.id, after: 0)
+            let attached = try await model.attachTerminal(selected.id, after: 0, intent: intent)
+            guard owns(intent, model: model) else { return }
+            terminal = attached
             connectionPhase = .connected
         } catch {
+            guard owns(intent, model: model) else { return }
             self.error = error.localizedDescription
             connectionPhase = .unavailable
         }
     }
 
-    func openLive(sessionID: String, model: AppModel) async {
-        if let current = terminal { await model.detachTerminal(current.id) }
+    func openLive(model: AppModel) async {
+        guard let intent = beginIntent(model: model) else { return }
         error = nil
         connectionPhase = .connecting
         terminal = nil
         do {
-            terminal = try await model.openTerminal(sessionID: sessionID, columns: 80, rows: 24)
-            history = try await model.listTerminals(sessionID: sessionID)
-            history.removeAll { $0.id == terminal?.id }
+            let opened = try await model.openTerminal(intent: intent, columns: 80, rows: 24)
+            guard owns(intent, model: model) else { return }
+            terminal = opened
+            history = try await model.listTerminals(intent: intent)
+            guard owns(intent, model: model) else { return }
+            history.removeAll { $0.id == opened.id }
             connectionPhase = .connected
         } catch {
+            guard owns(intent, model: model) else { return }
             self.error = error.localizedDescription
             connectionPhase = .unavailable
         }
+    }
+
+    func stop(model: AppModel) {
+        resizeTask?.cancel()
+        resizeTask = nil
+        intent = nil
+        terminal = nil
+        guard let presentation else { return }
+        self.presentation = nil
+        model.closeTerminalPresentation(presentation)
     }
 
     func send(_ bytes: ArraySlice<UInt8>, model: AppModel) {
-        guard let id = terminal?.id, terminal?.exitedAt == nil else { return }
+        guard let id = terminal?.id,
+              terminal?.exitedAt == nil,
+              let intent,
+              model.ownsTerminalIntent(intent) else { return }
         let data = String(decoding: bytes, as: UTF8.self)
         Task {
-            do { try await model.writeTerminal(id, data: data) }
+            do { try await model.writeTerminal(id, data: data, intent: intent) }
             catch {
+                guard owns(intent, model: model) else { return }
                 self.error = error.localizedDescription
                 self.connectionPhase = .reconnecting
             }
@@ -80,18 +111,23 @@ private final class TerminalController {
     }
 
     func resize(columns: Int, rows: Int, model: AppModel) {
-        guard let id = terminal?.id, terminal?.exitedAt == nil else { return }
+        guard let id = terminal?.id,
+              terminal?.exitedAt == nil,
+              let intent,
+              model.ownsTerminalIntent(intent) else { return }
         resizeTask?.cancel()
         resizeTask = Task {
             try? await Task.sleep(for: .milliseconds(120))
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, owns(intent, model: model) else { return }
             do {
                 try await model.resizeTerminal(
                     id,
                     columns: max(20, min(columns, 400)),
-                    rows: max(5, min(rows, 200))
+                    rows: max(5, min(rows, 200)),
+                    intent: intent
                 )
             } catch {
+                guard owns(intent, model: model) else { return }
                 self.error = error.localizedDescription
                 self.connectionPhase = .reconnecting
             }
@@ -99,11 +135,29 @@ private final class TerminalController {
     }
 
     func terminate(model: AppModel) {
-        guard let id = terminal?.id else { return }
+        guard let id = terminal?.id,
+              let intent,
+              model.ownsTerminalIntent(intent) else { return }
         Task {
-            do { try await model.terminateTerminal(id) }
-            catch { self.error = error.localizedDescription }
+            do { try await model.terminateTerminal(id, intent: intent) }
+            catch {
+                guard owns(intent, model: model) else { return }
+                self.error = error.localizedDescription
+            }
         }
+    }
+
+    private func beginIntent(model: AppModel) -> TerminalPresentationIntent? {
+        resizeTask?.cancel()
+        resizeTask = nil
+        guard let presentation,
+              let next = model.beginTerminalIntent(for: presentation) else { return nil }
+        intent = next
+        return next
+    }
+
+    private func owns(_ candidate: TerminalPresentationIntent, model: AppModel) -> Bool {
+        intent == candidate && model.ownsTerminalIntent(candidate)
     }
 }
 
@@ -268,13 +322,17 @@ struct TerminalSheet: View {
                 if let error = controller.error, controller.terminal == nil {
                     ContentUnavailableView("Terminal unavailable", systemImage: "terminal", description: Text(error))
                 } else if let terminal = controller.terminal {
+                    let replay = model.terminalReplay(for: terminal.id)
                     NativeTerminal(
-                        chunks: model.terminalChunks[terminal.id] ?? [],
+                        chunks: replay.chunks,
                         keyboard: keyboard,
                         onSend: { controller.send($0, model: model) },
                         onResize: { controller.resize(columns: $0, rows: $1, model: model) }
                     )
-                    .id(terminal.id)
+                    .id(TerminalRendererIdentity(
+                        terminalID: terminal.id,
+                        replayRevision: replay.revision
+                    ))
                     .padding(.horizontal, 8)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
                         if keyboard.isKeyboardPresented {
@@ -317,9 +375,7 @@ struct TerminalSheet: View {
         .task {
             await controller.start(sessionID: sessionID, model: model)
         }
-        .onDisappear {
-            if let id = controller.terminal?.id { Task { await model.detachTerminal(id) } }
-        }
+        .onDisappear { controller.stop(model: model) }
         .confirmationDialog("Quit this terminal?", isPresented: $confirmQuit, titleVisibility: .visible) {
             Button("Quit Terminal", role: .destructive) { controller.terminate(model: model) }
             Button("Cancel", role: .cancel) {}
@@ -337,7 +393,7 @@ struct TerminalSheet: View {
         Menu {
             if !controller.isRunning(model: model) {
                 Button("Open Live Terminal", systemImage: "terminal") {
-                    Task { await controller.openLive(sessionID: sessionID, model: model) }
+                    Task { await controller.openLive(model: model) }
                 }
             }
             if !controller.history.isEmpty {

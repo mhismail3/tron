@@ -71,8 +71,12 @@ and command-ID work. Its visible-open interval
 contains independently measured authoritative synchronization attempts; invalidated
 attempts end as discarded rather than being mislabeled as successful. Receipt timing
 begins only after an uncertain mutation response, never for an ordinary confirmed
-mutation. Terminal open/attach uses one replay installer and closes its interval only
-after reset or delta chunks are admitted.
+mutation. `TerminalCoordinator` owns presentation intents, per-terminal operations,
+shared attachment leases, a global 16-terminal/256-chunk/1 MiB in-flight event quarantine,
+replay revisions, and post-detach event admission. Terminal open/attach uses one replay installer and closes
+its interval only after reset, delta, and contiguous quarantined chunks are admitted.
+Stale successful attachments schedule an exact-connection compensating detach unless a
+newer presentation still owns that terminal.
 It loads a bounded disposable cache first, connects, fetches
 cursor-paginated sessions and model catalogs, and replaces local state with
 authoritative snapshots. Session snapshots carry a byte-bounded current
@@ -227,7 +231,13 @@ transient ScrollView content margins, so prompt insertion cannot expose a flush-
 Existing rows never participate in stack-wide insertion or scale animations. Thinking,
 Markdown, tool, and working rows therefore remain stable above the composer while the user
 follows the tail. Terminal output has its own monotonic sequence and reconnect replay cursor.
-Secondary live-runtime reads require that exact session to be opened first, so a
+Output/exit frames delivered while attach or gap recovery is suspended remain in a bounded
+coordinator quarantine and join the admitted replay contiguously. A reset increments an
+explicit replay revision so SwiftTerm is recreated even when replacement sequences do not
+increase; ordinary append/truncation does not change renderer identity. Presentation switch
+or dismissal revokes terminal intake and pending resize work synchronously, while multiple
+presentations sharing one terminal retain the connection subscription until the final owner
+closes. Secondary live-runtime reads require that exact session to be opened first, so a
 stale selection cannot read or render another session's context, tree, resources,
 export, or terminal inventory.
 Backward transcript pages carry an entry anchor and are rejected if branch

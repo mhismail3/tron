@@ -186,9 +186,7 @@ final class AppModel {
     var packageInventoryByTarget: [PackageConfigurationTarget: PackageInventory] = [:]
     var packageUpdatesByTarget: [PackageConfigurationTarget: [PackageUpdate]] = [:]
     var customModelsByTarget: [CustomModelTarget: JSONValue] = [:]
-    var terminals: [TerminalSummary] = []
-    var terminalChunks: [String: [TerminalChunk]] = [:]
-    var terminalExited: Set<String> = []
+    private var terminalState = TerminalCoordinator()
     var setupComplete: Bool {
         get {
             if UserDefaults.standard.object(forKey: "tronSetupComplete.v1") != nil {
@@ -226,8 +224,8 @@ final class AppModel {
     private var hiddenSessionIDs: Set<String> = []
     private var locallyCreatedUnindexedSessionIDs: Set<String> = []
     private var liveSessionSummaryUpdates: [String: SessionSummaryUpdate] = [:]
-    private var attachedTerminalIDs: Set<String> = []
-    private var reconcilingTerminalIDs: Set<String> = []
+    private var terminalCleanupGeneration = 0
+    private var terminalCleanupTasks: [Int: Task<Void, Never>] = [:]
     private var workspaceLoadGeneration = 0
     private var sessionCatalogLoadOwner = SessionCatalogLoadOwner()
     private var presentationOpenGeneration = 0
@@ -536,14 +534,17 @@ final class AppModel {
         let foreground = foregroundReconciliationTask
         let refresh = refreshTask
         let events = final ? eventTask : nil
+        let terminalCleanup = Array(terminalCleanupTasks.values)
         reconnectTask = nil
         reconnectAttemptGeneration &+= 1
         reconnectCanBeAccelerated = false
         foregroundReconciliationTask = nil
         refreshTask = nil
+        terminalCleanupTasks.removeAll()
         reconnect?.cancel()
         foreground?.cancel()
         refresh?.cancel()
+        terminalCleanup.forEach { $0.cancel() }
         if final {
             events?.cancel()
             eventTask = nil
@@ -556,6 +557,7 @@ final class AppModel {
         await reconnect?.value
         await foreground?.value
         await refresh?.value
+        for task in terminalCleanup { await task.value }
         await events?.value
         completeLifecycleTransition(generation)
         return generation
@@ -1877,96 +1879,219 @@ final class AppModel {
         }
     }
 
-    func listTerminals(sessionID: String) async throws -> [TerminalSummary] {
+    func beginTerminalPresentation(sessionID: String) -> TerminalPresentationTarget {
+        terminalState.beginPresentation(sessionID: sessionID)
+    }
+
+    func beginTerminalIntent(
+        for target: TerminalPresentationTarget
+    ) -> TerminalPresentationIntent? {
+        guard let transition = terminalState.beginIntent(for: target) else { return nil }
+        scheduleTerminalDetaches(transition.detached)
+        return transition.intent
+    }
+
+    func closeTerminalPresentation(_ target: TerminalPresentationTarget) {
+        scheduleTerminalDetaches(terminalState.revokePresentation(target))
+    }
+
+    func ownsTerminalIntent(_ intent: TerminalPresentationIntent) -> Bool {
+        terminalState.owns(intent)
+    }
+
+    func terminalReplay(for terminalID: String) -> TerminalReplayProjection {
+        terminalState.replay(for: terminalID)
+    }
+
+    func terminalHasExited(_ terminalID: String) -> Bool {
+        terminalState.hasExited(terminalID)
+    }
+
+    func listTerminals(intent: TerminalPresentationIntent) async throws -> [TerminalSummary] {
+        let sessionID = intent.presentation.sessionID
         let lifecycleGeneration = lifecyclePhase.generation
         let connectionID = gatewayConnectionID
         let subscriptionToken = subscriptionTokenBySession[sessionID]
-        guard subscribedSessionID == sessionID, subscriptionToken != nil else {
+        guard terminalState.owns(intent),
+              subscribedSessionID == sessionID,
+              subscriptionToken != nil else {
             throw GatewayFailure(code: "sync_failed", message: "Open the session before listing terminals.", retryable: true, details: nil)
         }
-        struct Params: Codable { let sessionId: String }
-        struct Response: Decodable { let terminals: [TerminalSummary] }
-        let response: Response = try await client.request("terminal.list", Params(sessionId: sessionID))
+        struct Params: Codable, Sendable { let sessionId: String }
+        struct Response: Decodable, Sendable { let terminals: [TerminalSummary] }
+        let request = Task { try await client.request("terminal.list", Params(sessionId: sessionID)) as Response }
+        let response = try await request.value
         try requireLifecycle(lifecycleGeneration)
         try requireConnection(connectionID)
-        guard subscribedSessionID == sessionID,
-              subscriptionTokenBySession[sessionID] == subscriptionToken else { throw CancellationError() }
-        let attached = terminals.filter { attachedTerminalIDs.contains($0.id) }
-        terminals = response.terminals + attached.filter { terminal in
-            !response.terminals.contains { $0.id == terminal.id }
-        }
+        guard terminalState.owns(intent),
+              subscribedSessionID == sessionID,
+              subscriptionTokenBySession[sessionID] == subscriptionToken,
+              response.terminals.allSatisfy({ $0.sessionId == sessionID }) else { throw CancellationError() }
+        terminalState.installInventory(response.terminals, sessionID: sessionID)
         return response.terminals
     }
 
-    func openTerminal(sessionID: String, columns: Int, rows: Int) async throws -> TerminalSummary {
+    func openTerminal(
+        intent: TerminalPresentationIntent,
+        columns: Int,
+        rows: Int
+    ) async throws -> TerminalSummary {
+        let lifecycleGeneration = lifecyclePhase.generation
+        guard let connectionID = gatewayConnectionID,
+              let lease = terminalState.beginOpen(intent: intent, connectionID: connectionID) else {
+            throw CancellationError()
+        }
         return try await measure(.terminalAttachReplay) {
-            struct Params: Codable { let sessionId: String; let columns, rows: Int; let commandId: String }
-            struct Replay: Codable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
-            struct Response: Codable { let terminal: TerminalSummary; let replay: Replay }
+            struct Params: Codable, Sendable { let sessionId: String; let columns, rows: Int; let commandId: String }
+            struct Replay: Codable, Sendable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
+            struct Response: Codable, Sendable { let terminal: TerminalSummary; let replay: Replay }
             let commandID = uuidSource.next().uuidString
-            let params = Params(sessionId: sessionID, columns: columns, rows: rows, commandId: commandID)
-            let response: Response = try await confirmedMutation(method: "terminal.open", commandId: commandID) {
-                try await client.request("terminal.open", params)
+            let params = Params(
+                sessionId: intent.presentation.sessionID,
+                columns: columns,
+                rows: rows,
+                commandId: commandID
+            )
+            let request = Task {
+                try await confirmedMutation(method: "terminal.open", commandId: commandID) {
+                    try await client.request("terminal.open", params)
+                } as Response
             }
-            let installedCount = installTerminalReplay(
-                response.replay.chunks,
-                terminal: response.terminal,
-                reset: true,
-                after: 0
+            let response: Response
+            do {
+                response = try await request.value
+            } catch {
+                terminalState.finish(lease)
+                throw error
+            }
+            guard !Task.isCancelled,
+                  admitsLifecycle(lifecycleGeneration),
+                  gatewayConnectionID == connectionID,
+                  let installation = terminalState.installReplay(
+                    response.replay.chunks,
+                    terminal: response.terminal,
+                    reset: true,
+                    after: 0,
+                    lease: lease
+                  ) else {
+                terminalState.finish(lease)
+                scheduleTerminalDetachIfUnowned(TerminalDetachClaim(
+                    terminalID: response.terminal.id,
+                    connectionID: connectionID
+                ))
+                throw CancellationError()
+            }
+            if installation.requiresReconciliation { reconcileTerminal(response.terminal.id) }
+            return (
+                response.terminal,
+                PerformanceMetrics(itemCount: installation.admittedCount)
             )
-            return (response.terminal, PerformanceMetrics(itemCount: installedCount))
         }
     }
 
-    func attachTerminal(_ id: String, after: Int) async throws -> TerminalSummary {
-        let lifecycleGeneration = lifecyclePhase.generation
-        let connectionID = gatewayConnectionID
-        return try await measure(.terminalAttachReplay) {
-            struct Params: Codable { let terminalId: String; let afterSequence: Int }
-            struct Response: Decodable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
-            let response: Response = try await client.request("terminal.attach", Params(terminalId: id, afterSequence: after))
-            try requireLifecycle(lifecycleGeneration)
-            try requireConnection(connectionID)
-            let installedCount = installTerminalReplay(
-                response.chunks,
-                terminal: response.terminal,
-                reset: response.reset,
-                after: after
+    func attachTerminal(
+        _ id: String,
+        after: Int,
+        intent: TerminalPresentationIntent
+    ) async throws -> TerminalSummary {
+        guard let connectionID = gatewayConnectionID,
+              let lease = terminalState.beginAttachment(
+                terminalID: id,
+                intent: intent,
+                connectionID: connectionID
+              ) else { throw CancellationError() }
+        return try await performTerminalAttach(
+            id,
+            after: after,
+            lease: lease,
+            lifecycleGeneration: lifecyclePhase.generation
+        )
+    }
+
+    private func performTerminalAttach(
+        _ id: String,
+        after: Int,
+        lease: TerminalAttachmentLease,
+        lifecycleGeneration: Int
+    ) async throws -> TerminalSummary {
+        try await measure(.terminalAttachReplay) {
+            struct Params: Codable, Sendable { let terminalId: String; let afterSequence: Int }
+            struct Response: Decodable, Sendable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
+            let request = Task {
+                try await client.request(
+                    "terminal.attach",
+                    Params(terminalId: id, afterSequence: after)
+                ) as Response
+            }
+            let response: Response
+            do {
+                response = try await request.value
+            } catch {
+                terminalState.finish(lease)
+                scheduleTerminalDetachIfUnowned(TerminalDetachClaim(
+                    terminalID: id,
+                    connectionID: lease.connectionID
+                ))
+                throw error
+            }
+            guard !Task.isCancelled,
+                  admitsLifecycle(lifecycleGeneration),
+                  gatewayConnectionID == lease.connectionID,
+                  let installation = terminalState.installReplay(
+                    response.chunks,
+                    terminal: response.terminal,
+                    reset: response.reset,
+                    after: after,
+                    lease: lease
+                  ) else {
+                terminalState.finish(lease)
+                scheduleTerminalDetachIfUnowned(TerminalDetachClaim(
+                    terminalID: id,
+                    connectionID: lease.connectionID
+                ))
+                if terminalState.requiresReconciliation(id) { reconcileTerminal(id) }
+                throw CancellationError()
+            }
+            if installation.requiresReconciliation { reconcileTerminal(response.terminal.id) }
+            return (
+                response.terminal,
+                PerformanceMetrics(itemCount: installation.admittedCount)
             )
-            return (response.terminal, PerformanceMetrics(itemCount: installedCount))
         }
     }
 
-    @discardableResult
-    private func installTerminalReplay(
-        _ chunks: [TerminalChunk],
-        terminal: TerminalSummary,
-        reset: Bool,
-        after: Int
-    ) -> Int {
-        let latest = terminalChunks[terminal.id]?.last?.sequence ?? after
-        var admittedSequences = Set<Int>()
-        let admitted = chunks.filter {
-            (reset || $0.sequence > latest) && admittedSequences.insert($0.sequence).inserted
-        }
-        if reset { terminalChunks[terminal.id] = admitted }
-        else { terminalChunks[terminal.id, default: []].append(contentsOf: admitted) }
-        upsertTerminal(terminal)
-        attachedTerminalIDs.insert(terminal.id)
-        return admitted.count
+    private func scheduleTerminalDetaches(_ claims: [TerminalDetachClaim]) {
+        for claim in claims { scheduleTerminalDetachIfUnowned(claim) }
     }
 
-    func detachTerminal(_ id: String) async {
-        struct Params: Codable { let terminalId: String }
-        struct Response: Decodable { let detached: Bool }
+    private func scheduleTerminalDetachIfUnowned(_ claim: TerminalDetachClaim) {
         let lifecycleGeneration = lifecyclePhase.generation
-        let connectionID = gatewayConnectionID
-        let _: Response? = try? await client.request("terminal.detach", Params(terminalId: id))
-        guard admitsLifecycle(lifecycleGeneration), gatewayConnectionID == connectionID else { return }
-        attachedTerminalIDs.remove(id)
+        terminalCleanupGeneration &+= 1
+        let cleanupGeneration = terminalCleanupGeneration
+        terminalCleanupTasks[cleanupGeneration] = Task { [weak self] in
+            guard let self else { return }
+            defer { self.terminalCleanupTasks.removeValue(forKey: cleanupGeneration) }
+            guard self.admitsLifecycle(lifecycleGeneration),
+                  self.gatewayConnectionID == claim.connectionID,
+                  !self.terminalState.hasCurrentInterest(
+                    in: claim.terminalID,
+                    connectionID: claim.connectionID
+                  ) else { return }
+            struct Params: Codable, Sendable { let terminalId: String }
+            struct Response: Decodable, Sendable { let detached: Bool }
+            let _: Response? = try? await self.client.request(
+                "terminal.detach",
+                Params(terminalId: claim.terminalID)
+            )
+        }
     }
 
-    func writeTerminal(_ id: String, data: String) async throws {
+    func writeTerminal(
+        _ id: String,
+        data: String,
+        intent: TerminalPresentationIntent
+    ) async throws {
+        guard terminalState.owns(intent) else { throw CancellationError() }
         struct Params: Codable { let terminalId, writeId, data, commandId: String }
         struct Response: Codable { let written: Bool }
         let identity = uuidSource.next().uuidString
@@ -1976,7 +2101,13 @@ final class AppModel {
         }
     }
 
-    func resizeTerminal(_ id: String, columns: Int, rows: Int) async throws {
+    func resizeTerminal(
+        _ id: String,
+        columns: Int,
+        rows: Int,
+        intent: TerminalPresentationIntent
+    ) async throws {
+        guard terminalState.owns(intent) else { throw CancellationError() }
         struct Params: Codable { let terminalId: String; let columns, rows: Int; let commandId: String }
         struct Response: Codable { let resized: Bool }
         let commandID = uuidSource.next().uuidString
@@ -1986,7 +2117,8 @@ final class AppModel {
         }
     }
 
-    func terminateTerminal(_ id: String) async throws {
+    func terminateTerminal(_ id: String, intent: TerminalPresentationIntent) async throws {
+        guard terminalState.owns(intent) else { throw CancellationError() }
         struct Params: Codable { let terminalId, commandId: String }
         struct Response: Codable { let terminated: Bool }
         let commandID = uuidSource.next().uuidString
@@ -2064,37 +2196,29 @@ final class AppModel {
                 replacing: .packageProgress
             )
         case "terminal.output":
-            if let object = event.payload.objectValue,
+            if let connectionID = gatewayConnectionID,
+               let object = event.payload.objectValue,
                let terminalID = object["terminalId"]?.stringValue,
                let sequence = object["sequence"]?.intValue,
-               let data = object["data"]?.stringValue {
-                let latest = terminalChunks[terminalID]?.last?.sequence ?? 0
-                guard sequence > latest else { break }
-                guard sequence == latest + 1 else {
-                    reconcileTerminal(terminalID)
-                    break
-                }
-                terminalChunks[terminalID, default: []].append(TerminalChunk(sequence: sequence, data: data))
-                if terminalChunks[terminalID, default: []].count > 2_048 {
-                    terminalChunks[terminalID]?.removeFirst(terminalChunks[terminalID]!.count - 2_048)
-                }
-                updateTerminalSequence(terminalID, sequence: sequence)
+               let data = object["data"]?.stringValue,
+               case .gap = terminalState.admitOutput(
+                terminalID: terminalID,
+                sequence: sequence,
+                data: data,
+                connectionID: connectionID
+               ) {
+                reconcileTerminal(terminalID)
             }
         case "terminal.exit":
-            if let id = event.payload.objectValue?["terminalId"]?.stringValue {
-                terminalExited.insert(id)
-                if let index = terminals.firstIndex(where: { $0.id == id }) {
-                    let current = terminals[index]
-                    terminals[index] = TerminalSummary(
-                        id: current.id,
-                        sessionId: current.sessionId,
-                        cwd: current.cwd,
-                        createdAt: current.createdAt,
-                        exitedAt: ISO8601DateFormatter().string(from: .now),
-                        exitCode: event.payload.objectValue?["exitCode"]?.intValue,
-                        sequence: max(current.sequence, event.payload.objectValue?["sequence"]?.intValue ?? current.sequence)
-                    )
-                }
+            if let connectionID = gatewayConnectionID,
+               let id = event.payload.objectValue?["terminalId"]?.stringValue {
+                _ = terminalState.admitExit(
+                    terminalID: id,
+                    sequence: event.payload.objectValue?["sequence"]?.intValue,
+                    exitCode: event.payload.objectValue?["exitCode"]?.intValue,
+                    exitedAt: ISO8601DateFormatter().string(from: .now),
+                    connectionID: connectionID
+                )
             }
         default:
             break
@@ -2749,51 +2873,45 @@ final class AppModel {
     private func clearLiveConnectionProjection() {
         noticeStore.removeAll()
         liveSessionSummaryUpdates.removeAll()
-        attachedTerminalIDs.removeAll()
-        reconcilingTerminalIDs.removeAll()
-        terminals.removeAll()
-        terminalChunks.removeAll()
-        terminalExited.removeAll()
+        terminalState.clear()
         sessionStructureRevisions.removeAll()
         sessionContextRevisions.removeAll()
         sessionResourceRevisions.removeAll()
     }
 
-    private func upsertTerminal(_ terminal: TerminalSummary) {
-        if let index = terminals.firstIndex(where: { $0.id == terminal.id }) { terminals[index] = terminal }
-        else { terminals.append(terminal) }
-        if terminal.exitedAt == nil { terminalExited.remove(terminal.id) }
-        else { terminalExited.insert(terminal.id) }
-    }
-
-    private func updateTerminalSequence(_ terminalID: String, sequence: Int) {
-        guard let index = terminals.firstIndex(where: { $0.id == terminalID }) else { return }
-        let terminal = terminals[index]
-        terminals[index] = TerminalSummary(
-            id: terminal.id,
-            sessionId: terminal.sessionId,
-            cwd: terminal.cwd,
-            createdAt: terminal.createdAt,
-            exitedAt: terminal.exitedAt,
-            exitCode: terminal.exitCode,
-            sequence: max(terminal.sequence, sequence)
-        )
-    }
-
     private func reconcileTerminal(_ terminalID: String) {
-        guard attachedTerminalIDs.contains(terminalID), reconcilingTerminalIDs.insert(terminalID).inserted else { return }
+        guard let connectionID = gatewayConnectionID,
+              let lease = terminalState.beginReconciliation(
+                terminalID: terminalID,
+                connectionID: connectionID
+              ) else { return }
+        let after = terminalState.replay(for: terminalID).chunks.last?.sequence ?? 0
+        let lifecycleGeneration = lifecyclePhase.generation
         Task { [weak self] in
             guard let self else { return }
-            defer { self.reconcilingTerminalIDs.remove(terminalID) }
-            let after = self.terminalChunks[terminalID]?.last?.sequence ?? 0
-            _ = try? await self.attachTerminal(terminalID, after: after)
+            _ = try? await self.performTerminalAttach(
+                terminalID,
+                after: after,
+                lease: lease,
+                lifecycleGeneration: lifecycleGeneration
+            )
         }
     }
 
     private func reattachTerminals() async {
-        for terminalID in attachedTerminalIDs {
-            let after = terminalChunks[terminalID]?.last?.sequence ?? 0
-            _ = try? await attachTerminal(terminalID, after: after)
+        guard let connectionID = gatewayConnectionID else { return }
+        for terminalID in terminalState.attachedTerminalIDs() {
+            guard let lease = terminalState.beginReattachment(
+                terminalID: terminalID,
+                connectionID: connectionID
+            ) else { continue }
+            let after = terminalState.replay(for: terminalID).chunks.last?.sequence ?? 0
+            _ = try? await performTerminalAttach(
+                terminalID,
+                after: after,
+                lease: lease,
+                lifecycleGeneration: lifecyclePhase.generation
+            )
         }
     }
 

@@ -104,8 +104,13 @@ methods, filenames, model names, prompts, transcript content, or other strings.
 Gateway and cache interval contracts are owned by `GatewayClientTransportTests`
 and `SnapshotCacheTests`. `AppModelPerformanceSignpostTests` drives raw Gateway
 frames through visible open, synchronization/resynchronization, uncertain receipt,
-and terminal replay boundaries. `SessionEventSynchronizerTests` own the intent-keyed shared
-outcome and event-quarantine invariants; `SessionSnapshotEventAdmissionTests` own the
+and terminal replay boundaries. `AppModelTerminalLifecycleTests` own presentation
+revocation, stale-attach compensation, out-of-order reset rejection, pending-event quarantine,
+gap coalescing/follow-up, shared multi-presentation leases, post-detach rejection, and final teardown.
+`TerminalCoordinatorTests` pin the global 16-terminal, 256-chunk, and 1 MiB pending-event
+bounds plus the three-attempt immediate recovery ceiling.
+`SessionEventSynchronizerTests` own the intent-keyed shared outcome and event-quarantine
+invariants; `SessionSnapshotEventAdmissionTests` own the
 live full-snapshot matrix (authority, route identity, runtime, duplicate/stale/exact-next/gap
 cursor). Synchronizer coverage rejects a quarantined route/payload mismatch before baseline
 publication, while the AppModel suites prove snapshots/tokens remain provisional through
@@ -297,7 +302,9 @@ system-chrome authority. At broad presentation checkpoints, build the actual
 `Tron Fast` `ProdDebug` app for the connected iOS 27 device, install it without
 removing its Keychain pairing, launch it against the isolated development
 gateway, and capture chat, dashboard/setup, Manage Session, tool detail, and
-settings screens with `devicectl`. Compare those captures to the historical
+settings screens with `devicectl`. Terminal lifecycle checkpoints additionally verify
+that the signed app installs and launches on the connected device after the focused suites
+pass; interactive PTY input remains a manual device check. Compare captures to the historical
 references before declaring parity. A signed install, launch, and screenshot are
 required together because default toolbar Liquid Glass can differ materially
 between the simulator and physical hardware. Chat checkpoints must also verify

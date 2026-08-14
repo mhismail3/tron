@@ -414,18 +414,31 @@ struct AppModelEventTests {
         #expect(model.sessionContextRevision(for: snapshot.sessionId) == 2)
     }
 
-    @Test("terminal output is deduplicated and ordered")
-    func terminalOutputOrdering() async {
+    @Test("terminal events without an attached presentation are ignored")
+    func detachedTerminalEventsAreIgnored() async {
         let model = AppModel()
-        func output(_ sequence: Int, _ data: String) -> GatewayEvent {
-            GatewayEvent(type: "event", topic: "terminal.output", sessionId: nil, payload: .object([
-                "terminalId": .string("terminal"), "sequence": .number(Double(sequence)), "data": .string(data)
-            ]))
-        }
-        await model.handle(output(1, "one"))
-        await model.handle(output(1, "duplicate"))
-        await model.handle(output(2, "two"))
-        #expect(model.terminalChunks["terminal"]?.map(\.data) == ["one", "two"])
+        await model.handle(GatewayEvent(
+            type: "event",
+            topic: "terminal.output",
+            sessionId: nil,
+            payload: .object([
+                "terminalId": .string("terminal"),
+                "sequence": .number(1),
+                "data": .string("unowned"),
+            ])
+        ))
+        await model.handle(GatewayEvent(
+            type: "event",
+            topic: "terminal.exit",
+            sessionId: nil,
+            payload: .object([
+                "terminalId": .string("terminal"),
+                "sequence": .number(2),
+                "exitCode": .number(0),
+            ])
+        ))
+        #expect(model.terminalReplay(for: "terminal") == .empty)
+        #expect(!model.terminalHasExited("terminal"))
     }
 
     @Test("unrendered sequenced events still advance the authoritative cursor")
