@@ -118,7 +118,10 @@ workspace clears the prior trust/model projection and closes creation admission 
 settings and trust reads complete; stale workspace completions cannot reopen it. Provider and
 model catalogs likewise use typed `.global` or `.session(id:)` targets and publish each fully
 paged provider/model pair atomically. Auth operations retain that target through completion or
-confirmed cancellation; unknown completions never guess from dashboard selection.
+confirmed cancellation; unknown completions never guess from dashboard selection. Package
+inventory and update projections use typed `.global` or `.workspace(cwd:)` targets; the global
+Settings route never inherits the default workspace, and successful update/remove mutations
+clear only the matching cached update markers before refreshing that target's inventory.
 Chat uses one presentation timeline rather than separate canonical, streaming,
 and live-tool tails. Tool calls, progress, and results join by `toolCallId`; the
 Gateway supplies a monotonic per-run ordinal for parallel calls, and the grouped

@@ -3,7 +3,11 @@ import SwiftUI
 struct PackagesSettingsView: View {
     @Environment(AppModel.self) private var model
     let projectCWD: String?
-    private var effectiveCWD: String? { projectCWD ?? model.defaultWorkspace }
+    private var target: PackageConfigurationTarget {
+        PackageConfigurationTarget(cwd: projectCWD)
+    }
+    private var inventory: PackageInventory? { model.packageInventoryByTarget[target] }
+    private var updates: [PackageUpdate] { model.packageUpdatesByTarget[target] ?? [] }
     @State private var source = ""
     @State private var local = false
     @State private var packageToRemove: PackageSummary?
@@ -15,7 +19,7 @@ struct PackagesSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
                 TronSettingsGroup("Installed") {
-                    if let packages = model.packageState?.packages, !packages.isEmpty {
+                    if let packages = inventory?.packages, !packages.isEmpty {
                         VStack(spacing: 0) {
                             ForEach(Array(packages.enumerated()), id: \.element.id) { index, package in
                                 if index > 0 { TronSettingsDivider() }
@@ -39,7 +43,7 @@ struct PackagesSettingsView: View {
                     VStack(spacing: 0) {
                         Button {
                             checking = true
-                            Task { await model.checkPackageUpdates(cwd: effectiveCWD); checking = false }
+                            Task { await model.checkPackageUpdates(target: target); checking = false }
                         } label: {
                             TronValueRow(icon: "arrow.clockwise", title: checking ? "Checking…" : "Check for Updates", accent: .tronCyan) {
                                 if checking { ProgressView().controlSize(.small) }
@@ -47,11 +51,11 @@ struct PackagesSettingsView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(checking)
-                        if !model.packageUpdates.isEmpty {
+                        if !updates.isEmpty {
                             TronSettingsDivider(accent: .tronCyan)
                             Button("Update All") {
                                 Task {
-                                    do { try await model.mutatePackage(action: "update", source: nil, local: false, cwd: effectiveCWD) }
+                                    do { try await model.mutatePackage(action: "update", source: nil, local: false, target: target) }
                                     catch { model.lastError = error.localizedDescription }
                                 }
                             }
@@ -76,7 +80,7 @@ struct PackagesSettingsView: View {
                     .padding(12)
                 }
 
-                if let resources = model.packageState?.resources {
+                if let resources = inventory?.resources {
                     TronSettingsGroup("Resolved Resources", accent: .tronTeal) {
                         TronStructuredJSONView(value: resources, title: "Resolved Resources", accent: .tronTeal)
                             .padding(12)
@@ -99,7 +103,9 @@ struct PackagesSettingsView: View {
                 TronReloadToolbarButton(isReloading: reloading, action: reload)
             }
         }
-        .task(id: model.packageInvalidationGeneration) { await model.loadPackages(cwd: effectiveCWD) }
+        .task(id: PackageLoadID(target: target, invalidationGeneration: model.packageInvalidationGeneration)) {
+            await model.loadPackages(target: target)
+        }
         .confirmationDialog(
             "Remove this package?",
             isPresented: Binding(get: { packageToRemove != nil }, set: { if !$0 { packageToRemove = nil } }),
@@ -114,7 +120,7 @@ struct PackagesSettingsView: View {
         reloading = true
         Task {
             defer { reloading = false }
-            await model.loadPackages(cwd: effectiveCWD)
+            await model.loadPackages(target: target)
         }
     }
 
@@ -122,7 +128,7 @@ struct PackagesSettingsView: View {
         TronValueRow(
             icon: "shippingbox.fill",
             title: package.source,
-            detail: [package.scope == .project ? "Project" : "Global", package.filtered ? "Filtered" : nil, model.packageUpdates.contains { $0.source == package.source } ? "Update available" : nil]
+            detail: [package.scope == .project ? "Project" : "Global", package.filtered ? "Filtered" : nil, updates.contains { $0.source == package.source } ? "Update available" : nil]
                 .compactMap { $0 }.joined(separator: " · ")
         ) {
             if workingSources.contains(package.source) {
@@ -144,7 +150,7 @@ struct PackagesSettingsView: View {
         Task {
             defer { workingSources.remove(value) }
             do {
-                try await model.mutatePackage(action: "install", source: value, local: local, cwd: effectiveCWD)
+                try await model.mutatePackage(action: "install", source: value, local: local, target: target)
                 source = ""
             } catch { model.lastError = error.localizedDescription }
         }
@@ -154,7 +160,7 @@ struct PackagesSettingsView: View {
         workingSources.insert(package.source)
         Task {
             defer { workingSources.remove(package.source) }
-            do { try await model.mutatePackage(action: "update", source: package.source, local: package.scope == .project, cwd: effectiveCWD) }
+            do { try await model.mutatePackage(action: "update", source: package.source, local: package.scope == .project, target: target) }
             catch { model.lastError = error.localizedDescription }
         }
     }
@@ -164,7 +170,7 @@ struct PackagesSettingsView: View {
         packageToRemove = nil
         Task {
             defer { workingSources.remove(package.source) }
-            do { try await model.mutatePackage(action: "remove", source: package.source, local: package.scope == .project, cwd: effectiveCWD) }
+            do { try await model.mutatePackage(action: "remove", source: package.source, local: package.scope == .project, target: target) }
             catch { model.lastError = error.localizedDescription }
         }
     }

@@ -142,8 +142,8 @@ final class AppModel {
     private(set) var authoritativeSessionIDs: Set<String> = []
     var commands: [CommandInfo] = []
     var resources: JSONValue?
-    var packageState: PackageInventory?
-    var packageUpdates: [PackageUpdate] = []
+    var packageInventoryByTarget: [PackageConfigurationTarget: PackageInventory] = [:]
+    var packageUpdatesByTarget: [PackageConfigurationTarget: [PackageUpdate]] = [:]
     var customModels: JSONValue?
     var terminals: [TerminalSummary] = []
     var terminalChunks: [String: [TerminalChunk]] = [:]
@@ -167,6 +167,8 @@ final class AppModel {
     private var settingsLoadGenerationByTarget: [SettingsTarget: Int] = [:]
     private var providerLoadGenerationByTarget: [ProviderCatalogTarget: Int] = [:]
     private var providerCatalogTargetByAuthOperation: [String: ProviderCatalogTarget] = [:]
+    private var packageLoadGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
+    private var packageUpdateGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
     private var foregroundReconciliationTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var subscribedSessionID: String?
@@ -1204,32 +1206,68 @@ final class AppModel {
         }
     }
 
-    func loadPackages(cwd: String? = nil) async {
+    @discardableResult
+    func loadPackages(target: PackageConfigurationTarget) async -> Bool {
         struct Params: Codable { let cwd: String? }
+        let generation = (packageLoadGenerationByTarget[target] ?? 0) + 1
+        packageLoadGenerationByTarget[target] = generation
         do {
-            packageState = try await client.request("packages.list", Params(cwd: cwd), timeout: .seconds(120))
+            let inventory: PackageInventory = try await client.request(
+                "packages.list",
+                Params(cwd: target.cwd),
+                timeout: .seconds(120)
+            )
+            guard packageLoadGenerationByTarget[target] == generation else { return false }
+            packageInventoryByTarget[target] = inventory
+            return true
+        } catch {
+            guard packageLoadGenerationByTarget[target] == generation else { return false }
+            surface(error)
+            return false
         }
-        catch { surface(error) }
     }
 
-    func checkPackageUpdates(cwd: String? = nil) async {
+    @discardableResult
+    func checkPackageUpdates(target: PackageConfigurationTarget) async -> Bool {
         struct Params: Codable { let cwd: String? }
         struct Response: Decodable { let updates: [PackageUpdate] }
+        let generation = (packageUpdateGenerationByTarget[target] ?? 0) + 1
+        packageUpdateGenerationByTarget[target] = generation
         do {
-            let response: Response = try await client.request("packages.checkUpdates", Params(cwd: cwd), timeout: .seconds(180))
-            packageUpdates = response.updates
-        } catch { surface(error) }
+            let response: Response = try await client.request(
+                "packages.checkUpdates",
+                Params(cwd: target.cwd),
+                timeout: .seconds(180)
+            )
+            guard packageUpdateGenerationByTarget[target] == generation else { return false }
+            packageUpdatesByTarget[target] = response.updates
+            return true
+        } catch {
+            guard packageUpdateGenerationByTarget[target] == generation else { return false }
+            surface(error)
+            return false
+        }
     }
 
-    func mutatePackage(action: String, source: String?, local: Bool, cwd: String?) async throws {
+    func mutatePackage(
+        action: String,
+        source: String?,
+        local: Bool,
+        target: PackageConfigurationTarget
+    ) async throws {
         struct Params: Codable { let source: String?; let local: Bool; let cwd: String?; let commandId: String }
         let method = "packages.\(action)"
         let commandID = uuidSource.next().uuidString
-        let params = Params(source: source, local: local, cwd: cwd, commandId: commandID)
+        let params = Params(source: source, local: local, cwd: target.cwd, commandId: commandID)
         _ = try await confirmedMutationValue(method: method, commandId: commandID) {
             try await client.requestValue(method, params, timeout: .seconds(300))
         }
-        await loadPackages(cwd: cwd)
+        if action == "update", source == nil {
+            packageUpdatesByTarget[target] = []
+        } else if action == "update" || action == "remove", let source {
+            packageUpdatesByTarget[target]?.removeAll { $0.source == source }
+        }
+        _ = await loadPackages(target: target)
     }
 
     func loadCustomModels() async {

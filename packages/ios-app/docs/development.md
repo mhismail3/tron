@@ -133,6 +133,8 @@ The focused suite deliberately completes global/project settings and global/sess
 catalogs out of order, then reverses two same-target reads; installed values must remain under
 their request key and the newest same-target request must win. It also proves auth completion
 retains its catalog target after failed cancellation and unknown operations trigger no guessed reload.
+Package cases similarly reverse global/workspace and same-target inventory responses, verify
+mutation CWD/local parameters, and require mutation-completed update markers to be cleared.
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \

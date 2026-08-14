@@ -28,6 +28,14 @@ struct AppModelInvalidationTests {
         #expect(initial != SettingsLoadID(target: .global, invalidationGeneration: 1))
     }
 
+    @Test("package targets map only nonempty workspace paths")
+    func packageTargets() {
+        #expect(PackageConfigurationTarget(cwd: nil) == .global)
+        #expect(PackageConfigurationTarget(cwd: "") == .global)
+        #expect(PackageConfigurationTarget(cwd: "/workspace/project") == .workspace(cwd: "/workspace/project"))
+        #expect(PackageConfigurationTarget.global.cwd == nil)
+    }
+
     @Test("out-of-order settings responses respect target and request ownership")
     nonisolated func settingsResponsesRemainKeyed() async throws {
         let scenario = Task { @MainActor in try await runSettingsOrderingScenario() }
@@ -40,6 +48,15 @@ struct AppModelInvalidationTests {
     @Test("out-of-order provider catalogs respect target and request ownership")
     nonisolated func providerCatalogResponsesRemainKeyed() async throws {
         let scenario = Task { @MainActor in try await runProviderOrderingScenario() }
+        defer { scenario.cancel() }
+        try await withTestWatchdog {
+            try await valueOfOwnedTask(scenario)
+        }
+    }
+
+    @Test("out-of-order package inventories respect target and request ownership")
+    nonisolated func packageResponsesRemainKeyed() async throws {
+        let scenario = Task { @MainActor in try await runPackageOrderingScenario() }
         defer { scenario.cancel() }
         try await withTestWatchdog {
             try await valueOfOwnedTask(scenario)
@@ -89,6 +106,79 @@ struct AppModelInvalidationTests {
             _ = await olderLoad.value
 
             #expect(model.settings(for: .global) == newerValue)
+        }
+    }
+
+    private func runPackageOrderingScenario() async throws {
+        try await withConnectedClient { client, socket in
+            let model = AppModel(client: client)
+            let workspace = PackageConfigurationTarget.workspace(cwd: "/workspace/project")
+
+            let globalLoad = Task { await model.loadPackages(target: .global) }
+            try await socket.waitUntilSent(count: 2)
+            let workspaceLoad = Task { await model.loadPackages(target: workspace) }
+            try await socket.waitUntilSent(count: 3)
+            let globalRequest = try await requestObject(at: 1, on: socket)
+            #expect(globalRequest["params"]?.objectValue?["cwd"] == nil)
+            let workspaceRequest = try await requestObject(at: 2, on: socket)
+            #expect(workspaceRequest["params"]?.objectValue?["cwd"] == .string("/workspace/project"))
+
+            try await respondToPackageRequest(at: 2, on: socket, marker: "workspace")
+            _ = await workspaceLoad.value
+            try await respondToPackageRequest(at: 1, on: socket, marker: "global")
+            _ = await globalLoad.value
+            #expect(model.packageInventoryByTarget[.global]?.packages.first?.source == "global")
+            #expect(model.packageInventoryByTarget[workspace]?.packages.first?.source == "workspace")
+
+            let olderLoad = Task { await model.loadPackages(target: .global) }
+            try await socket.waitUntilSent(count: 4)
+            let newerLoad = Task { await model.loadPackages(target: .global) }
+            try await socket.waitUntilSent(count: 5)
+            try await respondToPackageRequest(at: 4, on: socket, marker: "newer")
+            _ = await newerLoad.value
+            try await respondToPackageRequest(at: 3, on: socket, marker: "older")
+            _ = await olderLoad.value
+            #expect(model.packageInventoryByTarget[.global]?.packages.first?.source == "newer")
+
+            model.packageUpdatesByTarget[.global] = [
+                PackageUpdate(source: "update-me", displayName: "Update", type: "npm", scope: .user),
+                PackageUpdate(source: "keep-me", displayName: "Keep", type: "npm", scope: .user),
+            ]
+            let globalMutation = Task {
+                try await model.mutatePackage(
+                    action: "update",
+                    source: "update-me",
+                    local: false,
+                    target: .global
+                )
+            }
+            try await socket.waitUntilSent(count: 6)
+            let globalMutationRequest = try await requestObject(at: 5, on: socket)
+            #expect(globalMutationRequest["params"]?.objectValue?["cwd"] == nil)
+            #expect(globalMutationRequest["params"]?.objectValue?["local"] == .bool(false))
+            try await respond(toFrameAt: 5, on: socket, result: .object([:]))
+            try await socket.waitUntilSent(count: 7)
+            try await respondToPackageRequest(at: 6, on: socket, marker: "updated")
+            try await globalMutation.value
+            #expect(model.packageUpdatesByTarget[.global]?.map(\.source) == ["keep-me"])
+
+            let workspaceMutation = Task {
+                try await model.mutatePackage(
+                    action: "install",
+                    source: "workspace-package",
+                    local: true,
+                    target: workspace
+                )
+            }
+            try await socket.waitUntilSent(count: 8)
+            let workspaceMutationRequest = try await requestObject(at: 7, on: socket)
+            #expect(workspaceMutationRequest["params"]?.objectValue?["cwd"] == .string("/workspace/project"))
+            #expect(workspaceMutationRequest["params"]?.objectValue?["local"] == .bool(true))
+            try await respond(toFrameAt: 7, on: socket, result: .object([:]))
+            try await socket.waitUntilSent(count: 9)
+            try await respondToPackageRequest(at: 8, on: socket, marker: "installed")
+            try await workspaceMutation.value
+            #expect(model.packageInventoryByTarget[workspace]?.packages.first?.source == "installed")
         }
     }
 
@@ -243,14 +333,14 @@ struct AppModelInvalidationTests {
         )
         _ = await settings.value
 
-        let packages = Task { await model.loadPackages() }
+        let packages = Task { await model.loadPackages(target: .global) }
         try await socket.waitUntilSent(count: 3)
         try await respond(
             toFrameAt: 2,
             on: socket,
             result: .object(["packages": .array([]), "resources": .object([:])])
         )
-        await packages.value
+        _ = await packages.value
 
         let customModels = Task { await model.loadCustomModels() }
         try await socket.waitUntilSent(count: 4)
@@ -285,7 +375,7 @@ struct AppModelInvalidationTests {
         #expect(model.customModelInvalidationGeneration == 13)
         #expect(model.providerInvalidationGeneration == 14)
         #expect(model.settings(for: .global) == .object(["effective": .object([:])]))
-        #expect(model.packageState?.packages.isEmpty == true)
+        #expect(model.packageInventoryByTarget[.global]?.packages.isEmpty == true)
         #expect(model.customModels == .object(["providers": .object([:])]))
         #expect(model.providerCatalog(for: .global)?.providers.isEmpty == true)
         #expect(model.providerCatalog(for: .global)?.models.isEmpty == true)
@@ -313,6 +403,26 @@ struct AppModelInvalidationTests {
     ) async throws -> [String: JSONValue] {
         let frames = await socket.sentFrames()
         return try JSONDecoder.gateway.decode(JSONValue.self, from: frames[index]).objectValue ?? [:]
+    }
+
+    private func respondToPackageRequest(
+        at index: Int,
+        on socket: ScriptedGatewaySocket,
+        marker: String
+    ) async throws {
+        try await respond(
+            toFrameAt: index,
+            on: socket,
+            result: .object([
+                "packages": .array([.object([
+                    "source": .string(marker),
+                    "scope": .string("user"),
+                    "filtered": .bool(false),
+                    "installedPath": .null,
+                ])]),
+                "resources": .object(["marker": .string(marker)]),
+            ])
+        )
     }
 
     private func respondToCatalogRequests(
