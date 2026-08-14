@@ -15,10 +15,11 @@ bounded authoritative retry path.
 
 `AppModel.handle(_:)` owns routing:
 
-- `session.summary` applies a bounded global phase/name/count projection to
-  dashboard rows, so runs started by terminal or another mobile client show the
-  active spinner without subscribing every device to every transcript; paginated
-  list refreshes carry one revision and restart rather than install mixed pages;
+- `session.summary` enters `SessionCatalogCoordinator`'s monotonic phase/name/count
+  projection, so runs started by terminal or another mobile client update dashboard
+  rows without subscribing every device to every transcript. Unknown summaries request
+  discovery without fabricating a row; paginated list refreshes carry typed latest-load
+  admission and one revision, restarting rather than installing mixed or stale pages;
 - session snapshot/change topics update only the currently subscribed mounted or
   synchronizing authority. Full snapshots install only at the exact next cursor for
   the same runtime; duplicate/stale cursors are no-ops, gaps/runtime replacement/missing

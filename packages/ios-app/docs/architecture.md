@@ -52,7 +52,11 @@ names, prompts, transcript content, and terminal output are never recorded. `App
 is the shrinking MainActor composition façade; narrow typed owners retain lifecycle and
 coordination state instead of routing facts through unrelated façade fields. One monotonic
 connection-lifecycle phase now owns reconnect, foreground reconciliation, debounced catalog refresh,
-pairing replacement, profile switch/forget/revoke, and final teardown admission. A profile boundary
+pairing replacement, profile switch/forget/revoke, and final teardown admission. A dedicated
+`SessionCatalogCoordinator` owns dashboard summaries, retained monotonic live-summary overlays,
+and typed latest-load admission. Cache/disconnect/authoritative installs and removals all enter that
+one disposable projection; hidden/local selection policy remains outside it and cannot mount a chat.
+A profile boundary
 first invalidates those tasks plus profile-scoped load generations and presentation intake, then awaits
 the exact transport close before another profile may connect. Pairing pre-encodes profile metadata and
 commits the Keychain token before selecting that profile, so credential failure cannot leave selected

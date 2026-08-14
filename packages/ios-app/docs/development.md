@@ -117,8 +117,9 @@ publication, while the AppModel suites prove snapshots/tokens remain provisional
 acknowledgement, unmounted or synchronously revoked hints cannot create/advance state, and stale routes close their exact provisional token. The same suite proves a mounted route wins over divergent
 dashboard selection, dashboard refresh cannot open an inferred transcript, mounted reconnect restores
 the exact route, secondary reads cannot create hidden subscriptions, and create/fork return navigation
-identity without opening it implicitly. `DashboardStateOwnerTests` prove stale catalog/navigation
-admission, while `GlobalNoticeStoreTests` enforce the eight-entry, 4 KiB-message, and 16 KiB-total
+identity without opening it implicitly. `DashboardStateOwnerTests` prove typed latest-load and
+navigation admission, monotonic live-summary overlays, unknown-row discovery, safe cache/disconnect
+projection, and removal, while `GlobalNoticeStoreTests` enforce the eight-entry, 4 KiB-message, and 16 KiB-total
 budgets plus keyed progress coalescing. `PresentationOwnedStoreTests` prove session and same-session-generation
 isolation for disposable attachment/editor state; event tests prove departing routes are excluded from
 share admission. Compatible synchronization callers now share one outcome without timing polls;

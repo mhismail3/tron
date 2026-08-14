@@ -136,7 +136,11 @@ final class AppModel {
     var hasResolvedLaunchState = false
     var gatewayInfo: GatewayInfo?
     private var gatewayConnectionID: Int?
-    var sessions: [SessionSummary] = []
+    private var sessionCatalog = SessionCatalogCoordinator()
+    var sessions: [SessionSummary] {
+        get { sessionCatalog.sessions }
+        set { sessionCatalog.replaceForFacade(newValue) }
+    }
     var selectedSessionID: String? {
         didSet {
             guard selectedSessionID != oldValue else { return }
@@ -223,11 +227,9 @@ final class AppModel {
     private let sessionSynchronization = SessionSynchronizationCoordinator()
     private var hiddenSessionIDs: Set<String> = []
     private var locallyCreatedUnindexedSessionIDs: Set<String> = []
-    private var liveSessionSummaryUpdates: [String: SessionSummaryUpdate] = [:]
     private var terminalCleanupGeneration = 0
     private var terminalCleanupTasks: [Int: Task<Void, Never>] = [:]
     private var workspaceLoadGeneration = 0
-    private var sessionCatalogLoadOwner = SessionCatalogLoadOwner()
     private var presentationOpenGeneration = 0
     private var mountedPresentationGenerationBySession: [String: Int] = [:]
 
@@ -615,7 +617,7 @@ final class AppModel {
     }
 
     private func invalidateProfileScopedLoads() {
-        sessionCatalogLoadOwner.invalidate()
+        sessionCatalog.invalidateLoads()
         workspaceLoadGeneration &+= 1
         deviceLoadGeneration &+= 1
         legacyImportLoadGeneration &+= 1
@@ -629,7 +631,7 @@ final class AppModel {
     private func clearGatewayProjection() {
         gatewayInfo = nil
         gatewayConnectionID = nil
-        sessions.removeAll()
+        sessionCatalog.clear()
         snapshots.removeAll()
         authoritativeSessionIDs.removeAll()
         selectedSessionID = nil
@@ -896,7 +898,7 @@ final class AppModel {
     func refreshSessions(surfacingErrors: Bool = true) async -> Bool {
         struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
         struct Response: Decodable { let sessions: [SessionSummary]; let nextCursor: String?; let listRevision: Int }
-        let loadGeneration = sessionCatalogLoadOwner.begin()
+        let loadAdmission = sessionCatalog.beginLoad()
         do {
             var all: [SessionSummary] = []
             var cursor: String?
@@ -907,7 +909,7 @@ final class AppModel {
                     "session.list",
                     Params(cursor: cursor, limit: 200, scope: "all")
                 )
-                guard sessionCatalogLoadOwner.admits(loadGeneration) else { return false }
+                guard sessionCatalog.admits(loadAdmission) else { return false }
                 if let expectedRevision, expectedRevision != response.listRevision {
                     throw GatewayFailure(
                         code: "pagination_changed",
@@ -928,20 +930,15 @@ final class AppModel {
                     )
                 }
             } while cursor != nil
-            guard sessionCatalogLoadOwner.admits(loadGeneration) else { return false }
-            let ids = Set(all.map(\.id))
-            liveSessionSummaryUpdates = liveSessionSummaryUpdates.filter { ids.contains($0.key) }
-            sessions = all.map { summary in
-                guard let update = liveSessionSummaryUpdates[summary.id],
-                      update.summaryRevision > (summary.summaryRevision ?? 0) else { return summary }
-                return applying(update, to: summary)
+            guard sessionCatalog.publishAuthoritative(all, admission: loadAdmission) else {
+                return false
             }
             locallyCreatedUnindexedSessionIDs.subtract(all.map(\.id))
             reconcileSelection()
             saveCache()
             return true
         } catch {
-            guard sessionCatalogLoadOwner.admits(loadGeneration) else { return false }
+            guard sessionCatalog.admits(loadAdmission) else { return false }
             if surfacingErrors { surface(error) }
             return false
         }
@@ -1445,12 +1442,11 @@ final class AppModel {
             try await client.request("session.delete", params, timeout: .seconds(60))
         }
         snapshots.removeValue(forKey: id)
-        liveSessionSummaryUpdates.removeValue(forKey: id)
+        sessionCatalog.remove(id)
         sessionStructureRevisions.removeValue(forKey: id)
         sessionContextRevisions.removeValue(forKey: id)
         sessionResourceRevisions.removeValue(forKey: id)
         locallyCreatedUnindexedSessionIDs.remove(id)
-        sessions.removeAll { $0.id == id }
         if selectedSessionID == id { selectedSessionID = nil }
         saveCache()
     }
@@ -2154,8 +2150,7 @@ final class AppModel {
         case "transport.disconnected", "system.stopping":
             gatewayConnectionID = nil
             invalidateSessionConnectionOwnership()
-            liveSessionSummaryUpdates.removeAll()
-            sessions = sessions.map(\.safeCachedProjection)
+            sessionCatalog.markDisconnected()
             requestReconnect()
         case "transport.resyncRequired":
             if let sessionID = event.sessionId ?? subscribedSessionID {
@@ -2724,21 +2719,7 @@ final class AppModel {
     }
 
     private func updateSessionSummary(from snapshot: SessionSnapshot) {
-        guard let index = sessions.firstIndex(where: { $0.id == snapshot.sessionId }) else { return }
-        let current = sessions[index]
-        sessions[index] = SessionSummary(
-            id: current.id,
-            name: snapshot.name,
-            cwd: current.cwd,
-            kind: current.kind,
-            parentSessionId: current.parentSessionId,
-            createdAt: current.createdAt,
-            updatedAt: current.updatedAt,
-            messageCount: current.messageCount,
-            firstMessage: current.firstMessage,
-            phase: snapshot.phase,
-            summaryRevision: current.summaryRevision
-        )
+        sessionCatalog.update(from: snapshot)
     }
 
     static func installingSnapshot(
@@ -2827,32 +2808,14 @@ final class AppModel {
     }
 
     private func apply(_ update: SessionSummaryUpdate) {
-        if let current = liveSessionSummaryUpdates[update.sessionId], update.summaryRevision <= current.summaryRevision { return }
-        if let summary = sessions.first(where: { $0.id == update.sessionId }),
-           update.summaryRevision <= (summary.summaryRevision ?? 0) { return }
-        liveSessionSummaryUpdates[update.sessionId] = update
-        guard let index = sessions.firstIndex(where: { $0.id == update.sessionId }) else {
-            scheduleSessionListRefresh()
+        switch sessionCatalog.apply(update) {
+        case .stale:
             return
+        case .unknownSession:
+            scheduleSessionListRefresh()
+        case .updated:
+            saveCache()
         }
-        sessions[index] = applying(update, to: sessions[index])
-        saveCache()
-    }
-
-    private func applying(_ update: SessionSummaryUpdate, to summary: SessionSummary) -> SessionSummary {
-        SessionSummary(
-            id: summary.id,
-            name: update.name,
-            cwd: summary.cwd,
-            kind: summary.kind,
-            parentSessionId: summary.parentSessionId,
-            createdAt: summary.createdAt,
-            updatedAt: update.updatedAt,
-            messageCount: update.messageCount,
-            firstMessage: update.firstMessage,
-            phase: update.phase,
-            summaryRevision: update.summaryRevision
-        )
     }
 
     private func scheduleSessionListRefresh() {
@@ -2872,7 +2835,7 @@ final class AppModel {
 
     private func clearLiveConnectionProjection() {
         noticeStore.removeAll()
-        liveSessionSummaryUpdates.removeAll()
+        sessionCatalog.markDisconnected()
         terminalState.clear()
         sessionStructureRevisions.removeAll()
         sessionContextRevisions.removeAll()
@@ -3116,7 +3079,7 @@ final class AppModel {
     private func loadCache(profileID: String, lifecycleGeneration: Int) async {
         let value = await cache.load(profileID: profileID)
         guard admitsLifecycle(lifecycleGeneration), profiles.selected?.id == profileID else { return }
-        sessions = value.sessions.map(\.safeCachedProjection)
+        sessionCatalog.installCached(value.sessions)
         snapshots = Dictionary(uniqueKeysWithValues: value.snapshots.map { ($0.sessionId, $0) })
         reconcileSelection()
     }
