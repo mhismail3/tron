@@ -186,8 +186,20 @@ APNs implementation under the unchanged production bundle identifier. This
 one-way cleanup does not request notification permission or restore push delivery.
 
 Pairing accepts only `tron://pair` invitations containing a host, port, and
-8–32-character one-time code. The permanent returned device token goes directly
-to Keychain. Gateway profiles persist non-secret connection metadata only.
+8–32-character one-time code. `GatewayPairer` alone owns the narrow HTTP-data
+boundary for `POST /v1/pair`; it builds the request and deterministically maps
+HTTP status and response bytes while the transport owns no pairing policy. The
+permanent returned device token goes directly to Keychain. Gateway profiles
+persist non-secret connection metadata only.
+
+`AppModel` admits one pairing attempt at a time. Supersession, forget, and switch
+synchronously invalidate and cancel that exact task. Attempt identity is checked
+immediately after HTTP returns, immediately before profile/Keychain save, before
+connect, and after the connect-owned suspension boundaries. Therefore a stale
+pre-commit HTTP result cannot persist or connect. This admission boundary is not
+a Gateway connection epoch: a connection already suspended inside
+`GatewayClient` still requires the Phase 2 generation hardening.
+
 Provider credentials and the Mac wrapper credential are never decoded by iOS.
 Custom-model documents are validated through the pinned gateway runtime before
 the canonical document is replaced.

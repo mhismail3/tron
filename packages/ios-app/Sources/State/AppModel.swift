@@ -80,12 +80,22 @@ final class AppModel {
     private struct SessionMutationResponse: Codable { let sessionId: String }
     private struct CommandStatusParams: Codable { let method, commandId: String }
     private struct CommandStatusResponse: Decodable { let status: String; let result: JSONValue? }
+    private struct PairingAttempt {
+        let id: UUID
+        let task: Task<Void, Error>
+    }
+
+    typealias PairingCommit = @MainActor @Sendable (GatewayProfile, String) throws -> Void
+    typealias ProfileTokenLookup = @MainActor @Sendable (GatewayProfile) -> String?
 
     let client: GatewayClient
     let profiles: GatewayProfileStore
     private let cache: SnapshotCache
     private let clock: MonotonicClock
     private let uuidSource: UUIDSource
+    private let pairer: GatewayPairer
+    private let pairingCommit: PairingCommit
+    private let profileTokenLookup: ProfileTokenLookup
 
     var connectionState: ConnectionState = .unpaired
     /// False only while the first launch credential/connection decision is
@@ -153,6 +163,7 @@ final class AppModel {
 
     private var eventTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
+    private var pairingAttempt: PairingAttempt?
     private var foregroundReconciliationTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var subscribedSessionID: String?
@@ -174,13 +185,23 @@ final class AppModel {
         profiles: GatewayProfileStore = GatewayProfileStore(),
         cache: SnapshotCache = SnapshotCache(),
         clock: MonotonicClock = .continuous,
-        uuidSource: UUIDSource = .random
+        uuidSource: UUIDSource = .random,
+        pairer: GatewayPairer = GatewayPairer(),
+        pairingCommit: PairingCommit? = nil,
+        profileTokenLookup: ProfileTokenLookup? = nil
     ) {
         self.client = client
         self.profiles = profiles
         self.cache = cache
         self.clock = clock
         self.uuidSource = uuidSource
+        self.pairer = pairer
+        self.pairingCommit = pairingCommit ?? { profile, token in
+            try profiles.save(profile, token: token)
+        }
+        self.profileTokenLookup = profileTokenLookup ?? { profile in
+            profiles.token(for: profile)
+        }
         #if HOSTED_TEST
         if ProcessInfo.processInfo.arguments.contains("--tron-reset-ui-test-state") {
             for profile in profiles.profiles { profiles.remove(profile) }
@@ -189,8 +210,9 @@ final class AppModel {
             UserDefaults.standard.removeObject(forKey: "defaultWorkspace.v1")
         }
         #endif
-        eventTask = Task { [weak self, client] in
-            for await event in client.events { await self?.handle(event) }
+        let events = client.events
+        eventTask = Task { [weak self, events] in
+            for await event in events { await self?.handle(event) }
         }
     }
 
@@ -238,7 +260,7 @@ final class AppModel {
 
     func start() async {
         guard connectionState != .connecting, connectionState != .connected, connectionState != .reconnecting else { return }
-        guard let profile = profiles.selected, let token = profiles.token(for: profile) else {
+        guard let profile = profiles.selected, let token = profileTokenLookup(profile) else {
             connectionState = .unpaired
             hasResolvedLaunchState = true
             return
@@ -264,16 +286,51 @@ final class AppModel {
     }
 
     func pair(_ invitation: PairingInvitation) async throws {
+        invalidatePairingAttempt()
+        let attemptID = uuidSource.next()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { throw CancellationError() }
+            try await self.performPair(invitation, attemptID: attemptID)
+        }
+        pairingAttempt = PairingAttempt(id: attemptID, task: task)
+        defer {
+            if pairingAttempt?.id == attemptID { pairingAttempt = nil }
+        }
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func performPair(_ invitation: PairingInvitation, attemptID: UUID) async throws {
         connectionState = .connecting
         let name = UIDevice.current.name
-        let (profile, token) = try await GatewayPairer.pair(invitation, deviceName: name)
-        try profiles.save(profile, token: token)
-        await connect(profile: profile, token: token)
+        let (profile, token) = try await pairer.pair(invitation, deviceName: name)
+        try requirePairingAttempt(attemptID)
+        try pairingCommit(profile, token)
+        try requirePairingAttempt(attemptID)
+        await connect(profile: profile, token: token, pairingAttemptID: attemptID)
+        try requirePairingAttempt(attemptID)
         hasResolvedLaunchState = true
     }
 
+    private func requirePairingAttempt(_ id: UUID) throws {
+        try Task.checkCancellation()
+        guard pairingAttempt?.id == id else { throw CancellationError() }
+    }
+
+    private func invalidatePairingAttempt() {
+        let task = pairingAttempt?.task
+        pairingAttempt = nil
+        task?.cancel()
+    }
+
     func switchGateway(_ profile: GatewayProfile) async {
-        guard let token = profiles.token(for: profile) else {
+        invalidatePairingAttempt()
+        guard let token = profileTokenLookup(profile) else {
+            connectionState = .unpaired
+            hasResolvedLaunchState = true
             lastError = "This gateway no longer has a Keychain token. Pair it again."
             return
         }
@@ -289,6 +346,7 @@ final class AppModel {
     }
 
     func forgetCurrentGateway() {
+        invalidatePairingAttempt()
         if let profile = profiles.selected { profiles.remove(profile) }
         Task { await client.close() }
         gatewayInfo = nil
@@ -303,10 +361,12 @@ final class AppModel {
         hasResolvedLaunchState = true
     }
 
-    private func connect(profile: GatewayProfile, token: String) async {
+    private func connect(profile: GatewayProfile, token: String, pairingAttemptID: UUID? = nil) async {
         connectionState = .connecting
         do {
-            gatewayInfo = try await client.connect(profile: profile, token: token)
+            let connectedInfo = try await client.connect(profile: profile, token: token)
+            if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
+            gatewayInfo = connectedInfo
             subscribedSessionID = nil
             sessionEventSynchronizer.reset()
             pendingAuthoritativeResyncSessionIDs.removeAll()
@@ -314,14 +374,19 @@ final class AppModel {
             reconnectTask?.cancel()
             reconnectTask = nil
             await refreshAll()
+            if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
             await reattachTerminals()
+            if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
             connectionState = .connected
-        } catch let failure as GatewayFailure where failure.code == "unauthenticated" {
-            connectionState = .unauthorized
-            lastError = failure.message
         } catch {
-            connectionState = .offline(error.localizedDescription)
-            scheduleReconnect()
+            if let pairingAttemptID, (try? requirePairingAttempt(pairingAttemptID)) == nil { return }
+            if let failure = error as? GatewayFailure, failure.code == "unauthenticated" {
+                connectionState = .unauthorized
+                lastError = failure.message
+            } else {
+                connectionState = .offline(error.localizedDescription)
+                scheduleReconnect()
+            }
         }
     }
 

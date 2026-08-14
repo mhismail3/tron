@@ -408,7 +408,11 @@ struct OnboardingView: View {
         do {
             try await model.pair(invitation)
             if !model.setupComplete { withAnimation(.snappy(duration: 0.28)) { step = .workspace } }
-        } catch { model.onboardingError = error.localizedDescription }
+        } catch is CancellationError {
+            return
+        } catch {
+            model.onboardingError = error.localizedDescription
+        }
     }
     private func inspectTrust() async {
         guard !selectedWorkspace.isEmpty else { return }

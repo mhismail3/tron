@@ -79,6 +79,23 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests/GatewayClientTransportTests
 ```
 
+Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`
+feed raw HTTP response bytes and inspect the exact `/v1/pair` request.
+`AppModelPairingAttemptTests` use barriers whose late responses intentionally
+outlive task cancellation, plus an injected commit recorder, so stale-path tests
+never write Keychain. Run the attempt race suite repeatedly when changing its
+ownership checks:
+
+```bash
+for run in 1 2 3; do
+  xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+    -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+    -only-testing:TronMobileTests/GatewayPairingTransportTests \
+    -only-testing:TronMobileTests/AppModelPairingAttemptTests \
+    -only-testing:TronMobileTests/PairingInvitationParserTests || exit 1
+done
+```
+
 Run UI tests separately because simulator launch dominates their cost:
 
 ```bash

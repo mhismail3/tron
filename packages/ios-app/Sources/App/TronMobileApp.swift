@@ -20,6 +20,7 @@ struct TronMobileApp: App {
                     if let invitation = PairingInvitationParser.parse(url) {
                         Task {
                             do { try await model.pair(invitation) }
+                            catch is CancellationError { return }
                             catch { model.lastError = error.localizedDescription }
                         }
                     } else if url.host == "share", let shared = PendingShareService.load()?.buildSharePrompt() {

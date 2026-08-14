@@ -81,8 +81,21 @@ struct PairingResponse: Decodable, Sendable {
     let machineName: String
 }
 
-enum GatewayPairer {
-    static func pair(_ invitation: PairingInvitation, deviceName: String) async throws -> (GatewayProfile, String) {
+struct GatewayPairer: Sendable {
+    private struct PairingRequest: Encodable {
+        let code: String
+        let deviceName: String
+    }
+
+    private struct PairingFailureEnvelope: Decodable { let error: GatewayFailure }
+
+    private let transport: HTTPDataTransport
+
+    init(transport: HTTPDataTransport = .urlSession) {
+        self.transport = transport
+    }
+
+    func pair(_ invitation: PairingInvitation, deviceName: String) async throws -> (GatewayProfile, String) {
         var components = URLComponents()
         components.scheme = "http"
         components.host = invitation.host
@@ -92,11 +105,18 @@ enum GatewayPairer {
         var request = URLRequest(url: url, timeoutInterval: 15)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["code": invitation.code, "deviceName": deviceName])
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        request.httpBody = try encoder.encode(PairingRequest(code: invitation.code, deviceName: deviceName))
+        let (data, response) = try await transport.data(for: request)
+        guard response.statusCode == 200 else {
             let failure = try? JSONDecoder.gateway.decode(PairingFailureEnvelope.self, from: data)
-            throw failure?.error ?? GatewayFailure(code: "pairing_failed", message: "The Mac rejected this pairing code.", retryable: false, details: nil)
+            throw failure?.error ?? GatewayFailure(
+                code: "pairing_failed",
+                message: "The Mac rejected this pairing code.",
+                retryable: false,
+                details: nil
+            )
         }
         let paired = try JSONDecoder.gateway.decode(PairingResponse.self, from: data)
         let profile = GatewayProfile(
@@ -109,6 +129,4 @@ enum GatewayPairer {
         )
         return (profile, paired.token)
     }
-
-    private struct PairingFailureEnvelope: Decodable { let error: GatewayFailure }
 }
