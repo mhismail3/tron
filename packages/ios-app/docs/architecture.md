@@ -23,8 +23,15 @@ implementation detail; all user-facing language calls the agent Tron.
 ## State flow
 
 `GatewayClient` performs one authenticated WebSocket connection, protocol hello,
-request correlation, deadlines, and event delivery. `AppModel` is the MainActor
-state owner. It loads a bounded disposable cache first, connects, fetches
+request correlation, deadlines, and event delivery. Its injectable transport ends
+at WebSocket bytes, and its monotonic-clock and UUID inputs control only time and
+identity generation. The production transport is an actor-confined ephemeral
+`URLSession` owner and preserves the existing data frames, headers, deadlines, and
+random UUID behavior. Scripted test sockets contain no protocol, session, receipt,
+or event-admission policy; `GatewayClient` remains the only decoder and client
+runtime. `AppModel` is the MainActor state owner. It shares those clock/UUID seams
+for Gateway reconnect, synchronization, receipt, debounce, and command-ID work.
+It loads a bounded disposable cache first, connects, fetches
 cursor-paginated sessions and model catalogs, and replaces local state with
 authoritative snapshots. Session snapshots carry a byte-bounded current
 transcript tail; `transcriptStart`/`transcriptTotal` expose earlier canonical Pi

@@ -56,6 +56,29 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
 `scripts/ios-ci-test.sh` is the fresh-clone unit checkpoint: it generates the
 project, builds once, and runs the complete unit target without rebuilding.
 
+Swift 6 complete strict concurrency is explicit in `project.yml`. Preserve that
+baseline for focused builds that introduce or change concurrency boundaries:
+
+```bash
+xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  SWIFT_STRICT_CONCURRENCY=complete
+```
+
+Gateway transport tests inject `ManualClock`, `SequenceUUIDSource`, and
+`ScriptedGatewaySocket` below `GatewayClient`. Advance the manual clock only
+after the expected sleeper/barrier is registered. Test-owned unstructured tasks
+must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
+the test watchdog propagates cancellation. Scripts enqueue and inspect raw frame
+bytes; they must not implement protocol decoding, session state, receipt policy,
+retry policy, or event admission. Run the focused owner with:
+
+```bash
+xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/GatewayClientTransportTests
+```
+
 Run UI tests separately because simulator launch dominates their cost:
 
 ```bash

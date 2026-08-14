@@ -84,6 +84,8 @@ final class AppModel {
     let client: GatewayClient
     let profiles: GatewayProfileStore
     private let cache: SnapshotCache
+    private let clock: MonotonicClock
+    private let uuidSource: UUIDSource
 
     var connectionState: ConnectionState = .unpaired
     /// False only while the first launch credential/connection decision is
@@ -170,11 +172,15 @@ final class AppModel {
     init(
         client: GatewayClient = GatewayClient(),
         profiles: GatewayProfileStore = GatewayProfileStore(),
-        cache: SnapshotCache = SnapshotCache()
+        cache: SnapshotCache = SnapshotCache(),
+        clock: MonotonicClock = .continuous,
+        uuidSource: UUIDSource = .random
     ) {
         self.client = client
         self.profiles = profiles
         self.cache = cache
+        self.clock = clock
+        self.uuidSource = uuidSource
         #if HOSTED_TEST
         if ProcessInfo.processInfo.arguments.contains("--tron-reset-ui-test-state") {
             for profile in profiles.profiles { profiles.remove(profile) }
@@ -325,8 +331,9 @@ final class AppModel {
 
     private func scheduleReconnect(immediate: Bool = false) {
         guard profiles.selected != nil, reconnectTask == nil else { return }
+        let clock = self.clock
         reconnectTask = Task { [weak self] in
-            if !immediate { try? await Task.sleep(for: .seconds(2)) }
+            if !immediate { try? await clock.sleep(.seconds(2)) }
             var delay = 2.0
             while !Task.isCancelled {
                 guard let self else { return }
@@ -349,7 +356,7 @@ final class AppModel {
                     return
                 } catch {
                     self.connectionState = .offline(error.localizedDescription)
-                    try? await Task.sleep(for: .seconds(delay))
+                    try? await clock.sleep(.seconds(delay))
                     delay = min(delay * 1.7, 15)
                 }
             }
@@ -453,7 +460,7 @@ final class AppModel {
     func revokeDevice(_ id: String) async throws {
         struct Params: Codable { let deviceId: String; let commandId: String }
         struct Response: Codable { let revoked: Bool }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(deviceId: id, commandId: commandID)
         let response: Response = try await confirmedMutation(method: "device.revoke", commandId: commandID) {
             try await client.request("device.revoke", params)
@@ -480,7 +487,7 @@ final class AppModel {
     func importLegacySessions(port: Int = 9849) async throws {
         struct Params: Codable { let port: Int; let commandId: String }
         struct Response: Codable { let imported: Int; let skipped: Int }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(port: port, commandId: commandID)
         let response: Response = try await confirmedMutation(method: "legacy.import", commandId: commandID) {
             try await client.request("legacy.import", params, timeout: .seconds(600))
@@ -498,7 +505,7 @@ final class AppModel {
         struct Params: Codable { let uploadId, cwd, commandId: String }
         typealias Response = SessionMutationResponse
         await closeCurrentSubscription()
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(uploadId: uploadID, cwd: cwd, commandId: commandID)
         let response: Response = try await confirmedMutation(method: "session.import", commandId: commandID) {
             try await client.request("session.import", params, timeout: .seconds(120))
@@ -514,7 +521,7 @@ final class AppModel {
         struct Params: Codable { let cwd: String; let commandId: String }
         typealias Response = SessionMutationResponse
         await closeCurrentSubscription()
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(cwd: cwd, commandId: commandID)
         let response: Response = try await confirmedMutation(method: "session.create", commandId: commandID) {
             try await client.request("session.create", params, timeout: .seconds(60))
@@ -686,7 +693,7 @@ final class AppModel {
             let commandId: String
         }
         struct Response: Codable { let operationId: String }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, text: text, uploadIds: pendingAttachments.map(\.id), behavior: behavior, commandId: commandID)
         let _: Response = try await confirmedMutation(method: "session.prompt", commandId: commandID) {
             try await client.request("session.prompt", params, as: Response.self, timeout: .seconds(15))
@@ -698,7 +705,7 @@ final class AppModel {
         guard let sessionID = selectedSessionID else { return }
         struct Params: Codable { let sessionId, kind, commandId: String }
         struct Response: Codable { let aborted: Bool }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, kind: kind, commandId: commandID)
         do {
             let _: Response = try await confirmedMutation(method: "session.abort", commandId: commandID) {
@@ -710,7 +717,7 @@ final class AppModel {
     func clearQueue() async throws -> SessionSnapshot.QueuedMessages {
         guard let sessionID = selectedSessionID else { return .init(steering: [], followUp: []) }
         struct Params: Codable { let sessionId, commandId: String }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, commandId: commandID)
         let cleared: SessionSnapshot.QueuedMessages = try await confirmedMutation(method: "session.clearQueue", commandId: commandID) {
             try await client.request("session.clearQueue", params)
@@ -725,7 +732,7 @@ final class AppModel {
     func executeBash(_ command: String, excludeFromContext: Bool = false) async throws {
         guard let sessionID = selectedSessionID else { return }
         struct Params: Codable { let sessionId, command: String; let excludeFromContext: Bool; let commandId: String }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, command: command, excludeFromContext: excludeFromContext, commandId: commandID)
         _ = try await confirmedMutationValue(method: "session.bash", commandId: commandID) {
             try await client.requestValue("session.bash", params, timeout: .seconds(300))
@@ -735,7 +742,7 @@ final class AppModel {
     func setModel(_ model: ModelRef) async throws {
         guard let sessionID = selectedSessionID else { return }
         struct Params: Codable { let sessionId, provider, modelId, commandId: String }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, provider: model.provider, modelId: model.id, commandId: commandID)
         let _: MutationResponse = try await confirmedMutation(method: "session.setModel", commandId: commandID) {
             try await client.request("session.setModel", params)
@@ -745,7 +752,7 @@ final class AppModel {
     func setThinking(_ level: String) async throws {
         guard let sessionID = selectedSessionID else { return }
         struct Params: Codable { let sessionId, level, commandId: String }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, level: level, commandId: commandID)
         let _: MutationResponse = try await confirmedMutation(method: "session.setThinking", commandId: commandID) {
             try await client.request("session.setThinking", params)
@@ -759,7 +766,7 @@ final class AppModel {
 
     func renameSession(_ sessionID: String, name: String) async throws {
         struct Params: Codable { let sessionId, name, commandId: String }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, name: name, commandId: commandID)
         let _: MutationResponse = try await confirmedMutation(method: "session.rename", commandId: commandID) {
             try await client.request("session.rename", params)
@@ -770,7 +777,7 @@ final class AppModel {
         guard let sessionID = selectedSessionID else { return }
         struct Params: Codable { let sessionId: String; let instructions: String?; let commandId: String }
         struct Response: Codable { let compacted: Bool }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, instructions: instructions, commandId: commandID)
         let _: Response = try await confirmedMutation(method: "session.compact", commandId: commandID) {
             try await client.request("session.compact", params, timeout: .seconds(300))
@@ -780,7 +787,7 @@ final class AppModel {
     func setTools(_ tools: [String]) async throws {
         guard let sessionID = selectedSessionID else { return }
         struct Params: Codable { let sessionId: String; let tools: [String]; let commandId: String }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, tools: tools, commandId: commandID)
         let _: MutationResponse = try await confirmedMutation(method: "session.setTools", commandId: commandID) {
             try await client.request("session.setTools", params)
@@ -792,7 +799,7 @@ final class AppModel {
         guard let sessionID = selectedSessionID else { return nil }
         struct Params: Codable { let sessionId, entryId, position, commandId: String }
         struct Response: Codable { let sessionId: String; let selectedText: String? }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, entryId: entryID, position: position, commandId: commandID)
         let response: Response = try await confirmedMutation(method: "session.fork", commandId: commandID) {
             try await client.request("session.fork", params, timeout: .seconds(120))
@@ -819,7 +826,7 @@ final class AppModel {
             let commandId: String
         }
         struct Response: Codable { let editorText: String? }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, entryId: entryID, summarize: summarize, instructions: instructions, replaceInstructions: replaceInstructions, label: label, commandId: commandID)
         let response: Response = try await confirmedMutation(method: "session.navigate", commandId: commandID) {
             try await client.request("session.navigate", params, timeout: .seconds(300))
@@ -834,7 +841,7 @@ final class AppModel {
     func setLabel(entryID: String, label: String?) async throws {
         guard let sessionID = selectedSessionID else { return }
         struct Params: Codable { let sessionId, entryId: String; let label: String?; let commandId: String }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, entryId: entryID, label: label, commandId: commandID)
         let _: MutationResponse = try await confirmedMutation(method: "session.label", commandId: commandID) {
             try await client.request("session.label", params)
@@ -862,7 +869,7 @@ final class AppModel {
         struct Params: Codable { let sessionId, commandId: String }
         struct Response: Codable { let deleted: Bool }
         if subscribedSessionID == id { await closeCurrentSubscription() }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: id, commandId: commandID)
         let _: Response = try await confirmedMutation(method: "session.delete", commandId: commandID) {
             try await client.request("session.delete", params, timeout: .seconds(60))
@@ -931,7 +938,7 @@ final class AppModel {
         guard let sessionID = selectedSessionID else { return }
         struct Params: Codable { let sessionId, commandId: String }
         struct Response: Codable { let reloaded: Bool }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, commandId: commandID)
         let _: Response = try await confirmedMutation(method: "session.reloadResources", commandId: commandID) {
             try await client.request("session.reloadResources", params, timeout: .seconds(120))
@@ -1033,7 +1040,7 @@ final class AppModel {
 
     func refreshModelCatalog(force: Bool = true) async throws {
         struct Params: Codable { let force: Bool; let sessionId: String?; let commandId: String }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(force: force, sessionId: selectedSessionID, commandId: commandID)
         _ = try await confirmedMutationValue(method: "models.refresh", commandId: commandID) {
             try await client.requestValue("models.refresh", params, timeout: .seconds(75))
@@ -1044,7 +1051,7 @@ final class AppModel {
     func logout(providerID: String, sessionID: String? = nil) async throws {
         struct Params: Codable { let providerId, commandId: String; let sessionId: String? }
         struct Response: Codable { let loggedOut: Bool }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(providerId: providerID, commandId: commandID, sessionId: sessionID)
         let _: Response = try await confirmedMutation(method: "auth.logout", commandId: commandID) {
             try await client.request("auth.logout", params, timeout: .seconds(60))
@@ -1066,7 +1073,7 @@ final class AppModel {
 
     func updateSettings(_ patch: JSONValue, scope: String = "global", cwd: String? = nil) async throws {
         struct Params: Codable { let patch: JSONValue; let scope: String; let cwd: String?; let commandId: String }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(patch: patch, scope: scope, cwd: cwd ?? selectedSnapshot?.cwd, commandId: commandID)
         settings = try await confirmedMutationValue(method: "settings.update", commandId: commandID) {
             try await client.requestValue("settings.update", params, timeout: .seconds(60))
@@ -1081,7 +1088,7 @@ final class AppModel {
 
     func setTrust(cwd: String, decision: Bool?) async throws -> JSONValue {
         struct Params: Codable { let cwd: String; let decision: Bool?; let commandId: String }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(cwd: cwd, decision: decision, commandId: commandID)
         return try await confirmedMutationValue(method: "trust.set", commandId: commandID) {
             try await client.requestValue("trust.set", params)
@@ -1109,7 +1116,7 @@ final class AppModel {
     func mutatePackage(action: String, source: String?, local: Bool, cwd: String?) async throws {
         struct Params: Codable { let source: String?; let local: Bool; let cwd: String?; let commandId: String }
         let method = "packages.\(action)"
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(source: source, local: local, cwd: cwd, commandId: commandID)
         _ = try await confirmedMutationValue(method: method, commandId: commandID) {
             try await client.requestValue(method, params, timeout: .seconds(300))
@@ -1127,6 +1134,7 @@ final class AppModel {
 
     func replaceCustomModels(_ document: JSONValue) async throws {
         let client = self.client
+        let uuidSource = self.uuidSource
         try await CustomModelDocumentWriter(request: { method, params in
             try await client.requestValue(method, params)
         }, put: { [weak self] method, params in
@@ -1137,6 +1145,8 @@ final class AppModel {
             return try await self.confirmedMutationValue(method: method, commandId: commandID) {
                 try await client.requestValue(method, params)
             }
+        }, makeCommandID: {
+            uuidSource.next().uuidString
         }).replace(document)
     }
 
@@ -1155,7 +1165,7 @@ final class AppModel {
         }
         struct Params: Codable { let commandId: String }
         struct Response: Codable { let restarting: Bool; let scheduled: Bool; let activeSessionIds: [String] }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let response: Response = try await confirmedMutation(method: "gateway.restart", commandId: commandID) {
             try await client.request("gateway.restart", Params(commandId: commandID))
         }
@@ -1178,7 +1188,7 @@ final class AppModel {
     func createFolder(parent: String, name: String) async throws {
         struct Params: Codable { let parent, name, commandId: String }
         struct Response: Codable { let path: String }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(parent: parent, name: name, commandId: commandID)
         let response: Response = try await confirmedMutation(method: "filesystem.mkdir", commandId: commandID) {
             try await client.request("filesystem.mkdir", params)
@@ -1191,7 +1201,7 @@ final class AppModel {
         guard let sessionID = selectedSessionID else { return }
         struct Params: Codable { let sessionId, interactionId: String; let value: JSONValue?; let cancelled: Bool; let commandId: String }
         struct Response: Codable { let answered: Bool }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, interactionId: interaction.id, value: value, cancelled: cancelled, commandId: commandID)
         let _: Response = try await confirmedMutation(method: "extension.respond", commandId: commandID) {
             try await client.request("extension.respond", params)
@@ -1218,7 +1228,7 @@ final class AppModel {
         struct Params: Codable { let sessionId: String; let columns, rows: Int; let commandId: String }
         struct Replay: Codable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
         struct Response: Codable { let terminal: TerminalSummary; let replay: Replay }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, columns: columns, rows: rows, commandId: commandID)
         let response: Response = try await confirmedMutation(method: "terminal.open", commandId: commandID) {
             try await client.request("terminal.open", params)
@@ -1253,7 +1263,7 @@ final class AppModel {
     func writeTerminal(_ id: String, data: String) async throws {
         struct Params: Codable { let terminalId, writeId, data, commandId: String }
         struct Response: Codable { let written: Bool }
-        let identity = UUID().uuidString
+        let identity = uuidSource.next().uuidString
         let params = Params(terminalId: id, writeId: identity, data: data, commandId: identity)
         let _: Response = try await confirmedMutation(method: "terminal.write", commandId: identity) {
             try await client.request("terminal.write", params)
@@ -1263,7 +1273,7 @@ final class AppModel {
     func resizeTerminal(_ id: String, columns: Int, rows: Int) async throws {
         struct Params: Codable { let terminalId: String; let columns, rows: Int; let commandId: String }
         struct Response: Codable { let resized: Bool }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(terminalId: id, columns: columns, rows: rows, commandId: commandID)
         let _: Response = try await confirmedMutation(method: "terminal.resize", commandId: commandID) {
             try await client.request("terminal.resize", params)
@@ -1273,7 +1283,7 @@ final class AppModel {
     func terminateTerminal(_ id: String) async throws {
         struct Params: Codable { let terminalId, commandId: String }
         struct Response: Codable { let terminated: Bool }
-        let commandID = UUID().uuidString
+        let commandID = uuidSource.next().uuidString
         let params = Params(terminalId: id, commandId: commandID)
         let _: Response = try await confirmedMutation(method: "terminal.terminate", commandId: commandID) {
             try await client.request("terminal.terminate", params)
@@ -1573,10 +1583,10 @@ final class AppModel {
     ) async -> Bool {
         if sessionEventSynchronizer.isSynchronizing(sessionID: sessionID) {
             let token = sessionEventSynchronizer.token(sessionID: sessionID)
-            let deadline = ContinuousClock.now + .seconds(65)
-            while sessionEventSynchronizer.token(sessionID: sessionID) == token, ContinuousClock.now < deadline {
+            let deadline = clock.now() + .seconds(65)
+            while sessionEventSynchronizer.token(sessionID: sessionID) == token, clock.now() < deadline {
                 if Task.isCancelled { return false }
-                try? await Task.sleep(for: .milliseconds(10))
+                try? await clock.sleep(.milliseconds(10))
             }
             guard sessionEventSynchronizer.token(sessionID: sessionID) != token else { return false }
             if replacingVisibleTranscript {
@@ -1875,8 +1885,9 @@ final class AppModel {
 
     private func scheduleSessionListRefresh() {
         refreshTask?.cancel()
+        let clock = self.clock
         refreshTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(150))
+            try? await clock.sleep(.milliseconds(150))
             await self?.refreshSessions()
         }
     }
@@ -1964,9 +1975,9 @@ final class AppModel {
     ) async throws -> JSONValue {
         do { return try await send() }
         catch let original as GatewayFailure where Self.isUncertainTransportFailure(original) {
-            let deadline = ContinuousClock.now + .seconds(90)
+            let deadline = clock.now() + .seconds(90)
             var lastFailure: GatewayFailure = original
-            while ContinuousClock.now < deadline {
+            while clock.now() < deadline {
                 if Task.isCancelled { throw CancellationError() }
                 guard await waitForConnected(until: deadline) else { break }
                 do {
@@ -1994,7 +2005,7 @@ final class AppModel {
                 } catch let failure as GatewayFailure where Self.isUncertainTransportFailure(failure) {
                     lastFailure = failure
                 }
-                try? await Task.sleep(for: .milliseconds(250))
+                try? await clock.sleep(.milliseconds(250))
             }
             throw GatewayFailure(
                 code: "outcome_unknown",
@@ -2010,11 +2021,11 @@ final class AppModel {
     }
 
     private func waitForConnected(until deadline: ContinuousClock.Instant) async -> Bool {
-        while ContinuousClock.now < deadline {
+        while clock.now() < deadline {
             if connectionState == .connected { return true }
             if connectionState == .unauthorized || connectionState == .unpaired { return false }
             if reconnectTask == nil { scheduleReconnect(immediate: true) }
-            try? await Task.sleep(for: .milliseconds(100))
+            try? await clock.sleep(.milliseconds(100))
         }
         return false
     }

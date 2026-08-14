@@ -8,8 +8,10 @@ actor GatewayClient {
 
     nonisolated let events: AsyncStream<GatewayEvent>
     private let eventContinuation: AsyncStream<GatewayEvent>.Continuation
-    private var session: URLSession?
-    private var socket: URLSessionWebSocketTask?
+    private let socketFactory: GatewaySocketFactory
+    private let clock: MonotonicClock
+    private let uuidSource: UUIDSource
+    private var socket: (any GatewaySocketConnection)?
     private var receiveTask: Task<Void, Never>?
     private var livenessTask: Task<Void, Never>?
     private var pending: [String: PendingRequest] = [:]
@@ -23,7 +25,14 @@ actor GatewayClient {
     private var profile: GatewayProfile?
     private var token: String?
 
-    init() {
+    init(
+        socketFactory: GatewaySocketFactory = .urlSession,
+        clock: MonotonicClock = .continuous,
+        uuidSource: UUIDSource = .random
+    ) {
+        self.socketFactory = socketFactory
+        self.clock = clock
+        self.uuidSource = uuidSource
         var continuation: AsyncStream<GatewayEvent>.Continuation!
         events = AsyncStream(bufferingPolicy: .bufferingNewest(512)) { continuation = $0 }
         eventContinuation = continuation
@@ -33,11 +42,13 @@ actor GatewayClient {
         eventContinuation.finish()
         receiveTask?.cancel()
         livenessTask?.cancel()
-        socket?.cancel(with: .goingAway, reason: nil)
+        if let socket {
+            Task { await socket.close() }
+        }
     }
 
     func connect(profile: GatewayProfile, token: String) async throws -> GatewayInfo {
-        disconnect(
+        await disconnect(
             reason: GatewayFailure(code: "replaced", message: "Connection replaced", retryable: true, details: nil),
             intentional: true
         )
@@ -48,30 +59,23 @@ actor GatewayClient {
 
         var request = URLRequest(url: profile.socketURL, timeoutInterval: 15)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.waitsForConnectivity = true
-        configuration.timeoutIntervalForRequest = 15
-        let session = URLSession(configuration: configuration)
-        let socket = session.webSocketTask(with: request)
-        self.session = session
+        let socket = socketFactory.makeConnection(request)
         self.socket = socket
-        socket.resume()
 
         let hello: JSONValue = .object([
             "type": .string("hello"),
             "protocolVersion": .number(2),
-            "clientId": .string(UUID().uuidString),
+            "clientId": .string(uuidSource.next().uuidString),
         ])
-        try await socket.send(.data(JSONEncoder.gateway.encode(hello)))
-        let message = try await withTimeout(seconds: 15) { try await socket.receive() }
-        let data = Self.data(from: message)
+        try await socket.send(JSONEncoder.gateway.encode(hello))
+        let data = try await withTimeout(duration: .seconds(15)) { try await socket.receive() }
         let decoded = try JSONDecoder.gateway.decode(GatewayHello.self, from: data)
         guard decoded.type == "hello", decoded.protocolVersion == 2, decoded.minProtocolVersion <= 2 else {
             throw GatewayFailure(code: "protocol_mismatch", message: "The Mac gateway protocol is not compatible with this app.", retryable: false, details: nil)
         }
         let info = decoded.info
         self.info = info
-        lastInboundAt = .now
+        lastInboundAt = clock.now()
         overflowResyncSignaled = false
         receiveTask = Task { [weak self] in await self?.receiveLoop(generation: currentGeneration) }
         livenessTask = Task { [weak self] in await self?.monitorLiveness(generation: currentGeneration) }
@@ -85,20 +89,20 @@ actor GatewayClient {
         return try await connect(profile: profile, token: token)
     }
 
-    func close() {
-        disconnect(
+    func close() async {
+        profile = nil
+        token = nil
+        await disconnect(
             reason: GatewayFailure(code: "closed", message: "Connection closed", retryable: true, details: nil),
             intentional: true
         )
-        profile = nil
-        token = nil
     }
 
     func ensureResponsive(maximumSilence: Duration = .seconds(35)) async throws {
         guard socket != nil, let lastInboundAt else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
-        if ContinuousClock.now - lastInboundAt <= maximumSilence { return }
+        if clock.now() - lastInboundAt <= maximumSilence { return }
         struct Response: Decodable { let protocolVersion: Int }
         let _: Response = try await request("system.info", EmptyParams(), timeout: .seconds(8))
     }
@@ -117,19 +121,20 @@ actor GatewayClient {
         guard let socket else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
-        let id = UUID().uuidString
+        let id = uuidSource.next().uuidString
         let frame = GatewayRequest(id: id, method: method, params: try JSONValue.encode(params))
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
+                let clock = self.clock
                 let timeoutTask = Task { [weak self] in
-                    try? await Task.sleep(for: timeout)
+                    try? await clock.sleep(timeout)
                     guard !Task.isCancelled else { return }
                     await self?.expire(id: id)
                 }
                 pending[id] = PendingRequest(continuation: continuation, timeout: timeoutTask)
                 Task {
                     do {
-                        try await socket.send(.data(JSONEncoder.gateway.encode(frame)))
+                        try await socket.send(JSONEncoder.gateway.encode(frame))
                     } catch {
                         fail(id: id, error: Self.transportFailure(error))
                     }
@@ -178,14 +183,14 @@ actor GatewayClient {
     private func receiveLoop(generation expected: Int) async {
         while !Task.isCancelled, generation == expected, let socket {
             do {
-                let message = try await socket.receive()
-                lastInboundAt = .now
-                enqueue(Self.data(from: message))
+                let data = try await socket.receive()
+                lastInboundAt = clock.now()
+                await enqueue(data)
             } catch {
                 let intentional = intentionalDisconnectGenerations.remove(expected) != nil
                 guard generation == expected, !intentional, !(error is CancellationError) else { return }
                 let failure = Self.transportFailure(error)
-                disconnect(reason: failure)
+                await disconnect(reason: failure)
                 eventContinuation.yield(GatewayEvent(
                     type: "event",
                     topic: "transport.disconnected",
@@ -199,14 +204,14 @@ actor GatewayClient {
 
     private func monitorLiveness(generation expected: Int) async {
         while !Task.isCancelled, generation == expected, socket != nil {
-            try? await Task.sleep(for: .seconds(20))
+            try? await clock.sleep(.seconds(20))
             guard !Task.isCancelled, generation == expected, socket != nil else { return }
             do {
                 try await ensureResponsive(maximumSilence: .seconds(35))
             } catch {
                 guard generation == expected else { return }
                 let failure = Self.transportFailure(error)
-                disconnect(reason: failure)
+                await disconnect(reason: failure)
                 eventContinuation.yield(GatewayEvent(
                     type: "event",
                     topic: "transport.disconnected",
@@ -218,21 +223,21 @@ actor GatewayClient {
         }
     }
 
-    private func enqueue(_ data: Data) {
+    private func enqueue(_ data: Data) async {
         inboundFrames.append(data)
-        drainInboundFrames()
+        await drainInboundFrames()
     }
 
-    private func drainInboundFrames() {
+    private func drainInboundFrames() async {
         guard !processingInboundFrame else { return }
         processingInboundFrame = true
         defer { processingInboundFrame = false }
         while !inboundFrames.isEmpty {
             let data = inboundFrames.removeFirst()
-            do { try handle(data) }
+            do { try await handle(data) }
             catch {
                 let failure = Self.transportFailure(error)
-                disconnect(reason: failure)
+                await disconnect(reason: failure)
                 eventContinuation.yield(GatewayEvent(
                     type: "event",
                     topic: "transport.disconnected",
@@ -244,7 +249,7 @@ actor GatewayClient {
         }
     }
 
-    private func handle(_ data: Data) throws {
+    private func handle(_ data: Data) async throws {
         let value = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
         guard let object = value.objectValue, let type = object["type"]?.stringValue else { return }
         switch type {
@@ -258,7 +263,7 @@ actor GatewayClient {
             let event = try JSONDecoder.gateway.decode(GatewayEvent.self, from: data)
             if case .dropped = eventContinuation.yield(event), !overflowResyncSignaled {
                 overflowResyncSignaled = true
-                disconnect(reason: GatewayFailure(
+                await disconnect(reason: GatewayFailure(
                     code: "event_overflow",
                     message: "The live event buffer overflowed; reconnecting for an authoritative snapshot.",
                     retryable: true,
@@ -286,16 +291,14 @@ actor GatewayClient {
         waiter.continuation.resume(throwing: error)
     }
 
-    private func disconnect(reason: Error, intentional: Bool = false) {
+    private func disconnect(reason: Error, intentional: Bool = false) async {
         if intentional, receiveTask != nil { intentionalDisconnectGenerations.insert(generation) }
         receiveTask?.cancel()
         receiveTask = nil
         livenessTask?.cancel()
         livenessTask = nil
-        socket?.cancel(with: .goingAway, reason: nil)
+        let closingSocket = socket
         socket = nil
-        session?.invalidateAndCancel()
-        session = nil
         info = nil
         lastInboundAt = nil
         overflowResyncSignaled = false
@@ -306,6 +309,7 @@ actor GatewayClient {
             waiter.timeout.cancel()
             waiter.continuation.resume(throwing: reason)
         }
+        await closingSocket?.close()
     }
 
     private nonisolated static func transportFailure(_ error: Error) -> GatewayFailure {
@@ -313,24 +317,20 @@ actor GatewayClient {
         return GatewayFailure(code: "disconnected", message: error.localizedDescription, retryable: true, details: nil)
     }
 
-    private nonisolated static func data(from message: URLSessionWebSocketTask.Message) -> Data {
-        switch message {
-        case .data(let data): data
-        case .string(let value): Data(value.utf8)
-        @unknown default: Data()
+    private func withTimeout<T: Sendable>(
+        duration: Duration,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        let clock = self.clock
+        return try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await clock.sleep(duration)
+                throw GatewayFailure(code: "timeout", message: "The Mac gateway did not complete its handshake.", retryable: true, details: nil)
+            }
+            let value = try await group.next()!
+            group.cancelAll()
+            return value
         }
-    }
-}
-
-private func withTimeout<T: Sendable>(seconds: TimeInterval, operation: @escaping @Sendable () async throws -> T) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask { try await operation() }
-        group.addTask {
-            try await Task.sleep(for: .seconds(seconds))
-            throw GatewayFailure(code: "timeout", message: "The Mac gateway did not complete its handshake.", retryable: true, details: nil)
-        }
-        let value = try await group.next()!
-        group.cancelAll()
-        return value
     }
 }

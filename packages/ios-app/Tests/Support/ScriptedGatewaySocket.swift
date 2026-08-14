@@ -1,0 +1,202 @@
+import Foundation
+import Synchronization
+@testable import TronMobile
+
+actor ScriptedGatewaySocket: GatewaySocketConnection {
+    private struct Receiver {
+        let token: Int
+        let continuation: CheckedContinuation<Data, Error>
+    }
+
+    private struct Waiter {
+        let token: Int
+        let count: Int
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
+    private var inbound: [Data] = []
+    private var receivers: [Receiver] = []
+    private var nextReceiverToken = 0
+    private var sent: [Data] = []
+    private var sentWaiters: [Waiter] = []
+    private var closeInvocations = 0
+    private var closeTransitions = 0
+    private var closeInvocationWaiters: [Waiter] = []
+    private var closeWaiters: [Waiter] = []
+    private var nextWaiterToken = 0
+    private enum WaiterKind { case sent, closeInvocation, closeTransition }
+
+    private var isClosed = false
+    private var suspendsClose: Bool
+    private var closeBarrierWaiters: [Int: CheckedContinuation<Void, Error>] = [:]
+
+    init(suspendsClose: Bool = false) {
+        self.suspendsClose = suspendsClose
+    }
+
+    func send(_ data: Data) throws {
+        guard !isClosed else { throw CancellationError() }
+        sent.append(data)
+        resumeSatisfiedWaiters(&sentWaiters, observedCount: sent.count)
+    }
+
+    func receive() async throws -> Data {
+        guard !isClosed else { throw CancellationError() }
+        if !inbound.isEmpty { return inbound.removeFirst() }
+        let token = nextReceiverToken
+        nextReceiverToken += 1
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                receivers.append(.init(token: token, continuation: continuation))
+            }
+        } onCancel: {
+            Task { await self.cancelReceiver(token: token) }
+        }
+    }
+
+    func close() async {
+        closeInvocations += 1
+        resumeSatisfiedWaiters(&closeInvocationWaiters, observedCount: closeInvocations)
+        if suspendsClose {
+            let barrierToken = nextWaiterToken
+            nextWaiterToken += 1
+            // GatewayClient cancels its receive task before that same task closes an
+            // overflowing socket. Preserve the scripted barrier for that pre-existing
+            // cancellation, while still making newly cancelled close waits exit.
+            let cancellationWasAlreadySet = Task.isCancelled
+            try? await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    if (!cancellationWasAlreadySet && Task.isCancelled) || !suspendsClose {
+                        continuation.resume(throwing: CancellationError())
+                    } else {
+                        closeBarrierWaiters[barrierToken] = continuation
+                    }
+                }
+            } onCancel: {
+                guard !cancellationWasAlreadySet else { return }
+                Task { await self.cancelCloseBarrierWaiter(token: barrierToken) }
+            }
+        }
+        guard !isClosed else { return }
+        isClosed = true
+        closeTransitions += 1
+        let pendingReceivers = receivers
+        receivers.removeAll()
+        for receiver in pendingReceivers { receiver.continuation.resume(throwing: CancellationError()) }
+        resumeSatisfiedWaiters(&closeWaiters, observedCount: closeTransitions)
+    }
+
+    func releaseClose() {
+        suspendsClose = false
+        let waiters = closeBarrierWaiters.values
+        closeBarrierWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
+    func enqueue(_ data: Data) {
+        guard !isClosed else { return }
+        if receivers.isEmpty {
+            inbound.append(data)
+        } else {
+            receivers.removeFirst().continuation.resume(returning: data)
+        }
+    }
+
+    func sentFrames() -> [Data] { sent }
+    func closeInvocationCount() -> Int { closeInvocations }
+    func closeTransitionCount() -> Int { closeTransitions }
+    func closed() -> Bool { isClosed }
+
+    func waitUntilSent(count: Int) async throws {
+        try await wait(until: count, observedCount: sent.count, kind: .sent)
+    }
+
+    func waitUntilCloseInvoked(count: Int = 1) async throws {
+        try await wait(until: count, observedCount: closeInvocations, kind: .closeInvocation)
+    }
+
+    func waitUntilClosed(count: Int = 1) async throws {
+        try await wait(until: count, observedCount: closeTransitions, kind: .closeTransition)
+    }
+
+    private func wait(until count: Int, observedCount: Int, kind: WaiterKind) async throws {
+        if observedCount >= count { return }
+        let token = nextWaiterToken
+        nextWaiterToken += 1
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else {
+                    let waiter = Waiter(token: token, count: count, continuation: continuation)
+                    switch kind {
+                    case .sent: sentWaiters.append(waiter)
+                    case .closeInvocation: closeInvocationWaiters.append(waiter)
+                    case .closeTransition: closeWaiters.append(waiter)
+                    }
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(token: token) }
+        }
+    }
+
+    private func cancelReceiver(token: Int) {
+        guard let index = receivers.firstIndex(where: { $0.token == token }) else { return }
+        receivers.remove(at: index).continuation.resume(throwing: CancellationError())
+    }
+
+    private func cancelWaiter(token: Int) {
+        if let index = sentWaiters.firstIndex(where: { $0.token == token }) {
+            sentWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
+        } else if let index = closeInvocationWaiters.firstIndex(where: { $0.token == token }) {
+            closeInvocationWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
+        } else if let index = closeWaiters.firstIndex(where: { $0.token == token }) {
+            closeWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
+        }
+    }
+
+    private func cancelCloseBarrierWaiter(token: Int) {
+        closeBarrierWaiters.removeValue(forKey: token)?.resume(throwing: CancellationError())
+    }
+
+    private func resumeSatisfiedWaiters(_ waiters: inout [Waiter], observedCount: Int) {
+        let ready = waiters.filter { observedCount >= $0.count }
+        waiters.removeAll { observedCount >= $0.count }
+        for waiter in ready { waiter.continuation.resume() }
+    }
+}
+
+final class ScriptedGatewaySocketFactory: Sendable {
+    private struct State {
+        var sockets: [ScriptedGatewaySocket]
+        var nextSocket = 0
+        var requests: [URLRequest] = []
+    }
+
+    private let state: Mutex<State>
+
+    init(socket: ScriptedGatewaySocket) {
+        state = Mutex(State(sockets: [socket]))
+    }
+
+    init(sockets: [ScriptedGatewaySocket]) {
+        precondition(!sockets.isEmpty)
+        state = Mutex(State(sockets: sockets))
+    }
+
+    var factory: GatewaySocketFactory {
+        GatewaySocketFactory { request in
+            self.state.withLock { state in
+                precondition(state.nextSocket < state.sockets.count, "Scripted socket factory exhausted")
+                defer { state.nextSocket += 1 }
+                state.requests.append(request)
+                return state.sockets[state.nextSocket]
+            }
+        }
+    }
+
+    var requests: [URLRequest] {
+        state.withLock { $0.requests }
+    }
+}

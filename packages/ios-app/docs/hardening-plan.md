@@ -1,13 +1,13 @@
 # Tron iOS hardening plan
 
-Status: implementation in progress — milestone 0A complete; milestones 0B–9 not started
+Status: implementation in progress — milestones 0A and 0B.1 complete; milestones 0B.2–0B.5 and 1–9 not started
 
 Audit baseline: `cee85b64a`
 
-Implementation baseline: `cee85b64a`
+Implementation baseline for 0B.1: `fb009f311`
 Scope: all handwritten iOS app, share-extension, test, project, and owning documentation code under `packages/ios-app`, narrowly required Gateway contract work, and iOS release policy where repository rules require manual delivery.
 
-Milestone 0A began from clean tracked HEAD `cee85b64a`; untracked `.pi` runtime artifacts are outside the implementation baseline. No audit artifact or historical line number overrides source at this baseline.
+Milestone 0A began from clean tracked HEAD `cee85b64a`. Milestone 0B.1 began from clean tracked HEAD `fb009f311`; untracked `.pi` runtime artifacts are outside both implementation baselines. No audit artifact or historical line number overrides source at these baselines.
 
 ## Goal
 
@@ -48,7 +48,9 @@ Eight independent read-only audits covered state architecture, chat scrolling/pe
 
 **0A — Repository policy and canonical documentation: complete.** The automatic iOS production/TestFlight workflow was deleted; README, contributor, pull-request, and iOS development guidance now require manual maintainer delivery; the obsolete gateway-integration completion plan was deleted after its canonical architecture/event/onboarding facts were confirmed in owning docs and its signed-release checks were condensed into development guidance; and the architecture source map no longer claims app-owned native speech. System-keyboard dictation remains documented. This milestone changes no product behavior or UI.
 
-**0B and milestones 1–9: not started.** Baseline builds, tests, performance evidence, testability seams, runtime hardening, and later owner refactors remain pending under the plan below.
+**0B.1 — Deterministic Gateway boundary and strict baseline: complete.** `GatewayClient` now owns byte-level injectable WebSocket, monotonic-clock, and UUID seams; Gateway-related `AppModel` waits and command IDs use injected production-identical defaults. Focused transport tests characterize hello/request bytes, response/event admission, virtual timeout, exact socket close, and overflow signaling. Swift complete strict concurrency is explicit. These seams contain no session runtime, event journal, receipt policy, epoch fix, or UI change.
+
+**0B.2–0B.5 and milestones 1–9: not started.** Pairing attempt admission, generated/performance evidence, remaining testability and system-service seams, runtime hardening, and later owner refactors remain pending under the plan below.
 
 ### Verified correctness priorities
 
@@ -171,12 +173,12 @@ Work proceeds as serial milestones. Each milestone gets one writer, a bounded ow
 
 ### Phase 0 — Freeze contracts and establish evidence
 
-Milestone 0A completed the repository-policy and canonical-documentation slice described above. The following milestone 0B deliverables are pending and have not started:
+Milestone 0A completed the repository-policy and canonical-documentation slice described above. Milestone 0B.1 completed the byte-level Gateway WebSocket factory/connection, monotonic clock/sleeper, UUID source, strict-concurrency setting, and focused transport characterization tests. The remaining 0B.2–0B.5 deliverables are pending and have not started:
 
-- Record baseline build/test status at the approved implementation baseline.
-- Add injectable Gateway and pairing transports, clock/sleeper, display-frame scheduler, UUID source, and lightweight test barriers. These are testability seams around production behavior, not alternate implementations.
+- Add pairing transport and attempt admission; pairing remains intentionally outside the 0B.1 socket seam.
+- Add the display-frame scheduler and remaining lightweight barriers where their owning instrumentation/harness immediately uses them. These are testability seams around production behavior, not alternate implementations.
 - Add injectable camera/QR authorization and capture-session adapters plus share inbox/store/app-opener seams; make shared pure logic testable outside the extension controller and add archive assertions for both privacy manifests.
-- Establish a strict-concurrency baseline now and rerun it in every milestone that introduces off-main work.
+- Retain the explicit complete strict-concurrency baseline in every milestone that introduces off-main work.
 - Add privacy-safe signposts for Gateway connect, session open/sync/resync, receipt resolution, cache load/save, chat projection, first ready frame, scroll command/settle, prepend settle, and terminal attach/replay.
 - Add generated scenario builders for bounded snapshots, pages, gaps, tool bursts, and large sessions.
 - Add a hosted `ChatView`/real `ScrollView` integration harness with a scripted Gateway that captures semantic row frames and displacement once per presented display frame.
