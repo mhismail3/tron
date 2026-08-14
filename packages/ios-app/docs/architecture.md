@@ -23,8 +23,12 @@ implementation detail; all user-facing language calls the agent Tron.
 ## State flow
 
 `GatewayClient` performs one authenticated WebSocket connection, protocol hello,
-request correlation, deadlines, and event delivery. Its injectable transport ends
-at WebSocket bytes, and its monotonic-clock and UUID inputs control only time and
+request correlation, deadlines, and event delivery. One private connection epoch owns the
+exact socket, receive/liveness tasks, pending requests, liveness timestamp, overflow state,
+and handshake projection. Connect and close invalidate older attempts across every suspension;
+late hello, frame, failure, liveness, completion, and close callbacks can only detach or publish
+for their captured epoch. Idle transport tasks do not retain an otherwise unowned client. Its
+injectable transport ends at WebSocket bytes, and its monotonic-clock and UUID inputs control only time and
 identity generation. The production transport is an actor-confined ephemeral
 `URLSession` owner and preserves the existing data frames, headers, deadlines, and
 random UUID behavior. Scripted test sockets contain no protocol, session, receipt,

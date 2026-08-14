@@ -71,7 +71,9 @@ after the expected sleeper/barrier is registered. Test-owned unstructured tasks
 must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
 the test watchdog propagates cancellation. Scripts enqueue and inspect raw frame
 bytes; they must not implement protocol decoding, session state, receipt policy,
-retry policy, or event admission. Run the focused owner with:
+retry policy, or event admission. The optional late-callback and suspended-close modes exist only
+to prove that a retired epoch cannot install a hello/frame, emit a disconnect, or retain the client;
+they never alter production transport behavior. Run the focused owner with:
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \

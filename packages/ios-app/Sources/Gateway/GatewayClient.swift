@@ -6,25 +6,29 @@ actor GatewayClient {
         let timeout: Task<Void, Never>
     }
 
+    private struct ConnectionEpoch {
+        let id: Int
+        let socket: any GatewaySocketConnection
+        var receiveTask: Task<Void, Never>?
+        var livenessTask: Task<Void, Never>?
+        var pending: [String: PendingRequest] = [:]
+        var lastInboundAt: ContinuousClock.Instant?
+        var overflowResyncSignaled = false
+        var info: GatewayInfo?
+    }
+
     nonisolated let events: AsyncStream<GatewayEvent>
     private let eventContinuation: AsyncStream<GatewayEvent>.Continuation
     private let socketFactory: GatewaySocketFactory
     private let clock: MonotonicClock
     private let uuidSource: UUIDSource
     private let performanceSignposts: any PerformanceSignposting
-    private var socket: (any GatewaySocketConnection)?
-    private var receiveTask: Task<Void, Never>?
-    private var livenessTask: Task<Void, Never>?
-    private var pending: [String: PendingRequest] = [:]
-    private var processingInboundFrame = false
-    private var inboundFrames: [Data] = []
+    private var connection: ConnectionEpoch?
     private var generation = 0
-    private var intentionalDisconnectGenerations: Set<Int> = []
-    private var lastInboundAt: ContinuousClock.Instant?
-    private var overflowResyncSignaled = false
-    private(set) var info: GatewayInfo?
     private var profile: GatewayProfile?
     private var token: String?
+
+    var info: GatewayInfo? { connection?.info }
 
     init(
         socketFactory: GatewaySocketFactory = .urlSession,
@@ -43,9 +47,9 @@ actor GatewayClient {
 
     deinit {
         eventContinuation.finish()
-        receiveTask?.cancel()
-        livenessTask?.cancel()
-        if let socket {
+        connection?.receiveTask?.cancel()
+        connection?.livenessTask?.cancel()
+        if let socket = connection?.socket {
             Task { await socket.close() }
         }
     }
@@ -64,38 +68,47 @@ actor GatewayClient {
     }
 
     private func establishConnection(profile: GatewayProfile, token: String) async throws -> GatewayInfo {
-        await disconnect(
-            reason: GatewayFailure(code: "replaced", message: "Connection replaced", retryable: true, details: nil),
-            intentional: true
+        generation &+= 1
+        let epochID = generation
+        await detachConnection(
+            reason: GatewayFailure(code: "replaced", message: "Connection replaced", retryable: true, details: nil)
         )
+        try Task.checkCancellation()
+        guard generation == epochID else { throw CancellationError() }
+
         self.profile = profile
         self.token = token
-        generation &+= 1
-        let currentGeneration = generation
-
         var request = URLRequest(url: profile.socketURL, timeoutInterval: 15)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let socket = socketFactory.makeConnection(request)
-        self.socket = socket
+        connection = ConnectionEpoch(id: epochID, socket: socket)
 
-        let hello: JSONValue = .object([
-            "type": .string("hello"),
-            "protocolVersion": .number(2),
-            "clientId": .string(uuidSource.next().uuidString),
-        ])
-        try await socket.send(JSONEncoder.gateway.encode(hello))
-        let data = try await withTimeout(duration: .seconds(15)) { try await socket.receive() }
-        let decoded = try JSONDecoder.gateway.decode(GatewayHello.self, from: data)
-        guard decoded.type == "hello", decoded.protocolVersion == 2, decoded.minProtocolVersion <= 2 else {
-            throw GatewayFailure(code: "protocol_mismatch", message: "The Mac gateway protocol is not compatible with this app.", retryable: false, details: nil)
+        do {
+            let hello: JSONValue = .object([
+                "type": .string("hello"),
+                "protocolVersion": .number(2),
+                "clientId": .string(uuidSource.next().uuidString),
+            ])
+            try await socket.send(JSONEncoder.gateway.encode(hello))
+            try requireEpoch(epochID)
+            let data = try await withTimeout(duration: .seconds(15)) { try await socket.receive() }
+            try requireEpoch(epochID)
+            let decoded = try JSONDecoder.gateway.decode(GatewayHello.self, from: data)
+            try requireEpoch(epochID)
+            guard decoded.type == "hello", decoded.protocolVersion == 2, decoded.minProtocolVersion <= 2 else {
+                throw GatewayFailure(code: "protocol_mismatch", message: "The Mac gateway protocol is not compatible with this app.", retryable: false, details: nil)
+            }
+            guard var epoch = connection, epoch.id == epochID else { throw CancellationError() }
+            epoch.info = decoded.info
+            epoch.lastInboundAt = clock.now()
+            connection = epoch
+            startReceive(epochID: epochID)
+            startLivenessWait(epochID: epochID)
+            return decoded.info
+        } catch {
+            await detachConnection(epochID: epochID, reason: Self.transportFailure(error))
+            throw error
         }
-        let info = decoded.info
-        self.info = info
-        lastInboundAt = clock.now()
-        overflowResyncSignaled = false
-        receiveTask = Task { [weak self] in await self?.receiveLoop(generation: currentGeneration) }
-        livenessTask = Task { [weak self] in await self?.monitorLiveness(generation: currentGeneration) }
-        return info
     }
 
     func reconnect() async throws -> GatewayInfo {
@@ -106,21 +119,26 @@ actor GatewayClient {
     }
 
     func close() async {
+        generation &+= 1
         profile = nil
         token = nil
-        await disconnect(
-            reason: GatewayFailure(code: "closed", message: "Connection closed", retryable: true, details: nil),
-            intentional: true
+        await detachConnection(
+            reason: GatewayFailure(code: "closed", message: "Connection closed", retryable: true, details: nil)
         )
     }
 
     func ensureResponsive(maximumSilence: Duration = .seconds(35)) async throws {
-        guard socket != nil, let lastInboundAt else {
+        guard let epoch = connection, let lastInboundAt = epoch.lastInboundAt else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
         if clock.now() - lastInboundAt <= maximumSilence { return }
         struct Response: Decodable { let protocolVersion: Int }
-        let _: Response = try await request("system.info", EmptyParams(), timeout: .seconds(8))
+        let _: Response = try await request(
+            "system.info",
+            EmptyParams(),
+            timeout: .seconds(8),
+            expectedEpochID: epoch.id
+        )
     }
 
     func request<P: Encodable, R: Decodable>(
@@ -133,31 +151,78 @@ actor GatewayClient {
         return try value.decode(responseType)
     }
 
-    func requestValue<P: Encodable>(_ method: String, _ params: P, timeout: Duration = .seconds(30)) async throws -> JSONValue {
-        guard let socket else {
+    func requestValue<P: Encodable>(
+        _ method: String,
+        _ params: P,
+        timeout: Duration = .seconds(30)
+    ) async throws -> JSONValue {
+        try await requestValue(method, params, timeout: timeout, expectedEpochID: nil)
+    }
+
+    private func request<P: Encodable, R: Decodable>(
+        _ method: String,
+        _ params: P,
+        as responseType: R.Type = R.self,
+        timeout: Duration,
+        expectedEpochID: Int
+    ) async throws -> R {
+        let value = try await requestValue(
+            method,
+            params,
+            timeout: timeout,
+            expectedEpochID: expectedEpochID
+        )
+        return try value.decode(responseType)
+    }
+
+    private func requestValue<P: Encodable>(
+        _ method: String,
+        _ params: P,
+        timeout: Duration,
+        expectedEpochID: Int?
+    ) async throws -> JSONValue {
+        guard let epoch = connection,
+              expectedEpochID == nil || expectedEpochID == epoch.id else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
+        let epochID = epoch.id
+        let socket = epoch.socket
         let id = uuidSource.next().uuidString
         let frame = GatewayRequest(id: id, method: method, params: try JSONValue.encode(params))
+        let data = try JSONEncoder.gateway.encode(frame)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
+                guard var current = connection, current.id == epochID else {
+                    continuation.resume(throwing: GatewayFailure(
+                        code: "replaced",
+                        message: "Connection replaced",
+                        retryable: true,
+                        details: nil
+                    ))
+                    return
+                }
                 let clock = self.clock
                 let timeoutTask = Task { [weak self] in
                     try? await clock.sleep(timeout)
                     guard !Task.isCancelled else { return }
-                    await self?.expire(id: id)
+                    await self?.expire(id: id, epochID: epochID)
                 }
-                pending[id] = PendingRequest(continuation: continuation, timeout: timeoutTask)
-                Task {
+                current.pending[id] = PendingRequest(continuation: continuation, timeout: timeoutTask)
+                connection = current
+                Task { [weak self] in
                     do {
-                        try await socket.send(JSONEncoder.gateway.encode(frame))
+                        try await socket.send(data)
                     } catch {
-                        fail(id: id, error: Self.transportFailure(error))
+                        await self?.fail(
+                            id: id,
+                            epochID: epochID,
+                            error: Self.transportFailure(error)
+                        )
                     }
                 }
             }
         } onCancel: {
-            Task { await self.fail(id: id, error: CancellationError()) }
+            Task { await self.fail(id: id, epochID: epochID, error: CancellationError()) }
         }
     }
 
@@ -196,136 +261,164 @@ actor GatewayClient {
         return (data, http.value(forHTTPHeaderField: "Content-Type") ?? "application/octet-stream")
     }
 
-    private func receiveLoop(generation expected: Int) async {
-        while !Task.isCancelled, generation == expected, let socket {
+    private func startReceive(epochID: Int) {
+        guard var epoch = connection, epoch.id == epochID else { return }
+        let socket = epoch.socket
+        epoch.receiveTask = Task { [weak self, socket] in
+            let result: Result<Data, Error>
+            do { result = .success(try await socket.receive()) }
+            catch { result = .failure(error) }
+            await self?.receiveCompleted(result, epochID: epochID)
+        }
+        connection = epoch
+    }
+
+    private func receiveCompleted(_ result: Result<Data, Error>, epochID: Int) async {
+        guard ownsEpoch(epochID) else { return }
+        switch result {
+        case .success(let data):
+            guard var current = connection, current.id == epochID else { return }
+            current.lastInboundAt = clock.now()
+            connection = current
             do {
-                let data = try await socket.receive()
-                lastInboundAt = clock.now()
-                await enqueue(data)
+                try await handle(data, epochID: epochID)
+                if ownsEpoch(epochID) { startReceive(epochID: epochID) }
             } catch {
-                let intentional = intentionalDisconnectGenerations.remove(expected) != nil
-                guard generation == expected, !intentional, !(error is CancellationError) else { return }
-                let failure = Self.transportFailure(error)
-                await disconnect(reason: failure)
-                eventContinuation.yield(GatewayEvent(
-                    type: "event",
-                    topic: "transport.disconnected",
-                    sessionId: nil,
-                    payload: .object(["message": .string(failure.message)])
-                ))
-                return
+                await disconnectEpoch(epochID: epochID, failure: Self.transportFailure(error))
             }
+        case .failure(let error):
+            await disconnectEpoch(epochID: epochID, failure: Self.transportFailure(error))
         }
     }
 
-    private func monitorLiveness(generation expected: Int) async {
-        while !Task.isCancelled, generation == expected, socket != nil {
-            try? await clock.sleep(.seconds(20))
-            guard !Task.isCancelled, generation == expected, socket != nil else { return }
-            do {
-                try await ensureResponsive(maximumSilence: .seconds(35))
-            } catch {
-                guard generation == expected else { return }
-                let failure = Self.transportFailure(error)
-                await disconnect(reason: failure)
-                eventContinuation.yield(GatewayEvent(
-                    type: "event",
-                    topic: "transport.disconnected",
-                    sessionId: nil,
-                    payload: .object(["message": .string(failure.message)])
-                ))
-                return
+    private func startLivenessWait(epochID: Int) {
+        guard var epoch = connection, epoch.id == epochID else { return }
+        let clock = self.clock
+        epoch.livenessTask = Task { [weak self, clock] in
+            do { try await clock.sleep(.seconds(20)) }
+            catch { return }
+            guard !Task.isCancelled else { return }
+            await self?.livenessWaitCompleted(epochID: epochID)
+        }
+        connection = epoch
+    }
+
+    private func livenessWaitCompleted(epochID: Int) async {
+        guard ownsEpoch(epochID) else { return }
+        do {
+            guard let lastInboundAt = connection?.lastInboundAt else { return }
+            if clock.now() - lastInboundAt > .seconds(35) {
+                struct Response: Decodable { let protocolVersion: Int }
+                let _: Response = try await request(
+                    "system.info",
+                    EmptyParams(),
+                    timeout: .seconds(8),
+                    expectedEpochID: epochID
+                )
             }
+            if ownsEpoch(epochID) { startLivenessWait(epochID: epochID) }
+        } catch {
+            guard ownsEpoch(epochID) else { return }
+            await disconnectEpoch(epochID: epochID, failure: Self.transportFailure(error))
         }
     }
 
-    private func enqueue(_ data: Data) async {
-        inboundFrames.append(data)
-        await drainInboundFrames()
+    private func disconnectEpoch(epochID: Int, failure: GatewayFailure) async {
+        guard await detachConnection(epochID: epochID, reason: failure) else { return }
+        eventContinuation.yield(GatewayEvent(
+            type: "event",
+            topic: "transport.disconnected",
+            sessionId: nil,
+            payload: .object(["message": .string(failure.message)])
+        ))
     }
 
-    private func drainInboundFrames() async {
-        guard !processingInboundFrame else { return }
-        processingInboundFrame = true
-        defer { processingInboundFrame = false }
-        while !inboundFrames.isEmpty {
-            let data = inboundFrames.removeFirst()
-            do { try await handle(data) }
-            catch {
-                let failure = Self.transportFailure(error)
-                await disconnect(reason: failure)
-                eventContinuation.yield(GatewayEvent(
-                    type: "event",
-                    topic: "transport.disconnected",
-                    sessionId: nil,
-                    payload: .object(["message": .string(failure.message)])
-                ))
-                return
-            }
-        }
-    }
-
-    private func handle(_ data: Data) async throws {
+    private func handle(_ data: Data, epochID: Int) async throws {
+        try requireEpoch(epochID)
         let value = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
+        try requireEpoch(epochID)
         guard let object = value.objectValue, let type = object["type"]?.stringValue else { return }
         switch type {
         case "response":
             let response = try JSONDecoder.gateway.decode(GatewayResponse.self, from: data)
-            guard let waiter = pending.removeValue(forKey: response.id) else { return }
-            waiter.timeout.cancel()
-            if response.ok { waiter.continuation.resume(returning: response.result ?? .null) }
-            else { waiter.continuation.resume(throwing: response.error ?? GatewayFailure(code: "invalid_response", message: "Gateway returned an invalid error.", retryable: false, details: nil)) }
-        case "event":
-            let event = try JSONDecoder.gateway.decode(GatewayEvent.self, from: data)
-            if case .dropped = eventContinuation.yield(event), !overflowResyncSignaled {
-                overflowResyncSignaled = true
-                await disconnect(reason: GatewayFailure(
-                    code: "event_overflow",
-                    message: "The live event buffer overflowed; reconnecting for an authoritative snapshot.",
-                    retryable: true,
+            try requireEpoch(epochID)
+            guard let waiter = removePending(id: response.id, epochID: epochID) else { return }
+            if response.ok {
+                waiter.continuation.resume(returning: response.result ?? .null)
+            } else {
+                waiter.continuation.resume(throwing: response.error ?? GatewayFailure(
+                    code: "invalid_response",
+                    message: "Gateway returned an invalid error.",
+                    retryable: false,
                     details: nil
                 ))
-                _ = eventContinuation.yield(GatewayEvent(
-                    type: "event",
-                    topic: "transport.disconnected",
-                    sessionId: nil,
-                    payload: .object(["message": .string("Live event buffer overflow")])
-                ))
+            }
+        case "event":
+            let event = try JSONDecoder.gateway.decode(GatewayEvent.self, from: data)
+            try requireEpoch(epochID)
+            if case .dropped = eventContinuation.yield(event) {
+                guard var current = connection,
+                      current.id == epochID,
+                      !current.overflowResyncSignaled else { return }
+                current.overflowResyncSignaled = true
+                connection = current
+                await disconnectEpoch(
+                    epochID: epochID,
+                    failure: GatewayFailure(
+                        code: "event_overflow",
+                        message: "Live event buffer overflow",
+                        retryable: true,
+                        details: nil
+                    )
+                )
             }
         default:
             break
         }
     }
 
-    private func expire(id: String) {
-        fail(id: id, error: GatewayFailure(code: "timeout", message: "The Mac did not answer in time.", retryable: true, details: nil))
+    private func expire(id: String, epochID: Int) {
+        fail(
+            id: id,
+            epochID: epochID,
+            error: GatewayFailure(code: "timeout", message: "The Mac did not answer in time.", retryable: true, details: nil)
+        )
     }
 
-    private func fail(id: String, error: Error) {
-        guard let waiter = pending.removeValue(forKey: id) else { return }
-        waiter.timeout.cancel()
+    private func fail(id: String, epochID: Int, error: Error) {
+        guard let waiter = removePending(id: id, epochID: epochID) else { return }
         waiter.continuation.resume(throwing: error)
     }
 
-    private func disconnect(reason: Error, intentional: Bool = false) async {
-        if intentional, receiveTask != nil { intentionalDisconnectGenerations.insert(generation) }
-        receiveTask?.cancel()
-        receiveTask = nil
-        livenessTask?.cancel()
-        livenessTask = nil
-        let closingSocket = socket
-        socket = nil
-        info = nil
-        lastInboundAt = nil
-        overflowResyncSignaled = false
-        let waiters = pending.values
-        pending.removeAll()
-        inboundFrames.removeAll()
-        for waiter in waiters {
+    private func removePending(id: String, epochID: Int) -> PendingRequest? {
+        guard var epoch = connection, epoch.id == epochID,
+              let waiter = epoch.pending.removeValue(forKey: id) else { return nil }
+        connection = epoch
+        waiter.timeout.cancel()
+        return waiter
+    }
+
+    @discardableResult
+    private func detachConnection(epochID: Int? = nil, reason: Error) async -> Bool {
+        guard let epoch = connection,
+              epochID == nil || epoch.id == epochID else { return false }
+        connection = nil
+        epoch.receiveTask?.cancel()
+        epoch.livenessTask?.cancel()
+        for waiter in epoch.pending.values {
             waiter.timeout.cancel()
             waiter.continuation.resume(throwing: reason)
         }
-        await closingSocket?.close()
+        await epoch.socket.close()
+        return generation == epoch.id && connection == nil
+    }
+
+    private func ownsEpoch(_ epochID: Int) -> Bool {
+        connection?.id == epochID
+    }
+
+    private func requireEpoch(_ epochID: Int) throws {
+        guard ownsEpoch(epochID) else { throw CancellationError() }
     }
 
     private nonisolated static func transportFailure(_ error: Error) -> GatewayFailure {

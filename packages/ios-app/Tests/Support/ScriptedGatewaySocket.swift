@@ -15,6 +15,7 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
     }
 
     private var inbound: [Data] = []
+    private var inboundFailures: [Error] = []
     private var receivers: [Receiver] = []
     private var nextReceiverToken = 0
     private var sent: [Data] = []
@@ -28,10 +29,12 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
 
     private var isClosed = false
     private var suspendsClose: Bool
+    private let deliversCallbacksAfterClose: Bool
     private var closeBarrierWaiters: [Int: CheckedContinuation<Void, Error>] = [:]
 
-    init(suspendsClose: Bool = false) {
+    init(suspendsClose: Bool = false, deliversCallbacksAfterClose: Bool = false) {
         self.suspendsClose = suspendsClose
+        self.deliversCallbacksAfterClose = deliversCallbacksAfterClose
     }
 
     func send(_ data: Data) throws {
@@ -42,6 +45,7 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
 
     func receive() async throws -> Data {
         guard !isClosed else { throw CancellationError() }
+        if !inboundFailures.isEmpty { throw inboundFailures.removeFirst() }
         if !inbound.isEmpty { return inbound.removeFirst() }
         let token = nextReceiverToken
         nextReceiverToken += 1
@@ -80,9 +84,11 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         guard !isClosed else { return }
         isClosed = true
         closeTransitions += 1
-        let pendingReceivers = receivers
-        receivers.removeAll()
-        for receiver in pendingReceivers { receiver.continuation.resume(throwing: CancellationError()) }
+        if !deliversCallbacksAfterClose {
+            let pendingReceivers = receivers
+            receivers.removeAll()
+            for receiver in pendingReceivers { receiver.continuation.resume(throwing: CancellationError()) }
+        }
         resumeSatisfiedWaiters(&closeWaiters, observedCount: closeTransitions)
     }
 
@@ -94,12 +100,22 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
     }
 
     func enqueue(_ data: Data) {
-        guard !isClosed else { return }
+        guard !isClosed || deliversCallbacksAfterClose else { return }
         if receivers.isEmpty {
             inbound.append(data)
         } else {
             receivers.removeFirst().continuation.resume(returning: data)
         }
+    }
+
+    func failPendingReceivers(_ error: Error) {
+        guard !receivers.isEmpty else {
+            inboundFailures.append(error)
+            return
+        }
+        let pendingReceivers = receivers
+        receivers.removeAll()
+        for receiver in pendingReceivers { receiver.continuation.resume(throwing: error) }
     }
 
     func sentFrames() -> [Data] { sent }
@@ -142,6 +158,7 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
     }
 
     private func cancelReceiver(token: Int) {
+        guard !deliversCallbacksAfterClose else { return }
         guard let index = receivers.firstIndex(where: { $0.token == token }) else { return }
         receivers.remove(at: index).continuation.resume(throwing: CancellationError())
     }

@@ -2,6 +2,10 @@ import Foundation
 import Testing
 @testable import TronMobile
 
+private final class WeakGatewayClient {
+    weak var value: GatewayClient?
+}
+
 @Suite("Gateway client byte transport")
 struct GatewayClientTransportTests {
     private let profile = GatewayProfile(
@@ -241,6 +245,39 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("a current receiver cancellation is a transport disconnect")
+    func currentReceiverCancellationDisconnects() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000027")!,
+                ]).source
+            )
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+
+            var iterator = client.events.makeAsyncIterator()
+            await socket.failPendingReceivers(CancellationError())
+            let event = await iterator.next()
+            #expect(event?.topic == "transport.disconnected")
+            #expect(await client.info == nil)
+            #expect(await socket.closed())
+        }
+    }
+
+    @Test("an idle connected client releases its socket when ownership ends")
+    func connectedClientDeinitializes() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let weakClient = try await makeConnectedClientReleasedImmediately(socket: socket)
+            try await socket.waitUntilClosed()
+            #expect(weakClient.value == nil)
+            #expect(await socket.closeTransitionCount() == 1)
+        }
+    }
+
     @Test("disconnect invokes close once and closes the factory-created socket")
     func disconnectClosesExactSocket() async throws {
         try await withTestWatchdog {
@@ -306,6 +343,132 @@ struct GatewayClientTransportTests {
                 result: .string("alive")
             ))
             #expect(try await valueOfOwnedTask(request) == .string("alive"))
+            await client.close()
+        }
+    }
+
+    @Test("late hello from a replaced connection cannot install or clear the replacement")
+    func staleHelloIsDiscarded() async throws {
+        try await withTestWatchdog {
+            let oldSocket = ScriptedGatewaySocket(deliversCallbacksAfterClose: true)
+            let replacementSocket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(sockets: [oldSocket, replacementSocket]).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000061")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000062")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000063")!,
+                ]).source
+            )
+
+            let staleConnection = Task { try await client.connect(profile: profile, token: "old") }
+            defer { staleConnection.cancel() }
+            try await oldSocket.waitUntilSent(count: 1)
+
+            await replacementSocket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "new")
+            await oldSocket.enqueue(helloFrame())
+            await #expect(throws: CancellationError.self) {
+                _ = try await valueOfOwnedTask(staleConnection)
+            }
+
+            let request = Task { try await client.requestValue("test.current", EmptyParams()) }
+            defer { request.cancel() }
+            try await replacementSocket.waitUntilSent(count: 2)
+            await replacementSocket.enqueue(responseFrame(
+                id: "00000000-0000-0000-0000-000000000063",
+                result: .string("current")
+            ))
+            #expect(try await valueOfOwnedTask(request) == .string("current"))
+            await client.close()
+        }
+    }
+
+    @Test("late frame from a replaced receiver is discarded")
+    func staleFrameIsDiscarded() async throws {
+        try await withTestWatchdog {
+            let oldSocket = ScriptedGatewaySocket(deliversCallbacksAfterClose: true)
+            let replacementSocket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(sockets: [oldSocket, replacementSocket]).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000071")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000072")!,
+                ]).source
+            )
+            await oldSocket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "old")
+            await replacementSocket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "new")
+
+            var iterator = client.events.makeAsyncIterator()
+            await oldSocket.enqueue(eventFrame(topic: "stale.changed", payload: .number(1)))
+            await replacementSocket.enqueue(eventFrame(topic: "current.changed", payload: .number(2)))
+            let event = await iterator.next()
+            #expect(event?.topic == "current.changed")
+            #expect(await client.info?.machineId == "machine")
+            await client.close()
+        }
+    }
+
+    @Test("a suspended retired close cannot emit disconnect after replacement")
+    func suspendedRetiredDisconnectIsDiscarded() async throws {
+        try await withTestWatchdog {
+            let oldSocket = ScriptedGatewaySocket(suspendsClose: true)
+            let replacementSocket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(sockets: [oldSocket, replacementSocket]).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000075")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000076")!,
+                ]).source
+            )
+            await oldSocket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "old")
+            var iterator = client.events.makeAsyncIterator()
+            await oldSocket.failPendingReceivers(GatewayFailure(
+                code: "disconnected",
+                message: "old failure",
+                retryable: true,
+                details: nil
+            ))
+            try await oldSocket.waitUntilCloseInvoked()
+
+            await replacementSocket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "new")
+            await oldSocket.releaseClose()
+            await replacementSocket.enqueue(eventFrame(topic: "current.changed", payload: .number(2)))
+            let event = await iterator.next()
+            #expect(event?.topic == "current.changed")
+            #expect(await client.info?.machineId == "machine")
+            await client.close()
+        }
+    }
+
+    @Test("late receive failure from a replaced receiver cannot disconnect the replacement")
+    func staleDisconnectIsDiscarded() async throws {
+        try await withTestWatchdog {
+            let oldSocket = ScriptedGatewaySocket(deliversCallbacksAfterClose: true)
+            let replacementSocket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(sockets: [oldSocket, replacementSocket]).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000081")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000082")!,
+                ]).source
+            )
+            await oldSocket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "old")
+            await replacementSocket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "new")
+
+            await oldSocket.failPendingReceivers(GatewayFailure(
+                code: "disconnected",
+                message: "late old failure",
+                retryable: true,
+                details: nil
+            ))
+            #expect(await client.info?.machineId == "machine")
             await client.close()
         }
     }
@@ -385,6 +548,24 @@ struct GatewayClientTransportTests {
             #expect(await socket.closeInvocationCount() == 1)
             #expect(await socket.closeTransitionCount() == 1)
         }
+    }
+
+    private func makeConnectedClientReleasedImmediately(
+        socket: ScriptedGatewaySocket
+    ) async throws -> WeakGatewayClient {
+        let weakClient = WeakGatewayClient()
+        do {
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000028")!,
+                ]).source
+            )
+            weakClient.value = client
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+        }
+        return weakClient
     }
 
     private func decodedValue(in socket: ScriptedGatewaySocket, index: Int) async throws -> JSONValue {
