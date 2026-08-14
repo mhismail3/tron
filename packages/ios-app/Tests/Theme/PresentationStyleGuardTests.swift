@@ -332,6 +332,10 @@ struct PresentationStyleGuardTests {
             runtimeWorkingRowCallCount == 1,
             "expected one mounted runtime working row, found \(runtimeWorkingRowCallCount)"
         )
+
+        let chat = try #require(productionSources.first { $0.0.lastPathComponent == "ChatView.swift" }?.1)
+        #expect(!chat.contains("snapshot.extensionUI.widgets.filter"))
+        #expect(chat.occurrences(of: "ChatExtensionWidgetPolicy.visibleWidgets") == 2)
     }
 
     @Test("composer owns capped UIKit scrolling and attachment photos keep stable previews")

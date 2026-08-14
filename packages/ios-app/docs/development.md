@@ -108,6 +108,20 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests/SessionScenarioBuilderTests
 ```
 
+`ChatViewScrollHarnessTests` mount the actual `ChatView`, `LazyVStack`, composer
+inset, and native `UIScrollView` in a fixed hosted window. Test-only authority
+admission bypasses network I/O without bypassing `AppModel`'s authoritative read
+gate. Raw geometry, visible semantic IDs, and row frames are reduced to one latest
+sample on each `CADisplayLink` tick. The Phase 0 baseline requires a visible latest
+semantic row, not a final displacement tolerance; Phase 5 owns that budget and the
+current multiple-update-per-frame SwiftUI diagnostics.
+
+```bash
+xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/ChatViewScrollHarnessTests
+```
+
 Run UI tests separately because simulator launch dominates their cost:
 
 ```bash

@@ -10,6 +10,9 @@ private enum ChatAttachmentDestination: Hashable {
 
 struct ChatView: View {
     let sessionID: String
+    #if HOSTED_TEST
+    let hostedProbe: ChatHostedProbe?
+    #endif
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
@@ -40,10 +43,18 @@ struct ChatView: View {
     // a UIViewRepresentable that has no `.focused` registration.
     @State private var composerFocused = false
 
+    #if HOSTED_TEST
+    init(sessionID: String, hostedProbe: ChatHostedProbe? = nil) {
+        self.sessionID = sessionID
+        self.hostedProbe = hostedProbe
+        _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
+    }
+    #else
     init(sessionID: String) {
         self.sessionID = sessionID
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
     }
+    #endif
 
     var body: some View {
         transcript
@@ -182,6 +193,9 @@ struct ChatView: View {
         .tronScrollEdgeChrome()
         .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.15) { ids in
             visibleTranscriptRowIDs = ids.filter { $0 != "transcript-bottom" }
+            #if HOSTED_TEST
+            hostedProbe?.updateVisibleRowIDs(visibleTranscriptRowIDs)
+            #endif
         }
         .onChange(of: transcriptScrollPosition.isPositionedByUser) { _, positionedByUser in
             scrollCoordinator.scrollPositionChanged(isPositionedByUser: positionedByUser)
@@ -190,6 +204,9 @@ struct ChatView: View {
             ChatTranscriptGeometry(geometry)
         } action: { previous, geometry in
             transcriptGeometry = geometry
+            #if HOSTED_TEST
+            hostedProbe?.updateGeometry(geometry)
+            #endif
             guard isTranscriptReady else { return }
             let requestedFollow: Bool
             if geometry.hasViewportChange(from: previous) {
@@ -237,14 +254,24 @@ struct ChatView: View {
         .overlay { openingSurface }
     }
 
+    @ViewBuilder
     private func stableTranscriptRow<Content: View>(
         id: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        content()
+        let row = content()
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .id(id)
+        #if HOSTED_TEST
+        row.onGeometryChange(for: CGRect.self) { geometry in
+            geometry.frame(in: .scrollView(axis: .vertical))
+        } action: { frame in
+            hostedProbe?.updateRowFrame(id: id, frame: frame)
+        }
+        #else
+        row
+        #endif
     }
 
     private var selectedAuthoritativeSnapshot: SessionSnapshot? {
@@ -321,6 +348,12 @@ struct ChatView: View {
 
     @MainActor
     private func beginOpeningPresentation() async {
+        #if HOSTED_TEST
+        if let hostedProbe {
+            beginHostedPresentation(probe: hostedProbe)
+            return
+        }
+        #endif
         openingTask?.cancel()
         pagingTask?.cancel()
         modelPresentationGeneration = nil
@@ -353,6 +386,28 @@ struct ChatView: View {
         await task.value
         if openPresentation.epoch == epoch { openingTask = nil }
     }
+
+    #if HOSTED_TEST
+    @MainActor
+    private func beginHostedPresentation(probe: ChatHostedProbe) {
+        scrollCoordinator.resetForPresentation()
+        let epoch = openPresentation.begin()
+        transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
+        transcriptGeometry = .zero
+        visibleTranscriptRowIDs = []
+        guard selectedAuthoritativeSnapshot != nil,
+              openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
+            _ = openPresentation.fail(
+                sessionID: sessionID,
+                epoch: epoch,
+                message: "Hosted authoritative snapshot unavailable"
+            )
+            return
+        }
+        probe.markReady()
+        positionLatestTail(epoch: epoch)
+    }
+    #endif
 
     @MainActor
     private func positionLatestTail(epoch: Int) {
@@ -530,7 +585,10 @@ struct ChatView: View {
     private var composer: some View {
         VStack(spacing: 10) {
             if let snapshot = selectedAuthoritativeSnapshot {
-                ForEach(snapshot.extensionUI.widgets.filter { $0.placement == .aboveEditor }) { widget in
+                ForEach(ChatExtensionWidgetPolicy.visibleWidgets(
+                    snapshot.extensionUI.widgets,
+                    placement: .aboveEditor
+                )) { widget in
                     ExtensionWidgetView(widget: widget)
                 }
             }
@@ -569,7 +627,10 @@ struct ChatView: View {
             .padding(.bottom, 8)
 
             if let snapshot = selectedAuthoritativeSnapshot {
-                ForEach(snapshot.extensionUI.widgets.filter { $0.placement == .belowEditor }) { widget in
+                ForEach(ChatExtensionWidgetPolicy.visibleWidgets(
+                    snapshot.extensionUI.widgets,
+                    placement: .belowEditor
+                )) { widget in
                     ExtensionWidgetView(widget: widget)
                 }
             }

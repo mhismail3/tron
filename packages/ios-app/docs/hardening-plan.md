@@ -1,6 +1,6 @@
 # Tron iOS hardening plan
 
-Status: implementation in progress — milestones 0A–0B.2, 0B.3a, and the separate provisional UI removal milestone are complete; milestone 0B.3b and milestones 0B.4–0B.5 and 1–9 are pending
+Status: implementation in progress — milestones 0A–0B.3 and the separate provisional UI removal milestone are complete; milestones 0B.4–0B.5 and 1–9 are pending
 
 Audit baseline: `cee85b64a`
 
@@ -8,6 +8,7 @@ Implementation baseline for 0B.1: `fb009f311`
 Provisional UI removal baseline: `03aa3b9a6`
 Implementation baseline for 0B.2: `4bac0090d`
 Implementation baseline for 0B.3a: `028e39a5e`
+Implementation baseline for 0B.3b: `67dd6825b`
 Scope: all handwritten iOS app, share-extension, test, project, and owning documentation code under `packages/ios-app`, narrowly required Gateway contract work, and iOS release policy where repository rules require manual delivery.
 
 Milestone 0A began from clean tracked HEAD `cee85b64a`. Milestone 0B.1 began from clean tracked HEAD `fb009f311`. The user-directed provisional UI removal began as a separate serial milestone from clean tracked HEAD `03aa3b9a6`. Milestone 0B.2 began from clean tracked HEAD `4bac0090d`, and milestone 0B.3a began from clean tracked HEAD `028e39a5e`; untracked `.pi` runtime artifacts are outside these implementation baselines. No audit artifact or historical line number overrides source at these baselines.
@@ -53,13 +54,15 @@ Eight independent read-only audits covered state architecture, chat scrolling/pe
 
 **0B.1 — Deterministic Gateway boundary and strict baseline: complete.** `GatewayClient` now owns byte-level injectable WebSocket, monotonic-clock, and UUID seams; Gateway-related `AppModel` waits and command IDs use injected production-identical defaults. Focused transport tests characterize hello/request bytes, response/event admission, virtual timeout, exact socket close, and overflow signaling. Swift complete strict concurrency is explicit. These seams contain no session runtime, event journal, receipt policy, epoch fix, or UI change.
 
-**Provisional UI removal — complete as a separate user-directed serial milestone.** The composer waveform and custom subagent session-management sheet were removed. Active visible working and retry feedback uses the established compact runtime row without changing composer or scroll ownership. Session kind/classification and dashboard filtering remain canonical; the dashboard retains user sessions and ordinary forks while hiding subagent backing sessions. This milestone does not advance or implement any pending numbered hardening milestone.
+**Provisional UI removal — complete as a separate user-directed serial milestone.** The composer waveform, custom subagent session-management sheet, and `pi-subagents` async/fleet editor widgets were removed from chat presentation. Other extension widgets remain supported. Active visible working and retry feedback uses the established compact runtime row without changing composer or scroll ownership. Session kind/classification and dashboard filtering remain canonical; the dashboard retains user sessions and ordinary forks while hiding subagent backing sessions. This milestone does not advance or implement any pending numbered hardening milestone.
 
 **0B.2 — Pairing transport and pre-commit attempt admission: complete.** `GatewayPairer` owns a narrow injectable HTTP-data transport and deterministic `/v1/pair` request/status/error decoding. `AppModel` owns one exact cancellable pairing task; supersession, forget, and switch invalidate it, with admission checks after HTTP, before profile/Keychain save, before connect, and through connect suspension boundaries. Barrier-controlled tests prove stale HTTP success cannot commit metadata/token or initiate connect. This does not claim Gateway connection-epoch safety or transactional profile replacement.
 
 **0B.3a — Deterministic generated scenarios: complete.** A test-only seeded builder produces byte-bounded opening tails, on-demand 10,000-entry paging ranges, long history pages, 100–256-tool bursts, 30/60 Hz cumulative Markdown updates, and synthetic high-resolution attachment data. Focused tests fix exact counts, bounds, overlap/gap behavior, rates, IDs, and privacy-safe content. It creates no production cache, transcript mirror, runtime, or session owner.
 
-**0B.3b–0B.5 and milestones 1–9: pending.** The hosted presented-frame scroll harness, performance evidence, remaining testability and system-service seams, runtime hardening, and later owner refactors remain pending under the plan below.
+**0B.3b — Hosted presented-frame scroll harness: complete.** Test builds can admit a synthetic snapshot through the existing authoritative read gate and bypass only network opening. The harness mounts the real `ChatView`, lazy transcript, composer inset, and native scroll view; semantic row frames, visibility, and geometry are coalesced to one latest sample per `CADisplayLink` frame. Focused tests prove native-scroll fidelity, latest-tail visibility, authority gating, watchdog-bounded waits, and at-most-one recorded sample per presented frame. No test hook ships in Beta or production.
+
+**0B.4–0B.5 and milestones 1–9: pending.** Privacy-safe instrumentation, device performance evidence, remaining system-service seams, runtime hardening, and later owner refactors remain pending under the plan below.
 
 ### Verified correctness priorities
 
@@ -182,13 +185,12 @@ Work proceeds as serial milestones. Each milestone gets one writer, a bounded ow
 
 ### Phase 0 — Freeze contracts and establish evidence
 
-Milestone 0A completed the repository-policy and canonical-documentation slice described above. Milestone 0B.1 completed the byte-level Gateway WebSocket factory/connection, monotonic clock/sleeper, UUID source, strict-concurrency setting, and focused transport characterization tests. Milestone 0B.2 completed the pairing-only HTTP-data seam and pre-commit attempt admission without broadening that seam to other HTTP owners or claiming a connection epoch. Milestone 0B.3a added only deterministic test scenarios; the hosted real-scroll harness remains 0B.3b. The separate provisional UI removal changed only the user-directed presentation surfaces summarized above and did not begin any remaining hardening work. The remaining 0B.3b–0B.5 deliverables are pending:
+Milestone 0A completed the repository-policy and canonical-documentation slice described above. Milestone 0B.1 completed the byte-level Gateway WebSocket factory/connection, monotonic clock/sleeper, UUID source, strict-concurrency setting, and focused transport characterization tests. Milestone 0B.2 completed the pairing-only HTTP-data seam and pre-commit attempt admission without broadening that seam to other HTTP owners or claiming a connection epoch. Milestone 0B.3 added deterministic test scenarios and a hosted real-scroll harness without production runtime state. The separate provisional UI removal changed only the user-directed presentation surfaces summarized above and did not begin any remaining hardening work. The remaining 0B.4–0B.5 deliverables are pending:
 
 - Add the display-frame scheduler and remaining lightweight barriers where their owning instrumentation/harness immediately uses them. These are testability seams around production behavior, not alternate implementations.
 - Add injectable camera/QR authorization and capture-session adapters plus share inbox/store/app-opener seams; make shared pure logic testable outside the extension controller and add archive assertions for both privacy manifests.
 - Retain the explicit complete strict-concurrency baseline in every milestone that introduces off-main work.
 - Add privacy-safe signposts for Gateway connect, session open/sync/resync, receipt resolution, cache load/save, chat projection, first ready frame, scroll command/settle, prepend settle, and terminal attach/replay.
-- Add a hosted `ChatView`/real `ScrollView` integration harness with a scripted Gateway that captures semantic row frames and displacement once per presented display frame.
 - Separate useful static style rules from brittle exact-source-spelling assertions before moving files.
 
 Baseline fixtures:

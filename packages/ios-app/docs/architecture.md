@@ -44,7 +44,13 @@ then the whole stage fades and rises in (opacity only under Reduce Motion). That
 handshake immediately marks the stage ready; native `ScrollPosition` starts at the
 bottom and receives one same-turn best-effort positioning hint before interaction
 is enabled, but physical layout callbacks are never a correctness gate because
-SwiftUI may coalesce them. The
+SwiftUI may coalesce them. Test builds can admit one synthetic authoritative
+snapshot through the same read gate and skip only the network opening handshake.
+The hosted harness still mounts the production chat, lazy transcript, composer
+inset, and native scroll view; a display-link recorder coalesces geometry and
+semantic row-frame observations to at most one sample per presented frame. These
+hooks are absent from Beta and production builds and own no session policy or
+runtime state. The
 composer remains mounted and visible throughout opening so transient synchronization
 cannot remove the primary chat control; sending stays disabled until the authoritative
 baseline is ready. A failed transport/sync open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
@@ -97,8 +103,10 @@ the exact Pi content order without hiding or moving thinking traces.
 The immutable navigation session ID owns one opening task and one typed
 `ScrollPosition`; duplicate dashboard opens and competing proxy scroll commands are
 forbidden. The complete composer is the sole structural owner of the ScrollView's bottom
-safe-area inset, including wrapped text, staged attachments, and extension widgets. Native
-safe-area layout therefore pushes the transcript exactly once and reverses naturally when the
+safe-area inset, including wrapped text, staged attachments, and supported extension widgets.
+The retired `pi-subagents` async and fleet editor widgets are not mounted; unrelated extension
+widgets retain their declared placement. Native safe-area layout therefore pushes the transcript
+exactly once and reverses naturally when the
 keyboard or composer contracts; no parallel `ScrollPosition` correction or focus-triggered
 jump competes with it. Interactive transcripts use bottom initial positioning but top alignment
 for undersized or lazily materializing content, preventing keyboard frames from repeatedly

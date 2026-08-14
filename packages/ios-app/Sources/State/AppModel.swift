@@ -225,6 +225,14 @@ final class AppModel {
         return snapshots[sessionID]
     }
 
+    #if HOSTED_TEST
+    func installHostedAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
+        selectedSessionID = snapshot.sessionId
+        snapshots[snapshot.sessionId] = snapshot
+        authoritativeSessionIDs.insert(snapshot.sessionId)
+    }
+    #endif
+
     func presentationGeneration(for sessionID: String) -> Int? {
         mountedPresentationGenerationBySession[sessionID]
     }

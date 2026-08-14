@@ -59,8 +59,9 @@ bounded latest page; this cold-presentation rule is distinct from in-place recon
 Phase, operation, tool ordering, and canonical paging cursors remain authoritative. A rolling-upgrade
 client also normalizes the impossible legacy combination of an idle phase and retained running-tool
 overlay to an interrupted chip; it does not expose a fake Stop action for extension-owned detached
-work. Current Gateways project that background work separately through extension UI state. The run continues on the Mac;
-the app catches up without presenting transport errors as modal alerts. Foreground activation
+work. Current Gateways project that background work separately through extension UI state. Tron
+does not mount the retired `pi-subagents` async/fleet editor widgets; the run continues on the Mac
+and the app catches up without presenting transport errors as modal alerts. Foreground activation
 coalesces to one responsiveness/list/session reconciliation; an aborted or resumed network path
 enters the ordinary reconnect loop. A temporary catch-up pill is deduplicated and removed by the
 next successful authoritative session synchronization rather than persisting as an error state.

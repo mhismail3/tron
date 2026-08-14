@@ -1,6 +1,22 @@
 import Foundation
 import SwiftUI
 
+enum ChatExtensionWidgetPolicy {
+    private static let retiredSubagentChromeKeys: Set<String> = [
+        "subagent-async",
+        "subagent-fleet-status",
+    ]
+
+    static func visibleWidgets(
+        _ widgets: [ExtensionWidget],
+        placement: ExtensionWidget.Placement
+    ) -> [ExtensionWidget] {
+        widgets.filter {
+            $0.placement == placement && !retiredSubagentChromeKeys.contains($0.key)
+        }
+    }
+}
+
 /// The single ephemeral runtime row shown after the canonical transcript while
 /// an active session reports visible working state.
 struct ChatRuntimeWorkingPresentation: Equatable {

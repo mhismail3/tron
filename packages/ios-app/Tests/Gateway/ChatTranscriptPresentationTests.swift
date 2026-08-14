@@ -4,6 +4,23 @@ import Testing
 
 @Suite("Chat transcript presentation")
 struct ChatTranscriptPresentationTests {
+    @Test("retired subagent chrome is hidden while unrelated extension widgets remain")
+    func retiredSubagentWidgetPolicy() {
+        let widgets = [
+            ExtensionWidget(key: "subagent-async", lines: ["1 active agent"], placement: .belowEditor),
+            ExtensionWidget(key: "subagent-fleet-status", lines: ["Fleet"], placement: .aboveEditor),
+            ExtensionWidget(key: "subagent-custom", lines: ["Keep"], placement: .belowEditor),
+            ExtensionWidget(key: "project-status", lines: ["Ready"], placement: .aboveEditor),
+        ]
+
+        #expect(ChatExtensionWidgetPolicy.visibleWidgets(widgets, placement: .aboveEditor).map(\.key) == [
+            "project-status",
+        ])
+        #expect(ChatExtensionWidgetPolicy.visibleWidgets(widgets, placement: .belowEditor).map(\.key) == [
+            "subagent-custom",
+        ])
+    }
+
     @Test("runtime working row follows phase, visibility, message, and retry policy")
     func runtimeWorkingRowPolicy() {
         struct PolicyCase {
