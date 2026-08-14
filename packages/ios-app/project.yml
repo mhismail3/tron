@@ -18,12 +18,14 @@ configFiles:
   ProdDebug: Configuration/ProdDebug.xcconfig
   Prod: Configuration/Prod.xcconfig
   Test: Configuration/Test.xcconfig
+  DeviceTest: Configuration/DeviceTest.xcconfig
 
 configs:
   Beta: debug
   ProdDebug: debug
   Prod: release
   Test: debug
+  DeviceTest: debug
 
 settings:
   base:
@@ -76,6 +78,8 @@ targets:
           CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
         Prod:
           CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
+        DeviceTest:
+          CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
         Test:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.testhost
           CODE_SIGN_ENTITLEMENTS: ""
@@ -100,6 +104,9 @@ targets:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
           CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements
         Prod:
+          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
+          CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements
+        DeviceTest:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
           CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements
         Test:
@@ -209,6 +216,28 @@ schemes:
     archive:
       config: Beta
 
+  Tron Device Performance:
+    build:
+      targets:
+        TronMobile: all
+        TronShareExtension: all
+        TronMobileTests: [test]
+    run:
+      config: DeviceTest
+    test:
+      config: DeviceTest
+      environmentVariables:
+        TRON_PERFORMANCE_BASELINE: "$(TRON_PERFORMANCE_BASELINE_VALUE)"
+      targets:
+        - TronMobileTests
+    profile:
+      config: DeviceTest
+    analyze:
+      config: DeviceTest
+    # Keep hosted-test compilation out of every archive action.
+    archive:
+      config: Prod
+
   Tron Fast:
     build:
       targets:
@@ -219,6 +248,8 @@ schemes:
       config: ProdDebug
     test:
       config: Test
+      environmentVariables:
+        TRON_PERFORMANCE_BASELINE: "$(TRON_PERFORMANCE_BASELINE_VALUE)"
       targets:
         - TronMobileTests
     profile:

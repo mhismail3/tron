@@ -123,7 +123,7 @@ struct ChatViewScrollHarnessTests {
 }
 
 @MainActor
-private final class ChatViewScrollHarness {
+final class ChatViewScrollHarness {
     let snapshot: SessionSnapshot
     let transcriptIDs: Set<String>
     let firstTranscriptID: String
@@ -137,8 +137,19 @@ private final class ChatViewScrollHarness {
     private let window: UIWindow
     private let hostingController: UIHostingController<AnyView>
 
-    init(seed: Int, displayFrameScheduler: DisplayFrameScheduler) throws {
-        snapshot = try SessionScenarioBuilder(seed: seed).openingTail(targetEncodedBytes: 10_000)
+    convenience init(seed: Int, displayFrameScheduler: DisplayFrameScheduler) throws {
+        try self.init(
+            snapshot: SessionScenarioBuilder(seed: seed).openingTail(targetEncodedBytes: 10_000),
+            displayFrameScheduler: displayFrameScheduler
+        )
+    }
+
+    init(
+        snapshot: SessionSnapshot,
+        displayFrameScheduler: DisplayFrameScheduler,
+        performanceSignposts: (any PerformanceSignposting)? = nil
+    ) throws {
+        self.snapshot = snapshot
         transcriptIDs = Set(snapshot.transcript.map(\.id))
         firstTranscriptID = try Self.require(snapshot.transcript.first?.id)
         lastTranscriptID = try Self.require(snapshot.transcript.last?.id)
@@ -170,7 +181,7 @@ private final class ChatViewScrollHarness {
                     sessionID: sessionID,
                     hostedProbe: probe,
                     displayFrameScheduler: displayFrameScheduler,
-                    performanceSignposts: signposts
+                    performanceSignposts: performanceSignposts ?? signposts
                 )
             }
             .environment(model)
@@ -235,7 +246,7 @@ private final class ChatViewScrollHarness {
 }
 
 @MainActor
-private final class PresentedFrameRecorder: NSObject {
+final class PresentedFrameRecorder: NSObject {
     struct Sample: Sendable {
         let frameIndex: Int
         let observation: ChatHostedObservation
@@ -319,7 +330,7 @@ private final class PresentedFrameRecorder: NSObject {
     }
 }
 
-private enum HarnessError: Error {
+enum HarnessError: Error {
     case invalidAuthorityBoundary
     case missingTranscript
     case missingWindowScene

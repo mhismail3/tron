@@ -141,6 +141,15 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests/ChatPerformanceTrackerTests
 ```
 
+`ChatPerformanceBaselineTests` is opt-in and records five post-warm-up timing,
+CPU, physical-memory, malloc-zone allocation, and scroll-animation signpost
+samples against the 10,000-entry hosted fixture. `Tron Device Performance` uses
+the provisioned app identity with `HOSTED_TEST` for test/profile actions; its archive
+action points to `Prod` so hosted hooks cannot enter an archive. Run the test only at
+explicit checkpoints and keep device identifiers
+out of source. The recorded Phase 0 environment, results, limitations, and commands
+are in [performance-baseline.md](performance-baseline.md).
+
 Run UI tests separately because simulator launch dominates their cost:
 
 ```bash
