@@ -135,6 +135,7 @@ their request key and the newest same-target request must win. It also proves au
 retains its catalog target after failed cancellation and unknown operations trigger no guessed reload.
 Package cases similarly reverse global/workspace and same-target inventory responses, verify
 mutation CWD/local parameters, and require mutation-completed update markers to be cleared.
+A paired custom-model case proves the newer typed-global document read wins reversed completion.
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \

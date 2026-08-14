@@ -144,7 +144,7 @@ final class AppModel {
     var resources: JSONValue?
     var packageInventoryByTarget: [PackageConfigurationTarget: PackageInventory] = [:]
     var packageUpdatesByTarget: [PackageConfigurationTarget: [PackageUpdate]] = [:]
-    var customModels: JSONValue?
+    var customModelsByTarget: [CustomModelTarget: JSONValue] = [:]
     var terminals: [TerminalSummary] = []
     var terminalChunks: [String: [TerminalChunk]] = [:]
     var terminalExited: Set<String> = []
@@ -169,6 +169,7 @@ final class AppModel {
     private var providerCatalogTargetByAuthOperation: [String: ProviderCatalogTarget] = [:]
     private var packageLoadGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
     private var packageUpdateGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
+    private var customModelLoadGenerationByTarget: [CustomModelTarget: Int] = [:]
     private var foregroundReconciliationTask: Task<Void, Never>?
     private var refreshTask: Task<Void, Never>?
     private var subscribedSessionID: String?
@@ -1270,14 +1271,23 @@ final class AppModel {
         _ = await loadPackages(target: target)
     }
 
-    func loadCustomModels() async {
+    @discardableResult
+    func loadCustomModels(target: CustomModelTarget) async -> Bool {
+        let generation = (customModelLoadGenerationByTarget[target] ?? 0) + 1
+        customModelLoadGenerationByTarget[target] = generation
         do {
-            customModels = try await client.requestValue("models.custom.get", EmptyParams())
+            let value = try await client.requestValue("models.custom.get", EmptyParams())
+            guard customModelLoadGenerationByTarget[target] == generation else { return false }
+            customModelsByTarget[target] = value
+            return true
+        } catch {
+            guard customModelLoadGenerationByTarget[target] == generation else { return false }
+            surface(error)
+            return false
         }
-        catch { surface(error) }
     }
 
-    func replaceCustomModels(_ document: JSONValue) async throws {
+    func replaceCustomModels(_ document: JSONValue, target: CustomModelTarget) async throws {
         let client = self.client
         let uuidSource = self.uuidSource
         try await CustomModelDocumentWriter(request: { method, params in

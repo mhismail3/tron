@@ -63,6 +63,25 @@ struct AppModelInvalidationTests {
         }
     }
 
+    @Test("custom-model draft edits reject automatic publication until saved")
+    func customModelDraftAdmission() {
+        var owner = CustomModelDraftOwner()
+        #expect(owner.admitsPublication)
+        owner.markEdited()
+        #expect(!owner.admitsPublication)
+        owner.markInstalled()
+        #expect(owner.admitsPublication)
+    }
+
+    @Test("custom model publication rejects an older global request")
+    nonisolated func customModelResponsesRejectStaleRequests() async throws {
+        let scenario = Task { @MainActor in try await runCustomModelOrderingScenario() }
+        defer { scenario.cancel() }
+        try await withTestWatchdog {
+            try await valueOfOwnedTask(scenario)
+        }
+    }
+
     @Test("out-of-order settings responses respect target and request ownership")
     nonisolated func settingsResponsesRemainKeyed() async throws {
         let scenario = Task { @MainActor in try await runSettingsOrderingScenario() }
@@ -87,6 +106,32 @@ struct AppModelInvalidationTests {
         defer { scenario.cancel() }
         try await withTestWatchdog {
             try await valueOfOwnedTask(scenario)
+        }
+    }
+
+    private func runCustomModelOrderingScenario() async throws {
+        try await withConnectedClient { client, socket in
+            let model = AppModel(client: client)
+            let olderLoad = Task { await model.loadCustomModels(target: .global) }
+            try await socket.waitUntilSent(count: 2)
+            let newerLoad = Task { await model.loadCustomModels(target: .global) }
+            try await socket.waitUntilSent(count: 3)
+            try await respond(
+                toFrameAt: 2,
+                on: socket,
+                result: .object(["document": .object(["marker": .string("newer")])])
+            )
+            _ = await newerLoad.value
+            try await respond(
+                toFrameAt: 1,
+                on: socket,
+                result: .object(["document": .object(["marker": .string("older")])])
+            )
+            _ = await olderLoad.value
+            #expect(
+                model.customModelsByTarget[.global]?.objectValue?["document"]?.objectValue?["marker"]
+                    == .string("newer")
+            )
         }
     }
 
@@ -396,10 +441,10 @@ struct AppModelInvalidationTests {
         )
         _ = await packages.value
 
-        let customModels = Task { await model.loadCustomModels() }
+        let customModels = Task { await model.loadCustomModels(target: .global) }
         try await socket.waitUntilSent(count: 4)
         try await respond(toFrameAt: 3, on: socket, result: .object(["providers": .object([:])]))
-        await customModels.value
+        _ = await customModels.value
 
         let providers = Task { await model.refreshProviders(target: .global) }
         try await socket.waitUntilSent(count: 6)
@@ -430,7 +475,7 @@ struct AppModelInvalidationTests {
         #expect(model.providerInvalidationGeneration == 14)
         #expect(model.settings(for: .global) == .object(["effective": .object([:])]))
         #expect(model.packageInventoryByTarget[.global]?.packages.isEmpty == true)
-        #expect(model.customModels == .object(["providers": .object([:])]))
+        #expect(model.customModelsByTarget[.global] == .object(["providers": .object([:])]))
         #expect(model.providerCatalog(for: .global)?.providers.isEmpty == true)
         #expect(model.providerCatalog(for: .global)?.models.isEmpty == true)
         #expect(model.lastError == nil)

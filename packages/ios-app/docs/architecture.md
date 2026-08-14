@@ -125,7 +125,10 @@ clear only the matching cached update markers before refreshing that target's in
 Settings captures its session/CWD when presented rather than consulting later dashboard selection.
 Trust reads and mutations require a typed nonempty project target; onboarding, project Settings,
 and new-session admission discard stale workspace results, and trust invalidations reopen the
-new-session readiness gate until the matching workspace is inspected again.
+new-session readiness gate until the matching workspace is inspected again. Custom-model
+documents have one explicit typed global target and generation-owned publication, so a slower
+older read cannot replace a newer document. Guided and advanced editor changes share one draft
+owner; automatic invalidation loads cannot replace either form of unsaved input.
 Chat uses one presentation timeline rather than separate canonical, streaming,
 and live-tool tails. Tool calls, progress, and results join by `toolCallId`; the
 Gateway supplies a monotonic per-run ordinal for parallel calls, and the grouped

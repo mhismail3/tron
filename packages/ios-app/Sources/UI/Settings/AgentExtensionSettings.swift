@@ -268,12 +268,14 @@ private struct CustomModelProviderDraft: Identifiable, Hashable {
 
 struct CustomModelsSettingsView: View {
     @Environment(AppModel.self) private var model
+    private let target = CustomModelTarget.global
     @State private var document = ""
     @State private var documentRoot: [String: JSONValue] = [:]
     @State private var providers: [CustomModelProviderDraft] = []
     @State private var redacted = false
     @State private var showingAdvanced = false
     @State private var advancedDocumentEdited = false
+    @State private var draftOwner = CustomModelDraftOwner()
     @State private var saving = false
     @State private var providerToRemove: CustomModelProviderDraft?
     @FocusState private var advancedEditorFocused: Bool
@@ -318,7 +320,10 @@ struct CustomModelsSettingsView: View {
                         .buttonStyle(TronActionButtonStyle())
                 }
 
-                Button { providers.append(CustomModelProviderDraft()) } label: {
+                Button {
+                    providers.append(CustomModelProviderDraft())
+                    draftOwner.markEdited()
+                } label: {
                     Label("Add Provider", systemImage: "plus")
                 }
                 .buttonStyle(TronActionButtonStyle())
@@ -333,7 +338,10 @@ struct CustomModelsSettingsView: View {
                         .padding(.top, 12)
                         .focused($advancedEditorFocused)
                         .onChange(of: document) { _, _ in
-                            if advancedEditorFocused { advancedDocumentEdited = true }
+                            if advancedEditorFocused {
+                                advancedDocumentEdited = true
+                                draftOwner.markEdited()
+                            }
                         }
                 } label: {
                     Label("Advanced JSON", systemImage: "curlybraces")
@@ -352,7 +360,10 @@ struct CustomModelsSettingsView: View {
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Custom Models")
-        .task(id: model.customModelInvalidationGeneration) { await load() }
+        .task(id: CustomModelLoadID(
+            target: target,
+            invalidationGeneration: model.customModelInvalidationGeneration
+        )) { await load() }
         .alert(
             "Remove \(providerRemovalName)?",
             isPresented: Binding(get: { providerToRemove != nil }, set: { if !$0 { providerToRemove = nil } })
@@ -361,6 +372,7 @@ struct CustomModelsSettingsView: View {
             Button("Remove Provider", role: .destructive) {
                 if let providerToRemove { providers.removeAll { $0.id == providerToRemove.id } }
                 providerToRemove = nil
+                draftOwner.markEdited()
                 rebuildDocument()
             }
         }
@@ -406,7 +418,10 @@ struct CustomModelsSettingsView: View {
             }
         }
         .padding(14)
-        .onChange(of: provider.wrappedValue) { _, _ in rebuildDocument() }
+        .onChange(of: provider.wrappedValue) { _, _ in
+            draftOwner.markEdited()
+            rebuildDocument()
+        }
     }
 
     private func apiTitle(_ api: String) -> String {
@@ -420,18 +435,19 @@ struct CustomModelsSettingsView: View {
     }
 
     private func load() async {
-        await model.loadCustomModels()
+        guard await model.loadCustomModels(target: target) else { return }
         loadFromProjection()
     }
 
     private func loadFromProjection() {
-        guard !saving, !advancedDocumentEdited,
-              let root = model.customModels?.objectValue else { return }
+        guard !saving, draftOwner.admitsPublication,
+              let root = model.customModelsByTarget[target]?.objectValue else { return }
         let value = root["document"] ?? .object(["providers": .object([:])])
         documentRoot = value.objectValue ?? [:]
         document = value.prettyPrinted
         redacted = root["redacted"]?.boolValue ?? false
         loadDrafts(from: value)
+        draftOwner.markInstalled()
     }
 
     private func rebuildDocument() {
@@ -471,6 +487,7 @@ struct CustomModelsSettingsView: View {
         document = value.prettyPrinted
         loadDrafts(from: value)
         advancedDocumentEdited = false
+        draftOwner.markEdited()
         showingAdvanced = false
     }
 
@@ -500,7 +517,9 @@ struct CustomModelsSettingsView: View {
             if !advancedDocumentEdited { rebuildDocument() }
             guard let data = document.data(using: .utf8) else { return }
             let value = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
-            try await model.replaceCustomModels(value)
+            try await model.replaceCustomModels(value, target: target)
+            draftOwner.markInstalled()
+            advancedDocumentEdited = false
             try await model.restartGateway()
         } catch { model.lastError = error.localizedDescription }
     }

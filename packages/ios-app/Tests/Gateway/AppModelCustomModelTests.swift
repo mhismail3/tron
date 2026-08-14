@@ -36,7 +36,7 @@ struct AppModelCustomModelTests {
                         UUID(uuidString: "00000000-0000-0000-0000-000000000099")!,
                     ]).source
                 )
-                try await model.replaceCustomModels(document)
+                try await model.replaceCustomModels(document, target: .global)
             }
             defer { replacement.cancel() }
 
