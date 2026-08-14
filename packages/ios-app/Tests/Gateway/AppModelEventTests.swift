@@ -490,8 +490,8 @@ struct AppModelEventTests {
 
     @Test("receipt replay admission rejects cancellation after confirmed missing")
     func receiptReplayCancellationAdmission() {
-        #expect(AppModel.admitsReceiptReplay(taskIsCancelled: false))
-        #expect(!AppModel.admitsReceiptReplay(taskIsCancelled: true))
+        #expect(ConfirmedMutationExecutor.admitsReplay(taskIsCancelled: false))
+        #expect(!ConfirmedMutationExecutor.admitsReplay(taskIsCancelled: true))
     }
 
     @Test("foreground transport interruption reconnects without a user error alert")

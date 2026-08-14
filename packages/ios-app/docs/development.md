@@ -118,7 +118,19 @@ terminal-open responses that resolve on the same, a replacement, or no current c
 `SessionPresentationStoreTests` own observation forwarding, cold-cache non-authority,
 disconnect/profile-reset semantics, all-topic revocation, old-close/new-open arbitration, stale and
 revoked secondary-response rejection, exact subscription-token admission, and suspended paging
-revalidation across revocation, token replacement, and disconnect. `SessionEventSynchronizerTests` own the composed intent-keyed shared outcome and
+revalidation across revocation, token replacement, and disconnect. `SessionMutationServiceTests`
+own explicit session command identity, wire construction, typed outcomes, stable-ID replay only
+after a confirmed-missing receipt, and cancellation before replay wire emission. AppModel performance
+tests retain cross-owner create/fork/delete, prompt-attachment, queue, navigation-editor, and tree-reload
+ordering coverage. Run the focused mutation owner with:
+
+```bash
+xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/SessionMutationServiceTests
+```
+
+`SessionEventSynchronizerTests` own the composed intent-keyed shared outcome and
 event-quarantine invariants; `SessionSnapshotEventAdmissionTests` own the
 live full-snapshot matrix (authority, route identity, runtime, duplicate/stale/exact-next/gap
 cursor). Synchronizer coverage rejects a quarantined route/payload mismatch before baseline

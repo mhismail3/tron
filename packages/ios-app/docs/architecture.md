@@ -267,6 +267,11 @@ provenance wait for reconnect and poll the bounded command receipt: completed re
 only confirmed-missing commands are retried with the same ID after rechecking cancellation, and
 pending or cancelled uncertain outcomes are never replayed automatically. Definitive retryable
 application responses remain ordinary errors rather than receipt uncertainty.
+`ConfirmedMutationExecutor` is the single lifecycle-generation-bound owner of that receipt policy
+for every mutation domain. `SessionMutationService` owns explicit session command IDs, DTOs, wire
+methods, timeouts, and typed outcomes without reading presentation, catalog, cache, drafts, or route
+state. `AppModel` retains only cross-owner orchestration: exact-generation attachment/editor effects,
+post-confirmation projection changes, catalog refresh, navigation results, and delete ordering.
 
 ## Sessions
 

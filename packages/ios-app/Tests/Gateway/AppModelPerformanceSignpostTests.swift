@@ -570,6 +570,262 @@ struct AppModelPerformanceSignpostTests {
         }
     }
 
+    @Test("targeted prompt removes attachments only after confirmed success")
+    func promptAttachmentOrdering() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let snapshot = try SessionScenarioBuilder(seed: 58).openingTail(targetEncodedBytes: 4_096)
+            let target = try #require(await MainActor.run {
+                harness.model.installHostedSubscribedSnapshot(snapshot, token: "prompt-token")
+                return harness.model.mountedPresentationTarget
+            })
+            let attachments = [
+                AppModel.PendingAttachment(
+                    id: "upload-a", name: "a.txt", mimeType: "text/plain",
+                    size: 3, previewData: nil
+                ),
+                AppModel.PendingAttachment(
+                    id: "upload-b", name: "b.txt", mimeType: "text/plain",
+                    size: 4, previewData: nil
+                ),
+            ]
+            await MainActor.run {
+                harness.model.installHostedPendingAttachments(attachments, for: target)
+            }
+
+            let failing = Task { try await harness.model.send("first", target: target) }
+            defer { failing.cancel() }
+            let failedPrompt = try await request(in: harness.socket, frameIndex: 1)
+            #expect(failedPrompt.method == "session.prompt")
+            #expect(failedPrompt.params?.objectValue?["uploadIds"] == .array([
+                .string("upload-a"), .string("upload-b"),
+            ]))
+            #expect(await MainActor.run {
+                harness.model.pendingAttachments(for: target)
+            } == attachments)
+            await harness.socket.enqueue(errorResponse(
+                id: failedPrompt.id,
+                code: "synthetic_prompt_failure",
+                retryable: false
+            ))
+            do {
+                try await valueOfOwnedTask(failing)
+                Issue.record("failed prompt unexpectedly succeeded")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "synthetic_prompt_failure")
+            }
+            #expect(await MainActor.run {
+                harness.model.pendingAttachments(for: target)
+            } == attachments)
+
+            let succeeding = Task { try await harness.model.send("second", target: target) }
+            defer { succeeding.cancel() }
+            let confirmedPrompt = try await request(in: harness.socket, frameIndex: 2)
+            #expect(confirmedPrompt.method == "session.prompt")
+            #expect(await MainActor.run {
+                harness.model.pendingAttachments(for: target)
+            } == attachments)
+            await harness.socket.enqueue(successResponse(
+                id: confirmedPrompt.id,
+                result: .object(["operationId": .string("operation")])
+            ))
+            try await valueOfOwnedTask(succeeding)
+            #expect(await MainActor.run {
+                harness.model.pendingAttachments(for: target).isEmpty
+            })
+            await harness.client.close()
+        }
+    }
+
+    @Test("queue projection clears only after mutation confirmation")
+    func clearQueueOrdering() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            var snapshot = try SessionScenarioBuilder(seed: 59).openingTail(targetEncodedBytes: 4_096)
+            snapshot.queued = .init(steering: ["steer"], followUp: ["follow"])
+            let sessionID = snapshot.sessionId
+            let expectedQueue = snapshot.queued
+            await MainActor.run {
+                harness.model.installHostedSubscribedSnapshot(snapshot, token: "queue-token")
+            }
+
+            let clearing = Task { try await harness.model.clearQueue(sessionID: sessionID) }
+            defer { clearing.cancel() }
+            let mutation = try await request(in: harness.socket, frameIndex: 1)
+            #expect(mutation.method == "session.clearQueue")
+            #expect(await MainActor.run {
+                harness.model.authoritativeSnapshot(for: sessionID)?.queued
+            } == expectedQueue)
+            await harness.socket.enqueue(successResponse(
+                id: mutation.id,
+                result: .object([
+                    "steering": .array([.string("steer")]),
+                    "followUp": .array([.string("follow")]),
+                ])
+            ))
+
+            #expect(try await valueOfOwnedTask(clearing) == expectedQueue)
+            #expect(await MainActor.run {
+                harness.model.authoritativeSnapshot(for: sessionID)?.queued
+            } == .init(steering: [], followUp: []))
+            await harness.client.close()
+        }
+    }
+
+    @Test("stale navigation cannot publish editor text and reloads the owned tree")
+    func staleNavigateEditorAdmission() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let snapshot = try SessionScenarioBuilder(seed: 60).openingTail(targetEncodedBytes: 4_096)
+            let oldTarget = try #require(await MainActor.run {
+                harness.model.installHostedSubscribedSnapshot(snapshot, token: "old-token")
+                return harness.model.mountedPresentationTarget
+            })
+
+            let navigating = Task {
+                try await harness.model.navigate(
+                    sessionID: snapshot.sessionId,
+                    entryID: "entry",
+                    summarize: false
+                )
+            }
+            defer { navigating.cancel() }
+            let mutation = try await request(in: harness.socket, frameIndex: 1)
+            #expect(mutation.method == "session.navigate")
+
+            let newTarget = try #require(await MainActor.run {
+                harness.model.installHostedSubscribedSnapshot(snapshot, token: "new-token")
+                return harness.model.mountedPresentationTarget
+            })
+            #expect(newTarget != oldTarget)
+            await harness.socket.enqueue(successResponse(
+                id: mutation.id,
+                result: .object(["editorText": .string("stale editor text")])
+            ))
+
+            let treeRequest = try await request(in: harness.socket, frameIndex: 2)
+            #expect(treeRequest.method == "session.tree")
+            #expect(treeRequest.params?.objectValue?["sessionId"] == .string(snapshot.sessionId))
+            let node = SessionTreeNode(
+                id: "owned-entry", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+                kind: "message", label: nil, preview: "Owned", role: .user,
+                depth: 0, childCount: 0, isCurrentPath: true
+            )
+            await harness.socket.enqueue(successResponse(
+                id: treeRequest.id,
+                result: try JSONValue.encode([node])
+            ))
+
+            #expect(try await valueOfOwnedTask(navigating) == "stale editor text")
+            #expect(await MainActor.run {
+                harness.model.editorRequest(for: oldTarget)
+            } == nil)
+            #expect(await MainActor.run {
+                harness.model.editorRequest(for: newTarget)
+            } == nil)
+            #expect(await MainActor.run { harness.model.sessionTree } == [node])
+            await harness.client.close()
+        }
+    }
+
+    @Test("label confirmation precedes the owned tree reload")
+    func labelTreeReloadOrdering() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let snapshot = try SessionScenarioBuilder(seed: 61).openingTail(targetEncodedBytes: 4_096)
+            await MainActor.run {
+                harness.model.installHostedSubscribedSnapshot(snapshot, token: "label-token")
+            }
+            let oldNode = SessionTreeNode(
+                id: "old", parentId: nil, timestamp: "2026-01-01T00:00:00Z",
+                kind: "message", label: nil, preview: "Old", role: .user,
+                depth: 0, childCount: 0, isCurrentPath: true
+            )
+            await MainActor.run {
+                harness.model.installHostedSecondaryProjection(
+                    context: nil,
+                    tree: [oldNode],
+                    resources: nil
+                )
+            }
+
+            let labeling = Task {
+                try await harness.model.setLabel(
+                    sessionID: snapshot.sessionId,
+                    entryID: "old",
+                    label: "checkpoint"
+                )
+            }
+            defer { labeling.cancel() }
+            let mutation = try await request(in: harness.socket, frameIndex: 1)
+            #expect(mutation.method == "session.label")
+            #expect(await harness.socket.sentFrames().count == 2)
+            #expect(await MainActor.run { harness.model.sessionTree } == [oldNode])
+            await harness.socket.enqueue(successResponse(
+                id: mutation.id,
+                result: .object(["updated": .bool(true)])
+            ))
+
+            let treeRequest = try await request(in: harness.socket, frameIndex: 2)
+            #expect(treeRequest.method == "session.tree")
+            #expect(await MainActor.run { harness.model.sessionTree } == [oldNode])
+            let newNode = SessionTreeNode(
+                id: "new", parentId: "old", timestamp: "2026-01-01T00:00:01Z",
+                kind: "message", label: "checkpoint", preview: "New", role: .assistant,
+                depth: 1, childCount: 0, isCurrentPath: true
+            )
+            await harness.socket.enqueue(successResponse(
+                id: treeRequest.id,
+                result: try JSONValue.encode([newNode])
+            ))
+
+            try await valueOfOwnedTask(labeling)
+            #expect(await MainActor.run { harness.model.sessionTree } == [newNode])
+            await harness.client.close()
+        }
+    }
+
+    @Test("delete closes subscription before command and preserves projection on failure")
+    func deleteFailureOrdering() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let snapshot = try SessionScenarioBuilder(seed: 57).openingTail(targetEncodedBytes: 4_096)
+            await MainActor.run {
+                harness.model.installHostedSubscribedSnapshot(snapshot, token: "installed-token")
+            }
+            let deleting = Task { try await harness.model.deleteSession(snapshot.sessionId) }
+            defer { deleting.cancel() }
+
+            let close = try await request(in: harness.socket, frameIndex: 1)
+            #expect(close.method == "session.close")
+            #expect(close.params?.objectValue?["subscriptionToken"] == .string("installed-token"))
+            await harness.socket.enqueue(successResponse(
+                id: close.id,
+                result: .object(["closed": .bool(true)])
+            ))
+
+            let mutation = try await request(in: harness.socket, frameIndex: 2)
+            #expect(mutation.method == "session.delete")
+            #expect(mutation.params?.objectValue?["sessionId"] == .string(snapshot.sessionId))
+            await harness.socket.enqueue(errorResponse(
+                id: mutation.id,
+                code: "synthetic_delete_failure",
+                retryable: false
+            ))
+
+            do {
+                try await valueOfOwnedTask(deleting)
+                Issue.record("failed delete unexpectedly succeeded")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "synthetic_delete_failure")
+            }
+            #expect(await MainActor.run {
+                harness.model.authoritativeSnapshot(for: snapshot.sessionId)?.sessionId
+            } == snapshot.sessionId)
+            await harness.client.close()
+        }
+    }
+
     @Test("terminal attach interval includes deduplicated replay installation")
     func terminalAttachReplay() async throws {
         try await withTestWatchdog {

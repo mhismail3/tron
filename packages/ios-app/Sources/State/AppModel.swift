@@ -67,9 +67,6 @@ final class AppModel {
     }
 
     typealias SessionOpenResponse = GatewaySessionOpenResponse
-    private struct SessionMutationResponse: Codable { let sessionId: String }
-    private struct CommandStatusParams: Codable { let method, commandId: String }
-    private struct CommandStatusResponse: Decodable { let status: String; let result: JSONValue? }
     typealias PairingCommit = GatewayPairingCommit
     typealias ProfileTokenLookup = GatewayProfileTokenLookup
 
@@ -80,6 +77,8 @@ final class AppModel {
     private let clock: MonotonicClock
     private let uuidSource: UUIDSource
     private let performanceSignposts: any PerformanceSignposting
+    private let mutationExecutor: ConfirmedMutationExecutor
+    private let sessionMutations: SessionMutationService
 
     var connectionState: ConnectionState { lifecycle.connectionState }
     /// False only while the first launch credential/connection decision is
@@ -152,7 +151,6 @@ final class AppModel {
     private var legacyImportLoadGeneration = 0
     private var refreshTask: Task<Void, Never>?
     private var hiddenSessionIDs: Set<String> = []
-    private var locallyCreatedUnindexedSessionIDs: Set<String> = []
     private var terminalCleanupGeneration = 0
     private var terminalCleanupTasks: [Int: Task<Void, Never>] = [:]
     private var workspaceLoadGeneration = 0
@@ -175,7 +173,7 @@ final class AppModel {
         let resolvedProfileTokenLookup = profileTokenLookup ?? { profile in
             profiles.token(for: profile)
         }
-        self.lifecycle = GatewayLifecycleCoordinator(
+        let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
             clock: clock,
@@ -184,6 +182,19 @@ final class AppModel {
             pairer: pairer,
             pairingCommit: resolvedPairingCommit,
             profileTokenLookup: resolvedProfileTokenLookup
+        )
+        let mutationExecutor = ConfirmedMutationExecutor(
+            client: client,
+            lifecycle: lifecycle,
+            clock: clock,
+            performanceSignposts: performanceSignposts
+        )
+        self.lifecycle = lifecycle
+        self.mutationExecutor = mutationExecutor
+        self.sessionMutations = SessionMutationService(
+            client: client,
+            executor: mutationExecutor,
+            uuidSource: uuidSource
         )
         self.sessionPresentation = SessionPresentationStore(
             client: client,
@@ -255,6 +266,14 @@ final class AppModel {
 
     func installHostedAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
         sessionPresentation.installHostedAuthoritativeSnapshot(snapshot)
+    }
+
+    func installHostedPendingAttachments(
+        _ attachments: [PendingAttachment],
+        for target: SessionPresentationTarget
+    ) {
+        guard ownsPresentation(target) else { return }
+        pendingAttachmentsByTarget[target] = attachments.isEmpty ? nil : attachments
     }
 
     func connectHostedGateway(profile: GatewayProfile, token: String) async throws {
@@ -399,7 +418,6 @@ final class AppModel {
         legacyImportedCount = 0
         workspace = nil
         hiddenSessionIDs.removeAll()
-        locallyCreatedUnindexedSessionIDs.removeAll()
         providerCatalogByTarget.removeAll()
         settingsByTarget.removeAll()
         packageInventoryByTarget.removeAll()
@@ -483,7 +501,6 @@ final class AppModel {
             guard sessionCatalog.publishAuthoritative(all, admission: loadAdmission) else {
                 return false
             }
-            locallyCreatedUnindexedSessionIDs.subtract(all.map(\.id))
             reconcileSelection()
             saveCache()
             return true
@@ -513,7 +530,7 @@ final class AppModel {
         struct Response: Codable { let revoked: Bool }
         let commandID = uuidSource.next().uuidString
         let params = Params(deviceId: id, commandId: commandID)
-        let response: Response = try await confirmedMutation(method: "device.revoke", commandId: commandID) {
+        let response: Response = try await mutationExecutor.perform(method: "device.revoke", commandID: commandID) {
             try await client.request("device.revoke", params)
         }
         if response.revoked {
@@ -545,7 +562,7 @@ final class AppModel {
         struct Response: Codable { let imported: Int; let skipped: Int }
         let commandID = uuidSource.next().uuidString
         let params = Params(port: port, commandId: commandID)
-        let response: Response = try await confirmedMutation(method: "legacy.import", commandId: commandID) {
+        let response: Response = try await mutationExecutor.perform(method: "legacy.import", commandID: commandID) {
             try await client.request("legacy.import", params, timeout: .seconds(600))
         }
         legacyImportedCount += response.imported
@@ -557,31 +574,22 @@ final class AppModel {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        let uploadID = try await client.upload(name: url.lastPathComponent, mimeType: "application/x-ndjson", data: data)
-        struct Params: Codable { let uploadId, cwd, commandId: String }
-        typealias Response = SessionMutationResponse
-        let commandID = uuidSource.next().uuidString
-        let params = Params(uploadId: uploadID, cwd: cwd, commandId: commandID)
-        let response: Response = try await confirmedMutation(method: "session.import", commandId: commandID) {
-            try await client.request("session.import", params, timeout: .seconds(120))
-        }
+        let uploadID = try await client.upload(
+            name: url.lastPathComponent,
+            mimeType: "application/x-ndjson",
+            data: data
+        )
+        let sessionID = try await sessionMutations.importSession(uploadID: uploadID, cwd: cwd)
         await refreshSessions()
-        return response.sessionId
+        return sessionID
     }
 
     func createSession(cwd: String) async throws -> String {
-        struct Params: Codable { let cwd: String; let commandId: String }
-        typealias Response = SessionMutationResponse
-        let commandID = uuidSource.next().uuidString
-        let params = Params(cwd: cwd, commandId: commandID)
-        let response: Response = try await confirmedMutation(method: "session.create", commandId: commandID) {
-            try await client.request("session.create", params, timeout: .seconds(60))
-        }
-        locallyCreatedUnindexedSessionIDs.insert(response.sessionId)
+        let sessionID = try await sessionMutations.createSession(cwd: cwd)
         defaultWorkspace = cwd
         UserDefaults.standard.set(cwd, forKey: "defaultWorkspace.v1")
         await refreshSessions()
-        return response.sessionId
+        return sessionID
     }
 
     /// Starts a new mounted chat presentation. Unlike reconnect synchronization,
@@ -688,103 +696,51 @@ final class AppModel {
         uploadIDs: [String],
         behavior: String?
     ) async throws {
-        struct Params: Codable {
-            let sessionId: String
-            let text: String
-            let uploadIds: [String]
-            let behavior: String?
-            let commandId: String
-        }
-        struct Response: Codable { let operationId: String }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(
-            sessionId: sessionID,
-            text: text,
-            uploadIds: uploadIDs,
-            behavior: behavior,
-            commandId: commandID
+        try await sessionMutations.prompt(
+            text,
+            sessionID: sessionID,
+            uploadIDs: uploadIDs,
+            behavior: behavior
         )
-        let _: Response = try await confirmedMutation(method: "session.prompt", commandId: commandID) {
-            try await client.request("session.prompt", params, as: Response.self, timeout: .seconds(15))
-        }
     }
 
     func abort(sessionID: String, kind: String = "agent") async {
-        struct Params: Codable { let sessionId, kind, commandId: String }
-        struct Response: Codable { let aborted: Bool }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, kind: kind, commandId: commandID)
-        do {
-            let _: Response = try await confirmedMutation(method: "session.abort", commandId: commandID) {
-                try await client.request("session.abort", params, timeout: .seconds(30))
-            }
-        } catch { surface(error) }
+        do { try await sessionMutations.abort(sessionID: sessionID, kind: kind) }
+        catch { surface(error) }
     }
 
     func clearQueue(sessionID: String) async throws -> SessionSnapshot.QueuedMessages {
-        struct Params: Codable { let sessionId, commandId: String }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, commandId: commandID)
-        let cleared: SessionSnapshot.QueuedMessages = try await confirmedMutation(method: "session.clearQueue", commandId: commandID) {
-            try await client.request("session.clearQueue", params)
-        }
+        let cleared = try await sessionMutations.clearQueue(sessionID: sessionID)
         sessionPresentation.clearConfirmedQueue(sessionID: sessionID)
         return cleared
     }
 
     func executeBash(_ command: String, sessionID: String, excludeFromContext: Bool = false) async throws {
-        struct Params: Codable { let sessionId, command: String; let excludeFromContext: Bool; let commandId: String }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, command: command, excludeFromContext: excludeFromContext, commandId: commandID)
-        _ = try await confirmedMutationValue(method: "session.bash", commandId: commandID) {
-            try await client.requestValue("session.bash", params, timeout: .seconds(300))
-        }
+        try await sessionMutations.executeBash(
+            command,
+            sessionID: sessionID,
+            excludeFromContext: excludeFromContext
+        )
     }
 
     func setModel(_ model: ModelRef, sessionID: String) async throws {
-        struct Params: Codable { let sessionId, provider, modelId, commandId: String }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, provider: model.provider, modelId: model.id, commandId: commandID)
-        let _: MutationResponse = try await confirmedMutation(method: "session.setModel", commandId: commandID) {
-            try await client.request("session.setModel", params)
-        }
+        try await sessionMutations.setModel(model, sessionID: sessionID)
     }
 
     func setThinking(_ level: String, sessionID: String) async throws {
-        struct Params: Codable { let sessionId, level, commandId: String }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, level: level, commandId: commandID)
-        let _: MutationResponse = try await confirmedMutation(method: "session.setThinking", commandId: commandID) {
-            try await client.request("session.setThinking", params)
-        }
+        try await sessionMutations.setThinking(level, sessionID: sessionID)
     }
 
     func renameSession(_ sessionID: String, name: String) async throws {
-        struct Params: Codable { let sessionId, name, commandId: String }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, name: name, commandId: commandID)
-        let _: MutationResponse = try await confirmedMutation(method: "session.rename", commandId: commandID) {
-            try await client.request("session.rename", params)
-        }
+        try await sessionMutations.rename(sessionID, name: name)
     }
 
     func compact(sessionID: String, instructions: String? = nil) async throws {
-        struct Params: Codable { let sessionId: String; let instructions: String?; let commandId: String }
-        struct Response: Codable { let compacted: Bool }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, instructions: instructions, commandId: commandID)
-        let _: Response = try await confirmedMutation(method: "session.compact", commandId: commandID) {
-            try await client.request("session.compact", params, timeout: .seconds(300))
-        }
+        try await sessionMutations.compact(sessionID: sessionID, instructions: instructions)
     }
 
     func setTools(_ tools: [String], sessionID: String) async throws {
-        struct Params: Codable { let sessionId: String; let tools: [String]; let commandId: String }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, tools: tools, commandId: commandID)
-        let _: MutationResponse = try await confirmedMutation(method: "session.setTools", commandId: commandID) {
-            try await client.request("session.setTools", params)
-        }
+        try await sessionMutations.setTools(tools, sessionID: sessionID)
     }
 
     func fork(
@@ -792,16 +748,16 @@ final class AppModel {
         entryID: String,
         position: String = "before"
     ) async throws -> SessionNavigationRoute {
-        struct Params: Codable { let sessionId, entryId, position, commandId: String }
-        struct Response: Codable { let sessionId: String; let selectedText: String? }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, entryId: entryID, position: position, commandId: commandID)
-        let response: Response = try await confirmedMutation(method: "session.fork", commandId: commandID) {
-            try await client.request("session.fork", params, timeout: .seconds(120))
-        }
-        locallyCreatedUnindexedSessionIDs.insert(response.sessionId)
+        let outcome = try await sessionMutations.fork(
+            sessionID: sessionID,
+            entryID: entryID,
+            position: position
+        )
         await refreshSessions()
-        return SessionNavigationRoute(sessionID: response.sessionId, editorText: response.selectedText)
+        return SessionNavigationRoute(
+            sessionID: outcome.sessionID,
+            editorText: outcome.selectedText
+        )
     }
 
     @discardableResult
@@ -814,21 +770,15 @@ final class AppModel {
         label: String? = nil
     ) async throws -> String? {
         let editorTarget = presentationTarget(for: sessionID)
-        struct Params: Codable {
-            let sessionId, entryId: String
-            let summarize: Bool
-            let instructions: String?
-            let replaceInstructions: Bool
-            let label: String?
-            let commandId: String
-        }
-        struct Response: Codable { let editorText: String? }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, entryId: entryID, summarize: summarize, instructions: instructions, replaceInstructions: replaceInstructions, label: label, commandId: commandID)
-        let response: Response = try await confirmedMutation(method: "session.navigate", commandId: commandID) {
-            try await client.request("session.navigate", params, timeout: .seconds(300))
-        }
-        if let editorText = response.editorText,
+        let editorText = try await sessionMutations.navigate(
+            sessionID: sessionID,
+            entryID: entryID,
+            summarize: summarize,
+            instructions: instructions,
+            replaceInstructions: replaceInstructions,
+            label: label
+        )
+        if let editorText,
            let editorTarget,
            ownsPresentation(editorTarget) {
             editorRequestByTarget[editorTarget] = .init(
@@ -841,16 +791,15 @@ final class AppModel {
             )
         }
         await loadTree(sessionID: sessionID)
-        return response.editorText
+        return editorText
     }
 
     func setLabel(sessionID: String, entryID: String, label: String?) async throws {
-        struct Params: Codable { let sessionId, entryId: String; let label: String?; let commandId: String }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, entryId: entryID, label: label, commandId: commandID)
-        let _: MutationResponse = try await confirmedMutation(method: "session.label", commandId: commandID) {
-            try await client.request("session.label", params)
-        }
+        try await sessionMutations.setLabel(
+            sessionID: sessionID,
+            entryID: entryID,
+            label: label
+        )
         await loadTree(sessionID: sessionID)
     }
 
@@ -878,17 +827,10 @@ final class AppModel {
     }
 
     func deleteSession(_ id: String) async throws {
-        struct Params: Codable { let sessionId, commandId: String }
-        struct Response: Codable { let deleted: Bool }
         await sessionPresentation.closeSubscriptionIfInstalled(sessionID: id)
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: id, commandId: commandID)
-        let _: Response = try await confirmedMutation(method: "session.delete", commandId: commandID) {
-            try await client.request("session.delete", params, timeout: .seconds(60))
-        }
+        try await sessionMutations.delete(sessionID: id)
         sessionPresentation.remove(sessionID: id)
         sessionCatalog.remove(id)
-        locallyCreatedUnindexedSessionIDs.remove(id)
         saveCache()
     }
 
@@ -904,22 +846,12 @@ final class AppModel {
         await sessionPresentation.loadCommands(sessionID: sessionID)
     }
 
-    private func loadCommands(for sessionID: String) async {
-        await sessionPresentation.loadCommands(sessionID: sessionID)
-    }
-
     func loadResources(sessionID: String) async {
         await sessionPresentation.loadResources(sessionID: sessionID)
     }
 
     func reloadResources(sessionID: String) async throws {
-        struct Params: Codable { let sessionId, commandId: String }
-        struct Response: Codable { let reloaded: Bool }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, commandId: commandID)
-        let _: Response = try await confirmedMutation(method: "session.reloadResources", commandId: commandID) {
-            try await client.request("session.reloadResources", params, timeout: .seconds(120))
-        }
+        try await sessionMutations.reloadResources(sessionID: sessionID)
     }
 
     func archive(_ id: String) {
@@ -1043,7 +975,7 @@ final class AppModel {
         struct Params: Codable { let force: Bool; let sessionId: String?; let commandId: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(force: force, sessionId: target.sessionID, commandId: commandID)
-        _ = try await confirmedMutationValue(method: "models.refresh", commandId: commandID) {
+        _ = try await mutationExecutor.performValue(method: "models.refresh", commandID: commandID) {
             try await client.requestValue("models.refresh", params, timeout: .seconds(75))
         }
         await refreshProviders(target: target)
@@ -1054,7 +986,7 @@ final class AppModel {
         struct Response: Codable { let loggedOut: Bool }
         let commandID = uuidSource.next().uuidString
         let params = Params(providerId: providerID, commandId: commandID, sessionId: target.sessionID)
-        let _: Response = try await confirmedMutation(method: "auth.logout", commandId: commandID) {
+        let _: Response = try await mutationExecutor.perform(method: "auth.logout", commandID: commandID) {
             try await client.request("auth.logout", params, timeout: .seconds(60))
         }
         await refreshProviders(target: target)
@@ -1084,7 +1016,7 @@ final class AppModel {
         struct Params: Codable { let patch: JSONValue; let scope: String; let cwd: String?; let commandId: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(patch: patch, scope: target.scope.rawValue, cwd: target.cwd, commandId: commandID)
-        let _: JSONValue = try await confirmedMutationValue(method: "settings.update", commandId: commandID) {
+        let _: JSONValue = try await mutationExecutor.performValue(method: "settings.update", commandID: commandID) {
             try await client.requestValue("settings.update", params, timeout: .seconds(60))
         }
         _ = await refreshSettings(target: target)
@@ -1099,7 +1031,7 @@ final class AppModel {
         struct Params: Codable { let cwd: String; let decision: Bool?; let commandId: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(cwd: target.cwd, decision: decision, commandId: commandID)
-        return try await confirmedMutationValue(method: "trust.set", commandId: commandID) {
+        return try await mutationExecutor.performValue(method: "trust.set", commandID: commandID) {
             try await client.requestValue("trust.set", params)
         }
     }
@@ -1157,7 +1089,7 @@ final class AppModel {
         let method = "packages.\(action)"
         let commandID = uuidSource.next().uuidString
         let params = Params(source: source, local: local, cwd: target.cwd, commandId: commandID)
-        _ = try await confirmedMutationValue(method: method, commandId: commandID) {
+        _ = try await mutationExecutor.performValue(method: method, commandID: commandID) {
             try await client.requestValue(method, params, timeout: .seconds(300))
         }
         if action == "update", source == nil {
@@ -1194,7 +1126,7 @@ final class AppModel {
                   let commandID = params.objectValue?["commandId"]?.stringValue else {
                 throw GatewayFailure(code: "invalid_request", message: "Custom model command ID is missing.", retryable: false, details: nil)
             }
-            return try await self.confirmedMutationValue(method: method, commandId: commandID) {
+            return try await self.mutationExecutor.performValue(method: method, commandID: commandID) {
                 try await client.requestValue(method, params)
             }
         }, makeCommandID: {
@@ -1218,7 +1150,7 @@ final class AppModel {
         struct Params: Codable { let commandId: String }
         struct Response: Codable { let restarting: Bool; let scheduled: Bool; let activeSessionIds: [String] }
         let commandID = uuidSource.next().uuidString
-        let response: Response = try await confirmedMutation(method: "gateway.restart", commandId: commandID) {
+        let response: Response = try await mutationExecutor.perform(method: "gateway.restart", commandID: commandID) {
             try await client.request("gateway.restart", Params(commandId: commandID))
         }
         if response.scheduled {
@@ -1245,7 +1177,7 @@ final class AppModel {
         struct Response: Codable { let path: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(parent: parent, name: name, commandId: commandID)
-        let response: Response = try await confirmedMutation(method: "filesystem.mkdir", commandId: commandID) {
+        let response: Response = try await mutationExecutor.perform(method: "filesystem.mkdir", commandID: commandID) {
             try await client.request("filesystem.mkdir", params)
         }
         try await loadWorkspace(path: parent)
@@ -1258,13 +1190,12 @@ final class AppModel {
         value: JSONValue?,
         cancelled: Bool
     ) async throws {
-        struct Params: Codable { let sessionId, interactionId: String; let value: JSONValue?; let cancelled: Bool; let commandId: String }
-        struct Response: Codable { let answered: Bool }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(sessionId: sessionID, interactionId: interaction.id, value: value, cancelled: cancelled, commandId: commandID)
-        let _: Response = try await confirmedMutation(method: "extension.respond", commandId: commandID) {
-            try await client.request("extension.respond", params)
-        }
+        try await sessionMutations.answerInteraction(
+            interactionID: interaction.id,
+            sessionID: sessionID,
+            value: value,
+            cancelled: cancelled
+        )
     }
 
     func beginTerminalPresentation(sessionID: String) -> TerminalPresentationTarget {
@@ -1338,7 +1269,7 @@ final class AppModel {
                 commandId: commandID
             )
             let request = Task {
-                try await confirmedMutation(method: "terminal.open", commandId: commandID) {
+                try await mutationExecutor.perform(method: "terminal.open", commandID: commandID) {
                     try await client.request("terminal.open", params)
                 } as Response
             }
@@ -1514,7 +1445,7 @@ final class AppModel {
         struct Response: Codable { let written: Bool }
         let identity = uuidSource.next().uuidString
         let params = Params(terminalId: id, writeId: identity, data: data, commandId: identity)
-        let _: Response = try await confirmedMutation(method: "terminal.write", commandId: identity) {
+        let _: Response = try await mutationExecutor.perform(method: "terminal.write", commandID: identity) {
             try await client.request("terminal.write", params)
         }
     }
@@ -1530,7 +1461,7 @@ final class AppModel {
         struct Response: Codable { let resized: Bool }
         let commandID = uuidSource.next().uuidString
         let params = Params(terminalId: id, columns: columns, rows: rows, commandId: commandID)
-        let _: Response = try await confirmedMutation(method: "terminal.resize", commandId: commandID) {
+        let _: Response = try await mutationExecutor.perform(method: "terminal.resize", commandID: commandID) {
             try await client.request("terminal.resize", params)
         }
     }
@@ -1541,7 +1472,7 @@ final class AppModel {
         struct Response: Codable { let terminated: Bool }
         let commandID = uuidSource.next().uuidString
         let params = Params(terminalId: id, commandId: commandID)
-        let _: Response = try await confirmedMutation(method: "terminal.terminate", commandId: commandID) {
+        let _: Response = try await mutationExecutor.perform(method: "terminal.terminate", commandID: commandID) {
             try await client.request("terminal.terminate", params)
         }
     }
@@ -1783,131 +1714,6 @@ final class AppModel {
     private func loadHidden() { hiddenSessionIDs = Set(UserDefaults.standard.stringArray(forKey: hiddenKey) ?? []) }
     private func persistHidden() { UserDefaults.standard.set(Array(hiddenSessionIDs), forKey: hiddenKey) }
 
-    private func confirmedMutation<Response: Codable>(
-        method: String,
-        commandId: String,
-        send: () async throws -> Response
-    ) async throws -> Response {
-        let value = try await confirmedMutationValue(method: method, commandId: commandId) {
-            try JSONValue.encode(try await send())
-        }
-        return try value.decode(Response.self)
-    }
-
-    private func confirmedMutationValue(
-        method: String,
-        commandId: String,
-        send: () async throws -> JSONValue
-    ) async throws -> JSONValue {
-        guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
-        try requireLifecycle(admission)
-        do {
-            let value = try await send()
-            try requireLifecycle(admission)
-            return value
-        } catch let uncertain as GatewayPossiblySentError {
-            let original = uncertain.failure
-            if Task.isCancelled || !admitsLifecycle(admission) {
-                throw Self.uncertainMutationOutcome(
-                    method: method,
-                    commandId: commandId,
-                    lastFailure: original
-                )
-            }
-            let interval = performanceSignposts.begin(.receiptResolution)
-            var result = PerformanceResult.failure
-            defer {
-                if Task.isCancelled { result = .cancelled }
-                performanceSignposts.end(interval, result: result, metrics: .none)
-            }
-            let deadline = clock.now() + .seconds(90)
-            var lastFailure: GatewayFailure = original
-            while clock.now() < deadline {
-                if Task.isCancelled || !admitsLifecycle(admission) {
-                    result = .cancelled
-                    throw Self.uncertainMutationOutcome(
-                        method: method,
-                        commandId: commandId,
-                        lastFailure: lastFailure
-                    )
-                }
-                guard await lifecycle.waitForConnected(
-                    until: deadline,
-                    admission: admission
-                ) else { break }
-                do {
-                    let status: CommandStatusResponse = try await client.request(
-                        "command.status",
-                        CommandStatusParams(method: method, commandId: commandId),
-                        timeout: .seconds(10)
-                    )
-                    try requireLifecycle(admission)
-                    switch status.status {
-                    case "completed":
-                        guard let resolved = status.result else {
-                            throw GatewayFailure(code: "invalid_response", message: "The completed command did not include a result.", retryable: false, details: nil)
-                        }
-                        result = .success
-                        return resolved
-                    case "missing":
-                        do {
-                            guard admitsLifecycle(admission),
-                                  Self.admitsReceiptReplay(taskIsCancelled: Task.isCancelled) else {
-                                throw Self.uncertainMutationOutcome(
-                                    method: method,
-                                    commandId: commandId,
-                                    lastFailure: lastFailure
-                                )
-                            }
-                            let resolved = try await send()
-                            try requireLifecycle(admission)
-                            result = .success
-                            return resolved
-                        }
-                        catch let retry as GatewayPossiblySentError {
-                            lastFailure = retry.failure
-                        }
-                    case "pending":
-                        break
-                    default:
-                        throw GatewayFailure(code: "invalid_response", message: "Tron returned an unknown command status.", retryable: false, details: nil)
-                    }
-                } catch let failure as GatewayPossiblySentError {
-                    lastFailure = failure.failure
-                }
-                do { try await clock.sleep(.milliseconds(250)) }
-                catch { break }
-            }
-            if Task.isCancelled { result = .cancelled }
-            throw Self.uncertainMutationOutcome(
-                method: method,
-                commandId: commandId,
-                lastFailure: lastFailure
-            )
-        }
-    }
-
-    static func admitsReceiptReplay(taskIsCancelled: Bool) -> Bool {
-        !taskIsCancelled
-    }
-
-    private static func uncertainMutationOutcome(
-        method: String,
-        commandId: String,
-        lastFailure: GatewayFailure
-    ) -> GatewayFailure {
-        GatewayFailure(
-            code: "outcome_unknown",
-            message: "Tron may have accepted this command. Verify the authoritative state before trying again.",
-            retryable: false,
-            details: .object([
-                "commandId": .string(commandId),
-                "method": .string(method),
-                "lastFailure": .string(lastFailure.message),
-            ])
-        )
-    }
-
     private func measure<Value>(
         _ operation: PerformanceOperation,
         body: () async throws -> (Value, PerformanceMetrics)
@@ -1969,14 +1775,6 @@ final class AppModel {
         Task { await cache.save(profileID: id, sessions: sessions, snapshots: values) }
     }
 
-    private struct MutationResponse: Codable {
-        let updated: Bool?
-        init(from decoder: Decoder) throws {
-            let container = try decoder.singleValueContainer()
-            let object = try container.decode([String: Bool].self)
-            updated = object.values.first
-        }
-    }
 }
 
 extension AppModel: SessionPresentationStoreDelegate {
