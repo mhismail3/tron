@@ -157,19 +157,26 @@ controls remain tappable, and light/dark modes retain the same gradual
 transition. Immersive camera and image-preview sheets intentionally have no
 added backdrop.
 
-## Internal TestFlight beta delivery
+## Manual iOS release validation and delivery
 
-After CI succeeds for the current `main` head, `.github/workflows/release-ios.yml`
-archives the `Tron`/`Prod` app (`com.tron.mobile`) and uploads it to the configured
-internal all-build TestFlight group. This is beta distribution only: the workflow
-has no public TestFlight, Beta App Review, or App Store release path.
+The repository does not archive or upload production iOS artifacts. A maintainer
+performs every TestFlight or App Store delivery deliberately:
 
-The `ios-testflight` GitHub environment owns App Store Connect credentials,
-distribution certificate/profile secrets, and
-`ASC_TESTFLIGHT_INTERNAL_GROUP_ID`. Every workflow attempt receives a unique
-three-segment Apple build number. The workflow rechecks the current `main` head
-before upload and removes temporary keychain/profile material in an `always()`
-step. Public distribution and App Store release remain manual.
+1. Select the exact commit whose CI checks passed, confirm a clean tracked
+   checkout, and run `scripts/tron version check`.
+2. Generate the project and complete the release checkpoint: the full iOS unit
+   target, required UI/E2E journeys, and eyes-on physical iPhone/iPad review of
+   onboarding, pairing, chat/attachments, system-keyboard dictation, terminal,
+   settings, accessibility, and signed-device networking.
+3. With a stable non-beta Xcode and maintainer-controlled signing credentials,
+   archive the `Tron` scheme in `Prod`. Inspect the app and share extension bundle
+   identifiers, versions/builds, privacy manifests, and signatures before export.
+4. Use Xcode Organizer/App Store Connect to export and upload manually, then make
+   any TestFlight group assignment or App Store release choice explicitly. Record
+   the source commit, version/build, and validation results with the release.
+
+Never add or invoke a repository workflow or command that performs production
+archive upload, TestFlight distribution, or App Store release automatically.
 
 ## Gateway fixture work
 

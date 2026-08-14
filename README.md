@@ -154,6 +154,6 @@ or credentials.
 - [Mac development and packaging](packages/mac-app/docs/development.md)
 - [Contributing](CONTRIBUTING.md)
 
-Successful `main` CI publishes an internal TestFlight beta for the maintainer.
-App Store release, public TestFlight distribution, Mac signing/notarization, and
-production deployment remain manual-only.
+CI validates source but does not publish production artifacts. iOS/TestFlight
+and App Store delivery, Mac signing/notarization, and production deployment are
+manual maintainer actions; see the platform development guides.

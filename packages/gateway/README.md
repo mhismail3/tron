@@ -177,6 +177,10 @@ interruption represented by the durable run marker and is never automatically re
 
 ## Trust and execution
 
+Each project session has an isolated mutable model/provider runtime. Tron's
+administration/onboarding runtime composes global providers without loading
+untrusted project resources.
+
 Unresolved trust blocks project resource loading. A trusted project may load
 settings, extensions, skills, prompts, packages, and system prompt files with the
 Mac user's authority. This is not sandboxing. Package and extension source must

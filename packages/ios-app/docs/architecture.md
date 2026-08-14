@@ -12,7 +12,7 @@ implementation detail; all user-facing language calls the agent Tron.
 | `Sources/Gateway` | pairing, Keychain profiles, HTTP, WebSocket protocol |
 | `Sources/Models` | provider-qualified model and snapshot DTOs |
 | `Sources/State` | authoritative UI projection and reconnect orchestration |
-| `Sources/Support` | bounded cache, share intake, native speech |
+| `Sources/Support` | bounded cache and share intake |
 | `Sources/UI/Chat` | session shell, transcript, composer, context, forks |
 | `Sources/UI/Onboarding` | pairing, workspace, provider, and default setup |
 | `Sources/UI/Settings` | agent, trust, packages, devices, migration, diagnostics |

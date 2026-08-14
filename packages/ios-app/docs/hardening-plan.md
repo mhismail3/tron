@@ -1,10 +1,13 @@
 # Tron iOS hardening plan
 
-Status: reviewed draft for approval  
-Audit baseline: `44bbb8182`  
-Scope: all handwritten iOS app, share-extension, test, project, and owning documentation code under `packages/ios-app`, narrowly required Gateway contract work, and the iOS release workflow where repository policy requires manual delivery.
+Status: implementation in progress — milestone 0A complete; milestones 0B–9 not started
 
-The checkout changed during both audit waves. Implementation must begin from a newly recorded clean baseline after concurrent chat edits are committed or reverted; no audit artifact or line number overrides the source at that approved baseline.
+Audit baseline: `cee85b64a`
+
+Implementation baseline: `cee85b64a`
+Scope: all handwritten iOS app, share-extension, test, project, and owning documentation code under `packages/ios-app`, narrowly required Gateway contract work, and iOS release policy where repository rules require manual delivery.
+
+Milestone 0A began from clean tracked HEAD `cee85b64a`; untracked `.pi` runtime artifacts are outside the implementation baseline. No audit artifact or historical line number overrides source at this baseline.
 
 ## Goal
 
@@ -39,7 +42,13 @@ The pass is complete only when:
 
 ## Audit summary
 
-Eight independent read-only audits covered state architecture, chat scrolling/performance, transcript content, Gateway events, data/cache/privacy, non-chat UI, tests/determinism, and cross-cutting code quality. The repository advanced from `966a42b26` to `44bbb8182` during the audit; this plan incorporates the committed removal of unfinished iOS voice input and discards stale speech findings.
+Eight independent read-only audits covered state architecture, chat scrolling/performance, transcript content, Gateway events, data/cache/privacy, non-chat UI, tests/determinism, and cross-cutting code quality. Their findings were reconciled against audit and implementation baseline `cee85b64a`, which includes the committed removal of unfinished app-owned iOS voice input; stale speech findings are excluded.
+
+### Milestone status
+
+**0A — Repository policy and canonical documentation: complete.** The automatic iOS production/TestFlight workflow was deleted; README, contributor, pull-request, and iOS development guidance now require manual maintainer delivery; the obsolete gateway-integration completion plan was deleted after its canonical architecture/event/onboarding facts were confirmed in owning docs and its signed-release checks were condensed into development guidance; and the architecture source map no longer claims app-owned native speech. System-keyboard dictation remains documented. This milestone changes no product behavior or UI.
+
+**0B and milestones 1–9: not started.** Baseline builds, tests, performance evidence, testability seams, runtime hardening, and later owner refactors remain pending under the plan below.
 
 ### Verified correctness priorities
 
@@ -162,11 +171,9 @@ Work proceeds as serial milestones. Each milestone gets one writer, a bounded ow
 
 ### Phase 0 — Freeze contracts and establish evidence
 
-Deliverables:
+Milestone 0A completed the repository-policy and canonical-documentation slice described above. The following milestone 0B deliverables are pending and have not started:
 
-- Re-cut and record a clean baseline build/test status after concurrent source work settles.
-- Remove or disable `.github/workflows/release-ios.yml` automatic TestFlight upload and rewrite release guidance as a manual maintainer procedure.
-- Delete `docs/pi-integration-completion-plan.md` after moving still-canonical facts to owning docs; remove stale native-speech/source-map claims.
+- Record baseline build/test status at the approved implementation baseline.
 - Add injectable Gateway and pairing transports, clock/sleeper, display-frame scheduler, UUID source, and lightweight test barriers. These are testability seams around production behavior, not alternate implementations.
 - Add injectable camera/QR authorization and capture-session adapters plus share inbox/store/app-opener seams; make shared pure logic testable outside the extension controller and add archive assertions for both privacy manifests.
 - Establish a strict-concurrency baseline now and rerun it in every milestone that introduces off-main work.

@@ -101,7 +101,6 @@ to implementation-level detail.
 
 Keep commits reviewable and avoid generated build output. Xcode projects may be
 regenerated from `project.yml`; staged Mac gateway payloads and Node runtimes are
-ignored. Successful `main` CI automatically publishes the production iOS bundle
-to the maintainer's internal TestFlight group. Public TestFlight/App Store
-release, Mac signing and notarization, and production deployment remain manual
+ignored. CI does not publish production artifacts. TestFlight/App Store delivery,
+Mac signing and notarization, and production deployment are deliberate manual
 maintainer actions. Release tags use `tron-v<version>`.
