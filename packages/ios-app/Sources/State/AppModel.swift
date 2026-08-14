@@ -2383,7 +2383,15 @@ final class AppModel {
         send: () async throws -> JSONValue
     ) async throws -> JSONValue {
         do { return try await send() }
-        catch let original as GatewayFailure where Self.isUncertainTransportFailure(original) {
+        catch let uncertain as GatewayPossiblySentError {
+            let original = uncertain.failure
+            if Task.isCancelled {
+                throw Self.uncertainMutationOutcome(
+                    method: method,
+                    commandId: commandId,
+                    lastFailure: original
+                )
+            }
             let interval = performanceSignposts.begin(.receiptResolution)
             var result = PerformanceResult.failure
             defer {
@@ -2395,7 +2403,11 @@ final class AppModel {
             while clock.now() < deadline {
                 if Task.isCancelled {
                     result = .cancelled
-                    throw CancellationError()
+                    throw Self.uncertainMutationOutcome(
+                        method: method,
+                        commandId: commandId,
+                        lastFailure: lastFailure
+                    )
                 }
                 guard await waitForConnected(until: deadline) else { break }
                 do {
@@ -2413,33 +2425,35 @@ final class AppModel {
                         return resolved
                     case "missing":
                         do {
+                            guard Self.admitsReceiptReplay(taskIsCancelled: Task.isCancelled) else {
+                                throw Self.uncertainMutationOutcome(
+                                    method: method,
+                                    commandId: commandId,
+                                    lastFailure: lastFailure
+                                )
+                            }
                             let resolved = try await send()
                             result = .success
                             return resolved
                         }
-                        catch let retry as GatewayFailure where Self.isUncertainTransportFailure(retry) {
-                            lastFailure = retry
+                        catch let retry as GatewayPossiblySentError {
+                            lastFailure = retry.failure
                         }
                     case "pending":
                         break
                     default:
                         throw GatewayFailure(code: "invalid_response", message: "Tron returned an unknown command status.", retryable: false, details: nil)
                     }
-                } catch let failure as GatewayFailure where Self.isUncertainTransportFailure(failure) {
-                    lastFailure = failure
+                } catch let failure as GatewayPossiblySentError {
+                    lastFailure = failure.failure
                 }
                 try? await clock.sleep(.milliseconds(250))
             }
             if Task.isCancelled { result = .cancelled }
-            throw GatewayFailure(
-                code: "outcome_unknown",
-                message: "Tron may have accepted this command. The session was refreshed without replaying it; verify the authoritative transcript before trying again.",
-                retryable: false,
-                details: .object([
-                    "commandId": .string(commandId),
-                    "method": .string(method),
-                    "lastFailure": .string(lastFailure.message),
-                ])
+            throw Self.uncertainMutationOutcome(
+                method: method,
+                commandId: commandId,
+                lastFailure: lastFailure
             )
         }
     }
@@ -2454,8 +2468,25 @@ final class AppModel {
         return false
     }
 
-    private static func isUncertainTransportFailure(_ failure: GatewayFailure) -> Bool {
-        failure.retryable || ["timeout", "disconnected", "closed", "replaced"].contains(failure.code)
+    static func admitsReceiptReplay(taskIsCancelled: Bool) -> Bool {
+        !taskIsCancelled
+    }
+
+    private static func uncertainMutationOutcome(
+        method: String,
+        commandId: String,
+        lastFailure: GatewayFailure
+    ) -> GatewayFailure {
+        GatewayFailure(
+            code: "outcome_unknown",
+            message: "Tron may have accepted this command. Verify the authoritative state before trying again.",
+            retryable: false,
+            details: .object([
+                "commandId": .string(commandId),
+                "method": .string(method),
+                "lastFailure": .string(lastFailure.message),
+            ])
+        )
     }
 
     private func measure<Value>(
@@ -2477,7 +2508,7 @@ final class AppModel {
     static let sessionCatchUpNotice = "Live session view is catching up; the run continues on your Mac."
 
     static func shouldSurface(_ error: Error) -> Bool {
-        if error is CancellationError { return false }
+        if error is CancellationError || error is GatewayPossiblySentError { return false }
         if let failure = error as? GatewayFailure {
             return !["disconnected", "closed", "replaced", "timeout", "event_overflow"].contains(failure.code)
         }

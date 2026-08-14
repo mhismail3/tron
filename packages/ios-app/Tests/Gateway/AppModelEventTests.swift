@@ -387,6 +387,12 @@ struct AppModelEventTests {
         #expect(model.lastError == nil)
     }
 
+    @Test("receipt replay admission rejects cancellation after confirmed missing")
+    func receiptReplayCancellationAdmission() {
+        #expect(AppModel.admitsReceiptReplay(taskIsCancelled: false))
+        #expect(!AppModel.admitsReceiptReplay(taskIsCancelled: true))
+    }
+
     @Test("foreground transport interruption reconnects without a user error alert")
     func foregroundTransportErrorPresentation() {
         #expect(!AppModel.shouldSurface(GatewayFailure(

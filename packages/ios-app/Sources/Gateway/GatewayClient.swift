@@ -1,9 +1,19 @@
 import Foundation
 
+enum GatewayRequestTransmissionState: Equatable {
+    case queued
+    case sending
+    case sent
+
+    var mayHaveBeenSent: Bool { self != .queued }
+}
+
 actor GatewayClient {
     private struct PendingRequest {
         let continuation: CheckedContinuation<JSONValue, Error>
         let timeout: Task<Void, Never>
+        var send: Task<Void, Never>?
+        var transmission: GatewayRequestTransmissionState
     }
 
     private struct ConnectionEpoch {
@@ -207,22 +217,66 @@ actor GatewayClient {
                     guard !Task.isCancelled else { return }
                     await self?.expire(id: id, epochID: epochID)
                 }
-                current.pending[id] = PendingRequest(continuation: continuation, timeout: timeoutTask)
+                current.pending[id] = PendingRequest(
+                    continuation: continuation,
+                    timeout: timeoutTask,
+                    send: nil,
+                    transmission: .queued
+                )
                 connection = current
-                Task { [weak self] in
+                let sendTask = Task { [weak self, socket] in
+                    guard await self?.claimSend(id: id, epochID: epochID) == true else { return }
+                    let result: Result<Void, Error>
                     do {
                         try await socket.send(data)
+                        result = .success(())
                     } catch {
-                        await self?.fail(
-                            id: id,
-                            epochID: epochID,
-                            error: Self.transportFailure(error)
-                        )
+                        result = .failure(error)
                     }
+                    await self?.sendCompleted(result, id: id, epochID: epochID)
                 }
+                guard var installedEpoch = connection,
+                      installedEpoch.id == epochID,
+                      var installedRequest = installedEpoch.pending[id] else {
+                    sendTask.cancel()
+                    return
+                }
+                installedRequest.send = sendTask
+                installedEpoch.pending[id] = installedRequest
+                connection = installedEpoch
             }
         } onCancel: {
-            Task { await self.fail(id: id, epochID: epochID, error: CancellationError()) }
+            Task { await self.cancelRequest(id: id, epochID: epochID) }
+        }
+    }
+
+    private func claimSend(id: String, epochID: Int) -> Bool {
+        guard var epoch = connection, epoch.id == epochID,
+              var request = epoch.pending[id], request.transmission == .queued else { return false }
+        request.transmission = .sending
+        epoch.pending[id] = request
+        connection = epoch
+        return true
+    }
+
+    private func sendCompleted(
+        _ result: Result<Void, Error>,
+        id: String,
+        epochID: Int
+    ) {
+        guard var epoch = connection, epoch.id == epochID,
+              var request = epoch.pending[id] else { return }
+        switch result {
+        case .success:
+            request.transmission = .sent
+            epoch.pending[id] = request
+            connection = epoch
+        case .failure(let error):
+            fail(
+                id: id,
+                epochID: epochID,
+                error: Self.possiblySentFailure(cause: error)
+            )
         }
     }
 
@@ -378,11 +432,21 @@ actor GatewayClient {
     }
 
     private func expire(id: String, epochID: Int) {
-        fail(
-            id: id,
-            epochID: epochID,
-            error: GatewayFailure(code: "timeout", message: "The Mac did not answer in time.", retryable: true, details: nil)
-        )
+        guard let epoch = connection, epoch.id == epochID,
+              let request = epoch.pending[id] else { return }
+        let error: Error = request.transmission.mayHaveBeenSent
+            ? Self.possiblySentFailure(message: "The Mac did not answer after the request may have been sent.")
+            : GatewayFailure(code: "timeout", message: "The request expired before it was sent.", retryable: true, details: nil)
+        fail(id: id, epochID: epochID, error: error)
+    }
+
+    private func cancelRequest(id: String, epochID: Int) {
+        guard let epoch = connection, epoch.id == epochID,
+              let request = epoch.pending[id] else { return }
+        let error: Error = request.transmission.mayHaveBeenSent
+            ? Self.possiblySentFailure(message: "The cancelled request may have reached the Mac.")
+            : CancellationError()
+        fail(id: id, epochID: epochID, error: error)
     }
 
     private func fail(id: String, epochID: Int, error: Error) {
@@ -395,6 +459,7 @@ actor GatewayClient {
               let waiter = epoch.pending.removeValue(forKey: id) else { return nil }
         connection = epoch
         waiter.timeout.cancel()
+        waiter.send?.cancel()
         return waiter
     }
 
@@ -407,7 +472,10 @@ actor GatewayClient {
         epoch.livenessTask?.cancel()
         for waiter in epoch.pending.values {
             waiter.timeout.cancel()
-            waiter.continuation.resume(throwing: reason)
+            waiter.send?.cancel()
+            waiter.continuation.resume(throwing: waiter.transmission.mayHaveBeenSent
+                ? Self.possiblySentFailure(cause: reason)
+                : reason)
         }
         await epoch.socket.close()
         return generation == epoch.id && connection == nil
@@ -419,6 +487,18 @@ actor GatewayClient {
 
     private func requireEpoch(_ epochID: Int) throws {
         guard ownsEpoch(epochID) else { throw CancellationError() }
+    }
+
+    private nonisolated static func possiblySentFailure(
+        message: String = "The request may have reached the Mac before the connection ended.",
+        cause: Error? = nil
+    ) -> GatewayPossiblySentError {
+        GatewayPossiblySentError(failure: GatewayFailure(
+            code: "possibly_sent",
+            message: message,
+            retryable: true,
+            details: cause.map { .object(["cause": .string(transportFailure($0).code)]) }
+        ))
     }
 
     private nonisolated static func transportFailure(_ error: Error) -> GatewayFailure {

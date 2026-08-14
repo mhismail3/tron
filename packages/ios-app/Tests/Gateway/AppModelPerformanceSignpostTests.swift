@@ -121,15 +121,14 @@ struct AppModelPerformanceSignpostTests {
         try await withTestWatchdog {
             let harness = try await makeHarness()
             await MainActor.run { harness.model.selectedSessionID = "dashboard-selection" }
+            await harness.socket.failNextSend(GatewayFailure(
+                code: "disconnected",
+                message: "synthetic send failure",
+                retryable: true,
+                details: nil
+            ))
             let responder = Task {
-                let mutation = try await request(in: harness.socket, frameIndex: 1)
-                #expect(mutation.params?.objectValue?["sessionId"] == .string("mounted-route"))
-                await harness.socket.enqueue(errorResponse(
-                    id: mutation.id,
-                    code: "disconnected",
-                    retryable: true
-                ))
-                let status = try await request(in: harness.socket, frameIndex: 2)
+                let status = try await request(in: harness.socket, frameIndex: 1)
                 #expect(status.method == "command.status")
                 await harness.socket.enqueue(successResponse(
                     id: status.id,
@@ -150,6 +149,91 @@ struct AppModelPerformanceSignpostTests {
                 .begin(.receiptResolution),
                 .end(.receiptResolution, .success, .none),
             ])
+            await harness.client.close()
+        }
+    }
+
+    @Test("possibly-sent mutation cancellation never replays automatically")
+    func possiblySentCancellationDoesNotReplay() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            await harness.socket.suspendSends()
+            let mutation = Task {
+                try await harness.model.setModel(
+                    ModelRef(provider: "test", id: "model"),
+                    sessionID: "mounted-route"
+                )
+            }
+            try await harness.socket.waitUntilSendInvoked(count: 2)
+            mutation.cancel()
+            do {
+                try await valueOfOwnedTask(mutation)
+                Issue.record("cancelled possibly-sent mutation unexpectedly succeeded")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "outcome_unknown")
+                #expect(!failure.retryable)
+            }
+            await harness.socket.releaseSend()
+            #expect(await harness.socket.sentFrames().count == 1)
+            #expect(harness.signposts.events().isEmpty)
+            await harness.client.close()
+        }
+    }
+
+    @Test("wire errors cannot forge local possibly-sent transport provenance")
+    func wirePossiblySentCodeIsDefinitive() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let mutation = Task {
+                try await harness.model.setModel(
+                    ModelRef(provider: "test", id: "model"),
+                    sessionID: "mounted-route"
+                )
+            }
+            defer { mutation.cancel() }
+            let request = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.enqueue(errorResponse(
+                id: request.id,
+                code: "possibly_sent",
+                retryable: true
+            ))
+            do {
+                try await valueOfOwnedTask(mutation)
+                Issue.record("wire possibly-sent error unexpectedly succeeded")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "possibly_sent")
+            }
+            #expect(await harness.socket.sentFrames().count == 2)
+            #expect(harness.signposts.events().isEmpty)
+            await harness.client.close()
+        }
+    }
+
+    @Test("definitive retryable application errors do not enter receipt polling")
+    func retryableApplicationErrorIsDefinitive() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let mutation = Task {
+                try await harness.model.setModel(
+                    ModelRef(provider: "test", id: "model"),
+                    sessionID: "mounted-route"
+                )
+            }
+            defer { mutation.cancel() }
+            let request = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.enqueue(errorResponse(
+                id: request.id,
+                code: "busy",
+                retryable: true
+            ))
+            do {
+                try await valueOfOwnedTask(mutation)
+                Issue.record("retryable application rejection unexpectedly succeeded")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "busy")
+            }
+            #expect(await harness.socket.sentFrames().count == 2)
+            #expect(harness.signposts.events().isEmpty)
             await harness.client.close()
         }
     }

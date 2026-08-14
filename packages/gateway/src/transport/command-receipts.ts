@@ -20,7 +20,10 @@ export class CommandReceiptStore {
   private readonly directory: string;
   private readonly lanes = new Map<string, { mutex: AsyncMutex; users: number }>();
 
-  constructor(tronHome: string) {
+  constructor(
+    tronHome: string,
+    private readonly writeReceipt: (path: string, value: unknown, mode?: number) => Promise<void> = atomicWriteJson,
+  ) {
     this.directory = join(tronHome, "gateway", "command-receipts");
   }
 
@@ -71,9 +74,17 @@ export class CommandReceiptStore {
         status: "pending",
         createdAt: new Date().toISOString(),
       };
-      await atomicWriteJson(path, pending);
-      const result = await operation();
-      await atomicWriteJson(path, { ...pending, status: "completed", result });
+      await this.writeReceipt(path, pending);
+      let result: JsonValue;
+      try {
+        result = await operation();
+      } catch (error) {
+        // An observed application rejection is definitive. Only process/transport
+        // loss may leave a pending receipt as an uncertain outcome.
+        await rm(path, { force: true });
+        throw error;
+      }
+      await this.writeReceipt(path, { ...pending, status: "completed", result });
       return result;
       });
     } finally {

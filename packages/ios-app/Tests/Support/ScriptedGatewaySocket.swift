@@ -20,24 +20,59 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
     private var nextReceiverToken = 0
     private var sent: [Data] = []
     private var sentWaiters: [Waiter] = []
+    private var sendInvocations = 0
+    private var sendFailures: [Error] = []
+    private var sendInvocationWaiters: [Waiter] = []
+    private var sendBarrierWaiters: [Int: CheckedContinuation<Void, Error>] = [:]
     private var closeInvocations = 0
     private var closeTransitions = 0
     private var closeInvocationWaiters: [Waiter] = []
     private var closeWaiters: [Waiter] = []
     private var nextWaiterToken = 0
-    private enum WaiterKind { case sent, closeInvocation, closeTransition }
+    private enum WaiterKind { case sent, sendInvocation, closeInvocation, closeTransition }
 
     private var isClosed = false
+    private var suspendsSend: Bool
     private var suspendsClose: Bool
     private let deliversCallbacksAfterClose: Bool
+    private let deliversSendsAfterCancellation: Bool
     private var closeBarrierWaiters: [Int: CheckedContinuation<Void, Error>] = [:]
 
-    init(suspendsClose: Bool = false, deliversCallbacksAfterClose: Bool = false) {
+    init(
+        suspendsSend: Bool = false,
+        suspendsClose: Bool = false,
+        deliversCallbacksAfterClose: Bool = false,
+        deliversSendsAfterCancellation: Bool = false
+    ) {
+        self.suspendsSend = suspendsSend
         self.suspendsClose = suspendsClose
         self.deliversCallbacksAfterClose = deliversCallbacksAfterClose
+        self.deliversSendsAfterCancellation = deliversSendsAfterCancellation
     }
 
-    func send(_ data: Data) throws {
+    func send(_ data: Data) async throws {
+        guard !isClosed else { throw CancellationError() }
+        sendInvocations += 1
+        resumeSatisfiedWaiters(&sendInvocationWaiters, observedCount: sendInvocations)
+        if !sendFailures.isEmpty { throw sendFailures.removeFirst() }
+        if suspendsSend {
+            let ignoresCancellation = deliversSendsAfterCancellation
+            let barrierToken = nextWaiterToken
+            nextWaiterToken += 1
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    if Task.isCancelled || !suspendsSend {
+                        continuation.resume(throwing: CancellationError())
+                    } else {
+                        sendBarrierWaiters[barrierToken] = continuation
+                    }
+                }
+            } onCancel: {
+                guard !ignoresCancellation else { return }
+                Task { await self.cancelSendBarrierWaiter(token: barrierToken) }
+            }
+        }
+        if !deliversSendsAfterCancellation { try Task.checkCancellation() }
         guard !isClosed else { throw CancellationError() }
         sent.append(data)
         resumeSatisfiedWaiters(&sentWaiters, observedCount: sent.count)
@@ -92,6 +127,21 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
         resumeSatisfiedWaiters(&closeWaiters, observedCount: closeTransitions)
     }
 
+    func failNextSend(_ error: Error) {
+        sendFailures.append(error)
+    }
+
+    func suspendSends() {
+        suspendsSend = true
+    }
+
+    func releaseSend() {
+        suspendsSend = false
+        let waiters = sendBarrierWaiters.values
+        sendBarrierWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
+    }
+
     func releaseClose() {
         suspendsClose = false
         let waiters = closeBarrierWaiters.values
@@ -119,12 +169,17 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
     }
 
     func sentFrames() -> [Data] { sent }
+    func sendInvocationCount() -> Int { sendInvocations }
     func closeInvocationCount() -> Int { closeInvocations }
     func closeTransitionCount() -> Int { closeTransitions }
     func closed() -> Bool { isClosed }
 
     func waitUntilSent(count: Int) async throws {
         try await wait(until: count, observedCount: sent.count, kind: .sent)
+    }
+
+    func waitUntilSendInvoked(count: Int) async throws {
+        try await wait(until: count, observedCount: sendInvocations, kind: .sendInvocation)
     }
 
     func waitUntilCloseInvoked(count: Int = 1) async throws {
@@ -147,6 +202,7 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
                     let waiter = Waiter(token: token, count: count, continuation: continuation)
                     switch kind {
                     case .sent: sentWaiters.append(waiter)
+                    case .sendInvocation: sendInvocationWaiters.append(waiter)
                     case .closeInvocation: closeInvocationWaiters.append(waiter)
                     case .closeTransition: closeWaiters.append(waiter)
                     }
@@ -166,11 +222,17 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
     private func cancelWaiter(token: Int) {
         if let index = sentWaiters.firstIndex(where: { $0.token == token }) {
             sentWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
+        } else if let index = sendInvocationWaiters.firstIndex(where: { $0.token == token }) {
+            sendInvocationWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
         } else if let index = closeInvocationWaiters.firstIndex(where: { $0.token == token }) {
             closeInvocationWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
         } else if let index = closeWaiters.firstIndex(where: { $0.token == token }) {
             closeWaiters.remove(at: index).continuation.resume(throwing: CancellationError())
         }
+    }
+
+    private func cancelSendBarrierWaiter(token: Int) {
+        sendBarrierWaiters.removeValue(forKey: token)?.resume(throwing: CancellationError())
     }
 
     private func cancelCloseBarrierWaiter(token: Int) {

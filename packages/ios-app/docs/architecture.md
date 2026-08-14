@@ -191,10 +191,14 @@ Secondary live-runtime reads require that exact session to be opened first, so a
 stale selection cannot read or render another session's context, tree, resources,
 export, or terminal inventory.
 Backward transcript pages carry an entry anchor and are rejected if branch
-navigation changed the requested boundary. Mutations whose response is lost wait
-for reconnect and poll the bounded command receipt: completed results are reused,
-only confirmed-missing commands are retried with the same ID, and pending outcomes
-are never replayed automatically.
+navigation changed the requested boundary. Each WebSocket request owns its send and timeout
+tasks and moves through queued, sending, and sent transmission state. Cancellation before send
+is definitive; cancellation, timeout, failure, or disconnect after send begins produces a local,
+non-Codable possibly-sent error that a Gateway response cannot forge. Mutations with that local
+provenance wait for reconnect and poll the bounded command receipt: completed results are reused,
+only confirmed-missing commands are retried with the same ID after rechecking cancellation, and
+pending or cancelled uncertain outcomes are never replayed automatically. Definitive retryable
+application responses remain ordinary errors rather than receipt uncertainty.
 
 ## Sessions
 

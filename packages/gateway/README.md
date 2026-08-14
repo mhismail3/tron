@@ -55,8 +55,10 @@ Requests use `{type,id,method,params}` and receive `{type,id,ok,result|error}`.
 Mutations require `params.commandId`; receipts deduplicate completed commands.
 After an uncertain disconnect, clients reconnect and poll `command.status`, reuse
 a completed result, retry only a confirmed-missing command with the same ID, and
-never blindly replay a pending command. Receipt execution serializes identical
-command keys only; unrelated commands and sessions remain concurrent.
+never blindly replay a pending command. An observed application rejection removes
+its pending receipt so the definitive error remains definitive; process loss or failure
+to persist a successful completion leaves pending state and therefore cannot enable a
+blind duplicate. Receipt execution serializes identical command keys only; unrelated commands and sessions remain concurrent.
 The gateway sends WebSocket ping control frames every 25 seconds and terminates
 connections that fail the next heartbeat, so half-open Tailscale/iOS paths are
 observable. Reconnect and foreground activation converge through an authoritative

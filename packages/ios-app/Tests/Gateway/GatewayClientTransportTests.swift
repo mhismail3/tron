@@ -167,6 +167,77 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("transmission state distinguishes definitely queued from possibly sent")
+    func transmissionOutcomePolicy() {
+        #expect(!GatewayRequestTransmissionState.queued.mayHaveBeenSent)
+        #expect(GatewayRequestTransmissionState.sending.mayHaveBeenSent)
+        #expect(GatewayRequestTransmissionState.sent.mayHaveBeenSent)
+    }
+
+    @Test("cancellation during suspended send reports uncertainty and prevents a late ghost frame")
+    func suspendedSendCancellation() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000091")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000092")!,
+                ]).source
+            )
+            await socket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+            await socket.suspendSends()
+
+            let request = Task { try await client.requestValue("session.prompt", EmptyParams()) }
+            try await socket.waitUntilSendInvoked(count: 2)
+            request.cancel()
+            do {
+                _ = try await valueOfOwnedTask(request)
+                Issue.record("cancelled suspended send unexpectedly succeeded")
+            } catch let failure as GatewayPossiblySentError {
+                #expect(failure.failure.code == "possibly_sent")
+            }
+            await socket.releaseSend()
+            #expect(await socket.sentFrames().count == 1)
+            await client.close()
+        }
+    }
+
+    @Test("cancellation-insensitive send cannot retain the client or transmit after teardown")
+    func cancellationInsensitiveSendReleasesClient() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket(deliversSendsAfterCancellation: true)
+            let weakClient = WeakGatewayClient()
+            var client: GatewayClient? = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                uuidSource: SequenceUUIDSource([
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000093")!,
+                    UUID(uuidString: "00000000-0000-0000-0000-000000000094")!,
+                ]).source
+            )
+            weakClient.value = client
+            await socket.enqueue(helloFrame())
+            _ = try await client?.connect(profile: profile, token: "token")
+            await socket.suspendSends()
+
+            var request: Task<JSONValue, Error>? = makePromptRequest(client: try #require(client))
+            try await socket.waitUntilSendInvoked(count: 2)
+            request?.cancel()
+            do {
+                _ = try await request?.value
+                Issue.record("cancelled send unexpectedly succeeded")
+            } catch is GatewayPossiblySentError {}
+            request = nil
+            client = nil
+
+            try await socket.waitUntilClosed()
+            #expect(weakClient.value == nil)
+            await socket.releaseSend()
+            #expect(await socket.sentFrames().count == 1)
+        }
+    }
+
     @Test("request timeout advances on the injected monotonic clock")
     func virtualRequestTimeout() async throws {
         try await withTestWatchdog {
@@ -192,8 +263,8 @@ struct GatewayClientTransportTests {
             do {
                 _ = try await valueOfOwnedTask(request)
                 Issue.record("request unexpectedly succeeded")
-            } catch let failure as GatewayFailure {
-                #expect(failure.code == "timeout")
+            } catch let failure as GatewayPossiblySentError {
+                #expect(failure.failure.code == "possibly_sent")
             }
             await client.close()
         }
@@ -548,6 +619,10 @@ struct GatewayClientTransportTests {
             #expect(await socket.closeInvocationCount() == 1)
             #expect(await socket.closeTransitionCount() == 1)
         }
+    }
+
+    private func makePromptRequest(client: GatewayClient) -> Task<JSONValue, Error> {
+        Task { try await client.requestValue("session.prompt", EmptyParams()) }
     }
 
     private func makeConnectedClientReleasedImmediately(

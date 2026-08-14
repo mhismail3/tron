@@ -15,6 +15,14 @@ struct GatewayResponse: Decodable, Sendable {
     let error: GatewayFailure?
 }
 
+/// Local transport provenance for an operation whose bytes may have reached the
+/// Gateway. This type is intentionally not Codable and cannot be forged by a
+/// Gateway application-error response.
+struct GatewayPossiblySentError: Error, Hashable, Sendable, LocalizedError {
+    let failure: GatewayFailure
+    var errorDescription: String? { failure.message }
+}
+
 struct GatewayFailure: Codable, Error, Hashable, Sendable, LocalizedError {
     let code: String
     let message: String
