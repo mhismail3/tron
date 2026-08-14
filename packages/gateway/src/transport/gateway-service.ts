@@ -34,7 +34,6 @@ export interface ClientContext {
   id: string;
   identity: string;
   isLocal: boolean;
-  subscribe(sessionId: string): void;
   beginSynchronization(sessionId: string): string;
   establishSynchronization(sessionId: string, snapshot: import("../protocol/types.js").SessionSnapshot): void;
   completeSynchronization(sessionId: string, syncToken: string): void;
@@ -191,7 +190,8 @@ export class GatewayService {
           : integer(params.before, "before", 0, Number.MAX_SAFE_INTEGER);
         const expectedNextEntryId = optionalString(params.expectedNextEntryId, "expectedNextEntryId", 200);
         const slot = await this.dependencies.sessions.acquire(sessionId);
-        client.subscribe(sessionId);
+        // Paging is a bounded read for an already-open presentation. It must
+        // never create or revive event-subscription ownership after a close.
         return safeJson(slot.transcriptPage(before, expectedNextEntryId));
       }
       case "session.close": {

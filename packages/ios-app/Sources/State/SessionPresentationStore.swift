@@ -1,0 +1,1076 @@
+import Foundation
+import Observation
+
+struct SessionPresentationIdentity: Hashable, Sendable {
+    let sessionID: String
+    let generation: Int
+}
+
+enum SessionSnapshotInstallationMode { case freshPresentation, reconnect }
+enum SessionEditorAction: String { case set, paste }
+
+struct GatewaySessionOpenResponse: Decodable {
+    let session: SessionSnapshot
+    let syncToken: String
+    let subscriptionToken: String
+
+    private enum CodingKeys: String, CodingKey { case session, syncToken, subscriptionToken }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        session = try container.decode(SessionSnapshot.self, forKey: .session)
+        syncToken = try container.decode(String.self, forKey: .syncToken)
+        subscriptionToken = try container.decodeIfPresent(String.self, forKey: .subscriptionToken) ?? syncToken
+    }
+}
+
+@MainActor
+protocol SessionPresentationStoreDelegate: AnyObject {
+    func sessionPresentationStoreDidUpdateSummary(_ snapshot: SessionSnapshot)
+    func sessionPresentationStoreDidRequestCatalogRefresh()
+    func sessionPresentationStoreDidPublishEditorRequest(
+        target: SessionPresentationIdentity,
+        action: SessionEditorAction,
+        text: String,
+        fullText: String,
+        revision: Int
+    )
+    func sessionPresentationStoreDidOpen(_ target: SessionPresentationIdentity)
+    func sessionPresentationStorePostNotice(_ message: String, replacing key: GlobalNoticeKey?)
+    func sessionPresentationStoreRemoveNotice(_ key: GlobalNoticeKey)
+    func sessionPresentationStoreSurface(_ error: Error)
+    func sessionPresentationStoreCheckpointCache()
+}
+
+@MainActor
+@Observable
+final class SessionPresentationStore {
+    private let client: GatewayClient
+    private let performanceSignposts: any PerformanceSignposting
+    weak var delegate: (any SessionPresentationStoreDelegate)?
+
+    private(set) var target: SessionPresentationIdentity?
+    private var pendingTarget: SessionPresentationIdentity?
+    private(set) var snapshot: SessionSnapshot?
+    private(set) var isAuthoritative = false
+    private(set) var loadingEarlierTranscript = false
+    private var revokedTargets = Set<SessionPresentationIdentity>()
+    private var nextPresentationGeneration = 0
+    private var subscribedSessionID: String?
+    private var subscriptionToken: String?
+    private var subscriptionTarget: SessionPresentationIdentity?
+    private let synchronization = SessionSynchronizationCoordinator()
+    private var deferredEffectsByTarget: [SessionPresentationIdentity: [ReducerEffect]] = [:]
+
+    private(set) var context: JSONValue?
+    private(set) var sessionTree: [SessionTreeNode] = []
+    private(set) var commands: [CommandInfo] = []
+    private(set) var resources: JSONValue?
+    private var structureRevision = 0
+    private var contextRevision = 0
+    private var resourceRevision = 0
+
+    init(
+        client: GatewayClient,
+        performanceSignposts: any PerformanceSignposting
+    ) {
+        self.client = client
+        self.performanceSignposts = performanceSignposts
+    }
+
+    var mountedTarget: SessionPresentationIdentity? {
+        guard let target, owns(target) else { return nil }
+        return target
+    }
+
+    var selectedSessionID: String? { target?.sessionID ?? pendingTarget?.sessionID }
+
+    func authoritativeSnapshot(for sessionID: String) -> SessionSnapshot? {
+        guard isAuthoritative, ownsSession(sessionID), snapshot?.sessionId == sessionID else { return nil }
+        return snapshot
+    }
+
+    func snapshotForOwnedSession(_ sessionID: String) -> SessionSnapshot? {
+        guard ownsSession(sessionID) else { return nil }
+        return snapshot
+    }
+
+    func presentationGeneration(for sessionID: String) -> Int? {
+        guard target?.sessionID == sessionID else { return nil }
+        return target?.generation
+    }
+
+    func presentationTarget(for sessionID: String) -> SessionPresentationIdentity? {
+        guard target?.sessionID == sessionID else { return nil }
+        return target
+    }
+
+    func owns(_ requested: SessionPresentationIdentity) -> Bool {
+        target == requested && !revokedTargets.contains(requested)
+    }
+
+    func revokeIntake(_ requested: SessionPresentationIdentity) {
+        guard target == requested else { return }
+        revokedTargets.insert(requested)
+    }
+
+    func hasInstalledSubscription(for sessionID: String) -> Bool {
+        guard let target = mountedTarget else { return false }
+        return isAuthoritative
+            && target.sessionID == sessionID
+            && subscribedSessionID == sessionID
+            && subscriptionTarget == target
+            && subscriptionToken != nil
+    }
+
+    func installedSubscriptionToken(for sessionID: String) -> String? {
+        guard hasInstalledSubscription(for: sessionID) else { return nil }
+        return subscriptionToken
+    }
+
+    func ownsInstalledSubscription(sessionID: String, token: String) -> Bool {
+        ownsSubscription(sessionID: sessionID, requestedToken: token)
+    }
+
+    func structureRevision(for sessionID: String) -> Int {
+        ownsSession(sessionID) ? structureRevision : 0
+    }
+
+    func contextRevision(for sessionID: String) -> Int {
+        ownsSession(sessionID) ? contextRevision : 0
+    }
+
+    func resourceRevision(for sessionID: String) -> Int {
+        ownsSession(sessionID) ? resourceRevision : 0
+    }
+
+    func open(_ sessionID: String) async throws -> Int {
+        let interval = performanceSignposts.begin(.sessionOpen)
+        var result = PerformanceResult.failure
+        defer {
+            if Task.isCancelled { result = .cancelled }
+            performanceSignposts.end(interval, result: result, metrics: .none)
+        }
+
+        nextPresentationGeneration &+= 1
+        let requested = SessionPresentationIdentity(
+            sessionID: sessionID,
+            generation: nextPresentationGeneration
+        )
+        pendingTarget = requested
+        isAuthoritative = false
+        var didOpen = false
+        defer {
+            if !didOpen { deferredEffectsByTarget[requested] = nil }
+        }
+        clearSecondaryProjection()
+        if subscribedSessionID != sessionID { await closeCurrentSubscription() }
+        guard pendingTarget == requested else { throw CancellationError() }
+        let synchronized = await synchronize(
+            sessionID,
+            replacingVisibleTranscript: true,
+            presentationGeneration: requested.generation
+        )
+        guard pendingTarget == requested,
+              synchronized,
+              subscribedSessionID == sessionID,
+              subscriptionTarget == requested else {
+            throw GatewayFailure(code: "sync_failed", message: "Tron could not synchronize this session.", retryable: true, details: nil)
+        }
+        target = requested
+        pendingTarget = nil
+        revokedTargets.remove(requested)
+        isAuthoritative = true
+        publish(deferredEffectsByTarget.removeValue(forKey: requested) ?? [], target: requested)
+        delegate?.sessionPresentationStoreDidOpen(requested)
+        didOpen = true
+        result = .success
+        return requested.generation
+    }
+
+    func close(_ requested: SessionPresentationIdentity) async {
+        revokedTargets.remove(requested)
+        deferredEffectsByTarget[requested] = nil
+        guard target == requested else { return }
+        target = nil
+        if pendingTarget == requested { pendingTarget = nil }
+        isAuthoritative = false
+        snapshot = nil
+        clearSecondaryProjection()
+        await closeSubscription(requested.sessionID, expectedTarget: requested)
+    }
+
+    func loadEarlier(sessionID: String, presentationGeneration: Int) async {
+        guard !loadingEarlierTranscript,
+              let target,
+              target.sessionID == sessionID,
+              target.generation == presentationGeneration,
+              owns(target),
+              isAuthoritative,
+              let subscriptionToken = installedSubscriptionToken(for: sessionID),
+              let current = snapshot,
+              let before = current.transcriptStart,
+              before > 0 else { return }
+        let request = ChatTranscriptPageRequest(
+            sessionID: sessionID,
+            presentationGeneration: presentationGeneration,
+            runtimeGeneration: current.runtimeGeneration,
+            before: before,
+            expectedNextEntryID: current.transcript.first?.id
+        )
+        struct Params: Codable { let sessionId: String; let before: Int; let expectedNextEntryId: String? }
+        struct Response: Decodable { let items: [TranscriptItem]; let start: Int; let total: Int }
+        loadingEarlierTranscript = true
+        defer { loadingEarlierTranscript = false }
+        do {
+            let response: Response = try await client.request(
+                "session.transcript",
+                Params(sessionId: sessionID, before: before, expectedNextEntryId: current.transcript.first?.id),
+                timeout: .seconds(60)
+            )
+            guard !Task.isCancelled,
+                  let currentTarget = self.mountedTarget,
+                  currentTarget == target,
+                  self.isAuthoritative,
+                  self.installedSubscriptionToken(for: sessionID) == subscriptionToken,
+                  var snapshot = self.snapshot,
+                  request.canInstall(
+                    sessionID: currentTarget.sessionID,
+                    presentationGeneration: currentTarget.generation,
+                    runtimeGeneration: snapshot.runtimeGeneration,
+                    transcriptStart: snapshot.transcriptStart,
+                    firstTranscriptID: snapshot.transcript.first?.id
+                  ) else { return }
+            let existingIDs = Set(snapshot.transcript.map(\.id))
+            snapshot.transcript = response.items.filter { !existingIDs.contains($0.id) } + snapshot.transcript
+            snapshot.transcriptStart = response.start
+            snapshot.transcriptTotal = response.total
+            self.snapshot = snapshot
+            delegate?.sessionPresentationStoreCheckpointCache()
+        } catch is CancellationError {
+            return
+        } catch {
+            delegate?.sessionPresentationStoreSurface(error)
+        }
+    }
+
+    func retireConnection() {
+        deferredEffectsByTarget.removeAll()
+        subscribedSessionID = nil
+        subscriptionToken = nil
+        subscriptionTarget = nil
+        synchronization.reset()
+    }
+
+    func clearProfile() {
+        nextPresentationGeneration &+= 1
+        target = nil
+        pendingTarget = nil
+        snapshot = nil
+        isAuthoritative = false
+        revokedTargets.removeAll()
+        retireConnection()
+        clearSecondaryProjection()
+    }
+
+    func closeSubscriptionIfInstalled(sessionID: String) async {
+        guard subscribedSessionID == sessionID else { return }
+        await closeCurrentSubscription()
+    }
+
+    func remove(sessionID: String) {
+        guard selectedSessionID == sessionID else { return }
+        target = nil
+        pendingTarget = nil
+        snapshot = nil
+        isAuthoritative = false
+        revokedTargets = revokedTargets.filter { $0.sessionID != sessionID }
+        deferredEffectsByTarget = deferredEffectsByTarget.filter { $0.key.sessionID != sessionID }
+        retireConnection()
+        clearSecondaryProjection()
+    }
+
+    func clearConfirmedQueue(sessionID: String) {
+        guard ownsSession(sessionID), var snapshot else { return }
+        snapshot.queued = .init(steering: [], followUp: [])
+        self.snapshot = snapshot
+    }
+
+    func admit(_ event: GatewayEvent) async {
+        switch synchronization.admit(event) {
+        case .deliver(let event):
+            guard admitsSequencedEvent(event) else { return }
+            if let sessionID = reduce(event) {
+                _ = await synchronize(sessionID, operation: .sessionResync)
+            }
+        case .buffered:
+            break
+        case .overflow(let sessionID):
+            _ = await synchronize(sessionID, operation: .sessionResync)
+        }
+    }
+
+    func handleResyncRequired(sessionID: String?) async {
+        if let sessionID = sessionID ?? subscribedSessionID {
+            _ = await synchronize(sessionID, operation: .sessionResync)
+        }
+    }
+
+    @discardableResult
+    func reconnectMountedPresentation() async -> Bool {
+        guard let target = mountedTarget else { return true }
+        return await synchronize(
+            target.sessionID,
+            presentationGeneration: target.generation
+        )
+    }
+
+    func loadContext(sessionID: String) async {
+        guard let token = installedSubscriptionToken(for: sessionID) else { return }
+        struct Params: Codable { let sessionId: String }
+        do {
+            let loaded = try await client.requestValue("session.context", Params(sessionId: sessionID), timeout: .seconds(60))
+            guard ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+            context = loaded
+        } catch { delegate?.sessionPresentationStoreSurface(error) }
+    }
+
+    func loadTree(sessionID: String) async {
+        guard let token = installedSubscriptionToken(for: sessionID) else { return }
+        struct Params: Codable { let sessionId: String }
+        do {
+            let loaded: [SessionTreeNode] = try await client.request("session.tree", Params(sessionId: sessionID))
+            guard ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+            sessionTree = loaded
+        } catch { delegate?.sessionPresentationStoreSurface(error) }
+    }
+
+    func loadCommands(sessionID: String) async {
+        guard let token = installedSubscriptionToken(for: sessionID) else { return }
+        struct Params: Codable { let sessionId: String }
+        struct Response: Decodable { let commands: [CommandInfo] }
+        do {
+            let response: Response = try await client.request("session.commands", Params(sessionId: sessionID))
+            guard ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+            commands = response.commands
+        } catch { delegate?.sessionPresentationStoreSurface(error) }
+    }
+
+    func loadResources(sessionID: String) async {
+        guard let token = installedSubscriptionToken(for: sessionID) else { return }
+        struct Params: Codable { let sessionId: String }
+        do {
+            let loaded = try await client.requestValue("session.resources", Params(sessionId: sessionID), timeout: .seconds(60))
+            guard ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+            resources = loaded
+        } catch { delegate?.sessionPresentationStoreSurface(error) }
+    }
+
+    private func admitsSequencedEvent(_ event: GatewayEvent) -> Bool {
+        guard let sessionID = event.sessionId,
+              let target = mountedTarget,
+              isAuthoritative,
+              target.sessionID == sessionID,
+              snapshot?.sessionId == sessionID,
+              subscriptionTarget == target,
+              subscribedSessionID == sessionID,
+              subscriptionToken != nil else { return false }
+        return true
+    }
+
+    private func ownsSession(_ sessionID: String) -> Bool {
+        target?.sessionID == sessionID
+            || pendingTarget?.sessionID == sessionID
+            || snapshot?.sessionId == sessionID
+    }
+
+    private func ownsSubscription(sessionID: String, requestedToken: String) -> Bool {
+        guard let target = mountedTarget else { return false }
+        return isAuthoritative
+            && target.sessionID == sessionID
+            && subscribedSessionID == sessionID
+            && subscriptionTarget == target
+            && subscriptionToken == requestedToken
+    }
+
+    private func clearSecondaryProjection() {
+        context = nil
+        sessionTree = []
+        commands = []
+        resources = nil
+    }
+
+    private func closeCurrentSubscription() async {
+        guard let sessionID = subscribedSessionID else { return }
+        await closeSubscription(sessionID, expectedTarget: nil)
+    }
+
+    private func closeSubscription(_ sessionID: String, expectedTarget: SessionPresentationIdentity?) async {
+        if let expectedTarget, subscriptionTarget != expectedTarget { return }
+        guard subscribedSessionID == sessionID, let token = subscriptionToken else { return }
+        struct Params: Codable { let sessionId, subscriptionToken: String }
+        struct Response: Decodable { let closed: Bool }
+        let response: Response? = try? await client.request(
+            "session.close",
+            Params(sessionId: sessionID, subscriptionToken: token)
+        )
+        guard Self.shouldClearSubscription(
+            installedToken: subscriptionToken,
+            closingToken: token,
+            gatewayClosed: response?.closed == true
+        ) else { return }
+        subscriptionToken = nil
+        subscribedSessionID = nil
+        subscriptionTarget = nil
+    }
+
+    private func closeProvisionalSubscription(_ sessionID: String, token: String) async {
+        struct Params: Codable { let sessionId, subscriptionToken: String }
+        struct Response: Decodable { let closed: Bool }
+        let _: Response? = try? await client.request(
+            "session.close",
+            Params(sessionId: sessionID, subscriptionToken: token)
+        )
+    }
+
+    static func ownsPresentation(mountedGeneration: Int?, requestedGeneration: Int) -> Bool {
+        mountedGeneration == requestedGeneration
+    }
+
+    static func admitsPresentationIntake(
+        mountedGeneration: Int?,
+        requestedGeneration: Int,
+        isRevoked: Bool
+    ) -> Bool {
+        !isRevoked && ownsPresentation(
+            mountedGeneration: mountedGeneration,
+            requestedGeneration: requestedGeneration
+        )
+    }
+
+    static func ownsSubscription(
+        sessionID: String,
+        subscribedSessionID: String?,
+        installedToken: String?,
+        requestedToken: String
+    ) -> Bool {
+        subscribedSessionID == sessionID && installedToken == requestedToken
+    }
+
+    static func shouldClearSubscription(
+        installedToken: String?,
+        closingToken: String,
+        gatewayClosed: Bool
+    ) -> Bool {
+        gatewayClosed && installedToken == closingToken
+    }
+
+    @discardableResult
+    private func synchronize(
+        _ sessionID: String,
+        replacingVisibleTranscript: Bool = false,
+        presentationGeneration: Int? = nil,
+        operation: PerformanceOperation = .sessionSync
+    ) async -> Bool {
+        let intent: SessionSynchronizationCoordinator.Intent
+        if replacingVisibleTranscript {
+            guard let presentationGeneration else { return false }
+            intent = .presentation(generation: presentationGeneration)
+        } else {
+            guard let mountedGeneration = presentationGeneration ?? target?.generation,
+                  target?.sessionID == sessionID else { return false }
+            intent = .reconnect(presentationGeneration: mountedGeneration)
+        }
+
+        while !Task.isCancelled {
+            let lease = synchronization.acquire(sessionID: sessionID, intent: intent)
+            switch lease.role {
+            case .join:
+                return await lease.sharedValue()
+            case .retryAfterCurrent:
+                _ = await lease.sharedValue()
+            case .leader:
+                synchronization.prepareLeaderAttempt(lease)
+                return await performSynchronization(sessionID: sessionID, lease: lease, operation: operation)
+            }
+        }
+        return false
+    }
+
+    private enum AttemptOutcome { case success, retry, failed }
+
+    private enum ReducerEffect {
+        case catalogRefresh
+        case editor(action: SessionEditorAction, text: String, fullText: String, revision: Int)
+        case notice(String)
+        case failure(GatewayFailure)
+    }
+
+    private func performSynchronization(
+        sessionID: String,
+        lease: SessionSynchronizationCoordinator.Lease,
+        operation: PerformanceOperation
+    ) async -> Bool {
+        var nextOperation = operation
+        for _ in 0..<3 {
+            guard !Task.isCancelled,
+                  synchronization.owns(lease),
+                  ownsSynchronizationIntent(lease.intent, sessionID: sessionID) else {
+                synchronization.complete(lease, outcome: false)
+                return false
+            }
+            switch await performSynchronizationAttempt(sessionID: sessionID, lease: lease, operation: nextOperation) {
+            case .success:
+                synchronization.complete(lease, outcome: true)
+                delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+                delegate?.sessionPresentationStoreCheckpointCache()
+                return true
+            case .retry:
+                synchronization.restartBuffer(for: lease)
+                nextOperation = .sessionResync
+            case .failed:
+                synchronization.complete(lease, outcome: false)
+                return false
+            }
+        }
+        if subscriptionToken != nil { await closeSubscription(sessionID, expectedTarget: nil) }
+        synchronization.complete(lease, outcome: false)
+        delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
+        return false
+    }
+
+    private func performSynchronizationAttempt(
+        sessionID: String,
+        lease: SessionSynchronizationCoordinator.Lease,
+        operation: PerformanceOperation
+    ) async -> AttemptOutcome {
+        let interval = performanceSignposts.begin(operation)
+        var result = PerformanceResult.failure
+        var metrics = PerformanceMetrics.none
+        defer { performanceSignposts.end(interval, result: result, metrics: metrics) }
+        var provisionalToken: String?
+        do {
+            try Task.checkCancellation()
+            struct Params: Codable { let sessionId: String }
+            let response: GatewaySessionOpenResponse = try await client.request(
+                "session.open",
+                Params(sessionId: sessionID),
+                timeout: .seconds(60)
+            )
+            provisionalToken = response.subscriptionToken
+            if subscribedSessionID == sessionID {
+                subscribedSessionID = nil
+                subscriptionToken = nil
+            }
+            guard synchronization.owns(lease), ownsSynchronizationIntent(lease.intent, sessionID: sessionID) else {
+                await closeProvisionalSubscription(sessionID, token: response.subscriptionToken)
+                result = .discarded
+                return .failed
+            }
+
+            try await acknowledgeSync(sessionID: sessionID, syncToken: response.syncToken)
+            try Task.checkCancellation()
+            guard synchronization.owns(lease), ownsSynchronizationIntent(lease.intent, sessionID: sessionID) else {
+                await closeProvisionalSubscription(sessionID, token: response.subscriptionToken)
+                result = .discarded
+                return .failed
+            }
+
+            let mode: SessionSnapshotInstallationMode
+            switch lease.intent {
+            case .presentation:
+                mode = .freshPresentation
+            case .reconnect:
+                mode = synchronization.consumeFreshInstallRequirement(sessionID: sessionID)
+                    ? .freshPresentation : .reconnect
+            }
+            var installed = Self.installingSnapshot(current: snapshot, authoritative: response.session, mode: mode)
+            var replayEffects: [ReducerEffect] = []
+            let cursor = SessionSynchronizationCoordinator.Cursor(
+                runtimeGeneration: installed.runtimeGeneration,
+                eventSequence: installed.eventSequence
+            )
+            guard synchronization.owns(lease),
+                  let replay = synchronization.drainBufferedEvents(for: lease, baseline: cursor),
+                  SessionSynchronizationCoordinator.isContiguous(replay, after: cursor) else {
+                if case .freshPresentation = mode { synchronization.requireFreshInstall(sessionID: sessionID) }
+                await closeProvisionalSubscription(sessionID, token: response.subscriptionToken)
+                result = .discarded
+                return .retry
+            }
+
+            // Reduce the complete quarantined suffix locally. Snapshot, token,
+            // and route-keyed effects become observable only after acknowledgement
+            // and contiguity establish the exact installed target.
+            for event in replay {
+                _ = reduce(event, snapshot: &installed, effects: &replayEffects)
+            }
+            guard let installedTarget = synchronizationTarget(
+                for: lease.intent,
+                sessionID: sessionID
+            ) else {
+                await closeProvisionalSubscription(sessionID, token: response.subscriptionToken)
+                result = .discarded
+                return .failed
+            }
+            subscribedSessionID = sessionID
+            subscriptionToken = response.subscriptionToken
+            subscriptionTarget = installedTarget
+            snapshot = installed
+            delegate?.sessionPresentationStoreDidUpdateSummary(installed)
+            switch lease.intent {
+            case .presentation:
+                deferredEffectsByTarget[installedTarget, default: []].append(contentsOf: replayEffects)
+            case .reconnect:
+                publish(replayEffects, target: installedTarget)
+            }
+            provisionalToken = nil
+
+            if synchronization.consumeRetryRequirement(for: lease) {
+                result = .discarded
+                return .retry
+            }
+            result = .success
+            metrics = PerformanceMetrics(itemCount: replay.count)
+            return .success
+        } catch {
+            if Task.isCancelled || error is CancellationError { result = .cancelled }
+            if let provisionalToken { await closeProvisionalSubscription(sessionID, token: provisionalToken) }
+            if let failure = error as? GatewayFailure,
+               failure.retryable || failure.code == "response_too_large" {
+                delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
+            } else {
+                delegate?.sessionPresentationStoreSurface(error)
+            }
+            return .failed
+        }
+    }
+
+    private func synchronizationTarget(
+        for intent: SessionSynchronizationCoordinator.Intent,
+        sessionID: String
+    ) -> SessionPresentationIdentity? {
+        switch intent {
+        case .presentation(let generation):
+            let requested = SessionPresentationIdentity(sessionID: sessionID, generation: generation)
+            return pendingTarget == requested ? requested : nil
+        case .reconnect(let generation):
+            let requested = SessionPresentationIdentity(sessionID: sessionID, generation: generation)
+            return owns(requested) ? requested : nil
+        }
+    }
+
+    private func ownsSynchronizationIntent(
+        _ intent: SessionSynchronizationCoordinator.Intent,
+        sessionID: String
+    ) -> Bool {
+        switch intent {
+        case .presentation(let generation):
+            return pendingTarget == SessionPresentationIdentity(sessionID: sessionID, generation: generation)
+        case .reconnect(let generation):
+            return owns(SessionPresentationIdentity(sessionID: sessionID, generation: generation))
+        }
+    }
+
+    private func acknowledgeSync(sessionID: String, syncToken: String) async throws {
+        struct Params: Codable { let sessionId, syncToken: String }
+        struct Response: Decodable { let synchronized: Bool }
+        let response: Response = try await client.request(
+            "session.sync",
+            Params(sessionId: sessionID, syncToken: syncToken),
+            timeout: .seconds(15)
+        )
+        guard response.synchronized else {
+            throw GatewayFailure(code: "sync_failed", message: "Tron did not confirm session synchronization.", retryable: true, details: nil)
+        }
+    }
+
+    private func reduce(_ event: GatewayEvent) -> String? {
+        if event.topic == "session.snapshot",
+           case .sessionSnapshot(let incoming) = event.preparation {
+            return reduceSnapshotEvent(event, incoming: incoming)
+        }
+        guard var current = snapshot else {
+            if event.topic == "session.snapshot", case .sessionSnapshot(let incoming) = event.preparation {
+                return reduceSnapshotEvent(event, incoming: incoming)
+            }
+            if event.topic == "session.listChanged" { delegate?.sessionPresentationStoreDidRequestCatalogRefresh() }
+            return nil
+        }
+        var effects: [ReducerEffect] = []
+        let resync = reduce(event, snapshot: &current, effects: &effects)
+        snapshot = current
+        publish(effects, target: mountedTarget)
+        return resync
+    }
+
+    private func reduce(
+        _ event: GatewayEvent,
+        snapshot: inout SessionSnapshot,
+        effects: inout [ReducerEffect]
+    ) -> String? {
+        switch event.topic {
+        case "session.summary":
+            break
+        case "session.listChanged":
+            effects.append(.catalogRefresh)
+        case "session.snapshot":
+            guard case .sessionSnapshot(let incoming) = event.preparation else { break }
+            switch SessionSnapshotEventAdmission.evaluate(
+                eventSessionID: event.sessionId,
+                hasLiveAuthority: true,
+                current: snapshot,
+                incoming: incoming
+            ) {
+            case .install:
+                snapshot = Self.mergingVisibleTranscript(current: snapshot, authoritative: incoming)
+            case .ignore:
+                break
+            case .resynchronize(let sessionID):
+                if !synchronization.markRetryRequired(sessionID: sessionID) { return sessionID }
+            }
+        case "session.progress":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot),
+                  case .progress(let item)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
+            snapshot.streaming = item
+            advance(&snapshot, envelope)
+        case "session.toolProgress":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot),
+                  case .toolProgress(let tool)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
+            if let index = snapshot.toolExecutions.firstIndex(where: { $0.toolCallId == tool.toolCallId }) {
+                if isNewerToolState(tool, than: snapshot.toolExecutions[index]) { snapshot.toolExecutions[index] = tool }
+            } else { snapshot.toolExecutions.append(tool) }
+            snapshot.toolExecutions.sort(by: toolExecutionOrder)
+            advance(&snapshot, envelope)
+        case "session.interactions":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot),
+                  case .interactions(let interactions)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
+            snapshot.extensionUI.pendingInteractions = interactions
+            advance(&snapshot, envelope)
+        case "session.status":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot),
+                  let object = envelope.data.objectValue,
+                  let key = object["key"]?.stringValue else { return resyncIfNeeded(event, snapshot: snapshot) }
+            if let text = object["text"]?.stringValue { snapshot.extensionUI.statuses[key] = text }
+            else { snapshot.extensionUI.statuses.removeValue(forKey: key) }
+            advance(&snapshot, envelope)
+        case "session.working":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot), let object = envelope.data.objectValue else { return resyncIfNeeded(event, snapshot: snapshot) }
+            if object.keys.contains("message") { snapshot.extensionUI.working.message = object["message"]?.stringValue }
+            if let visible = object["visible"]?.boolValue { snapshot.extensionUI.working.visible = visible }
+            advance(&snapshot, envelope)
+        case "session.thinkingLabel":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
+            snapshot.extensionUI.hiddenThinkingLabel = envelope.data.objectValue?["label"]?.stringValue
+            advance(&snapshot, envelope)
+        case "session.widget":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot),
+                  case .widget(let key, let widget)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
+            snapshot.extensionUI.widgets.removeAll { $0.key == key }
+            if let widget { snapshot.extensionUI.widgets.append(widget) }
+            advance(&snapshot, envelope)
+        case "session.title":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
+            snapshot.extensionUI.title = envelope.data.objectValue?["title"]?.stringValue
+            advance(&snapshot, envelope)
+        case "session.editorText":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot),
+                  let object = envelope.data.objectValue,
+                  let rawAction = object["action"]?.stringValue,
+                  let action = SessionEditorAction(rawValue: rawAction),
+                  let text = object["text"]?.stringValue,
+                  let fullText = object["fullText"]?.stringValue,
+                  let revision = object["revision"]?.intValue else { return resyncIfNeeded(event, snapshot: snapshot) }
+            snapshot.extensionUI.editorRevision = revision
+            snapshot.extensionUI.editorText = fullText
+            effects.append(.editor(
+                action: action,
+                text: text,
+                fullText: fullText,
+                revision: revision
+            ))
+            advance(&snapshot, envelope)
+        case "session.notification":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
+            if let message = envelope.data.objectValue?["message"]?.stringValue {
+                effects.append(.notice(message))
+            }
+            advance(&snapshot, envelope)
+        case "session.operationFailed", "session.extensionError":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
+            if let message = envelope.data.objectValue?["message"]?.stringValue {
+                effects.append(.failure(GatewayFailure(
+                    code: "session_operation_failed",
+                    message: message,
+                    retryable: false,
+                    details: nil
+                )))
+            }
+            advance(&snapshot, envelope)
+        case "session.structureChanged":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
+            if envelope.data.objectValue?["branchChanged"]?.boolValue == true {
+                synchronization.requireFreshInstall(sessionID: snapshot.sessionId)
+            }
+            advance(&snapshot, envelope)
+            structureRevision &+= 1
+            contextRevision &+= 1
+        case "session.contextChanged":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
+            advance(&snapshot, envelope)
+            contextRevision &+= 1
+        case "session.resourcesChanged":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
+            advance(&snapshot, envelope)
+            resourceRevision &+= 1
+            contextRevision &+= 1
+        default:
+            if let envelope = admitEnvelope(event, snapshot: snapshot) { advance(&snapshot, envelope) }
+            else { return resyncIfNeeded(event, snapshot: snapshot) }
+        }
+        return nil
+    }
+
+    private func publish(
+        _ effects: [ReducerEffect],
+        target: SessionPresentationIdentity?
+    ) {
+        for effect in effects {
+            switch effect {
+            case .catalogRefresh:
+                delegate?.sessionPresentationStoreDidRequestCatalogRefresh()
+            case .editor(let action, let text, let fullText, let revision):
+                guard let target else { continue }
+                delegate?.sessionPresentationStoreDidPublishEditorRequest(
+                    target: target,
+                    action: action,
+                    text: text,
+                    fullText: fullText,
+                    revision: revision
+                )
+            case .notice(let message):
+                delegate?.sessionPresentationStorePostNotice(message, replacing: nil)
+            case .failure(let failure):
+                delegate?.sessionPresentationStoreSurface(failure)
+            }
+        }
+    }
+
+    private func reduceSnapshotEvent(_ event: GatewayEvent, incoming: SessionSnapshot) -> String? {
+        let hasAuthority = ownsLiveSnapshotEvent(sessionID: event.sessionId ?? "")
+        switch SessionSnapshotEventAdmission.evaluate(
+            eventSessionID: event.sessionId,
+            hasLiveAuthority: hasAuthority,
+            current: snapshot,
+            incoming: incoming
+        ) {
+        case .install:
+            let installed = snapshot.map { Self.mergingVisibleTranscript(current: $0, authoritative: incoming) } ?? incoming
+            snapshot = installed
+            delegate?.sessionPresentationStoreDidUpdateSummary(installed)
+            if installed.transcriptStart == incoming.transcriptStart,
+               installed.transcript.count == incoming.transcript.count {
+                delegate?.sessionPresentationStoreCheckpointCache()
+            }
+        case .ignore:
+            break
+        case .resynchronize(let sessionID):
+            if !synchronization.markRetryRequired(sessionID: sessionID) { return sessionID }
+        }
+        return nil
+    }
+
+    private func ownsLiveSnapshotEvent(sessionID: String) -> Bool {
+        guard hasInstalledSubscription(for: sessionID) else { return false }
+        let mounted = mountedTarget?.sessionID == sessionID && isAuthoritative
+        let synchronizing = synchronization.intent(sessionID: sessionID).map {
+            ownsSynchronizationIntent($0, sessionID: sessionID)
+        } ?? false
+        return mounted || synchronizing
+    }
+
+    private func admitEnvelope(_ event: GatewayEvent, snapshot: SessionSnapshot) -> SessionEventEnvelope? {
+        guard event.sessionId == snapshot.sessionId,
+              let envelope = event.preparedSessionEvent?.envelope,
+              envelope.runtimeGeneration == snapshot.runtimeGeneration,
+              envelope.eventSequence == snapshot.eventSequence + 1 else { return nil }
+        return envelope
+    }
+
+    private func resyncIfNeeded(_ event: GatewayEvent, snapshot: SessionSnapshot) -> String? {
+        guard let envelope = event.preparedSessionEvent?.envelope,
+              event.sessionId == snapshot.sessionId else { return nil }
+        if envelope.runtimeGeneration != snapshot.runtimeGeneration || envelope.eventSequence > snapshot.eventSequence + 1 {
+            if !synchronization.markRetryRequired(sessionID: snapshot.sessionId) { return snapshot.sessionId }
+        }
+        return nil
+    }
+
+    private func advance(_ snapshot: inout SessionSnapshot, _ envelope: SessionEventEnvelope) {
+        snapshot.eventSequence = envelope.eventSequence
+        snapshot.revision = max(snapshot.revision, envelope.revision)
+    }
+
+    private func isNewerToolState(_ candidate: ToolExecutionState, than current: ToolExecutionState) -> Bool {
+        if let candidateSequence = candidate.progressSequence,
+           let currentSequence = current.progressSequence,
+           candidateSequence != currentSequence { return candidateSequence > currentSequence }
+        if candidate.updatedAt != current.updatedAt { return candidate.updatedAt > current.updatedAt }
+        let rank: (ToolExecutionState.Status) -> Int = { status in
+            switch status { case .running: 0; case .completed, .failed: 1 }
+        }
+        return rank(candidate.status) >= rank(current.status)
+    }
+
+    private func toolExecutionOrder(_ left: ToolExecutionState, _ right: ToolExecutionState) -> Bool {
+        if let leftOrder = left.order, let rightOrder = right.order, leftOrder != rightOrder { return leftOrder < rightOrder }
+        if left.order != nil, right.order == nil { return true }
+        if left.order == nil, right.order != nil { return false }
+        if left.startedAt != right.startedAt { return left.startedAt < right.startedAt }
+        return left.toolCallId < right.toolCallId
+    }
+
+    static func installingSnapshot(
+        current: SessionSnapshot?,
+        authoritative: SessionSnapshot,
+        mode: SessionSnapshotInstallationMode
+    ) -> SessionSnapshot {
+        switch mode {
+        case .freshPresentation:
+            return authoritative
+        case .reconnect:
+            guard let current else { return authoritative }
+            if current.runtimeGeneration == authoritative.runtimeGeneration,
+               authoritative.eventSequence < current.eventSequence { return current }
+            return mergingVisibleTranscript(current: current, authoritative: authoritative)
+        }
+    }
+
+    static func mergingVisibleTranscript(
+        current: SessionSnapshot,
+        authoritative: SessionSnapshot
+    ) -> SessionSnapshot {
+        guard current.sessionId == authoritative.sessionId,
+              current.runtimeGeneration == authoritative.runtimeGeneration,
+              !current.transcript.isEmpty else { return authoritative }
+        guard !authoritative.transcript.isEmpty else {
+            guard authoritative.phase.isActive else { return authoritative }
+            var merged = authoritative
+            merged.transcript = current.transcript
+            merged.transcriptStart = current.transcriptStart
+            merged.transcriptTotal = max(
+                authoritative.transcriptTotal ?? 0,
+                current.transcriptTotal ?? current.transcript.count
+            )
+            return merged
+        }
+        let currentIndexByID = Dictionary(
+            uniqueKeysWithValues: current.transcript.enumerated().map { ($0.element.id, $0.offset) }
+        )
+        guard let overlap = authoritative.transcript.enumerated().compactMap({ index, item -> (Int, Int)? in
+            currentIndexByID[item.id].map { ($0, index) }
+        }).first else {
+            let currentStart = current.transcriptStart ?? 0
+            let authoritativeStart = authoritative.transcriptStart ?? 0
+            let currentEnd = currentStart + current.transcript.count
+            guard authoritative.phase.isActive, authoritativeStart >= currentEnd else { return authoritative }
+            var merged = authoritative
+            merged.transcript = current.transcript + authoritative.transcript
+            merged.transcriptStart = currentStart
+            merged.transcriptTotal = max(
+                authoritative.transcriptTotal ?? authoritativeStart + authoritative.transcript.count,
+                current.transcriptTotal ?? currentEnd
+            )
+            return merged
+        }
+        let currentOverlap = current.transcript[overlap.0...].map(\.id)
+        let authoritativeOverlap = authoritative.transcript[overlap.1...].map(\.id)
+        let sharedCount = min(currentOverlap.count, authoritativeOverlap.count)
+        guard Array(currentOverlap.prefix(sharedCount)) == Array(authoritativeOverlap.prefix(sharedCount)) else {
+            return authoritative
+        }
+        let authoritativeIDs = Set(authoritative.transcript.map(\.id))
+        let loadedPrefix = current.transcript[..<overlap.0].filter { !authoritativeIDs.contains($0.id) }
+        var merged = authoritative
+        merged.transcript = Array(loadedPrefix) + authoritative.transcript
+        merged.transcriptStart = max(0, current.transcriptStart ?? 0)
+        merged.transcriptTotal = max(
+            authoritative.transcriptTotal ?? authoritative.transcript.count,
+            merged.transcriptStart! + merged.transcript.count
+        )
+        return merged
+    }
+
+    static let sessionCatchUpNotice = "Live session view is catching up; the run continues on your Mac."
+
+    #if HOSTED_TEST
+    func installHostedSecondaryProjection(
+        context: JSONValue?,
+        tree: [SessionTreeNode],
+        commands: [CommandInfo],
+        resources: JSONValue?
+    ) {
+        self.context = context
+        sessionTree = tree
+        self.commands = commands
+        self.resources = resources
+    }
+
+    func installCompatibilitySelection(_ sessionID: String?) {
+        guard let sessionID else {
+            target = nil
+            pendingTarget = nil
+            isAuthoritative = false
+            clearSecondaryProjection()
+            return
+        }
+        nextPresentationGeneration &+= 1
+        target = SessionPresentationIdentity(sessionID: sessionID, generation: nextPresentationGeneration)
+        pendingTarget = nil
+        isAuthoritative = snapshot?.sessionId == sessionID
+        clearSecondaryProjection()
+    }
+
+    func installHostedSnapshotWithoutPresentation(_ snapshot: SessionSnapshot) {
+        target = nil
+        pendingTarget = nil
+        self.snapshot = snapshot
+        isAuthoritative = false
+    }
+
+    func installHostedSubscription(
+        snapshot: SessionSnapshot,
+        token: String
+    ) {
+        installHostedAuthoritativeSnapshot(snapshot)
+        subscribedSessionID = snapshot.sessionId
+        subscriptionToken = token
+        subscriptionTarget = target
+    }
+
+    func replaceHostedSubscriptionToken(_ token: String) {
+        guard subscribedSessionID != nil else { return }
+        subscriptionToken = token
+    }
+
+    func replaceHostedSnapshot(_ snapshot: SessionSnapshot) {
+        guard target?.sessionID == snapshot.sessionId else { return }
+        self.snapshot = snapshot
+    }
+
+    func invalidateHostedPendingPresentation() {
+        nextPresentationGeneration &+= 1
+        pendingTarget = nil
+    }
+
+    func installHostedAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
+        nextPresentationGeneration &+= 1
+        let target = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: nextPresentationGeneration)
+        self.target = target
+        pendingTarget = nil
+        self.snapshot = snapshot
+        isAuthoritative = true
+        revokedTargets.remove(target)
+    }
+    #endif
+}

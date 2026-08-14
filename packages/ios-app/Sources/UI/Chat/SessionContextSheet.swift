@@ -22,7 +22,7 @@ struct SessionContextSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    if let snapshot = model.snapshots[sessionID] {
+                    if let snapshot = model.authoritativeSnapshot(for: sessionID) {
                         contextUsageCard(snapshot)
                         configurationSection(snapshot)
                         navigationSection(snapshot)
@@ -68,7 +68,7 @@ struct SessionContextSheet: View {
                 await model.refreshSessions(surfacingErrors: false)
                 await model.loadContext(sessionID: sessionID)
                 await model.loadResources(sessionID: sessionID)
-                await loadGit(snapshot: model.snapshots[sessionID])
+                await loadGit(snapshot: model.authoritativeSnapshot(for: sessionID))
             }
             .task(id: model.sessionContextRevision(for: sessionID)) {
                 await model.loadContext(sessionID: sessionID)

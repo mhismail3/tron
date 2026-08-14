@@ -5,7 +5,6 @@ const client: ClientContext = {
   id: "phone",
   identity: "device:test",
   isLocal: false,
-  subscribe: () => {},
   beginSynchronization: () => "sync",
   establishSynchronization: () => {},
   completeSynchronization: () => {},

@@ -119,9 +119,8 @@ remain request-only, are scoped to the exact mount generation/cursor, and restor
 former visible anchor with bounded late-layout correction so the viewport does not jump.
 A gesture that begins during that correction cancels every remaining position write
 and its final native geometry wins over the pre-load detached state.
-A just-created empty session remains locally selected until Pi indexes it after
-its first user message; absence from discovery alone does not discard the
-newly returned authoritative snapshot.
+Create and fork return navigation identity without mounting or selecting a transcript;
+only the destination route may establish live presentation authority.
 
 Gateway restart uses a supervised drain contract. The request freezes new mutations,
 waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway
@@ -133,7 +132,16 @@ death is different: a surviving run marker projects the session as interrupted a
 never replays the accepted prompt automatically.
 
 Events are invalidation or live-presentation hints. They do not form a durable
-event journal and are never replayed into a local database. `session.open` uses
+event journal and are never replayed into a local database. `SessionPresentationStore`
+is the sole MainActor owner of the mounted immutable target, revocation, live snapshot,
+subscription lease, synchronization/quarantine, cursor reducer, transcript paging, and
+session-keyed context/tree/resources/commands. `AppModel` routes cross-domain effects through
+a weak delegate and retains no token, snapshot graph, presentation generation, or secondary
+projection mirror. Revocation synchronously rejects every sequenced topic, not only full snapshots.
+Paging, exports, and secondary reads capture an exact unrevoked target plus installed token and
+revalidate both after suspension. Paging is read-only at the Gateway and cannot revive event
+subscription ownership after close. Cold cache snapshots never enter the store's authoritative read gate.
+`session.open` uses
 a two-phase subscription barrier: the authoritative snapshot and ephemeral sync
 token are returned first. The snapshot and subscription token remain provisional and
 unobservable until `session.sync` succeeds and the exact session/presentation intent is

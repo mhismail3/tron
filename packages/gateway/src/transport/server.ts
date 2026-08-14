@@ -343,11 +343,6 @@ export class GatewayServer {
         id: connection.id,
         identity: connection.identity,
         isLocal: connection.isLocal,
-        subscribe: (sessionId) => {
-          connection.subscriptions.add(sessionId);
-          connection.openedSessions.add(sessionId);
-          this.options.sessions.subscribe(connection.id, sessionId);
-        },
         beginSynchronization: (sessionId) => {
           const previous = connection.synchronizations.get(sessionId);
           if (previous) {

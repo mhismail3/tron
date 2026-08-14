@@ -13,18 +13,22 @@ no-op behavior instead of disconnecting the transport. A quarantined event that 
 advance the reducer cursor rejects the suffix before baseline publication and triggers the
 bounded authoritative retry path.
 
-`AppModel.handle(_:)` owns routing:
+`AppModel.handle(_:)` owns cross-domain routing; `SessionPresentationStore` exclusively
+admits and reduces mounted-session topics:
 
 - `session.summary` enters `SessionCatalogCoordinator`'s monotonic phase/name/count
   projection, so runs started by terminal or another mobile client update dashboard
   rows without subscribing every device to every transcript. Unknown summaries request
   discovery without fabricating a row; paginated list refreshes carry typed latest-load
   admission and one revision, restarting rather than installing mixed or stale pages;
-- session snapshot/change topics update only the currently subscribed mounted or
-  synchronizing authority. Full snapshots install only at the exact next cursor for
+- session snapshot/change topics enter the store's composed synchronization quarantine and
+  update only the currently subscribed mounted or synchronizing authority. Baseline plus the
+  contiguous suffix reduce before snapshot/token publication in one MainActor turn. Full snapshots
+  install only at the exact next cursor for
   the same runtime; duplicate/stale cursors are no-ops, gaps/runtime replacement/missing
   baselines request authoritative synchronization, and missing authority or route/payload
-  mismatch is discarded without creating or caching state. Explicit acknowledged open/sync remains the only
+  mismatch is discarded without creating or caching state. Synchronous intake revocation rejects all
+  later sequenced topics before cursor reduction or cross-domain effects. Explicit acknowledged open/sync remains the only
   path allowed to replace a cursor or runtime baseline;
 - provider, package, settings, trust, and custom-model mutation invalidations
   advance owner revisions across connected clients; each visible surface reloads

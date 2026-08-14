@@ -114,7 +114,7 @@ struct ChatView: View {
             SettingsView(
                 scope: .project,
                 projectSessionID: sessionID,
-                projectCWD: model.snapshots[sessionID]?.cwd
+                projectCWD: model.authoritativeSnapshot(for: sessionID)?.cwd
             )
             .presentationDragIndicator(.hidden)
         }
@@ -677,7 +677,7 @@ struct ChatView: View {
                     }
                     lastHeight = height
                 }
-                guard model.selectedSessionID == sessionID,
+                guard model.presentationGeneration(for: sessionID) == presentationGeneration,
                       model.authoritativeSnapshot(for: sessionID)?.runtimeGeneration == runtimeGeneration,
                       modelPresentationGeneration == presentationGeneration else {
                     performanceResult = .discarded

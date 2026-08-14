@@ -35,8 +35,7 @@ struct AppModelEventTests {
     func portableSessionEvents() async throws {
         let snapshot = try loadSnapshot()
         let model = AppModel()
-        model.selectedSessionID = snapshot.sessionId
-        model.snapshots[snapshot.sessionId] = snapshot
+        model.installHostedSubscribedSnapshot(snapshot)
 
         let completedTool: JSONValue = .object([
             "toolCallId": .string("live-tool"), "toolName": .string("bash"), "order": .number(0), "status": .string("completed"),
@@ -74,11 +73,11 @@ struct AppModelEventTests {
         var afterInteraction = snapshot
         afterInteraction.eventSequence = 90
         await model.handle(event(topic: "session.editorText", snapshot: afterInteraction, sequence: 91, data: editor))
-        let unmountedTarget = AppModel.SessionPresentationTarget(
+        let mountedTarget = AppModel.SessionPresentationTarget(
             sessionID: snapshot.sessionId,
             generation: 1
         )
-        #expect(model.editorRequest(for: unmountedTarget) == nil)
+        #expect(model.editorRequest(for: mountedTarget)?.fullText == "replacement")
         #expect(model.selectedSnapshot?.extensionUI.editorText == "replacement")
         #expect(model.selectedSnapshot?.eventSequence == 91)
     }
@@ -92,8 +91,7 @@ struct AppModelEventTests {
             placement: .aboveEditor
         )]
         let model = AppModel()
-        model.selectedSessionID = snapshot.sessionId
-        model.snapshots[snapshot.sessionId] = snapshot
+        model.installHostedSubscribedSnapshot(snapshot)
 
         await model.handle(event(
             topic: "session.widget",
@@ -117,6 +115,9 @@ struct AppModelEventTests {
         #expect(model.selectedSnapshot?.eventSequence == afterWidget.eventSequence)
 
         let admittedBeforeSnapshot = afterWidget
+        if let target = model.mountedPresentationTarget {
+            model.revokePresentationIntake(target)
+        }
         afterWidget.eventSequence += 1
         afterWidget.phase = .running
         await model.handle(GatewayEvent(
@@ -132,8 +133,7 @@ struct AppModelEventTests {
     func liveSnapshotAdmission() async throws {
         let current = try loadSnapshot()
         let model = AppModel()
-        model.selectedSessionID = current.sessionId
-        model.snapshots[current.sessionId] = current
+        model.installHostedSnapshotWithoutPresentation(current)
 
         var duplicate = current
         duplicate.phase = current.phase == .running ? .idle : .running
@@ -159,7 +159,7 @@ struct AppModelEventTests {
         mismatched.name = "wrong route"
         await model.handle(snapshotEvent(mismatched, sessionID: "other-session"))
         #expect(model.selectedSnapshot == current)
-        #expect(model.snapshots["other-session"] == nil)
+        #expect(model.selectedSnapshot?.sessionId != "other-session")
     }
 
     @Test("older protocol-v2 opens reuse the sync token as subscription ownership")
@@ -398,8 +398,7 @@ struct AppModelEventTests {
     func surfaceInvalidations() async throws {
         let snapshot = try loadSnapshot()
         let model = AppModel()
-        model.selectedSessionID = snapshot.sessionId
-        model.snapshots[snapshot.sessionId] = snapshot
+        model.installHostedSubscribedSnapshot(snapshot)
 
         await model.handle(event(topic: "session.structureChanged", snapshot: snapshot, sequence: 88, data: .object([
             "branchChanged": .bool(false)
@@ -445,8 +444,7 @@ struct AppModelEventTests {
     func unrenderedEventsAdvanceCursor() async throws {
         let snapshot = try loadSnapshot()
         let model = AppModel()
-        model.selectedSessionID = snapshot.sessionId
-        model.snapshots[snapshot.sessionId] = snapshot
+        model.installHostedSubscribedSnapshot(snapshot)
 
         await model.handle(event(topic: "session.futureEvent", snapshot: snapshot, sequence: 88, data: .object([:])))
         await model.handle(event(topic: "session.notification", snapshot: snapshot, sequence: 89, data: .object([
@@ -532,15 +530,17 @@ struct AppModelEventTests {
     @Test("changing sessions clears secondary projections before their authoritative reload")
     func switchingSessionClearsSecondaryProjections() {
         let model = AppModel()
-        model.selectedSessionID = "first"
-        model.context = .object(["session": .string("first")])
-        model.resources = .object(["session": .string("first")])
-        model.sessionTree = [SessionTreeNode(
-            id: "entry", parentId: nil, timestamp: "2026-01-01T00:00:00Z", kind: "message",
-            label: nil, preview: "First", role: .user, depth: 0, childCount: 0, isCurrentPath: true
-        )]
+        model.selectHostedCompatibilitySession("first")
+        model.installHostedSecondaryProjection(
+            context: .object(["session": .string("first")]),
+            tree: [SessionTreeNode(
+                id: "entry", parentId: nil, timestamp: "2026-01-01T00:00:00Z", kind: "message",
+                label: nil, preview: "First", role: .user, depth: 0, childCount: 0, isCurrentPath: true
+            )],
+            resources: .object(["session": .string("first")])
+        )
 
-        model.selectedSessionID = "second"
+        model.selectHostedCompatibilitySession("second")
 
         #expect(model.context == nil)
         #expect(model.resources == nil)

@@ -115,8 +115,11 @@ gap coalescing/follow-up, shared multi-presentation leases, post-detach rejectio
 `TerminalCoordinatorTests` pin the global 16-terminal, 256-chunk, and 1 MiB pending-event
 bounds, the three-attempt immediate recovery ceiling, and the install/reattach/discard decision for
 terminal-open responses that resolve on the same, a replacement, or no current connection.
-`SessionEventSynchronizerTests` own the intent-keyed shared outcome and event-quarantine
-invariants; `SessionSnapshotEventAdmissionTests` own the
+`SessionPresentationStoreTests` own observation forwarding, cold-cache non-authority,
+disconnect/profile-reset semantics, all-topic revocation, old-close/new-open arbitration, stale and
+revoked secondary-response rejection, exact subscription-token admission, and suspended paging
+revalidation across revocation, token replacement, and disconnect. `SessionEventSynchronizerTests` own the composed intent-keyed shared outcome and
+event-quarantine invariants; `SessionSnapshotEventAdmissionTests` own the
 live full-snapshot matrix (authority, route identity, runtime, duplicate/stale/exact-next/gap
 cursor). Synchronizer coverage rejects a quarantined route/payload mismatch before baseline
 publication, while the AppModel suites prove snapshots/tokens remain provisional through
@@ -134,6 +137,7 @@ each actual authoritative open/resync attempt retains its own interval.
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/SessionPresentationStoreTests \
   -only-testing:TronMobileTests/AppModelPerformanceSignpostTests
 ```
 

@@ -72,7 +72,7 @@ struct AppModelPerformanceSignpostTests {
             ))
             let sync = try await request(in: harness.socket, frameIndex: 2)
             #expect(sync.method == "session.sync")
-            #expect(await MainActor.run { harness.model.snapshots[snapshot.sessionId] } == nil)
+            #expect(await MainActor.run { harness.model.selectedSnapshot } == nil)
             #expect(await MainActor.run {
                 harness.model.authoritativeSnapshot(for: snapshot.sessionId)
             } == nil)
@@ -112,7 +112,7 @@ struct AppModelPerformanceSignpostTests {
                 ])
             ))
             let sync = try await request(in: harness.socket, frameIndex: 2)
-            await MainActor.run { harness.model.selectedSessionID = "replacement-route" }
+            await MainActor.run { harness.model.invalidateHostedPendingPresentation() }
             await harness.socket.enqueue(successResponse(
                 id: sync.id,
                 result: .object(["synchronized": .bool(true)])
@@ -131,7 +131,7 @@ struct AppModelPerformanceSignpostTests {
             } catch let failure as GatewayFailure {
                 #expect(failure.code == "sync_failed")
             }
-            #expect(await MainActor.run { harness.model.snapshots[snapshot.sessionId] } == nil)
+            #expect(await MainActor.run { harness.model.selectedSnapshot } == nil)
             await harness.client.close()
         }
     }
@@ -143,7 +143,7 @@ struct AppModelPerformanceSignpostTests {
             let cached = try SessionScenarioBuilder(seed: 45).openingTail(targetEncodedBytes: 8_192)
             var proposed = cached
             proposed.eventSequence += 10
-            await MainActor.run { harness.model.snapshots[cached.sessionId] = cached }
+            await MainActor.run { harness.model.installHostedSnapshotWithoutPresentation(cached) }
             let opening = Task { try await harness.model.openSessionPresentation(cached.sessionId) }
             defer { opening.cancel() }
 
@@ -174,7 +174,7 @@ struct AppModelPerformanceSignpostTests {
                 Issue.record("failed acknowledgement unexpectedly installed")
             } catch {}
             #expect(await MainActor.run {
-                harness.model.snapshots[cached.sessionId]?.eventSequence
+                harness.model.selectedSnapshot?.eventSequence
             } == cached.eventSequence)
             #expect(await MainActor.run {
                 harness.model.authoritativeSnapshot(for: cached.sessionId)
@@ -245,7 +245,7 @@ struct AppModelPerformanceSignpostTests {
                 payload: try JSONValue.encode(afterRevocation)
             ))
             let rejectedAfterRevocation = await MainActor.run {
-                harness.model.snapshots[snapshot.sessionId]
+                harness.model.selectedSnapshot
             }
             #expect(rejectedAfterRevocation?.eventSequence == next.eventSequence)
             #expect(rejectedAfterRevocation?.name != "revoked presentation")
@@ -284,8 +284,7 @@ struct AppModelPerformanceSignpostTests {
                     expanded.transcriptStart = max(0, (snapshot.transcriptStart ?? 1) - 1)
                     expanded.transcriptTotal = max(snapshot.transcriptTotal ?? 0, expanded.transcript.count)
                 }
-                harness.model.snapshots[snapshot.sessionId] = expanded
-                harness.model.selectedSessionID = "divergent-dashboard-selection"
+                harness.model.replaceHostedAuthoritativeSnapshot(expanded)
                 return expanded.transcript.count
             }
             let reconnectResponder = Task {
@@ -300,7 +299,7 @@ struct AppModelPerformanceSignpostTests {
             try await valueOfOwnedTask(reconnectResponder)
             #expect(await MainActor.run { harness.model.selectedSessionID } == snapshot.sessionId)
             #expect(await MainActor.run {
-                harness.model.snapshots[snapshot.sessionId]?.transcript.count
+                harness.model.selectedSnapshot?.transcript.count
             } == expandedCount)
             await harness.client.close()
         }
@@ -334,7 +333,6 @@ struct AppModelPerformanceSignpostTests {
     func receiptResolution() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
-            await MainActor.run { harness.model.selectedSessionID = "dashboard-selection" }
             await harness.socket.failNextSend(GatewayFailure(
                 code: "disconnected",
                 message: "synthetic send failure",
@@ -456,7 +454,6 @@ struct AppModelPerformanceSignpostTests {
     func dashboardRefreshHasNoSessionOpen() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
-            await MainActor.run { harness.model.selectedSessionID = "stale-dashboard-selection" }
             let refreshing = Task { await harness.model.refreshAll() }
             defer { refreshing.cancel() }
 
@@ -509,7 +506,6 @@ struct AppModelPerformanceSignpostTests {
     func createRouteIdentity() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
-            await MainActor.run { harness.model.selectedSessionID = "dashboard-selection" }
             let creating = Task { try await harness.model.createSession(cwd: "/workspace") }
             defer { creating.cancel() }
 
@@ -529,7 +525,7 @@ struct AppModelPerformanceSignpostTests {
 
             #expect(try await valueOfOwnedTask(creating) == "created-route")
             let selectedAfterCreate = await MainActor.run { harness.model.selectedSessionID }
-            #expect(selectedAfterCreate == "dashboard-selection")
+            #expect(selectedAfterCreate == nil)
             await harness.client.close()
         }
     }
@@ -538,7 +534,6 @@ struct AppModelPerformanceSignpostTests {
     func forkRouteIdentity() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
-            await MainActor.run { harness.model.selectedSessionID = "dashboard-selection" }
             let forking = Task {
                 try await harness.model.fork(
                     sessionID: "mounted-route",
@@ -570,7 +565,7 @@ struct AppModelPerformanceSignpostTests {
             #expect(route.sessionID == "forked-route")
             #expect(route.editorText == "restored draft")
             let selectedAfterFork = await MainActor.run { harness.model.selectedSessionID }
-            #expect(selectedAfterFork == "dashboard-selection")
+            #expect(selectedAfterFork == nil)
             await harness.client.close()
         }
     }

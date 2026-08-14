@@ -56,7 +56,7 @@ struct SessionTreeSheet: View {
                         emptyState
                     } else {
                         ForEach(visibleNodes) { node in
-                            TreeNodeRow(node: node, leafID: model.snapshots[sessionID]?.leafEntryId) {
+                            TreeNodeRow(node: node, leafID: model.authoritativeSnapshot(for: sessionID)?.leafEntryId) {
                                 selection = SessionHistorySelection(node: node, action: .navigate)
                             } fork: {
                                 selection = SessionHistorySelection(node: node, action: .fork)
@@ -297,11 +297,11 @@ private struct NavigationSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     selectedPoint
                     if !node.isCurrentPath { abandonedBranchOptions }
-                    Button(working ? "Continuing…" : node.id == model.snapshots[sessionID]?.leafEntryId ? "Current Position" : "Continue From Here") {
+                    Button(working ? "Continuing…" : node.id == model.authoritativeSnapshot(for: sessionID)?.leafEntryId ? "Current Position" : "Continue From Here") {
                         navigate()
                     }
                     .buttonStyle(TronActionButtonStyle(role: .primary))
-                    .disabled(working || node.id == model.snapshots[sessionID]?.leafEntryId)
+                    .disabled(working || node.id == model.authoritativeSnapshot(for: sessionID)?.leafEntryId)
                 }
                 .padding(18)
             }

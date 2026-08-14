@@ -107,7 +107,9 @@ the same registry revision; clients restart pagination if summaries change betwe
 pages instead of installing a torn dashboard. `session.open` carries a
 byte-bounded authoritative transcript tail with `transcriptStart` and
 `transcriptTotal`; `session.transcript` pages backward through the same canonical
-Pi branch without enlarging the WebSocket frame limit. Live tool arguments,
+Pi branch without enlarging the WebSocket frame limit. Paging is a bounded read for an
+already-open presentation and never creates or revives event-subscription ownership.
+Live tool arguments,
 structured current results, and readable output are independently projected to
 bounded previews; current output updates the existing chip/detail view in place
 rather than creating transcript rows. Exact timing is retained for the current
