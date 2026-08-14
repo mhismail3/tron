@@ -3,12 +3,12 @@ import Foundation
 
 /// Fast, non-prompting TCC probes owned by the wrapper app.
 ///
-/// The server is launched through the bundled `com.tron.server`
+/// The Gateway is launched through the bundled `com.tron.gateway`
 /// LaunchAgent with the wrapper bundle IDs in `AssociatedBundleIdentifiers`.
 /// macOS therefore surfaces this permission under the responsible wrapper
 /// app (`Tron.app` in Release, `TronMac.app` in Debug). Probing from this
 /// process keeps the wizard, System Settings row, and launchd attribution
-/// aligned without creating a disabled `Tron Agent.app` entry.
+/// aligned without creating a disabled `Tron Gateway.app` entry.
 enum MacPermissionProbe {
     enum FileProbeOutcome: Equatable {
         case readable

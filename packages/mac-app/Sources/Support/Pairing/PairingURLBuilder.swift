@@ -7,7 +7,7 @@ enum PairingURLBuilder {
     private static let host = "pair"
 
     /// Builds a `tron://pair?host=…&port=…&code=…[&label=…]` URL.
-    /// The optional `label` value is the iOS server name.
+    /// The optional `label` value is the Mac name shown on iOS.
     /// Returns nil if any required field is empty or malformed after trimming.
     static func makeURL(_ payload: PairingPayload) -> URL? {
         guard let canonicalHost = PairingHostValidator.canonicalHost(payload.host),

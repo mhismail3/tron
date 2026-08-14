@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 
 struct MenuBarLogsView: View {
-    @Environment(\.environmentSetup) private var setup
+    @Environment(\.gatewayDependencies) private var dependencies
     @State private var phase: Phase = .loading
+    @State private var refreshTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -13,7 +14,8 @@ struct MenuBarLogsView: View {
                     .foregroundStyle(Color.tronEmerald)
                 Spacer()
                 Button("Refresh") {
-                    Task { await refresh() }
+                    refreshTask?.cancel()
+                    refreshTask = Task { await refresh() }
                 }
                 .disabled(phase == .loading)
                 Button("Copy") {
@@ -28,6 +30,10 @@ struct MenuBarLogsView: View {
         .padding(18)
         .frame(minWidth: 560, minHeight: 360)
         .task { await refresh() }
+        .onDisappear {
+            refreshTask?.cancel()
+            refreshTask = nil
+        }
     }
 
     @ViewBuilder
@@ -71,7 +77,15 @@ struct MenuBarLogsView: View {
     @MainActor
     private func refresh() async {
         phase = .loading
-        let result = await MenuBarLogReader.fetchRecentLogs(token: setup.readBearerToken())
+        guard case .signedIn(let host) = await dependencies.requirements.tailscaleStatus() else {
+            phase = .failed("Connect Tailscale to view Gateway logs.")
+            return
+        }
+        let result = await MenuBarLogReader.fetchRecentLogs(
+            host: host,
+            port: dependencies.configuration.gatewayPort,
+            token: dependencies.credentials.bearerToken()
+        )
         switch result {
         case .success(let logs):
             let trimmed = logs.trimmingCharacters(in: .whitespacesAndNewlines)

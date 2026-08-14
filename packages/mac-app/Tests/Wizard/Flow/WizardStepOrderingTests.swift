@@ -6,32 +6,25 @@ import Testing
 /// failing test instead of a confused user.
 @Suite("WizardStep ordering")
 struct WizardStepOrderingTests {
-    @Test("allCases is in canonical order (iOS beta precedes pairing)")
+    @Test("allCases is the paved onboarding flow")
     func canonicalOrder() {
-        // Install runs BEFORE permissions on purpose: the wrapper first
-        // registers the LaunchAgent with its associated bundle IDs, then
-        // probes/prompts the wrapper-owned TCC rows that macOS shows in
-        // System Settings. The iOS beta handoff then runs before the
-        // pairing QR.
         #expect(WizardStep.allCases == [
             .welcome,
             .tailscale,
             .install,
             .permissions,
-            .iosBeta,
-            .pairingInfo,
+            .connectIPhone,
             .done,
         ])
     }
 
-    @Test("rawValues are stable strings (used as UserDefaults keys)")
+    @Test("raw values are stable for accessibility and diagnostics")
     func rawValuesStable() {
         #expect(WizardStep.welcome.rawValue == "welcome")
         #expect(WizardStep.tailscale.rawValue == "tailscale")
         #expect(WizardStep.permissions.rawValue == "permissions")
         #expect(WizardStep.install.rawValue == "install")
-        #expect(WizardStep.iosBeta.rawValue == "iosBeta")
-        #expect(WizardStep.pairingInfo.rawValue == "pairingInfo")
+        #expect(WizardStep.connectIPhone.rawValue == "connectIPhone")
         #expect(WizardStep.done.rawValue == "done")
     }
 

@@ -6,10 +6,10 @@ import Testing
 @Suite("MenuBarIcon")
 @MainActor
 struct MenuBarIconTests {
-    @Test("each server state resolves to a tinted logo image")
+    @Test("each Gateway state resolves to a tinted logo image")
     func everyStateResolves() {
         for state in [
-            ServerStatusState.checking,
+            GatewayStatusState.checking,
             .running(version: "0.5.0", port: 9847),
             .busy(.restarting),
             .paused,

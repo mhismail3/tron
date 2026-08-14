@@ -1,56 +1,38 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
-/// Commits durable onboarding before emitting the process-local mode switch;
-/// throwing prevents AppDelegate from entering a mode that cannot survive relaunch.
-@MainActor
-func commitWizardCompletion(
-    touchSentinel: @Sendable () throws -> Void,
-    notificationCenter: NotificationCenter = .default
-) throws {
-    try touchSentinel()
-    notificationCenter.post(name: .tronWizardDidComplete, object: nil)
-}
-
-/// Top-level wizard. Reads the current `WizardStep` from `WizardState`
-/// and dispatches to a per-step view. The shell (top-bar with progress,
-/// fixed action bar, glass canvas, animated step transitions) is shared
-/// by `WizardShell`.
-///
-/// Pass `initialStep` to override the persisted last-visited step for
-/// wizard-owned recovery paths. The menu-bar pairing action uses its
-/// dedicated pairing-only window instead of remounting this wizard.
 struct WizardView: View {
-    @Environment(\.environmentSetup) private var setup
-    @State private var state: WizardState
+    @State private var model: GatewayOnboardingModel
 
-    init(initialStep: WizardStep? = nil) {
-        _state = State(initialValue: WizardState(initialStep: initialStep))
+    init(context: GatewayAppContext) {
+        _model = State(initialValue: GatewayOnboardingModel(
+            dependencies: context.dependencies,
+            coordinator: context.coordinator,
+            initialError: context.onboardingError,
+            completion: { await context.completeOnboarding() }
+        ))
     }
 
     var body: some View {
-        WizardShell(state: state) { step in
+        WizardShell(model: model) { step in
             switch step {
             case .welcome:
                 WelcomeStep()
             case .tailscale:
-                TailscaleStep(state: state)
+                TailscaleStep(state: model)
             case .install:
-                InstallStep(state: state)
+                InstallStep(state: model)
             case .permissions:
-                PermissionsStep(state: state)
-            case .iosBeta:
-                IOSBetaStep()
-            case .pairingInfo:
-                PairingInfoStep(state: state)
+                PermissionsStep(state: model)
+            case .connectIPhone:
+                PairingInfoStep(state: model)
             case .done:
                 DoneStep()
             }
         }
-        .environment(state)
-        .onAppear {
-            state.existingInstallStatus = setup.detectExistingInstall()
-        }
+        .environment(model)
+        .task { model.resumeFromObservedState() }
+        .onDisappear { model.cancelAll() }
     }
 }
 
@@ -62,463 +44,187 @@ private struct WizardProgressTrack: View, @MainActor Animatable {
         set { fraction = newValue }
     }
 
-    private var clampedFraction: Double {
-        min(1, max(0, fraction))
-    }
-
     var body: some View {
         Canvas { context, size in
             let rect = CGRect(origin: .zero, size: size).insetBy(dx: 0.4, dy: 0.4)
-            let radius = rect.height / 2
-            let track = Path(roundedRect: rect, cornerRadius: radius)
-            let fillWidth = max(WizardLayout.progressBarMinFillWidth, rect.width * clampedFraction)
-            let fillRect = CGRect(
-                x: rect.minX,
-                y: rect.minY,
-                width: min(rect.width, fillWidth),
-                height: rect.height
-            )
-            let fill = Path(roundedRect: fillRect, cornerRadius: radius)
-
+            let track = Path(roundedRect: rect, cornerRadius: rect.height / 2)
+            let width = min(rect.width, max(WizardLayout.progressBarMinFillWidth, rect.width * min(1, max(0, fraction))))
+            let fillRect = CGRect(x: rect.minX, y: rect.minY, width: width, height: rect.height)
+            let fill = Path(roundedRect: fillRect, cornerRadius: fillRect.height / 2)
             context.fill(track, with: .color(Color.tronEmerald.opacity(0.11)))
             context.fill(fill, with: .linearGradient(
                 Gradient(colors: [Color.tronMint, Color.tronEmeraldDeep]),
                 startPoint: CGPoint(x: fillRect.midX, y: fillRect.minY),
                 endPoint: CGPoint(x: fillRect.midX, y: fillRect.maxY)
             ))
-            context.stroke(fill, with: .linearGradient(
-                Gradient(colors: [
-                    Color.white.opacity(0.52),
-                    Color.black.opacity(0.22),
-                ]),
-                startPoint: CGPoint(x: fillRect.midX, y: fillRect.minY),
-                endPoint: CGPoint(x: fillRect.midX, y: fillRect.maxY)
-            ), lineWidth: 0.6)
-            context.stroke(track, with: .linearGradient(
-                Gradient(colors: [
-                    Color.black.opacity(0.16),
-                    Color.white.opacity(0.32),
-                ]),
-                startPoint: CGPoint(x: rect.midX, y: rect.minY),
-                endPoint: CGPoint(x: rect.midX, y: rect.maxY)
-            ), lineWidth: 0.8)
+            context.stroke(track, with: .color(Color.tronEmerald.opacity(0.20)), lineWidth: 0.8)
         }
-        .shadow(color: Color.white.opacity(0.55), radius: 1, x: 0, y: -1)
-        .shadow(color: Color.black.opacity(0.12), radius: 1.5, x: 0, y: 1)
-        .drawingGroup()
     }
 }
 
-/// Shared chrome — single liquid-glass canvas with the system traffic
-/// lights floating in the top-left, a pinned header row (step icon +
-/// title + progress), a transitioning body, and a pinned
-/// secondary/primary action bar.
-///
-/// Layout invariants:
-/// ```
-/// ┌────────────────────────────────────────┐
-/// │ ●●●                                    │
-/// │ [icon] Title                    [pill] │
-/// │                                        │
-/// │   [step body fills here]               │
-/// │                                        │
-/// │ [secondary]            [primary CTA]   │
-/// └────────────────────────────────────────┘
-/// ```
-///
-/// - The header row is pinned, so the icon, title, and progress pill
-///   share one vertical center on every step. The title/icon group
-///   transitions inside that row; the progress fill animates inside
-///   one stable Canvas-backed track.
-/// - Body content owns a single `.id(displayStep)` so it re-mounts and
-///   slides as one cohesive unit. The shell keeps one fixed-height
-///   viewport, so every page slides across the same clipping geometry.
-/// - The bottom action bar is an overlay pinned to
-///   `WizardLayout.bottomPadding` + `WizardLayout.horizontalPadding`.
-///   Step bodies cannot push it around during measurement.
-/// - Slide direction is read from `displayDirection`, a local `@State`
-///   mirror of `WizardState.slideDirection`. `WizardState`'s navigation
-///   methods set the new direction BEFORE mutating `step`; this view
-///   then performs a two-phase update (see `onChange` below) so the
-///   outgoing chrome is re-rendered with the fresh direction attached
-///   to its `.transition(...)` modifier BEFORE its identity changes
-///   and SwiftUI unmounts it. Without that deferral, SwiftUI reuses
-///   whatever direction was baked into the outgoing view's transition
-///   during the PREVIOUS body eval (i.e. the prior navigation's
-///   direction), producing reversed animations on every nav after the
-///   first.
-/// - The shell owns the secondary + primary CTAs for every step. Step
-///   bodies provide ONLY their description / body content; tertiary
-///   actions (Refresh, Re-check) live inline within the body
-///   so they slide with it.
 struct WizardShell<Content: View>: View {
-    @Environment(\.environmentSetup) private var setup
-    @Bindable var state: WizardState
+    @Bindable var model: GatewayOnboardingModel
     @ViewBuilder var content: (WizardStep) -> Content
-
-    /// The step actually rendered in the chrome. Lags `state.step` by
-    /// exactly one runloop tick after a navigation. See the struct-
-    /// level doc + the `.onChange` handler in `body` for the rationale.
-    @State private var displayStep: WizardStep
-
-    /// Direction consumed by `slideTransition`. Updated SYNCHRONOUSLY
-    /// inside `.onChange(of: state.step)` (Phase 1) so the outgoing
-    /// chrome re-renders with the fresh direction attached before
-    /// `displayStep` changes identity (Phase 2).
-    @State private var displayDirection: WizardSlideDirection
-
-    init(state: WizardState, @ViewBuilder content: @escaping (WizardStep) -> Content) {
-        self.state = state
-        self.content = content
-        _displayStep = State(wrappedValue: state.step)
-        _displayDirection = State(wrappedValue: state.slideDirection)
-    }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AccessibilityFocusState private var headerFocused: Bool
 
     var body: some View {
         ZStack(alignment: .top) {
-            // Layer 1 (content plane): body content re-mounts on every
-            // `displayStep` change and slides as one cohesive group.
-            // The top inset reserves permanent space for Layer 3's
-            // pinned header row, and the bottom inset reserves Layer
-            // 2's pinned action bar. Dynamic body measurement cannot
-            // move the Back/Continue buttons or the progress pill even
-            // for a single frame.
-            content(displayStep)
+            content(model.step)
                 .padding(.top, WizardLayout.topPadding + WizardLayout.headerHeight + WizardLayout.headerBodySpacing)
                 .padding(.horizontal, WizardLayout.horizontalPadding)
-                .padding(.bottom, WizardLayout.bottomPadding + WizardLayout.bottomBarHeight)
+                .padding(.bottom, WizardLayout.bottomPadding + WizardLayout.bottomBarHeight + 22)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .id(displayStep)
-                .transition(slideTransition)
-                .animation(WizardLayout.transitionAnimation, value: displayStep)
+                .id(model.step)
+                .transition(stepTransition)
 
-            // Layer 2 (pinned): bottom bar has an explicit height and
-            // absolute bottom alignment inside the 480×440 canvas. Only
-            // its labels/styles switch with `displayStep`; the bar's
-            // frame never gets remeasured by the sliding content.
             bottomBar
-                .frame(height: WizardLayout.bottomBarHeight, alignment: .center)
                 .padding(.horizontal, WizardLayout.horizontalPadding)
                 .padding(.bottom, WizardLayout.bottomPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
 
-            // Layer 3 (pinned): one real header row owns icon, title,
-            // and progress. Keeping the pill in this row prevents the
-            // progress track from drifting away from the title chrome
-            // during page transitions.
             headerBar
                 .padding(.top, WizardLayout.topPadding)
                 .padding(.horizontal, WizardLayout.horizontalPadding)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        // Fixed wizard canvas: every page gets the same 480×440 viewport,
-        // so horizontal transitions cannot resize the window or change
-        // their clipping geometry.
         .frame(width: WizardLayout.width, height: WizardLayout.height)
-        .configureHostingWindow { window in
-            window.isMovableByWindowBackground = true
-        }
-        // Two-phase direction+step update (see struct doc). Phase 1
-        // runs synchronously: write the new direction, which re-renders
-        // the CURRENTLY-mounted chrome so its `.transition(slideTransition)`
-        // modifier now holds the fresh direction. Phase 2 runs one
-        // runloop tick later via `DispatchQueue.main.async`: flip
-        // `displayStep`, which changes the chrome's `.id(...)` and
-        // triggers SwiftUI to unmount the outgoing view (using the
-        // direction Phase 1 just baked in) and mount the incoming
-        // view. If we set both synchronously, both sides of the
-        // transition use the direction from the PREVIOUS navigation
-        // (because that's what was baked into the outgoing view's
-        // transition during the prior body eval), and the animation
-        // reverses on every step after the first.
-        .onChange(of: state.step) { _, newStep in
-            displayDirection = state.slideDirection
-            DispatchQueue.main.async {
-                displayStep = newStep
-            }
-        }
+        .animation(reduceMotion ? nil : WizardLayout.transitionAnimation, value: model.step)
+        .configureHostingWindow { $0.isMovableByWindowBackground = true }
+        .onAppear { headerFocused = true }
+        .onChange(of: model.step) { _, _ in headerFocused = true }
     }
 
-    // MARK: - Header (icon + title + progress)
-
-    @ViewBuilder
     private var headerBar: some View {
-        HStack(alignment: .center, spacing: 12) {
-            ZStack(alignment: .leading) {
-                stepTitleGroup
-                    .id(displayStep)
-                    .transition(slideTransition)
-                    .animation(WizardLayout.transitionAnimation, value: displayStep)
-            }
-            .frame(maxWidth: .infinity, maxHeight: WizardLayout.headerHeight, alignment: .leading)
-            .clipped()
-
-            progressPill
-        }
-        .frame(height: WizardLayout.headerHeight, alignment: .center)
-    }
-
-    @ViewBuilder
-    private var stepTitleGroup: some View {
         HStack(spacing: 12) {
             stepIcon
-            Text(displayStep.displayTitle)
+            Text(model.step.displayTitle)
                 .font(TronTypography.wizardTitle)
                 .foregroundStyle(Color.tronEmerald)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($headerFocused)
             Spacer(minLength: 12)
+            progressPill
         }
-        .frame(height: WizardLayout.headerHeight, alignment: .center)
+        .frame(height: WizardLayout.headerHeight)
     }
 
     @ViewBuilder
     private var stepIcon: some View {
-        switch displayStep.headerIcon {
+        switch model.step.headerIcon {
         case .asset(let name):
             Image(name)
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 28, height: WizardLayout.headerHeight, alignment: .center)
+                .frame(width: 28, height: WizardLayout.headerHeight)
                 .foregroundStyle(Color.tronEmerald)
+                .accessibilityHidden(true)
         case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(Color.tronEmerald)
-                .frame(width: 28, height: WizardLayout.headerHeight, alignment: .center)
+                .frame(width: 28, height: WizardLayout.headerHeight)
+                .accessibilityHidden(true)
         }
     }
 
-    // MARK: - Bottom action bar
-
-    @ViewBuilder
     private var bottomBar: some View {
-        HStack(spacing: 12) {
-            secondaryButton
-            Spacer(minLength: 0)
-            primaryButton
+        VStack(alignment: .leading, spacing: 6) {
+            if let error = model.error {
+                Label(error.userMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(TronTypography.wizardCaption)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+                    .accessibilityElement(children: .combine)
+            }
+            HStack(spacing: 12) {
+                secondaryButton
+                Spacer(minLength: 0)
+                primaryButton
+            }
+            .frame(height: WizardLayout.bottomBarHeight)
         }
     }
 
     @ViewBuilder
     private var secondaryButton: some View {
-        switch displayStep {
-        case .welcome:
-            // Power-user shortcut — not a back button. The Welcome
-            // step is the entry point so there's nothing to go back
-            // to anyway.
-            Button {
-                state.skipToPairing()
-            } label: {
-                Text("I already have Tron running")
-            }
-            .buttonStyle(.wizardLink)
-        case .done:
-            // Done is terminal; no secondary action.
-            EmptyView()
-        default:
-            Button {
-                state.goBack()
-            } label: {
-                Text("Back")
-            }
-            .buttonStyle(.wizardSecondary)
-            .help("Back to previous step")
+        if model.canGoBack {
+            Button("Back") { model.goBack() }
+                .buttonStyle(.wizardSecondary)
+                .help("Back to previous step")
         }
     }
 
     @ViewBuilder
     private var primaryButton: some View {
-        switch displayStep {
+        switch model.step {
         case .welcome:
-            Button {
-                state.advance()
-            } label: {
-                Text("Get started")
-            }
-            .buttonStyle(.wizardPrimary)
-            .keyboardShortcut(.defaultAction)
+            primary("Get started") { model.advanceFromWelcome() }
         case .tailscale:
-            Button {
-                if state.tailscaleStatus?.isReady == true {
-                    state.advance()
-                } else {
-                    Task { @MainActor in
-                        let status = await setup.probeTailscale()
-                        state.tailscaleStatus = status
-                        if status.isReady {
-                            state.advance()
-                        }
-                    }
-                }
-            } label: {
-                Text(state.tailscaleStatus?.isReady == true ? "Continue" : "I have Tailscale")
+            primary(model.tailscaleStatus?.isReady == true ? "Continue" : "Check Tailscale") {
+                model.verifyTailscaleAndContinue()
             }
-            .buttonStyle(.wizardPrimary)
-            .keyboardShortcut(.defaultAction)
-        case .permissions:
-            Button {
-                Task { @MainActor in
-                    guard permissionsCanContinue else { return }
-                    if !state.permissionsServerRestarted {
-                        state.permissionsRestartInProgress = true
-                        _ = await setup.launchAgentManager.restart(label: setup.launchAgentLabel)
-                        state.permissionsServerRestarted = true
-                        state.permissionsRestartInProgress = false
-                    }
-                    state.advance()
-                }
-            } label: {
-                Text(state.permissionsRestartInProgress ? "Finalizing…" : "Continue")
-            }
-            .buttonStyle(.wizardPrimary)
-            .keyboardShortcut(.defaultAction)
-            .disabled(!permissionsCanContinue || state.permissionsRestartInProgress)
         case .install:
-            Button {
-                if installCanContinue {
-                    state.advance()
-                } else {
-                    state.requestInstall()
-                }
-            } label: {
-                Text(installPrimaryLabel)
+            primary(installLabel, disabled: model.isMutating) {
+                model.installIsReady ? model.continueAfterInstall() : model.install()
             }
-            .buttonStyle(.wizardPrimary)
-            .keyboardShortcut(.defaultAction)
-            .disabled(state.installIsRunning)
-        case .iosBeta:
-            Button {
-                state.advance()
-            } label: {
-                Text("I installed Tron")
+        case .permissions:
+            primary(model.isMutating ? "Finalizing…" : "Continue", disabled: !model.permissionsAreReady || model.isMutating) {
+                model.restartAfterPermissions()
             }
-            .buttonStyle(.wizardPrimary)
-            .keyboardShortcut(.defaultAction)
-        case .pairingInfo:
-            Button {
-                state.advance()
-            } label: {
-                Text("I'm paired")
+        case .connectIPhone:
+            primary("I'm connected", disabled: model.pairingPayload == nil) {
+                model.continueAfterPairing()
             }
-            .buttonStyle(.wizardPrimary)
-            .keyboardShortcut(.defaultAction)
-            .disabled(state.pairingPayload == nil)
         case .done:
-            Button(action: completeOnboarding) {
-                Text("Open menu bar")
+            primary("Open menu bar", disabled: model.isMutating) {
+                model.completeOnboarding()
             }
+        }
+    }
+
+    private func primary(
+        _ title: String,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(title, action: action)
             .buttonStyle(.wizardPrimary)
             .keyboardShortcut(.defaultAction)
-        }
+            .disabled(disabled)
     }
 
-    /// A failed durable commit leaves Done visible for retry instead of
-    /// asking AppDelegate to enter menu-bar mode.
-    private func completeOnboarding() {
-        do {
-            try commitWizardCompletion(touchSentinel: setup.touchOnboardedSentinel)
-        } catch {
-            NSLog("[Tron] Failed to write onboarded sentinel: \(error.localizedDescription)")
-        }
-    }
-
-    /// Gate for the Permissions step's Continue button. Full Disk Access
-    /// must be granted before pairing so agent file-backed execution
-    /// does not start from a half-working install.
-    private var permissionsCanContinue: Bool {
-        Permission.allCases.allSatisfy { permission in
-            state.permissionStatuses[permission] == .granted
-        }
-    }
-
-    /// Mirrors the gate previously implemented privately by
-    /// `InstallStep`: the primary CTA advances only after the install
-    /// pipeline has started the helper and `system::ping` has answered.
-    /// Before then, the same CTA starts or retries the pipeline via
-    /// `state.requestInstall()`.
-    private var installCanContinue: Bool {
-        guard let outcome = state.installOutcome else { return false }
-        return outcome == .success
-    }
-
-    private var installPrimaryLabel: String {
-        if installCanContinue { return "Continue" }
-        if state.installIsRunning { return "Installing..." }
-        if let outcome = state.installOutcome, outcome != .success {
-            return "Retry install"
-        }
-        if case .registered = state.existingInstallStatus {
-            return "Start Tron"
-        }
+    private var installLabel: String {
+        if model.installIsReady { return "Continue" }
+        if model.isMutating { return "Installing…" }
+        if model.installOutcome != nil { return "Retry install" }
         return "Install"
     }
 
-    // MARK: - Pinned progress pill
-
-    @ViewBuilder
     private var progressPill: some View {
-        let cases = WizardStep.allCases
-        let current = (cases.firstIndex(of: displayStep) ?? 0) + 1
-        let total = cases.count
-        let fraction = Double(current) / Double(total)
-
-        HStack(spacing: 8) {
-            progressCount(current: current, total: total)
-            progressTrack(fraction: fraction)
+        let steps = WizardStep.allCases
+        let current = (steps.firstIndex(of: model.step) ?? 0) + 1
+        let fraction = Double(current) / Double(steps.count)
+        return HStack(spacing: 8) {
+            Text("\(current) / \(steps.count)")
+                .font(TronTypography.wizardProgress)
+                .monospacedDigit()
+            WizardProgressTrack(fraction: fraction)
+                .frame(width: WizardLayout.progressBarWidth, height: WizardLayout.progressBarHeight)
         }
+        .foregroundStyle(Color.tronEmerald)
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
-        .background(
-            Capsule(style: .continuous)
-                .fill(Color.tronEmerald.opacity(0.06))
-                .overlay(
-                    Capsule(style: .continuous)
-                        .strokeBorder(Color.tronEmerald.opacity(0.14), lineWidth: 0.6)
-                )
-        )
+        .background(Capsule().fill(Color.tronEmerald.opacity(0.06)))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Setup step \(current) of \(steps.count)")
     }
 
-    @ViewBuilder
-    private func progressCount(current: Int, total: Int) -> some View {
-        Text("\(current) / \(total)")
-            .font(TronTypography.wizardProgress)
-            .foregroundStyle(Color.tronEmerald.opacity(0.90))
-            .monospacedDigit()
-            .shadow(color: Color.white.opacity(0.42), radius: 0.5, x: 0, y: -0.5)
-            .shadow(color: Color.black.opacity(0.10), radius: 1, x: 0, y: 0.5)
-    }
-
-    @ViewBuilder
-    private func progressTrack(fraction: Double) -> some View {
-        WizardProgressTrack(fraction: fraction)
-            .frame(
-                width: WizardLayout.progressBarWidth,
-                height: WizardLayout.progressBarHeight,
-                alignment: .leading
-            )
-            .animation(WizardLayout.progressAnimation, value: fraction)
-    }
-
-    // MARK: - Direction-aware slide transition
-
-    /// Reads `displayDirection` (a local mirror of `state.slideDirection`
-    /// updated in Phase 1 of the two-phase `onChange` handler above).
-    /// Forward navigations slide the outgoing view off-left and the
-    /// incoming view in from the right; back navigations reverse both
-    /// edges. The whole shell mimics a horizontal pager: forward =
-    /// swipe left, back = swipe right.
-    private var slideTransition: AnyTransition {
-        switch displayDirection {
-        case .forward:
-            return .asymmetric(
-                insertion: .move(edge: .trailing).combined(with: .opacity),
-                removal: .move(edge: .leading).combined(with: .opacity)
-            )
-        case .backward:
-            return .asymmetric(
-                insertion: .move(edge: .leading).combined(with: .opacity),
-                removal: .move(edge: .trailing).combined(with: .opacity)
-            )
-        }
+    private var stepTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        let insertion: Edge = model.slideDirection == .forward ? .trailing : .leading
+        let removal: Edge = model.slideDirection == .forward ? .leading : .trailing
+        return .asymmetric(insertion: .move(edge: insertion), removal: .move(edge: removal))
+            .combined(with: .opacity)
     }
 }

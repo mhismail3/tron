@@ -1,13 +1,13 @@
 import Foundation
 
 enum MenuBarLogReadError: Error, Equatable {
-    case serverUnavailable
+    case gatewayUnavailable
     case gatewayRequestFailed(String)
     case unreadableOutput(String)
 
     var message: String {
         switch self {
-        case .serverUnavailable:
+        case .gatewayUnavailable:
             return "Tron is not reachable."
         case .gatewayRequestFailed(let detail):
             return detail.isEmpty ? "The log request failed." : detail
@@ -22,14 +22,14 @@ enum MenuBarLogReader {
     static let requestID = "mac-system-logs"
 
     static func fetchRecentLogs(
-        host: String = "127.0.0.1",
-        port: Int = TronPaths.defaultServerPort,
+        host: String,
+        port: Int,
         token: String?,
         limit: Int = defaultLimit,
         timeout: TimeInterval = 5
     ) async -> Result<String, MenuBarLogReadError> {
         guard let url = URLComponents(string: "ws://\(host):\(port)/v1/socket")?.url else {
-            return .failure(.serverUnavailable)
+            return .failure(.gatewayUnavailable)
         }
 
         var request = URLRequest(url: url, timeoutInterval: timeout)
@@ -83,9 +83,9 @@ enum MenuBarLogReader {
                 }
             }
 
-            return .failure(.serverUnavailable)
+            return .failure(.gatewayUnavailable)
         } catch {
-            return .failure(.serverUnavailable)
+            return .failure(.gatewayUnavailable)
         }
     }
 

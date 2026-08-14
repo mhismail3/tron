@@ -1,33 +1,37 @@
+import AppKit
 import SwiftUI
 
-/// Tailscale prerequisite step. The shell owns the icon, title,
-/// progress pill, and the bottom action bar (Back / "I have Tailscale"
-/// or Continue). This view contributes the explanatory copy, the live
-/// status card driven by `setup.probeTailscale()`, and — only when
-/// Tailscale isn't yet ready — an inline link to the macOS download
-/// page.
 struct TailscaleStep: View {
-    @Bindable var state: WizardState
-    @Environment(\.environmentSetup) private var setup
-
-    @State private var probing = false
+    @Bindable var state: GatewayOnboardingModel
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: TailscaleStepLayout.contentSpacing) {
-                Text("Tron uses Tailscale as a private mesh network so your iPhone can reach this Mac without exposing it to the public internet.")
-                    .font(TronTypography.wizardBody)
-                    .foregroundStyle(.secondary)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 22) {
+            Text("Tron uses Tailscale so your iPhone can reach this Mac without exposing the Gateway to the public internet.")
+                .font(TronTypography.wizardBody)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-                statusCard
+            WizardInfoCard(verticalPadding: 16) {
+                WizardIconTextRow {
+                    Image(systemName: iconName)
+                        .font(.title)
+                        .foregroundStyle(iconColor)
+                        .accessibilityHidden(true)
+                } content: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(headline).font(TronTypography.wizardHeadline)
+                        Text(detail)
+                            .font(TronTypography.wizardBodySmall)
+                            .foregroundStyle(.secondary)
+                    }
+                } trailing: {
+                    if state.isRefreshing { ProgressView().controlSize(.small) }
+                }
+            }
+            .accessibilityElement(children: .combine)
 
-                // Tertiary action: only relevant before Tailscale is up.
-                // Inlined here (rather than living in the shell's bottom
-                // bar) so it slides with the rest of the body content
-                // and disappears cleanly once the user signs in.
-                if !(state.tailscaleStatus?.isReady ?? false) {
+            HStack(spacing: 16) {
+                if state.tailscaleStatus?.isReady != true {
                     Button {
                         NSWorkspace.shared.open(URL(string: "https://tailscale.com/download/mac")!)
                     } label: {
@@ -35,91 +39,48 @@ struct TailscaleStep: View {
                     }
                     .buttonStyle(.wizardLink)
                 }
+                Button {
+                    state.verifyTailscaleAndContinue()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.wizardLink)
+                .disabled(state.isRefreshing)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, TailscaleStepLayout.contentTopPadding)
-
             Spacer(minLength: 0)
         }
-        .task { await probeUntilReady() }
-    }
-
-    @ViewBuilder
-    private var statusCard: some View {
-        WizardInfoCard(verticalPadding: TailscaleStepLayout.statusCardVerticalPadding) {
-            WizardIconTextRow {
-                Image(systemName: iconName)
-                    .font(.title)
-                    .foregroundStyle(iconColor)
-            } content: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(headline)
-                        .font(TronTypography.wizardHeadline)
-                    Text(subheadline)
-                        .font(TronTypography.wizardBodySmall)
-                        .foregroundStyle(.secondary)
-                }
-            } trailing: {
-                if probing {
-                    ProgressView().controlSize(.small)
-                }
-            }
-        }
+        .padding(.top, 86)
     }
 
     private var iconName: String {
         switch state.tailscaleStatus {
-        case .signedIn: return "checkmark.seal.fill"
-        case .installedNotSignedIn: return "exclamationmark.triangle.fill"
-        case .notInstalled, .none: return "xmark.octagon.fill"
+        case .signedIn: "checkmark.seal.fill"
+        case .installedNotSignedIn: "exclamationmark.triangle.fill"
+        case .notInstalled, .none: "xmark.octagon.fill"
         }
     }
 
     private var iconColor: Color {
         switch state.tailscaleStatus {
-        case .signedIn: return .green
-        case .installedNotSignedIn: return .orange
-        case .notInstalled, .none: return .red
+        case .signedIn: .green
+        case .installedNotSignedIn: .orange
+        case .notInstalled, .none: .red
         }
     }
 
     private var headline: String {
         switch state.tailscaleStatus {
-        case .signedIn: return "Tailscale is connected"
-        case .installedNotSignedIn: return "Tailscale is installed but not signed in"
-        case .notInstalled, .none: return "Tailscale is not installed"
+        case .signedIn: "Tailscale is connected"
+        case .installedNotSignedIn: "Tailscale needs attention"
+        case .notInstalled, .none: "Tailscale is not connected"
         }
     }
 
-    private var subheadline: String {
+    private var detail: String {
         switch state.tailscaleStatus {
-        case .signedIn(let ip):
-            return "This Mac is reachable at \(ip) on your tailnet."
-        case .installedNotSignedIn:
-            return "Open Tailscale and sign in, then come back to this window."
-        case .notInstalled, .none:
-            return "Download and install Tailscale, then return here."
+        case .signedIn(let ip): "This Mac is reachable at \(ip)."
+        case .installedNotSignedIn: "Open Tailscale and sign in, then refresh."
+        case .notInstalled, .none: "Install Tailscale, sign in, then refresh."
         }
     }
-
-    /// Probes once immediately, then every second until the view-scoped
-    /// SwiftUI task is cancelled or Tailscale is ready.
-    @MainActor
-    private func probeUntilReady() async {
-        while !Task.isCancelled {
-            probing = true
-            let status = await setup.probeTailscale()
-            guard !Task.isCancelled else { return }
-            probing = false
-            state.tailscaleStatus = status
-            if status.isReady { return }
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-        }
-    }
-}
-
-enum TailscaleStepLayout {
-    static let contentTopPadding: CGFloat = 108
-    static let contentSpacing: CGFloat = 22
-    static let statusCardVerticalPadding: CGFloat = 16
 }

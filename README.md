@@ -30,8 +30,8 @@ second product users must configure or operate.
   interactions, and PTYs.
 - **The embedded runtime** owns model/provider behavior, tools, extensions,
   settings, credentials, compaction, retries, and canonical session JSONL.
-- **The Mac app** installs and supervises the always-running gateway and emits
-  short-lived one-time pairing invitations.
+- **The Mac menu-bar app** owns one serialized Gateway lifecycle, installs the
+  launchd-supervised Login Item, and emits short-lived pairing invitations.
 
 Tron does not mirror sessions into SQLite and does not reconstruct state from an
 event journal. Local iOS snapshots are bounded, disposable offline presentation
@@ -49,8 +49,9 @@ state only.
 - Project trust controls whether project-local settings and executable resources
   load. Trust is **not a sandbox**. Agent tools, extensions, and packages run
   with the Mac user's authority.
-- Mobile exposure binds explicitly to the detected Tailscale interface. The
-  default developer gateway remains loopback-only.
+- Mobile exposure binds explicitly to the detected Tailscale interface. The Mac
+  Debug service uses isolated state and port 9848; command-line development is
+  loopback-only unless `--tailscale` is requested.
 
 Do not open the same session concurrently in another runtime client: the
 canonical session format does not provide a cross-process session-file lock.
@@ -149,6 +150,7 @@ or credentials.
 - [iOS development](packages/ios-app/docs/development.md)
 - [Mac architecture](packages/mac-app/docs/architecture.md)
 - [Mac development and packaging](packages/mac-app/docs/development.md)
+- [Mac onboarding](packages/mac-app/docs/onboarding.md)
 - [Contributing](CONTRIBUTING.md)
 
 Successful `main` CI publishes an internal TestFlight beta for the maintainer.

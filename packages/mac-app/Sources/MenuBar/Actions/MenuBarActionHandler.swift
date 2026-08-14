@@ -2,31 +2,29 @@ import AppKit
 import Foundation
 import UserNotifications
 
-/// Typed commands emitted by the pure menu builder and executed by the
-/// controller-owned action handler.
 enum MenuBarAction: Equatable, Sendable {
     case showPairingInfo
     case viewLogs
     case sendFeedback
-    case pauseServer
-    case resumeServer
-    case restartServer
+    case pauseGateway
+    case resumeGateway
+    case restartGateway
     case uninstall
 }
 
-/// Owns the side effects behind typed menu-bar actions (launchctl,
-/// NSWorkspace, dialogs, notifications, and feedback issue links).
-/// `MenuBarController` owns one handler for exactly its own lifecycle.
+/// Main-actor bridge from menu commands to the one lifecycle coordinator.
 @MainActor
 final class MenuBarActionHandler {
-    private let setup: EnvironmentSetup
-
-    /// Handle on the menu-bar controller so re-pairing can request a
-    /// status refresh and pause/resume can re-render the menu.
+    private let dependencies: GatewayDependencies
+    private let coordinator: GatewayLifecycleCoordinator
     weak var menuBarController: MenuBarController?
 
-    init(setup: EnvironmentSetup) {
-        self.setup = setup
+    init(
+        dependencies: GatewayDependencies,
+        coordinator: GatewayLifecycleCoordinator
+    ) {
+        self.dependencies = dependencies
+        self.coordinator = coordinator
     }
 
     func perform(_ action: MenuBarAction) async {
@@ -37,269 +35,96 @@ final class MenuBarActionHandler {
             menuBarController?.showLogsWindow()
         case .sendFeedback:
             await sendFeedback()
-        case .pauseServer:
-            await pauseServer()
-        case .resumeServer:
-            await resumeServer()
-        case .restartServer:
-            await restartServer()
+        case .pauseGateway:
+            await run(.pause, successTitle: "Tron paused")
+        case .resumeGateway:
+            await run(.resume, successTitle: "Tron resumed")
+        case .restartGateway:
+            await run(.restart, successTitle: "Tron restarted")
         case .uninstall:
             await confirmAndUninstall()
         }
     }
 
-    // MARK: - Actions
-
-    private func restartServer() async {
-        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Restart blocked") else { return }
-        applyBusy(.restarting)
-        let outcome = await LaunchAgentLoader.ensureLoaded(
-            manager: setup.launchAgentManager,
-            plistPath: setup.launchAgentPlistPath,
-            label: setup.launchAgentLabel
-        )
-        switch outcome {
-        case .ok, .alreadyLoaded:
-            await finishServerStartAction(
-                successTitle: "Tron restarted",
-                successBody: "The menu bar status has been refreshed.",
-                failureTitle: "Restart failed"
-            )
-            return
-        case .requiresApproval(let message):
-            await refreshStatus()
-            LoginItemsSettingsOpener.open()
-            await MenuBarNotifier.post(title: "Restart blocked", body: message)
-            await presentNonBlockingError(title: "Restart blocked", message: message)
-        case .launchdRefused(let message), .unknown(let message):
-            await refreshStatus()
-            await MenuBarNotifier.post(title: "Restart failed", body: message)
-            await presentNonBlockingError(title: "Restart failed", message: message)
-        case .binaryMissing(let path):
-            await refreshStatus()
-            let message = "Binary missing: \(path)"
-            await MenuBarNotifier.post(title: "Restart failed", body: message)
-            await presentNonBlockingError(title: "Restart failed", message: message)
-        }
-    }
-
-    private func pauseServer() async {
-        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Pause blocked") else { return }
-        applyBusy(.pausing)
-        let outcome = await setup.launchAgentManager.unload(label: setup.launchAgentLabel)
-        await refreshStatus()
-        switch outcome {
-        case .ok, .alreadyLoaded:
-            await MenuBarNotifier.post(title: "Tron paused", body: "Resume it from the Tron menu bar when needed.")
-        case .requiresApproval(let message):
-            LoginItemsSettingsOpener.open()
-            await MenuBarNotifier.post(title: "Pause blocked", body: message)
-            await presentNonBlockingError(title: "Pause blocked", message: message)
-        case .launchdRefused(let message), .unknown(let message):
-            await MenuBarNotifier.post(title: "Pause failed", body: message)
-            await presentNonBlockingError(title: "Pause failed", message: message)
-        case .binaryMissing(let path):
-            let message = "Binary missing: \(path)"
-            await MenuBarNotifier.post(title: "Pause failed", body: message)
-            await presentNonBlockingError(title: "Pause failed", message: message)
-        }
-    }
-
-    private func resumeServer() async {
-        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Resume blocked") else { return }
-        applyBusy(.resuming)
-        let outcome = await setup.launchAgentManager.load(
-            plistPath: setup.launchAgentPlistPath,
-            label: setup.launchAgentLabel
-        )
-        switch outcome {
-        case .ok, .alreadyLoaded:
-            await finishServerStartAction(
-                successTitle: "Tron resumed",
-                successBody: "The menu bar status has been refreshed.",
-                failureTitle: "Resume failed"
-            )
-            return
-        case .requiresApproval(let message):
-            await refreshStatus()
-            LoginItemsSettingsOpener.open()
-            await MenuBarNotifier.post(title: "Resume blocked", body: message)
-            await presentNonBlockingError(title: "Resume blocked", message: message)
-        case .launchdRefused(let message), .unknown(let message):
-            await refreshStatus()
-            await MenuBarNotifier.post(title: "Resume failed", body: message)
-            await presentNonBlockingError(title: "Resume failed", message: message)
-        case .binaryMissing(let path):
-            await refreshStatus()
-            let message = "Binary missing: \(path)"
-            await MenuBarNotifier.post(title: "Resume failed", body: message)
-            await presentNonBlockingError(title: "Resume failed", message: message)
-        }
-    }
-
     private func sendFeedback() async {
-        let snapshot = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
-        await MenuBarFeedbackAction.present(snapshot: snapshot, token: setup.readBearerToken())
+        let snapshot = await coordinator.currentSnapshot()
+        await MenuBarFeedbackAction.present(
+            snapshot: snapshot,
+            dependencies: dependencies
+        )
+    }
+
+    private func run(
+        _ command: GatewayLifecycleCommand,
+        successTitle: String
+    ) async {
+        let result = await coordinator.perform(command)
+        switch result {
+        case .succeeded:
+            await MenuBarNotifier.post(
+                title: successTitle,
+                body: "The menu bar status is up to date."
+            )
+        case .failed(let failure):
+            if failure == .approvalRequired { LoginItemsSettingsOpener.open() }
+            await presentError(title: "Gateway operation failed", message: failure.userMessage)
+        case .busy:
+            await presentError(
+                title: "Gateway is busy",
+                message: "Wait for the current Gateway operation to finish, then try again."
+            )
+        case .needsOnboarding:
+            await presentError(
+                title: "Setup required",
+                message: "Open Tron to complete Mac setup."
+            )
+        }
     }
 
     private func confirmAndUninstall() async {
-        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Uninstall blocked") else { return }
         let alert = NSAlert()
-        alert.messageText = "Uninstall Tron?"
-        alert.informativeText = """
-        This unregisters the Tron Agent Login Item.
-
-        Canonical Tron sessions and provider credentials are preserved. Legacy Tron files are also left untouched.
-        """
+        alert.messageText = "Uninstall Tron Gateway?"
+        alert.informativeText = "This removes the Login Item and Mac setup record. Sessions and provider credentials are preserved."
         alert.alertStyle = .warning
-        let resetOptionsStack = NSStackView()
-        resetOptionsStack.orientation = .vertical
-        resetOptionsStack.alignment = .leading
-        resetOptionsStack.spacing = 6
 
-        let resetSettingsCheckbox = NSButton(
-            checkboxWithTitle: "Reset network cache",
+        let removeAuthorization = NSButton(
+            checkboxWithTitle: "Remove local Gateway authorization",
             target: nil,
             action: nil
         )
-        resetSettingsCheckbox.toolTip = "Also removes Tron's disposable network cache. Sessions and credentials are never removed."
-        let resetCredentialsCheckbox = NSButton(
-            checkboxWithTitle: "Reset Mac wrapper credential",
-            target: nil,
-            action: nil
-        )
-        resetCredentialsCheckbox.toolTip = "Also removes gateway/local-auth.json. Provider and device credentials are never removed."
-
-        resetSettingsCheckbox.sizeToFit()
-        resetCredentialsCheckbox.sizeToFit()
-        let checkboxWidth = max(
-            resetSettingsCheckbox.fittingSize.width,
-            resetCredentialsCheckbox.fittingSize.width
-        )
-        let accessoryWidth = max(checkboxWidth, 300)
-        let accessoryHeight = resetSettingsCheckbox.fittingSize.height
-            + resetCredentialsCheckbox.fittingSize.height
-            + resetOptionsStack.spacing
-            + 8
-        let resetOptionsAccessory = NSView(frame: NSRect(
-            x: 0,
-            y: 0,
-            width: accessoryWidth,
-            height: accessoryHeight
-        ))
-        resetOptionsStack.translatesAutoresizingMaskIntoConstraints = false
-        resetOptionsStack.addArrangedSubview(resetSettingsCheckbox)
-        resetOptionsStack.addArrangedSubview(resetCredentialsCheckbox)
-        resetOptionsAccessory.addSubview(resetOptionsStack)
-        NSLayoutConstraint.activate([
-            resetOptionsStack.leadingAnchor.constraint(equalTo: resetOptionsAccessory.leadingAnchor),
-            resetOptionsStack.trailingAnchor.constraint(lessThanOrEqualTo: resetOptionsAccessory.trailingAnchor),
-            resetOptionsStack.topAnchor.constraint(equalTo: resetOptionsAccessory.topAnchor, constant: 4),
-            resetOptionsStack.bottomAnchor.constraint(equalTo: resetOptionsAccessory.bottomAnchor, constant: -4),
-        ])
-        alert.accessoryView = resetOptionsAccessory
+        removeAuthorization.toolTip = "Removes gateway/local-auth.json. Sessions, provider credentials, and iPhone enrollment are preserved."
+        removeAuthorization.sizeToFit()
+        alert.accessoryView = removeAuthorization
         alert.addButton(withTitle: "Uninstall")
         alert.addButton(withTitle: "Cancel")
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return }
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        let outcome = await TronUninstaller.unregisterAndClean(
-            setup: setup,
-            options: TronUninstaller.Options(
-                resetSettings: resetSettingsCheckbox.state == .on,
-                resetCredentials: resetCredentialsCheckbox.state == .on
-            )
-        )
-        switch outcome {
-        case .ok, .alreadyLoaded:
-            NSApp.terminate(nil)
-        case .requiresApproval(let message), .launchdRefused(let message), .unknown(let message):
-            if case .requiresApproval = outcome {
-                LoginItemsSettingsOpener.open()
-            }
-            await presentNonBlockingError(
-                title: "Uninstall failed",
-                message: message
-            )
-        case .binaryMissing(let path):
-            await presentNonBlockingError(
-                title: "Uninstall failed",
-                message: "Missing helper: \(path)"
-            )
-        }
-    }
-
-    // MARK: - Helpers
-
-    private func refreshStatus() async {
-        // Triggers an immediate snapshot via the poller so the menu
-        // re-renders within ~100ms instead of waiting for the next 30s tick.
-        guard let controller = menuBarController else { return }
-        let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
-        controller.applySnapshot(snapshot)
-    }
-
-    private func finishServerStartAction(
-        successTitle: String,
-        successBody: String,
-        failureTitle: String
-    ) async {
-        let health = await ServerHealthAwaiter.waitForHealthy(setup: setup)
-        await refreshStatus()
-
-        if case .success = health {
-            await MenuBarNotifier.post(title: successTitle, body: successBody)
-            return
-        }
-
-        let message = unhealthyStartMessage(result: health)
-        await MenuBarNotifier.post(title: failureTitle, body: message)
-        await presentNonBlockingError(title: failureTitle, message: message)
-    }
-
-    private func unhealthyStartMessage(result: ServerPingResult) -> String {
-        switch result {
-        case .success:
-            return "Tron is running."
-        case .unauthorized:
-            return "The Tron Agent started but rejected the local bearer token. Re-pair or restart after updating /Applications/Tron.app."
-        case .unreachable, .timeout, .malformedResponse:
-            return "The Tron Agent was loaded by ServiceManagement, but /health never became reachable. Update or reinstall /Applications/Tron.app, then restart Tron."
-        }
-    }
-
-    private func applyBusy(_ action: ServerBusyAction) {
-        let current = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
-        menuBarController?.applySnapshot(ServerStatusSnapshot(
-            state: .busy(action),
-            tailscaleIP: current.tailscaleIP,
-            processID: current.processID,
-            uptime: current.uptime
+        let result = await coordinator.perform(.uninstall(
+            removeLocalAuthorization: removeAuthorization.state == .on
         ))
+        switch result {
+        case .succeeded:
+            NSApp.terminate(nil)
+        case .failed(let failure):
+            await presentError(title: "Uninstall failed", message: failure.userMessage)
+        case .busy:
+            await presentError(
+                title: "Gateway is busy",
+                message: "Wait for the current Gateway operation to finish, then try again."
+            )
+        case .needsOnboarding:
+            await presentError(title: "Uninstall failed", message: GatewayLifecycleFailure.serviceFailed.userMessage)
+        }
     }
 
-    private func presentNonBlockingError(title: String, message: String) async {
+    private func presentError(title: String, message: String) async {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
-        // runModal blocks the main thread but we're already on MainActor
-        // and the user explicitly invoked this action, so a brief modal is
-        // expected UX (mirrors System Settings deep-link confirms).
         _ = alert.runModal()
     }
-
-    private func ensureLaunchAgentManagementAllowed(actionTitle: String) async -> Bool {
-        guard setup.canManageLaunchAgent else {
-            let message = "This Xcode wrapper is running in companion mode. Use the installed Tron.app for Tron install, pause, restart, and uninstall actions, or use the isolated install scheme for reinstall testing."
-            await MenuBarNotifier.post(title: actionTitle, body: message)
-            await presentNonBlockingError(title: actionTitle, message: message)
-            return false
-        }
-        return true
-    }
-
 }
 
 enum MenuBarNotifier {
@@ -307,13 +132,26 @@ enum MenuBarNotifier {
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         if settings.authorizationStatus == .notDetermined {
-            _ = try? await center.requestAuthorization(options: [.alert, .sound])
+            do {
+                _ = try await center.requestAuthorization(options: [.alert, .sound])
+            } catch {
+                return
+            }
         }
+        guard settings.authorizationStatus != .denied else { return }
 
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        let request = UNNotificationRequest(identifier: "tron-menu-\(UUID().uuidString)", content: content, trigger: nil)
-        try? await center.add(request)
+        let request = UNNotificationRequest(
+            identifier: "tron-menu-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        do {
+            try await center.add(request)
+        } catch {
+            return
+        }
     }
 }

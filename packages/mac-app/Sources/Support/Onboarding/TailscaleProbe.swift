@@ -7,19 +7,11 @@ import Foundation
 /// 1. `/Applications/Tailscale.app` exists OR a CLI binary lives at one
 ///    of the known Homebrew paths (gives us something to invoke).
 /// 2. `tailscale status --peers=false --json` exits 0 AND the parsed
-///    `BackendState` is `"Running"` AND `TailscaleIPs` contains at least
-///    one IPv4 in the 100.64.0.0/10 CGNAT range.
+///    `BackendState` is `"Running"` AND `Self.TailscaleIPs` contains at
+///    least one IPv4 in the 100.64.0.0/10 CGNAT range.
 ///
-/// Why not `tailscale ip -4`: the CLI returns the Mac's assigned IP even
-/// when the user has hit **Disconnect** in the menu bar (`BackendState`
-/// becomes `"Stopped"`) or has quit Tailscale.app while the launchd
-/// daemon keeps running. Using `ip -4` caused the wizard to briefly
-/// flash `.installedNotSignedIn` (during the subprocess's transient
-/// unavailability window right after the user disconnected) and then
-/// flip back to `.signedIn` on the next poll because the cached IP
-/// reappeared. Parsing `BackendState` out of the JSON status gives us
-/// an authoritative "currently participating in the tailnet" signal
-/// that can't be fooled by the cached IP.
+/// The node is ready only while `BackendState` is `Running`; an assigned
+/// address retained while disconnected is not sufficient.
 ///
 /// `BackendState` values we treat as NOT-ready (i.e.
 /// `.installedNotSignedIn`):
@@ -35,7 +27,7 @@ import Foundation
 /// enough to run on `.main` (typically <100ms total) but the wizard
 /// awaits it on a background `Task` regardless.
 enum TailscaleProbe {
-    /// Default probe used by `EnvironmentSetup.live`. Tests inject a
+    /// Default probe used by `GatewayDependencies.live`. Tests inject a
     /// fake instead of mocking Process directly.
     static func probe() async -> TailscaleStatus {
         await probe(
@@ -85,12 +77,10 @@ enum TailscaleProbe {
                 continue
             }
 
-            // Prefer `Self.TailscaleIPs` (the node's own IP) over the
-            // top-level list which on some Tailscale versions includes
-            // only the aggregate tailnet IPs. Fall back to top-level
-            // if `Self` is absent.
-            let candidateIPs = status.`Self`?.TailscaleIPs ?? status.TailscaleIPs ?? []
-            if let ip = candidateIPs.first(where: { isIPv4($0) }) {
+            // Only the live local node's address is valid for health and
+            // pairing. Aggregate or peer addresses are never accepted.
+            let candidateIPs = status.`Self`?.TailscaleIPs ?? []
+            if let ip = candidateIPs.first(where: { isTailscaleIPv4($0) }) {
                 return .signedIn(ipv4: ip)
             }
 
@@ -108,9 +98,13 @@ enum TailscaleProbe {
         URL(fileURLWithPath: "/opt/homebrew/bin/tailscale"),
     ]
 
-    static func isIPv4(_ candidate: String) -> Bool {
+    static func isTailscaleIPv4(_ candidate: String) -> Bool {
         let parts = candidate.split(separator: ".")
-        guard parts.count == 4 else { return false }
+        guard parts.count == 4,
+              let first = Int(parts[0]),
+              let second = Int(parts[1]),
+              first == 100,
+              (64...127).contains(second) else { return false }
         for part in parts {
             guard let value = Int(part), value >= 0, value <= 255 else { return false }
         }
@@ -126,7 +120,6 @@ enum TailscaleProbe {
 /// throwing a decoding error that strands the wizard.
 private struct TailscaleStatusJSON: Decodable {
     let BackendState: String?
-    let TailscaleIPs: [String]?
     let `Self`: SelfStatus?
 
     struct SelfStatus: Decodable {

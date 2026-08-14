@@ -27,7 +27,7 @@ struct TailscaleProbeTests {
     @Test("BackendState=Running with IPv4: signed-in")
     func backendRunningWithIPv4() async throws {
         let cli = try makeFakeCLI()
-        defer { try? FileManager.default.removeItem(at: cli.deletingLastPathComponent()) }
+        defer { TestTempDir.cleanup(cli.deletingLastPathComponent()) }
 
         let json = """
         {
@@ -55,13 +55,10 @@ struct TailscaleProbeTests {
     @Test("BackendState=Stopped (user hit Disconnect): installed-not-signed-in")
     func backendStopped() async throws {
         let cli = try makeFakeCLI()
-        defer { try? FileManager.default.removeItem(at: cli.deletingLastPathComponent()) }
+        defer { TestTempDir.cleanup(cli.deletingLastPathComponent()) }
 
-        // Real Tailscale behaviour: when the user clicks Disconnect,
-        // `BackendState` flips to `Stopped` but `TailscaleIPs` still
-        // holds the cached IP. This is the exact bug the JSON probe
-        // fixes — the old `ip -4` probe would see that cached IP and
-        // incorrectly report .signedIn.
+        // Tailscale can retain an assigned address while disconnected;
+        // `BackendState` remains authoritative.
         let json = """
         {
           "Version": "1.58.2",
@@ -84,7 +81,7 @@ struct TailscaleProbeTests {
     @Test("BackendState=NeedsLogin (not signed in): installed-not-signed-in")
     func backendNeedsLogin() async throws {
         let cli = try makeFakeCLI()
-        defer { try? FileManager.default.removeItem(at: cli.deletingLastPathComponent()) }
+        defer { TestTempDir.cleanup(cli.deletingLastPathComponent()) }
 
         let json = """
         {
@@ -105,7 +102,7 @@ struct TailscaleProbeTests {
     @Test("BackendState=Starting (daemon coming up): installed-not-signed-in")
     func backendStarting() async throws {
         let cli = try makeFakeCLI()
-        defer { try? FileManager.default.removeItem(at: cli.deletingLastPathComponent()) }
+        defer { TestTempDir.cleanup(cli.deletingLastPathComponent()) }
 
         let json = """
         { "BackendState": "Starting" }
@@ -122,7 +119,7 @@ struct TailscaleProbeTests {
     @Test("CLI exits non-zero (daemon not running): installed-not-signed-in")
     func cliExitsNonZero() async throws {
         let cli = try makeFakeCLI()
-        defer { try? FileManager.default.removeItem(at: cli.deletingLastPathComponent()) }
+        defer { TestTempDir.cleanup(cli.deletingLastPathComponent()) }
 
         let status = await TailscaleProbe.probe(
             tailscaleAppExists: { _ in true },
@@ -139,7 +136,7 @@ struct TailscaleProbeTests {
     @Test("CLI prints non-JSON garbage: installed-not-signed-in (defensive)")
     func cliReturnsGarbage() async throws {
         let cli = try makeFakeCLI()
-        defer { try? FileManager.default.removeItem(at: cli.deletingLastPathComponent()) }
+        defer { TestTempDir.cleanup(cli.deletingLastPathComponent()) }
 
         let status = await TailscaleProbe.probe(
             tailscaleAppExists: { _ in true },
@@ -152,7 +149,7 @@ struct TailscaleProbeTests {
     @Test("BackendState=Running but no IPv4 in payload: installed-not-signed-in")
     func runningButNoIPv4() async throws {
         let cli = try makeFakeCLI()
-        defer { try? FileManager.default.removeItem(at: cli.deletingLastPathComponent()) }
+        defer { TestTempDir.cleanup(cli.deletingLastPathComponent()) }
 
         let json = """
         {
@@ -170,10 +167,10 @@ struct TailscaleProbeTests {
         #expect(status == .installedNotSignedIn)
     }
 
-    @Test("BackendState=Running, Self absent, IPv4 only in top-level TailscaleIPs: signed-in")
+    @Test("BackendState=Running without a local Self address is not ready")
     func runningWithTopLevelIPOnly() async throws {
         let cli = try makeFakeCLI()
-        defer { try? FileManager.default.removeItem(at: cli.deletingLastPathComponent()) }
+        defer { TestTempDir.cleanup(cli.deletingLastPathComponent()) }
 
         let json = """
         {
@@ -187,16 +184,12 @@ struct TailscaleProbeTests {
             cliPaths: [cli],
             runProcess: { _ in ProcessResult(exitCode: 0, stdout: json, stderr: "") }
         )
-        if case .signedIn(let ip) = status {
-            #expect(ip == "100.101.102.103")
-        } else {
-            Issue.record("expected .signedIn, got \(status)")
-        }
+        #expect(status == .installedNotSignedIn)
     }
 
     @Test("multiple CLI paths: skips non-executable paths")
     func skipsNonExecutablePaths() async throws {
-        let tmp = TestTempDir.make()
+        let tmp = try TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         // First path: not executable.
         let first = tmp.appendingPathComponent("first/tailscale", isDirectory: false)
@@ -214,8 +207,8 @@ struct TailscaleProbeTests {
         let json = """
         {
           "BackendState": "Running",
-          "TailscaleIPs": ["100.1.2.3"],
-          "Self": { "TailscaleIPs": ["100.1.2.3"] }
+          "TailscaleIPs": ["100.96.2.3"],
+          "Self": { "TailscaleIPs": ["100.96.2.3"] }
         }
         """
         let status = await TailscaleProbe.probe(
@@ -229,7 +222,7 @@ struct TailscaleProbeTests {
 
         #expect(seen == second, "first non-executable path should be skipped")
         if case .signedIn(let ip) = status {
-            #expect(ip == "100.1.2.3")
+            #expect(ip == "100.96.2.3")
         } else {
             Issue.record("expected .signedIn")
         }
@@ -237,7 +230,7 @@ struct TailscaleProbeTests {
 
     @Test("multiple CLI paths: falls through from stale executable to connected CLI")
     func fallsThroughFromStaleExecutableToConnectedCLI() async throws {
-        let tmp = TestTempDir.make()
+        let tmp = try TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
 
         let stale = tmp.appendingPathComponent("stale/tailscale", isDirectory: false)
@@ -279,25 +272,25 @@ struct TailscaleProbeTests {
         }
     }
 
-    // MARK: - isIPv4
+    // MARK: - Tailscale range validation
 
-    @Test("isIPv4 accepts dotted-quad")
-    func isIPv4Accepts() {
-        #expect(TailscaleProbe.isIPv4("0.0.0.0"))
-        #expect(TailscaleProbe.isIPv4("100.64.0.1"))
-        #expect(TailscaleProbe.isIPv4("255.255.255.255"))
+    @Test("range validation accepts only 100.64.0.0/10")
+    func rangeAccepts() {
+        #expect(TailscaleProbe.isTailscaleIPv4("100.64.0.1"))
+        #expect(TailscaleProbe.isTailscaleIPv4("100.127.255.255"))
+        #expect(!TailscaleProbe.isTailscaleIPv4("100.63.255.255"))
+        #expect(!TailscaleProbe.isTailscaleIPv4("100.128.0.0"))
+        #expect(!TailscaleProbe.isTailscaleIPv4("10.0.0.1"))
     }
 
-    @Test("isIPv4 rejects malformed")
-    func isIPv4Rejects() {
-        #expect(!TailscaleProbe.isIPv4(""))
-        #expect(!TailscaleProbe.isIPv4("not.an.ip"))
-        #expect(!TailscaleProbe.isIPv4("1.2.3"))
-        #expect(!TailscaleProbe.isIPv4("1.2.3.4.5"))
-        #expect(!TailscaleProbe.isIPv4("256.0.0.1"))
-        #expect(!TailscaleProbe.isIPv4("-1.0.0.0"))
-        #expect(!TailscaleProbe.isIPv4("a.b.c.d"))
-        #expect(!TailscaleProbe.isIPv4("fe80::1"))
+    @Test("range validation rejects malformed addresses")
+    func rangeRejectsMalformed() {
+        #expect(!TailscaleProbe.isTailscaleIPv4(""))
+        #expect(!TailscaleProbe.isTailscaleIPv4("not.an.ip"))
+        #expect(!TailscaleProbe.isTailscaleIPv4("100.64.0"))
+        #expect(!TailscaleProbe.isTailscaleIPv4("100.64.0.1.2"))
+        #expect(!TailscaleProbe.isTailscaleIPv4("100.64.0.256"))
+        #expect(!TailscaleProbe.isTailscaleIPv4("fe80::1"))
     }
 
     // MARK: - helpers
@@ -307,7 +300,7 @@ struct TailscaleProbeTests {
     /// Caller is responsible for removing the parent via
     /// `FileManager.default.removeItem(at: cli.deletingLastPathComponent())`.
     private func makeFakeCLI(file: StaticString = #file, line: UInt = #line) throws -> URL {
-        let tmp = TestTempDir.make()
+        let tmp = try TestTempDir.make()
         let cli = tmp.appendingPathComponent("tailscale", isDirectory: false)
         try Data().write(to: cli)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cli.path)

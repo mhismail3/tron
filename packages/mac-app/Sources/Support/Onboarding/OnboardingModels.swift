@@ -7,8 +7,7 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     case tailscale
     case install
     case permissions
-    case iosBeta
-    case pairingInfo
+    case connectIPhone
     case done
 
     var id: String { rawValue }
@@ -22,9 +21,8 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .welcome: return "Tron Installer"
         case .tailscale: return "Tailscale"
         case .permissions: return "Permissions"
-        case .iosBeta: return "Install iOS Beta"
         case .install: return "Install Tron"
-        case .pairingInfo: return "Pair your iPhone"
+        case .connectIPhone: return "Connect your iPhone"
         case .done: return "You're all set"
         }
     }
@@ -38,9 +36,8 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .welcome: return .asset("TronLogo")
         case .tailscale: return .symbol("network")
         case .permissions: return .symbol("lock.shield.fill")
-        case .iosBeta: return .symbol("iphone")
         case .install: return .symbol("arrow.down.circle.fill")
-        case .pairingInfo: return .symbol("qrcode")
+        case .connectIPhone: return .symbol("qrcode")
         case .done: return .symbol("checkmark.seal.fill")
         }
     }
@@ -95,11 +92,8 @@ enum TailscaleStatus: Equatable, Sendable {
     }
 }
 
-/// Existing server registration detection result. This deliberately
-/// models the Login Item registration, not whether the server is
-/// currently reachable. The Install step must still start/kickstart
-/// and ping the helper before it can advance.
-enum ExistingInstallStatus: Equatable, Sendable {
+/// Current Login Item registration observed by onboarding.
+enum GatewayInstallStatus: Equatable, Sendable {
     case none
     case requiresApproval
     case partial(reason: String)
@@ -108,28 +102,16 @@ enum ExistingInstallStatus: Equatable, Sendable {
 
 /// Canonical `system::ping` projection needed by the wrapper after the decoder
 /// validates the complete required response shape.
-struct ServerPingInfo: Equatable, Sendable {
+struct GatewayHealthInfo: Equatable, Sendable {
     var version: String
 }
 
 /// Pairing payload shared with the iOS app via the
 /// `tron://pair?host=...&port=...&code=...&label=...` URL.
-/// The `label` query item is the user-facing server name on iOS.
+/// The `label` query item is the user-facing Mac name on iOS.
 struct PairingPayload: Equatable, Sendable, Hashable {
     var host: String
     var port: Int
     var code: String
     var label: String?
-}
-
-/// Discrete steps in the install pipeline. Ordering is covered by
-/// `InstallPipelineStageOrderingTests`.
-enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
-    /// Confirms this is the release app in `/Applications`.
-    case validateApplication
-    /// Confirms the embedded helper app, plist, and signature are intact.
-    case validateHelper
-    /// Registers the bundled LaunchAgent through `SMAppService`.
-    case registerAgent
-    case awaitPing
 }

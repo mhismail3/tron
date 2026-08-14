@@ -5,13 +5,24 @@ import Foundation
 /// Log capture is best-effort and never routes through Mail.
 @MainActor
 enum MenuBarFeedbackAction {
-    static func present(snapshot: ServerStatusSnapshot, token: String?) async {
+    static func present(
+        snapshot: GatewayStatusSnapshot,
+        dependencies: GatewayDependencies
+    ) async {
         let logs: String
-        switch await MenuBarLogReader.fetchRecentLogs(token: token) {
-        case .success(let value):
-            logs = value
-        case .failure(let error):
-            logs = "Log capture failed: \(error.message)"
+        if case .signedIn(let host) = await dependencies.requirements.tailscaleStatus() {
+            switch await MenuBarLogReader.fetchRecentLogs(
+                host: host,
+                port: dependencies.configuration.gatewayPort,
+                token: dependencies.credentials.bearerToken()
+            ) {
+            case .success(let value):
+                logs = value
+            case .failure(let error):
+                logs = "Log capture failed: \(error.message)"
+            }
+        } else {
+            logs = "Log capture failed: Tailscale is unavailable."
         }
 
         let composer = FeedbackIssueComposer(
@@ -22,8 +33,8 @@ enum MenuBarFeedbackAction {
             osVersion: ProcessInfo.processInfo.operatingSystemVersionString
         )
 
-        let serverDescription = snapshot.feedbackDescription
-        guard let plan = composer.openPlan(serverDescription: serverDescription, logs: logs) else {
+        let gatewayDescription = snapshot.feedbackDescription
+        guard let plan = composer.openPlan(gatewayDescription: gatewayDescription, logs: logs) else {
             await MenuBarNotifier.post(title: "Feedback unavailable", body: "Could not build the GitHub issue URL.")
             return
         }
@@ -31,7 +42,7 @@ enum MenuBarFeedbackAction {
         if plan.copiedFullBodyToClipboard {
             let pb = NSPasteboard.general
             pb.clearContents()
-            pb.setString(composer.body(serverDescription: serverDescription, logs: logs), forType: .string)
+            pb.setString(composer.body(gatewayDescription: gatewayDescription, logs: logs), forType: .string)
             await MenuBarNotifier.post(
                 title: "Feedback details copied",
                 body: "Paste the copied details into the GitHub issue body."
@@ -46,7 +57,7 @@ enum MenuBarFeedbackAction {
     }
 }
 
-private extension ServerStatusSnapshot {
+private extension GatewayStatusSnapshot {
     var feedbackDescription: String {
         switch state {
         case .checking:

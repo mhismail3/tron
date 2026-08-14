@@ -1,7 +1,7 @@
 import Foundation
 
 /// Pure-value description of one menu row. Builder produces an array
-/// of these from a `ServerStatusSnapshot`; the controller turns them
+/// of these from a `GatewayStatusSnapshot`; the controller turns them
 /// into `NSMenuItem` instances. Tests assert the descriptor sequence
 /// without needing AppKit.
 enum MenuItemDescriptor: Equatable {
@@ -28,19 +28,17 @@ enum MenuBarItemBuilder {
     /// plan §A "Menu bar" layout. Tests in
     /// `Tests/MenuBar/Presentation/MenuBarItemBuilderTests.swift` pin the ordering.
     static func build(
-        snapshot: ServerStatusSnapshot,
+        snapshot: GatewayStatusSnapshot,
         tronHome: URL,
-        defaultServerPort: Int,
-        canManageLaunchAgent: Bool
+        defaultGatewayPort: Int
     ) -> [MenuItemDescriptor] {
         var items: [MenuItemDescriptor] = []
 
         let controlsEnabled = !snapshot.state.isBusy
-        let serviceControlsEnabled = controlsEnabled && canManageLaunchAgent
 
         items.append(.header(headerContent(
             snapshot: snapshot,
-            defaultServerPort: defaultServerPort
+            defaultGatewayPort: defaultGatewayPort
         )))
         items.append(.separator)
 
@@ -54,18 +52,18 @@ enum MenuBarItemBuilder {
 
         items.append(.separator)
         if snapshot.state.isRunning {
-            items.append(.action(title: "Pause Tron", isEnabled: serviceControlsEnabled, action: .pauseServer))
+            items.append(.action(title: "Pause Tron", isEnabled: controlsEnabled, action: .pauseGateway))
         } else {
-            items.append(.action(title: snapshot.state.resumeTitle, isEnabled: serviceControlsEnabled, action: .resumeServer))
+            items.append(.action(title: snapshot.state.resumeTitle, isEnabled: controlsEnabled, action: .resumeGateway))
         }
-        items.append(.action(title: snapshot.state.restartTitle, isEnabled: serviceControlsEnabled, action: .restartServer))
-        items.append(.action(title: "Uninstall Tron", isEnabled: serviceControlsEnabled, action: .uninstall))
+        items.append(.action(title: snapshot.state.restartTitle, isEnabled: controlsEnabled, action: .restartGateway))
+        items.append(.action(title: "Uninstall Tron", isEnabled: controlsEnabled, action: .uninstall))
         items.append(.quit(title: "Quit Tron"))
 
         return items
     }
 
-    static func statusLabel(snapshot: ServerStatusSnapshot) -> String {
+    static func statusLabel(snapshot: GatewayStatusSnapshot) -> String {
         switch snapshot.state {
         case .running:
             return "Running"
@@ -83,10 +81,10 @@ enum MenuBarItemBuilder {
     }
 
     static func headerContent(
-        snapshot: ServerStatusSnapshot,
-        defaultServerPort: Int
+        snapshot: GatewayStatusSnapshot,
+        defaultGatewayPort: Int
     ) -> MenuHeaderContent {
-        let port = snapshot.state.runningPort ?? defaultServerPort
+        let port = snapshot.state.runningPort ?? defaultGatewayPort
         let address = snapshot.tailscaleIP.map { "\($0):\(port)" } ?? "Tailscale unavailable"
         return MenuHeaderContent(
             endpoint: address,
@@ -94,13 +92,8 @@ enum MenuBarItemBuilder {
             status: statusLabel(snapshot: snapshot),
             tone: snapshot.state.tone,
             pid: snapshot.processID,
-            uptime: snapshot.uptime,
-            modeDetail: modeDetail(snapshot: snapshot)
+            uptime: snapshot.uptime
         )
-    }
-
-    private static func modeDetail(snapshot: ServerStatusSnapshot) -> String? {
-        return nil
     }
 }
 
@@ -120,20 +113,20 @@ struct MenuHeaderContent: Equatable, Sendable {
     var tone: MenuBarTone
     var pid: Int?
     var uptime: String?
-    var modeDetail: String?
 }
 
-enum ServerBusyAction: String, Equatable, Sendable {
+enum GatewayBusyAction: String, Equatable, Sendable {
     case starting = "Starting"
     case restarting = "Restarting"
     case pausing = "Pausing"
     case resuming = "Resuming"
+    case uninstalling = "Uninstalling"
 }
 
-enum ServerStatusState: Equatable, Sendable {
+enum GatewayStatusState: Equatable, Sendable {
     case checking
     case running(version: String?, port: Int)
-    case busy(ServerBusyAction)
+    case busy(GatewayBusyAction)
     case paused
     case failed(reason: String)
     case unauthorized
@@ -199,16 +192,16 @@ enum ServerStatusState: Equatable, Sendable {
 }
 
 /// Snapshot consumed by `MenuBarItemBuilder` and produced by
-/// `ServerStatusPoller`. Probe credentials remain with the health and pairing
-/// owners and never enter this presentation value.
-struct ServerStatusSnapshot: Equatable {
-    var state: ServerStatusState
+/// `GatewayLifecycleCoordinator`. Credentials never enter this presentation
+/// value.
+struct GatewayStatusSnapshot: Equatable, Sendable {
+    var state: GatewayStatusState
     var tailscaleIP: String?
     var processID: Int?
     var uptime: String?
 
     init(
-        state: ServerStatusState,
+        state: GatewayStatusState,
         tailscaleIP: String? = nil,
         processID: Int? = nil,
         uptime: String? = nil
@@ -219,5 +212,5 @@ struct ServerStatusSnapshot: Equatable {
         self.uptime = uptime
     }
 
-    static let checking = ServerStatusSnapshot(state: .checking)
+    static let checking = GatewayStatusSnapshot(state: .checking)
 }

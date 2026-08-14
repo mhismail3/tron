@@ -27,14 +27,14 @@ struct PairingURLBuilderTests {
         #expect(queryValue("label", in: url) == nil)
     }
 
-    @Test("server name label is emitted")
+    @Test("Mac name label is emitted")
     func emitsLabel() throws {
         let payload = PairingPayload(host: "100.64.0.1", port: 9847, code: "ABCD-EFGH", label: "Studio Mac")
         let url = try #require(PairingURLBuilder.makeURL(payload))
         #expect(queryValue("label", in: url) == "Studio Mac")
     }
 
-    @Test("blank server name label is omitted")
+    @Test("blank Mac name label is omitted")
     func omitsBlankLabel() throws {
         let payload = PairingPayload(host: "100.64.0.1", port: 9847, code: "ABCD-EFGH", label: "  \n")
         let url = try #require(PairingURLBuilder.makeURL(payload))

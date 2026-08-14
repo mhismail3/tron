@@ -3,27 +3,33 @@ import Foundation
 import SwiftUI
 
 /// Owns the menu-bar status item, the periodic poller, and the menu
-/// itself. Created by `AppDelegate` once the wizard has completed (or
-/// at launch when the `.onboarded` sentinel exists).
+/// itself. Created by `AppDelegate` after the durable Gateway state records
+/// completed onboarding.
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
-    private let setup: EnvironmentSetup
-    private let poller: ServerStatusPoller
+    private let dependencies: GatewayDependencies
+    private let coordinator: GatewayLifecycleCoordinator
     private let actionHandler: MenuBarActionHandler
     private var statusItem: NSStatusItem?
-    private var pollerTask: Task<Void, Never>?
-    private var pairingInfoWindowController: NSWindowController?
+    private var snapshotTask: Task<Void, Never>?
+    private var pollingTask: Task<Void, Never>?
+    private var refreshTask: Task<Void, Never>?
+    private var actionTask: Task<Void, Never>?
+    private var connectIPhoneWindowController: NSWindowController?
     private var logsWindowController: NSWindowController?
 
     /// Most-recent status snapshot, written by the poller and read by
     /// `rebuildMenu()`.
-    private(set) var snapshot: ServerStatusSnapshot
+    private(set) var snapshot: GatewayStatusSnapshot
 
-    init(setup: EnvironmentSetup) {
-        self.setup = setup
-        self.poller = ServerStatusPoller(setup: setup)
-        self.actionHandler = MenuBarActionHandler(setup: setup)
-        self.snapshot = ServerStatusSnapshot.checking
+    init(dependencies: GatewayDependencies, coordinator: GatewayLifecycleCoordinator) {
+        self.dependencies = dependencies
+        self.coordinator = coordinator
+        self.actionHandler = MenuBarActionHandler(
+            dependencies: dependencies,
+            coordinator: coordinator
+        )
+        self.snapshot = GatewayStatusSnapshot.checking
         super.init()
         self.actionHandler.menuBarController = self
     }
@@ -41,65 +47,73 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         item.menu = menu
         rebuildMenu()
 
-        // Start polling - emits a snapshot every 30 s.
-        pollerTask = Task { [weak self] in
+        snapshotTask = Task { [weak self] in
             guard let self else { return }
-            for await snapshot in self.poller.snapshots() {
-                await MainActor.run {
-                    self.applyPolledSnapshot(snapshot)
+            for await snapshot in await coordinator.snapshots() {
+                guard !Task.isCancelled else { return }
+                self.applySnapshot(snapshot)
+            }
+        }
+        pollingTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                _ = await coordinator.refreshStatus()
+                do {
+                    try await Task.sleep(for: .seconds(30))
+                } catch {
+                    return
                 }
             }
         }
     }
 
     func dispose() {
-        pollerTask?.cancel()
-        pollerTask = nil
+        snapshotTask?.cancel()
+        pollingTask?.cancel()
+        refreshTask?.cancel()
+        actionTask?.cancel()
+        snapshotTask = nil
+        pollingTask = nil
+        refreshTask = nil
+        actionTask = nil
+        connectIPhoneWindowController?.close()
+        logsWindowController?.close()
+        connectIPhoneWindowController = nil
+        logsWindowController = nil
         if let item = statusItem {
             NSStatusBar.system.removeStatusItem(item)
         }
         statusItem = nil
     }
 
-    /// Pushes an out-of-band snapshot into the menu bar (used by
-    /// `MenuBarActionHandler` after a launchctl restart/pause/resume so
-    /// the icon + menu items refresh immediately rather than waiting for
-    /// the next 30s poll).
-    func applySnapshot(_ snapshot: ServerStatusSnapshot) {
+    /// Applies the latest coordinator-owned snapshot.
+    func applySnapshot(_ snapshot: GatewayStatusSnapshot) {
         self.snapshot = snapshot
         statusItem?.button?.image = MenuBarIcon.image(for: snapshot.state)
         statusItem?.button?.toolTip = snapshot.state.tooltip
         rebuildMenu()
     }
 
-    /// Applies a snapshot produced by passive polling. Poll/menu refreshes
-    /// must not overwrite an explicit in-flight action such as "Restarting";
-    /// the action handler applies its own final snapshot when the command
-    /// exits.
-    func applyPolledSnapshot(_ snapshot: ServerStatusSnapshot) {
-        guard !self.snapshot.state.isBusy else { return }
-        applySnapshot(snapshot)
-    }
-
     func menuWillOpen(_ menu: NSMenu) {
-        Task { [weak self] in
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
             guard let self else { return }
-            let freshSnapshot = await ServerStatusPoller.singleSnapshot(setup: self.setup)
-            await MainActor.run {
-                self.applyPolledSnapshot(freshSnapshot)
-            }
+            _ = await coordinator.refreshStatus()
         }
     }
 
     func showPairingInfoWindow() {
-        if let pairingInfoWindowController {
-            pairingInfoWindowController.window?.makeKeyAndOrderFront(nil)
+        if let connectIPhoneWindowController {
+            connectIPhoneWindowController.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        let view = PairingInfoWindowView()
-            .environment(\.environmentSetup, setup)
+        let view = PairingInfoWindowView(
+            dependencies: dependencies,
+            coordinator: coordinator
+        )
+            .environment(\.gatewayDependencies, dependencies)
             .tint(Color.tronEmerald)
             .containerBackground(.regularMaterial, for: .window)
         let window = NSWindow(contentViewController: NSHostingController(rootView: view))
@@ -110,9 +124,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: WizardLayout.width, height: 360))
         let controller = MenuBarWindowController(window: window) { [weak self] in
-            self?.pairingInfoWindowController = nil
+            self?.connectIPhoneWindowController = nil
         }
-        pairingInfoWindowController = controller
+        connectIPhoneWindowController = controller
         controller.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -125,7 +139,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         }
 
         let view = MenuBarLogsView()
-            .environment(\.environmentSetup, setup)
+            .environment(\.gatewayDependencies, dependencies)
             .tint(Color.tronEmerald)
         let window = NSWindow(contentViewController: NSHostingController(rootView: view))
         window.title = "Tron Logs"
@@ -146,9 +160,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         guard let menu = statusItem?.menu else { return }
         let items = MenuBarItemBuilder.build(
             snapshot: snapshot,
-            tronHome: setup.tronHome,
-            defaultServerPort: setup.serverPort,
-            canManageLaunchAgent: setup.canManageLaunchAgent
+            tronHome: dependencies.configuration.tronHome,
+            defaultGatewayPort: dependencies.configuration.gatewayPort
         )
         menu.removeAllItems()
         for descriptor in items {
@@ -170,7 +183,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             return item
         case .action(let title, let isEnabled, let action):
             let wrapper = ActionWrapper { [weak self] in
-                Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.actionTask?.cancel()
+                self.actionTask = Task { @MainActor [weak self] in
                     guard let self else { return }
                     await self.actionHandler.perform(action)
                 }
@@ -230,7 +245,6 @@ private final class MenuBarHeaderView: NSView {
         let diagnosticRows = 2
             + (content.pid == nil ? 0 : 1)
             + (content.uptime == nil ? 0 : 1)
-            + (content.modeDetail == nil ? 0 : 1)
         let height = CGFloat(26 + diagnosticRows * 17)
         super.init(frame: NSRect(x: 0, y: 0, width: 202, height: height))
         translatesAutoresizingMaskIntoConstraints = false
@@ -274,12 +288,6 @@ private final class MenuBarHeaderView: NSView {
             rows.append(uptimeField)
             self.uptimeField = uptimeField
             startUptimeTimer(initialUptime: uptime)
-        }
-        if let modeDetail = content.modeDetail {
-            let modeField = NSTextField(labelWithString: modeDetail)
-            modeField.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
-            modeField.textColor = .systemOrange
-            rows.append(modeField)
         }
 
         let body = NSStackView(views: rows)
@@ -331,7 +339,11 @@ private final class MenuBarHeaderView: NSView {
         uptimeSeconds = seconds
         uptimeTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                do {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                } catch {
+                    return
+                }
                 guard !Task.isCancelled else { return }
                 self?.tickUptime()
             }
@@ -412,7 +424,7 @@ private final class MenuBarWindowController: NSWindowController, NSWindowDelegat
 enum MenuBarIcon {
     static let size = NSSize(width: 18, height: 18)
 
-    static func image(for state: ServerStatusState) -> NSImage {
+    static func image(for state: GatewayStatusState) -> NSImage {
         tintedLogo(color: color(for: state.tone))
     }
 

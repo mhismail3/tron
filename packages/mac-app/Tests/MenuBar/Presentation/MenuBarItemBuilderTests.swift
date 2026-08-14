@@ -6,22 +6,20 @@ import Testing
 struct MenuBarItemBuilderTests {
     /// Supplies only the immutable inputs consumed by the pure builder.
     static func build(
-        snapshot: ServerStatusSnapshot,
+        snapshot: GatewayStatusSnapshot,
         tronHome: URL = URL(fileURLWithPath: "/tmp/tron", isDirectory: true),
-        defaultServerPort: Int = 9847,
-        canManageLaunchAgent: Bool = true
+        defaultGatewayPort: Int = 9847
     ) -> [MenuItemDescriptor] {
         MenuBarItemBuilder.build(
             snapshot: snapshot,
             tronHome: tronHome,
-            defaultServerPort: defaultServerPort,
-            canManageLaunchAgent: canManageLaunchAgent
+            defaultGatewayPort: defaultGatewayPort
         )
     }
 
     @Test("paused snapshot: header reads paused and falls back when Tailscale is missing")
     func pausedSnapshot() throws {
-        let snap = ServerStatusSnapshot(state: .paused)
+        let snap = GatewayStatusSnapshot(state: .paused)
         let items = Self.build(snapshot: snap)
 
         if case .header(let content) = items[0] {
@@ -36,13 +34,13 @@ struct MenuBarItemBuilderTests {
 
     @Test("running snapshot: header reads running with endpoint")
     func runningSnapshot() throws {
-        let snap = ServerStatusSnapshot(
+        let snap = GatewayStatusSnapshot(
             state: .running(version: "0.5.0", port: 9847),
             tailscaleIP: "100.64.0.1",
             processID: 16027,
             uptime: "01:07:42"
         )
-        let items = Self.build(snapshot: snap, defaultServerPort: 9848)
+        let items = Self.build(snapshot: snap, defaultGatewayPort: 9848)
 
         if case .header(let content) = items[0] {
             #expect(content.status == "Running")
@@ -51,7 +49,6 @@ struct MenuBarItemBuilderTests {
             #expect(content.tone == .running)
             #expect(content.pid == 16027)
             #expect(content.uptime == "01:07:42")
-            #expect(content.modeDetail == nil)
         } else {
             Issue.record("status should live in custom header")
         }
@@ -59,7 +56,7 @@ struct MenuBarItemBuilderTests {
 
     @Test("running snapshot includes Pause Tron (not Resume)")
     func pauseShownWhileRunning() throws {
-        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
+        let snap = GatewayStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
         let items = Self.build(snapshot: snap)
 
         let titles = items.map(\.title)
@@ -69,7 +66,7 @@ struct MenuBarItemBuilderTests {
 
     @Test("paused snapshot includes Resume Tron (not Pause)")
     func resumeShownWhilePaused() throws {
-        let snap = ServerStatusSnapshot(state: .paused)
+        let snap = GatewayStatusSnapshot(state: .paused)
         let items = Self.build(snapshot: snap)
 
         let titles = items.map(\.title)
@@ -77,9 +74,9 @@ struct MenuBarItemBuilderTests {
         #expect(!titles.contains("Pause Tron"))
     }
 
-    @Test("menu always has pairing, folder, logs, feedback, server controls, uninstall, quit")
+    @Test("menu always has pairing, folder, logs, feedback, Gateway controls, uninstall, quit")
     func canonicalActionPresence() throws {
-        let snap = ServerStatusSnapshot.checking
+        let snap = GatewayStatusSnapshot.checking
         let items = Self.build(snapshot: snap)
 
         let titles = Set(items.map(\.title))
@@ -94,13 +91,11 @@ struct MenuBarItemBuilderTests {
         ] {
             #expect(titles.contains(required), "missing \(required) in menu")
         }
-        #expect(!titles.contains("Show Developer Options"))
-        #expect(!titles.contains("Start development agent"))
     }
 
     @Test("menu sections use the canonical order")
     func canonicalSectionOrder() throws {
-        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
+        let snap = GatewayStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
         let titles = Self.build(snapshot: snap).map(\.title)
 
         #expect(titles == [
@@ -120,7 +115,7 @@ struct MenuBarItemBuilderTests {
 
     @Test("menu titles map directly to typed actions")
     func canonicalActionRouting() throws {
-        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
+        let snap = GatewayStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
         let actions = Dictionary(uniqueKeysWithValues: Self.build(snapshot: snap).compactMap { item in
             if case .action(let title, _, let action) = item {
                 return (title, action)
@@ -132,48 +127,20 @@ struct MenuBarItemBuilderTests {
             "Show pairing info": .showPairingInfo,
             "Show logs": .viewLogs,
             "Send feedback": .sendFeedback,
-            "Pause Tron": .pauseServer,
-            "Restart Tron": .restartServer,
+            "Pause Tron": .pauseGateway,
+            "Restart Tron": .restartGateway,
             "Uninstall Tron": .uninstall,
         ])
 
-        let pausedItems = Self.build(snapshot: ServerStatusSnapshot(state: .paused))
-        #expect(pausedItems.contains(.action(title: "Resume Tron", isEnabled: true, action: .resumeServer)))
+        let pausedItems = Self.build(snapshot: GatewayStatusSnapshot(state: .paused))
+        #expect(pausedItems.contains(.action(title: "Resume Tron", isEnabled: true, action: .resumeGateway)))
 
 
     }
 
-    @Test("debug companion disables production LaunchAgent controls")
-    func companionDisablesProductionControls() throws {
-        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
-        let items = Self.build(snapshot: snap, canManageLaunchAgent: false)
-
-        for item in items {
-            if case .action(let title, let isEnabled, _) = item,
-               ["Pause Tron", "Restart Tron", "Uninstall Tron"].contains(title) {
-                #expect(!isEnabled, "\(title) should be disabled in companion mode")
-            }
-        }
-    }
-
-    @Test("menu omits developer start commands")
-    func menuOmitsDeveloperStartCommands() throws {
-        let snap = ServerStatusSnapshot(state: .running(version: "0.5.0", port: 9847))
-        let items = Self.build(snapshot: snap)
-        let titles = items.map(\.title)
-
-        #expect(!titles.contains("Show Developer Options"))
-        #expect(!titles.contains("Hide Developer Options"))
-        #expect(!titles.contains("Start development agent"))
-        #expect(!titles.contains("Start development agent after tests"))
-        #expect(!titles.contains("Build, test, and start development agent"))
-        #expect(!titles.contains("Open dev command log"))
-        #expect(!titles.contains("Stop development agent"))
-    }
-
-    @Test("busy snapshot disables server controls and shows transient action title")
-    func busyDisablesServerControls() throws {
-        let snap = ServerStatusSnapshot(state: .busy(.restarting))
+    @Test("busy snapshot disables Gateway controls and shows transient action title")
+    func busyDisablesGatewayControls() throws {
+        let snap = GatewayStatusSnapshot(state: .busy(.restarting))
         let items = Self.build(snapshot: snap)
 
         let titles = items.map(\.title)
@@ -189,7 +156,7 @@ struct MenuBarItemBuilderTests {
 
     @Test("failed status title carries reason")
     func failedTitle() throws {
-        let snap = ServerStatusSnapshot(state: .failed(reason: "timeout"))
+        let snap = GatewayStatusSnapshot(state: .failed(reason: "timeout"))
         let items = Self.build(snapshot: snap)
         if case .header(let content) = items[0] {
             #expect(content.status == "Stopped")
@@ -201,7 +168,7 @@ struct MenuBarItemBuilderTests {
 
     @Test("status title flips for unauthorized state")
     func unauthorizedTitle() throws {
-        let snap = ServerStatusSnapshot(state: .unauthorized)
+        let snap = GatewayStatusSnapshot(state: .unauthorized)
         let items = Self.build(snapshot: snap)
         if case .header(let content) = items[0] {
             #expect(content.status == "Needs token")
@@ -213,7 +180,7 @@ struct MenuBarItemBuilderTests {
 
     @Test("status title 'checking' for checking state")
     func checkingTitle() throws {
-        let snap = ServerStatusSnapshot.checking
+        let snap = GatewayStatusSnapshot.checking
         let items = Self.build(snapshot: snap)
         if case .header(let content) = items[0] {
             #expect(content.status == "Checking")
@@ -226,7 +193,7 @@ struct MenuBarItemBuilderTests {
     @Test("Open Tron folder uses the configured tronHome path")
     func openFolderUsesPath() throws {
         let tronHome = URL(fileURLWithPath: "/tmp/custom-tron", isDirectory: true)
-        let snap = ServerStatusSnapshot.checking
+        let snap = GatewayStatusSnapshot.checking
         let items = Self.build(snapshot: snap, tronHome: tronHome)
         let openLink = items.first { item in
             if case .openLink(_, _) = item { return true } else { return false }

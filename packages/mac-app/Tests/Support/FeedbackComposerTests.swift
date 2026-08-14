@@ -15,13 +15,13 @@ struct FeedbackComposerTests {
     func bodyRedactsLogs() {
         let composer = FeedbackIssueComposer(appVersion: "0.1.0-beta.1", buildNumber: "1", osVersion: "macOS 15.0")
         let body = composer.body(
-            serverDescription: "failed (timeout)",
+            gatewayDescription: "failed (timeout)",
             logs: "Bearer 1234567890abcdef1234 failed from /Users/alice/project"
         )
 
         #expect(body.contains("App: v0.1 (Beta 1) (build 1)"))
         #expect(body.contains("macOS: macOS 15.0"))
-        #expect(body.contains("Server: failed (timeout)"))
+        #expect(body.contains("Gateway: failed (timeout)"))
         #expect(!body.contains("1234567890abcdef1234"))
         #expect(!body.contains("/Users/alice"))
         #expect(body.contains("[redacted:len=20]"))
@@ -30,7 +30,7 @@ struct FeedbackComposerTests {
     @Test("issue URL targets GitHub issues, not mail")
     func issueURL() throws {
         let composer = FeedbackIssueComposer(appVersion: "0.1.0-beta.1", buildNumber: "1", osVersion: "macOS 15.0")
-        let plan = try #require(composer.openPlan(serverDescription: "running on port 9847, version v0.1 (Beta 1)", logs: "hello"))
+        let plan = try #require(composer.openPlan(gatewayDescription: "running on port 9847, version v0.1 (Beta 1)", logs: "hello"))
 
         #expect(plan.url.scheme == "https")
         #expect(plan.url.host == "github.com")
@@ -43,7 +43,7 @@ struct FeedbackComposerTests {
     @Test("oversized body opens title-only issue and marks body for clipboard")
     func oversizedBodyUsesClipboardPlan() throws {
         let composer = FeedbackIssueComposer(appVersion: "0.1.0-beta.1", buildNumber: "1", osVersion: "macOS 15.0")
-        let plan = try #require(composer.openPlan(serverDescription: "running on port 9847, version v0.1 (Beta 1)", logs: String(repeating: "x", count: 20_000)))
+        let plan = try #require(composer.openPlan(gatewayDescription: "running on port 9847, version v0.1 (Beta 1)", logs: String(repeating: "x", count: 20_000)))
 
         #expect(plan.copiedFullBodyToClipboard)
         #expect(plan.url.absoluteString.count < FeedbackIssueComposer.maxPrefilledURLLength)

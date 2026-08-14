@@ -1,52 +1,63 @@
 # Tron Mac development
 
-## Stage the gateway
+## Stage the bundled Gateway
 
-A fresh clone has neither Gateway dependencies/build output nor generated Mac
-payloads. Xcode copies generated payloads; it does not run npm or download Node
-during a build. Stage before opening or archiving the project:
+A fresh clone has no generated Gateway payload. Stage the exact production
+dependency tree, checksum-pinned Node runtimes, and universal launcher before
+building:
 
 ```bash
 packages/mac-app/scripts/bundle-gateway.sh
 ```
 
-The script:
+The script runs the locked Gateway install and build, creates an independent
+production-only dependency tree, verifies Node 22.22.0 arm64 and x64 archives,
+compiles `tron-gateway-launcher.c`, and stages it in both Login Items.
 
-1. runs locked gateway install and TypeScript build;
-2. creates an independent `npm ci --omit=dev` production tree, including the
-   owned node-pty postinstall helper;
-3. downloads exact Node 22.22.0 arm64 and x64 archives;
-4. checks hard-coded SHA-256 values;
-5. compiles `tron-gateway-launcher.c` as a universal macOS executable;
-6. stages the launcher into both tracked Login Item skeletons.
-
-Useful iteration options:
+For local iteration:
 
 ```bash
-# Reuse gateway node_modules/dist, but refresh runtime payloads
 packages/mac-app/scripts/bundle-gateway.sh --skip-install
-
-# Reuse already staged exact Node runtimes too
 packages/mac-app/scripts/bundle-gateway.sh --skip-install --skip-download
-
-# Remove generated payloads only
 packages/mac-app/scripts/bundle-gateway.sh --clean
 ```
 
+Generated Gateway payloads and launcher binaries are ignored by Git.
+
 ## Generate and build
+
+The project has one `TronMac` scheme. Configuration selects the mode:
+
+- Debug: `com.tron.gateway.dev`, `~/.tron-dev`, port 9848.
+- Release: `com.tron.gateway`, `~/.tron`, port 9847.
 
 ```bash
 cd packages/mac-app
 xcodegen generate
+
 xcodebuild build -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64'
+
+xcodebuild build -project TronMac.xcodeproj -scheme TronMac \
+  -configuration Release -destination 'platform=macOS,arch=arm64'
 ```
 
-Use `TronMac Isolated Install` to own `com.tron.server.dev`, `~/.tron-dev`, and
-port 9848 without replacing the installed production app. Ordinary Debug runs
-are companions and do not manage production registration.
+Release registration requires `/Applications/Tron.app`. Debug is intentionally
+isolated and can run from Xcode build products.
 
-## Efficient focused tests
+The internal command mode used by installation flows is:
+
+```bash
+# Debug
+/path/to/TronMac.app/Contents/MacOS/TronMac --tron-start-gateway-and-quit
+
+# Release
+/Applications/Tron.app/Contents/MacOS/Tron --tron-start-gateway-and-quit
+```
+
+## Tests
+
+Build once, run focused owners while iterating, then run the complete suite:
 
 ```bash
 xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
@@ -54,32 +65,53 @@ xcodebuild build-for-testing -project TronMac.xcodeproj -scheme TronMac \
 
 xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \
-  -only-testing:TronMacTests/PairingURLBuilderTests \
-  -only-testing:TronMacTests/EnrollmentCodeReaderTests
+  -only-testing:TronMacTests/GatewayLifecycleCoordinatorTests \
+  -only-testing:TronMacTests/GatewayOnboardingModelTests \
+  -only-testing:TronMacTests/SingleInstanceLockTests
+
+xcodebuild test -project TronMac.xcodeproj -scheme TronMac \
+  -configuration Debug -destination 'platform=macOS,arch=arm64'
 ```
 
-After an edit, rerun the incremental `build-for-testing`, then keep using
-`test-without-building`. This separates compilation from execution and avoids
-repeatedly paying for unrelated suites. `TronMacTests` is hosted by the app and
-must inherit the app's signing team; forcing the bundle to an ad-hoc identity
-causes macOS to reject it before tests bootstrap.
+The tests use behavioral service doubles, parsed plist assertions, real atomic
+filesystem operations, and a spawned process for lock exclusivity. They do not
+assert Swift source text.
 
-## Pairing checks
+## Development lifecycle checkpoint
 
-Pairing requires:
+With Tailscale connected, exercise the Debug service without touching
+production state:
 
-- a healthy authenticated gateway on the selected port;
-- an owner-only, unexpired `gateway/enrollment.json`;
-- a detected Tailscale address;
-- a code whose trimmed length is 8–32 characters.
+1. Launch the Debug app and complete onboarding.
+2. Confirm `com.tron.gateway.dev` is enabled and port 9848 is healthy.
+3. Pause, resume, and restart from the menu bar.
+4. Terminate the Gateway process and confirm launchd restarts it.
+5. Quit and relaunch the Debug app; confirm reconciliation reuses the current
+   healthy service without replacing it.
+6. Refresh pairing and connect an iPhone using the current one-time code.
+7. Uninstall, confirm the service is absent, and confirm durable Gateway data
+   remains.
 
-The wrapper's local credential path is `gateway/local-auth.json`; do not regress
-to legacy `~/.tron/auth.json` and never put the local token in the URL.
+## Built-product inspection
+
+```bash
+APP=/path/to/TronMac.app
+
+plutil -p "$APP/Contents/Library/LaunchAgents/com.tron.gateway.dev.plist"
+codesign --verify --deep --strict --verbose=2 "$APP"
+codesign -dv --verbose=4 \
+  "$APP/Contents/Library/LoginItems/Tron Gateway Dev.app"
+codesign -d --entitlements :- "$APP/Contents/Resources/Gateway/runtime/node-arm64"
+```
+
+For Release, inspect `com.tron.gateway.plist` and `Tron Gateway.app` instead.
+The plist must preserve the exact label, helper path, arguments, environment,
+associated wrapper ID, `RunAtLoad`, `KeepAlive`, and throttle interval.
 
 ## Release
 
-Mac release is manual. Stage the Gateway, generate the project, archive with the
-maintainer's Developer ID identity, notarize and staple the app and DMG, then
-publish the release assets deliberately. `packages/mac-app/scripts/package-dmg.sh`
-owns DMG layout verification and requires `create-dmg` on `PATH`. Never add an
-automated production release or deployment command.
+Mac release remains manual. Stage the Gateway, generate the project, archive
+with the maintainer's Developer ID identity, inspect signatures, notarize and
+staple the app and DMG, then publish deliberately.
+`packages/mac-app/scripts/package-dmg.sh` owns DMG layout verification and
+requires `create-dmg` on `PATH`.

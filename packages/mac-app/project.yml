@@ -68,17 +68,38 @@ targets:
           DST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Library"
           GATEWAY_SRC="$SRCROOT/Sources/Resources/Gateway"
           GATEWAY_DST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/Gateway"
+          NODE_ENTITLEMENTS="$SRCROOT/Configuration/GatewayNode.entitlements"
           test -d "$SRC" || { echo "Missing bundled Library resources at $SRC" >&2; exit 1; }
           test -d "$GATEWAY_SRC" || { echo "Missing bundled Gateway resources at $GATEWAY_SRC; run scripts/bundle-gateway.sh" >&2; exit 1; }
+          test -f "$NODE_ENTITLEMENTS" || { echo "Missing Node runtime entitlements at $NODE_ENTITLEMENTS" >&2; exit 1; }
+          if [ "$CONFIGURATION" = "Release" ]; then
+            HELPER_NAME="Tron Gateway.app"
+            SERVICE_LABEL="com.tron.gateway"
+          else
+            HELPER_NAME="Tron Gateway Dev.app"
+            SERVICE_LABEL="com.tron.gateway.dev"
+          fi
+          HELPER_SRC="$SRC/LoginItems/$HELPER_NAME"
+          PLIST_SRC="$SRC/LaunchAgents/$SERVICE_LABEL.plist"
+          test -d "$HELPER_SRC" || { echo "Missing bundled Login Item: $HELPER_SRC" >&2; exit 1; }
+          test -f "$PLIST_SRC" || { echo "Missing bundled service plist: $PLIST_SRC" >&2; exit 1; }
           rm -rf "$DST" "$GATEWAY_DST"
-          mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources"
-          ditto "$SRC" "$DST"
+          mkdir -p "$DST/LoginItems" "$DST/LaunchAgents" "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources"
+          ditto "$HELPER_SRC" "$DST/LoginItems/$HELPER_NAME"
+          ditto "$PLIST_SRC" "$DST/LaunchAgents/$SERVICE_LABEL.plist"
           ditto "$GATEWAY_SRC" "$GATEWAY_DST"
           if [ -d "$DST/LoginItems" ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]; then
             SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
             find "$GATEWAY_DST" -type f \( -perm -111 -o -name '*.node' \) | while IFS= read -r NATIVE; do
               if file "$NATIVE" | grep -q 'Mach-O'; then
-                codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$NATIVE"
+                case "$NATIVE" in
+                  "$GATEWAY_DST"/runtime/node-*)
+                    codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none --entitlements "$NODE_ENTITLEMENTS" "$NATIVE"
+                    ;;
+                  *)
+                    codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$NATIVE"
+                    ;;
+                esac
               fi
             done
             for HELPER in "$DST"/LoginItems/*.app; do
@@ -88,6 +109,11 @@ targets:
             if [ -n "${CODESIGNING_FOLDER_PATH:-}" ] \
               && [ -d "$CODESIGNING_FOLDER_PATH" ] \
               && [ ! -d "$CODESIGNING_FOLDER_PATH/Contents/PlugIns" ]; then
+              find "$CODESIGNING_FOLDER_PATH/Contents/MacOS" -type f -name '*.dylib' | while IFS= read -r APP_CODE; do
+                if file "$APP_CODE" | grep -q 'Mach-O'; then
+                  codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$APP_CODE"
+                fi
+              done
               ENTITLEMENTS_PATH=""
               if [ -f "$TARGET_TEMP_DIR/$PRODUCT_NAME.app.xcent" ]; then
                 ENTITLEMENTS_PATH="$TARGET_TEMP_DIR/$PRODUCT_NAME.app.xcent"
@@ -129,29 +155,6 @@ schemes:
       config: Debug
       environmentVariables:
         TRON_PROJECT_ROOT: "$(SRCROOT)/../.."
-    test:
-      config: Debug
-      environmentVariables:
-        TRON_MAC_TEST_HOST: "1"
-      targets:
-        - TronMacTests
-    profile:
-      config: Release
-    analyze:
-      config: Debug
-    archive:
-      config: Release
-  TronMac Isolated Install:
-    build:
-      targets:
-        TronMac: all
-        TronMacTests: [test]
-    run:
-      config: Debug
-      environmentVariables:
-        TRON_PROJECT_ROOT: "$(SRCROOT)/../.."
-        TRON_MAC_INSTALL_MODE: isolated
-        TRON_HOME_NAME: ".tron-dev"
     test:
       config: Debug
       environmentVariables:

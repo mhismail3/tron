@@ -22,7 +22,7 @@ struct FeedbackIssueComposer {
         "Mac menu bar feedback - \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))"
     }
 
-    func body(serverDescription: String, logs: String) -> String {
+    func body(gatewayDescription: String, logs: String) -> String {
         let redactedLogs = redactor.redactMessage(logs).trimmingCharacters(in: .whitespacesAndNewlines)
         return """
         ### Summary
@@ -32,7 +32,7 @@ struct FeedbackIssueComposer {
 
         - App: \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))
         - macOS: \(osVersion)
-        - Server: \(serverDescription)
+        - Gateway: \(gatewayDescription)
 
         ### Recent logs
 
@@ -42,9 +42,9 @@ struct FeedbackIssueComposer {
         """
     }
 
-    func openPlan(serverDescription: String, logs: String) -> FeedbackIssueOpenPlan? {
+    func openPlan(gatewayDescription: String, logs: String) -> FeedbackIssueOpenPlan? {
         let title = title()
-        let fullBody = body(serverDescription: serverDescription, logs: logs)
+        let fullBody = body(gatewayDescription: gatewayDescription, logs: logs)
         if let fullURL = Self.issueURL(title: title, body: fullBody),
            fullURL.absoluteString.count <= Self.maxPrefilledURLLength {
             return FeedbackIssueOpenPlan(url: fullURL, copiedFullBodyToClipboard: false)

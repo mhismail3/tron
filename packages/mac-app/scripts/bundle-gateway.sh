@@ -17,8 +17,8 @@ PAYLOAD_DIR="$RESOURCES_DIR/Gateway"
 APP_DIR="$PAYLOAD_DIR/app"
 RUNTIME_DIR="$PAYLOAD_DIR/runtime"
 LIBRARY_DIR="$RESOURCES_DIR/Library"
-HELPER_DIR="$LIBRARY_DIR/LoginItems/Tron Agent.app/Contents"
-DEV_HELPER_DIR="$LIBRARY_DIR/LoginItems/Tron Agent Dev.app/Contents"
+HELPER_DIR="$LIBRARY_DIR/LoginItems/Tron Gateway.app/Contents"
+DEV_HELPER_DIR="$LIBRARY_DIR/LoginItems/Tron Gateway Dev.app/Contents"
 NODE_VERSION="22.22.0"
 NODE_ARM64_SHA256="5ed4db0fcf1eaf84d91ad12462631d73bf4576c1377e192d222e48026a902640"
 NODE_X64_SHA256="5ea50c9d6dea3dfa3abb66b2656f7a4e1c8cef23432b558d45fb538c7b5dedce"
@@ -56,8 +56,8 @@ required=(
     "$SCRIPT_DIR/tron-gateway-launcher.c"
     "$HELPER_DIR/Info.plist"
     "$DEV_HELPER_DIR/Info.plist"
-    "$LIBRARY_DIR/LaunchAgents/com.tron.server.plist"
-    "$LIBRARY_DIR/LaunchAgents/com.tron.server.dev.plist"
+    "$LIBRARY_DIR/LaunchAgents/com.tron.gateway.plist"
+    "$LIBRARY_DIR/LaunchAgents/com.tron.gateway.dev.plist"
 )
 for path in "${required[@]}"; do
     [[ -f "$path" ]] || { echo "missing required source: $path" >&2; exit 3; }

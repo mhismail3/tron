@@ -53,15 +53,6 @@ struct QRCodeGeneratorTests {
         #expect(decoded == urlString)
     }
 
-    @Test("round-trip: TestFlight public invite encodes and decodes back")
-    func testFlightInviteRoundTrip() throws {
-        let urlString = IOSBetaStepContent.testFlightURL.absoluteString
-        let image = try #require(QRCodeGenerator.makeImage(payload: urlString, size: 512))
-        let rep = try #require(image.representations.first as? NSCIImageRep)
-        let decoded = try #require(decodeQRCode(rep.ciImage))
-        #expect(decoded == urlString)
-    }
-
     @Test("very long payload still encodes (no crash)")
     func longPayload() throws {
         let payload = String(repeating: "abc", count: 200)  // 600 chars

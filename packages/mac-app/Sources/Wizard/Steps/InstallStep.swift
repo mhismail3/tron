@@ -1,469 +1,84 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
-/// Install step. The shell owns the icon, title, progress pill, and
-/// the bottom action bar. Its primary CTA starts as "Install" and
-/// only advances as "Continue" after `installOutcome == .success`.
-/// This view contributes the description, the per-stage progress list,
-/// and an error summary on failure.
 struct InstallStep: View {
-    @Bindable var state: WizardState
-    @Environment(\.environmentSetup) private var setup
-
-    @State private var stages: [InstallPipelineStage: StageState] = [:]
-    @State private var installStatusText: String?
+    @Bindable var state: GatewayOnboardingModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: InstallStepLayout.sectionSpacing) {
-            Text(InstallStepContent.intro)
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Install Tron Gateway as a Login Item. macOS will keep it running when the menu-bar app is closed.")
                 .font(TronTypography.wizardBody)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if shouldShowRegisteredServiceLayout {
-                registeredServiceSummary
-            } else {
-                stageProgressArea
-
-                if let outcome = state.installOutcome, outcome != .success {
-                    WizardInfoCard {
-                        Text(outcomeDescription(outcome))
+            WizardInfoCard(verticalPadding: 18) {
+                WizardIconTextRow {
+                    statusIcon
+                } content: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(statusTitle).font(TronTypography.wizardHeadline)
+                        Text(statusDetail)
                             .font(TronTypography.wizardBodySmall)
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(statusFailure == nil ? Color.secondary : Color.red)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                }
-
-                if installIsComplete {
-                    readySummary
+                } trailing: {
+                    if state.isMutating { ProgressView().controlSize(.small) }
                 }
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .animation(WizardLayout.transitionAnimation, value: installIsComplete)
-        .task {
-            // Detection is observational only. Even an enabled Login
-            // Item registration is not considered ready until the user
-            // explicitly starts the pipeline and `system::ping` answers.
-            prepareTerminalInstallStateIfNeeded()
-        }
-        .task(id: state.installRequestID) {
-            guard state.installRequestID > 0 else { return }
-            guard state.hasUnhandledInstallRequest else {
-                prepareTerminalInstallStateIfNeeded()
-                return
-            }
-            await runPipeline(requestID: state.installRequestID)
-        }
-        .task(id: state.installOutcome) {
-            guard installIsComplete else {
-                installStatusText = nil
-                return
-            }
-            await refreshInstallStatus()
-        }
-    }
+            .accessibilityElement(children: .combine)
 
-    private var installIsComplete: Bool {
-        if state.installOutcome == .success {
-            return true
-        }
-        return currentInstallRunSucceeded
-    }
-
-    private var currentInstallRunSucceeded: Bool {
-        guard !stages.isEmpty else { return false }
-        return InstallPipelineStage.allCases.allSatisfy { stage in
-            stages[stage] == .succeeded
-        }
-    }
-
-    private var shouldShowRegisteredServiceLayout: Bool {
-        guard state.installOutcome == nil, !state.installIsRunning else {
-            return false
-        }
-        if case .registered = state.existingInstallStatus {
-            return true
-        }
-        return false
-    }
-
-    private func resetStagesToPending() {
-        for stage in InstallPipelineStage.allCases {
-            stages[stage] = .pending
-        }
-    }
-
-    private func markAlreadyInstalledStagesSucceeded() {
-        for stage in InstallPipelineStage.allCases {
-            stages[stage] = .succeeded
-        }
-    }
-
-    private func prepareTerminalInstallStateIfNeeded() {
-        switch state.installOutcome {
-        case .success:
-            markAlreadyInstalledStagesSucceeded()
-        case nil:
-            if stages.isEmpty {
-                resetStagesToPending()
-            }
-        default:
-            break
-        }
-    }
-
-    private func stageState(for stage: InstallPipelineStage) -> StageState {
-        if let explicitState = stages[stage] {
-            return explicitState
-        }
-        switch state.installOutcome {
-        case .success:
-            // Re-entering this page after a successful install should
-            // render completed rows on the first body pass. Updating
-            // them later from `.task` makes the icons pop separately
-            // from the page transition.
-            return .succeeded
-        default:
-            return .pending
-        }
-    }
-
-    private var visibleStages: [InstallPipelineStage] {
-        if state.installOutcome == .success {
-            return InstallPipelineStage.allCases
-        }
-        return InstallPipelineStage.allCases.filter { stage in
-            stageState(for: stage) != .pending
-        }
-    }
-
-    private var stageProgressArea: some View {
-        Group {
-            if visibleStages.isEmpty {
-                Text(InstallStepContent.notStartedPlaceholder)
-                    .font(TronTypography.wizardSubheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .transition(.opacity)
-            } else {
-                VStack(spacing: installIsComplete ? InstallStepLayout.completedStageSpacing : InstallStepLayout.runningStageSpacing) {
-                    ForEach(visibleStages, id: \.self) { stage in
-                        stageRow(stage)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
-                    }
+            if statusFailure == .approvalRequired {
+                Button {
+                    LoginItemsSettingsOpener.open()
+                } label: {
+                    Label("Open Login Items", systemImage: "gearshape.fill")
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .buttonStyle(.wizardLink)
             }
+            Spacer(minLength: 0)
         }
-        .animation(WizardLayout.transitionAnimation, value: visibleStages)
+        .padding(.top, 72)
     }
 
-    private func runPipeline(requestID: Int) async {
-        guard !state.installIsRunning else { return }
-        guard state.hasUnhandledInstallRequest else {
-            prepareTerminalInstallStateIfNeeded()
-            return
-        }
-        state.markInstallRequestHandled(requestID)
-
-        state.installIsRunning = true
-        defer { state.installIsRunning = false }
-        // Reset state.
-        resetStagesToPending()
-        stages[.validateApplication] = .running
-        state.installOutcome = nil
-
-        // 1. The release app must be running from /Applications/Tron.app.
-        await paceStage()
-        if let locationProblem = setup.validateApplicationLocation() {
-            state.installOutcome = .invalidApplicationLocation(locationProblem)
-            stages[.validateApplication] = .failed(locationProblem)
-            return
-        }
-        stages[.validateApplication] = .succeeded
-
-        // 2. Validate the bundled helper app, LaunchAgent plist, and signature.
-        stages[.validateHelper] = .running
-        await paceStage()
-        if let helperProblem = setup.validateBundledHelper() {
-            state.installOutcome = .helperValidationFailed(helperProblem)
-            stages[.validateHelper] = .failed(helperProblem)
-            return
-        }
-        guard ExistingInstallDetector.launchAgentPlistIsCurrent(
-            plistPath: setup.launchAgentPlistPath,
-            label: setup.launchAgentLabel,
-            port: setup.serverPort
-        ) else {
-            let message = "The bundled LaunchAgent plist is invalid. Reinstall Tron.app."
-            state.installOutcome = .helperValidationFailed(message)
-            stages[.validateHelper] = .failed(message)
-            return
-        }
-        stages[.validateHelper] = .succeeded
-
-        guard setup.canManageLaunchAgent else {
-            let message = "This Xcode Debug wrapper is in companion mode. Use /Applications/Tron.app for the production install, or run the isolated install-testing scheme."
-            stages[.registerAgent] = .failed(message)
-            state.installOutcome = .serviceRegistrationFailed(message)
-            return
-        }
-
-        // 3. Register the bundled Login Item through SMAppService.
-        stages[.registerAgent] = .running
-        await paceStage()
-        let outcome = await LaunchAgentLoader.ensureLoaded(
-            manager: setup.launchAgentManager,
-            plistPath: setup.launchAgentPlistPath,
-            label: setup.launchAgentLabel
-        )
-        switch outcome {
-        case .ok, .alreadyLoaded:
-            stages[.registerAgent] = .succeeded
-        case .requiresApproval(let message):
-            stages[.registerAgent] = .failed(message)
-            state.installOutcome = .serviceRequiresApproval
-            LoginItemsSettingsOpener.open()
-            return
-        case .launchdRefused(let message), .unknown(let message):
-            stages[.registerAgent] = .failed(message)
-            state.installOutcome = .serviceRegistrationFailed(message)
-            return
-        case .binaryMissing(let path):
-            stages[.registerAgent] = .failed("Missing: \(path)")
-            state.installOutcome = .helperValidationFailed("Missing: \(path)")
-            return
-        }
-
-        // 4. Await ping.
-        stages[.awaitPing] = .running
-        await paceStage()
-        let pingOK = await waitForPing()
-        if pingOK {
-            withAnimation(WizardLayout.transitionAnimation) {
-                stages[.awaitPing] = .succeeded
-                state.installOutcome = .success
-            }
-            state.existingInstallStatus = setup.detectExistingInstall()
+    @ViewBuilder
+    private var statusIcon: some View {
+        if state.installIsReady {
+            Image(systemName: "checkmark.seal.fill").font(.title2).foregroundStyle(.green)
+        } else if statusFailure != nil {
+            Image(systemName: "exclamationmark.triangle.fill").font(.title2).foregroundStyle(.red)
         } else {
-            stages[.awaitPing] = .failed("Tron did not respond within 30 seconds")
-            state.installOutcome = .awaitPingTimedOut
+            Image(systemName: "power.circle.fill").font(.title2).foregroundStyle(Color.tronEmerald)
         }
     }
 
-    @ViewBuilder
-    private func stageRow(_ stage: InstallPipelineStage) -> some View {
-        let stateForStage = stageState(for: stage)
-        HStack(alignment: .center, spacing: 12) {
-            stageIcon(stateForStage)
-                .frame(
-                    width: InstallStepLayout.stageIconColumnWidth,
-                    height: InstallStepLayout.stageRowMinHeight,
-                    alignment: .center
-                )
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label(for: stage))
-                    .font(TronTypography.wizardBody)
-                if case .failed(let message) = stateForStage {
-                    Text(message).font(TronTypography.wizardCaption).foregroundStyle(.red)
-                }
-            }
-            .frame(minHeight: InstallStepLayout.stageRowMinHeight, alignment: .center)
-            Spacer()
+    private var statusFailure: GatewayLifecycleFailure? {
+        if case .failed(let failure) = state.installOutcome { return failure }
+        return nil
+    }
+
+    private var statusTitle: String {
+        if state.installIsReady { return "Tron Gateway is ready" }
+        if state.isMutating { return "Preparing Tron Gateway" }
+        if statusFailure != nil { return "Setup needs attention" }
+        return "Ready to install"
+    }
+
+    private var statusDetail: String {
+        if state.installIsReady {
+            return "Running on Tailscale port \(state.dependencies.configuration.gatewayPort)."
         }
-    }
-
-    @ViewBuilder
-    private func stageIcon(_ stateForStage: StageState) -> some View {
-        switch stateForStage {
-        case .pending:
-            Image(systemName: "circle")
-                .font(.system(size: InstallStepLayout.stageIconGlyphSize, weight: .regular))
-                .foregroundStyle(.secondary)
-        case .running:
-            ProgressView()
-                .controlSize(.small)
-        case .succeeded:
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: InstallStepLayout.stageIconGlyphSize, weight: .semibold))
-                .foregroundStyle(.green)
-        case .failed(let message):
-            Image(systemName: "xmark.octagon.fill")
-                .font(.system(size: InstallStepLayout.stageIconGlyphSize, weight: .semibold))
-                .foregroundStyle(.red)
-                .help(message)
+        if state.isMutating {
+            return "Validating the bundle, registering the Login Item, and checking authenticated health."
         }
-    }
-
-    private func paceStage() async {
-        try? await Task.sleep(nanoseconds: InstallStepContent.stagePaceDelayNanoseconds)
-    }
-
-    enum StageState: Equatable {
-        case pending, running, succeeded, failed(String)
-    }
-
-    private func label(for stage: InstallPipelineStage) -> String {
-        InstallStepContent.label(for: stage)
-    }
-
-    private func outcomeDescription(_ outcome: InstallOutcome) -> String {
-        switch outcome {
-        case .success: return ""
-        case .invalidApplicationLocation(let message): return message
-        case .helperValidationFailed(let message): return message
-        case .serviceRequiresApproval: return "Approve Tron Agent in System Settings > Login Items, then return here."
-        case .serviceRegistrationFailed(let message): return "Could not register Tron Agent: \(message)"
-        case .awaitPingTimedOut: return "Tron did not respond in time. Open the logs window from the Tron menu bar after approving the Login Item."
-        }
-    }
-
-    @ViewBuilder
-    private var registeredServiceSummary: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            registeredServiceCard
-                .padding(.top, InstallStepLayout.detectedSummaryTopPadding)
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    @ViewBuilder
-    private var readySummary: some View {
-        readySummaryCards
-            .padding(.top, InstallStepLayout.readySummaryTopPadding)
-            .transition(InstallStepLayout.readySummaryTransition)
-    }
-
-    @ViewBuilder
-    private var readySummaryCards: some View {
-        VStack(alignment: .leading, spacing: InstallStepLayout.readySummarySpacing) {
-            serverReadyBanner
-        }
-    }
-
-    @ViewBuilder
-    private var registeredServiceCard: some View {
-        HStack(alignment: .center, spacing: WizardCardLayout.iconTextSpacing) {
-            Image(systemName: "power.circle.fill")
-                .foregroundStyle(Color.tronEmerald)
-                .font(.system(size: 17, weight: .semibold))
-                .frame(width: WizardCardLayout.iconColumnWidth, alignment: .center)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Tron Agent is registered")
-                    .font(TronTypography.wizardSubheadline)
-                    .foregroundStyle(Color.tronEmerald)
-                Text("Start it to confirm this Mac is reachable.")
-                    .font(TronTypography.wizardCaption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, InstallStepLayout.summaryCardVerticalPadding)
-        .padding(.horizontal, WizardCardLayout.horizontalInset)
-        .wizardGlassCard()
-    }
-
-    /// Polls `system::ping` for up to 30 s on a 1 s cadence. Returns true
-    /// the moment the server responds. Treats `.unauthorized` as a
-    /// success signal too — the server is alive; the wizard moves on
-    /// and the pairing step will surface the token.
-    private func waitForPing() async -> Bool {
-        for _ in 0..<30 {
-            let token = setup.readBearerToken()
-            switch await setup.pingServer(token) {
-            case .success, .unauthorized:
-                return true
-            case .unreachable, .timeout, .malformedResponse:
-                break
-            }
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-        }
-        return false
-    }
-
-    @ViewBuilder
-    private var serverReadyBanner: some View {
-        HStack(alignment: .center, spacing: WizardCardLayout.iconTextSpacing) {
-            Image(systemName: "checkmark.seal.fill")
-                .foregroundStyle(Color.tronSuccess)
-                .font(.system(size: 17, weight: .semibold))
-                .frame(width: WizardCardLayout.iconColumnWidth, alignment: .center)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Tron Agent is ready")
-                    .font(TronTypography.wizardSubheadline)
-                    .foregroundStyle(Color.tronEmerald)
-                Text("Current status: \(installStatusText ?? "Checking...")")
-                    .font(TronTypography.wizardCaption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, InstallStepLayout.summaryCardVerticalPadding)
-        .padding(.horizontal, WizardCardLayout.horizontalInset)
-        .wizardGlassCard()
-    }
-
-    private func refreshInstallStatus() async {
-        installStatusText = "Checking..."
-        let token = setup.readBearerToken()
-        switch await setup.pingServer(token) {
-        case .success:
-            installStatusText = "Running on port \(setup.serverPort)"
-        case .unauthorized:
-            installStatusText = "Running; token needs refresh"
-        case .unreachable:
-            installStatusText = "Not reachable"
-        case .timeout:
-            installStatusText = "Timed out"
-        case .malformedResponse:
-            installStatusText = "Unexpected response"
-        }
+        if let statusFailure { return statusFailure.userMessage }
+        return "Installation starts only when you press Install."
     }
 }
 
 enum LoginItemsSettingsOpener {
     static func open() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") {
-            NSWorkspace.shared.open(url)
-        }
-    }
-}
-
-enum InstallStepContent {
-    static let intro = "Install Tron on this Mac. It runs quietly in the background so your iPhone can connect."
-    static let notStartedPlaceholder = "Installation not started"
-    static let stagePaceDelayNanoseconds: UInt64 = 350_000_000
-
-    static func label(for stage: InstallPipelineStage) -> String {
-        switch stage {
-        case .validateApplication: return "Confirm app location"
-        case .validateHelper: return "Verify agent runtime"
-        case .registerAgent: return "Register Login Item"
-        case .awaitPing: return "Confirm it's running"
-        }
-    }
-}
-
-enum InstallStepLayout {
-    static let sectionSpacing: CGFloat = 16
-    static let runningStageSpacing: CGFloat = 6
-    static let completedStageSpacing: CGFloat = 4
-    static let readySummarySpacing: CGFloat = 11
-    static let readySummaryTopPadding: CGFloat = 0
-    static let detectedSummaryTopPadding: CGFloat = 72
-    static let summaryCardVerticalPadding: CGFloat = 14
-    static let stageIconColumnWidth: CGFloat = 24
-    static let stageRowMinHeight: CGFloat = 24
-    static let stageIconGlyphSize: CGFloat = 13
-
-    static var readySummaryTransition: AnyTransition {
-        .asymmetric(
-            insertion: .opacity
-                .combined(with: .move(edge: .bottom))
-                .combined(with: .scale(scale: 0.98, anchor: .top)),
-            removal: .opacity
-        )
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension") else { return }
+        NSWorkspace.shared.open(url)
     }
 }

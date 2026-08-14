@@ -2,11 +2,9 @@ import Foundation
 
 enum MacCommandLineMode: Equatable, Sendable {
     case normal
-    case startServerAndQuit
-    case uninstallAndQuit
+    case startGatewayAndQuit
 
-    static let startServerAndQuitFlag = "--tron-start-server-and-quit"
-    static let uninstallAndQuitFlag = "--tron-uninstall-and-quit"
+    static let startGatewayAndQuitFlag = "--tron-start-gateway-and-quit"
 
     static var current: MacCommandLineMode {
         parse(ProcessInfo.processInfo.arguments)
@@ -17,11 +15,8 @@ enum MacCommandLineMode: Equatable, Sendable {
     }
 
     static func parse(_ arguments: [String]) -> MacCommandLineMode {
-        if arguments.contains(uninstallAndQuitFlag) {
-            return .uninstallAndQuit
-        }
-        if arguments.contains(startServerAndQuitFlag) {
-            return .startServerAndQuit
+        if arguments.contains(startGatewayAndQuitFlag) {
+            return .startGatewayAndQuit
         }
         return .normal
     }
