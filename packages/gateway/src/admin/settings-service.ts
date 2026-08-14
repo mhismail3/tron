@@ -32,6 +32,12 @@ function rawString(value: unknown, name: string, maximum: number): string {
   return value;
 }
 
+function redactSettingsDocument(document: Record<string, unknown>): Record<string, unknown> {
+  const redacted = structuredClone(document);
+  delete redacted.httpProxy;
+  return redacted;
+}
+
 function setNullable(target: SettingsDocument, key: string, value: unknown): void {
   if (value === null || value === undefined) delete target[key];
   else target[key] = value;
@@ -68,7 +74,10 @@ export class SettingsService {
     const rawRetry = manager.getRetrySettings();
     return {
       scope: { cwd, projectTrusted },
-      documents: { global, project: projectTrusted ? project : null },
+      documents: {
+        global: redactSettingsDocument(global),
+        project: projectTrusted ? redactSettingsDocument(project) : null,
+      },
       effective: {
         defaultModel: defaultProvider && defaultModel ? { provider: defaultProvider, id: defaultModel } : null,
         defaultThinkingLevel: manager.getDefaultThinkingLevel() ?? null,

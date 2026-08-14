@@ -137,7 +137,8 @@ Package cases similarly reverse global/workspace and same-target inventory respo
 mutation CWD/local parameters, and require mutation-completed update markers to be cleared.
 A paired custom-model case proves the newer typed-global document read wins reversed completion.
 `SettingsDraftStoreTests` prove target isolation, pre-response editing, invalidation rejection,
-provider-target load identity, and stale save/scope-round-trip admission for model/default drafts.
+provider-target load identity, stale save/scope-round-trip admission across model/default, runtime,
+and resource drafts, changed-field-only wire patches, and explicit redacted proxy set/clear handling.
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \

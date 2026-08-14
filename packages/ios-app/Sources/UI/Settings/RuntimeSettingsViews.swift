@@ -1,38 +1,145 @@
 import SwiftUI
 
+struct RuntimeBehaviorDraft: Equatable {
+    var transport = "auto"
+    var steeringMode = "one-at-a-time"
+    var followUpMode = "one-at-a-time"
+    var compactionEnabled = true
+    var compactionReserve = 16_384
+    var compactionRecent = 20_000
+    var branchReserve = 16_384
+    var branchSkipPrompt = false
+    var retryEnabled = true
+    var retryCount = 3
+    var retryDelay = 1_000
+    var providerTimeout = 120_000
+    var providerRetryCount = 2
+    var providerRetryDelay = 30_000
+    var httpIdleTimeout = 300_000
+    var websocketTimeout = 10_000
+    var hideThinking = false
+    var cacheNotices = false
+    var resizeImages = true
+    var blockImages = false
+    var skillCommands = true
+    var installTelemetry = true
+    var analytics = false
+    var mermaid = "final"
+    var codeIndent = "  "
+    var anthropicWarning = true
+
+    func patch(comparedTo baseline: Self) -> JSONValue {
+        var patch: [String: JSONValue] = [:]
+        if transport != baseline.transport { patch["transport"] = .string(transport) }
+        if steeringMode != baseline.steeringMode { patch["steeringMode"] = .string(steeringMode) }
+        if followUpMode != baseline.followUpMode { patch["followUpMode"] = .string(followUpMode) }
+        var compaction: [String: JSONValue] = [:]
+        if compactionEnabled != baseline.compactionEnabled { compaction["enabled"] = .bool(compactionEnabled) }
+        if compactionReserve != baseline.compactionReserve { compaction["reserveTokens"] = .number(Double(compactionReserve)) }
+        if compactionRecent != baseline.compactionRecent { compaction["keepRecentTokens"] = .number(Double(compactionRecent)) }
+        if !compaction.isEmpty { patch["compaction"] = .object(compaction) }
+        var branch: [String: JSONValue] = [:]
+        if branchReserve != baseline.branchReserve { branch["reserveTokens"] = .number(Double(branchReserve)) }
+        if branchSkipPrompt != baseline.branchSkipPrompt { branch["skipPrompt"] = .bool(branchSkipPrompt) }
+        if !branch.isEmpty { patch["branchSummary"] = .object(branch) }
+        var retry: [String: JSONValue] = [:]
+        if retryEnabled != baseline.retryEnabled { retry["enabled"] = .bool(retryEnabled) }
+        if retryCount != baseline.retryCount { retry["maxRetries"] = .number(Double(retryCount)) }
+        if retryDelay != baseline.retryDelay { retry["baseDelayMs"] = .number(Double(retryDelay)) }
+        var provider: [String: JSONValue] = [:]
+        if providerTimeout != baseline.providerTimeout { provider["timeoutMs"] = .number(Double(providerTimeout)) }
+        if providerRetryCount != baseline.providerRetryCount { provider["maxRetries"] = .number(Double(providerRetryCount)) }
+        if providerRetryDelay != baseline.providerRetryDelay { provider["maxRetryDelayMs"] = .number(Double(providerRetryDelay)) }
+        if !provider.isEmpty { retry["provider"] = .object(provider) }
+        if !retry.isEmpty { patch["retry"] = .object(retry) }
+        if httpIdleTimeout != baseline.httpIdleTimeout { patch["httpIdleTimeoutMs"] = .number(Double(httpIdleTimeout)) }
+        if websocketTimeout != baseline.websocketTimeout { patch["websocketConnectTimeoutMs"] = .number(Double(websocketTimeout)) }
+        if hideThinking != baseline.hideThinking { patch["hideThinkingBlock"] = .bool(hideThinking) }
+        if cacheNotices != baseline.cacheNotices { patch["showCacheMissNotices"] = .bool(cacheNotices) }
+        var images: [String: JSONValue] = [:]
+        if resizeImages != baseline.resizeImages { images["autoResize"] = .bool(resizeImages) }
+        if blockImages != baseline.blockImages { images["blockImages"] = .bool(blockImages) }
+        if !images.isEmpty { patch["images"] = .object(images) }
+        if skillCommands != baseline.skillCommands { patch["enableSkillCommands"] = .bool(skillCommands) }
+        var markdown: [String: JSONValue] = [:]
+        if codeIndent != baseline.codeIndent { markdown["codeBlockIndent"] = .string(codeIndent) }
+        if mermaid != baseline.mermaid { markdown["mermaid"] = .string(mermaid) }
+        if !markdown.isEmpty { patch["markdown"] = .object(markdown) }
+        if anthropicWarning != baseline.anthropicWarning {
+            patch["warnings"] = .object(["anthropicExtraUsage": .bool(anthropicWarning)])
+        }
+        if installTelemetry != baseline.installTelemetry { patch["enableInstallTelemetry"] = .bool(installTelemetry) }
+        if analytics != baseline.analytics { patch["enableAnalytics"] = .bool(analytics) }
+        return .object(patch)
+    }
+}
+
+struct ResourceSettingsDraft: Equatable {
+    var extensions = ""
+    var skills = ""
+    var prompts = ""
+    var themes = ""
+    var shellPath = ""
+    var shellPrefix = ""
+    var npmCommand = ""
+    var proxy = ""
+    var proxyConfigured = false
+    var proxyEdited = false
+
+    func patch(comparedTo baseline: Self) -> JSONValue {
+        var patch: [String: JSONValue] = [:]
+        if extensions != baseline.extensions {
+            patch["extensions"] = .array(settingsLines(extensions).map(JSONValue.string))
+        }
+        if skills != baseline.skills {
+            patch["skills"] = .array(settingsLines(skills).map(JSONValue.string))
+        }
+        if prompts != baseline.prompts {
+            patch["prompts"] = .array(settingsLines(prompts).map(JSONValue.string))
+        }
+        if themes != baseline.themes {
+            patch["themes"] = .array(settingsLines(themes).map(JSONValue.string))
+        }
+        if shellPath != baseline.shellPath { patch["shellPath"] = shellPath.isEmpty ? .null : .string(shellPath) }
+        if shellPrefix != baseline.shellPrefix {
+            patch["shellCommandPrefix"] = shellPrefix.isEmpty ? .null : .string(shellPrefix)
+        }
+        if npmCommand != baseline.npmCommand {
+            patch["npmCommand"] = npmCommand.isEmpty
+                ? .null
+                : .array(npmCommand.split(separator: " ").map { .string(String($0)) })
+        }
+        if proxyEdited { patch["httpProxy"] = proxy.isEmpty ? .null : .string(proxy) }
+        return .object(patch)
+    }
+
+    func afterSuccessfulSave() -> Self {
+        var saved = self
+        if proxyEdited {
+            if !proxy.isEmpty { saved.proxyConfigured = true }
+            saved.proxy = ""
+            saved.proxyEdited = false
+        }
+        return saved
+    }
+}
+
+private func settingsLines(_ value: String) -> [String] {
+    value.split(whereSeparator: \.isNewline)
+        .map(String.init)
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+}
+
 struct RuntimeBehaviorSettingsView: View {
     @Environment(AppModel.self) private var model
     let projectCWD: String?
     @State private var scope: SettingsScope = .global
+    @State private var draft = RuntimeBehaviorDraft()
+    @State private var drafts = ScopedSettingsDraftStore<RuntimeBehaviorDraft>()
+    @State private var saving = false
 
     private var allowsProjectScope: Bool { projectCWD != nil }
-    @State private var transport = "auto"
-    @State private var steeringMode = "one-at-a-time"
-    @State private var followUpMode = "one-at-a-time"
-    @State private var compactionEnabled = true
-    @State private var compactionReserve = 16_384
-    @State private var compactionRecent = 20_000
-    @State private var branchReserve = 16_384
-    @State private var branchSkipPrompt = false
-    @State private var retryEnabled = true
-    @State private var retryCount = 3
-    @State private var retryDelay = 1_000
-    @State private var providerTimeout = 120_000
-    @State private var providerRetryCount = 2
-    @State private var providerRetryDelay = 30_000
-    @State private var httpIdleTimeout = 300_000
-    @State private var websocketTimeout = 10_000
-    @State private var hideThinking = false
-    @State private var cacheNotices = false
-    @State private var resizeImages = true
-    @State private var blockImages = false
-    @State private var skillCommands = true
-    @State private var installTelemetry = true
-    @State private var analytics = false
-    @State private var mermaid = "final"
-    @State private var codeIndent = "  "
-    @State private var anthropicWarning = true
-    @State private var saving = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -41,56 +148,56 @@ struct RuntimeBehaviorSettingsView: View {
                 TronSettingsGroup("Provider Transport", accent: .tronCyan) {
                     VStack(spacing: 0) {
                         choiceRow("network", "Transport", transportLabel, accent: .tronCyan) {
-                            Button("Automatic") { transport = "auto" }
-                            Button("Server-Sent Events") { transport = "sse" }
-                            Button("WebSocket") { transport = "websocket" }
-                            Button("Cached WebSocket") { transport = "websocket-cached" }
+                            Button("Automatic") { draft.transport = "auto" }
+                            Button("Server-Sent Events") { draft.transport = "sse" }
+                            Button("WebSocket") { draft.transport = "websocket" }
+                            Button("Cached WebSocket") { draft.transport = "websocket-cached" }
                         }
                         TronSettingsDivider(accent: .tronCyan)
-                        numberRow("timer", "HTTP idle timeout", "Milliseconds", value: $httpIdleTimeout, accent: .tronCyan)
+                        numberRow("timer", "HTTP idle timeout", "Milliseconds", value: $draft.httpIdleTimeout, accent: .tronCyan)
                         TronSettingsDivider(accent: .tronCyan)
-                        numberRow("bolt.horizontal", "WebSocket timeout", "Milliseconds", value: $websocketTimeout, accent: .tronCyan)
+                        numberRow("bolt.horizontal", "WebSocket timeout", "Milliseconds", value: $draft.websocketTimeout, accent: .tronCyan)
                     }
                 }
                 TronSettingsGroup("Message Queue", accent: .tronPurple) {
                     VStack(spacing: 0) {
-                        choiceRow("arrow.turn.up.right", "Steering delivery", queueLabel(steeringMode), accent: .tronPurple) {
-                            Button("Deliver all") { steeringMode = "all" }
-                            Button("One at a time") { steeringMode = "one-at-a-time" }
+                        choiceRow("arrow.turn.up.right", "Steering delivery", queueLabel(draft.steeringMode), accent: .tronPurple) {
+                            Button("Deliver all") { draft.steeringMode = "all" }
+                            Button("One at a time") { draft.steeringMode = "one-at-a-time" }
                         }
                         TronSettingsDivider(accent: .tronPurple)
-                        choiceRow("clock.arrow.circlepath", "Follow-up delivery", queueLabel(followUpMode), accent: .tronPurple) {
-                            Button("Deliver all") { followUpMode = "all" }
-                            Button("One at a time") { followUpMode = "one-at-a-time" }
+                        choiceRow("clock.arrow.circlepath", "Follow-up delivery", queueLabel(draft.followUpMode), accent: .tronPurple) {
+                            Button("Deliver all") { draft.followUpMode = "all" }
+                            Button("One at a time") { draft.followUpMode = "one-at-a-time" }
                         }
                     }
                 }
                 TronSettingsGroup("Compaction", accent: .tronTeal) {
                     VStack(spacing: 0) {
-                        TronToggleRow(icon: "arrow.triangle.2.circlepath", title: "Automatic compaction", accent: .tronTeal, isOn: $compactionEnabled)
+                        TronToggleRow(icon: "arrow.triangle.2.circlepath", title: "Automatic compaction", accent: .tronTeal, isOn: $draft.compactionEnabled)
                         TronSettingsDivider(accent: .tronTeal)
-                        numberRow("gauge.with.dots.needle.33percent", "Reserve tokens", nil, value: $compactionReserve, accent: .tronTeal)
+                        numberRow("gauge.with.dots.needle.33percent", "Reserve tokens", nil, value: $draft.compactionReserve, accent: .tronTeal)
                         TronSettingsDivider(accent: .tronTeal)
-                        numberRow("text.line.last.and.arrowtriangle.forward", "Keep recent tokens", nil, value: $compactionRecent, accent: .tronTeal)
+                        numberRow("text.line.last.and.arrowtriangle.forward", "Keep recent tokens", nil, value: $draft.compactionRecent, accent: .tronTeal)
                         TronSettingsDivider(accent: .tronTeal)
-                        numberRow("arrow.triangle.branch", "Branch summary reserve", nil, value: $branchReserve, accent: .tronTeal)
+                        numberRow("arrow.triangle.branch", "Branch summary reserve", nil, value: $draft.branchReserve, accent: .tronTeal)
                         TronSettingsDivider(accent: .tronTeal)
-                        TronToggleRow(icon: "text.bubble", title: "Skip branch-summary prompt", accent: .tronTeal, isOn: $branchSkipPrompt)
+                        TronToggleRow(icon: "text.bubble", title: "Skip branch-summary prompt", accent: .tronTeal, isOn: $draft.branchSkipPrompt)
                     }
                 }
                 TronSettingsGroup("Retry", accent: .tronAmber) {
                     VStack(spacing: 0) {
-                        TronToggleRow(icon: "arrow.clockwise", title: "Automatic retry", accent: .tronAmber, isOn: $retryEnabled)
+                        TronToggleRow(icon: "arrow.clockwise", title: "Automatic retry", accent: .tronAmber, isOn: $draft.retryEnabled)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("number", "Agent retry count", nil, value: $retryCount, accent: .tronAmber)
+                        numberRow("number", "Agent retry count", nil, value: $draft.retryCount, accent: .tronAmber)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("timer", "Base delay", "Milliseconds", value: $retryDelay, accent: .tronAmber)
+                        numberRow("timer", "Base delay", "Milliseconds", value: $draft.retryDelay, accent: .tronAmber)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("hourglass", "Provider timeout", "Milliseconds", value: $providerTimeout, accent: .tronAmber)
+                        numberRow("hourglass", "Provider timeout", "Milliseconds", value: $draft.providerTimeout, accent: .tronAmber)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("number", "Provider retry count", nil, value: $providerRetryCount, accent: .tronAmber)
+                        numberRow("number", "Provider retry count", nil, value: $draft.providerRetryCount, accent: .tronAmber)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("timer", "Maximum provider delay", "Milliseconds", value: $providerRetryDelay, accent: .tronAmber)
+                        numberRow("timer", "Maximum provider delay", "Milliseconds", value: $draft.providerRetryDelay, accent: .tronAmber)
                     }
                 }
                 TronSettingsGroup("Conversation") {
@@ -100,14 +207,14 @@ struct RuntimeBehaviorSettingsView: View {
                 }
                 TronSettingsGroup("Markdown", accent: .tronPurple) {
                     VStack(spacing: 0) {
-                        choiceRow("flowchart", "Mermaid diagrams", mermaid.capitalized, accent: .tronPurple) {
-                            Button("Off") { mermaid = "off" }
-                            Button("Completed responses") { mermaid = "final" }
-                            Button("While streaming") { mermaid = "streaming" }
+                        choiceRow("flowchart", "Mermaid diagrams", draft.mermaid.capitalized, accent: .tronPurple) {
+                            Button("Off") { draft.mermaid = "off" }
+                            Button("Completed responses") { draft.mermaid = "final" }
+                            Button("While streaming") { draft.mermaid = "streaming" }
                         }
                         TronSettingsDivider(accent: .tronPurple)
                         TronValueRow(icon: "chevron.left.forwardslash.chevron.right", title: "Code block indent", accent: .tronPurple) {
-                            TextField("Indent", text: $codeIndent)
+                            TextField("Indent", text: $draft.codeIndent)
                                 .tronInlineField(monospaced: true)
                                 .frame(width: 100)
                         }
@@ -115,11 +222,11 @@ struct RuntimeBehaviorSettingsView: View {
                 }
                 TronSettingsGroup("Privacy and Warnings", accent: .tronSlate) {
                     VStack(spacing: 0) {
-                        TronToggleRow(icon: "chart.bar", title: "Installation telemetry", accent: .tronSlate, isOn: $installTelemetry)
+                        TronToggleRow(icon: "chart.bar", title: "Installation telemetry", accent: .tronSlate, isOn: $draft.installTelemetry)
                         TronSettingsDivider(accent: .tronSlate)
-                        TronToggleRow(icon: "waveform.path.ecg", title: "Anonymous analytics", accent: .tronSlate, isOn: $analytics)
+                        TronToggleRow(icon: "waveform.path.ecg", title: "Anonymous analytics", accent: .tronSlate, isOn: $draft.analytics)
                         TronSettingsDivider(accent: .tronSlate)
-                        TronToggleRow(icon: "exclamationmark.triangle", title: "Anthropic extra-usage warning", accent: .tronSlate, isOn: $anthropicWarning)
+                        TronToggleRow(icon: "exclamationmark.triangle", title: "Anthropic extra-usage warning", accent: .tronSlate, isOn: $draft.anthropicWarning)
                     }
                 }
                 Button(saving ? "Saving…" : "Save Runtime Settings") { Task { await save() } }
@@ -135,14 +242,17 @@ struct RuntimeBehaviorSettingsView: View {
             if !allowsProjectScope { scope = .global }
             await load()
         }
+        .onChange(of: draft) { _, value in
+            if let target = settingsTarget { drafts.update(value, for: target) }
+        }
     }
 
     private var scopeGroup: some View {
         TronSettingsGroup("Scope") {
             VStack(spacing: 0) {
                 choiceRow("scope", "Settings Scope", scope == .project ? "Current Project" : "Global Defaults") {
-                    Button("Global Defaults") { scope = .global }
-                    if allowsProjectScope { Button("Current Project") { scope = .project } }
+                    Button("Global Defaults") { selectScope(.global) }
+                    if allowsProjectScope { Button("Current Project") { selectScope(.project) } }
                 }
                 Text(scope == .project ? "These overrides apply only to the trusted current workspace." : "These defaults apply to every workspace on this Mac.")
                     .font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).padding(14)
@@ -151,15 +261,15 @@ struct RuntimeBehaviorSettingsView: View {
     }
 
     @ViewBuilder private var toggleRows: some View {
-        TronToggleRow(icon: "brain", title: "Hide thinking blocks", isOn: $hideThinking)
+        TronToggleRow(icon: "brain", title: "Hide thinking blocks", isOn: $draft.hideThinking)
         TronSettingsDivider()
-        TronToggleRow(icon: "bell", title: "Show cache-miss notices", isOn: $cacheNotices)
+        TronToggleRow(icon: "bell", title: "Show cache-miss notices", isOn: $draft.cacheNotices)
         TronSettingsDivider()
-        TronToggleRow(icon: "photo", title: "Resize large images", isOn: $resizeImages)
+        TronToggleRow(icon: "photo", title: "Resize large images", isOn: $draft.resizeImages)
         TronSettingsDivider()
-        TronToggleRow(icon: "photo.slash", title: "Block images", isOn: $blockImages)
+        TronToggleRow(icon: "photo.slash", title: "Block images", isOn: $draft.blockImages)
         TronSettingsDivider()
-        TronToggleRow(icon: "command", title: "Enable skill commands", isOn: $skillCommands)
+        TronToggleRow(icon: "command", title: "Enable skill commands", isOn: $draft.skillCommands)
     }
 
     private func choiceRow<Content: View>(_ icon: String, _ title: String, _ value: String, accent: Color = .tronEmerald, @ViewBuilder choices: () -> Content) -> some View {
@@ -179,7 +289,7 @@ struct RuntimeBehaviorSettingsView: View {
     }
 
     private var transportLabel: String {
-        switch transport { case "sse": "Server-Sent Events"; case "websocket": "WebSocket"; case "websocket-cached": "Cached WebSocket"; default: "Automatic" }
+        switch draft.transport { case "sse": "Server-Sent Events"; case "websocket": "WebSocket"; case "websocket-cached": "Cached WebSocket"; default: "Automatic" }
     }
     private func queueLabel(_ value: String) -> String { value == "all" ? "Deliver all" : "One at a time" }
 
@@ -187,92 +297,94 @@ struct RuntimeBehaviorSettingsView: View {
         SettingsTarget(scope: scope, projectCWD: projectCWD)
     }
 
+    private func selectScope(_ newScope: SettingsScope) {
+        guard newScope != scope,
+              let newTarget = SettingsTarget(scope: newScope, projectCWD: projectCWD) else { return }
+        let nextDraft = drafts.draftForScopeSwitch(
+            current: draft,
+            from: settingsTarget,
+            to: newTarget,
+            default: RuntimeBehaviorDraft()
+        )
+        scope = newScope
+        draft = nextDraft
+    }
+
     private func load() async {
         guard let target = settingsTarget,
               await model.refreshSettings(target: target),
-              target == settingsTarget else { return }
-        loadFromProjection(target: target)
+              target == settingsTarget,
+              let loaded = projectionDraft(target: target),
+              drafts.install(loaded, for: target) else { return }
+        draft = loaded
     }
 
-    private func loadFromProjection(target: SettingsTarget) {
-        guard !saving,
-              let root = model.settings(for: target)?.objectValue,
-              let value = root["effective"]?.objectValue else { return }
-        transport = value.string("transport", fallback: "auto")
-        steeringMode = value.string("steeringMode", fallback: "one-at-a-time")
-        followUpMode = value.string("followUpMode", fallback: "one-at-a-time")
+    private func projectionDraft(target: SettingsTarget) -> RuntimeBehaviorDraft? {
+        guard let root = model.settings(for: target)?.objectValue,
+              let value = root["effective"]?.objectValue else { return nil }
+        var loaded = RuntimeBehaviorDraft()
+        loaded.transport = value.string("transport", fallback: loaded.transport)
+        loaded.steeringMode = value.string("steeringMode", fallback: loaded.steeringMode)
+        loaded.followUpMode = value.string("followUpMode", fallback: loaded.followUpMode)
         if let compaction = value["compaction"]?.objectValue {
-            compactionEnabled = compaction.bool("enabled", fallback: true)
-            compactionReserve = compaction.int("reserveTokens", fallback: compactionReserve)
-            compactionRecent = compaction.int("keepRecentTokens", fallback: compactionRecent)
+            loaded.compactionEnabled = compaction.bool("enabled", fallback: loaded.compactionEnabled)
+            loaded.compactionReserve = compaction.int("reserveTokens", fallback: loaded.compactionReserve)
+            loaded.compactionRecent = compaction.int("keepRecentTokens", fallback: loaded.compactionRecent)
         }
         if let branch = value["branchSummary"]?.objectValue {
-            branchReserve = branch.int("reserveTokens", fallback: branchReserve)
-            branchSkipPrompt = branch.bool("skipPrompt", fallback: false)
+            loaded.branchReserve = branch.int("reserveTokens", fallback: loaded.branchReserve)
+            loaded.branchSkipPrompt = branch.bool("skipPrompt", fallback: loaded.branchSkipPrompt)
         }
         if let retry = value["retry"]?.objectValue {
-            retryEnabled = retry.bool("enabled", fallback: true)
-            retryCount = retry.int("maxRetries", fallback: retryCount)
-            retryDelay = retry.int("baseDelayMs", fallback: retryDelay)
+            loaded.retryEnabled = retry.bool("enabled", fallback: loaded.retryEnabled)
+            loaded.retryCount = retry.int("maxRetries", fallback: loaded.retryCount)
+            loaded.retryDelay = retry.int("baseDelayMs", fallback: loaded.retryDelay)
             if let provider = retry["provider"]?.objectValue {
-                providerTimeout = provider.int("timeoutMs", fallback: providerTimeout)
-                providerRetryCount = provider.int("maxRetries", fallback: providerRetryCount)
-                providerRetryDelay = provider.int("maxRetryDelayMs", fallback: providerRetryDelay)
+                loaded.providerTimeout = provider.int("timeoutMs", fallback: loaded.providerTimeout)
+                loaded.providerRetryCount = provider.int("maxRetries", fallback: loaded.providerRetryCount)
+                loaded.providerRetryDelay = provider.int("maxRetryDelayMs", fallback: loaded.providerRetryDelay)
             }
         }
-        httpIdleTimeout = value.int("httpIdleTimeoutMs", fallback: httpIdleTimeout)
-        websocketTimeout = value.int("websocketConnectTimeoutMs", fallback: websocketTimeout)
-        hideThinking = value.bool("hideThinkingBlock", fallback: false)
-        cacheNotices = value.bool("showCacheMissNotices", fallback: false)
+        loaded.httpIdleTimeout = value.int("httpIdleTimeoutMs", fallback: loaded.httpIdleTimeout)
+        loaded.websocketTimeout = value.int("websocketConnectTimeoutMs", fallback: loaded.websocketTimeout)
+        loaded.hideThinking = value.bool("hideThinkingBlock", fallback: loaded.hideThinking)
+        loaded.cacheNotices = value.bool("showCacheMissNotices", fallback: loaded.cacheNotices)
         if let images = value["images"]?.objectValue {
-            resizeImages = images.bool("autoResize", fallback: true)
-            blockImages = images.bool("blockImages", fallback: false)
+            loaded.resizeImages = images.bool("autoResize", fallback: loaded.resizeImages)
+            loaded.blockImages = images.bool("blockImages", fallback: loaded.blockImages)
         }
-        skillCommands = value.bool("enableSkillCommands", fallback: true)
+        loaded.skillCommands = value.bool("enableSkillCommands", fallback: loaded.skillCommands)
         if let markdown = value["markdown"]?.objectValue {
-            mermaid = markdown.string("mermaid", fallback: "final")
-            codeIndent = markdown.string("codeBlockIndent", fallback: "  ")
+            loaded.mermaid = markdown.string("mermaid", fallback: loaded.mermaid)
+            loaded.codeIndent = markdown.string("codeBlockIndent", fallback: loaded.codeIndent)
         }
-        if let warnings = value["warnings"]?.objectValue { anthropicWarning = warnings.bool("anthropicExtraUsage", fallback: true) }
+        if let warnings = value["warnings"]?.objectValue {
+            loaded.anthropicWarning = warnings.bool("anthropicExtraUsage", fallback: loaded.anthropicWarning)
+        }
         if let telemetry = value["telemetry"]?.objectValue {
-            installTelemetry = telemetry.bool("install", fallback: true)
-            analytics = telemetry.bool("analytics", fallback: false)
+            loaded.installTelemetry = telemetry.bool("install", fallback: loaded.installTelemetry)
+            loaded.analytics = telemetry.bool("analytics", fallback: loaded.analytics)
         }
+        return loaded
     }
 
     private func save() async {
+        guard let target = settingsTarget else { return }
+        drafts.update(draft, for: target)
+        guard let savingRevision = drafts.revision(for: target) else { return }
+        let savingDraft = draft
         saving = true
         defer { saving = false }
-        let patch: JSONValue = .object([
-            "transport": .string(transport),
-            "steeringMode": .string(steeringMode),
-            "followUpMode": .string(followUpMode),
-            "compaction": .object([
-                "enabled": .bool(compactionEnabled), "reserveTokens": .number(Double(compactionReserve)),
-                "keepRecentTokens": .number(Double(compactionRecent)),
-            ]),
-            "branchSummary": .object(["reserveTokens": .number(Double(branchReserve)), "skipPrompt": .bool(branchSkipPrompt)]),
-            "retry": .object([
-                "enabled": .bool(retryEnabled), "maxRetries": .number(Double(retryCount)), "baseDelayMs": .number(Double(retryDelay)),
-                "provider": .object([
-                    "timeoutMs": .number(Double(providerTimeout)), "maxRetries": .number(Double(providerRetryCount)),
-                    "maxRetryDelayMs": .number(Double(providerRetryDelay)),
-                ]),
-            ]),
-            "httpIdleTimeoutMs": .number(Double(httpIdleTimeout)),
-            "websocketConnectTimeoutMs": .number(Double(websocketTimeout)),
-            "hideThinkingBlock": .bool(hideThinking),
-            "showCacheMissNotices": .bool(cacheNotices),
-            "images": .object(["autoResize": .bool(resizeImages), "blockImages": .bool(blockImages)]),
-            "enableSkillCommands": .bool(skillCommands),
-            "markdown": .object(["codeBlockIndent": .string(codeIndent), "mermaid": .string(mermaid)]),
-            "warnings": .object(["anthropicExtraUsage": .bool(anthropicWarning)]),
-            "enableInstallTelemetry": .bool(installTelemetry),
-            "enableAnalytics": .bool(analytics),
-        ])
+        let baseline = drafts.baseline(for: target) ?? RuntimeBehaviorDraft()
+        let patch = savingDraft.patch(comparedTo: baseline)
         do {
-            guard let target = settingsTarget else { return }
             try await model.updateSettings(patch, target: target)
+            guard target == settingsTarget else { return }
+            _ = drafts.markSaved(
+                savingDraft,
+                for: target,
+                expectedRevision: savingRevision
+            )
         }
         catch { model.lastError = error.localizedDescription }
     }
@@ -326,17 +438,11 @@ struct ResourceSettingsView: View {
     @Environment(AppModel.self) private var model
     let projectCWD: String?
     @State private var scope: SettingsScope = .global
-    @State private var extensions = ""
+    @State private var draft = ResourceSettingsDraft()
+    @State private var drafts = ScopedSettingsDraftStore<ResourceSettingsDraft>()
+    @State private var saving = false
 
     private var allowsProjectScope: Bool { projectCWD != nil }
-    @State private var skills = ""
-    @State private var prompts = ""
-    @State private var themes = ""
-    @State private var shellPath = ""
-    @State private var shellPrefix = ""
-    @State private var npmCommand = ""
-    @State private var proxy = ""
-    @State private var saving = false
     @State private var editor: Editor?
 
     var body: some View {
@@ -355,25 +461,25 @@ struct ResourceSettingsView: View {
 
                 TronSettingsGroup("Additional Locations", detail: "Optional paths outside automatic discovery.") {
                     VStack(spacing: 0) {
-                        editorRow(.extensions, icon: "shippingbox", value: extensions, accent: .tronPurple)
+                        editorRow(.extensions, icon: "shippingbox", value: draft.extensions, accent: .tronPurple)
                         TronSettingsDivider(accent: .tronPurple)
-                        editorRow(.skills, icon: "sparkles", value: skills, accent: .tronEmerald)
+                        editorRow(.skills, icon: "sparkles", value: draft.skills, accent: .tronEmerald)
                         TronSettingsDivider(accent: .tronPurple)
-                        editorRow(.prompts, icon: "text.quote", value: prompts, accent: .tronCyan)
+                        editorRow(.prompts, icon: "text.quote", value: draft.prompts, accent: .tronCyan)
                         TronSettingsDivider(accent: .tronPurple)
-                        editorRow(.themes, icon: "paintpalette", value: themes, accent: .tronTeal)
+                        editorRow(.themes, icon: "paintpalette", value: draft.themes, accent: .tronTeal)
                     }
                 }
 
                 TronSettingsGroup("Advanced Mac Overrides", detail: "Normally leave these on System Default.", accent: .tronSlate) {
                     VStack(spacing: 0) {
-                        editorRow(.shellPath, icon: "terminal", value: shellPath, accent: .tronTeal)
+                        editorRow(.shellPath, icon: "terminal", value: draft.shellPath, accent: .tronTeal)
                         TronSettingsDivider(accent: .tronSlate)
-                        editorRow(.shellPrefix, icon: "text.insert", value: shellPrefix, accent: .tronTeal)
+                        editorRow(.shellPrefix, icon: "text.insert", value: draft.shellPrefix, accent: .tronTeal)
                         TronSettingsDivider(accent: .tronSlate)
-                        editorRow(.npmCommand, icon: "shippingbox.and.arrow.backward", value: npmCommand, accent: .tronPurple)
+                        editorRow(.npmCommand, icon: "shippingbox.and.arrow.backward", value: draft.npmCommand, accent: .tronPurple)
                         TronSettingsDivider(accent: .tronSlate)
-                        editorRow(.proxy, icon: "network", value: proxy, accent: .tronAmber)
+                        editorRow(.proxy, icon: "network", value: draft.proxy, accent: .tronAmber)
                     }
                 }
 
@@ -391,6 +497,9 @@ struct ResourceSettingsView: View {
             if !allowsProjectScope { scope = .global }
             await load()
         }
+        .onChange(of: draft) { _, value in
+            if let target = settingsTarget { drafts.update(value, for: target) }
+        }
         .sheet(item: $editor) { value in editorSheet(value) }
     }
 
@@ -399,8 +508,8 @@ struct ResourceSettingsView: View {
             TronValueRow(icon: "scope", title: scope == .project ? "Current Project" : "Every Project", detail: scopeExplanation) {
                 if allowsProjectScope {
                     TronInlineMenu(scope == .project ? "Project" : "Global") {
-                        Button("Every Project") { scope = .global }
-                        Button("Current Project") { scope = .project }
+                        Button("Every Project") { selectScope(.global) }
+                        Button("Current Project") { selectScope(.project) }
                     }
                 }
             }
@@ -420,9 +529,11 @@ struct ResourceSettingsView: View {
     }
 
     private func summary(_ editor: Editor, text: String) -> String {
-        if editor == .proxy, text.isEmpty,
-           settingsTarget.flatMap({ model.settings(for: $0) })?.objectValue?["effective"]?.objectValue?["httpProxyConfigured"]?.boolValue == true {
-            return "Configured · value hidden"
+        if editor == .proxy {
+            if draft.proxyEdited {
+                return draft.proxy.isEmpty ? "System Default" : "New value entered · hidden"
+            }
+            if draft.proxyConfigured { return "Configured · value hidden" }
         }
         let values = editor.acceptsMultipleLines ? lines(text) : (text.isEmpty ? [] : [text])
         guard !values.isEmpty else {
@@ -480,25 +591,27 @@ struct ResourceSettingsView: View {
     private func binding(for editor: Editor) -> Binding<String> {
         Binding {
             switch editor {
-            case .extensions: extensions
-            case .skills: skills
-            case .prompts: prompts
-            case .themes: themes
-            case .shellPath: shellPath
-            case .shellPrefix: shellPrefix
-            case .npmCommand: npmCommand
-            case .proxy: proxy
+            case .extensions: draft.extensions
+            case .skills: draft.skills
+            case .prompts: draft.prompts
+            case .themes: draft.themes
+            case .shellPath: draft.shellPath
+            case .shellPrefix: draft.shellPrefix
+            case .npmCommand: draft.npmCommand
+            case .proxy: draft.proxy
             }
         } set: { value in
             switch editor {
-            case .extensions: extensions = value
-            case .skills: skills = value
-            case .prompts: prompts = value
-            case .themes: themes = value
-            case .shellPath: shellPath = value
-            case .shellPrefix: shellPrefix = value
-            case .npmCommand: npmCommand = value
-            case .proxy: proxy = value
+            case .extensions: draft.extensions = value
+            case .skills: draft.skills = value
+            case .prompts: draft.prompts = value
+            case .themes: draft.themes = value
+            case .shellPath: draft.shellPath = value
+            case .shellPrefix: draft.shellPrefix = value
+            case .npmCommand: draft.npmCommand = value
+            case .proxy:
+                draft.proxy = value
+                draft.proxyEdited = true
             }
         }
     }
@@ -507,45 +620,70 @@ struct ResourceSettingsView: View {
         SettingsTarget(scope: scope, projectCWD: projectCWD)
     }
 
+    private func selectScope(_ newScope: SettingsScope) {
+        guard newScope != scope,
+              let newTarget = SettingsTarget(scope: newScope, projectCWD: projectCWD) else { return }
+        let nextDraft = drafts.draftForScopeSwitch(
+            current: draft,
+            from: settingsTarget,
+            to: newTarget,
+            default: ResourceSettingsDraft()
+        )
+        scope = newScope
+        draft = nextDraft
+    }
+
     private func load() async {
         guard let target = settingsTarget,
               await model.refreshSettings(target: target),
-              target == settingsTarget else { return }
-        loadFromProjection(target: target)
+              target == settingsTarget,
+              editor == nil,
+              let loaded = projectionDraft(target: target),
+              drafts.install(loaded, for: target) else { return }
+        draft = loaded
     }
 
-    private func loadFromProjection(target: SettingsTarget) {
-        guard !saving, editor == nil,
-              let root = model.settings(for: target)?.objectValue,
-              let value = root["effective"]?.objectValue else { return }
-        shellPath = value["shellPath"]?.stringValue ?? ""
-        shellPrefix = value["shellCommandPrefix"]?.stringValue ?? ""
-        npmCommand = (value["npmCommand"]?.arrayValue ?? []).compactMap(\.stringValue).joined(separator: " ")
-        proxy = ""
+    private func projectionDraft(target: SettingsTarget) -> ResourceSettingsDraft? {
+        guard let root = model.settings(for: target)?.objectValue,
+              let value = root["effective"]?.objectValue else { return nil }
+        var loaded = ResourceSettingsDraft()
+        loaded.shellPath = value["shellPath"]?.stringValue ?? ""
+        loaded.shellPrefix = value["shellCommandPrefix"]?.stringValue ?? ""
+        loaded.npmCommand = (value["npmCommand"]?.arrayValue ?? [])
+            .compactMap(\.stringValue)
+            .joined(separator: " ")
+        loaded.proxyConfigured = value["httpProxyConfigured"]?.boolValue == true
         if let resources = value["resources"]?.objectValue {
-            extensions = resources.lines("extensions")
-            skills = resources.lines("skills")
-            prompts = resources.lines("prompts")
-            themes = resources.lines("themes")
+            loaded.extensions = resources.lines("extensions")
+            loaded.skills = resources.lines("skills")
+            loaded.prompts = resources.lines("prompts")
+            loaded.themes = resources.lines("themes")
         }
+        return loaded
     }
 
     private func save() async {
+        guard let target = settingsTarget else { return }
+        drafts.update(draft, for: target)
+        guard let savingRevision = drafts.revision(for: target) else { return }
+        let savingDraft = draft
         saving = true
         defer { saving = false }
-        var patch: [String: JSONValue] = [
-            "extensions": .array(lines(extensions).map(JSONValue.string)),
-            "skills": .array(lines(skills).map(JSONValue.string)),
-            "prompts": .array(lines(prompts).map(JSONValue.string)),
-            "themes": .array(lines(themes).map(JSONValue.string)),
-            "shellPath": shellPath.isEmpty ? .null : .string(shellPath),
-            "shellCommandPrefix": shellPrefix.isEmpty ? .null : .string(shellPrefix),
-            "npmCommand": npmCommand.isEmpty ? .null : .array(npmCommand.split(separator: " ").map { .string(String($0)) }),
-        ]
-        if !proxy.isEmpty { patch["httpProxy"] = .string(proxy) }
+        let baseline = drafts.baseline(for: target) ?? ResourceSettingsDraft()
+        let patch = savingDraft.patch(comparedTo: baseline)
         do {
-            guard let target = settingsTarget else { return }
-            try await model.updateSettings(.object(patch), target: target)
+            try await model.updateSettings(patch, target: target)
+            guard target == settingsTarget else { return }
+            let resultingDraft = projectionDraft(target: target)
+                ?? savingDraft.afterSuccessfulSave()
+            if drafts.markSaved(
+                submitted: savingDraft,
+                resulting: resultingDraft,
+                for: target,
+                expectedRevision: savingRevision
+            ) {
+                draft = resultingDraft
+            }
         }
         catch { model.lastError = error.localizedDescription }
     }

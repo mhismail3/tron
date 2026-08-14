@@ -80,7 +80,10 @@ by canonical call ID rather than arrival order.
 Session structure/context/resource invalidations refresh
 already-presented secondary surfaces. Provider, settings, trust, package, and
 custom-model mutations publish bounded global invalidations so another connected
-client refreshes its explicitly scoped canonical projection. Trust changes reload
+client refreshes its explicitly scoped canonical projection. Settings projections include
+scope-owned documents and effective values, but write-only proxy credentials are removed
+from both; clients receive only `httpProxyConfigured` and can set or explicitly clear the
+canonical value. Trust changes reload
 idle live runtimes before acknowledgement; project resources therefore cannot stay
 loaded from an obsolete decision. PTY output has an independent monotonic
 sequence and bounded attach replay for gap/reconnect convergence. Context, tree,

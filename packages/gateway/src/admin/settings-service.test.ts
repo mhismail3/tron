@@ -40,6 +40,37 @@ describe("SettingsService", () => {
     });
   });
 
+  it("never returns write-only proxy credentials in settings projections", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "tron-proxy-settings-"));
+    const cwd = join(agentDir, "project");
+    await mkdir(cwd);
+    const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    const service = new SettingsService(agentDir, models);
+
+    const updated = await service.update(
+      { httpProxy: "http://proxy.invalid" },
+      { cwd, scope: "global", projectTrusted: false },
+    ) as { effective: Record<string, unknown>; documents: { global: Record<string, unknown> } };
+    await service.update(
+      { httpProxy: "http://project-proxy.invalid" },
+      { cwd, scope: "project", projectTrusted: true },
+    );
+    const fetched = service.get(cwd, true) as {
+      effective: Record<string, unknown>;
+      documents: { global: Record<string, unknown>; project: Record<string, unknown> };
+    };
+
+    expect(updated.documents.global).not.toHaveProperty("httpProxy");
+    expect(updated.effective).not.toHaveProperty("httpProxy");
+    expect(updated.effective.httpProxyConfigured).toBe(true);
+    expect(fetched.documents.global).not.toHaveProperty("httpProxy");
+    expect(fetched.documents.project).not.toHaveProperty("httpProxy");
+    expect(fetched.effective).not.toHaveProperty("httpProxy");
+    expect(JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8"))).toMatchObject({
+      httpProxy: "http://proxy.invalid",
+    });
+  });
+
   it("keeps trusted project settings separate from global defaults", async () => {
     const agentDir = await mkdtemp(join(tmpdir(), "tron-project-settings-"));
     const cwd = join(agentDir, "project");

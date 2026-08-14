@@ -129,10 +129,13 @@ new-session readiness gate until the matching workspace is inspected again. Cust
 documents have one explicit typed global target and generation-owned publication, so a slower
 older read cannot replace a newer document. Guided and advanced editor changes share one draft
 owner; automatic invalidation loads cannot replace either form of unsaved input. Model/default
-settings keep separate global/project drafts with baselines and monotonic revisions. Scope changes
-preserve dirty input, reloads cannot overwrite it, and a save completion can mark only the exact
-draft revision it submitted. Global defaults always use the global model catalog; project defaults
-use the captured session catalog.
+settings keep separate global/project drafts with baselines and monotonic revisions. Runtime,
+resource-location, and model/default screens all use that owner. Scope changes preserve dirty input,
+reloads cannot overwrite it, and a save completion can mark only the exact draft revision it
+submitted. Mutations diff against the admitted baseline, so editing one project field does not
+materialize inherited effective values as project overrides. Write-only proxy drafts expose only
+redacted state, encode clearing explicitly, and are scrubbed after a confirmed save. Global defaults
+always use the global model catalog; project defaults use the captured session catalog.
 Chat uses one presentation timeline rather than separate canonical, streaming,
 and live-tool tails. Tool calls, progress, and results join by `toolCallId`; the
 Gateway supplies a monotonic per-run ordinal for parallel calls, and the grouped

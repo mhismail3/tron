@@ -531,12 +531,33 @@ private struct ProvidersSettingsView: View {
     }
 }
 
-private struct AgentDefaultsDraft: Equatable {
+struct AgentDefaultsDraft: Equatable {
     var selectedModel: ModelRef?
     var thinking = "medium"
     var compaction = true
     var retry = true
     var trust = "ask"
+
+    func patch(comparedTo baseline: Self) -> JSONValue {
+        var patch: [String: JSONValue] = [:]
+        if thinking != baseline.thinking { patch["defaultThinkingLevel"] = .string(thinking) }
+        if compaction != baseline.compaction {
+            patch["compaction"] = .object(["enabled": .bool(compaction)])
+        }
+        if retry != baseline.retry { patch["retry"] = .object(["enabled": .bool(retry)]) }
+        if trust != baseline.trust { patch["defaultProjectTrust"] = .string(trust) }
+        if selectedModel != baseline.selectedModel {
+            if let selectedModel {
+                patch["defaultModel"] = .object([
+                    "provider": .string(selectedModel.provider),
+                    "id": .string(selectedModel.id),
+                ])
+            } else {
+                patch["defaultModel"] = .null
+            }
+        }
+        return .object(patch)
+    }
 }
 
 private struct AgentDefaultsSettingsView: View {
@@ -646,14 +667,12 @@ private struct AgentDefaultsSettingsView: View {
     private func selectScope(_ newScope: SettingsScope) {
         guard newScope != scope,
               let newTarget = SettingsTarget(scope: newScope, projectCWD: projectCWD) else { return }
-        if let target = settingsTarget { drafts.update(draft, for: target) }
-        let nextDraft: AgentDefaultsDraft
-        if let saved = drafts.draft(for: newTarget) {
-            nextDraft = saved
-        } else {
-            nextDraft = AgentDefaultsDraft()
-            _ = drafts.install(nextDraft, for: newTarget)
-        }
+        let nextDraft = drafts.draftForScopeSwitch(
+            current: draft,
+            from: settingsTarget,
+            to: newTarget,
+            default: AgentDefaultsDraft()
+        )
         scope = newScope
         draft = nextDraft
     }
@@ -700,20 +719,10 @@ private struct AgentDefaultsSettingsView: View {
         drafts.update(draft, for: target)
         guard let savingRevision = drafts.revision(for: target) else { return }
         let savingDraft = draft
-        var patch: [String: JSONValue] = [
-            "defaultThinkingLevel": .string(savingDraft.thinking),
-            "compaction": .object(["enabled": .bool(savingDraft.compaction)]),
-            "retry": .object(["enabled": .bool(savingDraft.retry)]),
-            "defaultProjectTrust": .string(savingDraft.trust),
-        ]
-        if let selectedModel = savingDraft.selectedModel {
-            patch["defaultModel"] = .object([
-                "provider": .string(selectedModel.provider),
-                "id": .string(selectedModel.id),
-            ])
-        }
+        let baseline = drafts.baseline(for: target) ?? AgentDefaultsDraft()
+        let patch = savingDraft.patch(comparedTo: baseline)
         do {
-            try await model.updateSettings(.object(patch), target: target)
+            try await model.updateSettings(patch, target: target)
             guard target == settingsTarget else { return }
             _ = drafts.markSaved(
                 savingDraft,
