@@ -123,8 +123,8 @@ references before declaring parity. A signed install, launch, and screenshot are
 required together because default toolbar Liquid Glass can differ materially
 between the simulator and physical hardware. Chat checkpoints must also verify
 trailing alignment for user turns, historical transcript/tool insertion motion,
-the Settings gear in the chat toolbar, the context ring immediately before the
-microphone, and emerald toolbar/sheet actions. Terminal checkpoints must exercise
+the Settings gear in the chat toolbar, the context ring at the trailing edge of
+an empty idle composer, and emerald toolbar/sheet actions. Terminal checkpoints must exercise
 the native keyboard plus the floating shortcut and command-key surfaces rather
 than validating only PTY output.
 
@@ -178,6 +178,7 @@ make new mutation calls carry a UUID `commandId`.
 
 ## Privacy
 
-The app declares local-network, microphone, and speech-recognition usage.
-Speech audio is transcribed through Apple Speech APIs. Provider credentials must
-never be placed in fixtures, defaults, logs, or UserDefaults.
+The app declares local-network and camera usage. Voice input remains available
+through system-keyboard dictation; the app does not currently own microphone or
+speech-recognition capture. Provider credentials must never be placed in fixtures,
+defaults, logs, or UserDefaults.

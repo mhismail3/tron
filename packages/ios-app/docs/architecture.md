@@ -137,8 +137,9 @@ streaming projection, context usage, pending extension interactions, and runtime
 diagnostics. Model identity is always `(provider,id)`; model IDs alone are not
 assumed globally unique.
 
-The composer supports text, native speech transcription, images, and bounded
-file uploads. Drafting remains available while authoritative opening finishes and throughout
+The composer supports text, system-keyboard dictation, images, and bounded file
+uploads. It does not expose an app-owned microphone control until a proper voice mode exists.
+Drafting remains available while authoritative opening finishes and throughout
 an active turn; only submission waits for readiness. A non-empty active draft replaces the
 trailing Stop action with Send and is admitted as a steering message, while an empty active
 composer retains Stop. The keyboard remains focused after steering so multiple messages can
@@ -159,9 +160,13 @@ same square previews as pending photos and files use named chips. One gateway ru
 owner of a canonical session; terminal and mobile chat clients must attach to
 that owner rather than opening the same JSONL in separate Pi processes. Its
 historical context ring projects the
-canonical context percentage and opens Manage Session immediately beside the
-microphone; model and thinking configuration live in that sheet rather than as
-bootstrap transcript rows. Disconnecting never implies aborting an accepted run.
+canonical context percentage and opens Manage Session at the composer's trailing
+edge whenever no Send or Stop action is needed. When a draft adds Send, the action
+scales and fades in at its final in-bar position while the context ring springs left;
+Reduce Motion uses a short fade.
+Model and thinking configuration live in that sheet rather than as bootstrap
+transcript rows. Disconnecting never
+implies aborting an accepted run.
 
 ## Security
 

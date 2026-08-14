@@ -226,9 +226,7 @@ struct SessionContextProgressButton: View {
 
 enum ComposerTrailingMode: Equatable {
     case stopAgent
-    case stopRecording
     case send
-    case record
 }
 
 enum ChatComposerPolicy {
@@ -240,13 +238,11 @@ enum ChatComposerPolicy {
 
     static func trailingMode(
         phase: SessionPhase?,
-        isRecording: Bool,
         hasContent: Bool
-    ) -> ComposerTrailingMode {
-        if isRecording { return .stopRecording }
+    ) -> ComposerTrailingMode? {
         if hasContent { return .send }
         if phase?.isActive == true { return .stopAgent }
-        return .record
+        return nil
     }
 
     static func submissionBehavior(phase: SessionPhase?) -> String? {
@@ -269,13 +265,12 @@ struct ComposerTrailingButton: View {
     let isDisabled: Bool
     let onSend: () -> Void
     let onAbort: () -> Void
-    let onMicTap: () -> Void
 
     var body: some View {
         Button(action: performAction) {
             Group {
                 switch mode {
-                case .stopAgent, .stopRecording:
+                case .stopAgent:
                     Image(systemName: "stop.fill")
                         .font(TronTypography.buttonSM)
                         .foregroundStyle(Color.tronError)
@@ -283,10 +278,6 @@ struct ComposerTrailingButton: View {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(TronTypography.button)
                         .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
-                case .record:
-                    Image(systemName: "mic.fill")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(Color.tronEmerald)
                 }
             }
             .frame(width: 40, height: 40)
@@ -303,16 +294,13 @@ struct ComposerTrailingButton: View {
     private var accessibilityLabel: String {
         switch mode {
         case .stopAgent: "Stop Tron"
-        case .stopRecording: "Stop recording"
         case .send: "Send message"
-        case .record: "Record voice input"
         }
     }
 
     private func performAction() {
         switch mode {
         case .stopAgent: onAbort()
-        case .stopRecording, .record: onMicTap()
         case .send: onSend()
         }
     }

@@ -42,7 +42,6 @@ struct MultilineComposerTextViewTests {
             #expect(ChatComposerPolicy.isTextEditable(isTranscriptReady: true))
             #expect(ChatComposerPolicy.trailingMode(
                 phase: phase,
-                isRecording: false,
                 hasContent: true
             ) == .send)
             let behavior = ChatComposerPolicy.submissionBehavior(phase: phase)
@@ -71,16 +70,22 @@ struct MultilineComposerTextViewTests {
     func emptyActiveComposerStopsAgent() {
         #expect(ChatComposerPolicy.trailingMode(
             phase: .running,
-            isRecording: false,
             hasContent: false
         ) == .stopAgent)
+    }
+
+    @Test("an empty idle composer has no trailing action")
+    func emptyIdleComposerHasNoTrailingAction() {
+        #expect(ChatComposerPolicy.trailingMode(
+            phase: .idle,
+            hasContent: false
+        ) == nil)
     }
 
     @Test("idle messages remain ordinary prompts")
     func idleComposerPolicy() {
         #expect(ChatComposerPolicy.trailingMode(
             phase: .idle,
-            isRecording: false,
             hasContent: true
         ) == .send)
         let behavior = ChatComposerPolicy.submissionBehavior(phase: .idle)

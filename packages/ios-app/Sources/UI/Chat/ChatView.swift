@@ -28,7 +28,6 @@ struct ChatView: View {
     @State private var catchUpTask: Task<Void, Never>?
     @State private var modelPresentationGeneration: Int?
     @State private var pendingEditorRequest: AppModel.EditorRequest?
-    @State private var speech = SpeechTranscriber()
     @State private var composerTextHeight: CGFloat = 20
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
     @State private var scrollCoordinator = ChatScrollCoordinator()
@@ -97,8 +96,6 @@ struct ChatView: View {
                 cancelAttachmentPresentation(includingActive: false)
             }
         }
-        .onChange(of: speech.transcript) { _, value in if !value.isEmpty { text = value } }
-        .onChange(of: speech.error) { _, value in if let value { model.lastError = value } }
         .onChange(of: model.editorRequest) { _, request in
             guard let request, request.sessionId == model.selectedSessionID else { return }
             if text.isEmpty {
@@ -125,7 +122,6 @@ struct ChatView: View {
         }
         .task(id: sessionID) { await beginOpeningPresentation() }
         .onDisappear {
-            speech.stop()
             openingTask?.cancel()
             openingTask = nil
             pagingTask?.cancel()
@@ -593,7 +589,7 @@ struct ChatView: View {
 
             ZStack(alignment: .leading) {
                 if text.isEmpty && !composerFocused {
-                    Text(speech.isRecording ? "Listening…" : "Type here")
+                    Text("Type here")
                         .font(TronTypography.input)
                         .foregroundStyle(Color.tronEmerald)
                         .padding(.leading, 2)
@@ -616,9 +612,8 @@ struct ChatView: View {
                 .padding(.vertical, 10)
             }
             .frame(minHeight: 40)
-            .animation(.easeOut(duration: 0.18), value: speech.isRecording)
 
-            if let snapshot = selectedAuthoritativeSnapshot, !speech.isRecording {
+            if let snapshot = selectedAuthoritativeSnapshot {
                 SessionContextProgressButton(
                     contextPercentage: contextPercentage(snapshot),
                     modelName: snapshot.model.map { "\($0.provider) / \($0.id)" },
@@ -626,17 +621,27 @@ struct ChatView: View {
                 ) { showContext = true }
             }
 
-            ComposerTrailingButton(
-                mode: composerTrailingMode,
-                isDisabled: sending || !isTranscriptReady,
-                onSend: { Task { await send() } },
-                onAbort: { Task { await model.abort() } },
-                onMicTap: {
-                    composerFocused = false
-                    Task { await speech.toggle() }
-                }
-            )
+            if let composerTrailingMode {
+                ComposerTrailingButton(
+                    mode: composerTrailingMode,
+                    isDisabled: sending || !isTranscriptReady,
+                    onSend: { Task { await send() } },
+                    onAbort: { Task { await model.abort() } }
+                )
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .scale(scale: 0.78, anchor: .center)
+                            .combined(with: .opacity)
+                )
+            }
         }
+        .animation(
+            reduceMotion
+                ? .easeOut(duration: 0.12)
+                : .spring(response: 0.32, dampingFraction: 0.82),
+            value: composerTrailingMode
+        )
         .frame(maxWidth: .infinity, minHeight: 40)
         .padding(.horizontal, 4)
         .glassEffect(
@@ -712,10 +717,9 @@ struct ChatView: View {
         .accessibilityHint("Returns to the latest response and follows new messages")
     }
 
-    private var composerTrailingMode: ComposerTrailingMode {
+    private var composerTrailingMode: ComposerTrailingMode? {
         ChatComposerPolicy.trailingMode(
             phase: selectedAuthoritativeSnapshot?.phase,
-            isRecording: speech.isRecording,
             hasContent: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !model.pendingAttachments.isEmpty
         )

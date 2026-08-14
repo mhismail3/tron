@@ -152,7 +152,7 @@ The following checkpoints pass on the current working tree:
 Automation now covers all deterministic contracts available in repository
 history. A maintainer must perform eyes-on review on a physical iPhone and iPad
 because material rendering, haptics, keyboard feel, VoiceOver cadence, camera,
-speech permissions, and signed-device networking cannot be judged from
+system-keyboard dictation, and signed-device networking cannot be judged from
 simulator assertions.
 
 Review at minimum:
