@@ -15,11 +15,29 @@ enum WizardLayout {
     static let bottomPadding: CGFloat = 24
     static let headerHeight: CGFloat = 28
     static let headerBodySpacing: CGFloat = 18
+    static let footerHeight: CGFloat = 88
     static let bottomBarHeight: CGFloat = 54
     static let buttonCornerRadius: CGFloat = 11
-    static let progressBarWidth: CGFloat = 82
+    static let headerItemSpacing: CGFloat = 10
+    static let headerSpacerMinimum: CGFloat = 8
+    static let headerIconWidth: CGFloat = 28
+    static let progressPillWidth: CGFloat = 126
+    static let progressBarWidth: CGFloat = 72
     static let progressBarHeight: CGFloat = 8
     static let progressBarMinFillWidth: CGFloat = progressBarHeight
+
+    static let contentWidth = width - (horizontalPadding * 2)
+    static let bodyHeight = height
+        - topPadding
+        - headerHeight
+        - headerBodySpacing
+        - footerHeight
+        - bottomPadding
+    static let headerTitleAvailableWidth = contentWidth
+        - headerIconWidth
+        - progressPillWidth
+        - (headerItemSpacing * 3)
+        - headerSpacerMinimum
 
     static let transitionAnimation = Animation.spring(response: 0.42, dampingFraction: 0.86)
     static let progressAnimation = transitionAnimation

@@ -69,43 +69,69 @@ struct WizardShell<Content: View>: View {
     @AccessibilityFocusState private var headerFocused: Bool
 
     var body: some View {
-        ZStack(alignment: .top) {
-            content(model.step)
-                .padding(.top, WizardLayout.topPadding + WizardLayout.headerHeight + WizardLayout.headerBodySpacing)
-                .padding(.horizontal, WizardLayout.horizontalPadding)
-                .padding(.bottom, WizardLayout.bottomPadding + WizardLayout.bottomBarHeight + 22)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .id(model.step)
-                .transition(stepTransition)
-
-            bottomBar
-                .padding(.horizontal, WizardLayout.horizontalPadding)
-                .padding(.bottom, WizardLayout.bottomPadding)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-
+        VStack(spacing: 0) {
             headerBar
-                .padding(.top, WizardLayout.topPadding)
-                .padding(.horizontal, WizardLayout.horizontalPadding)
+            Spacer().frame(height: WizardLayout.headerBodySpacing)
+            stepBody
+            bottomBar
         }
-        .frame(width: WizardLayout.width, height: WizardLayout.height)
+        .padding(.top, WizardLayout.topPadding)
+        .padding(.horizontal, WizardLayout.horizontalPadding)
+        .padding(.bottom, WizardLayout.bottomPadding)
+        .frame(
+            width: WizardLayout.width,
+            height: WizardLayout.height,
+            alignment: .topLeading
+        )
         .animation(reduceMotion ? nil : WizardLayout.transitionAnimation, value: model.step)
-        .configureHostingWindow { $0.isMovableByWindowBackground = true }
+        .configureHostingWindow { window in
+            let size = NSSize(width: WizardLayout.width, height: WizardLayout.height)
+            window.isMovableByWindowBackground = true
+            window.contentMinSize = size
+            window.contentMaxSize = size
+            if window.contentLayoutRect.size != size { window.setContentSize(size) }
+        }
         .onAppear { headerFocused = true }
         .onChange(of: model.step) { _, _ in headerFocused = true }
     }
 
+    private var stepBody: some View {
+        ZStack(alignment: .topLeading) {
+            content(model.step)
+                .frame(
+                    width: WizardLayout.contentWidth,
+                    height: WizardLayout.bodyHeight,
+                    alignment: .topLeading
+                )
+                .id(model.step)
+                .transition(stepTransition)
+        }
+        .frame(
+            width: WizardLayout.contentWidth,
+            height: WizardLayout.bodyHeight,
+            alignment: .topLeading
+        )
+    }
+
     private var headerBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: WizardLayout.headerItemSpacing) {
             stepIcon
             Text(model.step.displayTitle)
                 .font(TronTypography.wizardTitle)
                 .foregroundStyle(Color.tronEmerald)
+                .lineLimit(1)
+                .minimumScaleFactor(0.9)
+                .layoutPriority(1)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityFocused($headerFocused)
-            Spacer(minLength: 12)
+            Spacer(minLength: WizardLayout.headerSpacerMinimum)
             progressPill
         }
-        .frame(height: WizardLayout.headerHeight)
+        .frame(
+            width: WizardLayout.contentWidth,
+            height: WizardLayout.headerHeight,
+            alignment: .leading
+        )
     }
 
     @ViewBuilder
@@ -116,14 +142,14 @@ struct WizardShell<Content: View>: View {
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
-                .frame(width: 28, height: WizardLayout.headerHeight)
+                .frame(width: WizardLayout.headerIconWidth, height: WizardLayout.headerHeight)
                 .foregroundStyle(Color.tronEmerald)
                 .accessibilityHidden(true)
         case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(Color.tronEmerald)
-                .frame(width: 28, height: WizardLayout.headerHeight)
+                .frame(width: WizardLayout.headerIconWidth, height: WizardLayout.headerHeight)
                 .accessibilityHidden(true)
         }
     }
@@ -144,6 +170,11 @@ struct WizardShell<Content: View>: View {
             }
             .frame(height: WizardLayout.bottomBarHeight)
         }
+        .frame(
+            width: WizardLayout.contentWidth,
+            height: WizardLayout.footerHeight,
+            alignment: .bottom
+        )
     }
 
     @ViewBuilder
@@ -215,6 +246,7 @@ struct WizardShell<Content: View>: View {
         .foregroundStyle(Color.tronEmerald)
         .padding(.vertical, 4)
         .padding(.horizontal, 8)
+        .frame(width: WizardLayout.progressPillWidth)
         .background(Capsule().fill(Color.tronEmerald.opacity(0.06)))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Setup step \(current) of \(steps.count)")
@@ -222,9 +254,8 @@ struct WizardShell<Content: View>: View {
 
     private var stepTransition: AnyTransition {
         guard !reduceMotion else { return .opacity }
-        let insertion: Edge = model.slideDirection == .forward ? .trailing : .leading
-        let removal: Edge = model.slideDirection == .forward ? .leading : .trailing
-        return .asymmetric(insertion: .move(edge: insertion), removal: .move(edge: removal))
+        let source: Edge = model.slideDirection == .forward ? .trailing : .leading
+        return .push(from: source)
             .combined(with: .opacity)
     }
 }

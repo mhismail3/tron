@@ -70,7 +70,9 @@ is unavailable, the coordinator and wizard expose a retryable Tailscale state.
 
 The Gateway writes owner-only local authorization and enrollment files below
 `<state-root>/gateway/`. Pairing first authenticates a health request, then reads
-an unexpired one-time enrollment code and emits:
+an unexpired one-time enrollment code. The Mac reader accepts the Gateway's
+RFC 3339 expiration timestamps with millisecond precision and rejects malformed,
+expired, or non-owner-only files before emitting:
 
 ```text
 tron://pair?host=<tailscale>&port=<port>&code=<one-time>&label=<mac>

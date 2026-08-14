@@ -4,15 +4,31 @@ import Testing
 
 @Suite("Gateway enrollment code reader")
 struct GatewayEnrollmentCodeReaderTests {
-    @Test("admits an owner-only unexpired one-time code")
-    func readsCurrentCode() throws {
+    @Test("admits the Gateway's owner-only millisecond timestamp")
+    func readsCurrentGatewayCode() throws {
         let root = try TestTempDir.make()
         defer { TestTempDir.cleanup(root) }
         let file = root.appendingPathComponent("enrollment.json")
-        try #"{"version":1,"code":"ABCD-EFGH","expiresAt":"2030-01-01T00:00:00Z","machineId":"machine"}"#.write(to: file, atomically: true, encoding: .utf8)
+        try #"{"version":1,"code":"ABCD-EFGH","expiresAt":"2030-01-01T00:00:00.000Z","machineId":"machine"}"#
+            .write(to: file, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
 
         #expect(GatewayEnrollmentCodeReader.read(at: file, now: Date(timeIntervalSince1970: 1_700_000_000)) == "ABCD-EFGH")
+    }
+
+    @Test("also admits an owner-only timestamp without fractional seconds")
+    func readsCompatibleTimestamp() throws {
+        let root = try TestTempDir.make()
+        defer { TestTempDir.cleanup(root) }
+        let file = root.appendingPathComponent("enrollment.json")
+        try #"{"version":1,"code":"ABCD-EFGH","expiresAt":"2030-01-01T00:00:00Z","machineId":"machine"}"#
+            .write(to: file, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+
+        #expect(GatewayEnrollmentCodeReader.read(
+            at: file,
+            now: Date(timeIntervalSince1970: 1_700_000_000)
+        ) == "ABCD-EFGH")
     }
 
     @Test("rejects expired or group-readable enrollment files")
@@ -20,7 +36,8 @@ struct GatewayEnrollmentCodeReaderTests {
         let root = try TestTempDir.make()
         defer { TestTempDir.cleanup(root) }
         let file = root.appendingPathComponent("enrollment.json")
-        try #"{"version":1,"code":"ABCD-EFGH","expiresAt":"2020-01-01T00:00:00Z","machineId":"machine"}"#.write(to: file, atomically: true, encoding: .utf8)
+        try #"{"version":1,"code":"ABCD-EFGH","expiresAt":"2020-01-01T00:00:00.000Z","machineId":"machine"}"#
+            .write(to: file, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path)
 
         #expect(GatewayEnrollmentCodeReader.read(at: file) == nil)

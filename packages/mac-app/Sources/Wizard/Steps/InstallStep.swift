@@ -38,7 +38,6 @@ struct InstallStep: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.top, 72)
     }
 
     @ViewBuilder

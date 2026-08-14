@@ -20,6 +20,13 @@ cancelled when superseded or when the view disappears. Each probe carries a
 generation ticket, so an older completion cannot advance the wizard or replace
 newer state.
 
+Every step uses one fixed 480 by 440 point window and the same header, body, and
+footer regions. Step content cannot resize or recenter the shell; titles retain
+priority over the fixed progress pill, forward pages push in from the right,
+Back pushes in from the left, and card shadows can render into the window's
+horizontal gutters without being clipped. Navigation controls remain pinned to
+the same bottom inset.
+
 ## Interrupted setup
 
 On launch, the model observes Tailscale, service registration, authenticated

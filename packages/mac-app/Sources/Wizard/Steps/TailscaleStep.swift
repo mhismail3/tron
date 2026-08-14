@@ -49,7 +49,6 @@ struct TailscaleStep: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.top, 86)
     }
 
     private var iconName: String {
