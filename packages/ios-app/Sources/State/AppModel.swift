@@ -236,10 +236,6 @@ final class AppModel {
         SessionSummary.dashboardSessions(sessions).filter { !hiddenSessionIDs.contains($0.id) }
     }
 
-    func originatingSubagents(for sessionID: String) -> [SessionSummary] {
-        SessionSummary.originatingSubagents(in: sessions, from: sessionID)
-    }
-
     func start() async {
         guard connectionState != .connecting, connectionState != .connected, connectionState != .reconnecting else { return }
         guard let profile = profiles.selected, let token = profiles.token(for: profile) else {

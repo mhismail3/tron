@@ -61,19 +61,4 @@ struct SessionSummaryPresentationTests {
         let child = session("child", kind: .subagent, parent: "parent")
         #expect(SessionSummary.dashboardSessions([parent, fork, child]).map(\.id) == ["parent", "fork"])
     }
-
-    @Test("originating subagents include recursive descendants newest first and stop cycles")
-    func recursiveSubagents() {
-        let sessions = [
-            session("parent"),
-            session("direct", kind: .subagent, parent: "parent", updatedAt: "2026-01-01T00:00:02Z"),
-            session("nested", kind: .subagent, parent: "direct", updatedAt: "2026-01-01T00:00:03Z"),
-            session("older", kind: .subagent, parent: "parent", updatedAt: "2026-01-01T00:00:01Z"),
-            session("cycle-a", kind: .subagent, parent: "cycle-b", updatedAt: "2026-01-01T00:00:05Z"),
-            session("cycle-b", kind: .subagent, parent: "cycle-a", updatedAt: "2026-01-01T00:00:04Z"),
-            session("unrelated", kind: .subagent, parent: "other", updatedAt: "2026-01-01T00:00:06Z"),
-        ]
-        #expect(SessionSummary.originatingSubagents(in: sessions, from: "parent").map(\.id) == ["nested", "direct", "older"])
-        #expect(SessionSummary.originatingSubagents(in: sessions, from: "cycle-a").map(\.id) == ["cycle-b"])
-    }
 }

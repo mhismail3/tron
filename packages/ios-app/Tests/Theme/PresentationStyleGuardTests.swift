@@ -12,7 +12,10 @@ struct PresentationStyleGuardTests {
     }
 
     private var uiSources: [(URL, String)] {
-        let root = packageRoot.appending(path: "Sources/UI")
+        swiftSources(at: packageRoot.appending(path: "Sources/UI"))
+    }
+
+    private func swiftSources(at root: URL) -> [(URL, String)] {
         let enumerator = FileManager.default.enumerator(
             at: root,
             includingPropertiesForKeys: nil,
@@ -52,7 +55,7 @@ struct PresentationStyleGuardTests {
     func noStockSettingsCollections() {
         let composedOwners = [
             "AgentExtensionSettings.swift", "RuntimeSettingsViews.swift", "SettingsView.swift", "ProjectResourcesView.swift",
-            "ExtensionInteractionSheet.swift", "SessionContextSheet.swift", "SessionTreeSheet.swift", "SubagentSessionsSheet.swift",
+            "ExtensionInteractionSheet.swift", "SessionContextSheet.swift", "SessionTreeSheet.swift",
         ]
         for (url, source) in uiSources where composedOwners.contains(url.lastPathComponent) {
             #expect(source.matches(#"\b(Form|List)(\([^\n]*\))?\s*\{"#) == 0,
@@ -278,13 +281,6 @@ struct PresentationStyleGuardTests {
         #expect(context.contains("ProjectResourcesView()"))
         #expect(context.contains("snapshot.stats.latestCacheHitRate"))
         #expect(context.contains("let sessionID: String"))
-        #expect(context.contains("SubagentSessionsSheet(sessionID: subagentSessionID)"))
-        let subagents = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SubagentSessionsSheet.swift"),
-            encoding: .utf8
-        )
-        #expect(subagents.contains("let sessionID: String"))
-        #expect(!subagents.contains("model.selectedSessionID"))
         for title in ["Extensions", "Prompts", "Skills", "Context Files", "Tools"] {
             #expect(resources.contains("\(title)"))
         }
@@ -299,6 +295,43 @@ struct PresentationStyleGuardTests {
         #expect(runtimeSettings.contains("Advanced Mac Overrides"))
         #expect(runtimeSettings.contains("Automatic discovery only"))
         #expect(!runtimeSettings.contains("case .sessionDir"))
+    }
+
+    @Test("removed provisional chat surfaces have no production source call sites")
+    func removedProvisionalChatSurfaces() throws {
+        let sourcesRoot = packageRoot.appending(path: "Sources")
+        let enumerator = FileManager.default.enumerator(
+            at: sourcesRoot,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        let productionSources = try (enumerator?.allObjects as? [URL] ?? [])
+            .filter { $0.pathExtension == "swift" }
+            .sorted { $0.path < $1.path }
+            .map { url in (url, try String(contentsOf: url, encoding: .utf8)) }
+
+        let forbiddenSymbols = [
+            "ComposerActivityWave",
+            "TaperedActivityWave",
+            "SubagentSessionsSheet",
+            "showSubagents",
+            "originatingSubagents",
+        ]
+        for symbol in forbiddenSymbols {
+            let occurrenceCount = productionSources.reduce(0) { count, source in
+                count + source.1.occurrences(of: symbol)
+            }
+            #expect(occurrenceCount == 0, "\(symbol) remains in production Sources")
+        }
+
+        let runtimeWorkingRowCall = "stableTranscriptRow(id: \"runtime-working\")"
+        let runtimeWorkingRowCallCount = productionSources.reduce(0) { count, source in
+            count + source.1.occurrences(of: runtimeWorkingRowCall)
+        }
+        #expect(
+            runtimeWorkingRowCallCount == 1,
+            "expected one mounted runtime working row, found \(runtimeWorkingRowCallCount)"
+        )
     }
 
     @Test("composer owns capped UIKit scrolling and attachment photos keep stable previews")
@@ -627,5 +660,9 @@ private extension String {
             in: self,
             range: NSRange(location: 0, length: utf16.count)
         ) ?? 0
+    }
+
+    func occurrences(of string: String) -> Int {
+        components(separatedBy: string).count - 1
     }
 }

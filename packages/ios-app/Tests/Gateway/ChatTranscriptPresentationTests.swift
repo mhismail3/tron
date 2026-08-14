@@ -4,6 +4,106 @@ import Testing
 
 @Suite("Chat transcript presentation")
 struct ChatTranscriptPresentationTests {
+    @Test("runtime working row follows phase, visibility, message, and retry policy")
+    func runtimeWorkingRowPolicy() {
+        struct PolicyCase {
+            let name: String
+            let phase: SessionPhase
+            let visible: Bool
+            let message: String?
+            let retry: RetryState?
+            let expectedMessage: String?
+            let expectedRetryMessage: String?
+        }
+
+        let retryWithMaximum = RetryState(
+            source: .agent,
+            attempt: 2,
+            maxAttempts: 4,
+            delayMs: 500,
+            errorMessage: "transient"
+        )
+        let retryWithoutMaximum = RetryState(
+            source: .compaction,
+            attempt: 3,
+            maxAttempts: nil,
+            delayMs: nil,
+            errorMessage: nil
+        )
+        let cases = [
+            PolicyCase(
+                name: "running visible default message without retry",
+                phase: .running, visible: true, message: nil, retry: nil,
+                expectedMessage: "Tron is working", expectedRetryMessage: nil
+            ),
+            PolicyCase(
+                name: "running invisible custom message with retry maximum",
+                phase: .running, visible: false, message: "Reading files", retry: retryWithMaximum,
+                expectedMessage: nil, expectedRetryMessage: nil
+            ),
+            PolicyCase(
+                name: "compacting visible custom message with retry without maximum",
+                phase: .compacting, visible: true, message: "Trimming history", retry: retryWithoutMaximum,
+                expectedMessage: "Trimming history", expectedRetryMessage: "Attempt 3"
+            ),
+            PolicyCase(
+                name: "compacting invisible default message without retry",
+                phase: .compacting, visible: false, message: nil, retry: nil,
+                expectedMessage: nil, expectedRetryMessage: nil
+            ),
+            PolicyCase(
+                name: "retrying visible default message with retry maximum",
+                phase: .retrying, visible: true, message: nil, retry: retryWithMaximum,
+                expectedMessage: "Retrying provider", expectedRetryMessage: "Attempt 2 of 4"
+            ),
+            PolicyCase(
+                name: "retrying invisible custom message without retry",
+                phase: .retrying, visible: false, message: "Trying again", retry: nil,
+                expectedMessage: nil, expectedRetryMessage: nil
+            ),
+            PolicyCase(
+                name: "idle visible default message without retry",
+                phase: .idle, visible: true, message: nil, retry: nil,
+                expectedMessage: nil, expectedRetryMessage: nil
+            ),
+            PolicyCase(
+                name: "idle invisible custom message with retry without maximum",
+                phase: .idle, visible: false, message: "Ignored", retry: retryWithoutMaximum,
+                expectedMessage: nil, expectedRetryMessage: nil
+            ),
+            PolicyCase(
+                name: "interrupted visible custom message with retry maximum",
+                phase: .interrupted, visible: true, message: "Ignored", retry: retryWithMaximum,
+                expectedMessage: nil, expectedRetryMessage: nil
+            ),
+            PolicyCase(
+                name: "interrupted invisible default message without retry",
+                phase: .interrupted, visible: false, message: nil, retry: nil,
+                expectedMessage: nil, expectedRetryMessage: nil
+            ),
+        ]
+
+        for policyCase in cases {
+            let presentation = ChatRuntimeWorkingPresentation(
+                phase: policyCase.phase,
+                working: .init(message: policyCase.message, visible: policyCase.visible),
+                retry: policyCase.retry
+            )
+            #expect(
+                (presentation != nil) == (policyCase.expectedMessage != nil),
+                "unexpected visibility for \(policyCase.name)"
+            )
+            #expect(
+                presentation?.message == policyCase.expectedMessage,
+                "unexpected message for \(policyCase.name)"
+            )
+            #expect(
+                presentation?.retryMessage == policyCase.expectedRetryMessage,
+                "unexpected retry message for \(policyCase.name)"
+            )
+        }
+    }
+
     @Test("zero and partial geometry never masquerade as bottom readiness")
     func chatGeometryValidity() {
         #expect(!ChatTranscriptGeometry.zero.isValid)

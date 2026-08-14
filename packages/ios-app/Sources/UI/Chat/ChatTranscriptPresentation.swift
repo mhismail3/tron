@@ -1,10 +1,30 @@
 import Foundation
 import SwiftUI
 
-/// Presentation-only filtering for Pi's canonical transcript. Configuration
-/// entries before the first conversational entry describe session bootstrap
-/// state and belong in Manage Session, not in the chat transcript. Later
-/// configuration entries remain visible as compact change notifications.
+/// The single ephemeral runtime row shown after the canonical transcript while
+/// an active session reports visible working state.
+struct ChatRuntimeWorkingPresentation: Equatable {
+    let message: String
+    let retryMessage: String?
+
+    init?(phase: SessionPhase, working: ExtensionUIState.Working, retry: RetryState?) {
+        guard phase.isActive, working.visible else { return nil }
+        message = working.message ?? Self.defaultMessage(for: phase)
+        retryMessage = retry.map {
+            "Attempt \($0.attempt)\($0.maxAttempts.map { " of \($0)" } ?? "")"
+        }
+    }
+
+    private static func defaultMessage(for phase: SessionPhase) -> String {
+        switch phase {
+        case .running: "Tron is working"
+        case .compacting: "Compacting context"
+        case .retrying: "Retrying provider"
+        case .interrupted, .idle: ""
+        }
+    }
+}
+
 struct ChatTranscriptGeometry: Equatable {
     let offsetY: CGFloat
     let contentHeight: CGFloat
@@ -348,6 +368,10 @@ enum ChatUnreadResponsePolicy {
     }
 }
 
+/// Presentation-only filtering for Pi's canonical transcript. Configuration
+/// entries before the first conversational entry describe session bootstrap
+/// state and belong in Manage Session, not in the chat transcript. Later
+/// configuration entries remain visible as compact change notifications.
 enum ChatTranscriptPresentation {
     static func items(in snapshot: SessionSnapshot) -> [TranscriptItem] {
         let visibleCallIDs = Set(snapshot.transcript.flatMap { item in

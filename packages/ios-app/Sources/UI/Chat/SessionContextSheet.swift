@@ -8,8 +8,6 @@ struct SessionContextSheet: View {
     @State private var showRename = false
     @State private var showFork = false
     @State private var showTree = false
-    @State private var showSubagents = false
-    @State private var subagentSessionID: String?
     @State private var showTerminal = false
     @State private var name = ""
     @State private var compacting = false
@@ -77,9 +75,6 @@ struct SessionContextSheet: View {
             .sheet(isPresented: $showRaw) { runtimeContextSheet }
             .sheet(isPresented: $showFork) { ForkSheet() }
             .sheet(isPresented: $showTree) { SessionTreeSheet() }
-            .sheet(isPresented: $showSubagents) {
-                if let subagentSessionID { SubagentSessionsSheet(sessionID: subagentSessionID) }
-            }
             .sheet(isPresented: $showTerminal) { TerminalSheet() }
             .alert("Rename Session", isPresented: $showRename) {
                 TextField("Name", text: $name)
@@ -264,24 +259,11 @@ struct SessionContextSheet: View {
     }
 
     private func navigationSection(_ snapshot: SessionSnapshot) -> some View {
-        let subagents = model.originatingSubagents(for: snapshot.sessionId)
-        return TronSettingsGroup("Session", detail: snapshot.cwd, accent: .tronCyan) {
+        TronSettingsGroup("Session", detail: snapshot.cwd, accent: .tronCyan) {
             VStack(spacing: 0) {
                 manageRow(icon: "doc.text.magnifyingglass", title: "Agent Context", subtitle: "Instructions, conversation, attachments, and available tools", accent: .tronPurple) { showRaw = true }
                 TronSettingsDivider(accent: .tronCyan)
                 manageRow(icon: "point.3.connected.trianglepath.dotted", title: "Session History", subtitle: "Navigate, label, or continue from an earlier entry", accent: .tronCyan) { showTree = true }
-                if model.sessions.first(where: { $0.id == snapshot.sessionId })?.kind == .user, !subagents.isEmpty {
-                    TronSettingsDivider(accent: .tronCyan)
-                    manageRow(
-                        icon: "person.2.badge.gearshape",
-                        title: "Subagents",
-                        subtitle: "\(subagents.count) current and past session\(subagents.count == 1 ? "" : "s")",
-                        accent: .tronPurple
-                    ) {
-                        subagentSessionID = snapshot.sessionId
-                        showSubagents = true
-                    }
-                }
                 TronSettingsDivider(accent: .tronCyan)
                 manageRow(icon: "arrow.triangle.branch", title: "Fork Session", subtitle: "Create a canonical branch from a user message", accent: .tronTeal) { showFork = true }
                 TronSettingsDivider(accent: .tronCyan)

@@ -112,27 +112,6 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     static func dashboardSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {
         sessions.filter { $0.kind == .user }
     }
-
-    static func originatingSubagents(in sessions: [SessionSummary], from sessionID: String) -> [SessionSummary] {
-        var childrenByParent: [String: [SessionSummary]] = [:]
-        for session in sessions where session.kind == .subagent {
-            guard let parentSessionId = session.parentSessionId else { continue }
-            childrenByParent[parentSessionId, default: []].append(session)
-        }
-        var visited: Set<String> = [sessionID]
-        var pending = [sessionID]
-        var descendants: [SessionSummary] = []
-        while let parent = pending.popLast() {
-            for child in childrenByParent[parent, default: []] where visited.insert(child.id).inserted {
-                descendants.append(child)
-                pending.append(child.id)
-            }
-        }
-        return descendants.sorted { left, right in
-            if left.updatedAt == right.updatedAt { return left.id < right.id }
-            return left.updatedAt > right.updatedAt
-        }
-    }
 }
 
 struct SessionSummaryUpdate: Codable, Hashable, Sendable {
