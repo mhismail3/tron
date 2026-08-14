@@ -96,6 +96,18 @@ for run in 1 2 3; do
 done
 ```
 
+`SessionScenarioBuilder` is test-only and generates deterministic synthetic
+opening tails, on-demand history pages, tool bursts, Markdown streams, and image
+metadata. It never stores a second transcript or uses personal files. Record the
+seed and the requested byte/count/rate/dimension inputs with performance results.
+Validate the fixture contracts with:
+
+```bash
+xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/SessionScenarioBuilderTests
+```
+
 Run UI tests separately because simulator launch dominates their cost:
 
 ```bash

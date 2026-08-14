@@ -1,15 +1,16 @@
 # Tron iOS hardening plan
 
-Status: implementation in progress — milestones 0A–0B.2 plus the separate provisional UI removal milestone are complete; milestones 0B.3–0B.5 and 1–9 not started
+Status: implementation in progress — milestones 0A–0B.2, 0B.3a, and the separate provisional UI removal milestone are complete; milestone 0B.3b and milestones 0B.4–0B.5 and 1–9 are pending
 
 Audit baseline: `cee85b64a`
 
 Implementation baseline for 0B.1: `fb009f311`
 Provisional UI removal baseline: `03aa3b9a6`
 Implementation baseline for 0B.2: `4bac0090d`
+Implementation baseline for 0B.3a: `028e39a5e`
 Scope: all handwritten iOS app, share-extension, test, project, and owning documentation code under `packages/ios-app`, narrowly required Gateway contract work, and iOS release policy where repository rules require manual delivery.
 
-Milestone 0A began from clean tracked HEAD `cee85b64a`. Milestone 0B.1 began from clean tracked HEAD `fb009f311`. The user-directed provisional UI removal began as a separate serial milestone from clean tracked HEAD `03aa3b9a6`. Milestone 0B.2 began from clean tracked HEAD `4bac0090d`; untracked `.pi` runtime artifacts are outside these implementation baselines. No audit artifact or historical line number overrides source at these baselines.
+Milestone 0A began from clean tracked HEAD `cee85b64a`. Milestone 0B.1 began from clean tracked HEAD `fb009f311`. The user-directed provisional UI removal began as a separate serial milestone from clean tracked HEAD `03aa3b9a6`. Milestone 0B.2 began from clean tracked HEAD `4bac0090d`, and milestone 0B.3a began from clean tracked HEAD `028e39a5e`; untracked `.pi` runtime artifacts are outside these implementation baselines. No audit artifact or historical line number overrides source at these baselines.
 
 ## Goal
 
@@ -56,7 +57,9 @@ Eight independent read-only audits covered state architecture, chat scrolling/pe
 
 **0B.2 — Pairing transport and pre-commit attempt admission: complete.** `GatewayPairer` owns a narrow injectable HTTP-data transport and deterministic `/v1/pair` request/status/error decoding. `AppModel` owns one exact cancellable pairing task; supersession, forget, and switch invalidate it, with admission checks after HTTP, before profile/Keychain save, before connect, and through connect suspension boundaries. Barrier-controlled tests prove stale HTTP success cannot commit metadata/token or initiate connect. This does not claim Gateway connection-epoch safety or transactional profile replacement.
 
-**0B.3–0B.5 and milestones 1–9: not started.** Generated/performance evidence, remaining testability and system-service seams, runtime hardening, and later owner refactors remain pending under the plan below.
+**0B.3a — Deterministic generated scenarios: complete.** A test-only seeded builder produces byte-bounded opening tails, on-demand 10,000-entry paging ranges, long history pages, 100–256-tool bursts, 30/60 Hz cumulative Markdown updates, and synthetic high-resolution attachment data. Focused tests fix exact counts, bounds, overlap/gap behavior, rates, IDs, and privacy-safe content. It creates no production cache, transcript mirror, runtime, or session owner.
+
+**0B.3b–0B.5 and milestones 1–9: pending.** The hosted presented-frame scroll harness, performance evidence, remaining testability and system-service seams, runtime hardening, and later owner refactors remain pending under the plan below.
 
 ### Verified correctness priorities
 
@@ -179,13 +182,12 @@ Work proceeds as serial milestones. Each milestone gets one writer, a bounded ow
 
 ### Phase 0 — Freeze contracts and establish evidence
 
-Milestone 0A completed the repository-policy and canonical-documentation slice described above. Milestone 0B.1 completed the byte-level Gateway WebSocket factory/connection, monotonic clock/sleeper, UUID source, strict-concurrency setting, and focused transport characterization tests. Milestone 0B.2 completed the pairing-only HTTP-data seam and pre-commit attempt admission without broadening that seam to other HTTP owners or claiming a connection epoch. The separate provisional UI removal changed only the user-directed presentation surfaces summarized above and did not begin any remaining hardening work. The remaining 0B.3–0B.5 deliverables are pending and have not started:
+Milestone 0A completed the repository-policy and canonical-documentation slice described above. Milestone 0B.1 completed the byte-level Gateway WebSocket factory/connection, monotonic clock/sleeper, UUID source, strict-concurrency setting, and focused transport characterization tests. Milestone 0B.2 completed the pairing-only HTTP-data seam and pre-commit attempt admission without broadening that seam to other HTTP owners or claiming a connection epoch. Milestone 0B.3a added only deterministic test scenarios; the hosted real-scroll harness remains 0B.3b. The separate provisional UI removal changed only the user-directed presentation surfaces summarized above and did not begin any remaining hardening work. The remaining 0B.3b–0B.5 deliverables are pending:
 
 - Add the display-frame scheduler and remaining lightweight barriers where their owning instrumentation/harness immediately uses them. These are testability seams around production behavior, not alternate implementations.
 - Add injectable camera/QR authorization and capture-session adapters plus share inbox/store/app-opener seams; make shared pure logic testable outside the extension controller and add archive assertions for both privacy manifests.
 - Retain the explicit complete strict-concurrency baseline in every milestone that introduces off-main work.
 - Add privacy-safe signposts for Gateway connect, session open/sync/resync, receipt resolution, cache load/save, chat projection, first ready frame, scroll command/settle, prepend settle, and terminal attach/replay.
-- Add generated scenario builders for bounded snapshots, pages, gaps, tool bursts, and large sessions.
 - Add a hosted `ChatView`/real `ScrollView` integration harness with a scripted Gateway that captures semantic row frames and displacement once per presented display frame.
 - Separate useful static style rules from brittle exact-source-spelling assertions before moving files.
 
