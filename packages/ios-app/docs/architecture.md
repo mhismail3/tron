@@ -237,6 +237,13 @@ configuration, so a late grant cannot restart a dismissed scanner. The first adm
 value stops capture and permanently closes that controller's callback gate. These seams
 make hardware-free boundary tests possible without creating another pairing owner.
 
+The share extension reduces provider results through pure ordered fragment logic, writes
+through `PendingShareStoring`, and opens the app through a responder-chain adapter. The app
+reads through the same store boundary. Phase 0 intentionally preserves the current single-slot,
+clear-before-send handoff; Phase 8 owns bounded entries, destination leases, acknowledged clear,
+and retained uncertain/failure behavior. Both packaged targets declare the required-reason
+UserDefaults privacy manifest, and archive verification fails if either manifest is absent.
+
 Provider credentials and the Mac wrapper credential are never decoded by iOS.
 Custom-model documents are validated through the pinned gateway runtime before
 the canonical document is replaced.

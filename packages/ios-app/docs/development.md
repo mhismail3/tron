@@ -110,6 +110,19 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests/QRCodeScannerBoundaryTests
 ```
 
+Share boundary tests cover provider-fragment reduction, prompt composition, and the
+single-value app-group store without loading extension UI. `PrivacyManifestTests` verify
+both source manifests and both built bundles. The separate archive check is read-only and
+must run after a maintainer-created archive; it never archives, exports, or uploads.
+
+```bash
+xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
+  -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/SharedContentTests \
+  -only-testing:TronMobileTests/PrivacyManifestTests
+packages/ios-app/scripts/verify-archive-privacy.sh <path-to-xcarchive>
+```
+
 Pairing tests keep policy above byte transport. `GatewayPairingTransportTests`
 feed raw HTTP response bytes and inspect the exact `/v1/pair` request.
 `AppModelPairingAttemptTests` use barriers whose late responses intentionally
@@ -278,8 +291,9 @@ performs every TestFlight or App Store delivery deliberately:
    onboarding, pairing, chat/attachments, system-keyboard dictation, terminal,
    settings, accessibility, and signed-device networking.
 3. With a stable non-beta Xcode and maintainer-controlled signing credentials,
-   archive the `Tron` scheme in `Prod`. Inspect the app and share extension bundle
-   identifiers, versions/builds, privacy manifests, and signatures before export.
+   archive the `Tron` scheme in `Prod`. Run
+   `packages/ios-app/scripts/verify-archive-privacy.sh <path-to-xcarchive>`, then inspect
+   the app and share extension bundle identifiers, versions/builds, and signatures before export.
 4. Use Xcode Organizer/App Store Connect to export and upload manually, then make
    any TestFlight group assignment or App Store release choice explicitly. Record
    the source commit, version/build, and validation results with the release.

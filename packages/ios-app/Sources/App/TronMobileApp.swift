@@ -5,6 +5,7 @@ struct TronMobileApp: App {
     @State private var model = AppModel()
     @State private var appearance = AppearanceSettings.shared
     @Environment(\.scenePhase) private var scenePhase
+    private let pendingShares = UserDefaultsPendingShareStore()
 
     var body: some Scene {
         WindowGroup {
@@ -23,8 +24,8 @@ struct TronMobileApp: App {
                             catch is CancellationError { return }
                             catch { model.lastError = error.localizedDescription }
                         }
-                    } else if url.host == "share", let shared = PendingShareService.load()?.buildSharePrompt() {
-                        PendingShareService.clear()
+                    } else if url.host == "share", let shared = pendingShares.load()?.buildSharePrompt() {
+                        pendingShares.clear()
                         Task { try? await model.send(shared.prompt) }
                     }
                 }

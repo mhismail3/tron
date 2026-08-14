@@ -1,7 +1,49 @@
 import UIKit
 import UniformTypeIdentifiers
 
+@MainActor
+protocol ShareAppOpening {
+    func openShareApp(from responder: UIResponder)
+}
+
+struct ResponderChainShareAppOpener: ShareAppOpening {
+    func openShareApp(from responder: UIResponder) {
+        guard let url = URL(string: "tron://share") else { return }
+        var current: UIResponder? = responder
+        while let next = current?.next {
+            if let application = next as? UIApplication {
+                application.open(url)
+                return
+            }
+            current = next
+        }
+    }
+}
+
 final class ShareViewController: UIViewController {
+    private let pendingShares: any PendingShareStoring
+    private let appOpener: any ShareAppOpening
+
+    init(
+        pendingShares: any PendingShareStoring,
+        appOpener: any ShareAppOpening
+    ) {
+        self.pendingShares = pendingShares
+        self.appOpener = appOpener
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    override init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
+        pendingShares = UserDefaultsPendingShareStore()
+        appOpener = ResponderChainShareAppOpener()
+        super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
+    }
+
+    required init?(coder: NSCoder) {
+        pendingShares = UserDefaultsPendingShareStore()
+        appOpener = ResponderChainShareAppOpener()
+        super.init(coder: coder)
+    }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -23,45 +65,29 @@ final class ShareViewController: UIViewController {
         }
 
         Task {
-            var text: String?
-            var url: String?
-
+            var fragments: [SharedContentFragment] = []
             for provider in providers {
-                if let result = await extractContent(from: provider) {
-                    switch result {
-                    case .text(let t):
-                        text = t
-                    case .url(let u):
-                        // If we already have a URL, append to text instead
-                        if url != nil {
-                            text = [text, u].compactMap { $0 }.joined(separator: "\n")
-                        } else {
-                            url = u
-                        }
-                    }
+                if let fragment = await extractContent(from: provider) {
+                    fragments.append(fragment)
                 }
             }
-
-            guard text != nil || url != nil else {
+            guard let content = SharedContentReducer.content(
+                from: fragments,
+                timestamp: Date()
+            ) else {
                 complete()
                 return
             }
 
-            let content = SharedContent(text: text, url: url, timestamp: Date())
-            PendingShareService.save(content)
-            openMainApp()
+            pendingShares.save(content)
+            appOpener.openShareApp(from: self)
             complete()
         }
     }
 
     // MARK: - Content Extraction
 
-    private enum ExtractedContent {
-        case text(String)
-        case url(String)
-    }
-
-    private func extractContent(from provider: NSItemProvider) async -> ExtractedContent? {
+    private func extractContent(from provider: NSItemProvider) async -> SharedContentFragment? {
         // Try URL first (more specific than plain text)
         if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
             if let url = await loadURL(from: provider) {
@@ -100,21 +126,6 @@ final class ShareViewController: UIViewController {
                     continuation.resume(returning: nil)
                 }
             }
-        }
-    }
-
-    // MARK: - App Launch
-
-    /// Open the main app via the responder chain's openURL method.
-    private func openMainApp() {
-        guard let url = URL(string: "tron://share") else { return }
-        var responder: UIResponder? = self
-        while let next = responder?.next {
-            if let application = next as? UIApplication {
-                application.open(url)
-                return
-            }
-            responder = next
         }
     }
 
