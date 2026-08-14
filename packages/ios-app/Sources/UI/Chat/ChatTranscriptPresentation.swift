@@ -72,13 +72,14 @@ struct ChatTranscriptGeometry: Equatable {
         guard rawDistance.isFinite else { return .greatestFiniteMagnitude }
         return max(0, rawDistance)
     }
+    static let catchUpDistance: CGFloat = 16
     var isAtBottom: Bool { isValid && distanceFromBottom <= 80 }
     var isAtExactBottom: Bool { isValid && distanceFromBottom <= 2 }
     /// Physical scroll settling commonly stops a few points above the computed
     /// edge because content insets and pixel rounding update in separate frames.
     /// This tighter-than-"near bottom" boundary is user-equivalent to reaching
     /// the tail and is used to dismiss catch-up without requiring a tap.
-    var isAtCatchUpBoundary: Bool { isValid && distanceFromBottom <= 16 }
+    var isAtCatchUpBoundary: Bool { isValid && distanceFromBottom <= Self.catchUpDistance }
 
     func hasViewportChange(from previous: Self) -> Bool {
         abs(containerHeight - previous.containerHeight) > 0.5

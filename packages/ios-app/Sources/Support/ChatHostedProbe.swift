@@ -6,6 +6,7 @@ struct ChatHostedObservation: Sendable {
     let geometry: ChatTranscriptGeometry
     let visibleRowIDs: [String]
     let rowFrames: [String: CGRect]
+    let scrollSettledDistance: CGFloat?
     let isReady: Bool
 }
 
@@ -14,6 +15,7 @@ final class ChatHostedProbe {
     private var geometry = ChatTranscriptGeometry.zero
     private var visibleRowIDs: [String] = []
     private var rowFrames: [String: CGRect] = [:]
+    private var scrollSettledDistance: CGFloat?
     private var isReady = false
     private(set) var revision = 0
 
@@ -23,6 +25,7 @@ final class ChatHostedProbe {
             geometry: geometry,
             visibleRowIDs: visibleRowIDs,
             rowFrames: rowFrames,
+            scrollSettledDistance: scrollSettledDistance,
             isReady: isReady
         )
     }
@@ -42,6 +45,12 @@ final class ChatHostedProbe {
     func updateRowFrame(id: String, frame: CGRect) {
         guard rowFrames[id] != frame else { return }
         rowFrames[id] = frame
+        revision &+= 1
+    }
+
+    func recordScrollSettle(distanceFromBottom: CGFloat) {
+        guard scrollSettledDistance != distanceFromBottom else { return }
+        scrollSettledDistance = distanceFromBottom
         revision &+= 1
     }
 

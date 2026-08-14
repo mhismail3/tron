@@ -63,7 +63,7 @@ Eight independent read-only audits covered state architecture, chat scrolling/pe
 
 **0B.3b — Hosted presented-frame scroll harness: complete.** Test builds can admit a synthetic snapshot through the existing authoritative read gate and bypass only network opening. The harness mounts the real `ChatView`, lazy transcript, composer inset, and native scroll view; semantic row frames, visibility, and geometry are coalesced to one latest sample per `CADisplayLink` frame. Focused tests prove native-scroll fidelity, latest-tail visibility, authority gating, watchdog-bounded waits, and at-most-one recorded sample per presented frame. No test hook ships in Beta or production.
 
-**0B.4 — Privacy-safe instrumentation and performance evidence: in progress.** The typed signpost vocabulary is installed. Gateway connection, disposable cache load/save, visible session open, authoritative sync/resync attempts, uncertain-command receipt resolution, and terminal attach/replay now expose only closed result codes and aggregate item/byte counts. Shared interval handling removed duplicate terminal replay installation and centralizes success/failure/cancellation closure. Focused spies characterize these boundaries without admitting profile IDs, session IDs, paths, command IDs, model names, prompts, transcript content, terminal output, or filenames. Deterministic chat projection now records only projected row count, and first-ready timing ends on the next actual `CADisplayLink` presentation rather than model readiness. Scroll/prepend settle intervals and simulator/device evidence remain pending within this milestone.
+**0B.4 — Privacy-safe instrumentation and performance evidence: in progress.** The typed signpost vocabulary is installed. Gateway connection, disposable cache load/save, visible session open, authoritative sync/resync attempts, uncertain-command receipt resolution, and terminal attach/replay now expose only closed result codes and aggregate item/byte counts. Shared interval handling removed duplicate terminal replay installation and centralizes success/failure/cancellation closure. Focused spies characterize these boundaries without admitting profile IDs, session IDs, paths, command IDs, model names, prompts, transcript content, terminal output, or filenames. Deterministic chat projection now records only projected row count, and first-ready timing ends on the next actual `CADisplayLink` presentation rather than model readiness. Generation-owned scroll and prepend intervals discard replaced commands, reject stale prepend completion, and cancel exactly once at teardown; stale paging defer blocks can no longer clear a newer paging owner. Prepend success is recorded only after the next presented frame confirms the requested offset within one point. Simulator/device performance evidence remains pending within this milestone.
 
 **0B.5 and milestones 1–9: pending.** Remaining system-service seams, runtime hardening, and later owner refactors remain pending under the plan below.
 
@@ -288,11 +288,14 @@ Deliverables:
 - Remove unused fields from unread-response observation.
 - Preserve visible ordering and grouping with golden tests against the current timeline.
 - Stabilize presentation identity across streaming-to-canonical settlement and overlapping tool-group expansion.
+- Animate every tool-chip insertion and visible state/content change with the established thinking-trace motion language, while honoring Reduce Motion and preserving stable chip identity.
+- Make compact tool chips hug their intrinsic content: remove flexible leading space before timestamps so each chip is only as wide as its label, status, and timestamp require.
 
 Exit gate:
 
 - Typing, geometry, toolbar width, sheet state, attachment-menu state, and unchanged snapshots cause zero timeline projections.
 - A tool-progress event updates only the owning tool/run descriptor and dependent tail state.
+- Tool chips animate appearance and changes consistently with thinking traces, and timestamp layout introduces no flexible unused leading gap.
 - Cancelled/out-of-order projection, reconnect replacement, and prepend-overlap completions cannot install.
 - MainActor publication plus the defined SwiftUI diff/command boundary stays within the calibrated budget.
 

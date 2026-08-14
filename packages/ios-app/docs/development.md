@@ -137,7 +137,8 @@ multiple-update-per-frame SwiftUI diagnostics.
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/ChatViewScrollHarnessTests
+  -only-testing:TronMobileTests/ChatViewScrollHarnessTests \
+  -only-testing:TronMobileTests/ChatPerformanceTrackerTests
 ```
 
 Run UI tests separately because simulator launch dominates their cost:

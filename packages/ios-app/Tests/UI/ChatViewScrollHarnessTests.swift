@@ -31,13 +31,19 @@ struct ChatViewScrollHarnessTests {
             try await withHarness(seed: 102) { harness in
                 let sample = try await harness.recorder.waitUntil { sample in
                     sample.observation.isReady
-                        && sample.observation.geometry.isValid
+                        && sample.observation.scrollSettledDistance != nil
                         && sample.observation.visibleRowIDs.contains(harness.lastTranscriptID)
                 }
 
-                #expect(sample.observation.geometry.distanceFromBottom < sample.observation.geometry.containerHeight)
+                let scrollEvents = harness.scrollEvents
+                #expect((sample.observation.scrollSettledDistance ?? .infinity)
+                    <= ChatTranscriptGeometry.catchUpDistance)
                 #expect(sample.observation.visibleRowIDs.contains(harness.lastTranscriptID))
                 #expect(!sample.observation.visibleRowIDs.contains(harness.firstTranscriptID))
+                #expect(scrollEvents.first == .begin(.scrollCommandSettle))
+                #expect(scrollEvents.contains(.end(.scrollCommandSettle, .success, .none)))
+                #expect(!scrollEvents.contains(.end(.scrollCommandSettle, .failure, .none)))
+                #expect(!scrollEvents.contains(.end(.scrollCommandSettle, .cancelled, .none)))
             }
         }
     }
@@ -186,12 +192,11 @@ private final class ChatViewScrollHarness {
     }
 
     var firstReadyEvents: [RecordingPerformanceSignposts.Event] {
-        signposts.events().filter {
-            switch $0 {
-            case .begin(.firstReadyFrame), .end(.firstReadyFrame, _, _): true
-            default: false
-            }
-        }
+        signposts.events().filter { $0.operation == .firstReadyFrame }
+    }
+
+    var scrollEvents: [RecordingPerformanceSignposts.Event] {
+        signposts.events().filter { $0.operation == .scrollCommandSettle }
     }
 
     func containsNativeTranscriptScrollView(matching geometry: ChatTranscriptGeometry) -> Bool {

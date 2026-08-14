@@ -122,20 +122,24 @@ exactly once and reverses naturally when the
 keyboard or composer contracts; no parallel `ScrollPosition` correction or focus-triggered
 jump competes with it. Interactive transcripts use bottom initial positioning but top alignment
 for undersized or lazily materializing content, preventing keyboard frames from repeatedly
-re-anchoring a partial stack. Once a bottom command or manual catch-up physically settles, its
-persistent `ScrollPosition` target is cleared without moving the viewport so later safe-area
+re-anchoring a partial stack. Once a bottom command or manual catch-up settles inside the
+practical tail boundary, its persistent `ScrollPosition` target is cleared without moving the viewport so later safe-area
 changes cannot replay stale edge ownership. Viewport resize owns mixed resize/streaming frames:
 a pinned reader receives only a bottom-edge command, while a detached reader receives no app
 position write. Native ownership arriving after geometry consumes preserved directional evidence
 instead of losing an upward gesture. Direct interactive scrolling always wins. A compact scroll coordinator is the sole owner of following intent: it
 combines native `ScrollPosition` ownership, phase-final geometry, inset-aware bottom
-distance, prepend ownership, and durable user scroll-away. Upward user geometry is
+distance, prepend ownership, and durable user scroll-away. A separate lightweight
+performance tracker owns only interval generations: a replacement command discards
+its predecessor, practical-tail observation settles the active command even when
+SwiftUI already cleared its binding, and stale paging defer work cannot close a newer
+prepend or paging owner. Upward user geometry is
 the only ordinary transition from pinned to detached; native ownership alone cannot
 detach a reader when streamed growth moves the physical bottom. A gesture commits
 detachment only after its settled geometry has moved toward older content, so bottom-edge
 rubber-banding cannot flash the catch-up control. While detached, a fixed action-sized circular
 glass down-arrow morphs from the composer's trailing edge; multiline editor height can never
-resize it. Reaching the practical physical bottom (with a small inset-rounding tolerance) or
+resize it. Reaching the practical tail boundary (with a small inset-rounding tolerance) or
 tapping that control immediately re-pins the transcript. Long-distance
 catch-up jumps without animation to a small reveal distance and smoothly animates only the
 final approach, avoiding a jittery traversal through lazy history. Every later measured

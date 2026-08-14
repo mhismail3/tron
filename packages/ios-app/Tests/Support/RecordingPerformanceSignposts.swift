@@ -5,6 +5,12 @@ final class RecordingPerformanceSignposts: PerformanceSignposting, @unchecked Se
     enum Event: Equatable {
         case begin(PerformanceOperation)
         case end(PerformanceOperation, PerformanceResult, PerformanceMetrics)
+
+        var operation: PerformanceOperation {
+            switch self {
+            case .begin(let operation), .end(let operation, _, _): operation
+            }
+        }
     }
 
     private let lock = NSLock()
