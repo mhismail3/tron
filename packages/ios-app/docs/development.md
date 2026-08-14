@@ -122,12 +122,15 @@ revalidation across revocation, token replacement, and disconnect. `SessionMutat
 own explicit session command identity, wire construction, typed outcomes, stable-ID replay only
 after a confirmed-missing receipt, and cancellation before replay wire emission. AppModel performance
 tests retain cross-owner create/fork/delete, prompt-attachment, queue, navigation-editor, and tree-reload
-ordering coverage. Run the focused mutation owner with:
+ordering coverage. `SessionImportCoordinatorTests` own exact lifecycle/profile admission across
+file access, upload, and mutation; security-scope balancing; and import-result independence from a
+later catalog refresh. Run the focused mutation and import owners with:
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/SessionMutationServiceTests
+  -only-testing:TronMobileTests/SessionMutationServiceTests \
+  -only-testing:TronMobileTests/SessionImportCoordinatorTests
 ```
 
 `SessionEventSynchronizerTests` own the composed intent-keyed shared outcome and

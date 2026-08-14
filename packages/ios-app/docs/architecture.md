@@ -270,8 +270,15 @@ application responses remain ordinary errors rather than receipt uncertainty.
 `ConfirmedMutationExecutor` is the single lifecycle-generation-bound owner of that receipt policy
 for every mutation domain. `SessionMutationService` owns explicit session command IDs, DTOs, wire
 methods, timeouts, and typed outcomes without reading presentation, catalog, cache, drafts, or route
-state. `AppModel` retains only cross-owner orchestration: exact-generation attachment/editor effects,
-post-confirmation projection changes, catalog refresh, navigation results, and delete ordering.
+state. `SessionImportCoordinator` owns the security-scoped file read, upload, and existing
+`session.import` mutation pipeline under one captured lifecycle generation and selected profile.
+It revalidates after every suspension boundary, so an upload ID produced for a retired profile can
+never become a mutation on its replacement, and always balances acquired file access. The admitted
+import result retains that exact lifecycle/profile identity through catalog refresh and the immediate
+MainActor navigation handoff; a retired generation stays inadmissible even if profile selection cycles
+away and back before presentation. `AppModel`
+retains only cross-owner orchestration: exact-generation attachment/editor effects, post-confirmation
+projection changes, catalog refresh, navigation results, and delete ordering.
 
 ## Sessions
 

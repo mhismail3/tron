@@ -50,7 +50,21 @@ final class AppModel {
     struct SessionNavigationRoute: Identifiable, Hashable {
         let sessionID: String
         let editorText: String?
+        fileprivate let gatewayProfileID: String?
+        fileprivate let gatewayLifecycleGeneration: Int?
         var id: String { sessionID }
+
+        init(
+            sessionID: String,
+            editorText: String?,
+            gatewayProfileID: String? = nil,
+            gatewayLifecycleGeneration: Int? = nil
+        ) {
+            self.sessionID = sessionID
+            self.editorText = editorText
+            self.gatewayProfileID = gatewayProfileID
+            self.gatewayLifecycleGeneration = gatewayLifecycleGeneration
+        }
     }
 
     typealias SessionPresentationTarget = SessionPresentationIdentity
@@ -79,6 +93,7 @@ final class AppModel {
     private let performanceSignposts: any PerformanceSignposting
     private let mutationExecutor: ConfirmedMutationExecutor
     private let sessionMutations: SessionMutationService
+    private let sessionImports: SessionImportCoordinator
 
     var connectionState: ConnectionState { lifecycle.connectionState }
     /// False only while the first launch credential/connection decision is
@@ -165,7 +180,9 @@ final class AppModel {
         pairer: GatewayPairer = GatewayPairer(),
         pairingCommit: PairingCommit? = nil,
         profileTokenLookup: ProfileTokenLookup? = nil,
-        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
+        sessionImportFileAccess: SessionImportFileAccess = .live,
+        sessionImportUpload: SessionImportUpload? = nil
     ) {
         let resolvedPairingCommit = pairingCommit ?? { profile, token in
             try profiles.save(profile, token: token)
@@ -189,12 +206,22 @@ final class AppModel {
             clock: clock,
             performanceSignposts: performanceSignposts
         )
-        self.lifecycle = lifecycle
-        self.mutationExecutor = mutationExecutor
-        self.sessionMutations = SessionMutationService(
+        let sessionMutations = SessionMutationService(
             client: client,
             executor: mutationExecutor,
             uuidSource: uuidSource
+        )
+        let resolvedSessionImportUpload = sessionImportUpload ?? { name, mimeType, data in
+            try await client.upload(name: name, mimeType: mimeType, data: data)
+        }
+        self.lifecycle = lifecycle
+        self.mutationExecutor = mutationExecutor
+        self.sessionMutations = sessionMutations
+        self.sessionImports = SessionImportCoordinator(
+            lifecycle: lifecycle,
+            mutations: sessionMutations,
+            fileAccess: sessionImportFileAccess,
+            upload: resolvedSessionImportUpload
         )
         self.sessionPresentation = SessionPresentationStore(
             client: client,
@@ -570,18 +597,23 @@ final class AppModel {
         await refreshSessions()
     }
 
-    func importSession(from url: URL, cwd: String) async throws -> String {
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        let uploadID = try await client.upload(
-            name: url.lastPathComponent,
-            mimeType: "application/x-ndjson",
-            data: data
-        )
-        let sessionID = try await sessionMutations.importSession(uploadID: uploadID, cwd: cwd)
+    func importSession(from url: URL, cwd: String) async throws -> SessionNavigationRoute {
+        let imported = try await sessionImports.importSession(from: url, cwd: cwd)
         await refreshSessions()
-        return sessionID
+        try sessionImports.requireCurrent(imported)
+        return SessionNavigationRoute(
+            sessionID: imported.sessionID,
+            editorText: nil,
+            gatewayProfileID: imported.profileID,
+            gatewayLifecycleGeneration: imported.lifecycleGeneration
+        )
+    }
+
+    func ownsNavigationRoute(_ route: SessionNavigationRoute) -> Bool {
+        guard let gatewayProfileID = route.gatewayProfileID else { return true }
+        guard profiles.selected?.id == gatewayProfileID,
+              let generation = route.gatewayLifecycleGeneration else { return false }
+        return lifecycle.admits(.init(generation: generation, connectionID: nil))
     }
 
     func createSession(cwd: String) async throws -> String {

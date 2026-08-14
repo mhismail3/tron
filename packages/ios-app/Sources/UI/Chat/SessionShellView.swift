@@ -159,9 +159,12 @@ struct SessionShellView: View {
         let navigationGeneration = navigationOwner.begin()
         Task {
             do {
-                let sessionID = try await model.importSession(from: url, cwd: cwd)
-                guard navigationOwner.admit(navigationGeneration) else { return }
-                present(AppModel.SessionNavigationRoute(sessionID: sessionID, editorText: nil))
+                let route = try await model.importSession(from: url, cwd: cwd)
+                guard navigationOwner.admit(navigationGeneration),
+                      model.ownsNavigationRoute(route) else { return }
+                present(route)
+            } catch is CancellationError {
+                _ = navigationOwner.admit(navigationGeneration)
             } catch {
                 guard navigationOwner.admit(navigationGeneration) else { return }
                 model.lastError = error.localizedDescription

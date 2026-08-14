@@ -66,7 +66,7 @@ struct SessionMutationServiceTests {
                 try await harness.service.fork(
                     sessionID: "session-c",
                     entryID: "entry-c",
-                    position: "after"
+                    position: "at"
                 )
             }
             let fork = try await request(in: harness.socket, frameIndex: frameIndex)
@@ -74,7 +74,7 @@ struct SessionMutationServiceTests {
             #expect(fork.method == "session.fork")
             #expect(fork.params?["sessionId"] == .string("session-c"))
             #expect(fork.params?["entryId"] == .string("entry-c"))
-            #expect(fork.params?["position"] == .string("after"))
+            #expect(fork.params?["position"] == .string("at"))
             try expectCommandID(fork)
             await harness.socket.enqueue(successResponse(
                 id: fork.id,
@@ -280,6 +280,34 @@ struct SessionMutationServiceTests {
                 method: "session.reloadResources", result: .object(["reloaded": .bool(true)]),
                 expectedParams: ["sessionId": .string("resources-session")]
             )
+            await harness.client.close()
+        }
+    }
+
+    @Test("updated mutations reject an unrelated boolean response field")
+    func exactUpdatedResponse() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let mutation = Task {
+                try await harness.service.setModel(
+                    ModelRef(provider: "provider", id: "model"),
+                    sessionID: "session"
+                )
+            }
+            defer { mutation.cancel() }
+            let request = try await request(in: harness.socket, frameIndex: 1)
+            #expect(request.method == "session.setModel")
+            await harness.socket.enqueue(successResponse(
+                id: request.id,
+                result: .object(["unrelated": .bool(true)])
+            ))
+            do {
+                try await valueOfOwnedTask(mutation)
+                Issue.record("unrelated boolean response unexpectedly decoded as updated")
+            } catch is DecodingError {
+            } catch {
+                Issue.record("unexpected response error: \(error)")
+            }
             await harness.client.close()
         }
     }

@@ -10,14 +10,8 @@ struct SessionForkOutcome: Equatable {
 @MainActor
 final class SessionMutationService {
     private struct SessionIDResponse: Codable { let sessionId: String }
-    private struct FlexibleMutationResponse: Codable {
-        let updated: Bool?
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.singleValueContainer()
-            let object = try container.decode([String: Bool].self)
-            updated = object.values.first
-        }
+    private struct MutationResponse: Codable {
+        let updated: Bool
     }
 
     private let client: GatewayClient
@@ -137,7 +131,7 @@ final class SessionMutationService {
             modelId: model.id,
             commandId: commandID
         )
-        let _: FlexibleMutationResponse = try await executor.perform(
+        let _: MutationResponse = try await executor.perform(
             method: "session.setModel",
             commandID: commandID
         ) {
@@ -149,7 +143,7 @@ final class SessionMutationService {
         struct Params: Codable { let sessionId, level, commandId: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, level: level, commandId: commandID)
-        let _: FlexibleMutationResponse = try await executor.perform(
+        let _: MutationResponse = try await executor.perform(
             method: "session.setThinking",
             commandID: commandID
         ) {
@@ -161,7 +155,7 @@ final class SessionMutationService {
         struct Params: Codable { let sessionId, name, commandId: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, name: name, commandId: commandID)
-        let _: FlexibleMutationResponse = try await executor.perform(
+        let _: MutationResponse = try await executor.perform(
             method: "session.rename",
             commandID: commandID
         ) {
@@ -187,7 +181,7 @@ final class SessionMutationService {
         struct Params: Codable { let sessionId: String; let tools: [String]; let commandId: String }
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, tools: tools, commandId: commandID)
-        let _: FlexibleMutationResponse = try await executor.perform(
+        let _: MutationResponse = try await executor.perform(
             method: "session.setTools",
             commandID: commandID
         ) {
@@ -259,7 +253,7 @@ final class SessionMutationService {
         }
         let commandID = uuidSource.next().uuidString
         let params = Params(sessionId: sessionID, entryId: entryID, label: label, commandId: commandID)
-        let _: FlexibleMutationResponse = try await executor.perform(
+        let _: MutationResponse = try await executor.perform(
             method: "session.label",
             commandID: commandID
         ) {
