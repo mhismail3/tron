@@ -50,9 +50,14 @@ commits the Keychain token before selecting that profile, so credential failure 
 metadata without its owned secret. Every suspended connect/reconnect/cache boundary revalidates that
 lifecycle generation. Mutation receipt reconciliation captures the same generation, so an uncertain
 old-profile command can report an unknown outcome but can never poll or replay through a replacement
-profile. Final teardown cancels and joins the event listener and
-shares one completion across concurrent callers; scene backgrounding deliberately does not tear down
-accepted Gateway-owned work. It shares the clock/UUID seams for Gateway reconnect, receipt, debounce,
+profile. Reconnect retains the nominal 2-second, ×1.7, 15-second-cap progression. Each sleep is
+independently sampled within 80–120% of its nominal value with a hard 15-second effective cap; the
+injected unit-interval source and monotonic clock make the exact schedule deterministic in tests.
+Foreground activation may cancel only a delay-owned retry and start one immediate attempt; repeated
+activation cannot replace an active handshake, and exact attempt generations reject stale cancellation
+or unauthorized completion. Final teardown cancels and joins the event listener and shares one
+completion across concurrent callers; scene backgrounding deliberately does not tear down accepted
+Gateway-owned work. It shares the clock/UUID seams for Gateway reconnect, receipt, debounce,
 and command-ID work. Its visible-open interval
 contains independently measured authoritative synchronization attempts; invalidated
 attempts end as discarded rather than being mislabeled as successful. Receipt timing

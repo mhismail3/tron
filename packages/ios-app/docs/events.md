@@ -37,7 +37,10 @@ retired profile cannot mutate its replacement.
   `terminal.attach(afterSequence:)` to replay the bounded authoritative PTY tail,
   while terminal exit updates both controls and status;
 - stopping/restart topics request the single lifecycle-owned reconnect loop; duplicate
-  transport signals cannot replace that owner or revive work after profile teardown.
+  transport signals cannot replace that owner or revive work after profile teardown. Its
+  nominal 2-second, ×1.7 backoff is independently jittered within a bounded 80–120%
+  window and never exceeds 15 seconds; foreground activation accelerates a pending delay
+  once without replacing an active handshake.
 
 A newly navigated chat opens exactly once and replaces any disposable cached or
 previously expanded projection with a fresh bounded authoritative latest tail.

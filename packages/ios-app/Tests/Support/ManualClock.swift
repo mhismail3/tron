@@ -19,6 +19,7 @@ final class ManualClock: Sendable {
         var nextToken = 0
         var nextWaiterToken = 0
         var sleepers: [Int: Sleeper] = [:]
+        var sleepHistory: [Duration] = []
         var cancelled: Set<Int> = []
         var sleepWaiters: [SleepWaiter] = []
     }
@@ -44,6 +45,14 @@ final class ManualClock: Sendable {
             return ready.values.map(\.continuation)
         }
         for continuation in continuations { continuation.resume() }
+    }
+
+    func recordedSleeps() -> [Duration] {
+        state.withLock { $0.sleepHistory }
+    }
+
+    func activeSleeperCount() -> Int {
+        state.withLock { $0.sleepers.count }
     }
 
     func waitUntilSleeping(count: Int) async throws {
@@ -86,6 +95,7 @@ final class ManualClock: Sendable {
                 var immediate: Result<Void, Error>?
                 var registrationContinuations: [CheckedContinuation<Void, Error>] = []
                 state.withLock { state in
+                    state.sleepHistory.append(duration)
                     if state.cancelled.remove(token) != nil || Task.isCancelled {
                         immediate = .failure(CancellationError())
                     } else {

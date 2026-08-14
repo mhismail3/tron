@@ -123,6 +123,7 @@ final class AppModel {
     let profiles: GatewayProfileStore
     private let cache: SnapshotCache
     private let clock: MonotonicClock
+    private let reconnectDelayPolicy: ReconnectDelayPolicy
     private let uuidSource: UUIDSource
     private let performanceSignposts: any PerformanceSignposting
     private let pairer: GatewayPairer
@@ -206,6 +207,8 @@ final class AppModel {
     private var lifecycleTransitionWaiters: [Int: [CheckedContinuation<Void, Never>]] = [:]
     private var eventTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
+    private var reconnectAttemptGeneration = 0
+    private var reconnectCanBeAccelerated = false
     private var pairingAttempt: PairingAttempt?
     private var settingsLoadGenerationByTarget: [SettingsTarget: Int] = [:]
     private var providerLoadGenerationByTarget: [ProviderCatalogTarget: Int] = [:]
@@ -235,6 +238,7 @@ final class AppModel {
         profiles: GatewayProfileStore = GatewayProfileStore(),
         cache: SnapshotCache = SnapshotCache(),
         clock: MonotonicClock = .continuous,
+        reconnectDelayPolicy: ReconnectDelayPolicy = .standard,
         uuidSource: UUIDSource = .random,
         pairer: GatewayPairer = GatewayPairer(),
         pairingCommit: PairingCommit? = nil,
@@ -245,6 +249,7 @@ final class AppModel {
         self.profiles = profiles
         self.cache = cache
         self.clock = clock
+        self.reconnectDelayPolicy = reconnectDelayPolicy
         self.uuidSource = uuidSource
         self.performanceSignposts = performanceSignposts
         self.pairer = pairer
@@ -422,7 +427,9 @@ final class AppModel {
     func becameActive() {
         guard lifecyclePhase.admitsWork else { return }
         guard connectionState == .connected else {
-            if connectionState != .connecting, connectionState != .reconnecting { scheduleReconnect(immediate: true) }
+            if connectionState != .connecting {
+                requestReconnect(immediate: true, replaceExisting: true)
+            }
             return
         }
         // Scene activation can be delivered more than once while system network
@@ -530,6 +537,8 @@ final class AppModel {
         let refresh = refreshTask
         let events = final ? eventTask : nil
         reconnectTask = nil
+        reconnectAttemptGeneration &+= 1
+        reconnectCanBeAccelerated = false
         foregroundReconciliationTask = nil
         refreshTask = nil
         reconnect?.cancel()
@@ -575,13 +584,32 @@ final class AppModel {
     }
 
     private func cancelReconnect() {
-        reconnectTask?.cancel()
+        let task = reconnectTask
         reconnectTask = nil
+        reconnectAttemptGeneration &+= 1
+        reconnectCanBeAccelerated = false
+        task?.cancel()
     }
 
-    private func finishReconnect(_ generation: Int) {
-        guard admitsLifecycle(generation) else { return }
+    private func admitsReconnect(lifecycleGeneration: Int, attemptGeneration: Int) -> Bool {
+        admitsLifecycle(lifecycleGeneration) && reconnectAttemptGeneration == attemptGeneration
+    }
+
+    private func requireReconnect(lifecycleGeneration: Int, attemptGeneration: Int) throws {
+        try Task.checkCancellation()
+        guard admitsReconnect(
+            lifecycleGeneration: lifecycleGeneration,
+            attemptGeneration: attemptGeneration
+        ) else { throw CancellationError() }
+    }
+
+    private func finishReconnect(lifecycleGeneration: Int, attemptGeneration: Int) {
+        guard admitsReconnect(
+            lifecycleGeneration: lifecycleGeneration,
+            attemptGeneration: attemptGeneration
+        ) else { return }
         reconnectTask = nil
+        reconnectCanBeAccelerated = false
     }
 
     private func invalidateProfileScopedLoads() {
@@ -709,7 +737,10 @@ final class AppModel {
 
     private func requestReconnect(immediate: Bool = false, replaceExisting: Bool = false) {
         guard lifecyclePhase.admitsWork, profiles.selected != nil else { return }
-        if replaceExisting { cancelReconnect() }
+        if replaceExisting, reconnectTask != nil {
+            guard reconnectCanBeAccelerated else { return }
+            cancelReconnect()
+        }
         guard reconnectTask == nil else { return }
         connectionState = .reconnecting
         scheduleReconnect(immediate: immediate)
@@ -717,45 +748,92 @@ final class AppModel {
 
     private func scheduleReconnect(immediate: Bool = false) {
         guard lifecyclePhase.admitsWork, profiles.selected != nil, reconnectTask == nil else { return }
-        let generation = lifecyclePhase.generation
+        let lifecycleGeneration = lifecyclePhase.generation
+        reconnectAttemptGeneration &+= 1
+        let attemptGeneration = reconnectAttemptGeneration
         let clock = self.clock
+        let delayPolicy = reconnectDelayPolicy
+        reconnectCanBeAccelerated = !immediate
         reconnectTask = Task { [weak self] in
             do {
-                if !immediate { try await clock.sleep(.seconds(2)) }
-                var delay = 2.0
+                if !immediate {
+                    try await clock.sleep(delayPolicy.delay(nominalSeconds: delayPolicy.initialSeconds))
+                    guard let self, self.admitsReconnect(
+                        lifecycleGeneration: lifecycleGeneration,
+                        attemptGeneration: attemptGeneration
+                    ) else { return }
+                    self.reconnectCanBeAccelerated = false
+                }
+                var nominalDelay = delayPolicy.initialSeconds
                 while !Task.isCancelled {
-                    guard let self, self.admitsLifecycle(generation) else { return }
+                    guard let self, self.admitsReconnect(
+                        lifecycleGeneration: lifecycleGeneration,
+                        attemptGeneration: attemptGeneration
+                    ) else { return }
                     self.connectionState = .reconnecting
                     do {
                         let connection = try await self.client.reconnectForLifecycle()
-                        try self.requireLifecycle(generation)
+                        try self.requireReconnect(
+                            lifecycleGeneration: lifecycleGeneration,
+                            attemptGeneration: attemptGeneration
+                        )
                         self.gatewayConnectionID = connection.id
                         try await self.client.activateEvents(connectionID: connection.id)
-                        try self.requireLifecycle(generation)
+                        try self.requireReconnect(
+                            lifecycleGeneration: lifecycleGeneration,
+                            attemptGeneration: attemptGeneration
+                        )
                         self.gatewayInfo = connection.info
                         self.invalidateSessionConnectionOwnership()
                         await self.refreshAll()
-                        try self.requireLifecycle(generation)
+                        try self.requireReconnect(
+                            lifecycleGeneration: lifecycleGeneration,
+                            attemptGeneration: attemptGeneration
+                        )
                         await self.restoreMountedPresentationAfterReconnect()
-                        try self.requireLifecycle(generation)
+                        try self.requireReconnect(
+                            lifecycleGeneration: lifecycleGeneration,
+                            attemptGeneration: attemptGeneration
+                        )
                         await self.reattachTerminals()
-                        try self.requireLifecycle(generation)
+                        try self.requireReconnect(
+                            lifecycleGeneration: lifecycleGeneration,
+                            attemptGeneration: attemptGeneration
+                        )
                         self.connectionState = .connected
-                        self.finishReconnect(generation)
+                        self.finishReconnect(
+                            lifecycleGeneration: lifecycleGeneration,
+                            attemptGeneration: attemptGeneration
+                        )
                         return
                     } catch let failure as GatewayFailure where failure.code == "unauthenticated" {
-                        guard self.admitsLifecycle(generation) else { return }
+                        guard !Task.isCancelled, self.admitsReconnect(
+                            lifecycleGeneration: lifecycleGeneration,
+                            attemptGeneration: attemptGeneration
+                        ) else { return }
                         self.connectionState = .unauthorized
                         self.lastError = failure.message
-                        self.finishReconnect(generation)
+                        self.finishReconnect(
+                            lifecycleGeneration: lifecycleGeneration,
+                            attemptGeneration: attemptGeneration
+                        )
                         return
                     } catch is CancellationError {
                         return
                     } catch {
-                        guard self.admitsLifecycle(generation) else { return }
+                        guard !Task.isCancelled, self.admitsReconnect(
+                            lifecycleGeneration: lifecycleGeneration,
+                            attemptGeneration: attemptGeneration
+                        ) else { return }
                         self.connectionState = .offline(error.localizedDescription)
-                        try await clock.sleep(.seconds(delay))
-                        delay = min(delay * 1.7, 15)
+                        self.reconnectCanBeAccelerated = true
+                        try await clock.sleep(delayPolicy.delay(nominalSeconds: nominalDelay))
+                        guard self.admitsReconnect(
+                            lifecycleGeneration: lifecycleGeneration,
+                            attemptGeneration: attemptGeneration
+                        ) else { return }
+                        self.reconnectCanBeAccelerated = false
+                        nominalDelay = delayPolicy.nextNominalSeconds(after: nominalDelay)
                     }
                 }
             } catch is CancellationError {
