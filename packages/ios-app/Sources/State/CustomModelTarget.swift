@@ -3,17 +3,30 @@ enum CustomModelTarget: Hashable, Sendable {
 }
 
 struct CustomModelDraftOwner: Equatable, Sendable {
-    private(set) var isDirty = false
+    private(set) var revision = 0
+    private var installedRevision = 0
+
+    var isDirty: Bool { revision != installedRevision }
+    var admitsPublication: Bool { !isDirty }
 
     mutating func markEdited() {
-        isDirty = true
+        revision &+= 1
     }
 
     mutating func markInstalled() {
-        isDirty = false
+        installedRevision = revision
     }
 
-    var admitsPublication: Bool { !isDirty }
+    func beginSave() -> Int {
+        revision
+    }
+
+    @discardableResult
+    mutating func completeSave(revision submittedRevision: Int) -> Bool {
+        guard revision == submittedRevision else { return false }
+        installedRevision = submittedRevision
+        return true
+    }
 }
 
 struct CustomModelLoadID: Hashable {

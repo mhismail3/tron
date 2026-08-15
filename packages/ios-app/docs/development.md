@@ -195,7 +195,15 @@ target-isolated newest-load admission, atomic provider/model publication, bounde
 profile-retirement rejection across parallel reads and pagination, operation-keyed prompt/event
 state, bounded event-before-response quarantine and promotion, stale response/cancellation safety,
 exact-target completion refresh, receipt-backed forced refresh/logout, event-only invalidation, and
-nested façade observation. `AppModelInvalidationTests` scripts every
+nested façade observation. `PackageConfigurationCoordinatorTests` owns typed target isolation,
+newest list/check admission, admitted-error handling, event-only invalidation, closed mutation
+wires and timeouts, stable receipt replay, pre-confirmation marker stability, admitted-versus-stale
+mutation failures, same-profile uncertainty preservation, exact-target reload, profile retirement,
+and nested façade observation. `CustomModelConfigurationCoordinatorTests` owns newest read and
+mutation admission, validate-before-put ordering, no-put failure/retirement, current-versus-retired
+validation/put errors, stable put receipts, A → B → A rejection, lifecycle-bound restart failures,
+cancellation-safe presentation, nested observation, and exact draft-revision save admission.
+`AppModelInvalidationTests` scripts every
 successful response and proves publication cannot schedule its own next load; event tests
 separately prove one generation advance per canonical invalidation. Settings requests use a
 typed target: global requests omit CWD, while project requests carry their exact project CWD.
@@ -203,10 +211,9 @@ The focused suite deliberately completes global/project settings and global/sess
 catalogs out of order, then reverses two same-target reads; installed values must remain under
 their request key and the newest same-target request must win. It also proves auth completion
 retains its catalog target after failed cancellation and unknown operations trigger no guessed reload.
-Package cases similarly reverse global/workspace and same-target inventory responses, verify
-mutation CWD/local parameters, and require mutation-completed update markers to be cleared.
-A paired custom-model case proves the newer typed-global document read wins reversed completion.
-`SettingsDraftStoreTests` prove target isolation, pre-response editing, invalidation rejection,
+Package and custom-model ordering and mutation cases now live with their extracted owners rather
+than in `AppModelInvalidationTests`. `SettingsDraftStoreTests` prove target isolation,
+pre-response editing, invalidation rejection,
 provider-target load identity, stale save/scope-round-trip admission across model/default, runtime,
 and resource drafts, changed-field-only wire patches, and explicit redacted proxy set/clear handling.
 
@@ -215,6 +222,8 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/SettingsTrustCoordinatorTests \
   -only-testing:TronMobileTests/ProviderAuthCoordinatorTests \
+  -only-testing:TronMobileTests/PackageConfigurationCoordinatorTests \
+  -only-testing:TronMobileTests/CustomModelConfigurationCoordinatorTests \
   -only-testing:TronMobileTests/AppModelInvalidationTests \
   -only-testing:TronMobileTests/AppModelEventTests/globalConfigurationInvalidations \
   -only-testing:TronMobileTests/NewSessionConfigurationOwnerTests \

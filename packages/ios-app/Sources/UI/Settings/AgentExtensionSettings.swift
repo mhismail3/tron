@@ -6,8 +6,8 @@ struct PackagesSettingsView: View {
     private var target: PackageConfigurationTarget {
         PackageConfigurationTarget(cwd: projectCWD)
     }
-    private var inventory: PackageInventory? { model.packageInventoryByTarget[target] }
-    private var updates: [PackageUpdate] { model.packageUpdatesByTarget[target] ?? [] }
+    private var inventory: PackageInventory? { model.packageInventory(for: target) }
+    private var updates: [PackageUpdate] { model.packageUpdates(for: target) }
     @State private var source = ""
     @State private var local = false
     @State private var packageToRemove: PackageSummary?
@@ -55,8 +55,8 @@ struct PackagesSettingsView: View {
                             TronSettingsDivider(accent: .tronCyan)
                             Button("Update All") {
                                 Task {
-                                    do { try await model.mutatePackage(action: "update", source: nil, local: false, target: target) }
-                                    catch { model.lastError = error.localizedDescription }
+                                    do { try await model.mutatePackage(action: .update, source: nil, local: false, target: target) }
+                                    catch { model.presentConfigurationActionError(error) }
                                 }
                             }
                             .buttonStyle(TronActionButtonStyle(role: .primary))
@@ -150,9 +150,9 @@ struct PackagesSettingsView: View {
         Task {
             defer { workingSources.remove(value) }
             do {
-                try await model.mutatePackage(action: "install", source: value, local: local, target: target)
+                try await model.mutatePackage(action: .install, source: value, local: local, target: target)
                 source = ""
-            } catch { model.lastError = error.localizedDescription }
+            } catch { model.presentConfigurationActionError(error) }
         }
     }
 
@@ -160,8 +160,8 @@ struct PackagesSettingsView: View {
         workingSources.insert(package.source)
         Task {
             defer { workingSources.remove(package.source) }
-            do { try await model.mutatePackage(action: "update", source: package.source, local: package.scope == .project, target: target) }
-            catch { model.lastError = error.localizedDescription }
+            do { try await model.mutatePackage(action: .update, source: package.source, local: package.scope == .project, target: target) }
+            catch { model.presentConfigurationActionError(error) }
         }
     }
 
@@ -170,8 +170,8 @@ struct PackagesSettingsView: View {
         packageToRemove = nil
         Task {
             defer { workingSources.remove(package.source) }
-            do { try await model.mutatePackage(action: "remove", source: package.source, local: package.scope == .project, target: target) }
-            catch { model.lastError = error.localizedDescription }
+            do { try await model.mutatePackage(action: .remove, source: package.source, local: package.scope == .project, target: target) }
+            catch { model.presentConfigurationActionError(error) }
         }
     }
 }
@@ -441,7 +441,7 @@ struct CustomModelsSettingsView: View {
 
     private func loadFromProjection() {
         guard !saving, draftOwner.admitsPublication,
-              let root = model.customModelsByTarget[target]?.objectValue else { return }
+              let root = model.customModels(for: target)?.objectValue else { return }
         let value = root["document"] ?? .object(["providers": .object([:])])
         documentRoot = value.objectValue ?? [:]
         document = value.prettyPrinted
@@ -517,11 +517,12 @@ struct CustomModelsSettingsView: View {
             if !advancedDocumentEdited { rebuildDocument() }
             guard let data = document.data(using: .utf8) else { return }
             let value = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
-            try await model.replaceCustomModels(value, target: target)
-            draftOwner.markInstalled()
-            advancedDocumentEdited = false
-            try await model.restartGateway()
-        } catch { model.lastError = error.localizedDescription }
+            let submittedRevision = draftOwner.beginSave()
+            try await model.replaceCustomModelsAndRestart(value, target: target)
+            if draftOwner.completeSave(revision: submittedRevision) {
+                advancedDocumentEdited = false
+            }
+        } catch { model.presentConfigurationActionError(error) }
     }
 }
 

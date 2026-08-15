@@ -68,6 +68,8 @@ final class AppModel {
     private let sessionImports: SessionImportCoordinator
     private let settingsTrust: SettingsTrustCoordinator
     private let providerAuth: ProviderAuthCoordinator
+    private let packageConfiguration: PackageConfigurationCoordinator
+    private let customModelConfiguration: CustomModelConfigurationCoordinator
 
     var connectionState: ConnectionState { lifecycle.connectionState }
     /// False only while the first launch credential/connection decision is
@@ -83,8 +85,8 @@ final class AppModel {
     private let sessionPresentation: SessionPresentationStore
     var settingsInvalidationGeneration: Int { settingsTrust.settingsInvalidationGeneration }
     var providerInvalidationGeneration: Int { providerAuth.invalidationGeneration }
-    var packageInvalidationGeneration = 0
-    var customModelInvalidationGeneration = 0
+    var packageInvalidationGeneration: Int { packageConfiguration.invalidationGeneration }
+    var customModelInvalidationGeneration: Int { customModelConfiguration.invalidationGeneration }
     var trustRevision: Int { settingsTrust.trustRevision }
     var pairedDevices: [PairedDevice] = []
     var legacyImportAvailable = false
@@ -110,9 +112,6 @@ final class AppModel {
     var loadingEarlierTranscript: Bool { sessionPresentation.loadingEarlierTranscript }
     var commands: [CommandInfo] { sessionPresentation.commands }
     var resources: JSONValue? { sessionPresentation.resources }
-    var packageInventoryByTarget: [PackageConfigurationTarget: PackageInventory] = [:]
-    var packageUpdatesByTarget: [PackageConfigurationTarget: [PackageUpdate]] = [:]
-    var customModelsByTarget: [CustomModelTarget: JSONValue] = [:]
     private var terminalState = TerminalCoordinator()
     var setupComplete: Bool {
         get {
@@ -128,9 +127,6 @@ final class AppModel {
     }
 
     private var eventTask: Task<Void, Never>?
-    private var packageLoadGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
-    private var packageUpdateGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
-    private var customModelLoadGenerationByTarget: [CustomModelTarget: Int] = [:]
     private var deviceLoadGeneration = 0
     private var legacyImportLoadGeneration = 0
     private var refreshTask: Task<Void, Never>?
@@ -190,6 +186,16 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
         )
+        let packageConfiguration = PackageConfigurationCoordinator(
+            client: client,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
+        let customModelConfiguration = CustomModelConfigurationCoordinator(
+            client: client,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
         let resolvedSessionImportUpload = sessionImportUpload ?? { name, mimeType, data in
             try await client.upload(name: name, mimeType: mimeType, data: data)
         }
@@ -204,6 +210,8 @@ final class AppModel {
         )
         self.settingsTrust = settingsTrust
         self.providerAuth = providerAuth
+        self.packageConfiguration = packageConfiguration
+        self.customModelConfiguration = customModelConfiguration
         self.sessionPresentation = SessionPresentationStore(
             client: client,
             performanceSignposts: performanceSignposts
@@ -224,6 +232,8 @@ final class AppModel {
         sessionPresentation.delegate = self
         settingsTrust.delegate = self
         providerAuth.delegate = self
+        packageConfiguration.delegate = self
+        customModelConfiguration.delegate = self
         let events = client.events
         eventTask = Task { [weak self, events] in
             for await delivery in events {
@@ -304,6 +314,25 @@ final class AppModel {
 
     func setHostedProviderInvalidationGeneration(_ generation: Int) {
         providerAuth.setHostedInvalidationGeneration(generation)
+    }
+
+    func installHostedPackageInventory(
+        _ inventory: PackageInventory?,
+        for target: PackageConfigurationTarget
+    ) {
+        packageConfiguration.installHostedInventory(inventory, for: target)
+    }
+
+    func setHostedPackageInvalidationGeneration(_ generation: Int) {
+        packageConfiguration.setHostedInvalidationGeneration(generation)
+    }
+
+    func installHostedCustomModels(_ value: JSONValue?, for target: CustomModelTarget) {
+        customModelConfiguration.installHostedModels(value, for: target)
+    }
+
+    func setHostedCustomModelInvalidationGeneration(_ generation: Int) {
+        customModelConfiguration.setHostedInvalidationGeneration(generation)
     }
 
     func installHostedProviderAuthOperation(
@@ -402,6 +431,11 @@ final class AppModel {
         noticeStore.removeAll()
     }
 
+    func presentConfigurationActionError(_ error: Error) {
+        guard !(error is CancellationError) else { return }
+        lastError = error.localizedDescription
+    }
+
     func start() async {
         await lifecycle.start()
     }
@@ -431,9 +465,6 @@ final class AppModel {
         workspaceLoadGeneration &+= 1
         deviceLoadGeneration &+= 1
         legacyImportLoadGeneration &+= 1
-        packageLoadGenerationByTarget = packageLoadGenerationByTarget.mapValues { $0 &+ 1 }
-        packageUpdateGenerationByTarget = packageUpdateGenerationByTarget.mapValues { $0 &+ 1 }
-        customModelLoadGenerationByTarget = customModelLoadGenerationByTarget.mapValues { $0 &+ 1 }
     }
 
     private func clearGatewayProjection() {
@@ -446,9 +477,8 @@ final class AppModel {
         hiddenSessionIDs.removeAll()
         providerAuth.clearProfile()
         settingsTrust.clearProfile()
-        packageInventoryByTarget.removeAll()
-        packageUpdatesByTarget.removeAll()
-        customModelsByTarget.removeAll()
+        packageConfiguration.clearProfile()
+        customModelConfiguration.clearProfile()
         lastError = nil
         onboardingError = nil
         pendingAttachmentsByTarget = .init()
@@ -958,102 +988,68 @@ final class AppModel {
         try await settingsTrust.setTrust(target: target, decision: decision)
     }
 
+    func packageInventory(for target: PackageConfigurationTarget) -> PackageInventory? {
+        packageConfiguration.inventory(for: target)
+    }
+
+    func packageUpdates(for target: PackageConfigurationTarget) -> [PackageUpdate] {
+        packageConfiguration.updates(for: target)
+    }
+
     @discardableResult
     func loadPackages(target: PackageConfigurationTarget) async -> Bool {
-        struct Params: Codable { let cwd: String? }
-        let generation = (packageLoadGenerationByTarget[target] ?? 0) + 1
-        packageLoadGenerationByTarget[target] = generation
-        do {
-            let inventory: PackageInventory = try await client.request(
-                "packages.list",
-                Params(cwd: target.cwd),
-                timeout: .seconds(120)
-            )
-            guard packageLoadGenerationByTarget[target] == generation else { return false }
-            packageInventoryByTarget[target] = inventory
-            return true
-        } catch {
-            guard packageLoadGenerationByTarget[target] == generation else { return false }
-            surface(error)
-            return false
-        }
+        await packageConfiguration.load(target: target)
     }
 
     @discardableResult
     func checkPackageUpdates(target: PackageConfigurationTarget) async -> Bool {
-        struct Params: Codable { let cwd: String? }
-        struct Response: Decodable { let updates: [PackageUpdate] }
-        let generation = (packageUpdateGenerationByTarget[target] ?? 0) + 1
-        packageUpdateGenerationByTarget[target] = generation
-        do {
-            let response: Response = try await client.request(
-                "packages.checkUpdates",
-                Params(cwd: target.cwd),
-                timeout: .seconds(180)
-            )
-            guard packageUpdateGenerationByTarget[target] == generation else { return false }
-            packageUpdatesByTarget[target] = response.updates
-            return true
-        } catch {
-            guard packageUpdateGenerationByTarget[target] == generation else { return false }
-            surface(error)
-            return false
-        }
+        await packageConfiguration.checkUpdates(target: target)
     }
 
     func mutatePackage(
-        action: String,
+        action: PackageMutationAction,
         source: String?,
         local: Bool,
         target: PackageConfigurationTarget
     ) async throws {
-        struct Params: Codable { let source: String?; let local: Bool; let cwd: String?; let commandId: String }
-        let method = "packages.\(action)"
-        let commandID = uuidSource.next().uuidString
-        let params = Params(source: source, local: local, cwd: target.cwd, commandId: commandID)
-        _ = try await mutationExecutor.performValue(method: method, commandID: commandID) {
-            try await client.requestValue(method, params, timeout: .seconds(300))
+        guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
+        do {
+            try await packageConfiguration.mutate(action, source: source, local: local, target: target)
+        } catch {
+            guard admitsLifecycle(admission) else { throw CancellationError() }
+            throw error
         }
-        if action == "update", source == nil {
-            packageUpdatesByTarget[target] = []
-        } else if action == "update" || action == "remove", let source {
-            packageUpdatesByTarget[target]?.removeAll { $0.source == source }
-        }
-        _ = await loadPackages(target: target)
+        try requireLifecycle(admission)
+    }
+
+    func customModels(for target: CustomModelTarget) -> JSONValue? {
+        customModelConfiguration.models(for: target)
     }
 
     @discardableResult
     func loadCustomModels(target: CustomModelTarget) async -> Bool {
-        let generation = (customModelLoadGenerationByTarget[target] ?? 0) + 1
-        customModelLoadGenerationByTarget[target] = generation
-        do {
-            let value = try await client.requestValue("models.custom.get", EmptyParams())
-            guard customModelLoadGenerationByTarget[target] == generation else { return false }
-            customModelsByTarget[target] = value
-            return true
-        } catch {
-            guard customModelLoadGenerationByTarget[target] == generation else { return false }
-            surface(error)
-            return false
-        }
+        await customModelConfiguration.load(target: target)
     }
 
-    func replaceCustomModels(_ document: JSONValue, target: CustomModelTarget) async throws {
-        let client = self.client
-        let uuidSource = self.uuidSource
-        try await CustomModelDocumentWriter(request: { method, params in
-            try await client.requestValue(method, params)
-        }, put: { [weak self] method, params in
-            guard let self,
-                  let commandID = params.objectValue?["commandId"]?.stringValue else {
-                throw GatewayFailure(code: "invalid_request", message: "Custom model command ID is missing.", retryable: false, details: nil)
-            }
-            return try await self.mutationExecutor.performValue(method: method, commandID: commandID) {
-                try await client.requestValue(method, params)
-            }
-        }, makeCommandID: {
-            uuidSource.next().uuidString
-        }).replace(document)
+    func replaceCustomModelsAndRestart(
+        _ document: JSONValue,
+        target: CustomModelTarget
+    ) async throws {
+        guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
+        try requireLifecycle(admission)
+        do {
+            try await customModelConfiguration.replace(document, target: target)
+        } catch {
+            guard admitsLifecycle(admission) else { throw CancellationError() }
+            throw error
+        }
+        try requireLifecycle(admission)
+        do {
+            try await restartGateway(admission: admission)
+        } catch {
+            guard admitsLifecycle(admission) else { throw CancellationError() }
+            throw error
+        }
     }
 
     nonisolated static func supportsSafeGatewayRestart(capabilities: [String]) -> Bool {
@@ -1061,6 +1057,19 @@ final class AppModel {
     }
 
     func restartGateway() async throws {
+        guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
+        do {
+            try await restartGateway(admission: admission)
+        } catch {
+            guard admitsLifecycle(admission) else { throw CancellationError() }
+            throw error
+        }
+    }
+
+    private func restartGateway(
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async throws {
+        try requireLifecycle(admission)
         guard Self.supportsSafeGatewayRestart(capabilities: gatewayInfo?.capabilities ?? []) else {
             throw GatewayFailure(
                 code: "unsupported",
@@ -1072,9 +1081,16 @@ final class AppModel {
         struct Params: Codable { let commandId: String }
         struct Response: Codable { let restarting: Bool; let scheduled: Bool; let activeSessionIds: [String] }
         let commandID = uuidSource.next().uuidString
-        let response: Response = try await mutationExecutor.perform(method: "gateway.restart", commandID: commandID) {
-            try await client.request("gateway.restart", Params(commandId: commandID))
+        let response: Response
+        do {
+            response = try await mutationExecutor.perform(method: "gateway.restart", commandID: commandID) {
+                try await client.request("gateway.restart", Params(commandId: commandID))
+            }
+        } catch {
+            guard admitsLifecycle(admission) else { throw CancellationError() }
+            throw error
         }
+        try requireLifecycle(admission)
         if response.scheduled {
             postNotice(
                 "Gateway restart scheduled after \(response.activeSessionIds.count) active agent run\(response.activeSessionIds.count == 1 ? "" : "s") finishes.",
@@ -1438,9 +1454,9 @@ final class AppModel {
         case "providers.changed":
             providerAuth.noteProvidersChanged()
         case "packages.changed":
-            packageInvalidationGeneration &+= 1
+            packageConfiguration.notePackagesChanged()
         case "models.customChanged":
-            customModelInvalidationGeneration &+= 1
+            customModelConfiguration.noteCustomModelsChanged()
         case "packages.progress", "packages.completed":
             postNotice(
                 event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…",
@@ -1706,6 +1722,18 @@ extension AppModel: ProviderAuthCoordinatorDelegate {
 
     func providerAuthCoordinatorSetCompletionError(_ message: String?) {
         lastError = message
+    }
+}
+
+extension AppModel: PackageConfigurationCoordinatorDelegate {
+    func packageConfigurationCoordinatorSurface(_ error: Error) {
+        surface(error)
+    }
+}
+
+extension AppModel: CustomModelConfigurationCoordinatorDelegate {
+    func customModelConfigurationCoordinatorSurface(_ error: Error) {
+        surface(error)
     }
 }
 

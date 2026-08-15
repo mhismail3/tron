@@ -189,7 +189,15 @@ newest admitted operation and is synchronously revoked on failure, cancellation,
 retirement. Provider and model pages publish as one atomic catalog; repeated cursors reject
 the complete read, and profile retirement synchronously discards catalogs and auth routing.
 Its forced refresh and logout commands use the shared receipt executor before reloading the
-exact captured target.
+exact captured target. `PackageConfigurationCoordinator` solely owns target-keyed inventories,
+update markers, newest-list/check/mutation admission, event-only invalidation, closed
+install/update/remove wire construction, and confirmed exact-target reload effects. The separate
+`CustomModelConfigurationCoordinator` owns typed-global reads and validate-before-put mutation
+admission. Both synchronously clear disposable projections and reject suspended work across
+profile retirement—including A → B → A replacement—and both reuse the shared confirmed-mutation
+executor rather than defining receipt policy. Every throwing mutation boundary rechecks the
+captured owner admission before propagating an error: retired or superseded work becomes
+cancellation, while current-profile uncertainty and application failures remain visible.
 `AppModel` only exposes observed computed reads and forwards operations; screen-owned
 revisioned draft stores remain local to their existing settings surfaces. Settings
 surfaces use typed `.global` or `.project(cwd:)` targets; installed values and automatic
@@ -210,8 +218,13 @@ Trust reads and mutations require a typed nonempty project target; onboarding, p
 and new-session admission discard stale workspace results, and trust invalidations reopen the
 new-session readiness gate until the matching workspace is inspected again. Custom-model
 documents have one explicit typed global target and generation-owned publication, so a slower
-older read cannot replace a newer document. Guided and advanced editor changes share one draft
-owner; automatic invalidation loads cannot replace either form of unsaved input. Model/default
+older read cannot replace a newer document. Validation and put revalidate the same profile and
+mutation generation before every mutating boundary; retirement after validation never sends put.
+The Save and Restart flow captures one lifecycle admission around both operations, so a confirmed
+save cannot restart a replacement profile and a late restart failure cannot surface into replacement-profile
+UI. Configuration screens discard cancellation while preserving current-operation errors. Guided and advanced editor changes share one monotonic
+revision owner; automatic invalidation loads cannot replace either form of unsaved input, and only
+the exact submitted revision can become clean after a suspended save. Model/default
 settings keep separate global/project drafts with baselines and monotonic revisions. Runtime,
 resource-location, and model/default screens all use that owner. Scope changes preserve dirty input,
 reloads cannot overwrite it, and a save completion can mark only the exact draft revision it
