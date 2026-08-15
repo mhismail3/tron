@@ -219,6 +219,10 @@ struct ChatViewScrollHarnessTests {
 
                 var newest = harness.snapshot
                 let initialSequence = newest.eventSequence
+                let initialProjectionOrdinal = try #require(
+                    harness.probeObservation.installedProjectionSourceOrdinal
+                )
+                let initialProjectionInstalls = harness.probeObservation.projectionInstallCount
                 for offset in 1...30 {
                     newest.revision += 1
                     newest.eventSequence = initialSequence + offset
@@ -238,10 +242,14 @@ struct ChatViewScrollHarnessTests {
                     viewport: true
                 )
                 let newestInstall = try await harness.recorder.waitUntil {
-                    $0.observation.installedProjectionSourceOrdinal == newest.eventSequence
+                    $0.observation.installedProjectionSourceOrdinal == initialProjectionOrdinal + 30
                 }
                 #expect(newestInstall.observation.installedProjectionRowCount > 0)
                 #expect(newestInstall.observation.isDetached)
+                #expect(
+                    newestInstall.observation.projectionInstallCount
+                        <= initialProjectionInstalls + 2
+                )
             }
         }
     }

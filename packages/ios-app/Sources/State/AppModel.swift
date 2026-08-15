@@ -337,6 +337,20 @@ final class AppModel {
         sessionPresentation.presentationGeneration(for: sessionID)
     }
 
+    func chatProjectionGenerations(
+        for sessionID: String,
+        presentationGeneration: Int
+    ) -> (canonical: Int, timeline: Int)? {
+        guard sessionPresentation.mountedTarget == SessionPresentationIdentity(
+            sessionID: sessionID,
+            generation: presentationGeneration
+        ) else { return nil }
+        return (
+            canonical: sessionPresentation.chatCanonicalGeneration,
+            timeline: sessionPresentation.chatTimelineGeneration
+        )
+    }
+
     func presentationTarget(for sessionID: String) -> SessionPresentationTarget? {
         sessionPresentation.presentationTarget(for: sessionID)
     }
@@ -683,6 +697,16 @@ final class AppModel {
 
     func loadEarlierTranscript(sessionID: String, presentationGeneration: Int) async {
         await sessionPresentation.loadEarlier(
+            sessionID: sessionID,
+            presentationGeneration: presentationGeneration
+        )
+    }
+
+    func discardLoadedTranscriptHistory(
+        sessionID: String,
+        presentationGeneration: Int
+    ) {
+        sessionPresentation.discardLoadedTranscriptHistory(
             sessionID: sessionID,
             presentationGeneration: presentationGeneration
         )
@@ -1642,7 +1666,7 @@ final class AppModel {
     private func saveCache() {
         guard let id = profiles.selected?.id else { return }
         let sessions = sessions
-        let values = sessionPresentation.snapshot.map { [$0] } ?? []
+        let values = sessionPresentation.disposableCacheSnapshot.map { [$0] } ?? []
         Task { await cache.save(profileID: id, sessions: sessions, snapshots: values) }
     }
 

@@ -5,20 +5,25 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     let sessionID: String
     let presentationGeneration: Int
     let runtimeGeneration: String
-    let revision: Int
-    let eventSequence: Int
+    let canonicalGeneration: Int
+    let timelineGeneration: Int
     let transcriptStart: Int?
     let transcriptTotal: Int?
     let transcriptCount: Int
     let firstTranscriptID: String?
     let lastTranscriptID: String?
 
-    init(snapshot: SessionSnapshot, presentationGeneration: Int) {
+    init(
+        snapshot: SessionSnapshot,
+        presentationGeneration: Int,
+        canonicalGeneration: Int? = nil,
+        timelineGeneration: Int? = nil
+    ) {
         sessionID = snapshot.sessionId
         self.presentationGeneration = presentationGeneration
         runtimeGeneration = snapshot.runtimeGeneration
-        revision = snapshot.revision
-        eventSequence = snapshot.eventSequence
+        self.canonicalGeneration = canonicalGeneration ?? snapshot.revision
+        self.timelineGeneration = timelineGeneration ?? snapshot.eventSequence
         transcriptStart = snapshot.transcriptStart
         transcriptTotal = snapshot.transcriptTotal
         transcriptCount = snapshot.transcript.count
@@ -55,20 +60,85 @@ private struct BuiltChatTranscript: Sendable {
 }
 
 private actor ChatTranscriptProjectionWorker {
-    private let builder: ChatTranscriptProjectionBuilder
+    private struct CanonicalBaseKey: Equatable, Sendable {
+        let sessionID: String
+        let presentationGeneration: Int
+        let runtimeGeneration: String
+        let canonicalGeneration: Int
+        let transcriptStart: Int?
+        let transcriptTotal: Int?
+        let transcriptCount: Int
+        let firstTranscriptID: String?
+        let lastTranscriptID: String?
+        let phase: SessionPhase
+        let toolExecutions: [ToolExecutionState]
 
-    init(builder: @escaping ChatTranscriptProjectionBuilder) {
+        init(tag: ChatTranscriptProjectionTag, snapshot: SessionSnapshot) {
+            sessionID = tag.sessionID
+            presentationGeneration = tag.presentationGeneration
+            runtimeGeneration = tag.runtimeGeneration
+            canonicalGeneration = tag.canonicalGeneration
+            transcriptStart = tag.transcriptStart
+            transcriptTotal = tag.transcriptTotal
+            transcriptCount = tag.transcriptCount
+            firstTranscriptID = tag.firstTranscriptID
+            lastTranscriptID = tag.lastTranscriptID
+            phase = snapshot.phase
+            toolExecutions = snapshot.toolExecutions
+        }
+    }
+
+    private let builder: ChatTranscriptProjectionBuilder
+    private let usesIncrementalProjection: Bool
+    private var canonicalBaseKey: CanonicalBaseKey?
+    private var canonicalBase: ChatTranscriptTimeline?
+    private var canonicalBaseIsInternallyConsistent = false
+
+    init(
+        builder: @escaping ChatTranscriptProjectionBuilder,
+        usesIncrementalProjection: Bool
+    ) {
         self.builder = builder
+        self.usesIncrementalProjection = usesIncrementalProjection
     }
 
     func build(
         snapshot: SessionSnapshot,
         tag: ChatTranscriptProjectionTag
     ) -> BuiltChatTranscript {
-        let timeline = builder(snapshot, tag)
+        let timeline: ChatTranscriptTimeline
+        let isInternallyConsistent: Bool
+        if usesIncrementalProjection,
+           snapshot.toolExecutions.allSatisfy({ $0.status != .running }),
+           let streaming = snapshot.streaming,
+           let live = ChatTranscriptPresentation.isolatedStreamingTimeline(streaming) {
+            let key = CanonicalBaseKey(tag: tag, snapshot: snapshot)
+            if canonicalBaseKey != key || canonicalBase == nil {
+                var baseSnapshot = snapshot
+                baseSnapshot.streaming = nil
+                canonicalBase = builder(baseSnapshot, tag)
+                canonicalBaseKey = key
+                canonicalBaseIsInternallyConsistent = canonicalBase!.isInternallyConsistent
+            }
+            timeline = canonicalBase!.appendingLive(live)
+            isInternallyConsistent = canonicalBaseIsInternallyConsistent
+                && live.isInternallyConsistent
+        } else if usesIncrementalProjection, snapshot.streaming == nil {
+            let key = CanonicalBaseKey(tag: tag, snapshot: snapshot)
+            if canonicalBaseKey != key || canonicalBase == nil {
+                canonicalBase = builder(snapshot, tag)
+                canonicalBaseKey = key
+                canonicalBaseIsInternallyConsistent = canonicalBase!.isInternallyConsistent
+            }
+            timeline = canonicalBase!
+            isInternallyConsistent = canonicalBaseIsInternallyConsistent
+        } else {
+            timeline = builder(snapshot, tag)
+            isInternallyConsistent = timeline.isInternallyConsistent
+        }
         return BuiltChatTranscript(
             timeline: timeline,
-            isInternallyConsistent: timeline.isInternallyConsistent
+            isInternallyConsistent: isInternallyConsistent
         )
     }
 }
@@ -96,11 +166,14 @@ final class ChatTranscriptPresentationStore {
     private(set) var installed: InstalledChatTranscript?
 
     @ObservationIgnored private let projectionWorker: ChatTranscriptProjectionWorker
+    @ObservationIgnored private let installationFrameScheduler: DisplayFrameScheduler?
     @ObservationIgnored private let maximumWaiters: Int
     @ObservationIgnored private var desiredTag: ChatTranscriptProjectionTag?
     @ObservationIgnored private var pending: PendingProjection?
     @ObservationIgnored private var buildingTag: ChatTranscriptProjectionTag?
     @ObservationIgnored private var worker: Task<Void, Never>?
+    @ObservationIgnored private var readyToInstall: InstalledChatTranscript?
+    @ObservationIgnored private var installFrameTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var waiters: [Waiter] = []
     @ObservationIgnored private var nextWaiterID: UInt64 = 0
@@ -108,9 +181,11 @@ final class ChatTranscriptPresentationStore {
     init(
         maximumWaiters: Int = 32,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
+        installationFrameScheduler: DisplayFrameScheduler? = nil,
         builder: Builder? = nil
     ) {
         self.maximumWaiters = max(1, maximumWaiters)
+        self.installationFrameScheduler = installationFrameScheduler
         let admittedBuilder: Builder
         if let builder {
             admittedBuilder = builder
@@ -122,7 +197,10 @@ final class ChatTranscriptPresentationStore {
                 )
             }
         }
-        projectionWorker = ChatTranscriptProjectionWorker(builder: admittedBuilder)
+        projectionWorker = ChatTranscriptProjectionWorker(
+            builder: admittedBuilder,
+            usesIncrementalProjection: builder == nil
+        )
     }
 
     /// Returns true only when this exact source introduced new projection work.
@@ -131,10 +209,12 @@ final class ChatTranscriptPresentationStore {
         precondition(
             ChatTranscriptProjectionTag(
                 snapshot: snapshot,
-                presentationGeneration: tag.presentationGeneration
+                presentationGeneration: tag.presentationGeneration,
+                canonicalGeneration: tag.canonicalGeneration,
+                timelineGeneration: tag.timelineGeneration
             ) == tag
         )
-        if installed?.tag == tag || buildingTag == tag {
+        if installed?.tag == tag || buildingTag == tag || readyToInstall?.tag == tag {
             desiredTag = tag
             pending = nil
             failWaiters(except: tag, error: .superseded)
@@ -195,6 +275,9 @@ final class ChatTranscriptPresentationStore {
         desiredTag = nil
         pending = nil
         buildingTag = nil
+        readyToInstall = nil
+        installFrameTask?.cancel()
+        installFrameTask = nil
         installed = nil
         failAllWaiters(with: CancellationError())
     }
@@ -223,14 +306,45 @@ final class ChatTranscriptPresentationStore {
                     continue
                 }
                 if self.desiredTag == next.tag {
-                    self.installed = output
-                    self.resumeWaiters(with: output)
+                    self.admitCompleted(output)
                 }
             }
             self.buildingTag = nil
             self.worker = nil
             if self.pending != nil { self.startWorkerIfNeeded() }
         }
+    }
+
+    private func admitCompleted(_ output: InstalledChatTranscript) {
+        guard installationFrameScheduler != nil else {
+            installed = output
+            resumeWaiters(with: output)
+            return
+        }
+        readyToInstall = output
+        guard installFrameTask == nil else { return }
+        let admittedGeneration = generation
+        installFrameTask = Task { [weak self] in
+            guard let self, let installationFrameScheduler else { return }
+            do {
+                try await installationFrameScheduler.nextFrame()
+            } catch {
+                guard !Task.isCancelled, self.generation == admittedGeneration else { return }
+                self.installReadyOutputIfAdmitted()
+                return
+            }
+            guard !Task.isCancelled, self.generation == admittedGeneration else { return }
+            self.installReadyOutputIfAdmitted()
+        }
+    }
+
+    private func installReadyOutputIfAdmitted() {
+        let output = readyToInstall
+        readyToInstall = nil
+        installFrameTask = nil
+        guard let output, desiredTag == output.tag else { return }
+        installed = output
+        resumeWaiters(with: output)
     }
 
     private func resumeWaiters(with output: InstalledChatTranscript) {

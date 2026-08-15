@@ -89,16 +89,21 @@ Stale successful attachments schedule an exact-connection compensating detach un
 newer presentation still owns that terminal.
 It loads a bounded disposable cache first, connects, fetches
 cursor-paginated sessions and model catalogs, and replaces local state with
-authoritative snapshots. Session snapshots carry a byte-bounded current
-transcript tail; `transcriptStart`/`transcriptTotal` expose earlier canonical Pi
-entries, which the chat can request backward without risking an oversized
-WebSocket frame. `ChatTranscriptPresentationStore` serializes snapshot-to-timeline
-preparation off MainActor, coalesces a burst to one pending newest source, and atomically
-installs only an exact tag containing session, mounted presentation, runtime, revision,
-event sequence, and paging bounds/edge identity. It retains at most one installed, one
-building, and one pending immutable snapshot/timeline; it is disposable projection state,
-not a session mirror or event journal. Projection instrumentation reports only aggregate row
-count. Opening
+authoritative snapshots. Session snapshots carry a current transcript tail bounded to
+800 KB and 512 items; `transcriptStart`/`transcriptTotal` expose earlier canonical Pi
+entries, which the chat can request backward in 600 KB/512-item pages without risking an
+oversized or generically truncated WebSocket frame. Page `start`/`end`/`total`, item count,
+neighbor identity, mount, runtime, and subscription ownership must all agree before prepend.
+The presentation owner keeps the newest authoritative tail separate from explicitly loaded
+older browsing rows. A pinned presentation replaces its tail instead of accumulating history;
+a detached reader retains loaded rows, and physical return to latest discards that disposable
+prefix with no control or pixel change. Only the authoritative tail enters the disk cache.
+`ChatTranscriptPresentationStore` serializes snapshot-to-timeline preparation off MainActor,
+coalesces a burst to one pending newest source, and atomically installs only an exact tag
+containing session, mounted presentation, runtime, canonical/timeline generations, and paging
+bounds/edge identity. It retains at most one installed, one building, and one pending immutable
+snapshot/timeline; it is disposable projection state, not a session mirror or event journal.
+Projection instrumentation reports only aggregate row count. Opening
 a new chat presentation always synchronizes a fresh authoritative bounded latest page; disposable cached or previously paged prefixes are never revealed as
 its baseline. The transcript remains behind a nonblank opening surface until the
 two-phase `session.open`/`session.sync` handshake installs its authoritative tail and
@@ -253,15 +258,23 @@ submitted. Mutations diff against the admitted baseline, so editing one project 
 materialize inherited effective values as project overrides. Write-only proxy drafts expose only
 redacted state, encode clearing explicitly, and are scrubbed after a confirmed save. Global defaults
 always use the global model catalog; project defaults use the captured session catalog.
-Chat uses one presentation timeline rather than separate canonical, streaming,
-and live-tool tails. `ChatView.body` never constructs that timeline: typing, focus,
-geometry, toolbar, and sheet invalidations reuse the installed immutable value, while
-streaming revisions are serialized/coalesced off-main. Exact-tag waiters let prepend retain
+Chat exposes one logical presentation timeline rather than independently rendered canonical,
+streaming, and live-tool arrays. Internally its random-access row collection can share an immutable
+canonical prefix with a tiny streaming suffix, so ordinary text/thinking/image streaming updates do
+not scan, copy, validate, or retain another copy of a 10,000-row prefix. Canonical and timeline
+mutation generations advance only for projection-relevant changes; status, editor, widget, and other
+sequenced events do not manufacture projection work. Tool-bearing/running states conservatively use
+the cold projector unless parity is proven. `ChatView.body` never constructs the timeline: typing,
+focus, geometry, toolbar, and sheet invalidations reuse the installed immutable value, while
+streaming revisions are serialized/coalesced off-main and observable installs are limited to a
+display-frame boundary. Exact-tag waiters let prepend retain
 its existing semantic-alias and layout-epoch transaction. This adopts the useful
 pre-Gateway principles of a non-render-path measurement/projection owner and coalesced
 stream updates without reviving the retired Engine, local event reconstruction, or scroll
-proxy architecture. Tool calls, progress, and results join by `toolCallId`; the
-Gateway supplies a monotonic per-run ordinal for parallel calls, and the grouped
+proxy architecture. Tool calls, progress, and results join by `toolCallId`; collapsed rows retain structured
+request/response values without eagerly formatting JSON strings, and the existing detail sheet
+resolves the identical raw/Markdown presentation only when opened. The Gateway supplies a
+monotonic per-run ordinal for parallel calls, and the grouped
 row keeps the first call's identity as it moves from invocation to completion.
 Consolidation applies only to consecutive tool calls: every canonical thinking,
 text, attachment, or notification boundary flushes the current group, preserving

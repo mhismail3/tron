@@ -52,7 +52,12 @@ final class SessionPresentationStore {
     private(set) var target: SessionPresentationIdentity?
     private var pendingTarget: SessionPresentationIdentity?
     private(set) var snapshot: SessionSnapshot?
+    private(set) var chatCanonicalGeneration = 0
+    private(set) var chatTimelineGeneration = 0
     private(set) var isAuthoritative = false
+    @ObservationIgnored private var authoritativeTailSnapshot: SessionSnapshot?
+    @ObservationIgnored private var hasLoadedTranscriptHistory = false
+    @ObservationIgnored private var discardLoadedHistoryAfterCurrentLoad = false
     private(set) var loadingEarlierTranscript = false
     private var revokedTargets = Set<SessionPresentationIdentity>()
     private var nextPresentationGeneration = 0
@@ -89,6 +94,8 @@ final class SessionPresentationStore {
         guard isAuthoritative, ownsSession(sessionID), snapshot?.sessionId == sessionID else { return nil }
         return snapshot
     }
+
+    var disposableCacheSnapshot: SessionSnapshot? { authoritativeTailSnapshot }
 
     func snapshotForOwnedSession(_ sessionID: String) -> SessionSnapshot? {
         guard ownsSession(sessionID) else { return nil }
@@ -198,6 +205,9 @@ final class SessionPresentationStore {
         if pendingTarget == requested { pendingTarget = nil }
         isAuthoritative = false
         snapshot = nil
+        authoritativeTailSnapshot = nil
+        hasLoadedTranscriptHistory = false
+        advanceChatProjection(canonical: true)
         clearSecondaryProjection()
         await closeSubscription(requested.sessionID, expectedTarget: requested)
     }
@@ -218,12 +228,22 @@ final class SessionPresentationStore {
             presentationGeneration: presentationGeneration,
             runtimeGeneration: current.runtimeGeneration,
             before: before,
+            expectedTotal: current.transcriptTotal ?? before + current.transcript.count,
             expectedNextEntryID: current.transcript.first?.id
         )
         struct Params: Codable { let sessionId: String; let before: Int; let expectedNextEntryId: String? }
-        struct Response: Decodable { let items: [TranscriptItem]; let start: Int; let total: Int }
+        struct Response: Decodable {
+            let items: [TranscriptItem]
+            let start: Int
+            let end: Int?
+            let total: Int
+        }
         loadingEarlierTranscript = true
-        defer { loadingEarlierTranscript = false }
+        discardLoadedHistoryAfterCurrentLoad = false
+        defer {
+            loadingEarlierTranscript = false
+            discardLoadedHistoryAfterCurrentLoad = false
+        }
         do {
             let response: Response = try await client.request(
                 "session.transcript",
@@ -241,19 +261,52 @@ final class SessionPresentationStore {
                     presentationGeneration: currentTarget.generation,
                     runtimeGeneration: snapshot.runtimeGeneration,
                     transcriptStart: snapshot.transcriptStart,
+                    transcriptTotal: snapshot.transcriptTotal,
                     firstTranscriptID: snapshot.transcript.first?.id
-                  ) else { return }
+                  ),
+                  request.canInstallPage(
+                    start: response.start,
+                    end: response.end ?? before,
+                    total: response.total,
+                    itemCount: response.items.count,
+                    visibleItemCount: snapshot.transcript.count
+                  ),
+                  !discardLoadedHistoryAfterCurrentLoad else { return }
             let existingIDs = Set(snapshot.transcript.map(\.id))
-            snapshot.transcript = response.items.filter { !existingIDs.contains($0.id) } + snapshot.transcript
+            let pageIDs = Set(response.items.map(\.id))
+            guard pageIDs.count == response.items.count,
+                  response.items.allSatisfy({ !existingIDs.contains($0.id) }) else { return }
+            snapshot.transcript = response.items + snapshot.transcript
             snapshot.transcriptStart = response.start
             snapshot.transcriptTotal = response.total
             self.snapshot = snapshot
+            hasLoadedTranscriptHistory = true
+            advanceChatProjection(canonical: true)
             delegate?.sessionPresentationStoreCheckpointCache()
         } catch is CancellationError {
             return
         } catch {
             delegate?.sessionPresentationStoreSurface(error)
         }
+    }
+
+    func discardLoadedTranscriptHistory(
+        sessionID: String,
+        presentationGeneration: Int
+    ) {
+        guard mountedTarget == SessionPresentationIdentity(
+            sessionID: sessionID,
+            generation: presentationGeneration
+        ) else { return }
+        if loadingEarlierTranscript { discardLoadedHistoryAfterCurrentLoad = true }
+        guard hasLoadedTranscriptHistory,
+              let tail = authoritativeTailSnapshot,
+              tail.sessionId == sessionID,
+              tail.runtimeGeneration == snapshot?.runtimeGeneration else { return }
+        snapshot = tail
+        hasLoadedTranscriptHistory = false
+        advanceChatProjection(canonical: true)
+        delegate?.sessionPresentationStoreCheckpointCache()
     }
 
     func retireConnection() {
@@ -269,6 +322,9 @@ final class SessionPresentationStore {
         target = nil
         pendingTarget = nil
         snapshot = nil
+        authoritativeTailSnapshot = nil
+        hasLoadedTranscriptHistory = false
+        advanceChatProjection(canonical: true)
         isAuthoritative = false
         revokedTargets.removeAll()
         retireConnection()
@@ -285,6 +341,9 @@ final class SessionPresentationStore {
         target = nil
         pendingTarget = nil
         snapshot = nil
+        authoritativeTailSnapshot = nil
+        hasLoadedTranscriptHistory = false
+        advanceChatProjection(canonical: true)
         isAuthoritative = false
         revokedTargets = revokedTargets.filter { $0.sessionID != sessionID }
         deferredEffectsByTarget = deferredEffectsByTarget.filter { $0.key.sessionID != sessionID }
@@ -586,7 +645,13 @@ final class SessionPresentationStore {
                 mode = synchronization.consumeFreshInstallRequirement(sessionID: sessionID)
                     ? .freshPresentation : .reconnect
             }
-            var installed = Self.installingSnapshot(current: snapshot, authoritative: response.session, mode: mode)
+            let visibleCurrent = hasLoadedTranscriptHistory ? snapshot : nil
+            var installed = Self.installingSnapshot(
+                current: visibleCurrent,
+                authoritative: response.session,
+                mode: mode
+            )
+            var installedTail = response.session
             var replayEffects: [ReducerEffect] = []
             let cursor = SessionSynchronizationCoordinator.Cursor(
                 runtimeGeneration: installed.runtimeGeneration,
@@ -604,8 +669,24 @@ final class SessionPresentationStore {
             // Reduce the complete quarantined suffix locally. Snapshot, token,
             // and route-keyed effects become observable only after acknowledgement
             // and contiguity establish the exact installed target.
+            var replayChangedChatTimeline = false
             for event in replay {
-                _ = reduce(event, snapshot: &installed, effects: &replayEffects)
+                _ = reduce(
+                    event,
+                    snapshot: &installed,
+                    effects: &replayEffects,
+                    chatTimelineChanged: &replayChangedChatTimeline
+                )
+                var ignoredEffects: [ReducerEffect] = []
+                var ignoredChatTimelineChange = false
+                _ = reduce(
+                    event,
+                    snapshot: &installedTail,
+                    effects: &ignoredEffects,
+                    chatTimelineChanged: &ignoredChatTimelineChange,
+                    updatesSecondaryRevisions: false,
+                    mergesVisibleTranscript: false
+                )
             }
             guard let installedTarget = synchronizationTarget(
                 for: lease.intent,
@@ -619,6 +700,9 @@ final class SessionPresentationStore {
             subscriptionToken = response.subscriptionToken
             subscriptionTarget = installedTarget
             snapshot = installed
+            authoritativeTailSnapshot = installedTail
+            if case .freshPresentation = mode { hasLoadedTranscriptHistory = false }
+            advanceChatProjection(canonical: true)
             delegate?.sessionPresentationStoreDidUpdateSummary(installed)
             switch lease.intent {
             case .presentation:
@@ -700,8 +784,28 @@ final class SessionPresentationStore {
             return nil
         }
         var effects: [ReducerEffect] = []
-        let resync = reduce(event, snapshot: &current, effects: &effects)
+        var chatTimelineChanged = false
+        let resync = reduce(
+            event,
+            snapshot: &current,
+            effects: &effects,
+            chatTimelineChanged: &chatTimelineChanged
+        )
+        if var tail = authoritativeTailSnapshot {
+            var ignoredEffects: [ReducerEffect] = []
+            var ignoredChatTimelineChange = false
+            _ = reduce(
+                event,
+                snapshot: &tail,
+                effects: &ignoredEffects,
+                chatTimelineChanged: &ignoredChatTimelineChange,
+                updatesSecondaryRevisions: false,
+                mergesVisibleTranscript: false
+            )
+            authoritativeTailSnapshot = tail
+        }
         snapshot = current
+        if chatTimelineChanged { advanceChatProjection(canonical: false) }
         publish(effects, target: mountedTarget)
         return resync
     }
@@ -709,7 +813,10 @@ final class SessionPresentationStore {
     private func reduce(
         _ event: GatewayEvent,
         snapshot: inout SessionSnapshot,
-        effects: inout [ReducerEffect]
+        effects: inout [ReducerEffect],
+        chatTimelineChanged: inout Bool,
+        updatesSecondaryRevisions: Bool = true,
+        mergesVisibleTranscript: Bool = true
     ) -> String? {
         switch event.topic {
         case "session.summary":
@@ -725,7 +832,9 @@ final class SessionPresentationStore {
                 incoming: incoming
             ) {
             case .install:
-                snapshot = Self.mergingVisibleTranscript(current: snapshot, authoritative: incoming)
+                snapshot = mergesVisibleTranscript
+                    ? Self.mergingVisibleTranscript(current: snapshot, authoritative: incoming)
+                    : incoming
             case .ignore:
                 break
             case .resynchronize(let sessionID):
@@ -734,15 +843,24 @@ final class SessionPresentationStore {
         case "session.progress":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
                   case .progress(let item)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
-            snapshot.streaming = item
+            if snapshot.streaming != item {
+                snapshot.streaming = item
+                chatTimelineChanged = true
+            }
             advance(&snapshot, envelope)
         case "session.toolProgress":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
                   case .toolProgress(let tool)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
             if let index = snapshot.toolExecutions.firstIndex(where: { $0.toolCallId == tool.toolCallId }) {
-                if isNewerToolState(tool, than: snapshot.toolExecutions[index]) { snapshot.toolExecutions[index] = tool }
-            } else { snapshot.toolExecutions.append(tool) }
-            snapshot.toolExecutions.sort(by: toolExecutionOrder)
+                if isNewerToolState(tool, than: snapshot.toolExecutions[index]) {
+                    snapshot.toolExecutions[index] = tool
+                    chatTimelineChanged = true
+                }
+            } else {
+                snapshot.toolExecutions.append(tool)
+                chatTimelineChanged = true
+            }
+            if chatTimelineChanged { snapshot.toolExecutions.sort(by: toolExecutionOrder) }
             advance(&snapshot, envelope)
         case "session.interactions":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
@@ -811,21 +929,26 @@ final class SessionPresentationStore {
             advance(&snapshot, envelope)
         case "session.structureChanged":
             guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
-            if envelope.data.objectValue?["branchChanged"]?.boolValue == true {
+            if updatesSecondaryRevisions,
+               envelope.data.objectValue?["branchChanged"]?.boolValue == true {
                 synchronization.requireFreshInstall(sessionID: snapshot.sessionId)
             }
             advance(&snapshot, envelope)
-            structureRevision &+= 1
-            contextRevision &+= 1
+            if updatesSecondaryRevisions {
+                structureRevision &+= 1
+                contextRevision &+= 1
+            }
         case "session.contextChanged":
             guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
             advance(&snapshot, envelope)
-            contextRevision &+= 1
+            if updatesSecondaryRevisions { contextRevision &+= 1 }
         case "session.resourcesChanged":
             guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
             advance(&snapshot, envelope)
-            resourceRevision &+= 1
-            contextRevision &+= 1
+            if updatesSecondaryRevisions {
+                resourceRevision &+= 1
+                contextRevision &+= 1
+            }
         default:
             if let envelope = admitEnvelope(event, snapshot: snapshot) { advance(&snapshot, envelope) }
             else { return resyncIfNeeded(event, snapshot: snapshot) }
@@ -867,8 +990,16 @@ final class SessionPresentationStore {
             incoming: incoming
         ) {
         case .install:
-            let installed = snapshot.map { Self.mergingVisibleTranscript(current: $0, authoritative: incoming) } ?? incoming
+            let installed = hasLoadedTranscriptHistory
+                ? snapshot.map { Self.mergingVisibleTranscript(current: $0, authoritative: incoming) } ?? incoming
+                : incoming
             snapshot = installed
+            authoritativeTailSnapshot = incoming
+            if installed.transcriptStart == incoming.transcriptStart,
+               installed.transcript.map(\.id) == incoming.transcript.map(\.id) {
+                hasLoadedTranscriptHistory = false
+            }
+            advanceChatProjection(canonical: true)
             delegate?.sessionPresentationStoreDidUpdateSummary(installed)
             if installed.transcriptStart == incoming.transcriptStart,
                installed.transcript.count == incoming.transcript.count {
@@ -911,6 +1042,11 @@ final class SessionPresentationStore {
     private func advance(_ snapshot: inout SessionSnapshot, _ envelope: SessionEventEnvelope) {
         snapshot.eventSequence = envelope.eventSequence
         snapshot.revision = max(snapshot.revision, envelope.revision)
+    }
+
+    private func advanceChatProjection(canonical: Bool) {
+        if canonical { chatCanonicalGeneration &+= 1 }
+        chatTimelineGeneration &+= 1
     }
 
     private func isNewerToolState(_ candidate: ToolExecutionState, than current: ToolExecutionState) -> Bool {
@@ -975,7 +1111,7 @@ final class SessionPresentationStore {
             let currentStart = current.transcriptStart ?? 0
             let authoritativeStart = authoritative.transcriptStart ?? 0
             let currentEnd = currentStart + current.transcript.count
-            guard authoritative.phase.isActive, authoritativeStart >= currentEnd else { return authoritative }
+            guard authoritative.phase.isActive, authoritativeStart == currentEnd else { return authoritative }
             var merged = authoritative
             merged.transcript = current.transcript + authoritative.transcript
             merged.transcriptStart = currentStart
@@ -1037,6 +1173,9 @@ final class SessionPresentationStore {
         target = nil
         pendingTarget = nil
         self.snapshot = snapshot
+        authoritativeTailSnapshot = snapshot
+        hasLoadedTranscriptHistory = false
+        advanceChatProjection(canonical: true)
         isAuthoritative = false
     }
 
@@ -1057,7 +1196,27 @@ final class SessionPresentationStore {
 
     func replaceHostedSnapshot(_ snapshot: SessionSnapshot) {
         guard target?.sessionID == snapshot.sessionId else { return }
+        let canonicalChanged = self.snapshot.map {
+            $0.runtimeGeneration != snapshot.runtimeGeneration
+                || $0.transcriptStart != snapshot.transcriptStart
+                || $0.transcriptTotal != snapshot.transcriptTotal
+                || $0.transcript != snapshot.transcript
+        } ?? true
+        let installsLoadedPrefix = authoritativeTailSnapshot.map { tail in
+            tail.runtimeGeneration == snapshot.runtimeGeneration
+                && (
+                    (snapshot.transcriptStart ?? 0) < (tail.transcriptStart ?? 0)
+                        || snapshot.transcript.count > tail.transcript.count
+                )
+                && !Set(tail.transcript.map(\.id)).isDisjoint(with: snapshot.transcript.map(\.id))
+        } ?? false
         self.snapshot = snapshot
+        if installsLoadedPrefix {
+            hasLoadedTranscriptHistory = true
+        } else {
+            authoritativeTailSnapshot = snapshot
+        }
+        advanceChatProjection(canonical: canonicalChanged)
     }
 
     func invalidateHostedPendingPresentation() {
@@ -1071,6 +1230,9 @@ final class SessionPresentationStore {
         self.target = target
         pendingTarget = nil
         self.snapshot = snapshot
+        authoritativeTailSnapshot = snapshot
+        hasLoadedTranscriptHistory = false
+        advanceChatProjection(canonical: true)
         isAuthoritative = true
         revokedTargets.remove(target)
     }

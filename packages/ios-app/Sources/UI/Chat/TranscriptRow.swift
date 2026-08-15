@@ -346,6 +346,7 @@ struct ToolCard: View {
     var error = false
     var request: JSONValue? = nil
     var response: JSONValue? = nil
+    var fallbackContent: JSONValue? = nil
     var timing: ChatToolPresentation? = nil
     @State private var detailPresentation: ToolDetailPresentation?
 
@@ -356,6 +357,7 @@ struct ToolCard: View {
         error: Bool = false,
         request: JSONValue? = nil,
         response: JSONValue? = nil,
+        fallbackContent: JSONValue? = nil,
         timing: ChatToolPresentation? = nil
     ) {
         self.title = title
@@ -364,6 +366,7 @@ struct ToolCard: View {
         self.error = error
         self.request = request
         self.response = response
+        self.fallbackContent = fallbackContent
         self.timing = timing
     }
 
@@ -375,6 +378,7 @@ struct ToolCard: View {
             error: data.error,
             request: data.request,
             response: data.response,
+            fallbackContent: data.fallbackContent,
             timing: data
         )
     }
@@ -443,7 +447,8 @@ struct ToolCard: View {
     }
 
     private var toolDetailContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let detailContent = resolvedContent
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: icon).foregroundStyle(accent)
                 Text(subtitle)
@@ -462,12 +467,12 @@ struct ToolCard: View {
                 ToolActivityAgeText(tool: timing, color: Color.tronTextMuted)
             }
             if let request { toolPayloadBlock("Request", value: request) }
-            if !content.isEmpty, content != response?.prettyPrinted {
-                textPayloadSection
+            if !detailContent.isEmpty, detailContent != response?.prettyPrinted {
+                textPayloadSection(detailContent)
             }
             if let response {
                 toolPayloadBlock(subtitle == "Running" ? "Current result" : "Response", value: response)
-            } else if content.isEmpty, request == nil {
+            } else if detailContent.isEmpty, request == nil {
                 TronSettingsGroup("Details", accent: accent) {
                     TronSettingsRow(
                         icon: icon,
@@ -489,7 +494,7 @@ struct ToolCard: View {
         }
     }
 
-    private var textPayloadSection: some View {
+    private func textPayloadSection(_ content: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(subtitle == "Running" ? "LIVE OUTPUT" : displayTitle == "Run command" ? "RESPONSE" : "DETAILS")
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
@@ -510,6 +515,11 @@ struct ToolCard: View {
                     .tronGlassSurface(accent: accent, tintOpacity: 0.08)
             }
         }
+    }
+
+    private var resolvedContent: String {
+        if !content.isEmpty { return content }
+        return fallbackContent?.prettyPrinted ?? ""
     }
 
     private var accessibilityLabel: String {

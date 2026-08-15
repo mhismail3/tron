@@ -105,9 +105,47 @@ struct ChatTranscriptPresentationStoreTests {
         snapshot.transcriptStart = 8
         let paged = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 10)
 
-        #expect(original.revision == paged.revision)
-        #expect(original.eventSequence == paged.eventSequence)
+        #expect(original.canonicalGeneration == paged.canonicalGeneration)
+        #expect(original.timelineGeneration == paged.timelineGeneration)
         #expect(original != paged)
+    }
+
+    @Test("warm canonical cache rejects changed paging bounds and edge identity")
+    func warmCachePagingParity() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_211)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.transcriptStart = 10
+            snapshot.transcriptTotal = snapshot.transcript.count + 10
+            let signposts = RecordingPerformanceSignposts()
+            let store = ChatTranscriptPresentationStore(performanceSignposts: signposts)
+            var tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 16,
+                canonicalGeneration: 50,
+                timelineGeneration: 1
+            )
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            snapshot.transcript.insert(
+                contentsOf: SessionScenarioBuilder(seed: 1_212)
+                    .historyPage(count: 2, longRowBytes: 16),
+                at: 0
+            )
+            snapshot.transcriptStart = 8
+            tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 16,
+                canonicalGeneration: 50,
+                timelineGeneration: 1
+            )
+            store.submit(snapshot: snapshot, tag: tag)
+            let installed = try await store.waitForInstall(of: tag)
+
+            #expect(installed.timeline == ChatTranscriptPresentation.timeline(in: snapshot))
+            #expect(signposts.events().filter { $0 == .begin(.chatProjection) }.count == 2)
+        }
     }
 
     @Test("reset rejects late detached completion and exact waiters")
@@ -159,6 +197,76 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("completed projection remains atomic until its controlled frame boundary")
+    func frameGatesCompletedProjection() async throws {
+        try await withTestWatchdog { @MainActor in
+            let snapshot = try SessionScenarioBuilder(seed: 1_210)
+                .openingTail(targetEncodedBytes: 8_000)
+            let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 15)
+            let builds = TranscriptProjectionBarrier()
+            let frames = ManualProjectionFrameScheduler()
+            let store = ChatTranscriptPresentationStore(
+                installationFrameScheduler: frames.scheduler,
+                builder: builds.build
+            )
+
+            store.submit(snapshot: snapshot, tag: tag)
+            await builds.waitForBuildCount(1)
+            builds.releaseBuild(at: 0)
+            await frames.waitForRequest(count: 1)
+            #expect(store.installed == nil)
+
+            frames.releaseNext()
+            let installed = try await store.waitForInstall(of: tag)
+            #expect(installed.tag == tag)
+            #expect(store.installed?.tag == tag)
+        }
+    }
+
+    @Test("text streaming reuses one maximum-page canonical projection")
+    func textStreamingReusesCanonicalProjection() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) { @MainActor in
+            let builder = SessionScenarioBuilder(seed: 1_209)
+            var snapshot = try builder.openingTail(targetEncodedBytes: 8_000)
+            let totalEntries = 10_000
+            snapshot.transcript = builder.pagedMixedSession(totalEntries: totalEntries).page(
+                before: totalEntries,
+                count: totalEntries
+            )
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = totalEntries
+            let signposts = RecordingPerformanceSignposts()
+            let store = ChatTranscriptPresentationStore(performanceSignposts: signposts)
+            var tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 14,
+                canonicalGeneration: 40,
+                timelineGeneration: 0
+            )
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            for update in 1...30 {
+                snapshot.streaming = try streamingMessage(update: update)
+                tag = ChatTranscriptProjectionTag(
+                    snapshot: snapshot,
+                    presentationGeneration: 14,
+                    canonicalGeneration: 40,
+                    timelineGeneration: update
+                )
+                store.submit(snapshot: snapshot, tag: tag)
+                _ = try await store.waitForInstall(of: tag)
+            }
+
+            let installed = try #require(store.installed)
+            let cold = ChatTranscriptPresentation.timeline(in: snapshot)
+            #expect(installed.timeline == cold)
+            #expect(installed.timeline.items.canonical.count == cold.items.count - 1)
+            #expect(installed.timeline.items.live.count == 1)
+            #expect(signposts.events().filter { $0 == .begin(.chatProjection) }.count == 1)
+        }
+    }
+
     @Test("maximum canonical page prepares off-main and installs one complete timeline")
     func maximumPageProjection() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) { @MainActor in
@@ -204,6 +312,15 @@ struct ChatTranscriptPresentationStoreTests {
             _ = try await store.waitForInstall(of: tag)
         }
     }
+}
+
+private func streamingMessage(update: Int) throws -> TranscriptItem {
+    try JSONDecoder.gateway.decode(
+        TranscriptItem.self,
+        from: Data("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"thinking","type":"thinking","text":"Working"},{"id":"answer","type":"text","text":"update-\(update)"}]}
+        """.utf8)
+    )
 }
 
 private final class TranscriptProjectionBarrier: @unchecked Sendable {
@@ -290,5 +407,40 @@ private final class TranscriptProjectionBarrier: @unchecked Sendable {
             return buildWaiters.remove(at: index).continuation
         }
         continuation?.resume()
+    }
+}
+
+@MainActor
+private final class ManualProjectionFrameScheduler {
+    private struct RequestWaiter {
+        let targetCount: Int
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
+    private var continuations: [CheckedContinuation<Void, Error>] = []
+    private var requestWaiters: [RequestWaiter] = []
+    private(set) var requestCount = 0
+
+    lazy var scheduler = DisplayFrameScheduler { [weak self] in
+        guard let self else { throw CancellationError() }
+        try await withCheckedThrowingContinuation { continuation in
+            requestCount += 1
+            continuations.append(continuation)
+            let ready = requestWaiters.filter { $0.targetCount <= requestCount }
+            requestWaiters.removeAll { $0.targetCount <= requestCount }
+            ready.forEach { $0.continuation.resume() }
+        }
+    }
+
+    func waitForRequest(count: Int) async {
+        if requestCount >= count { return }
+        await withCheckedContinuation { continuation in
+            requestWaiters.append(.init(targetCount: count, continuation: continuation))
+        }
+    }
+
+    func releaseNext() {
+        guard !continuations.isEmpty else { return }
+        continuations.removeFirst().resume()
     }
 }

@@ -284,7 +284,11 @@ each correction. First-ready timing cannot end before the exact initial transcri
 projection installs and its frame resumes. `ChatTranscriptPresentationStoreTests` use
 watchdog-bounded synchronous builder barriers to prove serial off-main work, same-tag
 coalescing, newest-wins and A→B→A admission, paging-tag distinction, reset rejection,
-and MainActor responsiveness. `ChatScrollCoordinatorTests` use watchdog-bounded
+MainActor responsiveness, display-frame-gated atomic installation, and one canonical scan
+across thirty updates of a 10,000-entry text stream. Cold/incremental parity tests require
+identical rows, order, tool state, and semantic maps. `SessionPresentationStoreTests` also
+prove exact page `start`/`end`/count admission and that return-to-latest compacts loaded
+history back to the retained authoritative tail. `ChatScrollCoordinatorTests` use watchdog-bounded
 barriers rather than sleeps or yields to prove callback-order equivalence, immediate
 catch-up dismissal for geometry-first manual return to the tail, pinned keyboard/composer
 following, one follow command per frame, no writes for detached layout/stream/keyboard

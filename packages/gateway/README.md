@@ -107,7 +107,10 @@ the same registry revision; clients restart pagination if summaries change betwe
 pages instead of installing a torn dashboard. `session.open` carries a
 byte-bounded authoritative transcript tail with `transcriptStart` and
 `transcriptTotal`; `session.transcript` pages backward through the same canonical
-Pi branch without enlarging the WebSocket frame limit. Paging is a bounded read for an
+Pi branch without enlarging the WebSocket frame limit. Snapshot tails and pages are
+bounded by both encoded bytes and 512 items. Page responses carry exact `start`, `end`,
+and `total` bounds; `end - start` always equals the returned item count, so generic JSON
+projection cannot silently truncate a tiny-item page. Paging is a bounded read for an
 already-open presentation and never creates or revives event-subscription ownership.
 Live tool arguments,
 structured current results, and readable output are independently projected to

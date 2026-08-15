@@ -73,6 +73,7 @@ final class ChatScrollCoordinator {
     private(set) var command: ChatScrollCommand?
     private(set) var commandRevision = 0
     private(set) var layoutEpoch = 0
+    private(set) var tailSettlementGeneration = 0
     private(set) var maximumPrependSemanticExcursion: CGFloat = 0
 
     private let frameScheduler: DisplayFrameScheduler
@@ -871,6 +872,7 @@ final class ChatScrollCoordinator {
     }
 
     private func releaseAtBottom() {
+        let publishesSettlement = userScrolledAway || !isAtBottom
         followFrameTask?.cancel()
         boundaryCameFromViewportWithoutTailMovement = false
         followFrameTask = nil
@@ -884,6 +886,7 @@ final class ChatScrollCoordinator {
             pendingNativeUserGeometry = false
             isUserDrivenSettling = false
         }
+        if publishesSettlement { tailSettlementGeneration &+= 1 }
     }
 
     private static func isDirectUserPhase(_ phase: ScrollPhase) -> Bool {

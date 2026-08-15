@@ -1,6 +1,6 @@
 # Tron iOS hardening plan
 
-Status: implementation in progress — Phases 0–2, Phase 3A–3C, and the separate provisional UI removal milestone are complete; Phase 4/5.1 deterministic scroll ownership and Phase 4/5.2 exact-tagged off-main atomic timeline projection are complete. Incremental per-entry/detail projection and physical-device chat acceptance remain before the remaining Phase 3D/3E cleanup.
+Status: implementation in progress — Phases 0–2, Phase 3A–3C, and the separate provisional UI removal milestone are complete; Phase 4/5.1 deterministic scroll ownership, Phase 4/5.2 exact-tagged off-main atomic projection, canonical-prefix reuse for ordinary streaming, and bounded latest-tail/page contracts are complete. Incremental tool/detail projection, media/rendering budgets, and physical-device chat acceptance remain before the remaining Phase 3D/3E cleanup.
 
 Source and owning documentation at tracked HEAD are authoritative; untracked `.pi` runtime artifacts and historical audit line numbers are not.
 
@@ -83,9 +83,8 @@ Eight independent read-only audits covered state architecture, chat scrolling/pe
 
 ### Verified performance risks
 
-- Whole-timeline projection is now serialized/coalesced off MainActor and removed from `ChatView.body`; it still performs whole-transcript scans and eager JSON formatting inside the detached builder until incremental entry/detail projection lands.
-- Large single-message Markdown and thinking updates still parse complete changed strings on the rendering path.
-- Markdown and thinking repeatedly parse complete strings; a single large message defeats outer row laziness.
+- Ordinary text/thinking/image streaming now shares its immutable canonical row/index prefix and projects only the live suffix; tool-bearing/running updates still use the conservative whole-transcript projector until sparse tool-row overrides land.
+- Large single-message Markdown and thinking updates still parse complete changed strings on the rendering path; a single large message defeats outer row laziness.
 - Transcript thumbnails fetch, decode, and retain full-resolution images for 64-point chips without shared byte-bounded deduplication.
 - Expanded-history merge, snapshot decode, JSON round trips, cache save scheduling, and full-file attachment work need tighter off-main and bounded ownership.
 
@@ -284,10 +283,11 @@ Deliverables:
 - **Complete:** frame-coalesced typed scroll-command ownership is active before asynchronous projection work; publication cannot amplify a height-driven command loop.
 - **Complete:** move timeline projection out of `ChatView.body` into `ChatTranscriptPresentationStore` and prepare it off-main from immutable tagged inputs.
 - **Complete:** serialize detached builds, coalesce to one pending newest snapshot, and reject stale/out-of-order results by the full session/presentation/runtime/authoritative/paging tag, including A→B→A.
-- Recompute only changed canonical entries, the streaming tail, affected tool groups, or a newly prepended page.
+- **Complete for ordinary non-tool streaming:** share the immutable canonical row/index prefix and recompute only the text/thinking/image live suffix; cold/incremental parity is exact across rows, order, tools, and semantic maps. Sparse affected-tool and changed-canonical-entry projection remains.
+- **Complete:** publish only complete immutable timelines at a display-frame boundary; multiple completed sources before that boundary retain only the newest exact source.
 - Atomically publish the complete ordered lightweight descriptor spine with shallow version equality before reveal; background cache fills do not publish a projection revision unless visible row output changes.
-- Separate compact tool summaries from detail payloads; resolve/format request, response, and output only when a detail sheet opens through the exact session/presentation/runtime/tool identity, never mutable global selection.
-- Defer `JSONValue.prettyPrinted` and cache it only for the lifetime of visible detail.
+- Separate compact tool summaries from detail payloads through exact session/presentation/runtime/tool identity, never mutable global selection. **Formatting complete:** collapsed rows retain structured values and no longer eagerly pretty-print request/response JSON; full payload-owner extraction remains.
+- **Complete for projected tool rows:** defer `JSONValue.prettyPrinted` until the existing detail sheet opens; a detail-lifetime formatting cache remains optional follow-up.
 - Remove unused fields from unread-response observation.
 - Preserve visible ordering and grouping with golden tests against the current timeline.
 - Stabilize presentation identity across streaming-to-canonical settlement and overlapping tool-group expansion.
@@ -314,6 +314,7 @@ Deliverables:
 - **Complete:** the load token stays active through settlement, repeat taps are no-ops, and stale work cannot end a newer transaction.
 - **Complete:** geometry-first detachment consumes its one-shot direct-return arm, so viewport expansion and later unattributed tail samples cannot release it; native/direct/accessibility return still releases at an attributed tail. Catch-up retains prior and newly arriving unread state through staged/final/settling phases, restores it on interruption, and clears it only after physical tail settlement.
 - **Complete:** hosted aggregate evidence drives the actual coordinator/executor, bounds retained row frames, admits at most one automatic command per displayed frame, and records zero detached writes without exposing content or identifiers in the added counters.
+- **Complete for the common latest-tail path:** Gateway snapshots/pages are capped at 512 items as well as their byte budgets; exact page bounds reject truncation/gaps, only explicitly detached browsing retains earlier pages, and physical return to latest drops that disposable prefix while preserving the authoritative tail and existing UI.
 - **Remaining checkpoint:** physical-device evidence for the final one-point/two-point excursion gate and the still-observed native SwiftUI geometry diagnostic.
 
 Exit gate:

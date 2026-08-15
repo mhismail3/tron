@@ -71,7 +71,8 @@ struct ChatView: View {
         _composerScope = State(initialValue: nil)
         _scrollCoordinator = State(initialValue: ChatScrollCoordinator(frameScheduler: displayFrameScheduler))
         _transcriptPresentation = State(initialValue: ChatTranscriptPresentationStore(
-            performanceSignposts: performanceSignposts
+            performanceSignposts: performanceSignposts,
+            installationFrameScheduler: displayFrameScheduler
         ))
         _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
@@ -92,7 +93,8 @@ struct ChatView: View {
         _composerScope = State(initialValue: nil)
         _scrollCoordinator = State(initialValue: ChatScrollCoordinator(frameScheduler: displayFrameScheduler))
         _transcriptPresentation = State(initialValue: ChatTranscriptPresentationStore(
-            performanceSignposts: performanceSignposts
+            performanceSignposts: performanceSignposts,
+            installationFrameScheduler: displayFrameScheduler
         ))
         _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
@@ -201,12 +203,19 @@ struct ChatView: View {
             hostedProbe?.recordProjectionSubmit(startedWork: startedWork)
             #endif
         }
+        .onChange(of: scrollCoordinator.tailSettlementGeneration) { _, _ in
+            guard let generation = modelPresentationGeneration else { return }
+            model.discardLoadedTranscriptHistory(
+                sessionID: sessionID,
+                presentationGeneration: generation
+            )
+        }
         #if HOSTED_TEST
         .onChange(of: transcriptPresentation.installed?.tag) { _, tag in
             guard let tag, let installed = transcriptPresentation.installed else { return }
             hostedProbe?.recordProjectionInstall(
                 rowCount: installed.timeline.items.count,
-                sourceOrdinal: tag.eventSequence
+                sourceOrdinal: tag.timelineGeneration
             )
         }
         #endif
@@ -366,10 +375,16 @@ struct ChatView: View {
     private var transcriptProjectionSource: ChatTranscriptProjectionTag? {
         guard let snapshot = selectedAuthoritativeSnapshot,
               let generation = modelPresentationGeneration,
+              let projection = model.chatProjectionGenerations(
+                for: sessionID,
+                presentationGeneration: generation
+              ),
               snapshot.sessionId == sessionID else { return nil }
         return ChatTranscriptProjectionTag(
             snapshot: snapshot,
-            presentationGeneration: generation
+            presentationGeneration: generation,
+            canonicalGeneration: projection.canonical,
+            timelineGeneration: projection.timeline
         )
     }
 
@@ -381,10 +396,16 @@ struct ChatView: View {
             try Task.checkCancellation()
             guard modelPresentationGeneration == presentationGeneration,
                   let snapshot = model.authoritativeSnapshot(for: sessionID),
+                  let projection = model.chatProjectionGenerations(
+                    for: sessionID,
+                    presentationGeneration: presentationGeneration
+                  ),
                   snapshot.sessionId == sessionID else { throw CancellationError() }
             let tag = ChatTranscriptProjectionTag(
                 snapshot: snapshot,
-                presentationGeneration: presentationGeneration
+                presentationGeneration: presentationGeneration,
+                canonicalGeneration: projection.canonical,
+                timelineGeneration: projection.timeline
             )
             transcriptPresentation.submit(snapshot: snapshot, tag: tag)
             do {

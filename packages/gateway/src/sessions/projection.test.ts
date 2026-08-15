@@ -12,6 +12,7 @@ import {
   safeJson,
   SESSION_SNAPSHOT_BYTES,
   TRANSCRIPT_PAGE_BYTES,
+  TRANSCRIPT_PAGE_ITEMS,
   TREE_PROJECTION_BYTES,
 } from "./projection.js";
 
@@ -210,6 +211,23 @@ describe("transcript projection", () => {
     );
     expect(fitted.transcriptStart).toBe(snapshot.transcriptStart);
     expect(fitted.transcript.map((item) => item.id)).toEqual(snapshot.transcript.map((item) => item.id));
+
+    const tinySnapshot: SessionSnapshot = {
+      ...snapshot,
+      transcript: Array.from({ length: 1_200 }, (_, index) => ({
+        id: `tiny-${index}`, parentId: index ? `tiny-${index - 1}` : null,
+        timestamp: new Date(index).toISOString(), kind: "message" as const, role: "user" as const,
+        content: [{ id: `tiny-${index}:0`, type: "text" as const, text: "x" }],
+      })),
+      transcriptStart: 0,
+      transcriptTotal: 1_200,
+      toolExecutions: [],
+    };
+    const fittedTiny = fitSessionSnapshot(tinySnapshot);
+    expect(fittedTiny.transcript).toHaveLength(TRANSCRIPT_PAGE_ITEMS);
+    expect(fittedTiny.transcriptStart).toBe(1_200 - TRANSCRIPT_PAGE_ITEMS);
+    expect(fittedTiny.transcriptStart + fittedTiny.transcript.length).toBe(fittedTiny.transcriptTotal);
+    expect(safeJson(fittedTiny)).toEqual(fittedTiny);
   });
 
   it("allows only resumed idle snapshots to trim canonical rows under pressure", () => {
@@ -241,6 +259,7 @@ describe("transcript projection", () => {
     manager.appendMessage({ role: "user", content: "x".repeat(2_000), timestamp: 1 });
     const page = projectTranscriptPage(manager, new BlobStore(), undefined, 1_024);
     expect(page.start).toBe(0);
+    expect(page.end).toBe(1);
     expect(page.total).toBe(1);
     expect(page.items).toHaveLength(1);
     expect(Buffer.byteLength(JSON.stringify(page.items))).toBeLessThanOrEqual(1_024);
@@ -254,13 +273,50 @@ describe("transcript projection", () => {
     const blobs = new BlobStore();
     const tail = projectTranscriptPage(manager, blobs);
     expect(tail.start).toBeGreaterThan(0);
+    expect(tail.end).toBe(24);
     expect(tail.total).toBe(24);
     expect(Buffer.byteLength(JSON.stringify(tail.items))).toBeLessThanOrEqual(TRANSCRIPT_PAGE_BYTES);
 
     const earlier = projectTranscriptPage(manager, blobs, tail.start, TRANSCRIPT_PAGE_BYTES, tail.items[0]?.id);
     expect(earlier.start).toBeLessThan(tail.start);
+    expect(earlier.end).toBe(tail.start);
     expect(earlier.items.at(-1)?.id).not.toBe(tail.items[0]?.id);
     expect(() => projectTranscriptPage(manager, blobs, tail.start, TRANSCRIPT_PAGE_BYTES, "stale-anchor")).toThrow("anchor changed");
     expect(Buffer.byteLength(JSON.stringify(earlier.items))).toBeLessThanOrEqual(TRANSCRIPT_PAGE_BYTES);
+  });
+
+  it("caps nested content before generic JSON projection can truncate it", () => {
+    const manager = SessionManager.inMemory("/tmp/tiny-content-parts");
+    manager.appendMessage({
+      role: "user",
+      content: Array.from({ length: 1_100 }, () => ({ type: "text", text: "x" })) as never,
+      timestamp: 1,
+    });
+
+    const page = projectTranscriptPage(manager, new BlobStore());
+    expect(page.items).toHaveLength(1);
+    const item = page.items[0]!;
+    expect(item.kind).toBe("message");
+    if (item.kind !== "message") throw new Error("expected message");
+    expect(item.content).toHaveLength(1_000);
+    expect(item.content.at(-1)).toMatchObject({ type: "text", text: expect.stringContaining("omitted") });
+    expect(safeJson(page)).toEqual(page);
+  });
+
+  it("caps tiny-item pages before generic JSON projection can truncate them", () => {
+    const manager = SessionManager.inMemory("/tmp/tiny-page-items");
+    for (let index = 0; index < 1_200; index += 1) {
+      manager.appendMessage({ role: "user", content: "x", timestamp: index });
+    }
+    manager.appendMessage({
+      role: "custom", customType: "hidden-runtime", content: [], display: false,
+      timestamp: 1_201,
+    } as never);
+
+    const page = projectTranscriptPage(manager, new BlobStore());
+    expect(page.items).toHaveLength(TRANSCRIPT_PAGE_ITEMS);
+    expect(page.end).toBe(1_200);
+    expect(page.start).toBe(page.end - page.items.length);
+    expect(safeJson(page)).toEqual(page);
   });
 });

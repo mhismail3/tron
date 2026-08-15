@@ -96,6 +96,7 @@ struct ChatScrollCoordinatorTests {
     func geometryFirstManualReturnClearsCatchUp() {
         let coordinator = detachedCoordinator(at: away, withUnread: true)
         #expect(coordinator.shouldShowCatchUpButton)
+        #expect(coordinator.tailSettlementGeneration == 0)
 
         coordinator.geometryChanged(previous: away, current: bottom)
         #expect(coordinator.shouldShowCatchUpButton)
@@ -105,6 +106,7 @@ struct ChatScrollCoordinatorTests {
         #expect(!coordinator.userScrolledAway)
         #expect(!coordinator.hasUnreadContent)
         #expect(coordinator.isAtBottom)
+        #expect(coordinator.tailSettlementGeneration == 1)
         #expect(coordinator.command?.destination == .releaseBinding)
     }
 
@@ -406,6 +408,7 @@ struct ChatScrollCoordinatorTests {
     func settlingCatchUpInterruptionAndSuccess() {
         let interrupted = detachedCoordinator(at: away, withUnread: false)
         interrupted.requestCatchUp(reduceMotion: true)
+        #expect(interrupted.tailSettlementGeneration == 0)
         let command = interrupted.command!
         interrupted.commandApplied(command)
         interrupted.semanticResponseArrived()
@@ -413,17 +416,20 @@ struct ChatScrollCoordinatorTests {
         interrupted.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
         #expect(interrupted.userScrolledAway)
         #expect(interrupted.hasUnreadContent)
+        #expect(interrupted.tailSettlementGeneration == 0)
         #expect(interrupted.command == nil)
 
         let settled = detachedCoordinator(at: away)
         settled.requestCatchUp(reduceMotion: true)
         #expect(settled.hasUnreadContent)
+        #expect(settled.tailSettlementGeneration == 0)
         settled.commandApplied(settled.command!)
         settled.semanticResponseArrived()
         #expect(settled.hasUnreadContent)
         settled.geometryChanged(previous: away, current: bottom)
         #expect(!settled.userScrolledAway)
         #expect(!settled.hasUnreadContent)
+        #expect(settled.tailSettlementGeneration == 1)
         #expect(settled.command?.destination == .releaseBinding)
     }
 

@@ -252,19 +252,23 @@ struct ChatTranscriptPresentationTests {
             presentationGeneration: 7,
             runtimeGeneration: "runtime-a",
             before: 40,
+            expectedTotal: 48,
             expectedNextEntryID: "entry-40"
         )
         #expect(request.canInstall(
             sessionID: "session-a", presentationGeneration: 7,
-            runtimeGeneration: "runtime-a", transcriptStart: 40, firstTranscriptID: "entry-40"
+            runtimeGeneration: "runtime-a", transcriptStart: 40,
+            transcriptTotal: 48, firstTranscriptID: "entry-40"
         ))
         #expect(!request.canInstall(
             sessionID: "session-a", presentationGeneration: 8,
-            runtimeGeneration: "runtime-a", transcriptStart: 40, firstTranscriptID: "entry-40"
+            runtimeGeneration: "runtime-a", transcriptStart: 40,
+            transcriptTotal: 48, firstTranscriptID: "entry-40"
         ))
         #expect(!request.canInstall(
             sessionID: "session-a", presentationGeneration: 7,
-            runtimeGeneration: "runtime-a", transcriptStart: 20, firstTranscriptID: "entry-20"
+            runtimeGeneration: "runtime-a", transcriptStart: 20,
+            transcriptTotal: 48, firstTranscriptID: "entry-20"
         ))
     }
 
@@ -450,12 +454,16 @@ struct ChatTranscriptPresentationTests {
         ])
         guard case .message(let first) = timeline.items[0],
               case .thinking(let firstRun) = first.parts.first,
+              case .toolRun(let toolRun) = timeline.items[1],
               case .message(let last) = timeline.items[2],
               case .thinking(let lastRun) = last.parts.first else {
             Issue.record("Expected thinking slices around the tool run")
             return
         }
         #expect(firstRun.segments.map(\.text) == ["First…"])
+        #expect(toolRun.tools.first?.content == "")
+        #expect(toolRun.tools.first?.request == .object([:]))
+        #expect(toolRun.tools.first?.fallbackContent == .object([:]))
         #expect(lastRun.segments.map(\.text) == ["Second…"])
     }
 
@@ -651,6 +659,64 @@ struct ChatTranscriptPresentationTests {
         #expect(settled.ids == ["user", "assistant-tools", "tool-run-call-1", "assistant-final"])
     }
 
+    @Test("isolated text streaming tail is identical to cold whole-timeline projection")
+    func isolatedStreamingParity() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"user","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"prompt","type":"text","text":"continue"}]}
+        ]
+        """)
+        snapshot.phase = .running
+        snapshot.toolExecutions = [
+            tool(
+                "completed-live",
+                "read",
+                status: .completed,
+                startedAt: "2026-01-01T00:00:01Z"
+            ),
+        ]
+        snapshot.streaming = try message("""
+        {"id":"streaming","parentId":"user","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"thinking","type":"thinking","text":"Preparing"},{"id":"answer","type":"text","text":"Current answer"}]}
+        """)
+
+        let cold = ChatTranscriptPresentation.timeline(in: snapshot)
+        let streaming = try #require(snapshot.streaming)
+        var baseSnapshot = snapshot
+        baseSnapshot.streaming = nil
+        let base = ChatTranscriptPresentation.timeline(in: baseSnapshot)
+        let live = try #require(ChatTranscriptPresentation.isolatedStreamingTimeline(streaming))
+        let incremental = base.appendingLive(live)
+
+        #expect(incremental == cold)
+        #expect(incremental.items.canonical.count == base.items.count)
+        #expect(incremental.items.live.count == 1)
+    }
+
+    @Test("explicit empty tool output never falls back to duplicated request content")
+    func explicitEmptyToolOutputPreservesDetailParity() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.toolExecutions = [
+            tool(
+                "empty-output",
+                "read",
+                status: .completed,
+                startedAt: "2026-01-01T00:00:01Z",
+                output: ""
+            ),
+        ]
+
+        let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
+        guard case .toolRun(let run) = timeline.items.first,
+              let tool = run.tools.first else {
+            Issue.record("Expected completed tool row")
+            return
+        }
+        #expect(tool.content == "")
+        #expect(tool.fallbackContent == nil)
+        #expect(tool.response == .object(["ok": .bool(true)]))
+    }
+
     @Test("live tool order is deterministic when progress events arrive out of order")
     func deterministicLiveToolOrder() throws {
         var snapshot = try fixture(transcript: "[]")
@@ -781,6 +847,7 @@ struct ChatTranscriptPresentationTests {
             request: nil,
             response: nil,
             content: "",
+            fallbackContent: nil,
             error: false,
             startedAt: nil,
             completedAt: nil,
@@ -803,7 +870,8 @@ struct ChatTranscriptPresentationTests {
         _ name: String,
         status: ToolExecutionState.Status = .running,
         startedAt: String,
-        order: Int? = nil
+        order: Int? = nil,
+        output: String? = nil
     ) -> ToolExecutionState {
         ToolExecutionState(
             toolCallId: id,
@@ -813,6 +881,7 @@ struct ChatTranscriptPresentationTests {
             arguments: .object([:]),
             partialResult: nil,
             result: status == .running ? nil : .object(["ok": .bool(true)]),
+            output: output,
             isError: status == .failed,
             startedAt: startedAt,
             updatedAt: startedAt,

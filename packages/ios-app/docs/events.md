@@ -104,7 +104,12 @@ enters the ordinary reconnect loop. Compatible reconnect requests share one type
 presentation and reconnect intents arbitrate serially, and at most three immediate authoritative
 attempts are retained for a continuous gap/overflow burst before the bounded catch-up state wins.
 A temporary catch-up pill is deduplicated and removed by the next successful authoritative session synchronization rather than persisting as an error state.
-Earlier canonical entries are fetched through `session.transcript` pages when requested. Event-buffer
+Earlier canonical entries are fetched through `session.transcript` pages when requested. Each page
+is capped at 600 KB and 512 items, carries exact `start`/`end`/`total` bounds, and installs only when
+`end` equals the requested boundary, `total` still equals the captured canonical total, and
+`end - start` equals the decoded item count. Duplicate IDs,
+gaps, stale anchors, and mismatched presentation/runtime/subscription leases are discarded rather
+than concatenated into plausible history. Event-buffer
 overflow closes the connection and forces global/session/terminal reconciliation;
 correctness must not depend on receiving every event while disconnected. A bounded
 sequenced session heartbeat advances the cursor during silent long-running tools;

@@ -8,9 +8,11 @@ const MAX_TEXT = 64_000;
 const MAX_JSON_STRING = 100_000;
 const MAX_PROJECTED_JSON_BYTES = 96_000;
 const MAX_CONTENT_BYTES = 320_000;
+const MAX_CONTENT_PARTS = 1_000;
 const COMPACT_LIVE_TOOL_JSON_BYTES = 12_000;
 const MAX_LIVE_TOOL_OUTPUT_BYTES = 48_000;
 export const TRANSCRIPT_PAGE_BYTES = 600_000;
+export const TRANSCRIPT_PAGE_ITEMS = 512;
 /** Leaves headroom for the response/event envelope under the 1 MiB socket cap. */
 export const SESSION_SNAPSHOT_BYTES = 800_000;
 
@@ -130,18 +132,27 @@ function frameBytes(value: unknown): number {
 /**
  * Fits every live session snapshot to a strict wire budget without touching Pi's
  * canonical state. Large tool payloads become readable previews first. While an
- * operation is active, transcript rows are never removed: doing so would make a
- * subscribed chat replace already-visible history with a shorter tail. Status,
- * operation, ordering, and canonical transcript cursors always survive.
+ * operation is active, transcript rows inside the fixed item cap are not removed:
+ * doing so would make a subscribed chat replace already-visible history with a
+ * shorter tail. Status, operation, ordering, and canonical transcript cursors
+ * always survive.
  */
 export function fitSessionSnapshot(
   snapshot: SessionSnapshot,
   maximumBytes = SESSION_SNAPSHOT_BYTES,
 ): SessionSnapshot {
-  if (frameBytes(snapshot) <= maximumBytes) return snapshot;
+  const transcriptOverflow = Math.max(0, snapshot.transcript.length - TRANSCRIPT_PAGE_ITEMS);
+  const countBounded = transcriptOverflow === 0
+    ? snapshot
+    : {
+      ...snapshot,
+      transcript: snapshot.transcript.slice(transcriptOverflow),
+      transcriptStart: snapshot.transcriptStart + transcriptOverflow,
+    };
+  if (frameBytes(countBounded) <= maximumBytes) return countBounded;
 
   let projected: SessionSnapshot = {
-    ...snapshot,
+    ...countBounded,
     toolExecutions: snapshot.toolExecutions.map((tool) => ({
       ...tool,
       arguments: projectJson(tool.arguments, COMPACT_LIVE_TOOL_JSON_BYTES),
@@ -153,7 +164,7 @@ export function fitSessionSnapshot(
         : { result: projectJson(tool.result, COMPACT_LIVE_TOOL_JSON_BYTES) }),
     })),
     diagnostics: [
-      ...snapshot.diagnostics,
+      ...countBounded.diagnostics,
       { type: "projection", message: "Large live details were compacted for this mobile snapshot." },
     ],
   };
@@ -314,6 +325,10 @@ function projectContent(content: ProjectableContent, blobs: BlobStore, ownerId: 
         break;
     }
     for (const candidate of candidates) {
+      if (projected.length >= MAX_CONTENT_PARTS - 1) {
+        projected.push({ id: `${ownerId}:truncated`, type: "text", text: "… additional content omitted from this mobile projection" });
+        return projected;
+      }
       const candidateBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
       if (bytes + candidateBytes > MAX_CONTENT_BYTES) {
         projected.push({ id: `${ownerId}:truncated`, type: "text", text: "… additional content omitted from this mobile projection" });
@@ -584,20 +599,29 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
   return selected.reverse();
 }
 
+function projectableTranscriptEntries(manager: SessionManager): SessionEntry[] {
+  return manager.getBranch().filter((entry) =>
+    entry.type !== "session_info"
+      && !(entry.type === "custom_message" && !entry.display)
+      && !(entry.type === "message" && entry.message.role === "custom" && !entry.message.display));
+}
+
 export function projectTranscript(
   manager: SessionManager,
   blobs: BlobStore,
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
 ): TranscriptItem[] {
-  return manager.getBranch().flatMap((entry) => {
+  return projectableTranscriptEntries(manager).map((entry) => {
     const projected = projectEntry(entry, blobs, toolMetadata);
-    return projected ? [projected] : [];
+    if (!projected) throw new Error("projectable transcript entry produced no item");
+    return projected;
   });
 }
 
 export interface TranscriptPage {
   items: TranscriptItem[];
   start: number;
+  end: number;
   total: number;
 }
 
@@ -609,16 +633,17 @@ export function projectTranscriptPage(
   expectedNextEntryId?: string,
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
 ): TranscriptPage {
-  const transcript = projectTranscript(manager, blobs, toolMetadata);
-  const end = Math.max(0, Math.min(before ?? transcript.length, transcript.length));
-  if (expectedNextEntryId !== undefined && transcript[end]?.id !== expectedNextEntryId) {
+  const entries = projectableTranscriptEntries(manager);
+  const end = Math.max(0, Math.min(before ?? entries.length, entries.length));
+  if (expectedNextEntryId !== undefined && entries[end]?.id !== expectedNextEntryId) {
     throw new Error("session transcript anchor changed");
   }
   let start = end;
   let bytes = 2;
   const selected: TranscriptItem[] = [];
-  while (start > 0) {
-    const item = transcript[start - 1]!;
+  while (start > 0 && selected.length < TRANSCRIPT_PAGE_ITEMS) {
+    const item = projectEntry(entries[start - 1]!, blobs, toolMetadata);
+    if (!item) throw new Error("projectable transcript entry produced no item");
     const itemBytes = Buffer.byteLength(JSON.stringify(item)) + 1;
     if (bytes + itemBytes > byteBudget && selected.length > 0) break;
     if (itemBytes > byteBudget) {
@@ -634,7 +659,7 @@ export function projectTranscriptPage(
     bytes += itemBytes;
     start -= 1;
   }
-  return { items: selected, start, total: transcript.length };
+  return { items: selected, start, end, total: entries.length };
 }
 
 function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number): TranscriptItem {

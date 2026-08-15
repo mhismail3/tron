@@ -136,10 +136,13 @@ struct ChatOpenPresentationState: Equatable {
 }
 
 struct ChatTranscriptPageRequest: Equatable {
+    static let maximumItemCount = 512
+
     let sessionID: String
     let presentationGeneration: Int
     let runtimeGeneration: String
     let before: Int
+    let expectedTotal: Int
     let expectedNextEntryID: String?
 
     func canInstall(
@@ -147,13 +150,31 @@ struct ChatTranscriptPageRequest: Equatable {
         presentationGeneration: Int,
         runtimeGeneration: String,
         transcriptStart: Int?,
+        transcriptTotal: Int?,
         firstTranscriptID: String?
     ) -> Bool {
         self.sessionID == sessionID
             && self.presentationGeneration == presentationGeneration
             && self.runtimeGeneration == runtimeGeneration
             && transcriptStart == before
+            && transcriptTotal == expectedTotal
             && firstTranscriptID == expectedNextEntryID
+    }
+
+    func canInstallPage(
+        start: Int,
+        end: Int,
+        total: Int,
+        itemCount: Int,
+        visibleItemCount: Int
+    ) -> Bool {
+        end == before
+            && start >= 0
+            && start <= end
+            && itemCount == end - start
+            && itemCount <= Self.maximumItemCount
+            && total == expectedTotal
+            && total == before + visibleItemCount
     }
 }
 
@@ -186,6 +207,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     let request: JSONValue?
     let response: JSONValue?
     let content: String
+    let fallbackContent: JSONValue?
     let error: Bool
     let startedAt: String?
     let completedAt: String?
@@ -326,19 +348,101 @@ enum ChatTranscriptRenderItem: Hashable, Identifiable, Sendable {
     }
 }
 
+struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
+    typealias Index = Int
+
+    let canonical: [ChatTranscriptRenderItem]
+    let live: [ChatTranscriptRenderItem]
+
+    init(canonical: [ChatTranscriptRenderItem], live: [ChatTranscriptRenderItem] = []) {
+        self.canonical = canonical
+        self.live = live
+    }
+
+    var startIndex: Int { 0 }
+    var endIndex: Int { canonical.count + live.count }
+
+    subscript(position: Int) -> ChatTranscriptRenderItem {
+        precondition(indices.contains(position))
+        return position < canonical.count
+            ? canonical[position]
+            : live[position - canonical.count]
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.count == rhs.count && lhs.elementsEqual(rhs)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(count)
+        for item in self { hasher.combine(item) }
+    }
+}
+
+struct ChatSemanticIndex: Hashable, Sendable {
+    let canonical: [String: String]
+    let live: [String: String]
+
+    init(canonical: [String: String], live: [String: String] = [:]) {
+        self.canonical = canonical
+        self.live = live
+    }
+
+    subscript(key: String) -> String? { live[key] ?? canonical[key] }
+
+    func allKeysSatisfy(_ predicate: (String) -> Bool) -> Bool {
+        canonical.keys.allSatisfy(predicate) && live.keys.allSatisfy(predicate)
+    }
+
+    func allValuesSatisfy(_ predicate: (String) -> Bool) -> Bool {
+        canonical.values.allSatisfy(predicate) && live.values.allSatisfy(predicate)
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        let keys = Set(lhs.canonical.keys)
+            .union(lhs.live.keys)
+            .union(rhs.canonical.keys)
+            .union(rhs.live.keys)
+        return keys.allSatisfy { lhs[$0] == rhs[$0] }
+    }
+
+    func hash(into hasher: inout Hasher) {
+        let keys = Set(canonical.keys).union(live.keys).sorted()
+        hasher.combine(keys.count)
+        for key in keys {
+            hasher.combine(key)
+            hasher.combine(self[key])
+        }
+    }
+}
+
 struct ChatTranscriptTimeline: Hashable, Sendable {
-    let items: [ChatTranscriptRenderItem]
-    let toolResults: [String: TranscriptItem]
-    let preferredSemanticIDByRenderedID: [String: String]
-    let renderedIDBySemanticID: [String: String]
+    let items: ChatTranscriptItems
+    let preferredSemanticIDByRenderedID: ChatSemanticIndex
+    let renderedIDBySemanticID: ChatSemanticIndex
 
     var ids: [String] { items.map(\.id) }
 
     var isInternallyConsistent: Bool {
         let renderedIDs = Set(ids)
         return renderedIDs.count == items.count
-            && preferredSemanticIDByRenderedID.keys.allSatisfy(renderedIDs.contains)
-            && renderedIDBySemanticID.values.allSatisfy(renderedIDs.contains)
+            && preferredSemanticIDByRenderedID.allKeysSatisfy(renderedIDs.contains)
+            && renderedIDBySemanticID.allValuesSatisfy(renderedIDs.contains)
+    }
+
+    func appendingLive(_ live: ChatTranscriptTimeline) -> ChatTranscriptTimeline {
+        precondition(live.items.canonical.isEmpty)
+        return ChatTranscriptTimeline(
+            items: ChatTranscriptItems(canonical: items.canonical, live: live.items.live),
+            preferredSemanticIDByRenderedID: ChatSemanticIndex(
+                canonical: preferredSemanticIDByRenderedID.canonical,
+                live: live.preferredSemanticIDByRenderedID.live
+            ),
+            renderedIDBySemanticID: ChatSemanticIndex(
+                canonical: renderedIDBySemanticID.canonical,
+                live: live.renderedIDBySemanticID.live
+            )
+        )
     }
 }
 
@@ -608,15 +712,51 @@ enum ChatTranscriptPresentation {
         }
         projectedCount = rendered.count
         return ChatTranscriptTimeline(
-            items: rendered,
-            toolResults: results,
-            preferredSemanticIDByRenderedID: preferredSemanticIDByRenderedID,
-            renderedIDBySemanticID: renderedIDBySemanticID
+            items: ChatTranscriptItems(canonical: rendered),
+            preferredSemanticIDByRenderedID: ChatSemanticIndex(
+                canonical: preferredSemanticIDByRenderedID
+            ),
+            renderedIDBySemanticID: ChatSemanticIndex(
+                canonical: renderedIDBySemanticID
+            )
         )
     }
 
     static func renderItems(in snapshot: SessionSnapshot) -> [ChatTranscriptRenderItem] {
-        timeline(in: snapshot).items
+        Array(timeline(in: snapshot).items)
+    }
+
+    /// A text/thinking/image streaming message is an ordering barrier after the
+    /// complete canonical/live-tool prefix. Project it independently so rapid
+    /// append-only updates never copy or rescan that prefix.
+    static func isolatedStreamingTimeline(_ item: TranscriptItem) -> ChatTranscriptTimeline? {
+        guard item.kind == .message, item.role != .toolResult else { return nil }
+        let parts = messageParts(in: item)
+        guard !parts.contains(where: { part in
+            if case .content(let content) = part { return content.type == .toolCall }
+            return false
+        }) else { return nil }
+
+        let hasFooter = !(item.errorMessage ?? "").isEmpty
+        let rendered: [ChatTranscriptRenderItem]
+        if parts.isEmpty, !hasFooter {
+            rendered = []
+        } else {
+            rendered = [.message(ChatMessagePresentation(
+                id: "streaming",
+                item: item,
+                parts: parts,
+                streaming: true,
+                showsFooter: true
+            ))]
+        }
+        let preferred = rendered.isEmpty ? [:] : ["streaming": "streaming"]
+        let reverse = rendered.isEmpty ? [:] : ["streaming": "streaming"]
+        return ChatTranscriptTimeline(
+            items: ChatTranscriptItems(canonical: [], live: rendered),
+            preferredSemanticIDByRenderedID: ChatSemanticIndex(canonical: [:], live: preferred),
+            renderedIDBySemanticID: ChatSemanticIndex(canonical: [:], live: reverse)
+        )
     }
 
     static func attachmentParts(in item: TranscriptItem) -> [ContentPart] {
@@ -704,7 +844,10 @@ enum ChatTranscriptPresentation {
             subtitle: liveToolSubtitle(live.status),
             request: canonical.request ?? live.arguments,
             response: response,
-            content: live.output ?? (response ?? canonical.request ?? live.arguments).prettyPrinted,
+            content: live.output ?? "",
+            fallbackContent: live.output == nil
+                ? (response ?? canonical.request ?? live.arguments)
+                : nil,
             error: live.isError,
             startedAt: live.startedAt,
             completedAt: live.completedAt ?? canonical.completedAt,
@@ -722,7 +865,8 @@ enum ChatTranscriptPresentation {
             subtitle: liveToolSubtitle(tool.status),
             request: tool.arguments,
             response: response,
-            content: tool.output ?? (response ?? tool.arguments).prettyPrinted,
+            content: tool.output ?? "",
+            fallbackContent: tool.output == nil ? (response ?? tool.arguments) : nil,
             error: tool.isError,
             startedAt: tool.startedAt,
             completedAt: tool.completedAt,
@@ -756,6 +900,7 @@ enum ChatTranscriptPresentation {
             request: tool.request,
             response: tool.response,
             content: tool.content,
+            fallbackContent: tool.fallbackContent,
             error: true,
             startedAt: tool.startedAt,
             completedAt: tool.completedAt,
@@ -793,7 +938,8 @@ enum ChatTranscriptPresentation {
                 subtitle: "Extension message",
                 request: nil,
                 response: item.details,
-                content: item.text.isEmpty ? item.details?.prettyPrinted ?? "" : item.text,
+                content: item.text,
+                fallbackContent: item.text.isEmpty ? item.details : nil,
                 error: false,
                 startedAt: item.startedAt,
                 completedAt: item.completedAt,
@@ -808,7 +954,8 @@ enum ChatTranscriptPresentation {
                 subtitle: "Extension state",
                 request: nil,
                 response: item.customData,
-                content: item.customData?.prettyPrinted ?? "",
+                content: "",
+                fallbackContent: item.customData,
                 error: false,
                 startedAt: item.startedAt,
                 completedAt: item.completedAt,
@@ -828,7 +975,8 @@ enum ChatTranscriptPresentation {
                         subtitle: result.isError == true ? "Failed" : "Completed",
                         request: part.arguments,
                         response: result.details,
-                        content: result.text.isEmpty ? result.details?.prettyPrinted ?? "" : result.text,
+                        content: result.text,
+                        fallbackContent: result.text.isEmpty ? result.details : nil,
                         error: result.isError == true,
                         startedAt: result.startedAt ?? item.timestamp,
                         completedAt: result.completedAt ?? result.timestamp,
@@ -843,7 +991,8 @@ enum ChatTranscriptPresentation {
                     subtitle: "Invocation",
                     request: part.arguments,
                     response: nil,
-                    content: part.arguments?.prettyPrinted ?? "",
+                    content: "",
+                    fallbackContent: part.arguments,
                     error: false,
                     startedAt: item.timestamp,
                     completedAt: nil,
@@ -864,7 +1013,8 @@ enum ChatTranscriptPresentation {
             subtitle: item.isError == true ? "Failed" : "Completed",
             request: nil,
             response: item.details,
-            content: item.text.isEmpty ? item.details?.prettyPrinted ?? "" : item.text,
+            content: item.text,
+            fallbackContent: item.text.isEmpty ? item.details : nil,
             error: item.isError == true,
             startedAt: item.startedAt,
             completedAt: item.completedAt ?? item.timestamp,

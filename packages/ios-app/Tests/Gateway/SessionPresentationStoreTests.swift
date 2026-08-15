@@ -212,6 +212,80 @@ struct SessionPresentationStoreTests {
         }
     }
 
+    @Test("synchronization replay keeps the cache tail bounded to the incoming snapshot")
+    func synchronizationReplayKeepsBoundedTail() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory
+            )
+            let profile = GatewayProfile(
+                id: "gateway",
+                label: "Mac",
+                host: "gateway.test",
+                port: 9_847,
+                machineId: "machine",
+                deviceId: "device"
+            )
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            try await connecting.value
+
+            var baseline = try SessionScenarioBuilder(seed: 8_901)
+                .openingTail(targetEncodedBytes: 8_000)
+            baseline.transcriptStart = 10
+            baseline.transcriptTotal = baseline.transcript.count + 10
+            var shifted = baseline
+            shifted.eventSequence += 1
+            shifted.revision += 1
+            shifted.transcript.removeFirst()
+            shifted.transcriptStart = 11
+            let store = SessionPresentationStore(
+                client: client,
+                performanceSignposts: SystemPerformanceSignposts.shared
+            )
+            let opening = Task { try await store.open(baseline.sessionId) }
+
+            try await socket.waitUntilSent(count: 2)
+            var frame = await socket.sentFrames()[1]
+            var request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+            var requestID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(requestID),
+                "ok": .bool(true),
+                "result": .object([
+                    "session": try JSONValue.encode(baseline),
+                    "syncToken": .string("sync"),
+                    "subscriptionToken": .string("subscription"),
+                ]),
+            ])))
+
+            try await socket.waitUntilSent(count: 3)
+            await store.admit(GatewayEvent(
+                type: "event",
+                topic: "session.snapshot",
+                sessionId: baseline.sessionId,
+                payload: try JSONValue.encode(shifted)
+            ))
+            frame = await socket.sentFrames()[2]
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+            requestID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(requestID),
+                "ok": .bool(true),
+                "result": .object(["synchronized": .bool(true)]),
+            ])))
+
+            _ = try await opening.value
+            #expect(store.snapshot?.transcript.map(\.id) == baseline.transcript.map(\.id))
+            #expect(store.disposableCacheSnapshot == shifted)
+            await client.close()
+        }
+    }
+
     @Test("fresh-open replay publishes editor effects against the installed target")
     func freshOpenReplayEditorTarget() async throws {
         try await withTestWatchdog { @MainActor in
@@ -304,7 +378,7 @@ struct SessionPresentationStoreTests {
         }
     }
 
-    @Test("paging rejects revocation, token replacement, and disconnect after suspension")
+    @Test("paging compacts back to the authoritative tail and rejects stale leases")
     func pagingRevalidatesLease() async throws {
         try await withTestWatchdog { @MainActor in
             let socket = ScriptedGatewaySocket()
@@ -332,7 +406,12 @@ struct SessionPresentationStoreTests {
                 performanceSignposts: SystemPerformanceSignposts.shared
             )
 
-            func respond(index: Int) async throws {
+            func respond(
+                index: Int,
+                items: [TranscriptItem] = [],
+                start: Int = 10,
+                end: Int = 10
+            ) async throws {
                 try await socket.waitUntilSent(count: index + 1)
                 let frame = await socket.sentFrames()[index]
                 let request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
@@ -342,21 +421,61 @@ struct SessionPresentationStoreTests {
                     "id": .string(id),
                     "ok": .bool(true),
                     "result": .object([
-                        "items": .array([]),
-                        "start": .number(0),
+                        "items": try JSONValue.encode(items),
+                        "start": .number(Double(start)),
+                        "end": .number(Double(end)),
                         "total": .number(Double(snapshot.transcriptTotal ?? 10)),
                     ]),
                 ])))
             }
 
-            store.installHostedSubscription(snapshot: snapshot, token: "revoked")
+            store.installHostedSubscription(snapshot: snapshot, token: "current")
             var target = try #require(store.mountedTarget)
+            let earlierItem = try #require(
+                SessionScenarioBuilder(seed: 8_600).historyPage(count: 1, longRowBytes: 16).first
+            )
+            let loaded = Task {
+                await store.loadEarlier(
+                    sessionID: snapshot.sessionId,
+                    presentationGeneration: target.generation
+                )
+            }
+            try await socket.waitUntilSent(count: 2)
+            try await respond(index: 1, items: [earlierItem], start: 9, end: 10)
+            await loaded.value
+            #expect(store.snapshot?.transcriptStart == 9)
+            #expect(store.snapshot?.transcript.first?.id == earlierItem.id)
+            store.discardLoadedTranscriptHistory(
+                sessionID: snapshot.sessionId,
+                presentationGeneration: target.generation
+            )
+            #expect(store.snapshot?.transcriptStart == 10)
+            #expect(store.snapshot?.transcript.map(\.id) == snapshot.transcript.map(\.id))
+
+            let returningWhileLoading = Task {
+                await store.loadEarlier(
+                    sessionID: snapshot.sessionId,
+                    presentationGeneration: target.generation
+                )
+            }
+            try await socket.waitUntilSent(count: 3)
+            store.discardLoadedTranscriptHistory(
+                sessionID: snapshot.sessionId,
+                presentationGeneration: target.generation
+            )
+            try await respond(index: 2, items: [earlierItem], start: 9, end: 10)
+            await returningWhileLoading.value
+            #expect(store.snapshot?.transcriptStart == 10)
+            #expect(store.snapshot?.transcript.map(\.id) == snapshot.transcript.map(\.id))
+
+            store.installHostedSubscription(snapshot: snapshot, token: "revoked")
+            target = try #require(store.mountedTarget)
             let revoked = Task {
                 await store.loadEarlier(sessionID: snapshot.sessionId, presentationGeneration: target.generation)
             }
-            try await socket.waitUntilSent(count: 2)
+            try await socket.waitUntilSent(count: 4)
             store.revokeIntake(target)
-            try await respond(index: 1)
+            try await respond(index: 3)
             await revoked.value
             #expect(store.snapshot?.transcriptStart == 10)
 
@@ -365,9 +484,9 @@ struct SessionPresentationStoreTests {
             let replaced = Task {
                 await store.loadEarlier(sessionID: snapshot.sessionId, presentationGeneration: target.generation)
             }
-            try await socket.waitUntilSent(count: 3)
+            try await socket.waitUntilSent(count: 5)
             store.replaceHostedSubscriptionToken("replacement")
-            try await respond(index: 2)
+            try await respond(index: 4)
             await replaced.value
             #expect(store.snapshot?.transcriptStart == 10)
 
@@ -376,9 +495,9 @@ struct SessionPresentationStoreTests {
             let disconnected = Task {
                 await store.loadEarlier(sessionID: snapshot.sessionId, presentationGeneration: target.generation)
             }
-            try await socket.waitUntilSent(count: 4)
+            try await socket.waitUntilSent(count: 6)
             store.retireConnection()
-            try await respond(index: 3)
+            try await respond(index: 5)
             await disconnected.value
             #expect(store.snapshot?.transcriptStart == 10)
             await client.close()
@@ -421,6 +540,7 @@ struct SessionPresentationStoreTests {
             presentationGeneration: 4,
             runtimeGeneration: "runtime",
             before: 20,
+            expectedTotal: 28,
             expectedNextEntryID: "first"
         )
         #expect(request.canInstall(
@@ -428,6 +548,7 @@ struct SessionPresentationStoreTests {
             presentationGeneration: 4,
             runtimeGeneration: "runtime",
             transcriptStart: 20,
+            transcriptTotal: 28,
             firstTranscriptID: "first"
         ))
         #expect(!request.canInstall(
@@ -435,6 +556,7 @@ struct SessionPresentationStoreTests {
             presentationGeneration: 4,
             runtimeGeneration: "runtime",
             transcriptStart: 20,
+            transcriptTotal: 28,
             firstTranscriptID: "first"
         ))
         #expect(!request.canInstall(
@@ -442,6 +564,7 @@ struct SessionPresentationStoreTests {
             presentationGeneration: 5,
             runtimeGeneration: "runtime",
             transcriptStart: 20,
+            transcriptTotal: 28,
             firstTranscriptID: "first"
         ))
         #expect(!request.canInstall(
@@ -449,6 +572,7 @@ struct SessionPresentationStoreTests {
             presentationGeneration: 4,
             runtimeGeneration: "replacement",
             transcriptStart: 20,
+            transcriptTotal: 28,
             firstTranscriptID: "first"
         ))
         #expect(!request.canInstall(
@@ -456,6 +580,7 @@ struct SessionPresentationStoreTests {
             presentationGeneration: 4,
             runtimeGeneration: "runtime",
             transcriptStart: 19,
+            transcriptTotal: 28,
             firstTranscriptID: "first"
         ))
         #expect(!request.canInstall(
@@ -463,7 +588,37 @@ struct SessionPresentationStoreTests {
             presentationGeneration: 4,
             runtimeGeneration: "runtime",
             transcriptStart: 20,
+            transcriptTotal: 28,
             firstTranscriptID: "replacement"
+        ))
+        #expect(!request.canInstall(
+            sessionID: "session",
+            presentationGeneration: 4,
+            runtimeGeneration: "runtime",
+            transcriptStart: 20,
+            transcriptTotal: 27,
+            firstTranscriptID: "first"
+        ))
+        #expect(request.canInstallPage(
+            start: 12, end: 20, total: 28, itemCount: 8, visibleItemCount: 8
+        ))
+        #expect(!request.canInstallPage(
+            start: 12, end: 19, total: 28, itemCount: 7, visibleItemCount: 8
+        ))
+        #expect(!request.canInstallPage(
+            start: 12, end: 20, total: 28, itemCount: 7, visibleItemCount: 8
+        ))
+        #expect(!request.canInstallPage(
+            start: -1, end: 20, total: 28, itemCount: 21, visibleItemCount: 8
+        ))
+        #expect(!request.canInstallPage(
+            start: 0, end: 20, total: 28, itemCount: 513, visibleItemCount: 8
+        ))
+        #expect(!request.canInstallPage(
+            start: 12, end: 20, total: 27, itemCount: 8, visibleItemCount: 8
+        ))
+        #expect(!request.canInstallPage(
+            start: 12, end: 20, total: 29, itemCount: 8, visibleItemCount: 8
         ))
     }
 }

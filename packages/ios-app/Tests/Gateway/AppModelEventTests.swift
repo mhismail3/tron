@@ -45,6 +45,10 @@ struct AppModelEventTests {
             target: mountedTarget,
             lifecycleGeneration: 0
         )
+        let initialProjection = try #require(model.chatProjectionGenerations(
+            for: snapshot.sessionId,
+            presentationGeneration: 1
+        ))
 
         let completedTool: JSONValue = .object([
             "toolCallId": .string("live-tool"), "toolName": .string("bash"), "order": .number(0), "status": .string("completed"),
@@ -56,6 +60,12 @@ struct AppModelEventTests {
         ])
         await model.handle(event(topic: "session.toolProgress", snapshot: snapshot, sequence: 88, data: completedTool))
         #expect(model.selectedSnapshot?.toolExecutions.first?.status == .completed)
+        let completedProjection = try #require(model.chatProjectionGenerations(
+            for: snapshot.sessionId,
+            presentationGeneration: 1
+        ))
+        #expect(completedProjection.canonical == initialProjection.canonical)
+        #expect(completedProjection.timeline == initialProjection.timeline + 1)
 
         let staleTool: JSONValue = .object([
             "toolCallId": .string("live-tool"), "toolName": .string("bash"), "order": .number(0), "status": .string("running"),
@@ -67,6 +77,10 @@ struct AppModelEventTests {
         #expect(model.selectedSnapshot?.toolExecutions.first?.status == .completed)
         #expect(model.selectedSnapshot?.toolExecutions.first?.output == "done")
         #expect(model.selectedSnapshot?.toolExecutions.first?.durationMs == 2_000)
+        #expect(model.chatProjectionGenerations(
+            for: snapshot.sessionId,
+            presentationGeneration: 1
+        )?.timeline == completedProjection.timeline)
 
         let interactions: JSONValue = .array([
             .object(["id": .string("confirm"), "method": .string("confirm"), "title": .string("Proceed?"), "message": .string("Check")]),
@@ -75,6 +89,10 @@ struct AppModelEventTests {
         afterStale.eventSequence = 89
         await model.handle(event(topic: "session.interactions", snapshot: afterStale, sequence: 90, data: interactions))
         #expect(model.selectedSnapshot?.extensionUI.pendingInteractions.first?.method == .confirm)
+        #expect(model.chatProjectionGenerations(
+            for: snapshot.sessionId,
+            presentationGeneration: 1
+        )?.timeline == completedProjection.timeline)
 
         let editor: JSONValue = .object([
             "action": .string("set"), "text": .string("replacement"), "fullText": .string("replacement"), "revision": .number(4),
@@ -320,6 +338,27 @@ struct AppModelEventTests {
         #expect(merged.transcript.map(\.id) == current.transcript.map(\.id) + adjacent.transcript.map(\.id))
         #expect(merged.transcriptStart == 20)
         #expect(merged.transcriptTotal == 28)
+    }
+
+    @Test("active snapshots never fabricate continuity across a missing range")
+    func activeSnapshotRejectsTranscriptGap() throws {
+        let baseline = try loadSnapshot()
+        var current = baseline
+        current.transcript = Array(baseline.transcript.prefix(3))
+        current.transcriptStart = 20
+        current.transcriptTotal = 23
+
+        var gapped = baseline
+        gapped.eventSequence += 1
+        gapped.phase = .running
+        gapped.transcript = Array(baseline.transcript.suffix(2))
+        gapped.transcriptStart = 25
+        gapped.transcriptTotal = 27
+
+        let merged = AppModel.mergingVisibleTranscript(current: current, authoritative: gapped)
+        #expect(merged.transcript.map(\.id) == gapped.transcript.map(\.id))
+        #expect(merged.transcriptStart == 25)
+        #expect(merged.transcriptTotal == 27)
     }
 
     @Test("active compact snapshots cannot blank an already visible transcript")

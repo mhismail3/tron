@@ -18,6 +18,7 @@ describe("session transcript paging", () => {
     const transcriptPage = vi.fn(() => ({
       items: [{ id: "entry", type: "message", role: "user", text: "earlier" }],
       start: 0,
+      end: 1,
       total: 1,
     }));
     const acquire = vi.fn(async () => ({ transcriptPage }));
@@ -32,6 +33,7 @@ describe("session transcript paging", () => {
     })).resolves.toEqual({
       items: [{ id: "entry", type: "message", role: "user", text: "earlier" }],
       start: 0,
+      end: 1,
       total: 1,
     });
     expect(acquire).toHaveBeenCalledWith("session");
