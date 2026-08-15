@@ -1,8 +1,8 @@
 # Tron iOS hardening plan
 
-Status: implementation in progress — Phases 0–2, Phase 3A–3C, and the separate provisional UI removal milestone are complete. The common Phase 4/5 chat path now has deterministic scroll ownership, exact-tagged off-main atomic projection, canonical-prefix reuse for ordinary streaming, bounded latest-tail/page contracts, exact post-layout opening-tail settlement, and the completed tool-detail presentation redesign. Sparse affected-tool/canonical-entry projection, Markdown/thinking and media budgets, final physical-device chat acceptance, and the remaining Phase 3D/3E cleanup are still pending.
+Status: implementation in progress — Phases 0–2, Phase 3A–3C, and the separate provisional UI removal milestone are complete. The common Phase 4/5 chat path now has deterministic scroll ownership, exact-tagged off-main atomic projection, canonical-prefix reuse for ordinary streaming, bounded latest-tail/page contracts, exact post-layout opening-tail settlement, the completed tool-detail redesign, and role-aligned animated chat activity presentation. Sparse affected-tool/canonical-entry projection, Markdown/thinking and media budgets, final physical-device chat acceptance, and the remaining Phase 3D/3E cleanup are still pending.
 
-Source and owning documentation in the current worktree are authoritative. The latest tool-detail, opening-tail, focused-editor attachment-menu, and dashboard background/foreground/reconnect synchronization changes are validated and installed but remain uncommitted; untracked `.pi` runtime artifacts and historical audit line numbers are not.
+Source and owning documentation in the current worktree are authoritative. The tool-detail, opening-tail, focused-editor attachment-menu, and dashboard synchronization checkpoint is committed at `04f9d9f80`; the subsequent justified-user-text and animated notification/tool-pill work is validated but remains uncommitted. Untracked `.pi` runtime artifacts and historical audit line numbers are not.
 
 Scope: all handwritten iOS app, share-extension, test, project, and owning documentation code under `packages/ios-app`, narrowly required Gateway contract work, and iOS release policy where repository rules require manual delivery.
 
@@ -199,7 +199,8 @@ Completed since the sustained-chat milestone:
 - Technical details now keeps compact selectable execution metadata first and then presents direct Request JSON followed by Result JSON, with no duplicated readable-output section, structured-field container, third fallback section, or raw JSON disclosure. Result resolution is response, then content, then a fallback distinct from the request, then JSON `null`.
 - Session opening no longer consumes its final tail command before the newly revealed lazy transcript is laid out. Settlement requires the exact installed timeline-tail identity, current presentation/layout epoch, valid geometry, and target-specific frame evidence; transient boundary geometry, auxiliary rows, stale presentations, and direct user interaction cannot repin it.
 - The attachment control retains the native `UIMenu`, 40-point plus target, option order, and picker routing while remaining usable with a focused nonempty editor and leaving the keyboard visible.
-- Focused owner suites, repeated hosted scroll-harness runs, the full native suite, strict unit/UI-test builds, privacy/diff guards, and production device builds/installations pass for this checkpoint. Final physical interaction/performance acceptance remains authoritative.
+- Multiline user prompts are fully justified inside a right-anchored block with explicit leading separation; agent prose/tools remain left aligned, while canonical and runtime system activity is centered in one compact capsule language. Flat no-detail notifications, interactive glass details, stable compaction morphing, one-shot geometry-admitted entrances, and discrete smooth tail following preserve Reduce Motion and detached-reader authority.
+- Focused owner suites, repeated hosted scroll-harness runs, the full native suite, strict unit/UI-test builds, privacy/diff guards, and production device builds/installations pass for the committed checkpoint; the subsequent chat role/activity work has the same automated validation but still awaits production device installation and physical acceptance.
 
 Next sequence:
 
@@ -309,17 +310,19 @@ Deliverables:
 - **Complete for projected tool rows and Technical details:** defer `JSONValue.prettyPrinted` until the detail sheet opens; render direct Request JSON then Result JSON only in that sheet. A detail-lifetime formatting cache remains an optional Phase 6 follow-up.
 - **Complete for detail fidelity:** inline diffs require exactly one requested change and one fail-closed valid diff unit; malformed, combined, header-light multi-file, multi-change, and ambiguous patches use the dedicated Changes sheet. Preview omission identities and accessibility labels are stable and bounded.
 - **Complete for detail-sheet geometry:** consolidated runs, individual tools, Changes, and Technical details share explicit inline navigation chrome, eliminating the empty large-title reservation so top-anchored content begins directly below the toolbar at every detent.
+- **Complete for chat role geometry:** multiline user prompts use width-aware TextKit justification inside a right-anchored 520-point block with 28 points of external leading separation; one visual line remains trailing, while agent prose/tools remain left and system events are centered.
+- **Complete for compact activity presentation:** canonical notifications, runtime working/status, errors, and agent tool/run chips share one capsule primitive and semantic tone model. Real detail actions alone use interactive Liquid Glass; no-detail notifications remain flat and noninteractive. Exact compaction bounds permit an in-place pending-to-canonical transition without changing Gateway identity.
 - Remove unused fields from unread-response observation.
 - Preserve visible ordering and grouping with golden tests against the current timeline.
 - Stabilize presentation identity across streaming-to-canonical settlement and overlapping tool-group expansion.
-- Animate every tool-chip insertion and visible state/content change with the established thinking-trace motion language, while honoring Reduce Motion and preserving stable chip identity.
-- Make compact tool chips hug their intrinsic content: remove flexible leading space before timestamps so each chip is only as wide as its label, status, and timestamp require.
+- **Complete:** every discrete tool-chip insertion and visible state/content change uses the shared compact motion policy, honors Reduce Motion, and preserves stable chip identity without replaying entrances after lazy realization.
+- **Complete:** compact tool chips hug their intrinsic content; no flexible leading space precedes timestamps, so each chip is only as wide as its label, status, and timestamp require.
 
 Exit gate:
 
 - **Complete for whole-timeline projection:** typing, geometry, toolbar width, sheet state, attachment-menu state, and unchanged snapshots cause zero timeline projection work.
 - A tool-progress event updates only the owning tool/run descriptor and dependent tail state.
-- Tool chips animate appearance and changes consistently with thinking traces, and timestamp layout introduces no flexible unused leading gap.
+- **Complete:** tool chips animate appearance and changes consistently with thinking traces, and timestamp layout introduces no flexible unused leading gap.
 - Cancelled/out-of-order projection, reconnect replacement, and prepend-overlap completions cannot install.
 - MainActor publication plus the defined SwiftUI diff/command boundary stays within the calibrated budget.
 
@@ -335,6 +338,7 @@ Deliverables:
 - **Complete:** the load token stays active through settlement, repeat taps are no-ops, and stale work cannot end a newer transaction.
 - **Complete:** geometry-first detachment consumes its one-shot direct-return arm, so viewport expansion and later unattributed tail samples cannot release it; native/direct/accessibility return still releases at an attributed tail. Catch-up retains prior and newly arriving unread state through staged/final/settling phases, restores it on interruption, and clears it only after physical tail settlement.
 - **Complete:** hosted aggregate evidence drives the actual coordinator/executor, bounds retained row frames, admits at most one automatic command per displayed frame, and records zero detached writes without exposing content or identifiers in the added counters.
+- **Complete:** bounded discrete entrance ownership installs atomically with the exact projection and resolves from current row geometry. Visible/pinned rows reveal once with non-layout opacity/scale, realized offscreen or user-displaced rows never replay, continuous streaming remains nonanimated, and only one admitted discrete insertion may arm a smooth pinned follow.
 - **Complete:** initial presentation settlement is layout-evidence-driven rather than timing-driven. The exact installed timeline-tail row and current layout epoch must agree with valid geometry before the final opening command can publish or settle; transient short geometry, auxiliary runtime rows, stale callbacks, and user interaction cannot consume or revive that ownership.
 - **Complete for the common latest-tail path:** Gateway snapshots/pages are capped at 512 items as well as their byte budgets; exact page bounds reject truncation/gaps, only explicitly detached browsing retains earlier pages, and physical return to latest drops that disposable prefix while preserving the authoritative tail and existing UI.
 - **Remaining checkpoint:** physical-device evidence for the final one-point/two-point excursion gate and the still-observed native SwiftUI geometry diagnostic.

@@ -38,9 +38,137 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     }
 }
 
+enum ChatTranscriptEntranceState: Equatable, Sendable {
+    case none
+    case pending
+    case admitted
+}
+
+struct ChatDisplayedTranscriptItems: RandomAccessCollection {
+    typealias Index = Int
+    let timeline: ChatTranscriptItems
+    let runtime: [ChatTranscriptRenderItem]
+
+    var startIndex: Int { 0 }
+    var endIndex: Int { timeline.count + runtime.count }
+
+    subscript(position: Int) -> ChatTranscriptRenderItem {
+        precondition(indices.contains(position))
+        return position < timeline.count
+            ? timeline[position]
+            : runtime[position - timeline.count]
+    }
+}
+
 struct InstalledChatTranscript: Hashable, Sendable {
+    struct SourceWindow: Hashable, Sendable {
+        let originalStart: Int?
+        let originalCount: Int
+        let start: Int?
+        let total: Int?
+        let ids: [String]
+        let hasExactBounds: Bool
+        let hasUniqueIDs: Bool
+
+        init(snapshot: SessionSnapshot) {
+            let sourceStart = snapshot.transcriptStart
+            let sourceCount = snapshot.transcript.count
+            originalStart = sourceStart
+            originalCount = sourceCount
+            let maximum = ChatTranscriptPageRequest.maximumItemCount
+            let dropped = max(0, sourceCount - maximum)
+            ids = Array(snapshot.transcript.suffix(maximum).map(\.id))
+            start = sourceStart.map { $0 + dropped }
+            total = snapshot.transcriptTotal
+            hasExactBounds = sourceStart.map {
+                $0 + sourceCount == snapshot.transcriptTotal
+            } == true
+            hasUniqueIDs = Set(ids).count == ids.count
+        }
+    }
+
     let tag: ChatTranscriptProjectionTag
     let timeline: ChatTranscriptTimeline
+    let runtimeItems: [ChatTranscriptRenderItem]
+    let sourceWindow: SourceWindow
+    let displayedIDSet: Set<String>
+
+    init(
+        tag: ChatTranscriptProjectionTag,
+        timeline: ChatTranscriptTimeline,
+        runtimeItems: [ChatTranscriptRenderItem],
+        sourceWindow: SourceWindow
+    ) {
+        self.tag = tag
+        self.timeline = timeline
+        self.runtimeItems = runtimeItems
+        self.sourceWindow = sourceWindow
+        displayedIDSet = Set(timeline.ids).union(runtimeItems.map(\.id))
+    }
+
+    var displayedItems: ChatDisplayedTranscriptItems {
+        ChatDisplayedTranscriptItems(timeline: timeline.items, runtime: runtimeItems)
+    }
+    var displayedIDs: [String] { timeline.ids + runtimeItems.map(\.id) }
+    func containsDisplayedID(_ id: String) -> Bool { displayedIDSet.contains(id) }
+}
+
+enum ChatTranscriptTransitionPolicy {
+    static func discreteInsertedIDs(
+        previous: InstalledChatTranscript?,
+        next: InstalledChatTranscript
+    ) -> Set<String> {
+        guard let previous,
+              previous.tag.matchesIdentity(of: next.tag) else { return [] }
+        let sameSource = previous.sourceWindow.originalStart == next.sourceWindow.originalStart
+            && previous.sourceWindow.originalCount == next.sourceWindow.originalCount
+            && previous.sourceWindow.start == next.sourceWindow.start
+            && previous.sourceWindow.total == next.sourceWindow.total
+            && previous.sourceWindow.ids == next.sourceWindow.ids
+        let renderedPrefixExtension = next.timeline.items.canonical.map(\.id)
+            .starts(with: previous.timeline.items.canonical.map(\.id))
+        guard sameSource
+                || isExactForwardEvolution(from: previous.sourceWindow, to: next.sourceWindow)
+                || renderedPrefixExtension else { return [] }
+
+        let previousIDs = Set(previous.displayedIDs)
+        let inserted = next.displayedIDs.filter { !previousIDs.contains($0) }
+        return Set(inserted.prefix(ChatTranscriptPageRequest.maximumItemCount))
+    }
+
+    /// Source ordinals, rather than rendered grouping, distinguish a forward
+    /// bounded-tail rollover from prepend or replacement. Both windows are
+    /// capped at the Gateway page bound before reaching MainActor publication.
+    private static func isExactForwardEvolution(
+        from previous: InstalledChatTranscript.SourceWindow,
+        to next: InstalledChatTranscript.SourceWindow
+    ) -> Bool {
+        guard previous.hasExactBounds, next.hasExactBounds,
+              previous.hasUniqueIDs, next.hasUniqueIDs,
+              let previousOriginalStart = previous.originalStart,
+              let nextOriginalStart = next.originalStart,
+              nextOriginalStart >= previousOriginalStart,
+              let previousStart = previous.start, let previousTotal = previous.total,
+              let nextStart = next.start, let nextTotal = next.total,
+              nextStart >= previousStart,
+              nextTotal >= previousTotal else { return false }
+
+        let overlapStart = max(previousStart, nextStart)
+        let overlapEnd = min(previousTotal, nextTotal)
+        if overlapStart == overlapEnd {
+            return previous.ids.isEmpty && nextStart == previousTotal
+        }
+        guard overlapStart < overlapEnd else { return false }
+        let overlapCount = overlapEnd - overlapStart
+        let previousOffset = overlapStart - previousStart
+        let nextOffset = overlapStart - nextStart
+        guard previousOffset >= 0, nextOffset >= 0,
+              previousOffset + overlapCount <= previous.ids.count,
+              nextOffset + overlapCount <= next.ids.count else { return false }
+        return previous.ids[previousOffset..<(previousOffset + overlapCount)].elementsEqual(
+            next.ids[nextOffset..<(nextOffset + overlapCount)]
+        )
+    }
 }
 
 enum ChatTranscriptPresentationStoreError: Error, Equatable, Sendable {
@@ -60,6 +188,36 @@ private struct BuiltChatTranscript: Sendable {
 }
 
 private actor ChatTranscriptProjectionWorker {
+    private struct TimelineKey: Equatable, Sendable {
+        let sessionID: String
+        let presentationGeneration: Int
+        let runtimeGeneration: String
+        let canonicalGeneration: Int
+        let transcriptStart: Int?
+        let transcriptTotal: Int?
+        let transcriptCount: Int
+        let firstTranscriptID: String?
+        let lastTranscriptID: String?
+        let phase: SessionPhase
+        let streaming: TranscriptItem?
+        let toolExecutions: [ToolExecutionState]
+
+        init(tag: ChatTranscriptProjectionTag, snapshot: SessionSnapshot) {
+            sessionID = tag.sessionID
+            presentationGeneration = tag.presentationGeneration
+            runtimeGeneration = tag.runtimeGeneration
+            canonicalGeneration = tag.canonicalGeneration
+            transcriptStart = tag.transcriptStart
+            transcriptTotal = tag.transcriptTotal
+            transcriptCount = tag.transcriptCount
+            firstTranscriptID = tag.firstTranscriptID
+            lastTranscriptID = tag.lastTranscriptID
+            phase = snapshot.phase
+            streaming = snapshot.streaming
+            toolExecutions = snapshot.toolExecutions
+        }
+    }
+
     private struct CanonicalBaseKey: Equatable, Sendable {
         let sessionID: String
         let presentationGeneration: Int
@@ -93,6 +251,9 @@ private actor ChatTranscriptProjectionWorker {
     private var canonicalBaseKey: CanonicalBaseKey?
     private var canonicalBase: ChatTranscriptTimeline?
     private var canonicalBaseIsInternallyConsistent = false
+    private var lastTimelineKey: TimelineKey?
+    private var lastTimeline: ChatTranscriptTimeline?
+    private var lastTimelineIsInternallyConsistent = false
 
     init(
         builder: @escaping ChatTranscriptProjectionBuilder,
@@ -106,6 +267,14 @@ private actor ChatTranscriptProjectionWorker {
         snapshot: SessionSnapshot,
         tag: ChatTranscriptProjectionTag
     ) -> BuiltChatTranscript {
+        let timelineKey = TimelineKey(tag: tag, snapshot: snapshot)
+        if usesIncrementalProjection, lastTimelineKey == timelineKey, let lastTimeline {
+            return BuiltChatTranscript(
+                timeline: lastTimeline,
+                isInternallyConsistent: lastTimelineIsInternallyConsistent
+            )
+        }
+
         let timeline: ChatTranscriptTimeline
         let isInternallyConsistent: Bool
         if usesIncrementalProjection,
@@ -136,6 +305,9 @@ private actor ChatTranscriptProjectionWorker {
             timeline = builder(snapshot, tag)
             isInternallyConsistent = timeline.isInternallyConsistent
         }
+        lastTimelineKey = timelineKey
+        lastTimeline = timeline
+        lastTimelineIsInternallyConsistent = isInternallyConsistent
         return BuiltChatTranscript(
             timeline: timeline,
             isInternallyConsistent: isInternallyConsistent
@@ -164,6 +336,8 @@ final class ChatTranscriptPresentationStore {
     }
 
     private(set) var installed: InstalledChatTranscript?
+    private(set) var pendingEntranceIDs: Set<String> = []
+    private(set) var admittedEntranceIDs: Set<String> = []
 
     @ObservationIgnored private let projectionWorker: ChatTranscriptProjectionWorker
     @ObservationIgnored private let installationFrameScheduler: DisplayFrameScheduler?
@@ -227,6 +401,8 @@ final class ChatTranscriptPresentationStore {
 
         if let installed, !installed.tag.matchesIdentity(of: tag) {
             self.installed = nil
+            pendingEntranceIDs.removeAll(keepingCapacity: true)
+            admittedEntranceIDs.removeAll(keepingCapacity: true)
         }
         desiredTag = tag
         pending = PendingProjection(snapshot: snapshot, tag: tag, generation: generation)
@@ -270,6 +446,27 @@ final class ChatTranscriptPresentationStore {
         }
     }
 
+    func entranceState(for id: String) -> ChatTranscriptEntranceState {
+        if admittedEntranceIDs.contains(id) { return .admitted }
+        if pendingEntranceIDs.contains(id) { return .pending }
+        return .none
+    }
+
+    /// Row geometry is the admission evidence. Visible inserted rows reveal once;
+    /// realized offscreen rows become immediately visible and never replay later.
+    @discardableResult
+    func resolveEntrance(id: String, isVisible: Bool) -> Bool {
+        guard pendingEntranceIDs.remove(id) != nil else { return false }
+        if isVisible { admittedEntranceIDs.insert(id) }
+        return isVisible
+    }
+
+    /// Direct/native interaction is stronger than a pending visual entrance.
+    /// Clearing here prevents lazily realized offscreen rows from replaying later.
+    func discardPendingEntrances() {
+        pendingEntranceIDs.removeAll(keepingCapacity: true)
+    }
+
     func reset() {
         generation &+= 1
         desiredTag = nil
@@ -279,6 +476,8 @@ final class ChatTranscriptPresentationStore {
         installFrameTask?.cancel()
         installFrameTask = nil
         installed = nil
+        pendingEntranceIDs.removeAll(keepingCapacity: false)
+        admittedEntranceIDs.removeAll(keepingCapacity: false)
         failAllWaiters(with: CancellationError())
     }
 
@@ -297,8 +496,16 @@ final class ChatTranscriptPresentationStore {
                 self.buildingTag = nil
                 guard self.generation == next.generation else { continue }
 
-                let output = InstalledChatTranscript(tag: next.tag, timeline: built.timeline)
-                guard built.isInternallyConsistent else {
+                let runtimeItems = ChatNotificationPresentation.runtime(in: next.snapshot)
+                    .map(ChatTranscriptRenderItem.notification)
+                let output = InstalledChatTranscript(
+                    tag: next.tag,
+                    timeline: built.timeline,
+                    runtimeItems: runtimeItems,
+                    sourceWindow: .init(snapshot: next.snapshot)
+                )
+                guard built.isInternallyConsistent,
+                      output.displayedIDSet.count == output.displayedItems.count else {
                     if self.desiredTag == next.tag {
                         self.desiredTag = nil
                         self.failWaiters(for: next.tag, error: .invalidProjection)
@@ -317,7 +524,7 @@ final class ChatTranscriptPresentationStore {
 
     private func admitCompleted(_ output: InstalledChatTranscript) {
         guard installationFrameScheduler != nil else {
-            installed = output
+            install(output)
             resumeWaiters(with: output)
             return
         }
@@ -343,8 +550,20 @@ final class ChatTranscriptPresentationStore {
         readyToInstall = nil
         installFrameTask = nil
         guard let output, desiredTag == output.tag else { return }
-        installed = output
+        install(output)
         resumeWaiters(with: output)
+    }
+
+    private func install(_ output: InstalledChatTranscript) {
+        let inserted = ChatTranscriptTransitionPolicy.discreteInsertedIDs(
+            previous: installed,
+            next: output
+        )
+        let displayedIDs = output.displayedIDSet
+        pendingEntranceIDs.formIntersection(displayedIDs)
+        admittedEntranceIDs.formIntersection(displayedIDs)
+        pendingEntranceIDs.formUnion(inserted.subtracting(admittedEntranceIDs))
+        installed = output
     }
 
     private func resumeWaiters(with output: InstalledChatTranscript) {

@@ -292,14 +292,16 @@ each correction. First-ready timing cannot end before the exact initial transcri
 projection installs and its frame resumes. `ChatTranscriptPresentationStoreTests` use
 watchdog-bounded synchronous builder barriers to prove serial off-main work, same-tag
 coalescing, newest-wins and A→B→A admission, paging-tag distinction, reset rejection,
-MainActor responsiveness, display-frame-gated atomic installation, and one canonical scan
-across thirty updates of a 10,000-entry text stream. Cold/incremental parity tests require
+MainActor responsiveness, display-frame-gated atomic installation, runtime-only cache reuse,
+bounded geometry-admitted entrance ownership, and one canonical scan across thirty updates of a
+10,000-entry text stream. Cold/incremental parity tests require
 identical rows, order, tool state, and semantic maps. `SessionPresentationStoreTests` also
 prove exact page `start`/`end`/count admission and that return-to-latest compacts loaded
 history back to the retained authoritative tail. `ChatScrollCoordinatorTests` use watchdog-bounded
 barriers rather than sleeps or yields to prove callback-order equivalence, immediate
 catch-up dismissal for geometry-first manual return to the tail, pinned keyboard/composer
-following, one follow command per frame, no writes for detached layout/stream/keyboard
+following, one follow command per frame, a single smooth command only for an admitted discrete
+insertion, immediate continuous-stream following, no writes for detached layout/stream/keyboard
 settlement, viewport geometry-first expansion detachment, frame-separated catch-up with unread admission
 through every interruption stage, Reduce Motion, exact reset/release command admission,
 exact-installed-tail opening settlement, transient-boundary rejection, auxiliary-row rejection, both
@@ -308,9 +310,12 @@ stale-presentation rejection, repeat-prepend ownership, post-install layout-epoc
 callbacks, and exact semantic remeasurement with at most one late correction and no
 frame retry or total-height polling. Hosted controls drive the production
 coordinator/executor; new evidence is bounded aggregate callback/command/frame and
-maximum-excursion data only. Hosted streaming bursts must install only their newest
-exact source while detached composer/viewport work remains writable and creates no
-projection work. Native bottom evidence comes from `ScrollGeometry.visibleRect.maxY`
+maximum-excursion data only. Hosted discrete-insertion cases record aggregate entrance and smooth-follow
+counts, prove a visible insertion admits once, and prove detached insertion emits no automatic write.
+Hosted streaming bursts must install only their newest exact source while detached composer/viewport work
+remains writable and creates no projection work. `ChatCompactPillTests` own single-line trailing versus
+multiline justification, the 28-point external user-side separation, and flat/detail material policy.
+Native bottom evidence comes from `ScrollGeometry.visibleRect.maxY`
 plus the bottom inset; the harness no longer substitutes a hard-coded settled distance.
 The obsolete visibility modifier is removed; the native SwiftUI geometry modifier still
 reports a multiple-update-per-frame diagnostic in hosted runs and remains a physical checkpoint.
@@ -321,6 +326,7 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests/ChatScrollCoordinatorTests \
   -only-testing:TronMobileTests/ChatTranscriptPresentationStoreTests \
   -only-testing:TronMobileTests/ChatTranscriptPresentationTests \
+  -only-testing:TronMobileTests/ChatCompactPillTests \
   -only-testing:TronMobileTests/ChatViewScrollHarnessTests \
   -only-testing:TronMobileTests/ChatPerformanceTrackerTests
 ```

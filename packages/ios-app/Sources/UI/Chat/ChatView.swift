@@ -47,6 +47,7 @@ struct ChatView: View {
     @State private var transcriptPresentation: ChatTranscriptPresentationStore
     @State private var performanceTracker: ChatPerformanceTracker
     @State private var transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
+    @State private var transcriptGeometry = ChatTranscriptGeometry.zero
     @Namespace private var composerGlassNamespace
     // UITextView is the responder owner. This mirrors delegate callbacks for
     // placeholder/scroll presentation; SwiftUI FocusState must not compete with
@@ -186,7 +187,8 @@ struct ChatView: View {
             Text(ComposerEditorRequestPolicy.confirmationMessage)
         }
         .task(id: sessionID) { await beginOpeningPresentation() }
-        .onChange(of: transcriptProjectionSource, initial: true) { _, source in
+        .onChange(of: transcriptProjectionSource, initial: true) { previous, source in
+            if previous != source { scrollCoordinator.discreteContentSuperseded() }
             guard let currentSource = transcriptProjectionSource else {
                 transcriptPresentation.reset()
                 return
@@ -246,18 +248,22 @@ struct ChatView: View {
                             earlierMessagesChip(snapshot: snapshot)
                         }
                     }
-                    if let timeline = transcriptPresentation.installed?.timeline {
-                        ForEach(timeline.items) { item in
+                    if let installed = transcriptPresentation.installed {
+                        ForEach(installed.displayedItems) { item in
                             stableTranscriptRow(id: item.id) {
-                                ChatTranscriptRenderRow(
-                                    item: item,
-                                    hiddenThinkingLabel: snapshot.extensionUI.hiddenThinkingLabel
-                                )
-                                .equatable()
+                                ChatTranscriptEntranceRow(
+                                    state: transcriptPresentation.entranceState(for: item.id),
+                                    reduceMotion: reduceMotion
+                                ) {
+                                    ChatTranscriptRenderRow(
+                                        item: item,
+                                        hiddenThinkingLabel: snapshot.extensionUI.hiddenThinkingLabel
+                                    )
+                                    .equatable()
+                                }
                             }
                         }
                     }
-                    runtimeRows(snapshot)
                 }
                 Color.clear
                     .frame(height: 12)
@@ -281,12 +287,16 @@ struct ChatView: View {
         .tronScrollEdgeChrome()
         .onChange(of: transcriptScrollPosition.isPositionedByUser) { _, positionedByUser in
             guard admitsNativeScrollCallbacks else { return }
-            if positionedByUser { performanceTracker.discardScroll() }
+            if positionedByUser {
+                performanceTracker.discardScroll()
+                transcriptPresentation.discardPendingEntrances()
+            }
             scrollCoordinator.scrollPositionChanged(isPositionedByUser: positionedByUser)
         }
         .onScrollGeometryChange(for: ChatTranscriptGeometry.self) { geometry in
             ChatTranscriptGeometry(geometry)
         } action: { previous, geometry in
+            transcriptGeometry = geometry
             #if HOSTED_TEST
             hostedProbe?.updateGeometry(geometry)
             if isTranscriptReady, geometry.isAtCatchUpBoundary {
@@ -304,6 +314,7 @@ struct ChatView: View {
             guard admitsNativeScrollCallbacks else { return }
             if newPhase == .interacting || newPhase == .tracking || newPhase == .decelerating {
                 performanceTracker.discardScroll()
+                transcriptPresentation.discardPendingEntrances()
             }
             let finalGeometry = ChatTranscriptGeometry(context.geometry)
             scrollCoordinator.scrollPhaseChanged(
@@ -357,6 +368,28 @@ struct ChatView: View {
                 layoutEpoch: sample.layoutEpoch,
                 frame: sample.frame
             )
+            if sample.layoutEpoch == scrollCoordinator.layoutEpoch,
+               transcriptPresentation.installed?.tag == transcriptProjectionSource,
+               transcriptPresentation.installed?.containsDisplayedID(id) == true {
+                let intersectsViewport = transcriptGeometry.isValid
+                    && sample.frame.maxY > 0
+                    && sample.frame.minY < transcriptGeometry.containerHeight
+                // A realized tail insertion owned by a pinned reader is the
+                // exact upcoming viewport target even when its first frame sits
+                // just below the current edge. Detached readers require actual
+                // intersection and never gain automatic authority here.
+                let isVisible = intersectsViewport || scrollCoordinator.canAutomaticallyFollow
+                if transcriptPresentation.entranceState(for: id) == .pending {
+                    let animated = transcriptPresentation.resolveEntrance(
+                        id: id,
+                        isVisible: isVisible
+                    )
+                    #if HOSTED_TEST
+                    hostedProbe?.recordEntranceResolution(animated: animated)
+                    #endif
+                    if animated { scrollCoordinator.discreteContentInserted() }
+                }
+            }
             #if HOSTED_TEST
             hostedProbe?.updateRowFrame(id: id, frame: sample.frame)
             hostedProbe?.recordMaximumSemanticExcursion(scrollCoordinator.maximumPrependSemanticExcursion)
@@ -460,34 +493,6 @@ struct ChatView: View {
         #else
         true
         #endif
-    }
-
-    @ViewBuilder private func runtimeRows(_ snapshot: SessionSnapshot) -> some View {
-        if let working = ChatRuntimeWorkingPresentation(
-            phase: snapshot.phase,
-            working: snapshot.extensionUI.working,
-            retry: snapshot.retry
-        ) {
-            stableTranscriptRow(id: "runtime-working") {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(working.message).foregroundStyle(.secondary)
-                        if let retryMessage = working.retryMessage {
-                            Text(retryMessage).foregroundStyle(.tertiary)
-                        }
-                    }
-                }
-                .font(TronTypography.caption).padding(.vertical, 4)
-            }
-        }
-        if !snapshot.extensionUI.statuses.isEmpty {
-            ForEach(snapshot.extensionUI.statuses.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                stableTranscriptRow(id: "runtime-status-\(key)") {
-                    TranscriptNotice(title: value, icon: "info.circle.fill", tint: .tronInfo)
-                }
-            }
-        }
     }
 
     @ViewBuilder private var openingSurface: some View {
@@ -777,13 +782,17 @@ struct ChatView: View {
             performanceTracker.settleScroll()
         }
         #if HOSTED_TEST
-        hostedProbe?.recordScrollCommand(isAutomatic: command.origin == .automaticFollow)
+        hostedProbe?.recordScrollCommand(
+            isAutomatic: command.origin == .automaticFollow,
+            isSmooth: command.animation != .disabled
+        )
         #endif
         scrollCoordinator.commandApplied(command)
     }
 
     @MainActor
     private func catchUpToTail() {
+        transcriptPresentation.discardPendingEntrances()
         scrollCoordinator.requestCatchUp(reduceMotion: reduceMotion)
     }
 
@@ -1364,6 +1373,44 @@ private struct PendingAttachmentChip: View {
     }
 }
 
+private struct ChatTranscriptEntranceRow<Content: View>: View {
+    let state: ChatTranscriptEntranceState
+    let reduceMotion: Bool
+    @ViewBuilder let content: Content
+    @State private var revealed: Bool
+
+    init(
+        state: ChatTranscriptEntranceState,
+        reduceMotion: Bool,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.state = state
+        self.reduceMotion = reduceMotion
+        self.content = content()
+        _revealed = State(initialValue: state != .pending || reduceMotion)
+    }
+
+    var body: some View {
+        content
+            .opacity(revealed ? 1 : 0)
+            .scaleEffect(revealed || reduceMotion ? 1 : 0.985)
+            .offset(y: revealed || reduceMotion ? 0 : 3)
+            .onChange(of: state, initial: true) { _, state in
+                switch state {
+                case .pending:
+                    break
+                case .admitted:
+                    if reduceMotion { revealed = true }
+                    else { withAnimation(.smooth(duration: 0.24)) { revealed = true } }
+                case .none:
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { revealed = true }
+                }
+            }
+    }
+}
+
 private struct ChatTranscriptRenderRow: View, Equatable {
     let item: ChatTranscriptRenderItem
     let hiddenThinkingLabel: String?
@@ -1388,6 +1435,9 @@ private struct ChatTranscriptRenderRow: View, Equatable {
         case .toolRun(let run):
             ToolRunView(run: run)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        case .notification(let notification):
+            ChatNotificationView(presentation: notification)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 }

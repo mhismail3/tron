@@ -196,6 +196,77 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("visible discrete insertion reveals once and owns one smooth follow")
+    func discreteInsertionEntrance() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 1_190) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                        && ($0.observation.scrollSettledDistance ?? .infinity)
+                            <= ChatTranscriptGeometry.catchUpDistance
+                }
+                let entranceBaseline = ready.observation.animatedEntranceCount
+                let smoothBaseline = ready.observation.smoothAutomaticScrollCommandCount
+                let installBaseline = ready.observation.projectionInstallCount
+
+                var updated = harness.snapshot
+                updated.transcript.append(try harnessMessage(id: "discrete-tail"))
+                updated.transcriptTotal = (updated.transcriptTotal ?? updated.transcript.count - 1) + 1
+                updated.revision += 1
+                updated.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(updated)
+
+                let revealed = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount > installBaseline
+                        && $0.observation.animatedEntranceCount == entranceBaseline + 1
+                }
+                #expect(revealed.observation.smoothAutomaticScrollCommandCount <= smoothBaseline + 1)
+
+                // Repeated geometry for the same row cannot replay admission.
+                if let frame = revealed.observation.rowFrames["discrete-tail"] {
+                    harness.probe.updateRowFrame(id: "discrete-tail", frame: frame)
+                }
+                #expect(harness.probeObservation.animatedEntranceCount == entranceBaseline + 1)
+            }
+        }
+    }
+
+    @Test("detached discrete insertion performs no automatic write")
+    func detachedDiscreteInsertion() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 1_191) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                }
+                let bottom = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
+                )
+                let away = ChatTranscriptGeometry(
+                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
+                )
+                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: bottom, current: away)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
+                harness.driveNativeOwnership(false)
+                #expect(harness.probeObservation.isDetached)
+
+                let commandBaseline = harness.probeObservation.automaticScrollCommandCount
+                let installBaseline = harness.probeObservation.projectionInstallCount
+                var updated = harness.snapshot
+                updated.transcript.append(try harnessMessage(id: "detached-tail"))
+                updated.transcriptTotal = (updated.transcriptTotal ?? updated.transcript.count - 1) + 1
+                updated.revision += 1
+                updated.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(updated)
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount > installBaseline
+                }
+                #expect(harness.probeObservation.automaticScrollCommandCount == commandBaseline)
+            }
+        }
+    }
+
     @Test("streaming burst installs only its newest projection while detached scrolling stays writable")
     func streamingBurstLatestProjection() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -333,12 +404,14 @@ struct ChatViewScrollHarnessTests {
                 #expect(!harness.drivePrepend())
                 _ = try await harness.recorder.waitUntil { $0.observation.prependLoadWaiting }
                 let callbacksBeforeRelease = harness.probeObservation.semanticFrameCallbackCount
+                let automaticBeforeRelease = harness.probeObservation.automaticScrollCommandCount
                 harness.releasePrependPage()
                 let completed = try await harness.recorder.waitUntil {
                     $0.observation.prependCompletionResult == .success
                 }
                 #expect(completed.observation.semanticFrameCallbackCount > callbacksBeforeRelease)
                 #expect(completed.observation.maximumSemanticExcursion <= 2)
+                #expect(completed.observation.automaticScrollCommandCount == automaticBeforeRelease)
 
                 #expect(harness.drivePrepend())
                 _ = try await harness.recorder.waitUntil { $0.observation.prependLoadWaiting }
@@ -396,6 +469,15 @@ struct ChatViewScrollHarnessTests {
         }
         harness.cleanup()
     }
+}
+
+private func harnessMessage(id: String) throws -> TranscriptItem {
+    try JSONDecoder.gateway.decode(
+        TranscriptItem.self,
+        from: Data("""
+        {"id":"\(id)","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"\(id):text","type":"text","text":"A new response"}]}
+        """.utf8)
+    )
 }
 
 @MainActor

@@ -581,7 +581,30 @@ scroll content so scrolling geometry and tail following remain authoritative. Pr
 the currently visible Providers or Onboarding surface, preventing an underlying
 sheet from deferring the login prompt until the user navigates back. Sheets never use pull-to-refresh;
 session history, packages, and providers expose reload as an explicit toolbar
-action while non-sheet dashboard refresh remains available. Every tool chip owns a tappable, top-anchored detail sheet, including
+action while non-sheet dashboard refresh remains available.
+
+Chat has one spatial role model: user prompts are right anchored, agent prose and tools are left
+anchored, and presentation-only system events are centered. A width-aware TextKit owner keeps a
+single-line user prompt trailing and fully justifies multiline prompts within a 520-point maximum,
+with an external 28-point leading separation that preserves the right-side silhouette. Canonical
+compaction/branch/configuration entries, embedded assistant failures, and exact admitted runtime
+working/status state share one semantic notification projection and capsule primitive. Only a pill
+with real detail content is an interactive Liquid Glass button; no-detail events use a flat tinted
+fill and stroke with identical type and geometry. Tones are Sendable semantic values resolved to
+SwiftUI color only at the view boundary. Under exact tail bounds, a pending compaction and its
+canonical entry share a presentation-only global-ordinal identity, so “Compacting context” becomes
+“Context compacted” in place without changing Gateway identity or semantic scroll maps.
+
+Runtime pills install atomically beside the exact tagged timeline. Working/status-only revisions reuse
+the unchanged expensive transcript projection. Bounded entrance candidates are admitted by current
+row geometry: visible/pinned discrete rows fade with a small non-layout transform exactly once,
+realized offscreen rows become visible without replay, and direct interaction discards unresolved
+candidates. `ChatScrollCoordinator` alone may consume one smooth follow for an admitted discrete
+insertion; continuous Markdown growth remains coalesced and nonanimated, while detached readers
+receive no writes and Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
+the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.
+
+Every tool chip owns a tappable, top-anchored detail sheet, including
 read/write/edit and filesystem search tools. The immersive camera retains the
 pre-gateway flashlight, morphing shutter/confirmation, and flip/retake controls
 over a full-sheet preview. A tool call and its canonical result are presented as
@@ -629,9 +652,10 @@ and minimal visual insets while their semantic buttons retain a 44-point interac
 region. Thinking traces are noninteractive and never hide canonical text behind a
 disclosure: adjacent thinking parts and their nonempty lines form one compact inline
 paragraph, each presentation segment ends in an ellipsis, and newly appended segments
-fade in unless Reduce Motion is enabled. Tool chips use a thin rounded rectangle rather
-than a tall capsule. Compaction and branch-summary events use
-content-sized transcript pills whose sheets contain the complete canonical summary;
+fade in unless Reduce Motion is enabled. Tool chips and system events share compact
+capsule geometry while preserving their role alignment and interaction semantics.
+Compaction and branch-summary events use content-sized transcript pills whose sheets
+contain the complete canonical summary;
 compaction token counts use compact `K` shorthand.
 Transcript configuration changes, errors,
 bookmarks, and extension statuses share one readable notification-pill language,

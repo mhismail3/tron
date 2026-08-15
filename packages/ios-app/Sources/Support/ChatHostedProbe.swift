@@ -15,6 +15,9 @@ struct ChatHostedObservation: Sendable {
     let scrollSettledDistance: CGFloat?
     let scrollCommandCount: Int
     let automaticScrollCommandCount: Int
+    let smoothAutomaticScrollCommandCount: Int
+    let animatedEntranceCount: Int
+    let offscreenEntranceResolutionCount: Int
     let geometryCallbackCount: Int
     let semanticFrameCallbackCount: Int
     let projectionSubmitCount: Int
@@ -41,6 +44,9 @@ final class ChatHostedProbe {
     private var scrollSettledDistance: CGFloat?
     private var scrollCommandCount = 0
     private var automaticScrollCommandCount = 0
+    private var smoothAutomaticScrollCommandCount = 0
+    private var animatedEntranceCount = 0
+    private var offscreenEntranceResolutionCount = 0
     private var geometryCallbackCount = 0
     private var semanticFrameCallbackCount = 0
     private var projectionSubmitCount = 0
@@ -87,6 +93,9 @@ final class ChatHostedProbe {
             scrollSettledDistance: scrollSettledDistance,
             scrollCommandCount: scrollCommandCount,
             automaticScrollCommandCount: automaticScrollCommandCount,
+            smoothAutomaticScrollCommandCount: smoothAutomaticScrollCommandCount,
+            animatedEntranceCount: animatedEntranceCount,
+            offscreenEntranceResolutionCount: offscreenEntranceResolutionCount,
             geometryCallbackCount: geometryCallbackCount,
             semanticFrameCallbackCount: semanticFrameCallbackCount,
             projectionSubmitCount: projectionSubmitCount,
@@ -133,9 +142,18 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
-    func recordScrollCommand(isAutomatic: Bool) {
+    func recordScrollCommand(isAutomatic: Bool, isSmooth: Bool) {
         scrollCommandCount &+= 1
-        if isAutomatic { automaticScrollCommandCount &+= 1 }
+        if isAutomatic {
+            automaticScrollCommandCount &+= 1
+            if isSmooth { smoothAutomaticScrollCommandCount &+= 1 }
+        }
+        revision &+= 1
+    }
+
+    func recordEntranceResolution(animated: Bool) {
+        if animated { animatedEntranceCount &+= 1 }
+        else { offscreenEntranceResolutionCount &+= 1 }
         revision &+= 1
     }
 

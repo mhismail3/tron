@@ -327,14 +327,11 @@ struct PresentationStyleGuardTests {
             #expect(occurrenceCount == 0, "\(symbol) remains in production Sources")
         }
 
-        let runtimeWorkingRowCall = "stableTranscriptRow(id: \"runtime-working\")"
-        let runtimeWorkingRowCallCount = productionSources.reduce(0) { count, source in
-            count + source.1.occurrences(of: runtimeWorkingRowCall)
+        let runtimeProjectionCount = productionSources.reduce(0) { count, source in
+            count + source.1.occurrences(of: "ChatNotificationPresentation.runtime(in:")
         }
-        #expect(
-            runtimeWorkingRowCallCount == 1,
-            "expected one mounted runtime working row, found \(runtimeWorkingRowCallCount)"
-        )
+        #expect(runtimeProjectionCount == 1)
+        #expect(productionSources.contains { $0.1.contains("let runtimeItems: [ChatTranscriptRenderItem]") })
 
         let chat = try #require(productionSources.first { $0.0.lastPathComponent == "ChatView.swift" }?.1)
         #expect(!chat.contains("snapshot.extensionUI.widgets.filter"))
@@ -594,6 +591,14 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
             encoding: .utf8
         )
+        let compactPill = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatCompactPill.swift"),
+            encoding: .utf8
+        )
+        let transcriptPresentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptPresentation.swift"),
+            encoding: .utf8
+        )
         let scrollCoordinator = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatScrollCoordinator.swift"),
             encoding: .utf8
@@ -626,13 +631,24 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("ChatTranscriptPresentation.timeline("))
         #expect(transcript.contains("struct ChatTranscriptPillModifier: ViewModifier"))
         #expect(transcript.contains("TronTypography.sizeBodySM"))
-        #expect(transcript.contains(".padding(.vertical, 6)"))
+        #expect(compactPill.contains(".padding(.vertical, 6)"))
         #expect(transcript.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(transcript.contains(".frame(minWidth: 44, minHeight: 44)"))
         #expect(transcript.contains(".contentShape(Rectangle())"))
         #expect(!transcript.contains(".fixedSize()"))
-        #expect(transcript.contains("detail: item.tokensBefore.map(ChatTokenCountPresentation.beforeCompaction)"))
-        #expect(transcript.components(separatedBy: ".chatTranscriptPill()").count - 1 == 1)
+        #expect(transcriptPresentation.contains("item.tokensBefore.map(ChatTokenCountPresentation.beforeCompaction)"))
+        #expect(compactPill.contains("struct ChatCompactPillSurface"))
+        #expect(compactPill.contains("case .glass:"))
+        #expect(compactPill.contains("case .flat:"))
+        #expect(compactPill.contains(".background(tone.surfaceColor.opacity(0.10), in: capsule)"))
+        #expect(compactPill.contains("Color(lightHex: \"#0369A1\", darkHex: \"#38BDF8\")"))
+        #expect(compactPill.contains("Color(lightHex: \"#92400E\", darkHex: \"#FBBF24\")"))
+        #expect(compactPill.contains("Color(lightHex: \"#475569\", darkHex: \"#CBD5E1\")"))
+        #expect(compactPill.contains("tone.secondaryColor"))
+        #expect(!compactPill.contains("tone.color.opacity"))
+        #expect(!transcript.contains("tone.color.opacity"))
+        #expect(compactPill.contains("paragraph.baseWritingDirection = .natural"))
+        #expect(transcript.components(separatedBy: ".chatTranscriptPill()").count - 1 == 0)
         let earlierMessagesChip = (chat.components(separatedBy: "private func earlierMessagesChip").dropFirst().first ?? "")
             .components(separatedBy: "private var composer").first ?? ""
         #expect(!earlierMessagesChip.contains("TronActionButtonStyle(expands: false)"))
@@ -703,11 +719,22 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatScrollCoordinator.swift"),
             encoding: .utf8
         )
+        let compactPill = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatCompactPill.swift"),
+            encoding: .utf8
+        )
         #expect(transcript.contains("struct TranscriptNotice: View"))
+        #expect(transcript.contains("struct ChatNotificationView: View"))
         #expect(transcript.contains("struct ToolRunView: View"))
-        #expect(transcript.contains("RoundedRectangle(cornerRadius: 9"))
-        #expect(transcript.contains(".padding(.vertical, 6)"))
-        #expect(transcript.components(separatedBy: "ProgressView().controlSize(.small)").count >= 3)
+        #expect(transcript.components(separatedBy: "ChatCompactPillSurface(tone: tone, material: .glass").count - 1 >= 2)
+        #expect(transcript.components(separatedBy: ".frame(minWidth: 44, minHeight: 44)").count - 1 >= 3)
+        #expect(transcript.contains("value: visualState"))
+        #expect(!transcript.contains("value: detailTool"))
+        #expect(!transcript.contains("value: presentation)"))
+        #expect(!transcript.contains("value: run)"))
+        #expect(compactPill.contains("struct ChatCompactPillVisualState: Hashable"))
+        #expect(compactPill.contains(".padding(.vertical, 6)"))
+        #expect(compactPill.contains("ProgressView().controlSize(.small)"))
         #expect(transcript.contains(".font(TronFont.body(12))"))
         #expect(transcript.contains(".foregroundStyle(Color.tronTextSecondary)"))
         #expect(transcript.contains(".italic()"))
@@ -774,7 +801,8 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("failPositioning(sessionID:"))
         #expect(chat.contains(".equatable()"))
         #expect(!chat.contains("model.selectedSnapshot?.transcript.map(\\.id)"))
-        #expect(chat.contains("TranscriptNotice("))
+        #expect(chat.contains("case .notification(let notification)"))
+        #expect(chat.contains("ChatNotificationView(presentation: notification)"))
     }
 
     @Test("sheets use explicit reload toolbar actions instead of pull to refresh")

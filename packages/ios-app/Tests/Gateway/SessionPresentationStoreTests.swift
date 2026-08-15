@@ -76,6 +76,96 @@ struct SessionPresentationStoreTests {
         #expect(store.mountedTarget == nil)
     }
 
+    @Test("runtime status and working changes advance timeline generation only on value change")
+    func runtimePresentationGeneration() async throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_501)
+            .openingTail(targetEncodedBytes: 4_096)
+        snapshot.eventSequence = 10
+        snapshot.revision = 20
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedSubscription(snapshot: snapshot, token: "token")
+        let baseline = store.chatTimelineGeneration
+
+        func event(topic: String, sequence: Int, data: JSONValue) -> GatewayEvent {
+            GatewayEvent(
+                type: "event", topic: topic, sessionId: snapshot.sessionId,
+                payload: .object([
+                    "runtimeGeneration": .string(snapshot.runtimeGeneration),
+                    "eventSequence": .number(Double(sequence)),
+                    "revision": .number(Double(snapshot.revision)),
+                    "data": data,
+                ])
+            )
+        }
+
+        await store.admit(event(
+            topic: "session.status", sequence: 11,
+            data: .object(["key": .string("sync"), "text": .string("Synchronizing")])
+        ))
+        #expect(store.chatTimelineGeneration == baseline + 1)
+
+        await store.admit(event(
+            topic: "session.status", sequence: 12,
+            data: .object(["key": .string("sync"), "text": .string("Synchronizing")])
+        ))
+        #expect(store.chatTimelineGeneration == baseline + 1)
+
+        await store.admit(event(
+            topic: "session.working", sequence: 13,
+            data: .object(["message": .string("Compacting context"), "visible": .bool(true)])
+        ))
+        #expect(store.chatTimelineGeneration == baseline + 2)
+    }
+
+    @Test("stale reconnect retains the newer authoritative tail for history discard")
+    func staleReconnectRetainsTail() throws {
+        var retained = try SessionScenarioBuilder(seed: 8_502)
+            .openingTail(targetEncodedBytes: 4_096)
+        retained.eventSequence = 20
+        retained.revision = 30
+        var stale = retained
+        stale.eventSequence = 18
+        stale.revision = 28
+        stale.transcript.removeLast()
+        stale.transcriptTotal = max(0, (stale.transcriptTotal ?? stale.transcript.count + 1) - 1)
+
+        let installedTail = SessionPresentationStore.installingAuthoritativeTail(
+            current: retained,
+            authoritative: stale,
+            mode: .reconnect
+        )
+        #expect(installedTail == retained)
+        #expect(SessionPresentationStore.installingAuthoritativeTail(
+            current: retained,
+            authoritative: stale,
+            mode: .freshPresentation
+        ) == stale)
+
+        var visible = retained
+        let earlier = try #require(
+            SessionScenarioBuilder(seed: 8_503).historyPage(count: 1, longRowBytes: 16).first
+        )
+        visible.transcript.insert(earlier, at: 0)
+        visible.transcriptStart = max(0, (visible.transcriptStart ?? 1) - 1)
+
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedSubscription(snapshot: retained, token: "token")
+        let target = try #require(store.mountedTarget)
+        store.installHostedLoadedHistory(visible: visible, authoritativeTail: installedTail)
+        store.discardLoadedTranscriptHistory(
+            sessionID: retained.sessionId,
+            presentationGeneration: target.generation
+        )
+        #expect(store.snapshot == retained)
+        #expect(store.disposableCacheSnapshot == retained)
+    }
+
     @Test("a secondary response cannot publish after exact token replacement")
     func staleSecondaryResponse() async throws {
         try await withTestWatchdog {

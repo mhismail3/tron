@@ -38,35 +38,10 @@ struct TranscriptRow: View, Equatable {
                     response: item.customData,
                     fallbackContent: item.customData
                 )
-            case .compaction:
-                SummaryNotice(
-                    icon: "arrow.down.right.and.arrow.up.left",
-                    title: "Context compacted",
-                    text: item.summary ?? "",
-                    detail: item.tokensBefore.map(ChatTokenCountPresentation.beforeCompaction)
-                )
-            case .branchSummary:
-                SummaryNotice(icon: "arrow.triangle.branch", title: "Branch summary", text: item.summary ?? "", detail: nil)
-            case .modelChange:
-                TranscriptNotice(
-                    title: "Model changed",
-                    value: item.modelRef.map { "\($0.provider) / \($0.id)" } ?? "Changed",
-                    icon: "cpu",
-                    tint: .tronEmerald
-                )
-            case .thinkingChange:
-                TranscriptNotice(
-                    title: "Thinking changed",
-                    value: item.level?.capitalized ?? "Changed",
-                    icon: "brain",
-                    tint: .tronEmerald
-                )
-            case .label:
-                TranscriptNotice(
-                    title: item.label.map { "Bookmark: \($0)" } ?? "Bookmark removed",
-                    icon: "bookmark",
-                    tint: .tronSlate
-                )
+            case .compaction, .branchSummary, .modelChange, .thinkingChange, .label:
+                if let notification = ChatNotificationPresentation.canonical(item, globalOrdinal: nil) {
+                    ChatNotificationView(presentation: notification)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
@@ -101,11 +76,9 @@ struct TranscriptRow: View, Equatable {
                             if part.attachment != nil {
                                 EmptyView() // Presented together above the prompt text.
                             } else if item.role == .user {
-                                Text(part.text ?? "").font(TronTypography.body).foregroundStyle(Color.userMessageText)
-                                    .lineSpacing(4)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .multilineTextAlignment(.trailing)
-                                    .frame(minHeight: 44, alignment: .topTrailing)
+                                JustifiedUserPromptText(text: part.text ?? "")
+                                    .padding(.leading, UserPromptTextLayoutPolicy.leadingInset)
+                                    .frame(maxWidth: 520, minHeight: 44, alignment: .topTrailing)
                             } else {
                                 MarkdownText(text: part.text ?? "", streaming: streaming)
                             }
@@ -142,7 +115,8 @@ struct TranscriptRow: View, Equatable {
                     TranscriptNotice(
                         title: error,
                         icon: "exclamationmark.triangle.fill",
-                        tint: .tronError
+                        tone: .error,
+                        animatesEntrance: streaming
                     )
                 }
                 if showsMessageFooter,
@@ -202,20 +176,19 @@ struct TranscriptRow: View, Equatable {
 
 }
 
-/// Shared compact visual treatment for transcript navigation and summary pills.
+/// Shared compact visual treatment for transcript navigation actions.
 /// The glass remains content-sized while the owning button supplies a separate
 /// 44-point semantic target.
 struct ChatTranscriptPillModifier: ViewModifier {
     func body(content: Content) -> some View {
-        content
-            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-            .foregroundStyle(Color.tronAccentText)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
-            .fixedSize(horizontal: false, vertical: true)
-            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.16)).interactive(), in: Capsule())
-            .frame(minWidth: 44, minHeight: 44)
-            .contentShape(Rectangle())
+        ChatCompactPillSurface(tone: .accent, material: .glass, interactive: true) {
+            content
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(Color.tronAccentText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(Rectangle())
     }
 }
 
@@ -226,36 +199,151 @@ extension View {
 }
 
 /// One visual language for transcript events that are not conversation turns.
-/// This deliberately covers configuration changes, errors, bookmarks, and
-/// extension status notices so small one-off labels cannot regress readability.
+/// Detail-bearing events are buttons with Liquid Glass; informational events
+/// remain noninteractive and flat while retaining the same capsule geometry.
+struct ChatNotificationView: View {
+    let presentation: ChatNotificationPresentation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showingDetail = false
+
+    var body: some View {
+        Group {
+            if presentation.hasDetailSheet {
+                Button { showingDetail = true } label: {
+                    pill.frame(minWidth: 44, minHeight: 44)
+                }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .transition(notificationTransition)
+            } else {
+                pill.transition(notificationTransition)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
+        .contentTransition(.opacity)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: visualState)
+        .accessibilityLabel(accessibilityLabel)
+        .sheet(isPresented: $showingDetail) { detailSheet }
+    }
+
+    private var notificationTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.985))
+    }
+
+    private var pill: some View {
+        ChatCompactPillSurface(
+            tone: presentation.tone,
+            material: presentation.material,
+            interactive: presentation.hasDetailSheet
+        ) {
+            ChatCompactPillLabel(
+                icon: presentation.icon,
+                title: presentation.title,
+                detail: presentation.detail,
+                tone: presentation.tone,
+                showsProgress: presentation.showsProgress,
+                titleWeight: .semibold,
+                detailStyle: presentation.hasDetailSheet ? .summary : .status
+            )
+        }
+    }
+
+    private var accessibilityLabel: String {
+        [presentation.title, presentation.detail].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    private var visualState: ChatCompactPillVisualState {
+        .init(
+            id: presentation.id,
+            title: presentation.title,
+            detail: presentation.detail,
+            icon: presentation.icon,
+            tone: presentation.tone,
+            material: presentation.material,
+            showsProgress: presentation.showsProgress
+        )
+    }
+
+    private var detailSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let detail = presentation.detail {
+                        Text(detail)
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextSecondary)
+                    }
+                    if let body = presentation.body {
+                        TronMarkdownView(text: body, streaming: false)
+                            .padding(14)
+                            .tronGlassSurface(accent: presentation.tone.surfaceColor, tintOpacity: 0.08)
+                    }
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .defaultScrollAnchor(.top)
+            .tronScrollEdgeChrome()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: presentation.title, accent: presentation.tone.surfaceColor)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { showingDetail = false } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
+        }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+    }
+}
+
 struct TranscriptNotice: View {
     let title: String
     var value: String? = nil
     let icon: String
-    let tint: Color
+    let tone: ChatNotificationTone
+    var animatesEntrance = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var revealed: Bool
+
+    init(
+        title: String,
+        value: String? = nil,
+        icon: String,
+        tone: ChatNotificationTone,
+        animatesEntrance: Bool = false
+    ) {
+        self.title = title
+        self.value = value
+        self.icon = icon
+        self.tone = tone
+        self.animatesEntrance = animatesEntrance
+        _revealed = State(initialValue: !animatesEntrance)
+    }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(tint)
-            Text(title)
-                .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(Color.tronTextSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let value {
-                Text(value)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .fixedSize(horizontal: false, vertical: true)
+        ChatNotificationView(presentation: .init(
+            id: "embedded-notice", semanticID: nil, icon: icon, title: title,
+            detail: value, body: nil, tone: tone, material: .flat
+        ))
+        .opacity(revealed ? 1 : 0)
+        .scaleEffect(revealed || reduceMotion ? 1 : 0.98)
+        .offset(y: revealed || reduceMotion ? 0 : 3)
+        .onAppear {
+            guard animatesEntrance, !revealed else { return }
+            if reduceMotion { revealed = true }
+            else {
+                withAnimation(.smooth(duration: 0.24)) { revealed = true }
             }
         }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 9)
-        .background(tint.opacity(0.10), in: Capsule())
-        .overlay(Capsule().stroke(tint.opacity(0.30), lineWidth: 0.5))
-        .frame(maxWidth: .infinity, alignment: .center)
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -358,6 +446,7 @@ struct ToolCard: View {
     var onOpenDetails: ((String) -> Void)? = nil
     @State private var detailPresentation: ToolDetailRoute?
     @State private var detailDetent: PresentationDetent = .medium
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
         title: String,
@@ -407,34 +496,30 @@ struct ToolCard: View {
                 detailPresentation = ToolDetailRoute(toolID: detailTool.id)
             }
         } label: {
-            HStack(spacing: 7) {
-                if subtitle == "Running" {
-                    ProgressView().controlSize(.small).tint(accent).frame(width: 18, height: 18)
-                } else {
-                    Image(systemName: icon).font(TronFont.body(10, weight: .semibold)).foregroundStyle(accent).frame(width: 18, height: 18)
-                }
-                Text(displayTitle).font(TronFont.body(12, weight: .bold)).foregroundStyle(accent).fixedSize(horizontal: false, vertical: true)
-                Text(subtitle.lowercased()).font(TronFont.mono(10, weight: .semibold)).foregroundStyle(accent.opacity(0.72)).fixedSize(horizontal: false, vertical: true)
-                if let timing {
-                    ToolElapsedText(tool: timing, color: accent.opacity(0.72))
+            ChatCompactPillSurface(tone: tone, material: .glass, interactive: true) {
+                ChatCompactPillLabel(
+                    icon: icon,
+                    title: displayTitle,
+                    detail: subtitle.lowercased(),
+                    tone: tone,
+                    showsProgress: subtitle == "Running"
+                ) {
+                    if let timing {
+                        ToolElapsedText(tool: timing, color: tone.secondaryColor)
+                    }
                 }
             }
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .glassEffect(
-                .regular.tint(surfaceAccent.opacity(0.26)).interactive(),
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
+            .frame(minWidth: 44, minHeight: 44)
             .accessibilityHidden(true)
         }
         .buttonStyle(.plain)
-        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .contentShape(Capsule())
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(title)
         .contentTransition(.opacity)
-        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: subtitle)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: visualState)
         .toolDetailSheet(
             route: $detailPresentation,
             detent: $detailDetent,
@@ -465,8 +550,22 @@ struct ToolCard: View {
         let duration = timing?.elapsedMilliseconds().map(ToolTiming.format(milliseconds:))
         return [displayTitle, subtitle, duration].compactMap { $0 }.joined(separator: ", ")
     }
-    private var accent: Color { error ? .tronError : .tronAccentText }
-    private var surfaceAccent: Color { error ? .tronError : subtitle == "Running" ? .tronAmber : .tronEmerald }
+    private var visualState: ChatCompactPillVisualState {
+        .init(
+            id: timing?.id ?? title,
+            title: displayTitle,
+            detail: subtitle.lowercased(),
+            icon: icon,
+            tone: tone,
+            material: .glass,
+            showsProgress: subtitle == "Running",
+            durationMilliseconds: timing?.isRunning == false ? timing?.durationMs : nil
+        )
+    }
+    private var tone: ChatNotificationTone {
+        if error { return .error }
+        return subtitle == "Running" ? .warning : .accent
+    }
     private var displayTitle: String { ToolDetailPresentation.displayTitle(for: title) }
     private var icon: String {
         error ? "exclamationmark.triangle.fill" : ToolDetailPresentation.icon(for: title)
@@ -477,63 +576,65 @@ struct ToolRunView: View {
     let run: ChatToolRunPresentation
     @State private var detailRoute: ToolDetailRoute?
     @State private var detailDetent: PresentationDetent = .medium
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Group {
+        ZStack(alignment: .leading) {
             if let tool = run.tools.first, run.tools.count == 1 {
                 ToolCard(data: tool) { toolID in
                     detailDetent = .medium
                     detailRoute = ToolDetailRoute(toolID: toolID)
                 }
+                .transition(toolRunTransition)
             } else {
                 ToolRunChip(run: run)
+                    .transition(toolRunTransition)
             }
         }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: run.tools.count == 1)
         .toolDetailSheet(
             route: $detailRoute,
             detent: $detailDetent,
             tool: detailRoute?.resolve(in: run.tools)
         )
     }
+
+    private var toolRunTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.985, anchor: .leading))
+    }
 }
 
 private struct ToolRunChip: View {
     let run: ChatToolRunPresentation
     @State private var showingDetails = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var accent: Color { run.failureCount > 0 ? .tronError : .tronAccentText }
-    private var surfaceAccent: Color { run.failureCount > 0 ? .tronError : .tronEmerald }
+    private var tone: ChatNotificationTone {
+        if run.failureCount > 0 { return .error }
+        return run.isRunning ? .warning : .accent
+    }
+    private var surfaceAccent: Color { tone.surfaceColor }
 
     var body: some View {
         Button { showingDetails = true } label: {
-            HStack(spacing: 7) {
-                if run.isRunning {
-                    ProgressView().controlSize(.small).tint(accent).frame(width: 18, height: 18)
-                } else {
-                    Image(systemName: run.failureCount > 0 ? "exclamationmark.triangle.fill" : "square.stack.3d.up")
-                        .font(TronFont.body(10, weight: .semibold))
-                        .foregroundStyle(accent)
-                        .frame(width: 18, height: 18)
+            ChatCompactPillSurface(tone: tone, material: .glass, interactive: true) {
+                ChatCompactPillLabel(
+                    icon: run.failureCount > 0
+                        ? "exclamationmark.triangle.fill" : "square.stack.3d.up",
+                    title: run.title,
+                    detail: run.status,
+                    tone: tone,
+                    showsProgress: run.isRunning
+                ) {
+                    ToolRunElapsedText(run: run, color: tone.secondaryColor)
                 }
-                Text(run.title)
-                    .font(TronFont.body(12, weight: .bold))
-                    .foregroundStyle(accent)
-                if let status = run.status {
-                    Text(status)
-                        .font(TronFont.mono(10, weight: .semibold))
-                        .foregroundStyle(accent.opacity(0.74))
-                }
-                ToolRunElapsedText(run: run, color: accent.opacity(0.74))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .glassEffect(
-                .regular.tint(surfaceAccent.opacity(0.26)).interactive(),
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
+            .frame(minWidth: 44, minHeight: 44)
         }
         .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .contentTransition(.opacity)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: visualState)
         .accessibilityLabel(runAccessibilityLabel)
         .sheet(isPresented: $showingDetails) {
             NavigationStack {
@@ -578,6 +679,22 @@ private struct ToolRunChip: View {
     private var runAccessibilityLabel: String {
         let duration = run.elapsedMilliseconds().map(ToolTiming.format(milliseconds:))
         return [run.title, run.status, duration].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    private var visualState: ChatCompactPillVisualState {
+        .init(
+            id: run.id,
+            title: run.title,
+            detail: run.status,
+            icon: run.failureCount > 0
+                ? "exclamationmark.triangle.fill" : "square.stack.3d.up",
+            tone: tone,
+            material: .glass,
+            showsProgress: run.isRunning,
+            count: run.tools.count,
+            durationMilliseconds: run.isRunning
+                ? nil : run.tools.compactMap(\.durationMs).max()
+        )
     }
 }
 
@@ -690,65 +807,6 @@ private extension View {
         tool: ChatToolPresentation?
     ) -> some View {
         modifier(ToolDetailSheetHost(route: route, detent: detent, tool: tool))
-    }
-}
-
-private struct SummaryNotice: View {
-    let icon, title, text: String
-    let detail: String?
-    @State private var showingDetail = false
-
-    var body: some View {
-        Button { showingDetail = true } label: {
-            HStack(spacing: 7) {
-                Image(systemName: icon)
-                Text(title)
-                if let detail {
-                    Text(detail)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .lineLimit(1)
-                }
-            }
-            .chatTranscriptPill()
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(title)\(detail.map { ", \($0)" } ?? "")")
-        .sheet(isPresented: $showingDetail) {
-            NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if let detail {
-                            Text(detail)
-                                .font(TronTypography.bodySM)
-                                .foregroundStyle(Color.tronTextSecondary)
-                        }
-                        TronMarkdownView(text: text, streaming: false)
-                            .padding(14)
-                            .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.08)
-                    }
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-                .defaultScrollAnchor(.top)
-                .tronScrollEdgeChrome()
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .principal) { TronSheetTitle(title: title) }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { showingDetail = false } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
-                        }
-                        .accessibilityLabel("Done")
-                    }
-                }
-            }
-            .tronTopBlur(.sheet)
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
-        }
     }
 }
 

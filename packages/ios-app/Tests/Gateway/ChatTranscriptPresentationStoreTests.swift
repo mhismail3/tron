@@ -267,6 +267,190 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("runtime-only updates reuse transcript projection and install exact pills")
+    func runtimeUpdatesReuseProjection() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_213)
+                .openingTail(targetEncodedBytes: 8_000)
+            let signposts = RecordingPerformanceSignposts()
+            let store = ChatTranscriptPresentationStore(performanceSignposts: signposts)
+            var tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 17,
+                canonicalGeneration: 60,
+                timelineGeneration: 1
+            )
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            snapshot.extensionUI.statuses["sync"] = "Synchronizing"
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 17,
+                canonicalGeneration: 60,
+                timelineGeneration: 2
+            )
+            store.submit(snapshot: snapshot, tag: tag)
+            let installed = try await store.waitForInstall(of: tag)
+
+            #expect(installed.runtimeItems.map(\.id) == ["runtime-status-sync"])
+            #expect(signposts.events().filter { $0 == .begin(.chatProjection) }.count == 1)
+            #expect(store.pendingEntranceIDs == ["runtime-status-sync"])
+            #expect(store.entranceState(for: "runtime-status-sync") == .pending)
+            #expect(!store.resolveEntrance(id: "runtime-status-sync", isVisible: false))
+            #expect(store.entranceState(for: "runtime-status-sync") == .none)
+        }
+    }
+
+    @Test("exact pending compaction becomes canonical in place")
+    func compactionTransitionIdentity() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_217)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            snapshot.phase = .compacting
+            snapshot.extensionUI.working = .init(message: nil, visible: true)
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 19)
+            store.submit(snapshot: snapshot, tag: tag)
+            let pending = try await store.waitForInstall(of: tag)
+            let pendingID = try #require(pending.runtimeItems.first?.id)
+
+            snapshot.transcript.append(try compactionItem(id: "finished-compaction"))
+            snapshot.transcriptTotal! += 1
+            snapshot.phase = .idle
+            snapshot.extensionUI.working.visible = false
+            snapshot.revision += 1
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 19)
+            store.submit(snapshot: snapshot, tag: tag)
+            let completed = try await store.waitForInstall(of: tag)
+
+            #expect(completed.runtimeItems.isEmpty)
+            #expect(completed.timeline.items.last?.id == pendingID)
+            #expect(store.pendingEntranceIDs.isEmpty)
+        }
+    }
+
+    @Test("discrete entrances admit tail extension but never prepend or initial load")
+    func entranceClassification() async throws {
+        try await withTestWatchdog { @MainActor in
+            let builder = SessionScenarioBuilder(seed: 1_214)
+            var snapshot = try builder.openingTail(targetEncodedBytes: 8_000)
+            snapshot.transcriptStart = 4
+            snapshot.transcriptTotal = 4 + snapshot.transcript.count
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 18)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+            #expect(store.pendingEntranceIDs.isEmpty)
+
+            let appended = SessionScenarioBuilder(seed: 1_216)
+                .historyPage(count: 1, longRowBytes: 24)[0]
+            snapshot.transcript.append(appended)
+            snapshot.transcriptTotal! += 1
+            snapshot.revision += 1
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 18)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+            #expect(store.pendingEntranceIDs.contains(appended.id))
+            #expect(store.resolveEntrance(id: appended.id, isVisible: true))
+            #expect(store.entranceState(for: appended.id) == .admitted)
+
+            let older = SessionScenarioBuilder(seed: 1_215)
+                .historyPage(count: 1, longRowBytes: 24)[0]
+            snapshot.transcript.insert(older, at: 0)
+            snapshot.transcriptStart! -= 1
+            snapshot.revision += 1
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 18)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+            #expect(store.pendingEntranceIDs.isEmpty)
+            #expect(store.entranceState(for: appended.id) == .admitted)
+        }
+    }
+
+    @Test("exact bounded-tail rollover admits only the appended row")
+    func boundedTailRolloverEntrance() async throws {
+        try await withTestWatchdog { @MainActor in
+            let builder = SessionScenarioBuilder(seed: 1_218)
+            var snapshot = try builder.openingTail(targetEncodedBytes: 8_000)
+            snapshot.transcript = builder.historyPage(
+                count: ChatTranscriptPageRequest.maximumItemCount,
+                longRowBytes: 16
+            )
+            snapshot.transcriptStart = 100
+            snapshot.transcriptTotal = 100 + snapshot.transcript.count
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 20)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            let appended = try #require(
+                SessionScenarioBuilder(seed: 1_219).historyPage(count: 1, longRowBytes: 16).first
+            )
+            snapshot.transcript.removeFirst()
+            snapshot.transcript.append(appended)
+            snapshot.transcriptStart! += 1
+            snapshot.transcriptTotal! += 1
+            snapshot.revision += 1
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 20)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            #expect(store.pendingEntranceIDs == [appended.id])
+            #expect(store.resolveEntrance(id: appended.id, isVisible: true))
+
+            var rewritten = snapshot
+            rewritten.transcript[10] = try #require(
+                SessionScenarioBuilder(seed: 1_220).historyPage(count: 1, longRowBytes: 16).first
+            )
+            rewritten.revision += 1
+            rewritten.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: rewritten, presentationGeneration: 20)
+            store.submit(snapshot: rewritten, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+            #expect(store.pendingEntranceIDs.isEmpty)
+        }
+    }
+
+    @Test("prepending into a full retained window never becomes an entrance")
+    func fullWindowPrependDoesNotAnimate() async throws {
+        try await withTestWatchdog { @MainActor in
+            let builder = SessionScenarioBuilder(seed: 1_221)
+            var snapshot = try builder.openingTail(targetEncodedBytes: 8_000)
+            snapshot.transcript = builder.historyPage(
+                count: ChatTranscriptPageRequest.maximumItemCount,
+                longRowBytes: 16
+            )
+            snapshot.transcriptStart = 100
+            snapshot.transcriptTotal = 100 + snapshot.transcript.count
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 21)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            let older = try #require(
+                SessionScenarioBuilder(seed: 1_222).historyPage(count: 1, longRowBytes: 16).first
+            )
+            snapshot.transcript.insert(older, at: 0)
+            snapshot.transcriptStart! -= 1
+            snapshot.revision += 1
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 21)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            #expect(store.pendingEntranceIDs.isEmpty)
+            #expect(store.entranceState(for: older.id) == .none)
+        }
+    }
+
     @Test("maximum canonical page prepares off-main and installs one complete timeline")
     func maximumPageProjection() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) { @MainActor in
@@ -312,6 +496,15 @@ struct ChatTranscriptPresentationStoreTests {
             _ = try await store.waitForInstall(of: tag)
         }
     }
+}
+
+private func compactionItem(id: String) throws -> TranscriptItem {
+    try JSONDecoder.gateway.decode(
+        TranscriptItem.self,
+        from: Data("""
+        {"id":"\(id)","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","summary":"Compacted summary","tokensBefore":1200}
+        """.utf8)
+    )
 }
 
 private func streamingMessage(update: Int) throws -> TranscriptItem {

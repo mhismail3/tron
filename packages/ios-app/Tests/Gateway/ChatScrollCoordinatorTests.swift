@@ -26,6 +26,90 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("one admitted discrete insertion smooths once while continuous growth stays immediate")
+    func discreteInsertionMotion() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.discreteContentInserted()
+            let inserted = ChatTranscriptGeometry(
+                offsetY: 600, contentHeight: 1_100, containerHeight: 400
+            )
+            coordinator.geometryChanged(previous: bottom, current: inserted)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let smooth = try await coordinator.hostedNextCommand()
+            #expect(smooth.origin == .automaticFollow)
+            #expect(smooth.animation == .smooth(duration: 0.24))
+            coordinator.commandApplied(smooth)
+
+            let streaming = ChatTranscriptGeometry(
+                offsetY: 700, contentHeight: 1_180, containerHeight: 400
+            )
+            coordinator.geometryChanged(previous: inserted, current: streaming)
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            let immediate = try await coordinator.hostedNextCommand()
+            #expect(immediate.animation == .disabled)
+        }
+    }
+
+    @Test("near-boundary insertion expires smooth entitlement before later streaming")
+    func nearBoundaryDiscreteInsertionExpires() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let decision = coordinator.hostedFollowDecisionRevision
+            coordinator.discreteContentInserted()
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            await coordinator.hostedWaitForFollowDecision(after: decision)
+            #expect(coordinator.command == nil)
+
+            let streaming = ChatTranscriptGeometry(
+                offsetY: 600, contentHeight: 1_100, containerHeight: 400
+            )
+            coordinator.geometryChanged(previous: bottom, current: streaming)
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(command.animation == .disabled)
+        }
+    }
+
+    @Test("superseded discrete insertion falls back to nonanimated streaming follow")
+    func supersededDiscreteInsertion() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.discreteContentInserted()
+            coordinator.discreteContentSuperseded()
+            coordinator.geometryChanged(
+                previous: bottom,
+                current: ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_100, containerHeight: 400
+                )
+            )
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(command.animation == .disabled)
+        }
+    }
+
+    @Test("detached reader and direct interaction cancel discrete insertion motion")
+    func detachedDiscreteInsertionIsInert() {
+        let frames = ManualScrollFrameScheduler()
+        let coordinator = detachedCoordinator(at: away, withUnread: false, frames: frames)
+        coordinator.discreteContentInserted()
+        coordinator.geometryChanged(
+            previous: away,
+            current: ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_100, containerHeight: 400)
+        )
+        #expect(frames.requestCount == 0)
+        #expect(coordinator.command == nil)
+    }
+
     @Test("growth arriving before an earlier tail command settles remains logically pinned")
     func continuousGrowthWhileSettling() async throws {
         try await withTestWatchdog { @MainActor in
@@ -621,6 +705,52 @@ struct ChatScrollCoordinatorTests {
         let command = try await coordinator.hostedNextCommand()
         #expect(command.destination == .tail)
         #expect(command.animation == .disabled)
+    }
+
+    @Test("prepend growth cannot arm a later automatic tail follow")
+    func prependGrowthDoesNotFollowTail() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let undersized = ChatTranscriptGeometry(
+                offsetY: 0, contentHeight: 280, containerHeight: 400
+            )
+            coordinator.geometryChanged(previous: .zero, current: undersized)
+            if let release = coordinator.command { coordinator.commandApplied(release) }
+            coordinator.semanticFrameChanged(
+                renderedID: "anchor",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 40, width: 100, height: 40)
+            )
+            let anchor = ChatSemanticAnchor(
+                semanticID: "anchor", renderedID: "anchor",
+                layoutEpoch: coordinator.layoutEpoch, viewportOffsetY: 40
+            )
+            let results = ScrollResultRecorder()
+            let began = coordinator.beginPrepend(
+                anchor: anchor,
+                load: {
+                    let installed = coordinator.beginInstalledPageLayoutEpoch()
+                    return ChatPrependPage(renderedAnchorID: "anchor", installedLayout: installed)
+                },
+                completion: { results.record($0) }
+            )
+            #expect(began)
+            try await coordinator.hostedWaitForPrependSemanticSample()
+
+            let overflow = ChatTranscriptGeometry(
+                offsetY: 0, contentHeight: 800, containerHeight: 400
+            )
+            coordinator.geometryChanged(previous: undersized, current: overflow)
+            coordinator.semanticFrameChanged(
+                renderedID: "anchor",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 40, width: 100, height: 40)
+            )
+            #expect(results.values == [.success])
+            #expect(frames.requestCount == 0)
+            #expect(coordinator.command == nil)
+        }
     }
 
     @Test("missing measured anchor discards without starting page load")

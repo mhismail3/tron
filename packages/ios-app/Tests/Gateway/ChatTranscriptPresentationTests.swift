@@ -353,6 +353,118 @@ struct ChatTranscriptPresentationTests {
         #expect(ChatTokenCountPresentation.beforeCompaction(322_486) == "322K tokens before compaction")
     }
 
+    @Test("notification policy separates flat status from detail-bearing summaries")
+    func notificationMaterialPolicy() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"compact","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","summary":"Condensed context","tokensBefore":1200},
+          {"id":"model","parentId":"compact","timestamp":"2026-01-01T00:00:01Z","kind":"modelChange","modelRef":{"provider":"openai-codex","id":"gpt-5.6-sol"}}
+        ]
+        """)
+        let compact = try #require(ChatNotificationPresentation.canonical(snapshot.transcript[0], globalOrdinal: 8))
+        let model = try #require(ChatNotificationPresentation.canonical(snapshot.transcript[1], globalOrdinal: 9))
+
+        #expect(compact.id == "notification-compaction-slot-8")
+        #expect(compact.material == .glass)
+        #expect(compact.hasDetailSheet)
+        #expect(compact.tone == .accent)
+        #expect(model.material == .flat)
+        #expect(!model.hasDetailSheet)
+        #expect(model.detail == "openai-codex / gpt-5.6-sol")
+    }
+
+    @Test("whitespace-only summaries stay flat and noninteractive")
+    func whitespaceSummaryIsFlat() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"blank","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","summary":"  \\n  ","tokensBefore":1200}
+        ]
+        """)
+        let notification = try #require(
+            ChatNotificationPresentation.canonical(snapshot.transcript[0], globalOrdinal: 0)
+        )
+        #expect(notification.body == nil)
+        #expect(notification.material == .flat)
+        #expect(!notification.hasDetailSheet)
+    }
+
+    @Test("pending compaction shares identity only under exact tail bounds")
+    func pendingCompactionContinuity() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .compacting
+        snapshot.extensionUI.working = .init(message: nil, visible: true)
+        snapshot.transcriptStart = 7
+        snapshot.transcriptTotal = 7
+        let exact = try #require(ChatNotificationPresentation.runtime(in: snapshot).first)
+        #expect(exact.id == "notification-compaction-slot-7")
+        #expect(exact.title == "Compacting context")
+        #expect(exact.material == .flat)
+
+        snapshot.transcriptTotal = 8
+        let malformed = try #require(ChatNotificationPresentation.runtime(in: snapshot).first)
+        #expect(malformed.id == "runtime-working")
+        #expect(malformed.id != exact.id)
+    }
+
+    @Test("canonical compaction ordinals survive bounded tails and prepends")
+    func canonicalCompactionOrdinals() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"compact-a","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","summary":"A","tokensBefore":100},
+          {"id":"compact-b","parentId":"compact-a","timestamp":"2026-01-01T00:00:01Z","kind":"compaction","summary":"B","tokensBefore":200}
+        ]
+        """)
+        snapshot.transcriptStart = 5
+        snapshot.transcriptTotal = 7
+        let notifications = ChatTranscriptPresentation.timeline(in: snapshot).items.compactMap { item -> ChatNotificationPresentation? in
+            guard case .notification(let notification) = item else { return nil }
+            return notification
+        }
+        #expect(notifications.map(\.id) == [
+            "notification-compaction-slot-5", "notification-compaction-slot-6",
+        ])
+
+        snapshot.transcriptStart = 3
+        snapshot.transcript.insert(contentsOf: try fixture(transcript: """
+        [
+          {"id":"older-a","parentId":null,"timestamp":"2025-12-31T23:59:58Z","kind":"modelChange","modelRef":{"provider":"openai-codex","id":"older"}},
+          {"id":"older-b","parentId":"older-a","timestamp":"2025-12-31T23:59:59Z","kind":"thinkingChange","level":"low"}
+        ]
+        """).transcript, at: 0)
+        let prepended = ChatTranscriptPresentation.timeline(in: snapshot).items.compactMap { item -> ChatNotificationPresentation? in
+            guard case .notification(let notification) = item,
+                  notification.id.hasPrefix("notification-compaction-slot") else { return nil }
+            return notification
+        }
+        #expect(prepended.map(\.id) == notifications.map(\.id))
+
+        snapshot.transcriptTotal = 99
+        let malformed = ChatTranscriptPresentation.timeline(in: snapshot).items.compactMap { item -> String? in
+            guard case .notification(let notification) = item,
+                  notification.semanticID?.hasPrefix("compact-") == true else { return nil }
+            return notification.id
+        }
+        #expect(malformed == [
+            "notification-compaction-compact-a", "notification-compaction-compact-b",
+        ])
+    }
+
+    @Test("duplicate canonical IDs fail safe without ordinal construction trap")
+    func duplicateCompactionIDsFailSafe() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"duplicate","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","summary":"A","tokensBefore":100},
+          {"id":"duplicate","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"compaction","summary":"B","tokensBefore":200}
+        ]
+        """)
+        snapshot.transcriptStart = 0
+        snapshot.transcriptTotal = 2
+        let ids = ChatTranscriptPresentation.timeline(in: snapshot).items.map(\.id)
+        #expect(ids == [
+            "notification-compaction-duplicate", "notification-compaction-duplicate",
+        ])
+    }
+
     @Test("prompt images and files share one attachment strip above text")
     func promptAttachmentStrip() throws {
         let snapshot = try fixture(transcript: """

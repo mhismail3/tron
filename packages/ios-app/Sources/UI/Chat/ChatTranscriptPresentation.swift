@@ -22,9 +22,11 @@ enum ChatExtensionWidgetPolicy {
 struct ChatRuntimeWorkingPresentation: Equatable {
     let message: String
     let retryMessage: String?
+    let phase: SessionPhase
 
     init?(phase: SessionPhase, working: ExtensionUIState.Working, retry: RetryState?) {
         guard phase.isActive, working.visible else { return nil }
+        self.phase = phase
         message = working.message ?? Self.defaultMessage(for: phase)
         retryMessage = retry.map {
             "Attempt \($0.attempt)\($0.maxAttempts.map { " of \($0)" } ?? "")"
@@ -320,6 +322,129 @@ enum ChatTokenCountPresentation {
     }
 }
 
+enum ChatNotificationTone: Hashable, Sendable {
+    case accent
+    case information
+    case warning
+    case error
+    case neutral
+}
+
+enum ChatNotificationMaterial: Hashable, Sendable {
+    case flat
+    case glass
+}
+
+struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
+    let id: String
+    let semanticID: String?
+    let icon: String
+    let title: String
+    let detail: String?
+    let body: String?
+    let tone: ChatNotificationTone
+    let material: ChatNotificationMaterial
+
+    var hasDetailSheet: Bool { material == .glass && body?.isEmpty == false }
+    var showsProgress: Bool {
+        semanticID == nil && (
+            id == "runtime-working" || id.hasPrefix("notification-compaction-slot-")
+        )
+    }
+
+    static func canonical(
+        _ item: TranscriptItem,
+        globalOrdinal: Int?
+    ) -> ChatNotificationPresentation? {
+        let summaryBody = item.summary?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let admittedSummary = summaryBody?.isEmpty == false ? summaryBody : nil
+        switch item.kind {
+        case .compaction:
+            return ChatNotificationPresentation(
+                id: globalOrdinal.map { "notification-compaction-slot-\($0)" }
+                    ?? "notification-compaction-\(item.id)",
+                semanticID: item.id,
+                icon: "arrow.down.right.and.arrow.up.left",
+                title: "Context compacted",
+                detail: item.tokensBefore.map(ChatTokenCountPresentation.beforeCompaction),
+                body: admittedSummary,
+                tone: .accent,
+                material: admittedSummary == nil ? .flat : .glass
+            )
+        case .branchSummary:
+            return ChatNotificationPresentation(
+                id: "notification-\(item.id)", semanticID: item.id,
+                icon: "arrow.triangle.branch", title: "Branch summary",
+                detail: nil, body: admittedSummary, tone: .accent,
+                material: admittedSummary == nil ? .flat : .glass
+            )
+        case .modelChange:
+            return ChatNotificationPresentation(
+                id: "notification-\(item.id)", semanticID: item.id,
+                icon: "cpu", title: "Model changed",
+                detail: item.modelRef.map { "\($0.provider) / \($0.id)" } ?? "Changed",
+                body: nil, tone: .accent, material: .flat
+            )
+        case .thinkingChange:
+            return ChatNotificationPresentation(
+                id: "notification-\(item.id)", semanticID: item.id,
+                icon: "brain", title: "Thinking changed",
+                detail: item.level?.capitalized ?? "Changed",
+                body: nil, tone: .accent, material: .flat
+            )
+        case .label:
+            return ChatNotificationPresentation(
+                id: "notification-\(item.id)", semanticID: item.id,
+                icon: "bookmark",
+                title: item.label.map { "Bookmark: \($0)" } ?? "Bookmark removed",
+                detail: nil, body: nil, tone: .neutral, material: .flat
+            )
+        case .message, .bash, .customMessage, .customEntry:
+            return nil
+        }
+    }
+
+    static func runtime(in snapshot: SessionSnapshot) -> [ChatNotificationPresentation] {
+        var values: [ChatNotificationPresentation] = []
+        if let working = ChatRuntimeWorkingPresentation(
+            phase: snapshot.phase,
+            working: snapshot.extensionUI.working,
+            retry: snapshot.retry
+        ) {
+            let exactNextOrdinal: Int? = {
+                guard snapshot.phase == .compacting,
+                      let start = snapshot.transcriptStart,
+                      let total = snapshot.transcriptTotal,
+                      start + snapshot.transcript.count == total else { return nil }
+                return total
+            }()
+            values.append(ChatNotificationPresentation(
+                id: exactNextOrdinal.map { "notification-compaction-slot-\($0)" }
+                    ?? "runtime-working",
+                semanticID: nil,
+                icon: working.phase == .compacting
+                    ? "arrow.down.right.and.arrow.up.left"
+                    : working.phase == .retrying ? "arrow.clockwise" : "sparkles",
+                title: working.message,
+                detail: working.retryMessage,
+                body: nil,
+                tone: working.phase == .retrying ? .warning : .accent,
+                material: .flat
+            ))
+        }
+        values.append(contentsOf: snapshot.extensionUI.statuses
+            .sorted(by: { $0.key < $1.key })
+            .map { key, value in
+                ChatNotificationPresentation(
+                    id: "runtime-status-\(key)", semanticID: nil,
+                    icon: "info.circle.fill", title: value, detail: nil, body: nil,
+                    tone: .information, material: .flat
+                )
+            })
+        return values
+    }
+}
+
 struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     let tools: [ChatToolPresentation]
     let anchorID: String
@@ -381,12 +506,14 @@ enum ChatTranscriptRenderItem: Hashable, Identifiable, Sendable {
     case transcript(TranscriptItem)
     case message(ChatMessagePresentation)
     case toolRun(ChatToolRunPresentation)
+    case notification(ChatNotificationPresentation)
 
     var id: String {
         switch self {
         case .transcript(let item): item.id
         case .message(let message): message.id
         case .toolRun(let run): run.id
+        case .notification(let notification): notification.id
         }
     }
 }
@@ -647,9 +774,31 @@ enum ChatTranscriptPresentation {
             )))
         }
 
+        let rawOrdinalByID: [String: Int]
+        if let transcriptStart = snapshot.transcriptStart,
+           transcriptStart + snapshot.transcript.count == snapshot.transcriptTotal {
+            var ordinals: [String: Int] = [:]
+            var duplicates = Set<String>()
+            for (offset, item) in snapshot.transcript.enumerated() {
+                if ordinals.updateValue(transcriptStart + offset, forKey: item.id) != nil {
+                    duplicates.insert(item.id)
+                }
+            }
+            for duplicate in duplicates { ordinals.removeValue(forKey: duplicate) }
+            rawOrdinalByID = ordinals
+        } else {
+            rawOrdinalByID = [:]
+        }
+
         func appendItem(_ item: TranscriptItem, tools: [ChatToolPresentation], streaming: Bool) {
             guard item.kind == .message, item.role != .toolResult else {
-                if tools.isEmpty {
+                if let notification = ChatNotificationPresentation.canonical(
+                    item,
+                    globalOrdinal: rawOrdinalByID[item.id]
+                ) {
+                    flushTools()
+                    rendered.append(.notification(notification))
+                } else if tools.isEmpty {
                     flushTools()
                     rendered.append(.transcript(item))
                 } else {
@@ -751,6 +900,11 @@ enum ChatTranscriptPresentation {
                     preferredSemanticIDByRenderedID[item.id] = semanticID
                 }
                 for tool in run.tools { renderedIDBySemanticID[tool.id] = item.id }
+            case .notification(let notification):
+                if let semanticID = notification.semanticID {
+                    preferredSemanticIDByRenderedID[item.id] = semanticID
+                    renderedIDBySemanticID[semanticID] = item.id
+                }
             }
         }
         projectedCount = rendered.count

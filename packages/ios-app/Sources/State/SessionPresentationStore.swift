@@ -650,7 +650,11 @@ final class SessionPresentationStore {
                 authoritative: response.session,
                 mode: mode
             )
-            var installedTail = response.session
+            var installedTail = Self.installingAuthoritativeTail(
+                current: authoritativeTailSnapshot,
+                authoritative: response.session,
+                mode: mode
+            )
             var replayEffects: [ReducerEffect] = []
             let cursor = SessionSynchronizationCoordinator.Cursor(
                 runtimeGeneration: installed.runtimeGeneration,
@@ -869,13 +873,17 @@ final class SessionPresentationStore {
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
                   let object = envelope.data.objectValue,
                   let key = object["key"]?.stringValue else { return resyncIfNeeded(event, snapshot: snapshot) }
+            let previous = snapshot.extensionUI.statuses[key]
             if let text = object["text"]?.stringValue { snapshot.extensionUI.statuses[key] = text }
             else { snapshot.extensionUI.statuses.removeValue(forKey: key) }
+            if previous != snapshot.extensionUI.statuses[key] { chatTimelineChanged = true }
             advance(&snapshot, envelope)
         case "session.working":
             guard let envelope = admitEnvelope(event, snapshot: snapshot), let object = envelope.data.objectValue else { return resyncIfNeeded(event, snapshot: snapshot) }
+            let previous = snapshot.extensionUI.working
             if object.keys.contains("message") { snapshot.extensionUI.working.message = object["message"]?.stringValue }
             if let visible = object["visible"]?.boolValue { snapshot.extensionUI.working.visible = visible }
+            if previous != snapshot.extensionUI.working { chatTimelineChanged = true }
             advance(&snapshot, envelope)
         case "session.thinkingLabel":
             guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
@@ -1081,6 +1089,21 @@ final class SessionPresentationStore {
         }
     }
 
+    static func installingAuthoritativeTail(
+        current: SessionSnapshot?,
+        authoritative: SessionSnapshot,
+        mode: SessionSnapshotInstallationMode
+    ) -> SessionSnapshot {
+        guard case .reconnect = mode,
+              let current,
+              current.sessionId == authoritative.sessionId,
+              current.runtimeGeneration == authoritative.runtimeGeneration,
+              authoritative.eventSequence < current.eventSequence else {
+            return authoritative
+        }
+        return current
+    }
+
     static func mergingVisibleTranscript(
         current: SessionSnapshot,
         authoritative: SessionSnapshot
@@ -1189,6 +1212,18 @@ final class SessionPresentationStore {
     func replaceHostedSubscriptionToken(_ token: String) {
         guard subscribedSessionID != nil else { return }
         subscriptionToken = token
+    }
+
+    func installHostedLoadedHistory(
+        visible: SessionSnapshot,
+        authoritativeTail: SessionSnapshot
+    ) {
+        guard target?.sessionID == visible.sessionId,
+              visible.sessionId == authoritativeTail.sessionId else { return }
+        snapshot = visible
+        authoritativeTailSnapshot = authoritativeTail
+        hasLoadedTranscriptHistory = true
+        advanceChatProjection(canonical: true)
     }
 
     func replaceHostedSnapshot(_ snapshot: SessionSnapshot) {

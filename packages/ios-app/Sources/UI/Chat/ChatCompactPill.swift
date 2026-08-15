@@ -1,0 +1,307 @@
+import SwiftUI
+import UIKit
+
+@MainActor
+extension ChatNotificationTone {
+    /// Small compact-pill text uses contrast-safe foregrounds independently of
+    /// the brighter semantic surface tint.
+    var primaryColor: Color {
+        switch self {
+        case .accent: .tronAccentText
+        case .information: Color(lightHex: "#0369A1", darkHex: "#38BDF8")
+        case .warning: Color(lightHex: "#92400E", darkHex: "#FBBF24")
+        case .error: .tronError
+        case .neutral: Color(lightHex: "#475569", darkHex: "#CBD5E1")
+        }
+    }
+
+    var secondaryColor: Color {
+        switch self {
+        case .accent: Color(lightHex: "#047857", darkHex: "#A7F3D0")
+        case .information: Color(lightHex: "#075985", darkHex: "#7DD3FC")
+        case .warning: Color(lightHex: "#78350F", darkHex: "#FDE68A")
+        case .error: Color(lightHex: "#991B1B", darkHex: "#FCA5A5")
+        case .neutral: Color(lightHex: "#334155", darkHex: "#E2E8F0")
+        }
+    }
+
+    var surfaceColor: Color {
+        switch self {
+        case .accent: .tronEmerald
+        case .information: .tronInfo
+        case .warning: .tronAmber
+        case .error: .tronError
+        case .neutral: .tronSlate
+        }
+    }
+}
+
+/// Shared visual primitive for compact transcript activity. Alignment and
+/// interaction remain with the role-specific owner; this type owns only shape,
+/// spacing, material, and state crossfades.
+struct ChatCompactPillSurface<Content: View>: View {
+    let tone: ChatNotificationTone
+    let material: ChatNotificationMaterial
+    let interactive: Bool
+    @ViewBuilder let content: Content
+
+    init(
+        tone: ChatNotificationTone,
+        material: ChatNotificationMaterial,
+        interactive: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.tone = tone
+        self.material = material
+        self.interactive = interactive
+        self.content = content()
+    }
+
+    @ViewBuilder var body: some View {
+        let capsule = Capsule()
+        switch material {
+        case .glass:
+            content
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .contentShape(capsule)
+                .glassEffect(
+                    .regular.tint(tone.surfaceColor.opacity(0.18)).interactive(interactive),
+                    in: capsule
+                )
+        case .flat:
+            content
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .contentShape(capsule)
+                .background(tone.surfaceColor.opacity(0.10), in: capsule)
+                .overlay(capsule.stroke(tone.surfaceColor.opacity(0.30), lineWidth: 0.5))
+        }
+    }
+}
+
+enum ChatCompactPillDetailStyle {
+    case status
+    case summary
+}
+
+/// A shallow animation key: transitions never compare raw request/result JSON,
+/// output bodies, or summary payloads on the render path.
+struct ChatCompactPillVisualState: Hashable {
+    let id: String
+    let title: String
+    let detail: String?
+    let icon: String
+    let tone: ChatNotificationTone
+    let material: ChatNotificationMaterial
+    let showsProgress: Bool
+    let count: Int
+    let durationMilliseconds: Int?
+
+    init(
+        id: String,
+        title: String,
+        detail: String?,
+        icon: String,
+        tone: ChatNotificationTone,
+        material: ChatNotificationMaterial,
+        showsProgress: Bool,
+        count: Int = 1,
+        durationMilliseconds: Int? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.detail = detail
+        self.icon = icon
+        self.tone = tone
+        self.material = material
+        self.showsProgress = showsProgress
+        self.count = count
+        self.durationMilliseconds = durationMilliseconds
+    }
+}
+
+struct ChatCompactPillLabel<Trailing: View>: View {
+    let icon: String
+    let title: String
+    let detail: String?
+    let tone: ChatNotificationTone
+    let showsProgress: Bool
+    let titleWeight: Font.Weight
+    let detailStyle: ChatCompactPillDetailStyle
+    @ViewBuilder let trailing: Trailing
+
+    init(
+        icon: String,
+        title: String,
+        detail: String? = nil,
+        tone: ChatNotificationTone,
+        showsProgress: Bool = false,
+        titleWeight: Font.Weight = .bold,
+        detailStyle: ChatCompactPillDetailStyle = .status,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.icon = icon
+        self.title = title
+        self.detail = detail
+        self.tone = tone
+        self.showsProgress = showsProgress
+        self.titleWeight = titleWeight
+        self.detailStyle = detailStyle
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            ZStack {
+                if showsProgress {
+                    ProgressView().controlSize(.small).tint(tone.primaryColor)
+                } else {
+                    Image(systemName: icon)
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(tone.primaryColor)
+                }
+            }
+            .frame(width: 18, height: 18)
+            Text(title)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: titleWeight))
+                .foregroundStyle(tone.primaryColor)
+                .fixedSize(horizontal: false, vertical: true)
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(detailStyle == .summary
+                        ? TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium)
+                        : TronTypography.code(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(detailStyle == .summary
+                        ? Color.tronTextSecondary : tone.secondaryColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            trailing
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension ChatCompactPillLabel where Trailing == EmptyView {
+    init(
+        icon: String,
+        title: String,
+        detail: String? = nil,
+        tone: ChatNotificationTone,
+        showsProgress: Bool = false,
+        titleWeight: Font.Weight = .bold,
+        detailStyle: ChatCompactPillDetailStyle = .status
+    ) {
+        self.init(
+            icon: icon,
+            title: title,
+            detail: detail,
+            tone: tone,
+            showsProgress: showsProgress,
+            titleWeight: titleWeight,
+            detailStyle: detailStyle,
+            trailing: { EmptyView() }
+        )
+    }
+}
+
+enum UserPromptTextLayoutPolicy {
+    static let leadingInset: CGFloat = 28
+
+    static func alignment(
+        text: String,
+        measuredSingleLineWidth: CGFloat,
+        availableWidth: CGFloat,
+        layoutDirection: LayoutDirection
+    ) -> NSTextAlignment {
+        guard !text.contains(where: \.isNewline),
+              measuredSingleLineWidth <= availableWidth + 0.5 else { return .justified }
+        return layoutDirection == .rightToLeft ? .left : .right
+    }
+}
+
+/// UIKit/TextKit owns typographic justification because SwiftUI Text has no
+/// full-justification mode. One visual line remains trailing; multiline text is
+/// justified. SwiftUI supplies the right-side layout inset outside this owner.
+struct JustifiedUserPromptText: View {
+    let text: String
+    @State private var fontSettings = FontSettings.shared
+
+    var body: some View {
+        // Reading the selected family and axes makes Observation invalidate this
+        // wrapper when the app's live typography settings change.
+        let family = fontSettings.selectedFamily
+        let weight = fontSettings.axisValue(for: family, axis: .weight)
+        let casual = fontSettings.axisValue(for: family, axis: .casual)
+        JustifiedUserPromptLabel(
+            text: text,
+            fontRevision: "\(family.rawValue):\(weight):\(casual)"
+        )
+        .accessibilityLabel(text)
+    }
+}
+
+private struct JustifiedUserPromptLabel: UIViewRepresentable {
+    let text: String
+    let fontRevision: String
+    @Environment(\.sizeCategory) private var sizeCategory
+    @Environment(\.layoutDirection) private var layoutDirection
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.lineBreakMode = .byWordWrapping
+        label.adjustsFontForContentSizeCategory = true
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        label.isAccessibilityElement = true
+        return label
+    }
+
+    func updateUIView(_ label: UILabel, context: Context) {
+        configure(label, width: label.bounds.width > 0 ? label.bounds.width : nil)
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: UILabel,
+        context: Context
+    ) -> CGSize? {
+        guard let proposedWidth = proposal.width, proposedWidth > 0 else { return nil }
+        configure(uiView, width: proposedWidth)
+        let size = uiView.sizeThatFits(CGSize(width: proposedWidth, height: .greatestFiniteMagnitude))
+        return CGSize(width: proposedWidth, height: ceil(size.height))
+    }
+
+    private func configure(_ label: UILabel, width: CGFloat?) {
+        _ = fontRevision
+        _ = sizeCategory
+        let base = TronFontLoader.createUIFont(size: TronTypography.sizeBody)
+        let font = UIFontMetrics(forTextStyle: .body).scaledFont(
+            for: base,
+            compatibleWith: label.traitCollection
+        )
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        paragraph.lineSpacing = 4
+        paragraph.baseWritingDirection = .natural
+        paragraph.alignment = UserPromptTextLayoutPolicy.alignment(
+            text: text,
+            measuredSingleLineWidth: (text as NSString).size(withAttributes: [.font: font]).width,
+            availableWidth: width ?? 0,
+            layoutDirection: layoutDirection
+        )
+        label.attributedText = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .foregroundColor: UIColor(Color.userMessageText),
+                .paragraphStyle: paragraph,
+            ]
+        )
+        label.accessibilityLabel = text
+        if let width { label.preferredMaxLayoutWidth = width }
+    }
+
+}
