@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import Testing
 @testable import TronMobile
 
@@ -167,9 +168,7 @@ struct AppModelPairingAttemptTests {
 
         try await socket.waitUntilSent(count: 1)
         await socket.enqueue(helloFrame())
-        for _ in 0..<20 where coordinator.connectionState != .connected {
-            await Task.yield()
-        }
+        await GatewayConnectedStateWaiter().wait(for: coordinator)
         #expect(coordinator.connectionState == .connected)
         #expect(coordinator.hasResolvedLaunchState)
         #expect(commit.saved.map(\.token) == ["committed-token"])
@@ -556,6 +555,46 @@ private actor LateResultPairingHTTPTransport {
         let ready = requestWaiters.filter { requestCount >= $0.count }
         requestWaiters.removeAll { requestCount >= $0.count }
         for waiter in ready { waiter.continuation.resume() }
+    }
+}
+
+@MainActor
+private final class GatewayConnectedStateWaiter {
+    private var coordinator: GatewayLifecycleCoordinator?
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func wait(for coordinator: GatewayLifecycleCoordinator) async {
+        guard coordinator.connectionState != .connected || !coordinator.hasResolvedLaunchState else {
+            return
+        }
+        self.coordinator = coordinator
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            observe()
+        }
+    }
+
+    private func observe() {
+        guard let coordinator else { return }
+        withObservationTracking {
+            _ = coordinator.connectionState
+            _ = coordinator.hasResolvedLaunchState
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in self?.admitChange() }
+        }
+    }
+
+    private func admitChange() {
+        guard let coordinator else { return }
+        guard coordinator.connectionState == .connected,
+              coordinator.hasResolvedLaunchState else {
+            observe()
+            return
+        }
+        self.coordinator = nil
+        let continuation = self.continuation
+        self.continuation = nil
+        continuation?.resume()
     }
 }
 
