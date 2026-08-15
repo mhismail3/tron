@@ -415,7 +415,7 @@ struct AppModelInvalidationTests {
         socket: ScriptedGatewaySocket
     ) async throws {
         let model = AppModel(client: client)
-        model.settingsInvalidationGeneration = 11
+        model.setHostedSettingsInvalidationGeneration(11)
         model.packageInvalidationGeneration = 12
         model.customModelInvalidationGeneration = 13
         model.providerInvalidationGeneration = 14

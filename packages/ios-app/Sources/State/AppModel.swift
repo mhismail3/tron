@@ -94,6 +94,7 @@ final class AppModel {
     private let mutationExecutor: ConfirmedMutationExecutor
     private let sessionMutations: SessionMutationService
     private let sessionImports: SessionImportCoordinator
+    private let settingsTrust: SettingsTrustCoordinator
 
     var connectionState: ConnectionState { lifecycle.connectionState }
     /// False only while the first launch credential/connection decision is
@@ -107,11 +108,11 @@ final class AppModel {
         set { sessionCatalog.replaceForFacade(newValue) }
     }
     private let sessionPresentation: SessionPresentationStore
-    var settingsInvalidationGeneration = 0
+    var settingsInvalidationGeneration: Int { settingsTrust.settingsInvalidationGeneration }
     var providerInvalidationGeneration = 0
     var packageInvalidationGeneration = 0
     var customModelInvalidationGeneration = 0
-    var trustRevision = 0
+    var trustRevision: Int { settingsTrust.trustRevision }
     var providerCatalogByTarget: [ProviderCatalogTarget: ProviderCatalog] = [:]
     var pairedDevices: [PairedDevice] = []
     var legacyImportAvailable = false
@@ -132,7 +133,6 @@ final class AppModel {
     var latestNotice: String? { noticeStore.latest }
     var lastError: String?
     var onboardingError: String?
-    var settingsByTarget: [SettingsTarget: JSONValue] = [:]
     var context: JSONValue? { sessionPresentation.context }
     var sessionTree: [SessionTreeNode] { sessionPresentation.sessionTree }
     var loadingEarlierTranscript: Bool { sessionPresentation.loadingEarlierTranscript }
@@ -156,7 +156,6 @@ final class AppModel {
     }
 
     private var eventTask: Task<Void, Never>?
-    private var settingsLoadGenerationByTarget: [SettingsTarget: Int] = [:]
     private var providerLoadGenerationByTarget: [ProviderCatalogTarget: Int] = [:]
     private var providerCatalogTargetByAuthOperation: [String: ProviderCatalogTarget] = [:]
     private var packageLoadGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
@@ -211,6 +210,11 @@ final class AppModel {
             executor: mutationExecutor,
             uuidSource: uuidSource
         )
+        let settingsTrust = SettingsTrustCoordinator(
+            client: client,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
         let resolvedSessionImportUpload = sessionImportUpload ?? { name, mimeType, data in
             try await client.upload(name: name, mimeType: mimeType, data: data)
         }
@@ -223,6 +227,7 @@ final class AppModel {
             fileAccess: sessionImportFileAccess,
             upload: resolvedSessionImportUpload
         )
+        self.settingsTrust = settingsTrust
         self.sessionPresentation = SessionPresentationStore(
             client: client,
             performanceSignposts: performanceSignposts
@@ -241,6 +246,7 @@ final class AppModel {
         #endif
         lifecycle.delegate = self
         sessionPresentation.delegate = self
+        settingsTrust.delegate = self
         let events = client.events
         eventTask = Task { [weak self, events] in
             for await delivery in events {
@@ -306,6 +312,14 @@ final class AppModel {
     func connectHostedGateway(profile: GatewayProfile, token: String) async throws {
         try await lifecycle.connectHosted(profile: profile, token: token)
     }
+
+    func installHostedSettings(_ value: JSONValue?, for target: SettingsTarget) {
+        settingsTrust.installHostedSettings(value, for: target)
+    }
+
+    func setHostedSettingsInvalidationGeneration(_ generation: Int) {
+        settingsTrust.setHostedInvalidationGenerations(settings: generation)
+    }
     #endif
 
     func presentationGeneration(for sessionID: String) -> Int? {
@@ -365,14 +379,11 @@ final class AppModel {
     }
 
     func settings(for target: SettingsTarget) -> JSONValue? {
-        settingsByTarget[target]
+        settingsTrust.settings(for: target)
     }
 
     func configuredDefaultModel(for target: SettingsTarget) -> ModelRef? {
-        guard let model = settings(for: target)?.objectValue?["effective"]?.objectValue?["defaultModel"]?.objectValue,
-              let provider = model["provider"]?.stringValue,
-              let id = model["id"]?.stringValue else { return nil }
-        return ModelRef(provider: provider, id: id)
+        settingsTrust.configuredDefaultModel(for: target)
     }
 
     func providerCatalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
@@ -430,7 +441,6 @@ final class AppModel {
         workspaceLoadGeneration &+= 1
         deviceLoadGeneration &+= 1
         legacyImportLoadGeneration &+= 1
-        settingsLoadGenerationByTarget = settingsLoadGenerationByTarget.mapValues { $0 &+ 1 }
         providerLoadGenerationByTarget = providerLoadGenerationByTarget.mapValues { $0 &+ 1 }
         packageLoadGenerationByTarget = packageLoadGenerationByTarget.mapValues { $0 &+ 1 }
         packageUpdateGenerationByTarget = packageUpdateGenerationByTarget.mapValues { $0 &+ 1 }
@@ -446,7 +456,7 @@ final class AppModel {
         workspace = nil
         hiddenSessionIDs.removeAll()
         providerCatalogByTarget.removeAll()
-        settingsByTarget.removeAll()
+        settingsTrust.clearProfile()
         packageInventoryByTarget.removeAll()
         packageUpdatesByTarget.removeAll()
         customModelsByTarget.removeAll()
@@ -1026,46 +1036,19 @@ final class AppModel {
 
     @discardableResult
     func refreshSettings(target: SettingsTarget) async -> Bool {
-        struct Params: Codable { let cwd: String?; let scope: String }
-        let generation = (settingsLoadGenerationByTarget[target] ?? 0) + 1
-        settingsLoadGenerationByTarget[target] = generation
-        do {
-            let value = try await client.requestValue(
-                "settings.get",
-                Params(cwd: target.cwd, scope: target.scope.rawValue)
-            )
-            guard settingsLoadGenerationByTarget[target] == generation else { return false }
-            settingsByTarget[target] = value
-            return true
-        } catch {
-            guard settingsLoadGenerationByTarget[target] == generation else { return false }
-            surface(error)
-            return false
-        }
+        await settingsTrust.refreshSettings(target: target)
     }
 
     func updateSettings(_ patch: JSONValue, target: SettingsTarget) async throws {
-        struct Params: Codable { let patch: JSONValue; let scope: String; let cwd: String?; let commandId: String }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(patch: patch, scope: target.scope.rawValue, cwd: target.cwd, commandId: commandID)
-        let _: JSONValue = try await mutationExecutor.performValue(method: "settings.update", commandID: commandID) {
-            try await client.requestValue("settings.update", params, timeout: .seconds(60))
-        }
-        _ = await refreshSettings(target: target)
+        try await settingsTrust.updateSettings(patch, target: target)
     }
 
     func inspectTrust(target: TrustTarget) async throws -> JSONValue {
-        struct Params: Codable { let cwd: String }
-        return try await client.requestValue("trust.inspect", Params(cwd: target.cwd))
+        try await settingsTrust.inspectTrust(target: target)
     }
 
     func setTrust(target: TrustTarget, decision: Bool?) async throws -> JSONValue {
-        struct Params: Codable { let cwd: String; let decision: Bool?; let commandId: String }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(cwd: target.cwd, decision: decision, commandId: commandID)
-        return try await mutationExecutor.performValue(method: "trust.set", commandID: commandID) {
-            try await client.requestValue("trust.set", params)
-        }
+        try await settingsTrust.setTrust(target: target, decision: decision)
     }
 
     @discardableResult
@@ -1550,10 +1533,9 @@ final class AppModel {
                 lastError = event.payload.objectValue?["error"]?.stringValue
             }
         case "settings.changed":
-            settingsInvalidationGeneration &+= 1
+            settingsTrust.noteSettingsChanged()
         case "trust.changed":
-            trustRevision &+= 1
-            settingsInvalidationGeneration &+= 1
+            settingsTrust.noteTrustChanged()
         case "providers.changed":
             providerInvalidationGeneration &+= 1
         case "packages.changed":
@@ -1859,6 +1841,12 @@ extension AppModel: SessionPresentationStoreDelegate {
 
     func sessionPresentationStoreCheckpointCache() {
         saveCache()
+    }
+}
+
+extension AppModel: SettingsTrustCoordinatorDelegate {
+    func settingsTrustCoordinatorSurface(_ error: Error) {
+        surface(error)
     }
 }
 

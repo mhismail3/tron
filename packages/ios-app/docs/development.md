@@ -186,7 +186,11 @@ packages/ios-app/scripts/verify-archive-privacy.sh <path-to-xcarchive>
 
 Global configuration surfaces key their SwiftUI reload task to event-only invalidation
 generations. Successful settings, provider/model, package, and custom-model reads publish
-values without changing those generations. `AppModelInvalidationTests` scripts every
+values without changing those generations. `SettingsTrustCoordinatorTests` owns the extracted
+settings/trust boundary: independent target admission, newest same-target publication, profile
+retirement rejection at each suspended boundary, exact `true`/`false`/explicit-`null` trust
+wire decisions, event-only revisions, centralized receipt replay, and nested Observation through
+the `AppModel` façade. `AppModelInvalidationTests` scripts every
 successful response and proves publication cannot schedule its own next load; event tests
 separately prove one generation advance per canonical invalidation. Settings requests use a
 typed target: global requests omit CWD, while project requests carry their exact project CWD.
@@ -204,6 +208,7 @@ and resource drafts, changed-field-only wire patches, and explicit redacted prox
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:TronMobileTests/SettingsTrustCoordinatorTests \
   -only-testing:TronMobileTests/AppModelInvalidationTests \
   -only-testing:TronMobileTests/AppModelEventTests/globalConfigurationInvalidations \
   -only-testing:TronMobileTests/NewSessionConfigurationOwnerTests \

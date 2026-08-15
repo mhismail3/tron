@@ -174,7 +174,15 @@ already-presented History, Fork, Manage Session, or Project Resources surface.
 Global settings, provider/model catalog, package, and custom-model event hints each
 advance a dedicated invalidation generation. Successful reads publish their projection
 without advancing that generation, so a visible `.task(id:)` performs one initial read
-and one read per actual invalidation rather than feeding its own reload loop. Settings
+and one read per actual invalidation rather than feeding its own reload loop.
+`SettingsTrustCoordinator` is the sole owner of target-keyed disposable settings values,
+per-target read admission, settings and trust event revisions, settings request/mutation
+construction, and trust inspection/mutation. Clearing a saved trust decision sends an explicit
+JSON `null`, while `true` and `false` remain distinct decisions. It uses the shared
+confirmed-mutation executor, and profile retirement synchronously revokes suspended work
+and clears settings projections.
+`AppModel` only exposes observed computed reads and forwards operations; screen-owned
+revisioned draft stores remain local to their existing settings surfaces. Settings
 surfaces use typed `.global` or `.project(cwd:)` targets; installed values and automatic
 reload tasks are keyed by that exact target. Global reads and writes never inherit the
 currently selected session's project path, different targets cannot overwrite each other,
