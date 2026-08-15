@@ -458,10 +458,10 @@ struct AppModelEventTests {
     @Test("configured default model is preferred over catalog order")
     func configuredDefaultModel() async {
         let model = AppModel()
-        model.providerCatalogByTarget[.global] = ProviderCatalog(providers: [], models: [
+        model.installHostedProviderCatalog(ProviderCatalog(providers: [], models: [
             ModelSummary(provider: "openai-codex", id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", reasoning: true, input: ["text"], contextWindow: 1, maxTokens: 1, available: true),
             ModelSummary(provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true, input: ["text"], contextWindow: 1, maxTokens: 1, available: true),
-        ])
+        ]), for: .global)
         model.installHostedSettings(.object([
             "effective": .object([
                 "defaultModel": .object(["provider": .string("openai-codex"), "id": .string("gpt-5.6-sol")]),
@@ -551,6 +551,7 @@ struct AppModelEventTests {
     @Test("OAuth URL and device-code notifications are retained for native presentation")
     func authEvents() async {
         let model = AppModel()
+        model.installHostedProviderAuthOperation("auth-operation")
         await model.handle(GatewayEvent(
             type: "event", topic: "auth.event", sessionId: nil,
             payload: .object([

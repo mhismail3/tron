@@ -418,7 +418,7 @@ struct AppModelInvalidationTests {
         model.setHostedSettingsInvalidationGeneration(11)
         model.packageInvalidationGeneration = 12
         model.customModelInvalidationGeneration = 13
-        model.providerInvalidationGeneration = 14
+        model.setHostedProviderInvalidationGeneration(14)
 
         let settings = Task { await model.refreshSettings(target: .global) }
         try await socket.waitUntilSent(count: 2)

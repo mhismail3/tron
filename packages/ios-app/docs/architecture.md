@@ -180,7 +180,16 @@ per-target read admission, settings and trust event revisions, settings request/
 construction, and trust inspection/mutation. Clearing a saved trust decision sends an explicit
 JSON `null`, while `true` and `false` remain distinct decisions. It uses the shared
 confirmed-mutation executor, and profile retirement synchronously revokes suspended work
-and clears settings projections.
+and clears settings projections. `ProviderAuthCoordinator` likewise solely owns typed-target
+provider/model catalogs, per-target paging admission, event-only provider invalidation,
+auth prompt/event parsing, and operation-to-target retention through completion or confirmed
+cancellation. Because provider login can synchronously emit presentation or completion events
+before `auth.begin` returns, a four-operation, 64-element, 16 KiB pre-response quarantine promotes only the
+newest admitted operation and is synchronously revoked on failure, cancellation, or profile
+retirement. Provider and model pages publish as one atomic catalog; repeated cursors reject
+the complete read, and profile retirement synchronously discards catalogs and auth routing.
+Its forced refresh and logout commands use the shared receipt executor before reloading the
+exact captured target.
 `AppModel` only exposes observed computed reads and forwards operations; screen-owned
 revisioned draft stores remain local to their existing settings surfaces. Settings
 surfaces use typed `.global` or `.project(cwd:)` targets; installed values and automatic

@@ -16,36 +16,8 @@ final class AppModel {
         let previewData: Data?
     }
 
-    struct AuthPromptState: Identifiable, Hashable {
-        enum Kind: String { case text, secret, select, manualCode = "manual_code" }
-        let id: String
-        let operationId: String
-        let kind: Kind
-        let message: String
-        let placeholder: String?
-        let options: [Option]
-        struct Option: Hashable, Identifiable { let id: String; let label: String; let description: String? }
-    }
-
-    struct AuthEventState: Identifiable, Hashable {
-        struct Link: Hashable, Identifiable {
-            let url: URL
-            let label: String?
-            var id: String { url.absoluteString }
-        }
-        enum Kind: String { case info, authURL = "auth_url", deviceCode = "device_code", progress }
-        let operationId: String
-        let kind: Kind
-        let message: String?
-        let links: [Link]
-        let url: URL?
-        let instructions: String?
-        let userCode: String?
-        let verificationURL: URL?
-        let intervalSeconds: Int?
-        let expiresInSeconds: Int?
-        var id: String { operationId }
-    }
+    typealias AuthPromptState = ProviderAuthPromptState
+    typealias AuthEventState = ProviderAuthEventState
 
     struct SessionNavigationRoute: Identifiable, Hashable {
         let sessionID: String
@@ -95,6 +67,7 @@ final class AppModel {
     private let sessionMutations: SessionMutationService
     private let sessionImports: SessionImportCoordinator
     private let settingsTrust: SettingsTrustCoordinator
+    private let providerAuth: ProviderAuthCoordinator
 
     var connectionState: ConnectionState { lifecycle.connectionState }
     /// False only while the first launch credential/connection decision is
@@ -109,11 +82,10 @@ final class AppModel {
     }
     private let sessionPresentation: SessionPresentationStore
     var settingsInvalidationGeneration: Int { settingsTrust.settingsInvalidationGeneration }
-    var providerInvalidationGeneration = 0
+    var providerInvalidationGeneration: Int { providerAuth.invalidationGeneration }
     var packageInvalidationGeneration = 0
     var customModelInvalidationGeneration = 0
     var trustRevision: Int { settingsTrust.trustRevision }
-    var providerCatalogByTarget: [ProviderCatalogTarget: ProviderCatalog] = [:]
     var pairedDevices: [PairedDevice] = []
     var legacyImportAvailable = false
     var legacyImportedCount = 0
@@ -123,8 +95,8 @@ final class AppModel {
         SessionPresentationTarget,
         [PendingAttachment]
     >()
-    var authPrompt: AuthPromptState?
-    var authEvent: AuthEventState?
+    var authPrompt: AuthPromptState? { providerAuth.prompt }
+    var authEvent: AuthEventState? { providerAuth.event }
     private var editorRequestByTarget = PresentationOwnedStore<
         SessionPresentationTarget,
         EditorRequest
@@ -156,8 +128,6 @@ final class AppModel {
     }
 
     private var eventTask: Task<Void, Never>?
-    private var providerLoadGenerationByTarget: [ProviderCatalogTarget: Int] = [:]
-    private var providerCatalogTargetByAuthOperation: [String: ProviderCatalogTarget] = [:]
     private var packageLoadGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
     private var packageUpdateGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
     private var customModelLoadGenerationByTarget: [CustomModelTarget: Int] = [:]
@@ -215,6 +185,11 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
         )
+        let providerAuth = ProviderAuthCoordinator(
+            client: client,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
         let resolvedSessionImportUpload = sessionImportUpload ?? { name, mimeType, data in
             try await client.upload(name: name, mimeType: mimeType, data: data)
         }
@@ -228,6 +203,7 @@ final class AppModel {
             upload: resolvedSessionImportUpload
         )
         self.settingsTrust = settingsTrust
+        self.providerAuth = providerAuth
         self.sessionPresentation = SessionPresentationStore(
             client: client,
             performanceSignposts: performanceSignposts
@@ -247,6 +223,7 @@ final class AppModel {
         lifecycle.delegate = self
         sessionPresentation.delegate = self
         settingsTrust.delegate = self
+        providerAuth.delegate = self
         let events = client.events
         eventTask = Task { [weak self, events] in
             for await delivery in events {
@@ -320,6 +297,21 @@ final class AppModel {
     func setHostedSettingsInvalidationGeneration(_ generation: Int) {
         settingsTrust.setHostedInvalidationGenerations(settings: generation)
     }
+
+    func installHostedProviderCatalog(_ catalog: ProviderCatalog?, for target: ProviderCatalogTarget) {
+        providerAuth.installHostedCatalog(catalog, for: target)
+    }
+
+    func setHostedProviderInvalidationGeneration(_ generation: Int) {
+        providerAuth.setHostedInvalidationGeneration(generation)
+    }
+
+    func installHostedProviderAuthOperation(
+        _ operationID: String,
+        target: ProviderCatalogTarget = .global
+    ) {
+        providerAuth.installHostedAuthOperation(operationID, target: target)
+    }
     #endif
 
     func presentationGeneration(for sessionID: String) -> Int? {
@@ -387,13 +379,11 @@ final class AppModel {
     }
 
     func providerCatalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
-        providerCatalogByTarget[target]
+        providerAuth.catalog(for: target)
     }
 
     func preferredAvailableModel(for target: ProviderCatalogTarget) -> ModelRef? {
-        let available = providerCatalog(for: target)?.models.filter(\.available) ?? []
-        return available.first(where: { $0.provider == "openai-codex" && $0.id == "gpt-5.6-sol" })?.ref
-            ?? available.first?.ref
+        providerAuth.preferredAvailableModel(for: target)
     }
 
     var visibleSessions: [SessionSummary] {
@@ -441,7 +431,6 @@ final class AppModel {
         workspaceLoadGeneration &+= 1
         deviceLoadGeneration &+= 1
         legacyImportLoadGeneration &+= 1
-        providerLoadGenerationByTarget = providerLoadGenerationByTarget.mapValues { $0 &+ 1 }
         packageLoadGenerationByTarget = packageLoadGenerationByTarget.mapValues { $0 &+ 1 }
         packageUpdateGenerationByTarget = packageUpdateGenerationByTarget.mapValues { $0 &+ 1 }
         customModelLoadGenerationByTarget = customModelLoadGenerationByTarget.mapValues { $0 &+ 1 }
@@ -455,14 +444,11 @@ final class AppModel {
         legacyImportedCount = 0
         workspace = nil
         hiddenSessionIDs.removeAll()
-        providerCatalogByTarget.removeAll()
+        providerAuth.clearProfile()
         settingsTrust.clearProfile()
         packageInventoryByTarget.removeAll()
         packageUpdatesByTarget.removeAll()
         customModelsByTarget.removeAll()
-        providerCatalogTargetByAuthOperation.removeAll()
-        authPrompt = nil
-        authEvent = nil
         lastError = nil
         onboardingError = nil
         pendingAttachmentsByTarget = .init()
@@ -932,106 +918,27 @@ final class AppModel {
 
     @discardableResult
     func refreshProviders(target: ProviderCatalogTarget) async -> Bool {
-        struct ProviderParams: Codable { let sessionId: String? }
-        struct ModelParams: Codable { let sessionId: String?; let cursor: String?; let limit: Int }
-        struct ProviderResponse: Decodable { let providers: [ProviderSummary] }
-        struct ModelResponse: Decodable { let models: [ModelSummary]; let nextCursor: String? }
-        let generation = (providerLoadGenerationByTarget[target] ?? 0) + 1
-        providerLoadGenerationByTarget[target] = generation
-        do {
-            async let providerRequest: ProviderResponse = client.request("provider.list", ProviderParams(sessionId: target.sessionID))
-            var models: [ModelSummary] = []
-            var cursor: String?
-            var seenCursors = Set<String>()
-            repeat {
-                let response: ModelResponse = try await client.request(
-                    "model.list",
-                    ModelParams(sessionId: target.sessionID, cursor: cursor, limit: 500)
-                )
-                models.append(contentsOf: response.models)
-                cursor = response.nextCursor
-                if let cursor, !seenCursors.insert(cursor).inserted {
-                    throw GatewayFailure(
-                        code: "invalid_pagination",
-                        message: "Tron returned a repeated model cursor.",
-                        retryable: true,
-                        details: nil
-                    )
-                }
-            } while cursor != nil
-            let providers = try await providerRequest.providers
-            guard providerLoadGenerationByTarget[target] == generation else { return false }
-            providerCatalogByTarget[target] = ProviderCatalog(providers: providers, models: models)
-            return true
-        } catch {
-            guard providerLoadGenerationByTarget[target] == generation else { return false }
-            surface(error)
-            return false
-        }
+        await providerAuth.refreshCatalog(target: target)
     }
 
     func beginAuth(providerID: String, authType: String, target: ProviderCatalogTarget) async throws {
-        struct Params: Codable { let providerId, authType: String; let sessionId: String? }
-        struct Response: Decodable { let operationId: String }
-        let response: Response = try await client.request("auth.begin", Params(providerId: providerID, authType: authType, sessionId: target.sessionID), timeout: .seconds(15))
-        providerCatalogTargetByAuthOperation[response.operationId] = target
-        authEvent = .init(
-            operationId: response.operationId,
-            kind: .progress,
-            message: "Starting provider login…",
-            links: [],
-            url: nil,
-            instructions: nil,
-            userCode: nil,
-            verificationURL: nil,
-            intervalSeconds: nil,
-            expiresInSeconds: nil
-        )
+        try await providerAuth.beginAuth(providerID: providerID, authType: authType, target: target)
     }
 
     func answerAuth(_ value: String) async throws {
-        guard let prompt = authPrompt else { return }
-        struct Params: Codable { let operationId, promptId, value: String }
-        struct Response: Decodable { let answered: Bool }
-        let _: Response = try await client.request("auth.respond", Params(operationId: prompt.operationId, promptId: prompt.id, value: value))
-        // A provider may publish its next prompt before this response resumes.
-        // Never erase newer canonical auth state with a stale completion.
-        if authPrompt?.operationId == prompt.operationId, authPrompt?.id == prompt.id {
-            authPrompt = nil
-        }
+        try await providerAuth.answerAuth(value)
     }
 
     func cancelAuth(operationID: String? = nil) async {
-        guard let id = operationID ?? authPrompt?.operationId ?? authEvent?.operationId else { return }
-        struct Params: Codable { let operationId: String }
-        struct Response: Decodable { let cancelled: Bool }
-        let response: Response? = try? await client.request("auth.cancel", Params(operationId: id))
-        if authPrompt?.operationId == id { authPrompt = nil }
-        if authEvent?.operationId == id { authEvent = nil }
-        if response?.cancelled == true {
-            providerCatalogTargetByAuthOperation[id] = nil
-        }
+        await providerAuth.cancelAuth(operationID: operationID)
     }
 
     func refreshModelCatalog(target: ProviderCatalogTarget, force: Bool = true) async throws {
-        struct Params: Codable { let force: Bool; let sessionId: String?; let commandId: String }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(force: force, sessionId: target.sessionID, commandId: commandID)
-        _ = try await mutationExecutor.performValue(method: "models.refresh", commandID: commandID) {
-            try await client.requestValue("models.refresh", params, timeout: .seconds(75))
-        }
-        await refreshProviders(target: target)
+        try await providerAuth.refreshModelCatalog(target: target, force: force)
     }
 
     func logout(providerID: String, target: ProviderCatalogTarget) async throws {
-        struct Params: Codable { let providerId, commandId: String; let sessionId: String? }
-        struct Response: Codable { let loggedOut: Bool }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(providerId: providerID, commandId: commandID, sessionId: target.sessionID)
-        let _: Response = try await mutationExecutor.perform(method: "auth.logout", commandID: commandID) {
-            try await client.request("auth.logout", params, timeout: .seconds(60))
-        }
-        await refreshProviders(target: target)
+        try await providerAuth.logout(providerID: providerID, target: target)
     }
 
     @discardableResult
@@ -1519,25 +1426,17 @@ final class AppModel {
         case "session.listChanged":
             scheduleSessionListRefresh()
         case "auth.prompt":
-            parseAuthPrompt(event.payload)
+            providerAuth.handlePrompt(event.payload)
         case "auth.event":
-            parseAuthEvent(event.payload)
+            providerAuth.handleEvent(event.payload)
         case "auth.completed":
-            authPrompt = nil
-            authEvent = nil
-            let operationID = event.payload.objectValue?["operationId"]?.stringValue
-            if let target = operationID.flatMap({ providerCatalogTargetByAuthOperation.removeValue(forKey: $0) }) {
-                await refreshProviders(target: target)
-            }
-            if event.payload.objectValue?["success"]?.boolValue == false {
-                lastError = event.payload.objectValue?["error"]?.stringValue
-            }
+            await providerAuth.handleCompletion(event.payload)
         case "settings.changed":
             settingsTrust.noteSettingsChanged()
         case "trust.changed":
             settingsTrust.noteTrustChanged()
         case "providers.changed":
-            providerInvalidationGeneration &+= 1
+            providerAuth.noteProvidersChanged()
         case "packages.changed":
             packageInvalidationGeneration &+= 1
         case "models.customChanged":
@@ -1575,56 +1474,6 @@ final class AppModel {
         default:
             break
         }
-    }
-
-    private func parseAuthPrompt(_ payload: JSONValue) {
-        guard let root = payload.objectValue,
-              let operationID = root["operationId"]?.stringValue,
-              let promptID = root["promptId"]?.stringValue,
-              let prompt = root["prompt"]?.objectValue,
-              let rawKind = prompt["type"]?.stringValue,
-              let kind = AuthPromptState.Kind(rawValue: rawKind),
-              let message = prompt["message"]?.stringValue else { return }
-        let options = (prompt["options"].flatMap { value -> [JSONValue]? in
-            guard case .array(let array) = value else { return nil }; return array
-        } ?? []).compactMap { value -> AuthPromptState.Option? in
-            guard let item = value.objectValue, let id = item["id"]?.stringValue, let label = item["label"]?.stringValue else { return nil }
-            return .init(id: id, label: label, description: item["description"]?.stringValue)
-        }
-        authPrompt = AuthPromptState(
-            id: promptID,
-            operationId: operationID,
-            kind: kind,
-            message: message,
-            placeholder: prompt["placeholder"]?.stringValue,
-            options: options
-        )
-    }
-
-    private func parseAuthEvent(_ payload: JSONValue) {
-        guard let root = payload.objectValue,
-              let operationID = root["operationId"]?.stringValue,
-              let event = root["event"]?.objectValue,
-              let rawKind = event["type"]?.stringValue,
-              let kind = AuthEventState.Kind(rawValue: rawKind) else { return }
-        let links: [AuthEventState.Link] = (event["links"]?.arrayValue ?? []).compactMap { value in
-            guard let object = value.objectValue,
-                  let rawURL = object["url"]?.stringValue,
-                  let url = URL(string: rawURL) else { return nil }
-            return .init(url: url, label: object["label"]?.stringValue)
-        }
-        authEvent = .init(
-            operationId: operationID,
-            kind: kind,
-            message: event["message"]?.stringValue,
-            links: links,
-            url: event["url"]?.stringValue.flatMap(URL.init(string:)),
-            instructions: event["instructions"]?.stringValue,
-            userCode: event["userCode"]?.stringValue,
-            verificationURL: event["verificationUri"]?.stringValue.flatMap(URL.init(string:)),
-            intervalSeconds: event["intervalSeconds"]?.intValue,
-            expiresInSeconds: event["expiresInSeconds"]?.intValue
-        )
     }
 
     static func installingSnapshot(
@@ -1847,6 +1696,16 @@ extension AppModel: SessionPresentationStoreDelegate {
 extension AppModel: SettingsTrustCoordinatorDelegate {
     func settingsTrustCoordinatorSurface(_ error: Error) {
         surface(error)
+    }
+}
+
+extension AppModel: ProviderAuthCoordinatorDelegate {
+    func providerAuthCoordinatorSurface(_ error: Error) {
+        surface(error)
+    }
+
+    func providerAuthCoordinatorSetCompletionError(_ message: String?) {
+        lastError = message
     }
 }
 

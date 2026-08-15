@@ -190,7 +190,12 @@ values without changing those generations. `SettingsTrustCoordinatorTests` owns 
 settings/trust boundary: independent target admission, newest same-target publication, profile
 retirement rejection at each suspended boundary, exact `true`/`false`/explicit-`null` trust
 wire decisions, event-only revisions, centralized receipt replay, and nested Observation through
-the `AppModel` façade. `AppModelInvalidationTests` scripts every
+the `AppModel` façade. `ProviderAuthCoordinatorTests` owns the corresponding provider boundary:
+target-isolated newest-load admission, atomic provider/model publication, bounded cursor validation,
+profile-retirement rejection across parallel reads and pagination, operation-keyed prompt/event
+state, bounded event-before-response quarantine and promotion, stale response/cancellation safety,
+exact-target completion refresh, receipt-backed forced refresh/logout, event-only invalidation, and
+nested façade observation. `AppModelInvalidationTests` scripts every
 successful response and proves publication cannot schedule its own next load; event tests
 separately prove one generation advance per canonical invalidation. Settings requests use a
 typed target: global requests omit CWD, while project requests carry their exact project CWD.
@@ -209,6 +214,7 @@ and resource drafts, changed-field-only wire patches, and explicit redacted prox
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/SettingsTrustCoordinatorTests \
+  -only-testing:TronMobileTests/ProviderAuthCoordinatorTests \
   -only-testing:TronMobileTests/AppModelInvalidationTests \
   -only-testing:TronMobileTests/AppModelEventTests/globalConfigurationInvalidations \
   -only-testing:TronMobileTests/NewSessionConfigurationOwnerTests \
