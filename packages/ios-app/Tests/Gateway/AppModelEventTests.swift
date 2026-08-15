@@ -36,6 +36,15 @@ struct AppModelEventTests {
         let snapshot = try loadSnapshot()
         let model = AppModel()
         model.installHostedSubscribedSnapshot(snapshot)
+        let mountedTarget = AppModel.SessionPresentationTarget(
+            sessionID: snapshot.sessionId,
+            generation: 1
+        )
+        let composerScope = model.composerDrafts.installHostedPresentation(
+            profileID: "hosted",
+            target: mountedTarget,
+            lifecycleGeneration: 0
+        )
 
         let completedTool: JSONValue = .object([
             "toolCallId": .string("live-tool"), "toolName": .string("bash"), "order": .number(0), "status": .string("completed"),
@@ -73,11 +82,8 @@ struct AppModelEventTests {
         var afterInteraction = snapshot
         afterInteraction.eventSequence = 90
         await model.handle(event(topic: "session.editorText", snapshot: afterInteraction, sequence: 91, data: editor))
-        let mountedTarget = AppModel.SessionPresentationTarget(
-            sessionID: snapshot.sessionId,
-            generation: 1
-        )
-        #expect(model.editorRequest(for: mountedTarget)?.fullText == "replacement")
+        #expect(model.composerDrafts.editorRequest(for: mountedTarget) == nil)
+        #expect(model.composerDrafts.text(for: composerScope) == "replacement")
         #expect(model.selectedSnapshot?.extensionUI.editorText == "replacement")
         #expect(model.selectedSnapshot?.eventSequence == 91)
     }

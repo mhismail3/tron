@@ -124,13 +124,24 @@ after a confirmed-missing receipt, and cancellation before replay wire emission.
 tests retain cross-owner create/fork/delete, prompt-attachment, queue, navigation-editor, and tree-reload
 ordering coverage. `SessionImportCoordinatorTests` own exact lifecycle/profile admission across
 file access, upload, and mutation; security-scope balancing; and import-result independence from a
-later catalog refresh. Run the focused mutation and import owners with:
+later catalog refresh. `ComposerDraftCoordinatorTests` own bounded profile/session text retention,
+exact presentation mounting/revocation, deterministic inactive-draft LRU, one-time route seeding,
+independent barrier-controlled out-of-order uploads with exact byte/name/MIME capture, cancellation cleanup,
+editor policy/use/keep disposition, confirmed/failure/uncertain submission semantics, A → B → A rejection,
+and nested façade observation. `SessionShellProfileRouteOwnerTests` prove that selected-profile round trips
+synchronously revoke and pop the production route. AppModel performance tests retain the real
+`session.prompt` integration proof, post-mount admission-failure cleanup, attachment removal only after
+confirmation, and direct share prompts that never inherit staged composer IDs. Run the focused mutation, import, and
+composer owners with:
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/SessionMutationServiceTests \
-  -only-testing:TronMobileTests/SessionImportCoordinatorTests
+  -only-testing:TronMobileTests/SessionImportCoordinatorTests \
+  -only-testing:TronMobileTests/ComposerDraftCoordinatorTests \
+  -only-testing:TronMobileTests/SessionShellProfileRouteOwnerTests \
+  -only-testing:TronMobileTests/MultilineComposerTextViewTests
 ```
 
 `SessionEventSynchronizerTests` own the composed intent-keyed shared outcome and
@@ -144,9 +155,9 @@ the exact route, secondary reads cannot create hidden subscriptions, and create/
 identity without opening it implicitly. `DashboardStateOwnerTests` prove typed latest-load and
 navigation admission, monotonic live-summary overlays, unknown-row discovery, safe cache/disconnect
 projection, and removal, while `GlobalNoticeStoreTests` enforce the eight-entry, 4 KiB-message, and 16 KiB-total
-budgets plus keyed progress coalescing. `PresentationOwnedStoreTests` prove session and same-session-generation
-isolation for disposable attachment/editor state; event tests prove departing routes are excluded from
-share admission. Compatible synchronization callers now share one outcome without timing polls;
+budgets plus keyed progress coalescing. `ComposerDraftCoordinatorTests` prove profile/session draft
+isolation and same-session-generation isolation for disposable attachment/editor/submission state;
+event tests prove departing routes are excluded from share admission. Compatible synchronization callers now share one outcome without timing polls;
 each actual authoritative open/resync attempt retains its own interval.
 
 ```bash

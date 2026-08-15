@@ -254,9 +254,10 @@ enum ChatComposerPolicy {
     }
 
     static func restoredDraft(outgoing: String, currentDraft: String) -> String {
-        guard !outgoing.isEmpty else { return currentDraft }
-        guard !currentDraft.isEmpty else { return outgoing }
-        return "\(outgoing)\n\(currentDraft)"
+        ComposerDraftTextPolicy.restoredDraft(
+            outgoing: outgoing,
+            currentDraft: currentDraft
+        )
     }
 }
 

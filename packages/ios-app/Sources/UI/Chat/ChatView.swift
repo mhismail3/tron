@@ -8,8 +8,14 @@ private enum ChatAttachmentDestination: Hashable {
     case files
 }
 
+enum ChatAttachmentImportPolicy {
+    static let maximumPhotoSelection = 5
+    static let maximumFileSelection = 10
+}
+
 struct ChatView: View {
     let sessionID: String
+    private let initialEditorText: String?
     private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     private let displayFrameScheduler: DisplayFrameScheduler
     private let performanceSignposts: any PerformanceSignposting
@@ -20,20 +26,18 @@ struct ChatView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
-    @State private var text: String
+    @State private var composerScope: ComposerDraftScope?
     @State private var photos: [PhotosPickerItem] = []
     @State private var attachmentDestination: ChatAttachmentDestination?
     @State private var queuedAttachmentDestination: ChatAttachmentDestination?
     @State private var attachmentPresentationTask: Task<Void, Never>?
     @State private var showContext = false
     @State private var showSettings = false
-    @State private var sending = false
     @State private var openPresentation: ChatOpenPresentationState
     @State private var openingTask: Task<Void, Never>?
     @State private var pagingOwner = ChatPagingOwner()
     @State private var catchUpTask: Task<Void, Never>?
     @State private var modelPresentationGeneration: Int?
-    @State private var pendingEditorRequest: AppModel.EditorRequest?
     @State private var composerTextHeight: CGFloat = 20
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
     @State private var scrollCoordinator = ChatScrollCoordinator()
@@ -57,11 +61,12 @@ struct ChatView: View {
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
     ) {
         self.sessionID = sessionID
+        self.initialEditorText = initialEditorText
         self.onForkCreated = onForkCreated
         self.hostedProbe = hostedProbe
         self.displayFrameScheduler = displayFrameScheduler
         self.performanceSignposts = performanceSignposts
-        _text = State(initialValue: initialEditorText ?? "")
+        _composerScope = State(initialValue: nil)
         _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
     }
@@ -74,10 +79,11 @@ struct ChatView: View {
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
     ) {
         self.sessionID = sessionID
+        self.initialEditorText = initialEditorText
         self.onForkCreated = onForkCreated
         self.displayFrameScheduler = displayFrameScheduler
         self.performanceSignposts = performanceSignposts
-        _text = State(initialValue: initialEditorText ?? "")
+        _composerScope = State(initialValue: nil)
         _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
     }
@@ -124,7 +130,7 @@ struct ChatView: View {
         .photosPicker(
             isPresented: attachmentPresentationBinding(for: .photos),
             selection: $photos,
-            maxSelectionCount: 5,
+            maxSelectionCount: ChatAttachmentImportPolicy.maximumPhotoSelection,
             matching: .images
         )
         .sheet(item: interactionBinding) { interaction in
@@ -145,33 +151,27 @@ struct ChatView: View {
                 cancelAttachmentPresentation(includingActive: false)
             }
         }
-        .onChange(of: routedEditorRequest) { _, request in
-            guard let request,
-                  let target = presentationTarget,
-                  request.presentationGeneration == target.generation else { return }
-            if text.isEmpty {
-                text = request.action == .paste ? text + request.text : request.fullText
-                model.consumeEditorRequest(request, for: target)
-            } else {
-                pendingEditorRequest = request
+        .confirmationDialog(ComposerEditorRequestPolicy.confirmationTitle, isPresented: Binding(
+            get: { routedEditorRequest != nil },
+            set: { isPresented in
+                guard !isPresented,
+                      let request = routedEditorRequest,
+                      let target = presentationTarget else { return }
+                model.composerDrafts.disposeEditorRequest(request, disposition: .keep, target: target)
             }
-        }
-        .confirmationDialog("Replace the current draft?", isPresented: Binding(
-            get: { pendingEditorRequest != nil },
-            set: { if !$0 { pendingEditorRequest = nil } }
         )) {
-            Button("Use Extension Text") {
-                if let request = pendingEditorRequest {
-                    text = request.action == .paste ? text + request.text : request.fullText
-                    if let target = presentationTarget {
-                        model.consumeEditorRequest(request, for: target)
-                    }
-                }
-                pendingEditorRequest = nil
+            Button(ComposerEditorRequestPolicy.useActionTitle) {
+                guard let request = routedEditorRequest,
+                      let target = presentationTarget else { return }
+                model.composerDrafts.disposeEditorRequest(request, disposition: .use, target: target)
             }
-            Button("Keep Current Draft", role: .cancel) { pendingEditorRequest = nil }
+            Button(ComposerEditorRequestPolicy.keepActionTitle, role: .cancel) {
+                guard let request = routedEditorRequest,
+                      let target = presentationTarget else { return }
+                model.composerDrafts.disposeEditorRequest(request, disposition: .keep, target: target)
+            }
         } message: {
-            Text("An extension requested a composer change. Tron will not overwrite what you typed without confirmation.")
+            Text(ComposerEditorRequestPolicy.confirmationMessage)
         }
         .task(id: sessionID) { await beginOpeningPresentation() }
         .onDisappear {
@@ -331,12 +331,30 @@ struct ChatView: View {
         }
     }
 
-    private var pendingAttachments: [AppModel.PendingAttachment] {
-        presentationTarget.map(model.pendingAttachments(for:)) ?? []
+    private var composerText: String {
+        composerScope.map(model.composerDrafts.text(for:)) ?? ""
     }
 
-    private var routedEditorRequest: AppModel.EditorRequest? {
-        presentationTarget.flatMap(model.editorRequest(for:))
+    private var composerTextBinding: Binding<String> {
+        Binding(
+            get: { composerText },
+            set: { value in
+                guard let composerScope else { return }
+                model.composerDrafts.setText(value, for: composerScope)
+            }
+        )
+    }
+
+    private var pendingAttachments: [PendingAttachment] {
+        presentationTarget.map(model.composerDrafts.pendingAttachments(for:)) ?? []
+    }
+
+    private var routedEditorRequest: ComposerEditorRequest? {
+        presentationTarget.flatMap(model.composerDrafts.editorRequest(for:))
+    }
+
+    private var sending: Bool {
+        presentationTarget.map(model.composerDrafts.isSending(target:)) ?? false
     }
 
     private var responseState: ChatResponseState? {
@@ -409,6 +427,13 @@ struct ChatView: View {
 
     @MainActor
     private func beginOpeningPresentation() async {
+        if composerScope == nil, let profileID = model.profiles.selected?.id {
+            composerScope = model.composerDrafts.prepareDraft(
+                profileID: profileID,
+                sessionID: sessionID,
+                initialText: initialEditorText
+            )
+        }
         #if HOSTED_TEST
         if let hostedProbe {
             await beginHostedPresentation(probe: hostedProbe)
@@ -426,7 +451,10 @@ struct ChatView: View {
         let task = Task { @MainActor in
             let interval = performanceSignposts.begin(.firstReadyFrame)
             do {
-                let generation = try await model.openSessionPresentation(sessionID)
+                let generation = try await model.openSessionPresentation(
+                    sessionID,
+                    composerScope: composerScope
+                )
                 guard !Task.isCancelled,
                       openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
                     performanceSignposts.end(interval, result: .discarded, metrics: .none)
@@ -734,7 +762,7 @@ struct ChatView: View {
                         ForEach(pendingAttachments) { attachment in
                             PendingAttachmentChip(attachment: attachment) {
                                 if let target = presentationTarget {
-                                    model.removeAttachment(attachment.id, target: target)
+                                    model.composerDrafts.removeAttachment(attachment.id, target: target)
                                 }
                             }
                         }
@@ -779,7 +807,7 @@ struct ChatView: View {
             attachmentButton
 
             ZStack(alignment: .leading) {
-                if text.isEmpty && !composerFocused {
+                if composerText.isEmpty && !composerFocused {
                     Text("Type here")
                         .font(TronTypography.input)
                         .foregroundStyle(Color.tronEmerald)
@@ -789,7 +817,7 @@ struct ChatView: View {
                         .accessibilityHidden(true)
                 }
                 MultilineComposerTextView(
-                    text: $text,
+                    text: composerTextBinding,
                     isFocused: Binding(
                         get: { composerFocused },
                         set: { composerFocused = $0 }
@@ -911,7 +939,7 @@ struct ChatView: View {
     private var composerTrailingMode: ComposerTrailingMode? {
         ChatComposerPolicy.trailingMode(
             phase: selectedAuthoritativeSnapshot?.phase,
-            hasContent: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            hasContent: !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !pendingAttachments.isEmpty
         )
     }
@@ -1021,28 +1049,23 @@ struct ChatView: View {
     }
 
     private func send() async {
-        let outgoing = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !outgoing.isEmpty || !pendingAttachments.isEmpty,
-              let target = presentationTarget else { return }
+        guard let target = presentationTarget else { return }
         let behavior = ChatComposerPolicy.submissionBehavior(phase: selectedAuthoritativeSnapshot?.phase)
-        text = ""
         if !ChatComposerPolicy.preservesFocus(submissionBehavior: behavior) {
             composerFocused = false
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
-        sending = true
-        defer { sending = false }
-        do { try await model.send(outgoing, target: target, behavior: behavior) }
-        catch {
-            text = ChatComposerPolicy.restoredDraft(outgoing: outgoing, currentDraft: text)
-            model.lastError = error.localizedDescription
-        }
+        do { try await model.sendComposer(target: target, behavior: behavior) }
+        catch { model.presentComposerActionError(error, target: target) }
     }
 
     private func importCameraImage(_ image: UIImage) async {
         guard let target = presentationTarget else { return }
         guard let data = image.jpegData(compressionQuality: 0.92) else {
-            model.lastError = "The captured photo could not be prepared."
+            model.presentComposerActionError(
+                "The captured photo could not be prepared.",
+                target: target
+            )
             return
         }
         do {
@@ -1053,15 +1076,21 @@ struct ChatView: View {
                 target: target
             )
         }
-        catch { model.lastError = error.localizedDescription }
+        catch { model.presentComposerActionError(error, target: target) }
     }
 
     private func importPhotos(_ values: [PhotosPickerItem]) async {
         photos = []
         guard let target = presentationTarget else { return }
         for item in values {
-            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
             do {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    model.presentComposerActionError(
+                        "The selected photo could not be prepared.",
+                        target: target
+                    )
+                    continue
+                }
                 try await model.upload(
                     name: "photo.jpg",
                     mimeType: item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg",
@@ -1069,14 +1098,19 @@ struct ChatView: View {
                     target: target
                 )
             }
-            catch { model.lastError = error.localizedDescription }
+            catch { model.presentComposerActionError(error, target: target) }
         }
     }
 
     private func importFiles(_ result: Result<[URL], Error>) async {
-        guard case .success(let urls) = result,
-              let target = presentationTarget else { return }
-        for url in urls.prefix(10) {
+        guard let target = presentationTarget else { return }
+        guard case .success(let urls) = result else {
+            if case .failure(let error) = result {
+                model.presentComposerActionError(error, target: target)
+            }
+            return
+        }
+        for url in urls.prefix(ChatAttachmentImportPolicy.maximumFileSelection) {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
@@ -1087,13 +1121,13 @@ struct ChatView: View {
                     data: data,
                     target: target
                 )
-            } catch { model.lastError = error.localizedDescription }
+            } catch { model.presentComposerActionError(error, target: target) }
         }
     }
 }
 
 private struct PendingAttachmentChip: View {
-    let attachment: AppModel.PendingAttachment
+    let attachment: PendingAttachment
     let onRemove: () -> Void
     @State private var showPreview = false
 

@@ -329,6 +329,46 @@ struct AppModelPerformanceSignpostTests {
         }
     }
 
+    @Test("post-mount profile rejection revokes composer, presentation, and share intake before returning")
+    func rejectedMountedOpenClosesAuthority() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let snapshot = try SessionScenarioBuilder(seed: 144).openingTail(targetEncodedBytes: 4_096)
+            await MainActor.run {
+                harness.model.hostedSessionOpenAdmissionOverride = false
+            }
+            let opening = Task { try await harness.model.openSessionPresentation(snapshot.sessionId) }
+            let responder = Task {
+                try await respondToSessionSynchronization(
+                    socket: harness.socket,
+                    firstFrameIndex: 1,
+                    snapshot: snapshot
+                )
+                try await respondToRejectedOpenCleanup(socket: harness.socket, firstFrameIndex: 3)
+            }
+            defer {
+                opening.cancel()
+                responder.cancel()
+            }
+
+            await #expect(throws: CancellationError.self) {
+                try await valueOfOwnedTask(opening)
+            }
+            try await valueOfOwnedTask(responder)
+            let rejectedTarget = AppModel.SessionPresentationTarget(
+                sessionID: snapshot.sessionId,
+                generation: 1
+            )
+            #expect(await MainActor.run { harness.model.mountedPresentationTarget } == nil)
+            #expect(await MainActor.run { !harness.model.ownsPresentation(rejectedTarget) })
+            #expect(await MainActor.run { !harness.model.composerDrafts.admits(rejectedTarget) })
+            await #expect(throws: CancellationError.self) {
+                try await harness.model.sendSharedContent("must remain pending", target: rejectedTarget)
+            }
+            await harness.client.close()
+        }
+    }
+
     @Test("receipt interval starts only after an uncertain mutation response")
     func receiptResolution() async throws {
         try await withTestWatchdog {
@@ -580,20 +620,30 @@ struct AppModelPerformanceSignpostTests {
                 return harness.model.mountedPresentationTarget
             })
             let attachments = [
-                AppModel.PendingAttachment(
+                PendingAttachment(
                     id: "upload-a", name: "a.txt", mimeType: "text/plain",
                     size: 3, previewData: nil
                 ),
-                AppModel.PendingAttachment(
+                PendingAttachment(
                     id: "upload-b", name: "b.txt", mimeType: "text/plain",
                     size: 4, previewData: nil
                 ),
             ]
             await MainActor.run {
-                harness.model.installHostedPendingAttachments(attachments, for: target)
+                for attachment in attachments {
+                    harness.model.composerDrafts.installHostedAttachment(attachment, target: target)
+                }
             }
 
-            let failing = Task { try await harness.model.send("first", target: target) }
+            let failing = Task {
+                let scope = await MainActor.run {
+                    harness.model.composerDrafts.prepareDraft(
+                        profileID: "machine", sessionID: target.sessionID, initialText: "first"
+                    )
+                }
+                await MainActor.run { harness.model.composerDrafts.setText("first", for: scope) }
+                try await harness.model.sendComposer(target: target)
+            }
             defer { failing.cancel() }
             let failedPrompt = try await request(in: harness.socket, frameIndex: 1)
             #expect(failedPrompt.method == "session.prompt")
@@ -601,7 +651,7 @@ struct AppModelPerformanceSignpostTests {
                 .string("upload-a"), .string("upload-b"),
             ]))
             #expect(await MainActor.run {
-                harness.model.pendingAttachments(for: target)
+                harness.model.composerDrafts.pendingAttachments(for: target)
             } == attachments)
             await harness.socket.enqueue(errorResponse(
                 id: failedPrompt.id,
@@ -615,15 +665,23 @@ struct AppModelPerformanceSignpostTests {
                 #expect(failure.code == "synthetic_prompt_failure")
             }
             #expect(await MainActor.run {
-                harness.model.pendingAttachments(for: target)
+                harness.model.composerDrafts.pendingAttachments(for: target)
             } == attachments)
 
-            let succeeding = Task { try await harness.model.send("second", target: target) }
+            let succeeding = Task {
+                let scope = await MainActor.run {
+                    harness.model.composerDrafts.prepareDraft(
+                        profileID: "machine", sessionID: target.sessionID, initialText: "second"
+                    )
+                }
+                await MainActor.run { harness.model.composerDrafts.setText("second", for: scope) }
+                try await harness.model.sendComposer(target: target)
+            }
             defer { succeeding.cancel() }
             let confirmedPrompt = try await request(in: harness.socket, frameIndex: 2)
             #expect(confirmedPrompt.method == "session.prompt")
             #expect(await MainActor.run {
-                harness.model.pendingAttachments(for: target)
+                harness.model.composerDrafts.pendingAttachments(for: target)
             } == attachments)
             await harness.socket.enqueue(successResponse(
                 id: confirmedPrompt.id,
@@ -631,8 +689,75 @@ struct AppModelPerformanceSignpostTests {
             ))
             try await valueOfOwnedTask(succeeding)
             #expect(await MainActor.run {
-                harness.model.pendingAttachments(for: target).isEmpty
+                harness.model.composerDrafts.pendingAttachments(for: target).isEmpty
             })
+
+            await MainActor.run {
+                harness.model.lastError = nil
+                harness.model.presentComposerActionError(
+                    GatewayFailure(
+                        code: "current",
+                        message: "current composer failure",
+                        retryable: false,
+                        details: nil
+                    ),
+                    target: target
+                )
+            }
+            #expect(await MainActor.run { harness.model.lastError } == "current composer failure")
+            await MainActor.run {
+                harness.model.lastError = nil
+                harness.model.revokePresentationIntake(target)
+                harness.model.presentComposerActionError(
+                    GatewayFailure(
+                        code: "stale",
+                        message: "stale composer failure",
+                        retryable: false,
+                        details: nil
+                    ),
+                    target: target
+                )
+            }
+            #expect(await MainActor.run { harness.model.lastError } == nil)
+            await harness.client.close()
+        }
+    }
+
+    @Test("direct share prompt excludes composer attachments and leaves them staged after confirmation")
+    func directShareExcludesComposerAttachments() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let snapshot = try SessionScenarioBuilder(seed: 158).openingTail(targetEncodedBytes: 4_096)
+            let target = try #require(await MainActor.run {
+                harness.model.installHostedSubscribedSnapshot(snapshot, token: "share-token")
+                return harness.model.mountedPresentationTarget
+            })
+            let attachment = PendingAttachment(
+                id: "composer-only", name: "draft.txt", mimeType: "text/plain",
+                size: 5, previewData: nil
+            )
+            await MainActor.run {
+                harness.model.composerDrafts.installHostedAttachment(attachment, target: target)
+            }
+
+            let sending = Task {
+                try await harness.model.sendSharedContent("shared prompt", target: target)
+            }
+            let prompt = try await request(in: harness.socket, frameIndex: 1)
+            #expect(prompt.method == "session.prompt")
+            #expect(prompt.params?.objectValue?["text"] == .string("shared prompt"))
+            #expect(prompt.params?.objectValue?["uploadIds"] == .array([]))
+            #expect(await MainActor.run {
+                harness.model.composerDrafts.pendingAttachments(for: target)
+            } == [attachment])
+            await harness.socket.enqueue(successResponse(
+                id: prompt.id,
+                result: .object(["operationId": .string("share-operation")])
+            ))
+            try await valueOfOwnedTask(sending)
+            #expect(await MainActor.run {
+                harness.model.composerDrafts.pendingAttachments(for: target)
+            } == [attachment])
             await harness.client.close()
         }
     }
@@ -718,10 +843,10 @@ struct AppModelPerformanceSignpostTests {
 
             #expect(try await valueOfOwnedTask(navigating) == "stale editor text")
             #expect(await MainActor.run {
-                harness.model.editorRequest(for: oldTarget)
+                harness.model.composerDrafts.editorRequest(for: oldTarget)
             } == nil)
             #expect(await MainActor.run {
-                harness.model.editorRequest(for: newTarget)
+                harness.model.composerDrafts.editorRequest(for: newTarget)
             } == nil)
             #expect(await MainActor.run { harness.model.sessionTree } == [node])
             await harness.client.close()
@@ -973,6 +1098,36 @@ struct AppModelPerformanceSignpostTests {
             id: sync.id,
             result: .object(["synchronized": .bool(true)])
         ))
+    }
+
+    private func respondToRejectedOpenCleanup(
+        socket: ScriptedGatewaySocket,
+        firstFrameIndex: Int
+    ) async throws {
+        var index = firstFrameIndex
+        while true {
+            let next = try await request(in: socket, frameIndex: index)
+            index += 1
+            let result: JSONValue
+            switch next.method {
+            case "provider.list":
+                result = .object(["providers": .array([])])
+            case "model.list":
+                result = .object(["models": .array([]), "nextCursor": .null])
+            case "session.commands":
+                result = .object(["commands": .array([])])
+            case "session.close":
+                await socket.enqueue(successResponse(
+                    id: next.id,
+                    result: .object(["closed": .bool(true)])
+                ))
+                return
+            default:
+                Issue.record("unexpected rejected-open cleanup request: \(next.method)")
+                return
+            }
+            await socket.enqueue(successResponse(id: next.id, result: result))
+        }
     }
 
     private func respondToPresentationRefreshes(

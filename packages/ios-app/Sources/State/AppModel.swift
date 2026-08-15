@@ -8,14 +8,6 @@ final class AppModel {
     typealias SessionSnapshotInstallMode = SessionSnapshotInstallationMode
     typealias ConnectionState = GatewayConnectionState
 
-    struct PendingAttachment: Identifiable, Hashable {
-        let id: String
-        let name: String
-        let mimeType: String
-        let size: Int
-        let previewData: Data?
-    }
-
     typealias AuthPromptState = ProviderAuthPromptState
     typealias AuthEventState = ProviderAuthEventState
 
@@ -41,17 +33,6 @@ final class AppModel {
 
     typealias SessionPresentationTarget = SessionPresentationIdentity
 
-    struct EditorRequest: Identifiable, Hashable {
-        typealias Action = SessionEditorAction
-        let sessionId: String
-        let presentationGeneration: Int
-        let revision: Int
-        let action: Action
-        let text: String
-        let fullText: String
-        var id: String { "\(sessionId):\(presentationGeneration):\(revision)" }
-    }
-
     typealias SessionOpenResponse = GatewaySessionOpenResponse
     typealias PairingCommit = GatewayPairingCommit
     typealias ProfileTokenLookup = GatewayProfileTokenLookup
@@ -70,6 +51,7 @@ final class AppModel {
     private let providerAuth: ProviderAuthCoordinator
     private let packageConfiguration: PackageConfigurationCoordinator
     private let customModelConfiguration: CustomModelConfigurationCoordinator
+    let composerDrafts: ComposerDraftCoordinator
 
     var connectionState: ConnectionState { lifecycle.connectionState }
     /// False only while the first launch credential/connection decision is
@@ -93,16 +75,8 @@ final class AppModel {
     var legacyImportedCount = 0
     var workspace: WorkspaceListing?
     var defaultWorkspace: String?
-    private var pendingAttachmentsByTarget = PresentationOwnedStore<
-        SessionPresentationTarget,
-        [PendingAttachment]
-    >()
     var authPrompt: AuthPromptState? { providerAuth.prompt }
     var authEvent: AuthEventState? { providerAuth.event }
-    private var editorRequestByTarget = PresentationOwnedStore<
-        SessionPresentationTarget,
-        EditorRequest
-    >()
     private var noticeStore = GlobalNoticeStore()
     var latestNotice: String? { noticeStore.latest }
     var lastError: String?
@@ -147,7 +121,8 @@ final class AppModel {
         profileTokenLookup: ProfileTokenLookup? = nil,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
         sessionImportFileAccess: SessionImportFileAccess = .live,
-        sessionImportUpload: SessionImportUpload? = nil
+        sessionImportUpload: SessionImportUpload? = nil,
+        composerUpload: ComposerUploadOperation? = nil
     ) {
         let resolvedPairingCommit = pairingCommit ?? { profile, token in
             try profiles.save(profile, token: token)
@@ -196,6 +171,15 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
         )
+        let composerDrafts = ComposerDraftCoordinator(
+            upload: composerUpload ?? { name, mimeType, data in
+                try await client.upload(name: name, mimeType: mimeType, data: data)
+            },
+            send: { text, sessionID, uploadIDs, behavior in
+                try await sessionMutations.prompt(text, sessionID: sessionID, uploadIDs: uploadIDs, behavior: behavior)
+            },
+            admitsLifecycleGeneration: { lifecycle.admits(.init(generation: $0, connectionID: nil)) }
+        )
         let resolvedSessionImportUpload = sessionImportUpload ?? { name, mimeType, data in
             try await client.upload(name: name, mimeType: mimeType, data: data)
         }
@@ -212,6 +196,7 @@ final class AppModel {
         self.providerAuth = providerAuth
         self.packageConfiguration = packageConfiguration
         self.customModelConfiguration = customModelConfiguration
+        self.composerDrafts = composerDrafts
         self.sessionPresentation = SessionPresentationStore(
             client: client,
             performanceSignposts: performanceSignposts
@@ -282,19 +267,24 @@ final class AppModel {
 
     func installHostedSubscribedSnapshot(_ snapshot: SessionSnapshot, token: String = "hosted-token") {
         sessionPresentation.installHostedSubscription(snapshot: snapshot, token: token)
+        installHostedComposerPresentationIfPossible()
     }
 
     func installHostedAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
         sessionPresentation.installHostedAuthoritativeSnapshot(snapshot)
+        installHostedComposerPresentationIfPossible()
     }
 
-    func installHostedPendingAttachments(
-        _ attachments: [PendingAttachment],
-        for target: SessionPresentationTarget
-    ) {
-        guard ownsPresentation(target) else { return }
-        pendingAttachmentsByTarget[target] = attachments.isEmpty ? nil : attachments
+    private func installHostedComposerPresentationIfPossible() {
+        guard let target = sessionPresentation.mountedTarget,
+              let profileID = lifecycle.selectedProfileID,
+              let generation = lifecycle.generationAdmission?.generation else { return }
+        _ = composerDrafts.installHostedPresentation(
+            profileID: profileID, target: target, lifecycleGeneration: generation
+        )
     }
+
+    var hostedSessionOpenAdmissionOverride: Bool?
 
     func connectHostedGateway(profile: GatewayProfile, token: String) async throws {
         try await lifecycle.connectHosted(profile: profile, token: token)
@@ -356,20 +346,18 @@ final class AppModel {
     }
 
     func revokePresentationIntake(_ target: SessionPresentationTarget) {
+        composerDrafts.revoke(target)
         sessionPresentation.revokeIntake(target)
     }
 
-    func pendingAttachments(for target: SessionPresentationTarget) -> [PendingAttachment] {
-        pendingAttachmentsByTarget[target] ?? []
+    func presentComposerActionError(_ error: Error, target: SessionPresentationTarget) {
+        guard composerDrafts.admits(target), !(error is CancellationError) else { return }
+        lastError = error.localizedDescription
     }
 
-    func editorRequest(for target: SessionPresentationTarget) -> EditorRequest? {
-        editorRequestByTarget[target]
-    }
-
-    func consumeEditorRequest(_ request: EditorRequest, for target: SessionPresentationTarget) {
-        guard editorRequestByTarget[target]?.id == request.id else { return }
-        editorRequestByTarget[target] = nil
+    func presentComposerActionError(_ message: String, target: SessionPresentationTarget) {
+        guard composerDrafts.admits(target) else { return }
+        lastError = message
     }
 
     var mountedPresentationTarget: SessionPresentationTarget? {
@@ -479,10 +467,9 @@ final class AppModel {
         settingsTrust.clearProfile()
         packageConfiguration.clearProfile()
         customModelConfiguration.clearProfile()
+        composerDrafts.retireProfilePresentation()
         lastError = nil
         onboardingError = nil
-        pendingAttachmentsByTarget = .init()
-        editorRequestByTarget = .init()
         clearLiveConnectionProjection()
     }
 
@@ -491,7 +478,9 @@ final class AppModel {
     }
 
     func forgetCurrentGateway() async {
+        let forgottenProfileID = profiles.selected?.id
         if await lifecycle.forgetCurrentGateway() {
+            if let forgottenProfileID { composerDrafts.removeProfile(forgottenProfileID) }
             setupComplete = false
         }
     }
@@ -590,6 +579,7 @@ final class AppModel {
             pairedDevices.removeAll { $0.id == id }
             if let profile = profiles.selected, profile.deviceId == id,
                await lifecycle.forget(profile: profile) {
+                composerDrafts.removeProfile(profile.id)
                 setupComplete = false
             }
         }
@@ -653,14 +643,41 @@ final class AppModel {
     /// Starts a new mounted chat presentation. Unlike reconnect synchronization,
     /// this always installs a fresh authoritative bounded tail and never carries
     /// an explicitly paged prefix across navigation lifetimes.
-    func openSessionPresentation(_ id: String) async throws -> Int {
-        try await sessionPresentation.open(id)
+    func openSessionPresentation(
+        _ id: String,
+        composerScope suppliedScope: ComposerDraftScope? = nil
+    ) async throws -> Int {
+        guard let admission = lifecycle.generationAdmission,
+              let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
+        let scope = suppliedScope ?? composerDrafts.prepareDraft(
+            profileID: profileID,
+            sessionID: id,
+            initialText: nil
+        )
+        guard scope.profileID == profileID, scope.sessionID == id else { throw CancellationError() }
+        #if HOSTED_TEST
+        let hostedAdmission = hostedSessionOpenAdmissionOverride ?? true
+        hostedSessionOpenAdmissionOverride = nil
+        #else
+        let hostedAdmission = true
+        #endif
+        return try await composerDrafts.openMountedPresentation(
+            scope: scope,
+            lifecycleGeneration: admission.generation,
+            open: { try await sessionPresentation.open(id) },
+            finalAdmission: { _ in
+                try requireLifecycle(admission)
+                guard hostedAdmission,
+                      lifecycle.selectedProfileID == profileID else { throw CancellationError() }
+            },
+            revokePresentation: sessionPresentation.revokeIntake,
+            closePresentation: sessionPresentation.close
+        )
     }
 
     func closeSessionPresentation(_ id: String, generation: Int) async {
         let target = SessionPresentationTarget(sessionID: id, generation: generation)
-        pendingAttachmentsByTarget.removeValue(for: target)
-        editorRequestByTarget.removeValue(for: target)
+        composerDrafts.revoke(target)
         await sessionPresentation.close(target)
     }
 
@@ -723,43 +740,24 @@ final class AppModel {
         )
     }
 
-    func send(_ text: String, sessionID: String, behavior: String? = nil) async throws {
-        try await send(text, sessionID: sessionID, uploadIDs: [], behavior: behavior)
-    }
-
     func sendSharedContent(
         _ text: String,
         target: SessionPresentationTarget
     ) async throws {
         guard ownsPresentation(target) else { throw CancellationError() }
-        try await send(text, sessionID: target.sessionID, uploadIDs: [], behavior: nil)
+        try await sessionMutations.prompt(
+            text,
+            sessionID: target.sessionID,
+            uploadIDs: [],
+            behavior: nil
+        )
     }
 
-    func send(
-        _ text: String,
+    func sendComposer(
         target: SessionPresentationTarget,
         behavior: String? = nil
     ) async throws {
-        guard ownsPresentation(target) else { throw CancellationError() }
-        let sentIDs = pendingAttachments(for: target).map(\.id)
-        try await send(text, sessionID: target.sessionID, uploadIDs: sentIDs, behavior: behavior)
-        guard var attachments = pendingAttachmentsByTarget[target] else { return }
-        attachments.removeAll { sentIDs.contains($0.id) }
-        pendingAttachmentsByTarget[target] = attachments.isEmpty ? nil : attachments
-    }
-
-    private func send(
-        _ text: String,
-        sessionID: String,
-        uploadIDs: [String],
-        behavior: String?
-    ) async throws {
-        try await sessionMutations.prompt(
-            text,
-            sessionID: sessionID,
-            uploadIDs: uploadIDs,
-            behavior: behavior
-        )
+        try await composerDrafts.send(target: target, behavior: behavior)
     }
 
     func abort(sessionID: String, kind: String = "agent") async {
@@ -839,13 +837,16 @@ final class AppModel {
         if let editorText,
            let editorTarget,
            ownsPresentation(editorTarget) {
-            editorRequestByTarget[editorTarget] = .init(
-                sessionId: sessionID,
-                presentationGeneration: editorTarget.generation,
-                revision: Int(Date.now.timeIntervalSince1970 * 1_000),
-                action: .set,
-                text: editorText,
-                fullText: editorText
+            composerDrafts.publishEditorRequest(
+                ComposerEditorRequest(
+                    sessionID: sessionID,
+                    presentationGeneration: editorTarget.generation,
+                    revision: Int(Date.now.timeIntervalSince1970 * 1_000),
+                    action: .set,
+                    text: editorText,
+                    fullText: editorText
+                ),
+                target: editorTarget
             )
         }
         await loadTree(sessionID: sessionID)
@@ -888,6 +889,9 @@ final class AppModel {
         await sessionPresentation.closeSubscriptionIfInstalled(sessionID: id)
         try await sessionMutations.delete(sessionID: id)
         sessionPresentation.remove(sessionID: id)
+        if let profileID = lifecycle.selectedProfileID {
+            composerDrafts.removeSession(profileID: profileID, sessionID: id)
+        }
         sessionCatalog.remove(id)
         saveCache()
     }
@@ -926,24 +930,12 @@ final class AppModel {
         data: Data,
         target: SessionPresentationTarget
     ) async throws {
-        guard ownsPresentation(target) else { throw CancellationError() }
-        let id = try await client.upload(name: name, mimeType: mimeType, data: data)
-        guard ownsPresentation(target) else { return }
-        var attachments = pendingAttachmentsByTarget[target] ?? []
-        attachments.append(PendingAttachment(
-            id: id,
+        try await composerDrafts.upload(
             name: name,
             mimeType: mimeType,
-            size: data.count,
-            previewData: mimeType.hasPrefix("image/") ? data : nil
-        ))
-        pendingAttachmentsByTarget[target] = attachments
-    }
-
-    func removeAttachment(_ id: String, target: SessionPresentationTarget) {
-        guard var attachments = pendingAttachmentsByTarget[target] else { return }
-        attachments.removeAll { $0.id == id }
-        pendingAttachmentsByTarget[target] = attachments.isEmpty ? nil : attachments
+            data: data,
+            target: target
+        )
     }
 
     @discardableResult
@@ -1667,23 +1659,27 @@ extension AppModel: SessionPresentationStoreDelegate {
 
     func sessionPresentationStoreDidPublishEditorRequest(
         target: SessionPresentationTarget,
-        action: EditorRequest.Action,
+        action: SessionEditorAction,
         text: String,
         fullText: String,
         revision: Int
     ) {
         guard ownsPresentation(target) else { return }
-        editorRequestByTarget[target] = .init(
-            sessionId: target.sessionID,
-            presentationGeneration: target.generation,
-            revision: revision,
-            action: action,
-            text: text,
-            fullText: fullText
+        composerDrafts.publishEditorRequest(
+            ComposerEditorRequest(
+                sessionID: target.sessionID,
+                presentationGeneration: target.generation,
+                revision: revision,
+                action: action,
+                text: text,
+                fullText: fullText
+            ),
+            target: target
         )
     }
 
     func sessionPresentationStoreDidOpen(_ target: SessionPresentationTarget) {
+        _ = composerDrafts.mountPreparedPresentation(target)
         Task { [weak self] in
             guard let self else { return }
             async let providerRefresh: Bool = self.refreshProviders(target: .session(id: target.sessionID))

@@ -290,7 +290,13 @@ struct SessionPresentationStoreTests {
                 sessionID: snapshot.sessionId,
                 generation: generation
             )
-            #expect(model.editorRequest(for: target)?.fullText == "draft")
+            let scope = model.composerDrafts.prepareDraft(
+                profileID: "gateway",
+                sessionID: snapshot.sessionId,
+                initialText: nil
+            )
+            #expect(model.composerDrafts.editorRequest(for: target) == nil)
+            #expect(model.composerDrafts.text(for: scope) == "draft")
             #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.extensionUI.editorText == "draft")
             #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.eventSequence == snapshot.eventSequence + 1)
             await model.teardown()

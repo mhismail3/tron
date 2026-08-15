@@ -115,6 +115,15 @@ final class GatewayLifecycleCoordinator {
         return Admission(generation: phase.generation, connectionID: nil)
     }
 
+    var selectedProfileID: String? {
+        if let selected = profiles.selected?.id { return selected }
+        #if HOSTED_TEST
+        return hostedProfileID
+        #else
+        return nil
+        #endif
+    }
+
     var admitsWork: Bool { phase.admitsWork }
 
     func admits(_ admission: Admission) -> Bool {
@@ -314,6 +323,8 @@ final class GatewayLifecycleCoordinator {
     }
 
     #if HOSTED_TEST
+    private var hostedProfileID: String?
+
     func connectHosted(profile: GatewayProfile, token: String) async throws {
         guard let admission else { throw CancellationError() }
         let connection = try await client.connectForLifecycle(profile: profile, token: token)
@@ -325,6 +336,7 @@ final class GatewayLifecycleCoordinator {
             connectionID: connection.id
         )
         try require(connectedAdmission)
+        hostedProfileID = profile.id
         gatewayInfo = connection.info
         connectionState = .connected
     }

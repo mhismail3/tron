@@ -1,6 +1,31 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+struct SessionShellProfileRouteOwner {
+    private var hasObservedProfile = false
+    private var profileID: String?
+
+    mutating func reconcile(
+        profileID nextProfileID: String?,
+        presentedSession: inout AppModel.SessionNavigationRoute?,
+        presentationTarget: (String) -> AppModel.SessionPresentationTarget?,
+        revoke: (AppModel.SessionPresentationTarget) -> Void
+    ) {
+        guard hasObservedProfile else {
+            hasObservedProfile = true
+            profileID = nextProfileID
+            return
+        }
+        guard profileID != nextProfileID else { return }
+        profileID = nextProfileID
+        if let sessionID = presentedSession?.sessionID,
+           let target = presentationTarget(sessionID) {
+            revoke(target)
+        }
+        presentedSession = nil
+    }
+}
+
 struct SessionShellView: View {
     @Environment(AppModel.self) private var model
     @State private var showNewSession = false
@@ -15,6 +40,7 @@ struct SessionShellView: View {
     @State private var renameName = ""
     @State private var collapsedWorkspaces = Set<String>()
     @State private var navigationOwner = DashboardNavigationOwner()
+    @State private var profileRouteOwner = SessionShellProfileRouteOwner()
 
     var body: some View {
         dashboardNavigation
@@ -51,6 +77,19 @@ struct SessionShellView: View {
             Button("Cancel", role: .cancel) { sessionToRename = nil }
         }
         .gatewayGlobalSheets()
+        .onChange(of: model.profiles.selected?.id, initial: true) { _, profileID in
+            var route = presentedSession
+            profileRouteOwner.reconcile(
+                profileID: profileID,
+                presentedSession: &route,
+                presentationTarget: model.presentationTarget(for:),
+                revoke: model.revokePresentationIntake
+            )
+            if presentedSession != route {
+                navigationOwner.invalidate()
+                presentedSession = route
+            }
+        }
     }
 
     private var dashboardNavigation: some View {

@@ -7,7 +7,7 @@ struct SessionPresentationIdentity: Hashable, Sendable {
 }
 
 enum SessionSnapshotInstallationMode { case freshPresentation, reconnect }
-enum SessionEditorAction: String { case set, paste }
+enum SessionEditorAction: String, Hashable, Sendable { case set, paste }
 
 struct GatewaySessionOpenResponse: Decodable {
     let session: SessionSnapshot
@@ -181,8 +181,10 @@ final class SessionPresentationStore {
         pendingTarget = nil
         revokedTargets.remove(requested)
         isAuthoritative = true
-        publish(deferredEffectsByTarget.removeValue(forKey: requested) ?? [], target: requested)
+        // Composer presentation authority must mount before deferred editor
+        // effects publish for this exact fresh presentation.
         delegate?.sessionPresentationStoreDidOpen(requested)
+        publish(deferredEffectsByTarget.removeValue(forKey: requested) ?? [], target: requested)
         didOpen = true
         result = .success
         return requested.generation

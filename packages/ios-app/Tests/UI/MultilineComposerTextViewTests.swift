@@ -94,6 +94,22 @@ struct MultilineComposerTextViewTests {
         #expect(ChatComposerPolicy.isTextEditable(isTranscriptReady: false))
     }
 
+    @Test("attachment pickers preserve characterized selection ceilings")
+    func attachmentSelectionCeilings() {
+        #expect(ChatAttachmentImportPolicy.maximumPhotoSelection == 5)
+        #expect(ChatAttachmentImportPolicy.maximumFileSelection == 10)
+    }
+
+    @Test("editor confirmation policy preserves wording and empty-draft admission")
+    func editorConfirmationPolicy() {
+        #expect(ComposerEditorRequestPolicy.confirmationTitle == "Replace the current draft?")
+        #expect(ComposerEditorRequestPolicy.useActionTitle == "Use Extension Text")
+        #expect(ComposerEditorRequestPolicy.keepActionTitle == "Keep Current Draft")
+        #expect(ComposerEditorRequestPolicy.confirmationMessage == "An extension requested a composer change. Tron will not overwrite what you typed without confirmation.")
+        #expect(ComposerEditorRequestPolicy.appliesAutomatically(to: ""))
+        #expect(!ComposerEditorRequestPolicy.appliesAutomatically(to: "existing"))
+    }
+
     @Test("grows to eight lines then gives scrolling to the text view")
     func cappedGrowth() async throws {
         var text = ""

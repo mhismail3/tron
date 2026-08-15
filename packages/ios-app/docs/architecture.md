@@ -222,7 +222,23 @@ older read cannot replace a newer document. Validation and put revalidate the sa
 mutation generation before every mutating boundary; retirement after validation never sends put.
 The Save and Restart flow captures one lifecycle admission around both operations, so a confirmed
 save cannot restart a replacement profile and a late restart failure cannot surface into replacement-profile
-UI. Configuration screens discard cancellation while preserving current-operation errors. Guided and advanced editor changes share one monotonic
+UI. Configuration screens discard cancellation while preserving current-operation errors. `ComposerDraftCoordinator`
+is the sole owner of composer text, staged attachments, upload admission, editor requests, and submission state.
+Text is keyed by explicit profile/session scope with monotonic revisions and a deterministic 24-inactive-draft
+LRU; text is never truncated and survives route close/reopen until exact session/profile deletion or bounded
+eviction. The active lease is the immutable session/presentation generation plus lifecycle generation.
+Attachments, previews, concurrent upload admissions, editor requests, and submission snapshots live only for
+that lease and are synchronously discarded on revocation, close, or profile retirement. Uploads are independent,
+so completion order—not newest-request arbitration—orders staged IDs. A confirmed prompt removes only the IDs
+captured by its submission and never clears newer text or attachments; failure or uncertain receipt resolution
+retains those IDs and restores outgoing text before newer input. Retired completions publish neither restoration
+nor errors. Extension editor requests auto-apply only to an empty exact draft; nonempty drafts require the
+existing explicit Use/Keep disposition. Route-provided initial editor text seeds only an absent exact
+profile/session draft; reopen and repeated preparation cannot overwrite retained edits. `SessionShellView`
+observes explicit selected-profile identity through `SessionShellProfileRouteOwner`; an A → B → A change
+synchronously revokes the current presentation and clears its navigation route before another profile can
+reuse the screen's prior draft scope. Staged attachment retention beyond a presentation and remote upload cleanup remain a
+Phase 8D product/contract decision; this owner does not preserve or clean remote IDs speculatively. Guided and advanced editor changes share one monotonic
 revision owner; automatic invalidation loads cannot replace either form of unsaved input, and only
 the exact submitted revision can become clean after a suspended save. Model/default
 settings keep separate global/project drafts with baselines and monotonic revisions. Runtime,
@@ -306,9 +322,9 @@ It revalidates after every suspension boundary, so an upload ID produced for a r
 never become a mutation on its replacement, and always balances acquired file access. The admitted
 import result retains that exact lifecycle/profile identity through catalog refresh and the immediate
 MainActor navigation handoff; a retired generation stays inadmissible even if profile selection cycles
-away and back before presentation. `AppModel`
-retains only cross-owner orchestration: exact-generation attachment/editor effects, post-confirmation
-projection changes, catalog refresh, navigation results, and delete ordering.
+away and back before presentation. `AppModel` retains only cross-owner orchestration: immutable
+lifecycle/presentation mounting and revocation, admitted global error publication, direct no-attachment
+share delivery, post-confirmation projection changes, catalog refresh, navigation results, and delete ordering.
 
 ## Sessions
 
@@ -446,11 +462,12 @@ a same-session reopen, and cannot silently open another session. Presentation te
 ownership per session rather than against an unrelated route's newer generation; share intake is
 admitted only when exactly one presentation remains mounted. Create, import, and fork return navigation results; they do not rewrite
 selection or claim subscription ownership before the destination mounts. Fork-restored editor
-text travels in that route result rather than through selection-backed global state. Uploaded
-attachments and extension editor requests are stored by session plus presentation generation;
-late uploads, stale same-session editor events, removal, and send completion cannot cross a reopen.
-Closing or replacing a route synchronously revokes its intake lease and disposes its transient
-state. Share intake captures the sole admitted presentation target, never consumes that target's
+text travels in that route result and installs into the exact profile/session composer draft rather
+than selection-backed global state. Uploaded attachments and extension editor requests are owned
+by `ComposerDraftCoordinator` under session plus presentation generation; late uploads, stale
+same-session editor events, removal, send completion, and errors cannot cross a reopen. Closing or
+replacing a route synchronously revokes its intake lease and disposes presentation-transient state
+while retaining only the bounded profile/session text draft. Share intake captures the sole admitted presentation target, never consumes that target's
 staged uploads, and clears the shared payload only after confirmed prompt admission. Dashboard
 imports use the explicit default workspace rather than a hidden transcript selection. Global
 notice projection is disposable and bounded to eight entries, 4 KiB per message, and 16 KiB total.
