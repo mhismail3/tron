@@ -308,7 +308,7 @@ Deliverables:
 
 - **Complete:** raw geometry and semantic row frames leave broad `ChatView` state and enter one scroll reducer; the obsolete production visibility callback is deleted.
 - **Complete:** one owner emits a typed optional command, coalesces follow-tail to at most one command per display frame, and skips writes inside the practical bottom boundary.
-- **Complete:** direct/native/accessibility interaction is absolute authority and synchronously cancels pending automatic commands.
+- **Complete:** direct/native/accessibility interaction is absolute authority and synchronously cancels pending automatic commands; geometry-first manual return to the measured tail clears catch-up without requiring a button tap.
 - **Complete:** the 60-frame prepend polling loop is replaced by one generation/token-scoped semantic-anchor transaction; canonical-to-rendered mapping survives page-boundary tool grouping.
 - **Complete:** exact page install advances a layout epoch carried by the row geometry transform, so an unchanged numeric frame still emits an exact post-epoch sample. Prepend passively waits for that sample, requires a strictly newer exact sample after each correction, permits at most one late correction, and succeeds only within one point. No next-frame assumption or total tail/content height drives correction.
 - **Complete:** the load token stays active through settlement, repeat taps are no-ops, and stale work cannot end a newer transaction.
@@ -318,8 +318,9 @@ Deliverables:
 
 Exit gate:
 
-- Pinned readers remain pinned without shimmer.
-- Detached readers receive no app position writes except explicit catch-up.
+- Pinned readers remain pinned without shimmer, including keyboard focus and composer-height transitions.
+- Detached readers receive no app position writes except explicit catch-up; keyboard focus preserves their semantic reading position.
+- The down-arrow is derived only from detached state and disappears on an admitted manual return to the practical tail.
 - History anchor settles within 1 point with no visible intermediate excursion above 2 points in the controlled harness.
 - Repeat tap, page-boundary tool group, concurrent streaming, keyboard, composer resize, and user-gesture races pass.
 

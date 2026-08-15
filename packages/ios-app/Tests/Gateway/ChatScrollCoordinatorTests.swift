@@ -92,6 +92,133 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.command == nil)
     }
 
+    @Test("geometry-first manual return to tail immediately clears catch-up state")
+    func geometryFirstManualReturnClearsCatchUp() {
+        let coordinator = detachedCoordinator(at: away, withUnread: true)
+        #expect(coordinator.shouldShowCatchUpButton)
+
+        coordinator.geometryChanged(previous: away, current: bottom)
+        #expect(coordinator.shouldShowCatchUpButton)
+
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        #expect(!coordinator.shouldShowCatchUpButton)
+        #expect(!coordinator.userScrolledAway)
+        #expect(!coordinator.hasUnreadContent)
+        #expect(coordinator.isAtBottom)
+        #expect(coordinator.command?.destination == .releaseBinding)
+    }
+
+    @Test("manual return to tail remains pinned through keyboard viewport contraction")
+    func manualReturnThenKeyboardFollowsTail() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = detachedCoordinator(at: away, withUnread: true, frames: frames)
+            coordinator.geometryChanged(previous: away, current: bottom)
+            coordinator.scrollPositionChanged(isPositionedByUser: true)
+            if let release = coordinator.command { coordinator.commandApplied(release) }
+
+            coordinator.composerViewportTransitionBegan()
+            let keyboard = ChatTranscriptGeometry(
+                offsetY: 600,
+                contentHeight: 1_000,
+                containerHeight: 300,
+                bottomInset: 100
+            )
+            coordinator.viewportChanged(previous: bottom, current: keyboard)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+
+            let command = try await coordinator.hostedNextCommand()
+            #expect(command.destination == .tail)
+            #expect(command.origin == .automaticFollow)
+            #expect(!coordinator.shouldShowCatchUpButton)
+        }
+    }
+
+    @Test("direct mixed viewport geometry return to tail clears catch-up")
+    func mixedViewportManualReturnClearsCatchUp() {
+        let coordinator = detachedCoordinator(at: away, withUnread: true)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
+        let intermediateViewport = ChatTranscriptGeometry(
+            offsetY: 300,
+            contentHeight: 1_000,
+            containerHeight: 350
+        )
+        coordinator.viewportChanged(previous: away, current: intermediateViewport)
+        #expect(coordinator.shouldShowCatchUpButton)
+
+        // SwiftUI may coalesce the final scroll geometry into the idle phase.
+        let mixedBottom = ChatTranscriptGeometry(
+            offsetY: 700,
+            contentHeight: 1_000,
+            containerHeight: 300
+        )
+        coordinator.scrollPhaseChanged(
+            from: .interacting,
+            to: .idle,
+            finalGeometry: mixedBottom
+        )
+
+        #expect(!coordinator.shouldShowCatchUpButton)
+        #expect(!coordinator.hasUnreadContent)
+        #expect(coordinator.isAtBottom)
+    }
+
+    @Test("active keyboard viewport settlement without content motion preserves detachment")
+    func activeKeyboardViewportDoesNotRepin() {
+        let coordinator = detachedCoordinator(at: away, withUnread: true)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
+        let expandedToBoundary = ChatTranscriptGeometry(
+            offsetY: 300,
+            contentHeight: 1_000,
+            containerHeight: 700
+        )
+        coordinator.viewportChanged(previous: away, current: expandedToBoundary)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        let streamedWithinBoundary = ChatTranscriptGeometry(
+            offsetY: 300,
+            contentHeight: 1_005,
+            containerHeight: 700
+        )
+        coordinator.geometryChanged(
+            previous: expandedToBoundary,
+            current: streamedWithinBoundary
+        )
+        #expect(coordinator.shouldShowCatchUpButton)
+        #expect(coordinator.hasUnreadContent)
+        let measuredReturn = ChatTranscriptGeometry(
+            offsetY: 305,
+            contentHeight: 1_005,
+            containerHeight: 700
+        )
+        coordinator.scrollPhaseChanged(
+            from: .interacting,
+            to: .idle,
+            finalGeometry: measuredReturn
+        )
+
+        #expect(!coordinator.shouldShowCatchUpButton)
+        #expect(!coordinator.hasUnreadContent)
+        #expect(coordinator.isAtBottom)
+
+        let lateNative = detachedCoordinator(at: away, withUnread: true)
+        lateNative.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
+        lateNative.viewportChanged(previous: away, current: expandedToBoundary)
+        lateNative.scrollPhaseChanged(
+            from: .interacting,
+            to: .idle,
+            finalGeometry: expandedToBoundary
+        )
+        lateNative.scrollPositionChanged(isPositionedByUser: true)
+        lateNative.geometryChanged(
+            previous: expandedToBoundary,
+            current: streamedWithinBoundary
+        )
+        #expect(lateNative.shouldShowCatchUpButton)
+        #expect(lateNative.hasUnreadContent)
+        #expect(lateNative.command == nil)
+    }
+
     @Test("native positioning after released binding emits a new typed release at tail")
     func nativePositioningRearmsBindingRelease() {
         let coordinator = ChatScrollCoordinator()
@@ -120,8 +247,10 @@ struct ChatScrollCoordinatorTests {
         coordinator.viewportChanged(previous: stream, current: composer)
         let image = ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_240, containerHeight: 320, bottomInset: 80)
         coordinator.geometryChanged(previous: composer, current: image)
+        coordinator.composerViewportTransitionBegan()
         coordinator.semanticResponseArrived()
         #expect(coordinator.userScrolledAway)
+        #expect(coordinator.shouldShowCatchUpButton)
         #expect(coordinator.hasUnreadContent)
         #expect(frames.requestCount == 0)
         #expect(coordinator.command == nil)
@@ -148,8 +277,19 @@ struct ChatScrollCoordinatorTests {
         #expect(!coordinator.isAtBottom)
         #expect(coordinator.command == nil)
 
+        let taller = ChatTranscriptGeometry(
+            offsetY: 300,
+            contentHeight: 1_200,
+            containerHeight: 700
+        )
+        coordinator.geometryChanged(previous: expanded, current: taller)
         coordinator.scrollPositionChanged(isPositionedByUser: true)
-        coordinator.geometryChanged(previous: away, current: expanded)
+        let manuallyReturned = ChatTranscriptGeometry(
+            offsetY: 500,
+            contentHeight: 1_200,
+            containerHeight: 700
+        )
+        coordinator.geometryChanged(previous: taller, current: manuallyReturned)
         #expect(!coordinator.userScrolledAway)
         #expect(!coordinator.hasUnreadContent)
         #expect(coordinator.command?.destination == .releaseBinding)
@@ -172,16 +312,18 @@ struct ChatScrollCoordinatorTests {
     }
 
     @Test("direct interaction cancels a pending automatic frame command")
-    func interactionCancelsPendingFollow() async {
-        let frames = ManualScrollFrameScheduler()
-        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
-        let grown = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_100, containerHeight: 400)
-        coordinator.geometryChanged(previous: bottom, current: grown)
-        await frames.waitForRequest(count: 1)
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: grown)
-        frames.releaseNext()
-        #expect(coordinator.command == nil)
-        #expect(coordinator.isUserInteracting)
+    func interactionCancelsPendingFollow() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let grown = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_100, containerHeight: 400)
+            coordinator.geometryChanged(previous: bottom, current: grown)
+            await frames.waitForRequest(count: 1)
+            coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: grown)
+            frames.releaseNext()
+            #expect(coordinator.command == nil)
+            #expect(coordinator.isUserInteracting)
+        }
     }
 
     @Test("long catch-up stages and finishes on separate display frames")
@@ -491,9 +633,10 @@ struct ChatScrollCoordinatorTests {
 
     private func detachedCoordinator(
         at geometry: ChatTranscriptGeometry,
-        withUnread: Bool = true
+        withUnread: Bool = true,
+        frames: ManualScrollFrameScheduler? = nil
     ) -> ChatScrollCoordinator {
-        let coordinator = ChatScrollCoordinator()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames?.scheduler ?? .displayLink)
         coordinator.scrollPositionChanged(isPositionedByUser: true)
         coordinator.geometryChanged(previous: bottom, current: geometry)
         coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: geometry)
@@ -546,9 +689,16 @@ private final class ScrollResultRecorder {
 
 @MainActor
 private final class ManualScrollFrameScheduler {
+    private struct RequestWaiter {
+        let id: Int
+        let targetCount: Int
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
     private var continuations: [Int: CheckedContinuation<Void, Error>] = [:]
     private var nextContinuationID = 0
-    private var requestWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private var requestWaiters: [RequestWaiter] = []
+    private var nextRequestWaiterID = 0
     private(set) var requestCount = 0
 
     lazy var scheduler = DisplayFrameScheduler { [weak self] in
@@ -560,9 +710,9 @@ private final class ManualScrollFrameScheduler {
         let id = nextContinuationID
         nextContinuationID &+= 1
         requestCount &+= 1
-        let ready = requestWaiters.filter { $0.0 <= requestCount }
-        requestWaiters.removeAll { $0.0 <= requestCount }
-        ready.forEach { $0.1.resume() }
+        let ready = requestWaiters.filter { $0.targetCount <= requestCount }
+        requestWaiters.removeAll { $0.targetCount <= requestCount }
+        ready.forEach { $0.continuation.resume() }
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
@@ -575,7 +725,22 @@ private final class ManualScrollFrameScheduler {
 
     func waitForRequest(count: Int) async {
         guard requestCount < count else { return }
-        await withCheckedContinuation { requestWaiters.append((count, $0)) }
+        let id = nextRequestWaiterID
+        nextRequestWaiterID &+= 1
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled { continuation.resume() }
+                else {
+                    requestWaiters.append(.init(
+                        id: id,
+                        targetCount: count,
+                        continuation: continuation
+                    ))
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in self.cancelRequestWaiter(id: id) }
+        }
     }
 
     func releaseNext() {
@@ -585,5 +750,10 @@ private final class ManualScrollFrameScheduler {
 
     private func cancel(id: Int) {
         continuations.removeValue(forKey: id)?.resume(throwing: CancellationError())
+    }
+
+    private func cancelRequestWaiter(id: Int) {
+        guard let index = requestWaiters.firstIndex(where: { $0.id == id }) else { return }
+        requestWaiters.remove(at: index).continuation.resume()
     }
 }

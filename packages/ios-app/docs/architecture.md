@@ -262,8 +262,8 @@ safe-area inset, including wrapped text, staged attachments, and supported exten
 The retired `pi-subagents` async and fleet editor widgets are not mounted; unrelated extension
 widgets retain their declared placement. Native safe-area layout therefore pushes the transcript
 exactly once and reverses naturally when the
-keyboard or composer contracts; no parallel `ScrollPosition` correction or focus-triggered
-jump competes with it. Interactive transcripts use bottom initial positioning but top alignment
+keyboard or composer contracts. Focus/height changes only arm the scroll owner for the next
+measured viewport transition; they never issue an independent jump. Interactive transcripts use bottom initial positioning but top alignment
 for undersized or lazily materializing content, preventing keyboard frames from repeatedly
 re-anchoring a partial stack. Once a bottom command or manual catch-up settles inside the
 practical tail boundary, its persistent `ScrollPosition` target is cleared without moving the viewport so later safe-area
@@ -286,6 +286,10 @@ detachment only after its settled geometry has moved toward older content, so bo
 rubber-banding cannot flash the catch-up control. Viewport expansion or later
 unattributed tail geometry cannot release detachment; only an admitted direct/native/
 accessibility return or a catch-up command that physically settles at the boundary may do so.
+If final bottom geometry arrives before native ownership, that exact callback pair admits the
+manual return immediately, clears unread state, and removes the catch-up control without a tap.
+A mixed viewport/scroll callback does the same only when direct interaction and measured movement
+toward the tail are both present; keyboard resize alone cannot release detachment.
 While detached, a fixed action-sized circular
 glass down-arrow morphs from the composer's trailing edge; multiline editor height can never
 resize it. Reaching the practical tail boundary (with a small inset-rounding tolerance) or
@@ -298,8 +302,10 @@ final, and settling phases. Interruption away from the tail restores detached/un
 ownership, while successful physical settlement clears unread only at completion.
 Every later measured height increase coalesces into
 the next display-frame command until another upward gesture.
-Progress-only tool mutations cannot request a tail position. Keyboard and composer layout may
-restore a logically pinned tail but cannot change the durable pinned/detached mode. Async editor
+Progress-only tool mutations cannot request a tail position. Keyboard and composer layout keep
+a logically pinned reader at the latest tail, while a detached reader receives no position write
+and retains the same semantic reading position. These layout changes cannot change the durable
+pinned/detached mode. Async editor
 height measurements carry a latest-revision guard, so an older wrap measurement cannot overwrite
 a newer line count. Every stable row owns its horizontal inset instead of relying on
 transient ScrollView content margins, so prompt insertion cannot expose a flush-left frame.

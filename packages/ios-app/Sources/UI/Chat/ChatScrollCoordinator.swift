@@ -88,6 +88,7 @@ final class ChatScrollCoordinator {
     private var hadUserInteraction = false
     private var isUserDrivenSettling = false
     private var directTailReturnArmed = false
+    private var boundaryCameFromViewportWithoutTailMovement = false
     private var pendingGrowthFollow = false
     private var pendingUnattributedOlderMovement = false
     private var userInteractionStartOffsetY: CGFloat?
@@ -134,6 +135,11 @@ final class ChatScrollCoordinator {
         self.frameScheduler = frameScheduler
     }
 
+    /// The catch-up affordance projects one fact only: the reader has
+    /// intentionally left the latest tail. Unread events, native binding
+    /// ownership, and issued commands cannot keep the button visible.
+    var shouldShowCatchUpButton: Bool { userScrolledAway }
+
     var shouldTrackUnreadResponse: Bool {
         userScrolledAway || catchUpPhase != .none
     }
@@ -161,6 +167,7 @@ final class ChatScrollCoordinator {
         hadUserInteraction = false
         isUserDrivenSettling = false
         directTailReturnArmed = false
+        boundaryCameFromViewportWithoutTailMovement = false
         pendingGrowthFollow = false
         pendingUnattributedOlderMovement = false
         userInteractionStartOffsetY = nil
@@ -237,8 +244,45 @@ final class ChatScrollCoordinator {
                 commitScrollAway()
                 pendingNativeUserGeometry = false
             }
+
+            // SwiftUI can publish final bottom geometry before it marks the
+            // ScrollPosition as user-owned. For an already-detached reader,
+            // that callback pair is direct proof of a manual return to latest.
+            if userScrolledAway,
+               geometry.isAtCatchUpBoundary,
+               boundaryCameFromViewportWithoutTailMovement {
+                directTailReturnArmed = isUserInteracting || isUserDrivenSettling
+                pendingNativeUserGeometry = false
+                isNativeUserOwned = false
+                hadUserInteraction = false
+                return
+            }
+            if userScrolledAway,
+               geometry.isAtCatchUpBoundary,
+               !boundaryCameFromViewportWithoutTailMovement {
+                directTailReturnArmed = false
+                pendingNativeUserGeometry = false
+                isNativeUserOwned = false
+                admitTailBoundary(directlyOwned: true)
+                return
+            }
         }
         isNativeUserOwned = isPositionedByUser
+    }
+
+    /// Arms pinned following for the next measured keyboard/composer viewport
+    /// change. It emits no immediate write, and detached readers are inert.
+    func composerViewportTransitionBegan() {
+        guard !userScrolledAway, catchUpPhase == .none, !isPrependingHistory else { return }
+        if geometry.isAtCatchUpBoundary && !isUserInteracting {
+            // A native binding may remain transiently owned after manual return;
+            // at the measured tail it must not block keyboard following.
+            isNativeUserOwned = false
+            pendingNativeUserGeometry = false
+            isUserDrivenSettling = false
+        }
+        pendingGrowthFollow = true
+        scheduleTailFollow()
     }
 
     func scrollPhaseChanged(from oldPhase: ScrollPhase, to newPhase: ScrollPhase, finalGeometry: ChatTranscriptGeometry?) {
@@ -260,17 +304,33 @@ final class ChatScrollCoordinator {
         guard newPhase == .idle else { return }
 
         let movedOlder: Bool
+        let movedTowardLatest: Bool
         if let startY = userInteractionStartOffsetY,
            let startDistance = userInteractionStartDistanceFromBottom,
            let finalGeometry {
             movedOlder = finalGeometry.offsetY < startY - 1
                 && finalGeometry.distanceFromBottom > startDistance + 1
-        } else { movedOlder = false }
+            movedTowardLatest = finalGeometry.offsetY > startY + 1
+                && finalGeometry.distanceFromBottom < startDistance - 1
+        } else {
+            movedOlder = false
+            movedTowardLatest = false
+        }
         userInteractionStartOffsetY = nil
         userInteractionStartDistanceFromBottom = nil
 
         if finalGeometry?.isAtCatchUpBoundary == true {
-            admitTailBoundary(directlyOwned: directTailReturnArmed)
+            let directlyOwnedReturn = directTailReturnArmed && movedTowardLatest
+            admitTailBoundary(directlyOwned: directlyOwnedReturn)
+            if userScrolledAway {
+                // A rejected viewport-only boundary consumes all transient
+                // native/direct authority. Later streaming geometry must not
+                // reinterpret that keyboard interaction as a tail return.
+                isNativeUserOwned = false
+                pendingNativeUserGeometry = false
+                hadUserInteraction = false
+                isUserDrivenSettling = false
+            }
         } else if (wasInteracting || wasSettling) && movedOlder {
             commitScrollAway()
         } else if !userScrolledAway && catchUpPhase == .none {
@@ -288,14 +348,26 @@ final class ChatScrollCoordinator {
         let movedOlder = previous.isValid
             && current.offsetY < previous.offsetY - 1
             && current.distanceFromBottom > previous.distanceFromBottom + 1
+        let movedTowardLatest = previous.isValid
+            && current.offsetY > previous.offsetY + 1
+            && current.distanceFromBottom < previous.distanceFromBottom - 1
+        let preservesRejectedViewportAuthority = userScrolledAway
+            && boundaryCameFromViewportWithoutTailMovement
+            && !movedTowardLatest
+        if !preservesRejectedViewportAuthority {
+            boundaryCameFromViewportWithoutTailMovement = false
+        }
         // Persistent native binding ownership is not fresh navigation intent.
         // Only the current direct phase/callback admission may release detachment.
-        let attributed = isUserInteracting || hadUserInteraction
-            || pendingNativeUserGeometry || isUserDrivenSettling || directTailReturnArmed
+        let attributed = !preservesRejectedViewportAuthority
+            && (isUserInteracting || hadUserInteraction
+                || pendingNativeUserGeometry || isUserDrivenSettling || directTailReturnArmed)
 
         if current.isAtCatchUpBoundary {
             admitTailBoundary(directlyOwned: attributed)
-            directTailReturnArmed = false
+            if !preservesRejectedViewportAuthority || !isUserInteracting {
+                directTailReturnArmed = false
+            }
         } else {
             if isAtBottom != current.isAtBottom { isAtBottom = current.isAtBottom }
             if movedOlder && !attributed { pendingUnattributedOlderMovement = true }
@@ -316,10 +388,31 @@ final class ChatScrollCoordinator {
         guard current.hasViewportChange(from: previous) else { return }
         pendingUnattributedOlderMovement = false
         if userScrolledAway {
-            // Viewport changes are never proof that the user intentionally
-            // returned to the tail. Consume any stale native one-shot so a
-            // later settlement callback cannot re-pin the reader.
-            directTailReturnArmed = false
+            let movedTowardLatest = (
+                current.offsetY > previous.offsetY + 1
+                    && current.distanceFromBottom < previous.distanceFromBottom - 1
+            ) || (
+                userInteractionStartOffsetY.map { current.offsetY > $0 + 1 } == true
+                    && userInteractionStartDistanceFromBottom.map {
+                        current.distanceFromBottom < $0 - 1
+                    } == true
+            )
+            boundaryCameFromViewportWithoutTailMovement = current.isAtCatchUpBoundary
+                && !movedTowardLatest
+            let directlyOwned = isUserInteracting || isUserDrivenSettling
+                || pendingNativeUserGeometry || directTailReturnArmed
+            if current.isAtCatchUpBoundary, directlyOwned, movedTowardLatest {
+                admitTailBoundary(directlyOwned: true)
+                directTailReturnArmed = false
+                return
+            }
+            // Preserve authority throughout an active direct gesture so an
+            // intermediate keyboard viewport frame cannot erase a later
+            // coalesced return-to-tail settlement. Outside that gesture,
+            // consume stale one-shot authority so resize alone cannot re-pin.
+            if !isUserInteracting && !isUserDrivenSettling {
+                directTailReturnArmed = false
+            }
             isAtBottom = false
             return
         }
@@ -779,6 +872,7 @@ final class ChatScrollCoordinator {
 
     private func releaseAtBottom() {
         followFrameTask?.cancel()
+        boundaryCameFromViewportWithoutTailMovement = false
         followFrameTask = nil
         isAtBottom = true
         userScrolledAway = false

@@ -282,9 +282,10 @@ long-distance catch-up staging. Semantic prepend settlement instead waits passiv
 for exact epoch-qualified row callbacks and requires a strictly newer callback after
 each correction. First-ready timing cannot end before its frame resumes.
 `ChatScrollCoordinatorTests` use watchdog-bounded
-barriers rather than sleeps or yields to prove callback-order equivalence, one
-follow command per frame, no writes for detached layout/stream settlement, viewport
-geometry-first expansion detachment, frame-separated catch-up with unread admission
+barriers rather than sleeps or yields to prove callback-order equivalence, immediate
+catch-up dismissal for geometry-first manual return to the tail, pinned keyboard/composer
+following, one follow command per frame, no writes for detached layout/stream/keyboard
+settlement, viewport geometry-first expansion detachment, frame-separated catch-up with unread admission
 through every interruption stage, Reduce Motion, exact reset/release command admission,
 repeat-prepend ownership, post-install layout-epoch rejection, unchanged-frame epoch
 callbacks, and exact semantic remeasurement with at most one late correction and no

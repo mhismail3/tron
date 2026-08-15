@@ -160,6 +160,7 @@ struct ChatViewScrollHarnessTests {
                 #expect(harness.probeObservation.isDetached)
                 #expect(harness.probeObservation.hasUnread)
                 let commandsBeforeDetachedGrowth = harness.probeObservation.scrollCommandCount
+                harness.driveComposerViewportTransition()
                 harness.driveGeometry(
                     previous: away,
                     current: ChatTranscriptGeometry(
@@ -187,6 +188,61 @@ struct ChatViewScrollHarnessTests {
                 harness.drivePhase(from: .idle, to: .interacting, geometry: away)
                 #expect(harness.probeObservation.isDetached)
                 #expect(harness.probeObservation.hasUnread)
+            }
+        }
+    }
+
+    @Test("manual tail return hides catch-up and pinned keyboard transition follows")
+    func manualTailReturnAndKeyboardFollow() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 117) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                }
+                let bottom = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
+                )
+                let away = ChatTranscriptGeometry(
+                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
+                )
+                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: bottom, current: away)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
+                harness.driveSemanticResponse()
+                #expect(harness.probeObservation.isDetached)
+                #expect(harness.probeObservation.hasUnread)
+
+                // Production callback order observed on device: the final
+                // direct return can be a mixed scroll/viewport callback while
+                // interactive keyboard dismissal changes the inset.
+                harness.drivePhase(from: .idle, to: .interacting, geometry: away)
+                let intermediateViewport = ChatTranscriptGeometry(
+                    offsetY: 300, contentHeight: 1_000, containerHeight: 350
+                )
+                harness.driveGeometry(previous: away, current: intermediateViewport, viewport: true)
+                #expect(harness.probeObservation.isDetached)
+                let mixedBottom = ChatTranscriptGeometry(
+                    offsetY: 700, contentHeight: 1_000, containerHeight: 300
+                )
+                harness.drivePhase(from: .interacting, to: .idle, geometry: mixedBottom)
+                #expect(!harness.probeObservation.isDetached)
+                #expect(!harness.probeObservation.hasUnread)
+
+                let automaticBeforeKeyboard = harness.probeObservation.automaticScrollCommandCount
+                harness.driveComposerViewportTransition()
+                let keyboard = ChatTranscriptGeometry(
+                    offsetY: 700,
+                    contentHeight: 1_000,
+                    containerHeight: 250,
+                    bottomInset: 100
+                )
+                harness.driveGeometry(previous: mixedBottom, current: keyboard, viewport: true)
+                try await harness.driveFrameBoundary()
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.automaticScrollCommandCount == automaticBeforeKeyboard + 1
+                }
+                #expect(!harness.probeObservation.isDetached)
             }
         }
     }
@@ -378,6 +434,10 @@ final class ChatViewScrollHarness {
 
     func driveSemanticResponse() {
         probe.driveSemanticResponse()
+    }
+
+    func driveComposerViewportTransition() {
+        probe.driveComposerViewportTransition()
     }
 
     func driveCatchUp(reduceMotion: Bool) {

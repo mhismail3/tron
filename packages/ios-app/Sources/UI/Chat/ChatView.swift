@@ -281,6 +281,12 @@ struct ChatView: View {
                 scrollCoordinator.semanticResponseArrived()
             }
         }
+        .onChange(of: composerFocused) { _, _ in
+            scrollCoordinator.composerViewportTransitionBegan()
+        }
+        .onChange(of: composerTextHeight) { _, _ in
+            scrollCoordinator.composerViewportTransitionBegan()
+        }
         .overlay { openingSurface }
     }
 
@@ -501,6 +507,9 @@ struct ChatView: View {
             },
             catchUp: { reduceMotion in
                 scrollCoordinator.requestCatchUp(reduceMotion: reduceMotion)
+            },
+            composerViewport: {
+                scrollCoordinator.composerViewportTransitionBegan()
             },
             semanticResponse: {
                 scrollCoordinator.semanticResponseArrived()
@@ -733,7 +742,7 @@ struct ChatView: View {
             GlassEffectContainer(spacing: 8) {
                 HStack(alignment: .bottom, spacing: 8) {
                     composerInputBar
-                    if scrollCoordinator.userScrolledAway {
+                    if scrollCoordinator.shouldShowCatchUpButton {
                         catchUpButton
                     }
                 }
@@ -742,7 +751,7 @@ struct ChatView: View {
                 reduceMotion
                     ? .easeOut(duration: 0.12)
                     : .spring(response: 0.32, dampingFraction: 0.82),
-                value: scrollCoordinator.userScrolledAway
+                value: scrollCoordinator.shouldShowCatchUpButton
             )
             .padding(.horizontal, 16)
             .padding(.bottom, 8)

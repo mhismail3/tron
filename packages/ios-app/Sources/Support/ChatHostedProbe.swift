@@ -50,6 +50,7 @@ final class ChatHostedProbe {
     private var phaseControl: ((ScrollPhase, ScrollPhase, ChatTranscriptGeometry?) -> Void)?
     private var nativeControl: ((Bool) -> Void)?
     private var catchUpControl: ((Bool) -> Void)?
+    private var composerViewportControl: (() -> Void)?
     private var semanticResponseControl: (() -> Void)?
     private var frameControl: (() async throws -> Void)?
     private var stateControl: (() -> ChatHostedScrollState)?
@@ -133,6 +134,7 @@ final class ChatHostedProbe {
         phase: @escaping (ScrollPhase, ScrollPhase, ChatTranscriptGeometry?) -> Void,
         native: @escaping (Bool) -> Void,
         catchUp: @escaping (Bool) -> Void,
+        composerViewport: @escaping () -> Void,
         semanticResponse: @escaping () -> Void,
         frame: @escaping () async throws -> Void,
         state: @escaping () -> ChatHostedScrollState,
@@ -143,6 +145,7 @@ final class ChatHostedProbe {
         phaseControl = phase
         nativeControl = native
         catchUpControl = catchUp
+        composerViewportControl = composerViewport
         semanticResponseControl = semanticResponse
         frameControl = frame
         stateControl = state
@@ -172,6 +175,13 @@ final class ChatHostedProbe {
     func driveNativeOwnership(_ owned: Bool) {
         controlEventCount &+= 1
         nativeControl?(owned)
+        refreshControlledState()
+        revision &+= 1
+    }
+
+    func driveComposerViewportTransition() {
+        controlEventCount &+= 1
+        composerViewportControl?()
         refreshControlledState()
         revision &+= 1
     }
