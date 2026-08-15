@@ -497,23 +497,17 @@ struct AppModelPerformanceSignpostTests {
             let refreshing = Task { await harness.model.refreshAll() }
             defer { refreshing.cancel() }
 
-            let list = try await request(in: harness.socket, frameIndex: 1)
-            #expect(list.method == "session.list")
-            await harness.socket.enqueue(successResponse(
-                id: list.id,
-                result: .object([
-                    "sessions": .array([]),
-                    "nextCursor": .null,
-                    "listRevision": .number(1),
-                ])
-            ))
-
-            var expected = Set(["provider.list", "model.list", "settings.get", "device.list"])
-            for index in 2...5 {
+            var expected = Set(["session.list", "provider.list", "model.list", "settings.get", "device.list"])
+            for index in 1...5 {
                 let next = try await request(in: harness.socket, frameIndex: index)
                 #expect(expected.remove(next.method) != nil)
                 let result: JSONValue
                 switch next.method {
+                case "session.list": result = .object([
+                    "sessions": .array([]),
+                    "nextCursor": .null,
+                    "listRevision": .number(1),
+                ])
                 case "provider.list": result = .object(["providers": .array([])])
                 case "model.list": result = .object(["models": .array([]), "nextCursor": .null])
                 case "settings.get": result = .object(["effective": .object([:])])

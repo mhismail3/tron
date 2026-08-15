@@ -37,6 +37,13 @@ final class AppModel {
     typealias PairingCommit = GatewayPairingCommit
     typealias ProfileTokenLookup = GatewayProfileTokenLookup
 
+    private struct CacheCheckpoint: Sendable {
+        let profileID: String
+        let generation: Int
+        let sessions: [SessionSummary]
+        let snapshots: [SessionSnapshot]
+    }
+
     private let lifecycle: GatewayLifecycleCoordinator
     var client: GatewayClient { lifecycle.client }
     var profiles: GatewayProfileStore { lifecycle.profiles }
@@ -103,7 +110,16 @@ final class AppModel {
     private var eventTask: Task<Void, Never>?
     private var deviceLoadGeneration = 0
     private var legacyImportLoadGeneration = 0
-    private var refreshTask: Task<Void, Never>?
+    private var catalogRefreshTask: Task<SessionCatalogRefreshOutcome, Never>?
+    private var catalogRefreshKey: SessionCatalogLoadKey?
+    private var catalogRefreshRequestGeneration = 0
+    private var catalogInvalidationGeneration = 0
+    private var catalogDeferredFollowUpKey: SessionCatalogLoadKey?
+    private var sceneAllowsCatalogRefresh = true
+    private var cacheCheckpointTask: Task<Void, Never>?
+    private var cacheCheckpointTaskGeneration = 0
+    private var cacheCheckpointGeneration = 0
+    private var pendingCacheCheckpoint: CacheCheckpoint?
     private var hiddenSessionIDs: Set<String> = []
     private var terminalCleanupGeneration = 0
     private var terminalCleanupTasks: [Int: Task<Void, Never>] = [:]
@@ -421,6 +437,10 @@ final class AppModel {
         SessionSummary.dashboardSessions(sessions).filter { !hiddenSessionIDs.contains($0.id) }
     }
 
+    func dashboardActivity(for sessionID: String) -> DashboardSessionActivity {
+        sessionCatalog.activity(for: sessionID)
+    }
+
     func postNotice(_ message: String, replacing key: GlobalNoticeKey? = nil) {
         noticeStore.post(message, replacing: key)
     }
@@ -442,8 +462,17 @@ final class AppModel {
         await lifecycle.start()
     }
 
-    func becameActive() {
-        lifecycle.becameActive()
+    @discardableResult
+    func becameActive() -> Task<Void, Never>? {
+        sceneAllowsCatalogRefresh = true
+        return lifecycle.becameActive()
+    }
+
+    func enteredBackground() {
+        sceneAllowsCatalogRefresh = false
+        lifecycle.enteredBackground()
+        catalogInvalidationGeneration &+= 1
+        cancelCatalogRefresh()
     }
 
     func pair(_ invitation: PairingInvitation) async throws {
@@ -463,6 +492,7 @@ final class AppModel {
     }
 
     private func invalidateProfileScopedLoads() {
+        cancelCatalogRefresh()
         sessionCatalog.invalidateLoads()
         workspaceLoadGeneration &+= 1
         deviceLoadGeneration &+= 1
@@ -511,60 +541,186 @@ final class AppModel {
         settingsTarget: SettingsTarget = .global,
         providerTarget: ProviderCatalogTarget = .global
     ) async {
-        await refreshSessions()
+        async let sessionLoad = refreshSessions()
         async let providerLoad: Bool = refreshProviders(target: providerTarget)
         async let settingLoad: Bool = refreshSettings(target: settingsTarget)
         async let deviceLoad: Void = refreshDevices()
-        _ = await (providerLoad, settingLoad, deviceLoad)
+        _ = await (sessionLoad, providerLoad, settingLoad, deviceLoad)
     }
 
     @discardableResult
-    func refreshSessions(surfacingErrors: Bool = true) async -> Bool {
-        struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
-        struct Response: Decodable { let sessions: [SessionSummary]; let nextCursor: String?; let listRevision: Int }
-        let loadAdmission = sessionCatalog.beginLoad()
-        do {
-            var all: [SessionSummary] = []
-            var cursor: String?
-            var seenCursors = Set<String>()
-            var expectedRevision: Int?
-            repeat {
-                let response: Response = try await client.request(
-                    "session.list",
-                    Params(cursor: cursor, limit: 200, scope: "all")
-                )
-                guard sessionCatalog.admits(loadAdmission) else { return false }
-                if let expectedRevision, expectedRevision != response.listRevision {
-                    throw GatewayFailure(
-                        code: "pagination_changed",
-                        message: "Sessions changed while loading the dashboard.",
-                        retryable: true,
-                        details: nil
-                    )
-                }
-                expectedRevision = response.listRevision
-                all.append(contentsOf: response.sessions)
-                cursor = response.nextCursor
-                if let cursor, !seenCursors.insert(cursor).inserted {
-                    throw GatewayFailure(
-                        code: "invalid_pagination",
-                        message: "Tron returned a repeated session cursor.",
-                        retryable: true,
-                        details: nil
-                    )
-                }
-            } while cursor != nil
-            guard sessionCatalog.publishAuthoritative(all, admission: loadAdmission) else {
-                return false
-            }
-            reconcileSelection()
-            saveCache()
-            return true
-        } catch {
-            guard sessionCatalog.admits(loadAdmission) else { return false }
-            if surfacingErrors { surface(error) }
-            return false
+    func refreshSessions() async -> SessionCatalogRefreshOutcome {
+        guard let key = currentCatalogLoadKey() else { return .retained }
+        if let task = catalogRefreshTask, catalogRefreshKey == key {
+            return await task.value
         }
+        if catalogRefreshTask != nil { cancelCatalogRefresh() }
+        return await startCatalogRefresh(key: key).value
+    }
+
+    private func currentCatalogLoadKey() -> SessionCatalogLoadKey? {
+        guard sceneAllowsCatalogRefresh,
+              let admission = lifecycle.admission,
+              let connectionID = admission.connectionID,
+              let profileID = lifecycle.selectedProfileID else { return nil }
+        return SessionCatalogLoadKey(
+            profileID: profileID,
+            lifecycleGeneration: admission.generation,
+            connectionID: connectionID
+        )
+    }
+
+    @discardableResult
+    private func startCatalogRefresh(key: SessionCatalogLoadKey) -> Task<SessionCatalogRefreshOutcome, Never> {
+        catalogRefreshRequestGeneration &+= 1
+        let requestGeneration = catalogRefreshRequestGeneration
+        let task = Task<SessionCatalogRefreshOutcome, Never> { @MainActor [weak self] in
+            guard let self else { return SessionCatalogRefreshOutcome.retained }
+            let outcome = await self.runCatalogRefreshLease(key: key, requestGeneration: requestGeneration)
+            if self.catalogRefreshRequestGeneration == requestGeneration,
+               self.catalogRefreshKey == key {
+                let needsFollowUp = self.catalogDeferredFollowUpKey == key
+                self.catalogDeferredFollowUpKey = nil
+                self.catalogRefreshTask = nil
+                self.catalogRefreshKey = nil
+                if needsFollowUp, self.currentCatalogLoadKey() == key {
+                    _ = self.startCatalogRefresh(key: key)
+                }
+            }
+            return outcome
+        }
+        catalogRefreshKey = key
+        catalogRefreshTask = task
+        return task
+    }
+
+    private func runCatalogRefreshLease(
+        key: SessionCatalogLoadKey,
+        requestGeneration: Int
+    ) async -> SessionCatalogRefreshOutcome {
+        var outcome: SessionCatalogRefreshOutcome = .retained
+        for traversal in 0..<2 {
+            let observedInvalidation = catalogInvalidationGeneration
+            outcome = await performCatalogTraversal(key: key, requestGeneration: requestGeneration)
+            guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration) else { return .retained }
+            if outcome == .transportFailure { return outcome }
+            let dirtied = catalogInvalidationGeneration > observedInvalidation
+            guard dirtied else { return outcome }
+            if traversal == 1 {
+                // Bound immediate catch-up under an event burst. Completion
+                // hands one dirty bit to a new shared lease rather than
+                // spinning forever inside this owner.
+                catalogDeferredFollowUpKey = key
+                return outcome
+            }
+        }
+        return outcome
+    }
+
+    private func performCatalogTraversal(
+        key: SessionCatalogLoadKey,
+        requestGeneration: Int
+    ) async -> SessionCatalogRefreshOutcome {
+        struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
+        struct Response: Decodable {
+            let sessions: [SessionSummary]
+            let nextCursor: String?
+            let listRevision: Int
+        }
+
+        for revisionAttempt in 0..<2 {
+            let loadAdmission = sessionCatalog.beginLoad(key: key)
+            var requestedContinuation = false
+            do {
+                let pageLimit = 500
+                let maximumPages = 50
+                let maximumItems = 25_000
+                var all: [SessionSummary] = []
+                var cursor: String?
+                var seenCursors = Set<String>()
+                var seenSessionIDs = Set<String>()
+                var expectedRevision: Int?
+                var revisionChanged = false
+                var pageCount = 0
+                repeat {
+                    guard pageCount < maximumPages else { return .retained }
+                    requestedContinuation = cursor != nil
+                    let response: Response = try await client.request(
+                        "session.list",
+                        Params(cursor: cursor, limit: pageLimit, scope: "user")
+                    )
+                    pageCount += 1
+                    guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
+                          sessionCatalog.admits(loadAdmission, key: key) else { return .retained }
+                    if let expectedRevision, expectedRevision != response.listRevision {
+                        revisionChanged = true
+                        break
+                    }
+                    expectedRevision = response.listRevision
+                    guard response.sessions.count <= pageLimit,
+                          all.count <= maximumItems - response.sessions.count,
+                          response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
+                        return .retained
+                    }
+                    all.append(contentsOf: response.sessions)
+                    cursor = response.nextCursor
+                    if let cursor, !seenCursors.insert(cursor).inserted { return .retained }
+                } while cursor != nil
+
+                if revisionChanged {
+                    if revisionAttempt == 0 { continue }
+                    return .retained
+                }
+                guard sessionCatalog.publishAuthoritative(all, admission: loadAdmission) else { return .retained }
+                reconcileSelection()
+                scheduleCacheCheckpoint()
+                return .published
+            } catch is CancellationError {
+                return .retained
+            } catch let failure as GatewayFailure
+                where requestedContinuation && failure.code == "invalid_request" && revisionAttempt == 0 {
+                guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
+                      sessionCatalog.admits(loadAdmission, key: key) else { return .retained }
+                continue
+            } catch {
+                guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
+                      sessionCatalog.admits(loadAdmission, key: key) else { return .retained }
+                return Self.catalogFailureOutcome(error)
+            }
+        }
+        return .retained
+    }
+
+    private func admitsCatalogRefresh(
+        key: SessionCatalogLoadKey,
+        requestGeneration: Int
+    ) -> Bool {
+        guard catalogRefreshRequestGeneration == requestGeneration,
+              catalogRefreshKey == key,
+              let admission = lifecycle.admission else { return false }
+        return admission.generation == key.lifecycleGeneration
+            && admission.connectionID == key.connectionID
+            && lifecycle.selectedProfileID == key.profileID
+    }
+
+    private static func catalogFailureOutcome(_ error: Error) -> SessionCatalogRefreshOutcome {
+        if error is CancellationError { return .retained }
+        if let failure = error as? GatewayFailure,
+           ["disconnected", "closed", "replaced", "timeout"].contains(failure.code) {
+            return .transportFailure
+        }
+        if error is URLError { return .transportFailure }
+        let cocoaError = error as NSError
+        if cocoaError.domain == NSPOSIXErrorDomain { return .transportFailure }
+        return .retained
+    }
+
+    private func cancelCatalogRefresh() {
+        catalogRefreshRequestGeneration &+= 1
+        catalogDeferredFollowUpKey = nil
+        catalogRefreshTask?.cancel()
+        catalogRefreshTask = nil
+        catalogRefreshKey = nil
     }
 
     func refreshDevices() async {
@@ -917,7 +1073,7 @@ final class AppModel {
             composerDrafts.removeSession(profileID: profileID, sessionID: id)
         }
         sessionCatalog.remove(id)
-        saveCache()
+        scheduleCacheCheckpoint()
     }
 
     func loadContext(sessionID: String) async {
@@ -1537,22 +1693,15 @@ final class AppModel {
         case .unknownSession:
             scheduleSessionListRefresh()
         case .updated:
-            saveCache()
+            scheduleCacheCheckpoint()
         }
     }
 
     private func scheduleSessionListRefresh() {
-        guard let admission = lifecycle.admission else { return }
-        refreshTask?.cancel()
-        let clock = self.clock
-        refreshTask = Task { [weak self] in
-            do { try await clock.sleep(.milliseconds(150)) }
-            catch { return }
-            guard let self, self.admitsLifecycle(admission) else { return }
-            await self.refreshSessions()
-            guard self.admitsLifecycle(admission) else { return }
-            self.refreshTask = nil
-        }
+        catalogInvalidationGeneration &+= 1
+        guard catalogRefreshTask == nil,
+              let key = currentCatalogLoadKey() else { return }
+        _ = startCatalogRefresh(key: key)
     }
 
     private func clearLiveConnectionProjection() {
@@ -1663,20 +1812,45 @@ final class AppModel {
         reconcileSelection()
     }
 
-    private func saveCache() {
-        guard let id = profiles.selected?.id else { return }
-        let sessions = sessions
-        let values = sessionPresentation.disposableCacheSnapshot.map { [$0] } ?? []
-        Task { await cache.save(profileID: id, sessions: sessions, snapshots: values) }
+    private func scheduleCacheCheckpoint() {
+        guard let profileID = profiles.selected?.id else { return }
+        cacheCheckpointGeneration &+= 1
+        pendingCacheCheckpoint = CacheCheckpoint(
+            profileID: profileID,
+            generation: cacheCheckpointGeneration,
+            sessions: sessions,
+            snapshots: sessionPresentation.disposableCacheSnapshot.map { [$0] } ?? []
+        )
+        guard cacheCheckpointTask == nil else { return }
+        cacheCheckpointTaskGeneration &+= 1
+        let taskGeneration = cacheCheckpointTaskGeneration
+        cacheCheckpointTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled, let checkpoint = self.pendingCacheCheckpoint {
+                self.pendingCacheCheckpoint = nil
+                await self.cache.save(
+                    profileID: checkpoint.profileID,
+                    generation: checkpoint.generation,
+                    sessions: checkpoint.sessions,
+                    snapshots: checkpoint.snapshots
+                )
+            }
+            if self.cacheCheckpointTaskGeneration == taskGeneration {
+                self.cacheCheckpointTask = nil
+            }
+        }
+    }
+
+    private func cancelCacheCheckpoints() {
+        cacheCheckpointTaskGeneration &+= 1
+        pendingCacheCheckpoint = nil
+        cacheCheckpointTask?.cancel()
+        cacheCheckpointTask = nil
     }
 
 }
 
 extension AppModel: SessionPresentationStoreDelegate {
-    func sessionPresentationStoreDidUpdateSummary(_ snapshot: SessionSnapshot) {
-        sessionCatalog.update(from: snapshot)
-    }
-
     func sessionPresentationStoreDidRequestCatalogRefresh() {
         scheduleSessionListRefresh()
     }
@@ -1725,7 +1899,7 @@ extension AppModel: SessionPresentationStoreDelegate {
     }
 
     func sessionPresentationStoreCheckpointCache() {
-        saveCache()
+        scheduleCacheCheckpoint()
     }
 }
 
@@ -1792,35 +1966,21 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     ) async throws {
         try await client.ensureResponsive()
         try requireLifecycle(admission)
-        guard await refreshSessions(surfacingErrors: false) else {
-            throw GatewayFailure(
-                code: "disconnected",
-                message: "The Mac gateway connection is resuming.",
-                retryable: true,
-                details: nil
-            )
-        }
-        try requireLifecycle(admission)
-        if !(await sessionPresentation.reconnectMountedPresentation()) {
-            throw GatewayFailure(
-                code: "sync_failed",
-                message: "The live session is resuming.",
-                retryable: true,
-                details: nil
-            )
-        }
-        try requireLifecycle(admission)
-        await reattachTerminals(admission: admission)
+        async let catalog = refreshSessions()
+        async let mounted = sessionPresentation.reconnectMountedPresentation()
+        async let terminals: Void = reattachTerminals(admission: admission)
+        _ = await (catalog, mounted, terminals)
         try requireLifecycle(admission)
     }
 
     func lifecycleRetireProjection(final: Bool) async {
-        let refresh = refreshTask
+        let catalog = catalogRefreshTask
+        let cacheCheckpoint = cacheCheckpointTask
         let events = final ? eventTask : nil
         let terminalCleanup = Array(terminalCleanupTasks.values)
-        refreshTask = nil
+        cancelCatalogRefresh()
+        cancelCacheCheckpoints()
         terminalCleanupTasks.removeAll()
-        refresh?.cancel()
         terminalCleanup.forEach { $0.cancel() }
         if final {
             events?.cancel()
@@ -1831,7 +1991,8 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         invalidateSessionConnectionOwnership()
         clearGatewayProjection()
 
-        await refresh?.value
+        _ = await catalog?.value
+        await cacheCheckpoint?.value
         for task in terminalCleanup { await task.value }
         await events?.value
     }

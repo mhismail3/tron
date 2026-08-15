@@ -280,6 +280,7 @@ struct ChatView: View {
         .scrollPosition($transcriptScrollPosition)
         .tronScrollEdgeChrome()
         .onChange(of: transcriptScrollPosition.isPositionedByUser) { _, positionedByUser in
+            guard admitsNativeScrollCallbacks else { return }
             if positionedByUser { performanceTracker.discardScroll() }
             scrollCoordinator.scrollPositionChanged(isPositionedByUser: positionedByUser)
         }
@@ -292,7 +293,7 @@ struct ChatView: View {
                 hostedProbe?.recordScrollSettle(distanceFromBottom: geometry.distanceFromBottom)
             }
             #endif
-            guard isTranscriptReady else { return }
+            guard isTranscriptReady, admitsNativeScrollCallbacks else { return }
             if geometry.hasViewportChange(from: previous) {
                 scrollCoordinator.viewportChanged(previous: previous, current: geometry)
             } else {
@@ -300,6 +301,7 @@ struct ChatView: View {
             }
         }
         .onScrollPhaseChange { oldPhase, newPhase, context in
+            guard admitsNativeScrollCallbacks else { return }
             if newPhase == .interacting || newPhase == .tracking || newPhase == .decelerating {
                 performanceTracker.discardScroll()
             }
@@ -452,6 +454,14 @@ struct ChatView: View {
 
     private var isTranscriptReady: Bool { openPresentation.phase == .ready }
 
+    private var admitsNativeScrollCallbacks: Bool {
+        #if HOSTED_TEST
+        hostedProbe?.usesDrivenScrollAuthority != true
+        #else
+        true
+        #endif
+    }
+
     @ViewBuilder private func runtimeRows(_ snapshot: SessionSnapshot) -> some View {
         if let working = ChatRuntimeWorkingPresentation(
             phase: snapshot.phase,
@@ -566,7 +576,10 @@ struct ChatView: View {
                     return
                 }
                 openedGeneration = nil
-                positionLatestTail(epoch: epoch)
+                positionLatestTail(
+                    epoch: epoch,
+                    targetRenderedID: installed.timeline.ids.last
+                )
                 _ = await completeFirstReadyFrame(interval, epoch: epoch)
             } catch {
                 if let generation = openedGeneration {
@@ -609,8 +622,9 @@ struct ChatView: View {
             return
         }
         modelPresentationGeneration = epoch
+        let installed: InstalledChatTranscript
         do {
-            _ = try await installCurrentTranscriptProjection(presentationGeneration: epoch)
+            installed = try await installCurrentTranscriptProjection(presentationGeneration: epoch)
         } catch {
             performanceSignposts.end(interval, result: PerformanceResult.forFailure(error), metrics: .none)
             _ = openPresentation.fail(
@@ -688,7 +702,10 @@ struct ChatView: View {
             }
         )
         probe.markReady()
-        positionLatestTail(epoch: epoch)
+        positionLatestTail(
+            epoch: epoch,
+            targetRenderedID: installed.timeline.ids.last
+        )
         _ = await completeFirstReadyFrame(interval, epoch: epoch)
         probe.recordReadyFrameCompletion()
     }
@@ -717,14 +734,13 @@ struct ChatView: View {
     }
 
     @MainActor
-    private func positionLatestTail(epoch: Int) {
-        // `ScrollPosition(edge: .bottom)` and the initial anchor provide the
-        // baseline. Reissue once in the same MainActor turn that makes the
-        // transcript ready, before native interaction can claim ownership.
+    private func positionLatestTail(epoch: Int, targetRenderedID: String?) {
+        // Arm coordinator-owned final placement for the exact installed tail.
+        // Empty timelines take the explicit no-transcript path.
         guard !Task.isCancelled,
               openPresentation.epoch == epoch,
               openPresentation.phase == .ready else { return }
-        scrollCoordinator.requestOpeningTail()
+        scrollCoordinator.requestOpeningTail(targetRenderedID: targetRenderedID)
     }
 
     @MainActor
@@ -962,32 +978,19 @@ struct ChatView: View {
     private var attachmentButton: some View {
         ZStack {
             // The original compact SF Symbol is a real composer child rendered
-            // before the bar's glass. Only the transparent Menu hit target is
+            // before the bar's glass. Only the transparent menu hit target is
             // overlaid, so native menu styling cannot wash out or enlarge it.
             Image(systemName: "plus")
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(Color.tronEmerald)
+                .foregroundStyle(attachmentActionsEnabled ? Color.tronEmerald : Color.tronTextMuted)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
 
-            Menu {
-                Button("Take Photo", systemImage: "camera") {
-                    requestAttachmentPresentation(.camera)
-                }
-                .disabled(!attachmentActionsEnabled)
-                Button("Select Photos", systemImage: "photo.on.rectangle") {
-                    requestAttachmentPresentation(.photos)
-                }
-                .disabled(!attachmentActionsEnabled)
-                Button("Attach Files", systemImage: "folder") {
-                    requestAttachmentPresentation(.files)
-                }
-                .disabled(!attachmentActionsEnabled)
-            } label: {
-                Color.clear
-                    .frame(width: 40, height: 40)
-                    .contentShape(Circle())
-            }
+            ComposerAttachmentMenuButton(
+                isEnabled: attachmentActionsEnabled,
+                onSelect: requestAttachmentPresentation
+            )
+            .frame(width: 40, height: 40)
             // Native menu action attributes may be cached across navigation.
             // Replace only when the viewed session or availability changes.
             .id(attachmentMenuState.identity)
@@ -1210,6 +1213,55 @@ struct ChatView: View {
                     target: target
                 )
             } catch { model.presentComposerActionError(error, target: target) }
+        }
+    }
+}
+
+private struct ComposerAttachmentMenuButton: UIViewRepresentable {
+    let isEnabled: Bool
+    let onSelect: @MainActor (ChatAttachmentDestination) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .custom)
+        button.backgroundColor = .clear
+        button.showsMenuAsPrimaryAction = true
+        button.isAccessibilityElement = true
+        button.accessibilityLabel = "Add attachment"
+        return button
+    }
+
+    func updateUIView(_ button: UIButton, context: Context) {
+        context.coordinator.parent = self
+        button.isEnabled = isEnabled
+        button.menu = context.coordinator.makeMenu()
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var parent: ComposerAttachmentMenuButton
+
+        init(parent: ComposerAttachmentMenuButton) {
+            self.parent = parent
+        }
+
+        func makeMenu() -> UIMenu {
+            UIMenu(children: [
+                action("Take Photo", systemImage: "camera", destination: .camera),
+                action("Select Photos", systemImage: "photo.on.rectangle", destination: .photos),
+                action("Attach Files", systemImage: "folder", destination: .files),
+            ])
+        }
+
+        private func action(
+            _ title: String,
+            systemImage: String,
+            destination: ChatAttachmentDestination
+        ) -> UIAction {
+            UIAction(title: title, image: UIImage(systemName: systemImage)) { [weak self] _ in
+                self?.parent.onSelect(destination)
+            }
         }
     }
 }

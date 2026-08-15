@@ -458,6 +458,7 @@ export class GatewayServer {
     for (const synchronization of connection.synchronizations.values()) clearTimeout(synchronization.timeout);
     connection.synchronizations.clear();
     this.options.sessions.unsubscribeClient(connection.id);
+    this.options.service.releaseClient(connection.id);
     this.options.auth.cancelClient(connection.id);
   }
 

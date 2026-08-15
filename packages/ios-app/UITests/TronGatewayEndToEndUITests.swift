@@ -69,9 +69,18 @@ final class TronGatewayEndToEndUITests: XCTestCase {
 
         let input = app.textViews["Message input"]
         XCTAssertTrue(input.waitForExistence(timeout: 15))
-        assertAttachmentMenuPresentsNativeDestinations(app)
+        let outgoingText = "continue while disconnected"
+        input.tap()
+        input.typeText(outgoingText)
+        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertEqual(input.value as? String, outgoingText)
+        assertAttachmentMenuPresentsNativeDestinations(
+            app,
+            focusedInput: input,
+            expectedText: outgoingText
+        )
         if environment["TRON_E2E_ATTACHMENT_ONLY"] == "1" { return }
-        input.tap(); input.typeText("continue while disconnected")
+        XCTAssertEqual(input.value as? String, outgoingText)
         app.buttons["Send message"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Streaming response starts now")).firstMatch.waitForExistence(timeout: 15))
         app.terminate()
@@ -207,21 +216,32 @@ final class TronGatewayEndToEndUITests: XCTestCase {
     @MainActor
     private func assertAttachmentMenuPresentsNativeDestinations(
         _ app: XCUIApplication,
+        focusedInput: XCUIElement,
+        expectedText: String,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        XCTAssertTrue(app.keyboards.firstMatch.exists, file: file, line: line)
+        XCTAssertEqual(focusedInput.value as? String, expectedText, file: file, line: line)
         let addAttachment = app.buttons["Add attachment"]
         XCTAssertTrue(addAttachment.waitForExistence(timeout: 5), file: file, line: line)
 
         addAttachment.tap()
         let takePhoto = app.buttons["Take Photo"]
         XCTAssertTrue(takePhoto.waitForExistence(timeout: 3), file: file, line: line)
+        XCTAssertTrue(
+            app.keyboards.firstMatch.exists,
+            "Opening the attachment menu must keep the focused keyboard visible",
+            file: file,
+            line: line
+        )
+        XCTAssertEqual(focusedInput.value as? String, expectedText, file: file, line: line)
         XCTAssertTrue(takePhoto.isEnabled, file: file, line: line)
         takePhoto.tap()
         app.tap()
         XCTAssertTrue(
             app.buttons["Capture photo"].waitForExistence(timeout: 5),
-            "Selecting Take Photo must present the camera sheet",
+            "The first Take Photo tap from a focused nonempty editor must present the camera sheet",
             file: file,
             line: line
         )
@@ -264,6 +284,7 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         )
         photoCancel.tap()
         XCTAssertTrue(addAttachment.waitForExistence(timeout: 5), file: file, line: line)
+        XCTAssertEqual(focusedInput.value as? String, expectedText, file: file, line: line)
     }
 
     @MainActor

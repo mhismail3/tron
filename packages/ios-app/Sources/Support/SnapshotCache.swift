@@ -16,6 +16,7 @@ actor SnapshotCache {
 
     private let root: URL
     private let performanceSignposts: any PerformanceSignposting
+    private var latestSaveGenerationByProfile: [String: Int] = [:]
 
     init(
         root: URL? = nil,
@@ -57,7 +58,14 @@ actor SnapshotCache {
         }
     }
 
-    func save(profileID: String, sessions: [SessionSummary], snapshots: [SessionSnapshot]) {
+    func save(
+        profileID: String,
+        generation: Int = 0,
+        sessions: [SessionSummary],
+        snapshots: [SessionSnapshot]
+    ) {
+        guard generation >= (latestSaveGenerationByProfile[profileID] ?? Int.min) else { return }
+        latestSaveGenerationByProfile[profileID] = generation
         let interval = performanceSignposts.begin(.cacheSave)
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

@@ -18,6 +18,7 @@ export class RuntimeRegistry {
   private interrupted = new Set<string>();
   private readonly subscribers = new Map<string, Set<string>>();
   private readonly summaryRevisions = new Map<string, number>();
+  private readonly latestSummaries = new Map<string, SessionSummaryUpdate>();
   private revision = 0;
   private catalogFingerprint: string | undefined;
   private evictionTimer?: NodeJS.Timeout;
@@ -53,8 +54,14 @@ export class RuntimeRegistry {
       summaryChanged: (summary: SessionSummaryUpdate) => {
         const summaryRevision = (this.summaryRevisions.get(summary.sessionId) ?? 0) + 1;
         this.summaryRevisions.set(summary.sessionId, summaryRevision);
-        this.revision += 1;
-        this.options.sessionSummaryChanged({ ...summary, summaryRevision });
+        const revisioned = { ...summary, summaryRevision };
+        // Store fields and revision atomically. A catalog materialization may
+        // observe either this whole summary or an older whole summary, never
+        // stale fields stamped with a newer revision.
+        this.latestSummaries.set(summary.sessionId, revisioned);
+        // Row activity is revisioned independently from catalog structure.
+        // A running session must not invalidate an immutable list traversal.
+        this.options.sessionSummaryChanged(revisioned);
       },
       changed: () => {
         this.revision += 1;
@@ -69,6 +76,9 @@ export class RuntimeRegistry {
         const previousSummaryRevision = this.summaryRevisions.get(previousId);
         this.summaryRevisions.delete(previousId);
         if (previousSummaryRevision !== undefined) this.summaryRevisions.set(nextId, previousSummaryRevision);
+        const previousSummary = this.latestSummaries.get(previousId);
+        this.latestSummaries.delete(previousId);
+        if (previousSummary) this.latestSummaries.set(nextId, { ...previousSummary, sessionId: nextId });
         if (this.interrupted.delete(previousId)) this.interrupted.add(nextId);
         const subscribers = this.subscribers.get(previousId);
         if (subscribers) {
@@ -147,7 +157,9 @@ export class RuntimeRegistry {
     return this.catalogMutex.run(async () => {
       const sessions = await this.sessionInfos();
       const fingerprint = JSON.stringify(sessions
-        .map((session) => [session.id, session.path, session.parentSessionPath, session.modified.toISOString(), session.messageCount, session.name])
+        // Structural membership and classification own listRevision. Mutable
+        // row fields are delivered through revisioned session.summary events.
+        .map((session) => [session.id, session.path, session.parentSessionPath, session.cwd, session.name])
         .sort((left, right) => String(left[0]).localeCompare(String(right[0]))));
       if (this.catalogFingerprint === undefined) this.catalogFingerprint = fingerprint;
       else if (this.catalogFingerprint !== fingerprint) {
@@ -188,18 +200,20 @@ export class RuntimeRegistry {
       const headerParentSessionId = session.parentSessionPath ? pathToId.get(resolve(session.parentSessionPath)) : undefined;
       const parentSessionId = nestedOwner?.id ?? headerParentSessionId;
       const slot = this.slots.get(session.id);
+      const latest = this.latestSummaries.get(session.id);
+      const name = latest?.name ?? session.name;
       return [{
         id: session.id,
-        ...(session.name ? { name: session.name } : {}),
+        ...(name ? { name } : {}),
         cwd: session.cwd,
         kind,
         ...(parentSessionId ? { parentSessionId } : {}),
         createdAt: session.created.toISOString(),
-        updatedAt: session.modified.toISOString(),
-        messageCount: session.messageCount,
-        firstMessage: session.firstMessage,
-        phase: slot ? slot.snapshot().phase : this.interrupted.has(session.id) ? "interrupted" : "idle",
-        summaryRevision: this.summaryRevisions.get(session.id) ?? 0,
+        updatedAt: latest?.updatedAt ?? session.modified.toISOString(),
+        messageCount: latest?.messageCount ?? session.messageCount,
+        firstMessage: latest?.firstMessage ?? session.firstMessage,
+        phase: latest?.phase ?? (slot ? slot.catalogPhase : this.interrupted.has(session.id) ? "interrupted" : "idle"),
+        summaryRevision: latest?.summaryRevision ?? 0,
       }];
     }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
@@ -284,6 +298,7 @@ export class RuntimeRegistry {
       this.slots.delete(sessionId);
       this.subscribers.delete(sessionId);
       this.summaryRevisions.delete(sessionId);
+      this.latestSummaries.delete(sessionId);
       this.interrupted.delete(sessionId);
       await this.markers.clear(sessionId);
       await rm(info.path, { force: true });

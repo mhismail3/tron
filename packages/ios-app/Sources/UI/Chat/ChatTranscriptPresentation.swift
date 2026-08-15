@@ -214,6 +214,39 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     let durationMs: Int?
     let lastProgressAt: String?
     let progressSequence: Int?
+    let outputTruncated: Bool
+
+    init(
+        id: String,
+        title: String,
+        subtitle: String,
+        request: JSONValue?,
+        response: JSONValue?,
+        content: String,
+        fallbackContent: JSONValue?,
+        error: Bool,
+        startedAt: String?,
+        completedAt: String?,
+        durationMs: Int?,
+        lastProgressAt: String?,
+        progressSequence: Int?,
+        outputTruncated: Bool = false
+    ) {
+        self.id = id
+        self.title = title
+        self.subtitle = subtitle
+        self.request = request
+        self.response = response
+        self.content = content
+        self.fallbackContent = fallbackContent
+        self.error = error
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.durationMs = durationMs
+        self.lastProgressAt = lastProgressAt
+        self.progressSequence = progressSequence
+        self.outputTruncated = outputTruncated || response?.hasToolOutputTruncationMetadata == true
+    }
 
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
 
@@ -227,15 +260,25 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
 
 }
 
+private extension JSONValue {
+    var hasToolOutputTruncationMetadata: Bool {
+        guard let object = objectValue else { return false }
+        if object["truncation"]?.objectValue?["truncated"]?.boolValue == true { return true }
+        return object["details"]?.objectValue?["truncation"]?.objectValue?["truncated"]?.boolValue == true
+    }
+}
+
 /// Runtime timestamps are authoritative for live/current-Gateway calls. Pi JSONL
 /// does not yet persist execution timing, so older canonical calls use their call
 /// and result entry timestamps as a conservative observed interval.
 enum ToolTiming {
+    private static let fractionalTimestamp = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let wholeSecondTimestamp = Date.ISO8601FormatStyle(includingFractionalSeconds: false)
+
     static func date(_ value: String?) -> Date? {
         guard let value else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+        return try? fractionalTimestamp.parse(value)
+            ?? wholeSecondTimestamp.parse(value)
     }
 
     static func intervalMilliseconds(start: String?, end: String?) -> Int? {
@@ -853,7 +896,8 @@ enum ChatTranscriptPresentation {
             completedAt: live.completedAt ?? canonical.completedAt,
             durationMs: live.durationMs ?? canonical.durationMs,
             lastProgressAt: live.lastProgressAt ?? live.updatedAt,
-            progressSequence: live.progressSequence
+            progressSequence: live.progressSequence,
+            outputTruncated: live.outputTruncated == true || canonical.outputTruncated
         )
     }
 
@@ -872,7 +916,8 @@ enum ChatTranscriptPresentation {
             completedAt: tool.completedAt,
             durationMs: tool.durationMs,
             lastProgressAt: tool.lastProgressAt ?? tool.updatedAt,
-            progressSequence: tool.progressSequence
+            progressSequence: tool.progressSequence,
+            outputTruncated: tool.outputTruncated == true
         )
     }
 
@@ -906,7 +951,8 @@ enum ChatTranscriptPresentation {
             completedAt: tool.completedAt,
             durationMs: tool.durationMs,
             lastProgressAt: tool.lastProgressAt,
-            progressSequence: tool.progressSequence
+            progressSequence: tool.progressSequence,
+            outputTruncated: tool.outputTruncated
         )
     }
 

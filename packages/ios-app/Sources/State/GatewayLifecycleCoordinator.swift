@@ -10,7 +10,7 @@ typealias GatewayPairingCommit = @MainActor @Sendable (GatewayProfile, String) t
 typealias GatewayProfileTokenLookup = @MainActor @Sendable (GatewayProfile) -> String?
 
 @MainActor
-protocol GatewayLifecycleProjectionDelegate: AnyObject {
+protocol GatewayLifecycleProjectionDelegate: AnyObject, Sendable {
     func lifecycleLoadCache(
         profileID: String,
         admission: GatewayLifecycleCoordinator.Admission
@@ -167,19 +167,23 @@ final class GatewayLifecycleCoordinator {
         hasResolvedLaunchState = true
     }
 
-    func becameActive() {
-        guard phase.admitsWork else { return }
+    @discardableResult
+    func becameActive() -> Task<Void, Never>? {
+        guard phase.admitsWork else { return nil }
         guard connectionState == .connected else {
-            if connectionState != .connecting {
+            switch connectionState {
+            case .offline, .reconnecting:
                 requestReconnect(immediate: true, replaceExisting: true)
+                return reconnectTask
+            case .unpaired, .unauthorized, .connecting, .connected:
+                return nil
             }
-            return
         }
-        guard foregroundReconciliationTask == nil,
-              let admission else { return }
+        if let foregroundReconciliationTask { return foregroundReconciliationTask }
+        guard let admission else { return nil }
         foregroundReconciliationGeneration &+= 1
         let reconciliationGeneration = foregroundReconciliationGeneration
-        foregroundReconciliationTask = Task { [weak self] in
+        let task = Task { [weak self] in
             guard let self else { return }
             defer {
                 if self.foregroundReconciliationGeneration == reconciliationGeneration {
@@ -197,6 +201,18 @@ final class GatewayLifecycleCoordinator {
                 self.requestReconnect(immediate: true, replaceExisting: true)
             }
         }
+        foregroundReconciliationTask = task
+        return task
+    }
+
+    /// Backgrounding suspends disposable reconciliation work without retiring
+    /// the selected route or responsive socket. The next active scene owns a
+    /// fresh convergence pass.
+    func enteredBackground() {
+        foregroundReconciliationGeneration &+= 1
+        let task = foregroundReconciliationTask
+        foregroundReconciliationTask = nil
+        task?.cancel()
     }
 
     func pair(_ invitation: PairingInvitation) async throws {
@@ -477,10 +493,10 @@ final class GatewayLifecycleCoordinator {
             try require(connectedAdmission)
             gatewayInfo = connection.info
             delegate?.lifecycleInvalidateSessionConnectionOwnership()
-            await delegate?.lifecycleRefreshAll(admission: connectedAdmission)
-            try require(connectedAdmission)
-            if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
-            await delegate?.lifecycleReattachTerminals(admission: connectedAdmission)
+            async let refresh: Void = delegate?.lifecycleRefreshAll(admission: connectedAdmission) ?? ()
+            async let restore: Void = delegate?.lifecycleRestoreMountedPresentation(admission: connectedAdmission) ?? ()
+            async let terminals: Void = delegate?.lifecycleReattachTerminals(admission: connectedAdmission) ?? ()
+            _ = await (refresh, restore, terminals)
             try require(connectedAdmission)
             if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
             connectionState = .connected
@@ -599,17 +615,10 @@ final class GatewayLifecycleCoordinator {
                         )
                         self.gatewayInfo = connection.info
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()
-                        await self.delegate?.lifecycleRefreshAll(admission: admission)
-                        try self.requireReconnect(
-                            lifecycleGeneration: lifecycleGeneration,
-                            attemptGeneration: attemptGeneration
-                        )
-                        await self.delegate?.lifecycleRestoreMountedPresentation(admission: admission)
-                        try self.requireReconnect(
-                            lifecycleGeneration: lifecycleGeneration,
-                            attemptGeneration: attemptGeneration
-                        )
-                        await self.delegate?.lifecycleReattachTerminals(admission: admission)
+                        async let refresh: Void = self.delegate?.lifecycleRefreshAll(admission: admission) ?? ()
+                        async let restore: Void = self.delegate?.lifecycleRestoreMountedPresentation(admission: admission) ?? ()
+                        async let terminals: Void = self.delegate?.lifecycleReattachTerminals(admission: admission) ?? ()
+                        _ = await (refresh, restore, terminals)
                         try self.requireReconnect(
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration

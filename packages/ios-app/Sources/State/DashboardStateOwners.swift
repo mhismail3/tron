@@ -20,10 +20,37 @@ struct DashboardNavigationOwner: Equatable {
     }
 }
 
-/// Owns the disposable session-catalog projection and its latest-load admission.
+enum SessionCatalogFreshness: Equatable, Sendable {
+    case cached
+    case stale
+    case live
+}
+
+enum DashboardSessionActivity: Equatable, Sendable {
+    case idle
+    case active
+    case resuming
+    case interrupted
+}
+
+enum SessionCatalogRefreshOutcome: Equatable, Sendable {
+    case published
+    case retained
+    case transportFailure
+}
+
+struct SessionCatalogLoadKey: Equatable, Sendable {
+    let profileID: String
+    let lifecycleGeneration: Int
+    let connectionID: Int
+}
+
+/// Owns the bounded dashboard projection, revisioned global row overlays, and
+/// exact admission for one catalog materialization. Gateway remains canonical.
 struct SessionCatalogCoordinator: Equatable {
     struct LoadAdmission: Equatable, Sendable {
         fileprivate let generation: Int
+        fileprivate let key: SessionCatalogLoadKey?
     }
 
     enum SummaryUpdateAdmission: Equatable, Sendable {
@@ -33,20 +60,35 @@ struct SessionCatalogCoordinator: Equatable {
     }
 
     private(set) var sessions: [SessionSummary] = []
+    private(set) var freshness: SessionCatalogFreshness = .stale
+    private var indicesByID: [String: Int] = [:]
     private var liveUpdates: [String: SessionSummaryUpdate] = [:]
+    private var liveSessionIDs: Set<String> = []
     private var loadGeneration = 0
 
-    mutating func beginLoad() -> LoadAdmission {
+    mutating func beginLoad(key: SessionCatalogLoadKey? = nil) -> LoadAdmission {
         loadGeneration &+= 1
-        return LoadAdmission(generation: loadGeneration)
+        return LoadAdmission(generation: loadGeneration, key: key)
     }
 
     mutating func invalidateLoads() {
         loadGeneration &+= 1
     }
 
-    func admits(_ admission: LoadAdmission) -> Bool {
+    func admits(_ admission: LoadAdmission, key: SessionCatalogLoadKey? = nil) -> Bool {
         admission.generation == loadGeneration
+            && (key == nil || admission.key == key)
+    }
+
+    func activity(for sessionID: String) -> DashboardSessionActivity {
+        guard let index = indicesByID[sessionID], sessions.indices.contains(index) else { return .idle }
+        let phase = sessions[index].phase
+        let isLive = freshness == .live || liveSessionIDs.contains(sessionID)
+        guard isLive else {
+            return phase == .idle ? .idle : .resuming
+        }
+        if phase.isActive { return .active }
+        return phase == .interrupted ? .interrupted : .idle
     }
 
     @discardableResult
@@ -54,7 +96,7 @@ struct SessionCatalogCoordinator: Equatable {
         _ authoritative: [SessionSummary],
         admission: LoadAdmission
     ) -> Bool {
-        guard admits(admission) else { return false }
+        guard admits(admission, key: admission.key) else { return false }
         let ids = Set(authoritative.map(\.id))
         liveUpdates = liveUpdates.filter { ids.contains($0.key) }
         sessions = authoritative.map { summary in
@@ -62,6 +104,9 @@ struct SessionCatalogCoordinator: Equatable {
                   update.summaryRevision > (summary.summaryRevision ?? 0) else { return summary }
             return applying(update, to: summary)
         }
+        rebuildIndex()
+        liveSessionIDs = ids
+        freshness = .live
         return true
     }
 
@@ -70,64 +115,69 @@ struct SessionCatalogCoordinator: Equatable {
            update.summaryRevision <= current.summaryRevision {
             return .stale
         }
-        if let summary = sessions.first(where: { $0.id == update.sessionId }),
-           update.summaryRevision <= (summary.summaryRevision ?? 0) {
+        if let index = indicesByID[update.sessionId], sessions.indices.contains(index),
+           update.summaryRevision <= (sessions[index].summaryRevision ?? 0) {
             return .stale
         }
         liveUpdates[update.sessionId] = update
-        guard let index = sessions.firstIndex(where: { $0.id == update.sessionId }) else {
+        liveSessionIDs.insert(update.sessionId)
+        guard let index = indicesByID[update.sessionId], sessions.indices.contains(index) else {
             return .unknownSession
         }
         sessions[index] = applying(update, to: sessions[index])
         return .updated
     }
 
-    mutating func update(from snapshot: SessionSnapshot) {
-        guard let index = sessions.firstIndex(where: { $0.id == snapshot.sessionId }) else { return }
-        let current = sessions[index]
-        sessions[index] = SessionSummary(
-            id: current.id,
-            name: snapshot.name,
-            cwd: current.cwd,
-            kind: current.kind,
-            parentSessionId: current.parentSessionId,
-            createdAt: current.createdAt,
-            updatedAt: current.updatedAt,
-            messageCount: current.messageCount,
-            firstMessage: current.firstMessage,
-            phase: snapshot.phase,
-            summaryRevision: current.summaryRevision
-        )
-    }
-
     mutating func installCached(_ cached: [SessionSummary]) {
         invalidateLoads()
         liveUpdates.removeAll()
-        sessions = cached.map(\.safeCachedProjection)
+        liveSessionIDs.removeAll()
+        sessions = cached
+        rebuildIndex()
+        freshness = .cached
     }
 
     mutating func markDisconnected() {
         invalidateLoads()
         liveUpdates.removeAll()
-        sessions = sessions.map(\.safeCachedProjection)
+        liveSessionIDs.removeAll()
+        freshness = .stale
     }
 
     mutating func remove(_ sessionID: String) {
         invalidateLoads()
         liveUpdates.removeValue(forKey: sessionID)
-        sessions.removeAll { $0.id == sessionID }
+        liveSessionIDs.remove(sessionID)
+        guard let index = indicesByID[sessionID], sessions.indices.contains(index) else { return }
+        sessions.remove(at: index)
+        rebuildIndex()
     }
 
     mutating func replaceForFacade(_ replacement: [SessionSummary]) {
         invalidateLoads()
         liveUpdates.removeAll()
         sessions = replacement
+        rebuildIndex()
+        liveSessionIDs = Set(replacement.map(\.id))
+        freshness = .live
     }
 
     mutating func clear() {
         invalidateLoads()
         liveUpdates.removeAll()
+        liveSessionIDs.removeAll()
         sessions.removeAll()
+        indicesByID.removeAll()
+        freshness = .stale
+    }
+
+    func hasConsistentIndex() -> Bool {
+        indicesByID.count == sessions.count
+            && sessions.enumerated().allSatisfy { indicesByID[$0.element.id] == $0.offset }
+    }
+
+    private mutating func rebuildIndex() {
+        indicesByID = Dictionary(uniqueKeysWithValues: sessions.enumerated().map { ($0.element.id, $0.offset) })
     }
 
     private func applying(

@@ -424,7 +424,7 @@ struct AppModelEventTests {
         #expect(model.sessions.first?.firstMessage == "Original")
     }
 
-    @Test("disconnect removes live dashboard claims until authoritative reconnect")
+    @Test("disconnect marks dashboard activity as resuming without fabricating interruption")
     func disconnectClearsLiveDashboardPhase() async {
         let model = AppModel()
         model.sessions = [SessionSummary(
@@ -436,7 +436,8 @@ struct AppModelEventTests {
             type: "event", topic: "transport.disconnected", sessionId: nil,
             payload: .object(["message": .string("offline")])
         ))
-        #expect(model.sessions.first?.phase == .interrupted)
+        #expect(model.sessions.first?.phase == .running)
+        #expect(model.dashboardActivity(for: "active") == .resuming)
     }
 
     @Test("structure, context, and resource events invalidate their live surfaces")
@@ -557,19 +558,17 @@ struct AppModelEventTests {
         )))
     }
 
-    @Test("cached active dashboard rows never masquerade as live after relaunch")
-    func cachedActivityIsInterrupted() {
+    @Test("cached active dashboard rows retain phase but present as resuming")
+    func cachedActivityIsResuming() {
         let summary = SessionSummary(
             id: "cached", name: nil, cwd: "/workspace", parentSessionId: nil,
             createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
             messageCount: 1, firstMessage: "Cached", phase: .running
         )
-        #expect(summary.safeCachedProjection.phase == .interrupted)
-        #expect(SessionSummary(
-            id: "idle", name: nil, cwd: "/workspace", parentSessionId: nil,
-            createdAt: summary.createdAt, updatedAt: summary.updatedAt,
-            messageCount: 1, firstMessage: "Idle", phase: .idle
-        ).safeCachedProjection.phase == .idle)
+        var catalog = SessionCatalogCoordinator()
+        catalog.installCached([summary])
+        #expect(catalog.sessions.first?.phase == .running)
+        #expect(catalog.activity(for: "cached") == .resuming)
     }
 
     @Test("changing sessions clears secondary projections before their authoritative reload")

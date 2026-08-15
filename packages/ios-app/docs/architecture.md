@@ -57,9 +57,19 @@ retire/close transitions, and final teardown. It composes `GatewayClient` withou
 byte-transport epoch. `AppModel` supplies narrow projection hooks for cache installation, refresh,
 session/terminal reconciliation, and synchronous retirement; it no longer stores a parallel lifecycle
 phase, reconnect task, pairing attempt, connection identity, or transition waiters. A dedicated
-`SessionCatalogCoordinator` owns dashboard summaries, retained monotonic live-summary overlays,
-and typed latest-load admission. Cache/disconnect/authoritative installs and removals all enter that
-one disposable projection; hidden/local selection policy remains outside it and cannot mount a chat.
+`SessionCatalogCoordinator` owns dashboard summaries, an ID-indexed monotonic live-summary overlay,
+cached/stale/live provenance, and exact profile/lifecycle/connection load admission. Equivalent
+foreground, reconnect, pull-to-refresh, unknown-summary, and structural-invalidations share one
+catalog traversal; invalidation during a traversal sets one dirty bit and receives at most one immediate
+follow-up before handing newest truth to a new bounded lease. iOS requests user scope in 500-row pages,
+rejects more than 50 pages/25,000 identities, duplicate IDs, cursor cycles, and mixed revisions, and
+publishes only a complete catalog. A mixed revision from an older Gateway or an expired continuation lease restarts silently once from a nil
+cursor; it is expected optimistic invalidation, not the former actionable “Sessions changed while loading
+the dashboard” alert. Known revisioned `session.summary` events apply synchronously without a list read,
+and mounted transcript snapshots cannot overwrite those global row fields. Cache/disconnect/authoritative
+installs and removals all enter that one disposable projection; hidden/local selection policy remains
+outside it and cannot mount a chat. Cached or stale non-idle rows present as resuming without rewriting
+the canonical phase; only a live Gateway-authoritative interrupted phase uses the amber warning.
 A profile boundary synchronously invalidates lifecycle admission, chains behind any preceding
 retirement, revokes profile-scoped loads and presentation intake, and awaits the exact transport close
 before another profile may connect. Pairing pre-encodes profile metadata and
@@ -74,7 +84,12 @@ independently sampled within 80–120% of its nominal value with a hard 15-secon
 injected unit-interval source and monotonic clock make the exact schedule deterministic in tests.
 Foreground activation may cancel only a delay-owned retry and start one immediate attempt; repeated
 activation cannot replace an active handshake, and exact attempt generations reject stale cancellation
-or unauthorized completion. Final teardown cancels and joins the event listener and shares one
+or unauthorized completion. Background scene transition cancels only disposable foreground/catalog
+reconciliation, leaves the route and responsive socket intact, and gates event-triggered catalog reads
+until the next active scene starts a fresh shared pass. After event activation, reconnect and foreground
+reconciliation start dashboard convergence, mounted-session restoration, and terminal reattachment
+concurrently; provider/settings/device reads cannot delay mounted chat restoration, and a retained catalog
+failure never replaces an otherwise responsive socket. Final teardown cancels and joins the event listener and shares one
 completion across concurrent callers; scene backgrounding deliberately does not tear down accepted
 Gateway-owned work. It shares the clock/UUID seams for Gateway reconnect, receipt, debounce,
 and command-ID work. Its visible-open interval
@@ -272,8 +287,19 @@ its existing semantic-alias and layout-epoch transaction. This adopts the useful
 pre-Gateway principles of a non-render-path measurement/projection owner and coalesced
 stream updates without reviving the retired Engine, local event reconstruction, or scroll
 proxy architecture. Tool calls, progress, and results join by `toolCallId`; collapsed rows retain structured
-request/response values without eagerly formatting JSON strings, and the existing detail sheet
-resolves the identical raw/Markdown presentation only when opened. The Gateway supplies a
+request/response values without eagerly formatting JSON strings. Opening a detail sheet derives a
+bounded semantic presentation only for that selected tool: exact lowercase built-ins foreground their file,
+command, query, diff, and readable result, while arbitrary extension tools may foreground only the first
+trusted common string key and otherwise lead with their result. Bash commands wrap to the available width
+using word-preserving line breaks while outputs and other string metadata wrap; all previews bound pathological
+line count, total characters, and per-line length with explicit head/tail omission markers. Small numeric
+and boolean metadata remains unchanged. The final Technical details sub-sheet starts with compact selectable
+execution metadata, then exposes the untouched Request JSON and Result JSON directly in that order without a
+second readable-output projection, structured field traversal, or raw-data disclosure state. Result JSON uses
+the authoritative response first, otherwise the complete readable content string, then only a fallback distinct
+from the request; request-only projections cannot duplicate themselves as results. Shared nested
+structured field sheets remain available to unrelated arbitrary-data surfaces and resolve semantic paths
+against each newest live root value rather than snapshotting the selected value. The Gateway supplies a
 monotonic per-run ordinal for parallel calls, and the grouped
 row keeps the first call's identity as it moves from invocation to completion.
 Consolidation applies only to consecutive tool calls: every canonical thinking,
@@ -299,7 +325,13 @@ raw geometry and semantic-row frame intake; pinned/detached and unread
 state; presentation and command generations; display-frame follow and catch-up tasks;
 and the exact paging/semantic-anchor transaction. It publishes one exact-token typed
 command for `ChatView` to execute and acknowledge; presentation reset and settled
-binding release are command destinations rather than direct view policy. Automatic streaming growth is
+binding release are command destinations rather than direct view policy. Opening arms final tail settlement
+with the exact rendered ID of the installed timeline tail. Auxiliary/runtime rows cannot admit it, and transient
+boundary geometry cannot clear it before that expected current-layout row exists and a later geometry sample
+proves final settlement. Exact tail evidence plus overflow emits one disabled presentation command; exact
+evidence plus a later undersized/already-settled viewport clears without defeating top alignment. An empty
+timeline takes an explicit no-transcript path, while any direct/native/accessibility interaction cancels the
+pending target permanently. Automatic streaming growth is
 latest-sample-wins behind one injected display-frame wait, emits at most one tail
 command per presented frame, and emits none inside the practical bottom boundary.
 Direct/native/accessibility interaction synchronously invalidates pending automatic
@@ -389,7 +421,9 @@ be queued without waiting for the current turn to settle. Camera, photo, and fil
 also remain enabled during an active turn: uploads stage locally and the eventual prompt
 carries the same steering behavior as text. The native attachment menu derives enablement
 from the immutable viewed session and an explicit authoritative phase; a missing phase remains
-unavailable. Its identity changes only when the session or effective availability changes.
+unavailable. Its identity changes only when the session or effective availability changes. A transparent
+UIKit button preserves the native `UIMenu`, icon, and 40-point hit target as a single UIKit interaction
+boundary, so a focused nonempty composer keeps the keyboard visible while menu options receive their taps.
 Menu selections enter one cancellation-aware queue and become
 the active camera, photo, or file destination only after the native menu dismissal settles,
 preventing a competing presentation controller from dropping the selection on physical
@@ -554,9 +588,43 @@ over a full-sheet preview. A tool call and its canonical result are presented as
 one progressively updated chip when both are in the bounded transcript page; an
 unmatched result remains visible when its call is outside that page. Consecutive
 tool-only entries collapse into a single compact run chip whose sub-sheet keeps
-every tool and its individual detail available. Tool detail separates canonical
-request arguments from response data, explicitly top-anchors short scroll content,
-and begins immediately below native toolbar chrome. Tool chips use compact row spacing
+every tool and its individual detail available. The run, individual tool, Changes, and
+Technical details sheets share one inline navigation-chrome policy; principal toolbar titles
+therefore cannot reserve an empty large-title region above the scroll view. Each medium/large
+tool detail sheet explicitly top-anchors short scroll content and begins immediately below
+native toolbar chrome. Its medium
+detent is a glance surface: a wrapping chip flow combines state and elapsed time and expresses only useful
+metadata in natural singular/plural copy. Pulling to large selects the expanded display density without
+changing the selected call or scroll ownership. Read/write/edit foreground a selectable path whose directory
+uses the restrained secondary tone and whose basename uses the tool accent; bash foregrounds a smaller
+selectable command that wraps without splitting words, while grep/find/list
+foreground their pattern and location. Code results use the larger code size.
+Edit uses an authoritative returned patch when present, otherwise it previews only exact requested old/new
+blocks. Exactly one verified requested change with exactly one authoritative diff unit containing a real
+addition or removal may appear inline: medium uses a compact bounded head/tail glance and large reveals the
+full bounded diff. Patch admission fails closed on malformed or combined hunk headers and uses the maximum
+evidence across file, `+++`, and valid unified-hunk headers, so extra header-only or binary files cannot hide
+behind one text hunk. File-header-like `---`/`+++` lines encountered inside a hunk retain their source-line
+rendering but make unit evidence ambiguous, conservatively preventing header-light multi-file patches from
+appearing inline. Multiple or uncertain changes fail closed to a dedicated Changes sub-sheet rather than
+crowding the primary sheet or claiming a false count. Compact and expanded lines share bounded source-derived
+identities; their omission rows carry distinct range identities so a rolling tail never reuses an identity for
+different visible content. Diff preparation retains only bounded head/tail lines in circular tail storage,
+bounds individual rendered line width, and marks every omitted line or character while the untouched payload remains available under
+the final Technical details row. Empty edit sides represent pure insertions/deletions; blank rows are retained
+only when a nonempty source value actually contains them. The tool-run row owns an open detail route and its
+detent above the one-tool/grouped rendering branch, resolving the selected stable call ID against every newest
+run projection so a second arriving call cannot dismiss the first call's sheet. Metadata VoiceOver labels use
+only concise bounded chip previews and disclose that complete values remain in Technical details. The chip
+flow measures every chip against the finite available width; status and scalar text may wrap to two lines at
+Accessibility Dynamic Type without escaping the sheet or changing VoiceOver order. Cached Sendable ISO 8601
+parse strategies handle both fractional and whole-second Gateway timestamps for live timers without repeated
+formatter allocation. Technical execution rows use compact selectable label/value geometry; a bounded bash
+preview records its completeness fact there, followed by direct Request JSON and Result JSON with explicit
+`null` for a truly missing side. Content-only results remain JSON strings, response data wins, and a fallback
+identical to Request is rejected. Running sheets consume the newest immutable tool presentation, update status, timing,
+partial output, and bounded-output disclosure in place, and never move
+the reader's scroll position. Tool chips use compact row spacing
 and minimal visual insets while their semantic buttons retain a 44-point interaction
 region. Thinking traces are noninteractive and never hide canonical text behind a
 disclosure: adjacent thinking parts and their nonempty lines form one compact inline

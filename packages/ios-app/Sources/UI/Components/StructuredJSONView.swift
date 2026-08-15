@@ -1,10 +1,39 @@
 import SwiftUI
 
+enum StructuredJSONPathComponent: Hashable, Sendable {
+    case key(String)
+    case index(Int)
+}
+
+enum StructuredJSONPath {
+    static func resolve(_ root: JSONValue, components: [StructuredJSONPathComponent]) -> JSONValue? {
+        components.reduce(Optional(root)) { value, component in
+            guard let value else { return nil }
+            switch component {
+            case .key(let key): return value.objectValue?[key]
+            case .index(let index):
+                guard let values = value.arrayValue, values.indices.contains(index) else { return nil }
+                return values[index]
+            }
+        }
+    }
+
+    static func display(_ components: [StructuredJSONPathComponent]) -> String {
+        components.reduce("$") { path, component in
+            switch component {
+            case .key(let key): "\(path).\(key)"
+            case .index(let index): "\(path)[\(index)]"
+            }
+        }
+    }
+}
+
 private struct JSONFieldSelection: Identifiable {
-    let id = UUID()
     let title: String
-    let path: String
-    let value: JSONValue
+    let components: [StructuredJSONPathComponent]
+
+    var id: String { StructuredJSONPath.display(components) }
+    var path: String { id }
 }
 
 /// Progressive, bounded presentation for arbitrary Pi extension/tool JSON.
@@ -15,21 +44,26 @@ struct TronStructuredJSONView: View {
     var title = "Result"
     var path = "$"
     var accent: Color = .tronPurple
+    var showsRawDisclosure = true
+    var rootValue: JSONValue? = nil
+    var pathComponents: [StructuredJSONPathComponent] = []
     @State private var selectedField: JSONFieldSelection?
     @State private var showRaw = false
+
+    private var authoritativeRoot: JSONValue { rootValue ?? value }
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.section) {
             switch value {
             case .object(let fields):
                 fieldSection(fields.sorted { fieldRank($0.key) < fieldRank($1.key) }.map {
-                    (label: humanized($0.key), component: $0.key, value: $0.value)
+                    (label: humanized($0.key), component: .key($0.key), value: $0.value)
                 })
             case .array(let values):
                 fieldSection(values.enumerated().map {
                     (
                         label: arrayItemTitle($0.element, index: $0.offset),
-                        component: String($0.offset),
+                        component: .index($0.offset),
                         value: $0.element
                     )
                 })
@@ -39,40 +73,49 @@ struct TronStructuredJSONView: View {
             case .null: primitive("No value")
             }
 
-            Button { showRaw.toggle() } label: {
-                TronSettingsRow(
-                    icon: "curlybraces",
-                    title: showRaw ? "Hide raw JSON" : "View raw JSON",
-                    subtitle: "Copyable protocol representation",
-                    accent: .tronSlate
-                ) {
-                    Image(systemName: showRaw ? "chevron.up" : "chevron.down")
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextMuted)
+            if showsRawDisclosure {
+                Button { showRaw.toggle() } label: {
+                    TronSettingsRow(
+                        icon: "curlybraces",
+                        title: showRaw ? "Hide raw JSON" : "View raw JSON",
+                        subtitle: "Copyable protocol representation",
+                        accent: .tronSlate
+                    ) {
+                        Image(systemName: showRaw ? "chevron.up" : "chevron.down")
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextMuted)
+                    }
                 }
-            }
-            .buttonStyle(.plain)
-            .tronGlassSurface(accent: .tronSlate, tintOpacity: 0.08, interactive: true)
+                .buttonStyle(.plain)
+                .tronGlassSurface(accent: .tronSlate, tintOpacity: 0.08, interactive: true)
 
-            if showRaw {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    Text(value.prettyPrinted)
-                        .font(TronTypography.codeContent)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .textSelection(.enabled)
-                        .padding(12)
-                        .fixedSize(horizontal: true, vertical: false)
+                if showRaw {
+                    ScrollView(.horizontal, showsIndicators: true) {
+                        Text(value.prettyPrinted)
+                            .font(TronTypography.codeContent)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .textSelection(.enabled)
+                            .padding(12)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .tronGlassSurface(accent: .tronSlate, tintOpacity: 0.08)
                 }
-                .tronGlassSurface(accent: .tronSlate, tintOpacity: 0.08)
             }
         }
         .sheet(item: $selectedField) { selection in
-            JSONFieldSheet(selection: selection, accent: accent)
+            JSONFieldSheet(
+                selection: selection,
+                rootValue: authoritativeRoot,
+                accent: accent,
+                showsRawDisclosure: showsRawDisclosure
+            )
         }
     }
 
     @ViewBuilder
-    private func fieldSection(_ fields: [(label: String, component: String, value: JSONValue)]) -> some View {
+    private func fieldSection(
+        _ fields: [(label: String, component: StructuredJSONPathComponent, value: JSONValue)]
+    ) -> some View {
         if fields.isEmpty {
             primitive("Empty collection")
         } else {
@@ -81,14 +124,13 @@ struct TronStructuredJSONView: View {
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(Color.tronTextMuted)
                 TronGlassCard(accent: accent) {
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         ForEach(Array(fields.enumerated()), id: \.offset) { index, field in
                             if index > 0 { TronSettingsDivider(accent: accent) }
                             Button {
                                 selectedField = JSONFieldSelection(
                                     title: field.label,
-                                    path: childPath(field.component),
-                                    value: field.value
+                                    components: pathComponents + [field.component]
                                 )
                             } label: {
                                 HStack(alignment: .center, spacing: 11) {
@@ -153,10 +195,6 @@ struct TronStructuredJSONView: View {
         return "Entry \(index + 1)"
     }
 
-    private func childPath(_ component: String) -> String {
-        path == "$" ? "$.\(component)" : "\(path).\(component)"
-    }
-
     private func humanized(_ value: String) -> String {
         value.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
             .replacingOccurrences(of: "_", with: " ")
@@ -172,8 +210,14 @@ struct TronStructuredJSONView: View {
 
 private struct JSONFieldSheet: View {
     let selection: JSONFieldSelection
+    let rootValue: JSONValue
     let accent: Color
+    let showsRawDisclosure: Bool
     @Environment(\.dismiss) private var dismiss
+
+    private var selectedValue: JSONValue {
+        StructuredJSONPath.resolve(rootValue, components: selection.components) ?? .null
+    }
 
     var body: some View {
         NavigationStack {
@@ -189,10 +233,13 @@ private struct JSONFieldSheet: View {
                             .textSelection(.enabled)
                     }
                     TronStructuredJSONView(
-                        value: selection.value,
+                        value: selectedValue,
                         title: selection.title,
                         path: selection.path,
-                        accent: accent
+                        accent: accent,
+                        showsRawDisclosure: showsRawDisclosure,
+                        rootValue: rootValue,
+                        pathComponents: selection.components
                     )
                 }
                 .padding(18)

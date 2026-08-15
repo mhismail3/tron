@@ -366,13 +366,30 @@ struct PresentationStyleGuardTests {
         #expect(composer.contains("hasMirroredFocus"))
         #expect(chat.contains("MultilineComposerTextView("))
         #expect(!chat.contains("TextField(\"\", text: $text, axis: .vertical)"))
-        let attachmentMenu = (chat.components(separatedBy: "Menu {").dropFirst().last ?? "")
-            .components(separatedBy: "} label:").first ?? ""
-        #expect(attachmentMenu.contains("requestAttachmentPresentation(.camera)"))
-        #expect(attachmentMenu.contains("requestAttachmentPresentation(.photos)"))
-        #expect(attachmentMenu.contains("requestAttachmentPresentation(.files)"))
-        #expect(attachmentMenu.components(separatedBy: ".disabled(!attachmentActionsEnabled)").count == 4)
+        let attachmentButton = try #require(
+            chat.components(separatedBy: "private struct ComposerAttachmentMenuButton").dropFirst().first?
+                .components(separatedBy: "private struct PendingAttachmentChip").first
+        )
+        #expect(attachmentButton.contains("UIButton(type: .custom)"))
+        #expect(attachmentButton.contains("button.backgroundColor = .clear"))
+        #expect(attachmentButton.contains("button.showsMenuAsPrimaryAction = true"))
+        #expect(!attachmentButton.contains("for: .touchDown"))
+        #expect(!attachmentButton.contains("onTouchDown"))
+        #expect(attachmentButton.contains("button.isEnabled = isEnabled"))
+        #expect(attachmentButton.contains("button.accessibilityLabel = \"Add attachment\""))
+        let camera = try #require(attachmentButton.firstRange(of: "action(\"Take Photo\"")?.lowerBound)
+        let photos = try #require(attachmentButton.firstRange(of: "action(\"Select Photos\"")?.lowerBound)
+        let files = try #require(attachmentButton.firstRange(of: "action(\"Attach Files\"")?.lowerBound)
+        #expect(camera < photos)
+        #expect(photos < files)
+        #expect(attachmentButton.contains("parent.onSelect(destination)"))
         #expect(chat.contains(".id(attachmentMenuState.identity)"))
+        let attachmentMenu = try #require(
+            chat.components(separatedBy: "private var attachmentButton: some View").dropFirst().first?
+                .components(separatedBy: "private var catchUpButton").first
+        )
+        #expect(!attachmentMenu.contains("composerFocused = false"))
+        #expect(!attachmentMenu.contains("resignFirstResponder"))
         let attachmentRequest = (chat.components(separatedBy: "private var attachmentMenuState").dropFirst().first ?? "")
             .components(separatedBy: "private func send()").first ?? ""
         #expect(attachmentRequest.contains("sessionID: sessionID"))
@@ -426,18 +443,128 @@ struct PresentationStyleGuardTests {
         #expect(!block.contains(".onTapGesture"))
     }
 
-    @Test("tool details are tappable and start at the sheet top")
+    @Test("tool details foreground semantic content and isolate technical JSON")
     func toolDetailPresentation() throws {
         let transcript = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
             encoding: .utf8
         )
-        #expect(transcript.contains(".sheet(item: $detailPresentation)"))
-        #expect(transcript.contains(".defaultScrollAnchor(.top, for: .initialOffset)"))
-        #expect(transcript.contains(".defaultScrollAnchor(.top, for: .alignment)"))
-        #expect(transcript.contains(".frame(maxWidth: .infinity, alignment: .topLeading)"))
+        let sheet = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolDetailSheet.swift"),
+            encoding: .utf8
+        )
+        let presentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolDetailPresentation.swift"),
+            encoding: .utf8
+        )
+        let transcriptPresentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptPresentation.swift"),
+            encoding: .utf8
+        )
+        let structured = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Components/StructuredJSONView.swift"),
+            encoding: .utf8
+        )
+        #expect(transcript.contains("content.sheet(item: $route)"))
+        #expect(transcript.contains("ToolDetailSheet("))
+        #expect(transcript.contains("tool: tool"))
+        #expect(transcript.contains("density: detent == .large ? .expanded : .glance"))
+        #expect(transcript.contains(".presentationDetents([.medium, .large], selection: $detent)"))
+        let runOwner = try #require(
+            transcript.components(separatedBy: "struct ToolRunView: View {").dropFirst().first?
+                .components(separatedBy: "private struct ToolRunChip: View {").first
+        )
+        #expect(runOwner.contains("@State private var detailRoute: ToolDetailRoute?"))
+        #expect(runOwner.contains("@State private var detailDetent: PresentationDetent = .medium"))
+        #expect(runOwner.contains("if let tool = run.tools.first, run.tools.count == 1"))
+        #expect(runOwner.contains("detailRoute?.resolve(in: run.tools)"))
+        let statePosition = try #require(runOwner.firstRange(of: "@State private var detailRoute")?.lowerBound)
+        let branchPosition = try #require(runOwner.firstRange(of: "if let tool = run.tools.first")?.lowerBound)
+        let hostPosition = try #require(runOwner.firstRange(of: ".toolDetailSheet(")?.lowerBound)
+        #expect(statePosition < branchPosition)
+        #expect(branchPosition < hostPosition)
+        #expect(sheet.contains(".defaultScrollAnchor(.top, for: .initialOffset)"))
+        #expect(sheet.contains(".defaultScrollAnchor(.top, for: .alignment)"))
+        let navigationChrome = try #require(
+            sheet.components(separatedBy: "func tronToolDetailNavigationChrome() -> some View {").dropFirst().first?
+                .components(separatedBy: "private struct ToolTechnicalMetadataItem").first
+        )
+        #expect(navigationChrome.contains("navigationTitle(\"\")"))
+        #expect(navigationChrome.contains(".navigationBarTitleDisplayMode(.inline)"))
+        #expect(transcript.matches(#"\.tronToolDetailNavigationChrome\(\)"#) == 2)
+        #expect(sheet.matches(#"\.tronToolDetailNavigationChrome\(\)"#) == 2)
+        #expect(sheet.contains("title: \"Technical details\""))
+        #expect(sheet.contains("ToolTechnicalDetailsSheet"))
+        #expect(sheet.contains("ToolChipFlowLayout"))
+        #expect(sheet.contains("ToolStatusChip"))
+        #expect(sheet.contains("ToolMetadataChip"))
+        let chipLayout = try #require(
+            sheet.components(separatedBy: "private struct ToolChipFlowLayout: Layout {").dropFirst().first?
+                .components(separatedBy: "private struct ToolActivityChip: View {").first
+        )
+        #expect(chipLayout.contains("let ideal = subview.sizeThatFits(.unspecified)"))
+        #expect(chipLayout.contains("guard ideal.width > availableWidth else { return ideal }"))
+        #expect(chipLayout.contains("sizeThatFits(ProposedViewSize(width: availableWidth, height: nil))"))
+        #expect(chipLayout.contains("min(availableWidth, constrained.width)"))
+        #expect(!chipLayout.contains(".fixedSize(horizontal: true"))
+        #expect(chipLayout.matches(#"\.lineLimit\(2\)"#) >= 3)
+        #expect(sheet.contains(".accessibilityLabel(item.accessibilityLabel)"))
+        #expect(!sheet.contains(".accessibilityLabel(\"\\(item.label), \\(item.value)\")"))
+        #expect(sheet.contains("ToolChangesSheet"))
+        #expect(sheet.contains("if diff.showsInline"))
+        #expect(sheet.contains("diff.visibleLines(for: density)"))
+        #expect(sheet.contains("Text($0).foregroundColor(Color.tronTextSecondary)"))
+        #expect(sheet.contains("Text(path.basename).foregroundColor(accent)"))
+        let primaryDetail = try #require(
+            sheet.components(separatedBy: "@ViewBuilder private func primarySection").dropFirst().first?
+                .components(separatedBy: "private func pathText").first
+        )
+        #expect(primaryDetail.contains("presentation.kind == .bash"))
+        #expect(primaryDetail.contains("Text(verbatim: preview.text)"))
+        #expect(primaryDetail.contains(".font(TronTypography.codeContent)"))
+        #expect(primaryDetail.contains(".fixedSize(horizontal: false, vertical: true)"))
+        #expect(!primaryDetail.contains("ScrollView(.horizontal"))
+        #expect(primaryDetail.contains("preview.isBounded, presentation.kind != .bash"))
+        let resultDetail = try #require(
+            sheet.components(separatedBy: "@ViewBuilder private func resultSection").dropFirst().first?
+                .components(separatedBy: "private var technicalDetailsButton").first
+        )
+        #expect(resultDetail.contains(".font(TronTypography.code(size: TronTypography.sizeBodySM))"))
+        let technicalDetail = try #require(
+            sheet.components(separatedBy: "private struct ToolTechnicalDetailsSheet").dropFirst().first?
+                .components(separatedBy: "private struct ToolTechnicalMetadataItem").first
+        )
+        let requestJSON = try #require(technicalDetail.firstRange(of: "payload(\"Request\", value: tool.request ?? .null)")?.lowerBound)
+        let resultJSON = try #require(technicalDetail.firstRange(of: "payload(\"Result\", value: ToolTechnicalResultResolver.resolve(tool))")?.lowerBound)
+        #expect(requestJSON < resultJSON)
+        #expect(technicalDetail.contains("Text(value.prettyPrinted)"))
+        #expect(technicalDetail.contains("ScrollView(.horizontal, showsIndicators: true)"))
+        #expect(technicalDetail.contains("ToolTechnicalMetadataItem"))
+        #expect(technicalDetail.contains("Command preview"))
+        #expect(!technicalDetail.contains("TronSettingsRow"))
+        #expect(!technicalDetail.contains("TronStructuredJSONView"))
+        #expect(!technicalDetail.contains("readableOutput"))
+        #expect(!technicalDetail.contains("Projected fallback"))
+        #expect(sheet.contains("Complete available result data is in Technical details; Gateway marked the output truncated."))
+        #expect(sheet.contains("Complete result data is available in Technical details."))
+        #expect(!sheet.contains("Request, response, timing, and raw JSON"))
+        #expect(!sheet.contains("statusCard"))
+        #expect(sheet.contains("showsRawDisclosure: false"))
+        #expect(sheet.matches(#"ToolDetailPresentation\(tool: tool\)"#) == 1)
+        #expect(!sheet.contains("presentation.kind == .generic, let request"))
+        #expect(!presentation.contains("title.lowercased()"))
+        let timing = try #require(
+            transcriptPresentation.components(separatedBy: "enum ToolTiming {").dropFirst().first?
+                .components(separatedBy: "enum ChatTokenCountPresentation {").first
+        )
+        #expect(timing.contains("private static let fractionalTimestamp = Date.ISO8601FormatStyle"))
+        #expect(timing.contains("private static let wholeSecondTimestamp = Date.ISO8601FormatStyle"))
+        #expect(!timing.contains("ISO8601DateFormatter"))
+        #expect(structured.contains("showsRawDisclosure: showsRawDisclosure"))
+        #expect(structured.contains("StructuredJSONPath.resolve(rootValue, components: selection.components)"))
+        #expect(!transcript.contains(".prettyPrinted"))
         for tool in ["read", "write", "edit", "bash", "grep", "find", "ls"] {
-            #expect(transcript.contains("case \"\(tool)\""), "missing detail presentation mapping for \(tool)")
+            #expect(presentation.contains("case \"\(tool)\""), "missing semantic detail mapping for \(tool)")
         }
     }
 
@@ -490,6 +617,11 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains("GlassEffectContainer(spacing: 8)"))
         #expect(chat.contains("if scrollCoordinator.shouldShowCatchUpButton"))
         #expect(scrollCoordinator.contains("var shouldShowCatchUpButton: Bool { userScrolledAway }"))
+        #expect(chat.contains("targetRenderedID: installed.timeline.ids.last"))
+        #expect(chat.contains("requestOpeningTail(targetRenderedID: targetRenderedID)"))
+        #expect(scrollCoordinator.contains("openingTailTargetRenderedID"))
+        #expect(scrollCoordinator.contains("semanticFrames[targetRenderedID]"))
+        #expect(scrollCoordinator.contains("openingTailPresentation == presentation"))
         #expect(chat.contains("ChatTranscriptPresentationStore"))
         #expect(!chat.contains("ChatTranscriptPresentation.timeline("))
         #expect(transcript.contains("struct ChatTranscriptPillModifier: ViewModifier"))
@@ -550,7 +682,8 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
             encoding: .utf8
         )
-        #expect(shell.contains("HistoricalSessionRow(session: session)"))
+        #expect(shell.contains("HistoricalSessionRow("))
+        #expect(shell.contains("activity: model.dashboardActivity(for: session.id)"))
         #expect(!shell.contains("HistoricalSessionRow(session: session, selected:"))
         #expect(!shell.contains("let selected: Bool"))
         #expect(shell.contains(".foregroundStyle(Color.tronEmerald)"))
@@ -594,10 +727,12 @@ struct PresentationStyleGuardTests {
             .components(separatedBy: "private var catchUpButton").first ?? ""
         #expect(attachmentButton.contains("Image(systemName: \"plus\")"))
         #expect(attachmentButton.contains(".font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))"))
-        #expect(attachmentButton.contains(".foregroundStyle(Color.tronEmerald)"))
+        #expect(attachmentButton.contains(".foregroundStyle(attachmentActionsEnabled ? Color.tronEmerald : Color.tronTextMuted)"))
         #expect(attachmentButton.contains(".allowsHitTesting(false)"))
-        #expect(attachmentButton.contains("Color.clear"))
-        #expect(attachmentButton.contains("Menu {"))
+        #expect(attachmentButton.contains("ComposerAttachmentMenuButton("))
+        #expect(!attachmentButton.contains("onTouchDown"))
+        #expect(attachmentButton.contains("onSelect: requestAttachmentPresentation"))
+        #expect(!attachmentButton.contains("Menu {"))
         #expect(!chat.contains(".contentMargins(.horizontal, 16, for: .scrollContent)"))
         let stableRow = (chat.components(separatedBy: "private func stableTranscriptRow").dropFirst().first ?? "")
             .components(separatedBy: "private var selectedAuthoritativeSnapshot").first ?? ""

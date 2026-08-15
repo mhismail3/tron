@@ -95,7 +95,11 @@ final class ChatScrollCoordinator {
     private var userInteractionStartOffsetY: CGFloat?
     private var userInteractionStartDistanceFromBottom: CGFloat?
     private var bindingIsReleased = false
-    private var openingTailRequested = false
+    private var openingTailSettlementPending = false
+    private var openingTailTargetRenderedID: String?
+    private var openingTailPresentation: Int?
+    private var openingTailExpectedFrameGeometryRevision: Int?
+    private var geometryRevision = 0
 
     @ObservationIgnored private var followFrameTask: Task<Void, Never>?
     @ObservationIgnored private var catchUpTask: Task<Void, Never>?
@@ -174,9 +178,10 @@ final class ChatScrollCoordinator {
         userInteractionStartOffsetY = nil
         userInteractionStartDistanceFromBottom = nil
         geometry = .zero
+        geometryRevision = 0
         advanceLayoutEpoch()
         bindingIsReleased = false
-        openingTailRequested = false
+        clearOpeningTailSettlement()
         clearCommand()
         publish(.resetToBottom, animation: .disabled, origin: .presentation)
     }
@@ -207,6 +212,12 @@ final class ChatScrollCoordinator {
         }
         recordPrependExcursionIfOwned(renderedID: renderedID, layoutEpoch: layoutEpoch, frame: frame)
         evaluatePrependMeasurementIfReady()
+        if openingTailSettlementPending,
+           openingTailPresentation == presentation,
+           openingTailTargetRenderedID == renderedID {
+            openingTailExpectedFrameGeometryRevision = geometryRevision
+            settleOpeningTailIfPossible(allowsBoundarySettlement: false)
+        }
     }
 
     /// Chooses the visually first measured row that actually intersects the
@@ -345,6 +356,8 @@ final class ChatScrollCoordinator {
 
     func geometryChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
         geometry = current
+        geometryRevision &+= 1
+        if settleOpeningTailIfPossible(allowsBoundarySettlement: true) { return }
         let grew = current.contentHeight > previous.contentHeight + 0.5
         let movedOlder = previous.isValid
             && current.offsetY < previous.offsetY - 1
@@ -386,6 +399,8 @@ final class ChatScrollCoordinator {
 
     func viewportChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
         geometry = current
+        geometryRevision &+= 1
+        if settleOpeningTailIfPossible(allowsBoundarySettlement: true) { return }
         guard current.hasViewportChange(from: previous) else { return }
         pendingUnattributedOlderMovement = false
         if userScrolledAway {
@@ -427,12 +442,18 @@ final class ChatScrollCoordinator {
         scheduleTailFollow()
     }
 
-    func requestOpeningTail() {
-        if command?.destination == .resetToBottom {
-            openingTailRequested = true
-        } else {
-            publish(.tail, animation: .disabled, origin: .presentation)
+    /// Arms final opening placement for the exact installed timeline tail. The
+    /// nil target is the explicit no-transcript path and needs no position write.
+    func requestOpeningTail(targetRenderedID: String?) {
+        clearOpeningTailSettlement()
+        guard let targetRenderedID else { return }
+        openingTailSettlementPending = true
+        openingTailTargetRenderedID = targetRenderedID
+        openingTailPresentation = presentation
+        if semanticFrames[targetRenderedID]?.layoutEpoch == layoutEpoch {
+            openingTailExpectedFrameGeometryRevision = geometryRevision
         }
+        settleOpeningTailIfPossible(allowsBoundarySettlement: false)
     }
 
     func requestCatchUp(reduceMotion: Bool) {
@@ -536,10 +557,7 @@ final class ChatScrollCoordinator {
         switch applied.destination {
         case .resetToBottom:
             bindingIsReleased = false
-            if openingTailRequested {
-                openingTailRequested = false
-                publish(.tail, animation: .disabled, origin: .presentation)
-            }
+            settleOpeningTailIfPossible(allowsBoundarySettlement: false)
         case .releaseBinding:
             bindingIsReleased = true
         case .tail, .offsetY:
@@ -733,6 +751,7 @@ final class ChatScrollCoordinator {
     }
 
     private func cancelAutomaticWorkForUserInteraction() {
+        clearOpeningTailSettlement()
         cancelAutomaticTasks()
         if isPrependingHistory {
             prependInterrupted = true
@@ -748,6 +767,7 @@ final class ChatScrollCoordinator {
     }
 
     private func cancelAllOwnedWork(result: PerformanceResult) {
+        clearOpeningTailSettlement()
         cancelAutomaticTasks()
         cancelCatchUp(restoringDetached: false)
         prependTask?.cancel()
@@ -789,6 +809,43 @@ final class ChatScrollCoordinator {
         prependCompletion = nil
         completion?(result)
         if pendingGrowthFollow { scheduleTailFollow() }
+    }
+
+    @discardableResult
+    private func settleOpeningTailIfPossible(allowsBoundarySettlement: Bool) -> Bool {
+        guard openingTailSettlementPending,
+              openingTailPresentation == presentation,
+              let targetRenderedID = openingTailTargetRenderedID,
+              let targetSample = semanticFrames[targetRenderedID],
+              targetSample.layoutEpoch == layoutEpoch,
+              let frameGeometryRevision = openingTailExpectedFrameGeometryRevision,
+              geometry.isValid else { return false }
+
+        if geometry.isAtCatchUpBoundary {
+            // A boundary sample that predates an offscreen expected tail may be
+            // transient pre-layout geometry. A later geometry callback or an
+            // expected tail visibly inside the current viewport proves final
+            // undersized/already-settled layout without arbitrary row evidence.
+            let expectedTailIsVisible = targetSample.frame.maxY > 0
+                && targetSample.frame.minY < geometry.containerHeight
+            guard expectedTailIsVisible || (
+                allowsBoundarySettlement && geometryRevision > frameGeometryRevision
+            ) else { return false }
+            clearOpeningTailSettlement()
+            return false
+        }
+
+        guard canAutomaticallyFollow, command == nil else { return false }
+        clearOpeningTailSettlement()
+        publish(.tail, animation: .disabled, origin: .presentation)
+        return true
+    }
+
+    private func clearOpeningTailSettlement() {
+        openingTailSettlementPending = false
+        openingTailTargetRenderedID = nil
+        openingTailPresentation = nil
+        openingTailExpectedFrameGeometryRevision = nil
     }
 
     private func advanceLayoutEpoch() {

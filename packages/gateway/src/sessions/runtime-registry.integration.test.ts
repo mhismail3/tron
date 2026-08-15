@@ -4,8 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
+import type { SessionSummaryUpdate } from "../protocol/types.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
@@ -24,6 +25,108 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
     if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+  });
+
+  it("keeps row-summary revisions separate and lists phase without transcript snapshots", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-summary-revision-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const faux = fauxProvider({ provider: "tron-catalog-boundary", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("catalog ready")]);
+    runtime.registerNativeProvider(faux.provider);
+    const summaries: SessionSummaryUpdate[] = [];
+    let listChanges = 0;
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: (summary) => summaries.push(summary),
+      sessionListChanged: () => { listChanges += 1; },
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt(`catalog boundary ${"x".repeat(5_000)}`);
+    await waitUntil(() => !slot.isBusy);
+    await slot.rename(`catalog-${"n".repeat(5_000)}`);
+    const before = await registry.catalog("user");
+    const snapshot = vi.spyOn(slot, "snapshot");
+    const structuralChangesBeforeSummary = listChanges;
+
+    slot.publishSnapshot();
+    snapshot.mockClear();
+    const after = await registry.catalog("user");
+
+    expect(summaries.at(-1)?.summaryRevision).toBeGreaterThan(0);
+    expect(Buffer.byteLength(summaries.at(-1)?.firstMessage ?? "")).toBeLessThanOrEqual(1_024);
+    expect(Buffer.byteLength(summaries.at(-1)?.name ?? "")).toBeLessThanOrEqual(1_024);
+    expect(after.listRevision).toBe(before.listRevision);
+    expect(listChanges).toBe(structuralChangesBeforeSummary);
+    expect(after.sessions[0]?.phase).toBe(slot.catalogPhase);
+    // Runtime-owned deferred publication may legitimately call snapshot(sequence)
+    // here; catalog listing must never call the former zero-argument full snapshot.
+    expect(snapshot.mock.calls.filter((arguments_) => arguments_.length === 0)).toHaveLength(0);
+  });
+
+  it("never stamps captured stale catalog fields with a newer summary revision", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-summary-race-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const faux = fauxProvider({ provider: "tron-catalog-race", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("catalog ready")]);
+    runtime.registerNativeProvider(faux.provider);
+    const summaries: SessionSummaryUpdate[] = [];
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: (summary) => summaries.push(summary),
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("catalog race baseline");
+    await waitUntil(() => !slot.isBusy);
+
+    const internals = registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const originalSessionInfos = internals.sessionInfos.bind(registry);
+    let capturedResolve!: () => void;
+    let releaseResolve!: () => void;
+    const captured = new Promise<void>((resolve) => { capturedResolve = resolve; });
+    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+    vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
+      const infos = await originalSessionInfos();
+      capturedResolve();
+      await release;
+      return infos;
+    });
+
+    const loading = registry.catalog("user");
+    await captured;
+    await slot.rename("new authoritative name");
+    const latest = summaries.at(-1)!;
+    releaseResolve();
+    const catalog = await loading;
+
+    expect(catalog.sessions[0]?.name).toBe(latest.name);
+    expect(catalog.sessions[0]?.phase).toBe(latest.phase);
+    expect(catalog.sessions[0]?.messageCount).toBe(latest.messageCount);
+    expect(catalog.sessions[0]?.summaryRevision).toBe(latest.summaryRevision);
   });
 
   it("runs distinct sessions concurrently and keeps a run alive after its client disconnects", async () => {

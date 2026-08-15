@@ -43,6 +43,8 @@ struct TronMobileApp: App {
                     if phase == .active {
                         Task { await RetiredNotificationBadge.clear() }
                         model.becameActive()
+                    } else if phase == .background {
+                        model.enteredBackground()
                     }
                 }
         }

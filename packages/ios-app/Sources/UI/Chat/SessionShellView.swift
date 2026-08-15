@@ -282,7 +282,10 @@ struct SessionShellView: View {
         return Button {
             present(AppModel.SessionNavigationRoute(sessionID: session.id, editorText: nil))
         } label: {
-            HistoricalSessionRow(session: session)
+            HistoricalSessionRow(
+                session: session,
+                activity: model.dashboardActivity(for: session.id)
+            )
         }
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)
@@ -367,16 +370,17 @@ private enum SessionDashboardLayout {
 
 private struct HistoricalSessionRow: View {
     let session: SessionSummary
+    let activity: DashboardSessionActivity
 
     var body: some View {
         HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
             Group {
-                if session.phase.isActive {
+                if activity == .active || activity == .resuming {
                     ProgressView().controlSize(.small).tint(.tronEmerald)
                 } else {
-                    Image(systemName: session.phase == .interrupted ? "exclamationmark.circle" : "circle")
+                    Image(systemName: activity == .interrupted ? "exclamationmark.circle" : "circle")
                         .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                        .foregroundStyle(session.phase == .interrupted ? Color.tronAmber : Color.tronEmerald.opacity(0.82))
+                        .foregroundStyle(activity == .interrupted ? Color.tronAmber : Color.tronEmerald.opacity(0.82))
                 }
             }
             .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
@@ -404,7 +408,18 @@ private struct HistoricalSessionRow: View {
             interactive: true
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(session.title), \(session.phase.rawValue), \(session.relativeActivityDescription())")
+        .accessibilityLabel("\(session.title), \(activity.accessibilityDescription), \(session.relativeActivityDescription())")
+    }
+}
+
+private extension DashboardSessionActivity {
+    var accessibilityDescription: String {
+        switch self {
+        case .idle: "idle"
+        case .active: "active"
+        case .resuming: "resuming"
+        case .interrupted: "interrupted"
+        }
     }
 }
 

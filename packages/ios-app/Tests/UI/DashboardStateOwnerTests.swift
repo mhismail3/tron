@@ -73,17 +73,22 @@ struct DashboardStateOwnerTests {
         #expect(owner.sessions.first?.phase == .idle)
     }
 
-    @Test("disconnect and cache installation remove live activity claims")
-    func safeCachedProjection() {
+    @Test("cached and disconnected phases retain provenance without fabricating interruption")
+    func catalogFreshnessAndActivity() {
         var owner = SessionCatalogCoordinator()
         let load = owner.beginLoad()
         let published = owner.publishAuthoritative([
             summary(revision: 1, phase: .running),
         ], admission: load)
         #expect(published)
+        #expect(owner.freshness == .live)
+        #expect(owner.activity(for: "session") == .active)
+
         let pendingBeforeDisconnect = owner.beginLoad()
         owner.markDisconnected()
-        #expect(owner.sessions.first?.phase == .interrupted)
+        #expect(owner.sessions.first?.phase == .running)
+        #expect(owner.freshness == .stale)
+        #expect(owner.activity(for: "session") == .resuming)
         let disconnectedPublish = owner.publishAuthoritative(
             [summary(revision: 2, phase: .running)],
             admission: pendingBeforeDisconnect
@@ -91,13 +96,19 @@ struct DashboardStateOwnerTests {
         #expect(!disconnectedPublish)
 
         let pendingBeforeCache = owner.beginLoad()
-        owner.installCached([summary(revision: 2, phase: .compacting)])
+        owner.installCached([summary(revision: 2, phase: .interrupted)])
         #expect(owner.sessions.first?.phase == .interrupted)
+        #expect(owner.freshness == .cached)
+        #expect(owner.activity(for: "session") == .resuming)
         let cachedPublish = owner.publishAuthoritative(
             [summary(revision: 3)],
             admission: pendingBeforeCache
         )
         #expect(!cachedPublish)
+
+        let liveInterrupted = owner.apply(update(revision: 4, phase: .interrupted))
+        #expect(liveInterrupted == .updated)
+        #expect(owner.activity(for: "session") == .interrupted)
     }
 
     @Test("removal clears both the row and retained live revision")
@@ -139,6 +150,25 @@ struct DashboardStateOwnerTests {
         )
         #expect(!clearedPublish)
         #expect(owner.sessions.isEmpty)
+        #expect(owner.hasConsistentIndex())
+    }
+
+    @Test("catalog index stays exact across publication, update, removal, replacement, and clear")
+    func catalogIndexIntegrity() {
+        var owner = SessionCatalogCoordinator()
+        let load = owner.beginLoad()
+        let published = owner.publishAuthoritative([summary(revision: 1)], admission: load)
+        #expect(published)
+        #expect(owner.hasConsistentIndex())
+        let updated = owner.apply(update(revision: 2, phase: .running))
+        #expect(updated == .updated)
+        #expect(owner.hasConsistentIndex())
+        owner.remove("session")
+        #expect(owner.hasConsistentIndex())
+        owner.replaceForFacade([summary(revision: 3)])
+        #expect(owner.hasConsistentIndex())
+        owner.clear()
+        #expect(owner.hasConsistentIndex())
     }
 
     @MainActor

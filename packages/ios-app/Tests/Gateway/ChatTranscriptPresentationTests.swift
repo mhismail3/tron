@@ -171,7 +171,7 @@ struct ChatTranscriptPresentationTests {
         #expect(ChatToolbarTitleLayout.width(containerWidth: 1_024) == 360)
     }
 
-    @Test("attachment menu state is scoped to the viewed session and authoritative phase")
+    @Test("attachment menu availability is session scoped and independent of draft text")
     func attachmentAvailability() {
         #expect(!ChatAttachmentAvailabilityPolicy.actionsEnabled(
             isTranscriptReady: false, phase: .idle, isSending: false
@@ -751,6 +751,7 @@ struct ChatTranscriptPresentationTests {
             partialResult: .object(["content": .array([.object(["type": .string("text"), "text": .string("Waiting 12s · reviewer: read")])])]),
             result: nil,
             output: "Waiting 12s · reviewer: read",
+            outputTruncated: true,
             isError: false,
             startedAt: "2026-01-01T00:00:01Z",
             updatedAt: "2026-01-01T00:00:13Z",
@@ -764,9 +765,22 @@ struct ChatTranscriptPresentationTests {
         }
         let tool = try #require(run.tools.first)
         #expect(tool.content == "Waiting 12s · reviewer: read")
+        #expect(tool.outputTruncated)
         #expect(tool.progressSequence == 14)
         #expect(tool.elapsedMilliseconds(at: try #require(ToolTiming.date("2026-01-01T00:00:13Z"))) == 12_000)
         #expect(ToolTiming.format(milliseconds: 478_000) == "7m 58s")
+    }
+
+    @Test("tool timing parses cached ISO timestamps with and without fractional seconds")
+    func toolTimingISOParsing() throws {
+        let whole = try #require(ToolTiming.date("2026-01-01T00:00:01Z"))
+        let fractional = try #require(ToolTiming.date("2026-01-01T00:00:01.125Z"))
+        #expect(Int((fractional.timeIntervalSince(whole) * 1_000).rounded()) == 125)
+        #expect(ToolTiming.intervalMilliseconds(
+            start: "2026-01-01T00:00:01.125Z",
+            end: "2026-01-01T00:00:02Z"
+        ) == 875)
+        #expect(ToolTiming.date("not-a-timestamp") == nil)
     }
 
     @Test("canonical history derives timing when exact runtime metadata is unavailable")

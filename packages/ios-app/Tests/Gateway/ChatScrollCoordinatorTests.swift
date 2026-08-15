@@ -433,11 +433,11 @@ struct ChatScrollCoordinatorTests {
         #expect(settled.command?.destination == .releaseBinding)
     }
 
-    @Test("presentation reset revokes an unacknowledged command")
+    @Test("presentation reset revokes an unacknowledged opening command")
     func presentationResetRevokesCommand() {
         let coordinator = ChatScrollCoordinator()
         coordinator.resetForPresentation(1)
-        coordinator.requestOpeningTail()
+        coordinator.requestOpeningTail(targetRenderedID: "old-tail")
         let stale = coordinator.command
         #expect(stale?.presentation == 1)
         coordinator.resetForPresentation(2)
@@ -445,6 +445,159 @@ struct ChatScrollCoordinatorTests {
         if let stale { coordinator.commandApplied(stale) }
         #expect(current?.destination == .resetToBottom)
         #expect(coordinator.command == current)
+    }
+
+    @Test("transient boundary and auxiliary rows cannot consume exact opening tail")
+    func openingTailRejectsTransientBoundaryAndAuxiliaryRows() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.resetForPresentation(1)
+        let reset = coordinator.command!
+        coordinator.requestOpeningTail(targetRenderedID: "expected-tail")
+        coordinator.commandApplied(reset)
+
+        let short = ChatTranscriptGeometry(offsetY: 0, contentHeight: 180, containerHeight: 400)
+        coordinator.geometryChanged(previous: .zero, current: short)
+        #expect(coordinator.command?.destination != .tail)
+        if let release = coordinator.command { coordinator.commandApplied(release) }
+
+        coordinator.semanticFrameChanged(
+            renderedID: "runtime-working",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 10, width: 100, height: 40)
+        )
+        #expect(coordinator.command == nil)
+        coordinator.semanticFrameChanged(
+            renderedID: "expected-tail",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 900, width: 100, height: 40)
+        )
+        #expect(coordinator.command == nil)
+
+        coordinator.geometryChanged(previous: short, current: away)
+        let tail = coordinator.command
+        #expect(tail?.destination == .tail)
+        #expect(tail?.origin == .presentation)
+        #expect(tail?.animation == .disabled)
+        coordinator.commandApplied(tail!)
+        coordinator.geometryChanged(previous: away, current: away)
+        #expect(coordinator.command == nil)
+    }
+
+    @Test("opening tail admits exact evidence in either callback order")
+    func openingTailExactEvidencePermutations() {
+        let geometryFirst = ChatScrollCoordinator()
+        geometryFirst.resetForPresentation(1)
+        geometryFirst.requestOpeningTail(targetRenderedID: "tail")
+        geometryFirst.commandApplied(geometryFirst.command!)
+        geometryFirst.geometryChanged(previous: .zero, current: away)
+        #expect(geometryFirst.command == nil)
+        geometryFirst.semanticFrameChanged(
+            renderedID: "tail",
+            layoutEpoch: geometryFirst.layoutEpoch,
+            frame: CGRect(x: 0, y: 900, width: 100, height: 40)
+        )
+        #expect(geometryFirst.command?.destination == .tail)
+
+        let frameFirst = ChatScrollCoordinator()
+        frameFirst.resetForPresentation(2)
+        frameFirst.requestOpeningTail(targetRenderedID: "tail")
+        frameFirst.commandApplied(frameFirst.command!)
+        frameFirst.semanticFrameChanged(
+            renderedID: "tail",
+            layoutEpoch: frameFirst.layoutEpoch,
+            frame: CGRect(x: 0, y: 900, width: 100, height: 40)
+        )
+        #expect(frameFirst.command == nil)
+        frameFirst.geometryChanged(previous: .zero, current: away)
+        #expect(frameFirst.command?.destination == .tail)
+        #expect(frameFirst.command?.origin == .presentation)
+    }
+
+    @Test("opening tail leaves final undersized and empty transcripts top aligned")
+    func openingTailClearsForUndersizedOrEmptyTimeline() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.resetForPresentation(1)
+        coordinator.requestOpeningTail(targetRenderedID: "short-tail")
+        coordinator.commandApplied(coordinator.command!)
+        coordinator.semanticFrameChanged(
+            renderedID: "short-tail",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 10, width: 100, height: 40)
+        )
+        let short = ChatTranscriptGeometry(offsetY: 0, contentHeight: 180, containerHeight: 400)
+        coordinator.geometryChanged(previous: .zero, current: short)
+        #expect(coordinator.command?.destination != .tail)
+        if let release = coordinator.command { coordinator.commandApplied(release) }
+        coordinator.geometryChanged(previous: short, current: away)
+        coordinator.semanticFrameChanged(
+            renderedID: "short-tail",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 900, width: 100, height: 40)
+        )
+        #expect(coordinator.command == nil)
+
+        let shortGeometryFirst = ChatScrollCoordinator()
+        shortGeometryFirst.resetForPresentation(2)
+        shortGeometryFirst.requestOpeningTail(targetRenderedID: "short-tail")
+        shortGeometryFirst.commandApplied(shortGeometryFirst.command!)
+        shortGeometryFirst.geometryChanged(previous: .zero, current: short)
+        if let release = shortGeometryFirst.command { shortGeometryFirst.commandApplied(release) }
+        shortGeometryFirst.semanticFrameChanged(
+            renderedID: "short-tail",
+            layoutEpoch: shortGeometryFirst.layoutEpoch,
+            frame: CGRect(x: 0, y: 10, width: 100, height: 40)
+        )
+        shortGeometryFirst.geometryChanged(previous: short, current: away)
+        #expect(shortGeometryFirst.command == nil)
+
+        let empty = ChatScrollCoordinator()
+        empty.resetForPresentation(2)
+        let emptyReset = empty.command!
+        empty.requestOpeningTail(targetRenderedID: nil)
+        empty.commandApplied(emptyReset)
+        empty.geometryChanged(previous: .zero, current: away)
+        empty.semanticFrameChanged(
+            renderedID: "runtime-working",
+            layoutEpoch: empty.layoutEpoch,
+            frame: CGRect(x: 0, y: 900, width: 100, height: 40)
+        )
+        #expect(empty.command == nil)
+    }
+
+    @Test("native interaction cancels exact pending opening tail")
+    func nativeInteractionCancelsOpeningTail() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.resetForPresentation(1)
+        coordinator.requestOpeningTail(targetRenderedID: "tail")
+        coordinator.commandApplied(coordinator.command!)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.geometryChanged(previous: .zero, current: away)
+        coordinator.semanticFrameChanged(
+            renderedID: "tail",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 900, width: 100, height: 40)
+        )
+        #expect(coordinator.command == nil)
+    }
+
+    @Test("stale opening target cannot repin a replacement presentation")
+    func staleOpeningLayoutCannotRepinReplacement() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.resetForPresentation(1)
+        let staleReset = coordinator.command!
+        let staleEpoch = coordinator.layoutEpoch
+        coordinator.requestOpeningTail(targetRenderedID: "stale-tail")
+
+        coordinator.resetForPresentation(2)
+        let replacementReset = coordinator.command!
+        coordinator.commandApplied(staleReset)
+        coordinator.geometryChanged(previous: .zero, current: away)
+        coordinator.semanticFrameChanged(
+            renderedID: "stale-tail",
+            layoutEpoch: staleEpoch,
+            frame: CGRect(x: 0, y: 900, width: 100, height: 40)
+        )
+        #expect(coordinator.command == replacementReset)
     }
 
     @Test("semantic frame projection is count bounded")

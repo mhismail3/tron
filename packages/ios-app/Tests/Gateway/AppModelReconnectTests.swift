@@ -28,6 +28,46 @@ struct AppModelReconnectTests {
         }
     }
 
+    @Test("foreground activation keeps a selected profile without credentials unpaired")
+    func missingCredentialDoesNotReconnect() async throws {
+        let suiteName = "GatewayLifecycleMissingCredentialTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.removePersistentDomain(forName: suiteName)
+        let profile = GatewayProfile(
+            id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"
+        )
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let store = GatewayProfileStore(defaults: defaults)
+        let factory = ScriptedGatewaySocketFactory(socket: ScriptedGatewaySocket())
+        let client = GatewayClient(socketFactory: factory.factory)
+        let coordinator = GatewayLifecycleCoordinator(
+            client: client,
+            profiles: store,
+            clock: .continuous,
+            reconnectDelayPolicy: .standard,
+            uuidSource: .random,
+            pairer: GatewayPairer(),
+            pairingCommit: { _, _ in },
+            profileTokenLookup: { _ in nil }
+        )
+
+        await coordinator.start()
+        #expect(coordinator.connectionState == .unpaired)
+        #expect(coordinator.hasResolvedLaunchState)
+        #expect(factory.requests.isEmpty)
+        if case .some = coordinator.becameActive() {
+            Issue.record("Unpaired foreground activation unexpectedly started lifecycle work")
+        }
+        #expect(coordinator.connectionState == .unpaired)
+        #expect(factory.requests.isEmpty)
+
+        await coordinator.teardown()
+        await client.close()
+    }
+
     @Test("non-immediate retries jitter each preserved backoff delay")
     func jitteredRetryProgression() async throws {
         let units = SequenceReconnectUnits([0, 0.5, 1])

@@ -46,6 +46,14 @@ import type { RunMarkerStore } from "./run-markers.js";
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
+function boundedSummaryText(value: string, maximumBytes = 1_024): string {
+  const encoded = Buffer.from(value);
+  if (encoded.length <= maximumBytes) return value;
+  const suffix = "…";
+  const available = Math.max(0, maximumBytes - Buffer.byteLength(suffix));
+  return `${encoded.subarray(0, available).toString("utf8").replace(/\uFFFD$/u, "")}${suffix}`;
+}
+
 export interface RuntimeSlotHooks {
   broadcast: SessionBroadcast;
   summaryChanged: (summary: SessionSummaryUpdate) => void;
@@ -91,6 +99,13 @@ export class RuntimeSlot {
   private readonly toolMetadata = new Map<string, ToolProjectionMetadata>();
   private nextToolOrder = 0;
   private lastPublishedSummary: SessionSummaryUpdate | undefined;
+  private summaryContentDirty = true;
+  private cachedSummaryContent: {
+    name?: string;
+    updatedAt: string;
+    messageCount: number;
+    firstMessage: string;
+  } | undefined;
   private lastTouchedAt = Date.now();
 
   private constructor(
@@ -155,6 +170,12 @@ export class RuntimeSlot {
     this.activeOperationId ??= randomUUID();
     this.operation ??= { id: this.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
     if (!this.activityHeartbeat) this.startActivityHeartbeat();
+  }
+
+  /** Lightweight dashboard projection. Catalog listing must not construct a
+   * transcript-bearing session snapshot merely to read runtime activity. */
+  get catalogPhase(): SessionPhase {
+    return this.effectivePhase;
   }
 
   get touchedAt(): number {
@@ -267,31 +288,38 @@ export class RuntimeSlot {
   }
 
   private summary(): SessionSummaryUpdate {
-    const entries = this.sessionManager.getEntries();
-    let firstMessage = "";
-    let messageCount = 0;
-    let updatedAt = this.sessionManager.getHeader()?.timestamp ?? new Date().toISOString();
-    for (const entry of entries) {
-      if (entry.type === "message") {
-        messageCount += 1;
-        if (!firstMessage && entry.message.role === "user") {
-          firstMessage = (typeof entry.message.content === "string"
-            ? entry.message.content
-            : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join(""))
-            .trim();
+    if (this.summaryContentDirty || !this.cachedSummaryContent) {
+      const entries = this.sessionManager.getEntries();
+      let firstMessage = "";
+      let messageCount = 0;
+      let updatedAt = this.sessionManager.getHeader()?.timestamp ?? new Date().toISOString();
+      for (const entry of entries) {
+        if (entry.type === "message") {
+          messageCount += 1;
+          if (!firstMessage && entry.message.role === "user") {
+            firstMessage = boundedSummaryText((typeof entry.message.content === "string"
+              ? entry.message.content
+              : entry.message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join(""))
+              .trim());
+          }
         }
+        updatedAt = entry.timestamp;
       }
-      updatedAt = entry.timestamp;
+      const rawName = this.sessionManager.getSessionName();
+      const name = rawName ? boundedSummaryText(rawName) : undefined;
+      this.cachedSummaryContent = {
+        ...(name ? { name } : {}),
+        updatedAt,
+        messageCount,
+        firstMessage,
+      };
+      this.summaryContentDirty = false;
     }
-    const name = this.sessionManager.getSessionName();
     return {
       sessionId: this.id,
       summaryRevision: 0,
       phase: this.effectivePhase,
-      ...(name ? { name } : {}),
-      updatedAt,
-      messageCount,
-      firstMessage,
+      ...this.cachedSummaryContent,
     };
   }
 
@@ -329,7 +357,6 @@ export class RuntimeSlot {
         void this.dependencies.markers.clear(this.id);
         this.hooks.settled(this.id);
         this.publishSnapshot();
-        this.hooks.changed(this.id);
         break;
       case "compaction_start":
         this.phase = "compacting";
@@ -482,6 +509,7 @@ export class RuntimeSlot {
         this.emit("session.bashProgress", safeJson(event));
         break;
       case "entry_appended":
+        this.summaryContentDirty = true;
         if (event.entry.type === "message" && event.entry.message.role === "toolResult") {
           // The canonical result now owns presentation. Keeping the same payload
           // in the live overlay for the rest of a long run duplicates output and
@@ -500,6 +528,7 @@ export class RuntimeSlot {
         this.scheduleSnapshot();
         break;
       case "session_info_changed":
+        this.summaryContentDirty = true;
         this.scheduleSnapshot();
         this.hooks.changed(this.id);
         break;
@@ -805,6 +834,7 @@ export class RuntimeSlot {
     await this.lane.run(() => {
       this.assertUsable();
       this.runtime.session.setSessionName(name);
+      this.summaryContentDirty = true;
       this.revision += 1;
       this.publishSnapshot();
       this.hooks.changed(this.id);
@@ -816,6 +846,7 @@ export class RuntimeSlot {
       this.assertIdle();
       if (!this.sessionManager.getEntry(entryId)) throw new GatewayError("not_found", "Session entry was not found");
       this.sessionManager.appendLabelChange(entryId, label?.trim() || undefined);
+      this.summaryContentDirty = true;
       this.revision += 1;
       this.emit("session.structureChanged", { branchChanged: false });
       this.publishSnapshot();
@@ -830,6 +861,7 @@ export class RuntimeSlot {
       if (result.cancelled) throw new GatewayError("cancelled", "Fork was cancelled by an extension");
       const next = this.id;
       if (previous !== next) this.hooks.rekey(previous, next, this);
+      this.summaryContentDirty = true;
       this.revision += 1;
       this.emit("session.structureChanged", { branchChanged: true });
       this.publishSnapshot();
@@ -852,6 +884,7 @@ export class RuntimeSlot {
       });
       this.operation = undefined;
       if (result.cancelled) throw new GatewayError("cancelled", "Tree navigation was cancelled by an extension");
+      this.summaryContentDirty = true;
       this.revision += 1;
       this.emit("session.structureChanged", { branchChanged: true });
       this.publishSnapshot();
@@ -987,6 +1020,7 @@ export class RuntimeSlot {
       this.assertIdle();
       const result = await this.runtime.importFromJsonl(path, cwdOverride);
       if (result.cancelled) throw new GatewayError("cancelled", "Session import was cancelled by an extension");
+      this.summaryContentDirty = true;
       this.revision += 1;
       this.publishSnapshot();
       this.hooks.changed(this.id);

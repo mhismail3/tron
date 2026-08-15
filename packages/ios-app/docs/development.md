@@ -77,8 +77,13 @@ owned connection continuation rather than a stranded transitioning/connecting st
 `AppModelReconnectTests` injects
 an ordered unit-interval source and records `ManualClock` sleeps to prove the nominal
 2/3.4/5.78/9.826/15-second progression, bounded effective delay, foreground acceleration,
-delay cancellation, single-attempt ownership, and foreground reconciliation slot release on every
-exit. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
+delay cancellation, single-attempt ownership, foreground reconciliation slot release on every
+exit, and that a selected profile without a credential remains actionable `.unpaired` instead of
+entering a reconnect loop. `AppModelCatalogSyncTests` owns scripted request barriers for known-summary
+zero-read updates, unknown discovery, shared single-flight traversal, dirty follow-up, silent mixed-revision
+recovery, page/item/identity bounds, typed retained/transport outcomes, background/foreground convergence,
+and responsive-socket preservation. `DashboardStateOwnerTests` separately owns synchronous
+cached/stale/live activity and ID-index integrity. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
 waits on a scripted orchestration barrier must run inside `withTestWatchdog`; never add an unbounded
 wait or a clock that collapses liveness sleeps into a hot loop. Test-owned unstructured tasks
 must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
@@ -107,7 +112,10 @@ Performance intervals use `SystemPerformanceSignposts`; tests inject
 closed result code and nonnegative item/byte counts. Never add identifiers, paths,
 methods, filenames, model names, prompts, transcript content, or other strings.
 Gateway and cache interval contracts are owned by `GatewayClientTransportTests`
-and `SnapshotCacheTests`. `AppModelPerformanceSignpostTests` drives raw Gateway
+and `SnapshotCacheTests`. Gateway `session.list` materialization, authenticated cursor expiry/scope/client
+binding, per-client/global count and byte limits, disconnect cleanup, one-scan traversal, and summary/catalog
+revision atomicity are owned by `session-list-pagination.test.ts` and
+`runtime-registry.integration.test.ts`. `AppModelPerformanceSignpostTests` drives raw Gateway
 frames through visible open, synchronization/resynchronization, uncertain receipt,
 and terminal replay boundaries. `AppModelTerminalLifecycleTests` own presentation
 revocation, stale-attach compensation, out-of-order reset rejection, pending-event quarantine,
@@ -294,7 +302,9 @@ catch-up dismissal for geometry-first manual return to the tail, pinned keyboard
 following, one follow command per frame, no writes for detached layout/stream/keyboard
 settlement, viewport geometry-first expansion detachment, frame-separated catch-up with unread admission
 through every interruption stage, Reduce Motion, exact reset/release command admission,
-repeat-prepend ownership, post-install layout-epoch rejection, unchanged-frame epoch
+exact-installed-tail opening settlement, transient-boundary rejection, auxiliary-row rejection, both
+geometry/frame callback orders, empty/undersized top alignment, pre-settlement user cancellation,
+stale-presentation rejection, repeat-prepend ownership, post-install layout-epoch rejection, unchanged-frame epoch
 callbacks, and exact semantic remeasurement with at most one late correction and no
 frame retry or total-height polling. Hosted controls drive the production
 coordinator/executor; new evidence is bounded aggregate callback/command/frame and
@@ -395,7 +405,27 @@ between the simulator and physical hardware. Chat checkpoints must also verify
 trailing alignment for user turns, historical transcript/tool insertion motion,
 the Settings gear in the chat toolbar, the context ring at the trailing edge of
 an empty idle composer, the compact runtime working row without any composer-structure
-change, and emerald toolbar/sheet actions. Terminal checkpoints must exercise
+change, and emerald toolbar/sheet actions. Tool-detail checkpoints open read, edit,
+bash, and one unknown/extension call at the medium detent: verify the compact status/metadata chips,
+secondary-plus-accent path, faithful single-change diff glance, word-preserving wrapped bash commands in
+the smaller code size, high-signal generic summary, and larger live result are visible before
+protocol fields. A bounded command must not add an amber completeness row to the primary sheet. Pull one single-change sheet to large
+and confirm its full bounded diff appears in place; separately verify multiple edits, extra header-only/binary
+files, header-light multi-file patches, and malformed or combined patch hunks show only the focused Changes
+row and dedicated Changes sub-sheet. At an Accessibility Dynamic Type size, confirm every status, metadata,
+and activity chip hugs its intrinsic content instead of stretching across an available row; when content is wider
+than the sheet, it remains within the sheet and wraps to at most two lines in the original VoiceOver order.
+Open a running single-tool detail before a second tool joins its run and verify the original sheet and detent stay
+mounted while its fields settle from the newest matching call ID. Exercise one pathological command/output and confirm the
+primary preview wraps, explicitly marks omissions, and leaves the complete projected value in the final
+Technical details sheet. With VoiceOver enabled, verify pathological path/glob metadata speaks only the concise
+preview plus the Technical details disclosure. Verify compact selectable execution metadata remains first and
+records bounded-command completeness, followed by direct Request JSON then Result JSON; verify response-first,
+content-only string, distinct-fallback, request-only, and missing-result cases without a readable-output duplicate,
+structured field cards, third fallback section, or raw JSON expand/collapse control.
+Verify live updates and true-only truncation metadata without moving the primary sheet's reading position. With
+a nonempty focused composer, open the native attachment menu, verify the keyboard remains visible, and activate
+camera, photos, and files on the first option tap; the 40-point plus control and native menu appearance/order must remain unchanged. Terminal checkpoints must exercise
 the native keyboard plus the floating shortcut and command-key surfaces rather
 than validating only PTY output.
 

@@ -19,21 +19,24 @@ struct TranscriptRow: View, Equatable {
                     title: "bash",
                     subtitle: item.cancelled == true ? "Cancelled" : "Exit \(item.exitCode.map(String.init) ?? "—")",
                     content: item.output ?? "",
-                    request: .object(["command": .string(item.command ?? "")])
+                    request: .object(["command": .string(item.command ?? "")]),
+                    outputTruncated: item.truncated == true
                 )
             case .customMessage:
                 ToolCard(
                     title: item.customType ?? "Extension",
                     subtitle: "Extension message",
-                    content: item.text.isEmpty ? item.details?.prettyPrinted ?? "" : item.text,
-                    response: item.details
+                    content: item.text,
+                    response: item.details,
+                    fallbackContent: item.text.isEmpty ? item.details : nil
                 )
             case .customEntry:
                 ToolCard(
                     title: item.customType ?? "Extension state",
                     subtitle: "Extension state",
-                    content: item.customData?.prettyPrinted ?? "",
-                    response: item.customData
+                    content: "",
+                    response: item.customData,
+                    fallbackContent: item.customData
                 )
             case .compaction:
                 SummaryNotice(
@@ -74,9 +77,10 @@ struct TranscriptRow: View, Equatable {
             ToolCard(
                 title: item.toolName ?? "Tool result",
                 subtitle: item.isError == true ? "Failed" : "Completed",
-                content: item.text.isEmpty ? item.details?.prettyPrinted ?? "" : item.text,
+                content: item.text,
                 error: item.isError == true,
-                response: item.details
+                response: item.details,
+                fallbackContent: item.text.isEmpty ? item.details : nil
             )
         } else {
             VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 4) {
@@ -115,17 +119,19 @@ struct TranscriptRow: View, Equatable {
                                     ToolCard(
                                         title: part.name ?? result.toolName ?? "Tool",
                                         subtitle: result.isError == true ? "Failed" : "Completed",
-                                        content: result.text.isEmpty ? result.details?.prettyPrinted ?? "" : result.text,
+                                        content: result.text,
                                         error: result.isError == true,
                                         request: part.arguments,
-                                        response: result.details
+                                        response: result.details,
+                                        fallbackContent: result.text.isEmpty ? result.details : nil
                                     )
                                 } else {
                                     ToolCard(
                                         title: part.name ?? "Tool",
                                         subtitle: "Invocation",
-                                        content: part.arguments?.prettyPrinted ?? "",
-                                        request: part.arguments
+                                        content: "",
+                                        request: part.arguments,
+                                        fallbackContent: part.arguments
                                     )
                                 }
                             }
@@ -347,8 +353,11 @@ struct ToolCard: View {
     var request: JSONValue? = nil
     var response: JSONValue? = nil
     var fallbackContent: JSONValue? = nil
+    var outputTruncated = false
     var timing: ChatToolPresentation? = nil
-    @State private var detailPresentation: ToolDetailPresentation?
+    var onOpenDetails: ((String) -> Void)? = nil
+    @State private var detailPresentation: ToolDetailRoute?
+    @State private var detailDetent: PresentationDetent = .medium
 
     init(
         title: String,
@@ -358,7 +367,9 @@ struct ToolCard: View {
         request: JSONValue? = nil,
         response: JSONValue? = nil,
         fallbackContent: JSONValue? = nil,
-        timing: ChatToolPresentation? = nil
+        outputTruncated: Bool = false,
+        timing: ChatToolPresentation? = nil,
+        onOpenDetails: ((String) -> Void)? = nil
     ) {
         self.title = title
         self.subtitle = subtitle
@@ -367,10 +378,12 @@ struct ToolCard: View {
         self.request = request
         self.response = response
         self.fallbackContent = fallbackContent
+        self.outputTruncated = outputTruncated
         self.timing = timing
+        self.onOpenDetails = onOpenDetails
     }
 
-    init(data: ChatToolPresentation) {
+    init(data: ChatToolPresentation, onOpenDetails: ((String) -> Void)? = nil) {
         self.init(
             title: data.title,
             subtitle: data.subtitle,
@@ -379,12 +392,21 @@ struct ToolCard: View {
             request: data.request,
             response: data.response,
             fallbackContent: data.fallbackContent,
-            timing: data
+            outputTruncated: data.outputTruncated,
+            timing: data,
+            onOpenDetails: onOpenDetails
         )
     }
 
     var body: some View {
-        Button { detailPresentation = ToolDetailPresentation() } label: {
+        Button {
+            if let onOpenDetails {
+                onOpenDetails(detailTool.id)
+            } else {
+                detailDetent = .medium
+                detailPresentation = ToolDetailRoute(toolID: detailTool.id)
+            }
+        } label: {
             HStack(spacing: 7) {
                 if subtitle == "Running" {
                     ProgressView().controlSize(.small).tint(accent).frame(width: 18, height: 18)
@@ -413,113 +435,30 @@ struct ToolCard: View {
         .accessibilityValue(title)
         .contentTransition(.opacity)
         .animation(.spring(response: 0.28, dampingFraction: 0.86), value: subtitle)
-        .sheet(item: $detailPresentation) { _ in
-            NavigationStack {
-                ScrollView {
-                    toolDetailContent
-                        .padding(.horizontal, 16)
-                        .padding(.top, 4)
-                        .padding(.bottom, 18)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-                .defaultScrollAnchor(.top, for: .initialOffset)
-                .defaultScrollAnchor(.top, for: .alignment)
-                .defaultScrollAnchor(.top, for: .sizeChanges)
-                .tronScrollEdgeChrome()
-                .navigationTitle("")
-                .toolbar {
-                    ToolbarItem(placement: .principal) { TronSheetTitle(title: displayTitle, accent: accent) }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { detailPresentation = nil } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
-                        }
-                        .accessibilityLabel("Done")
-                    }
-                }
-            }
-            .tronTopBlur(.sheet)
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
-            .tronPresentation()
-        }
+        .toolDetailSheet(
+            route: $detailPresentation,
+            detent: $detailDetent,
+            tool: detailPresentation?.resolve(in: [detailTool])
+        )
     }
 
-    private var toolDetailContent: some View {
-        let detailContent = resolvedContent
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: icon).foregroundStyle(accent)
-                Text(subtitle)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                if subtitle == "Running" { ProgressView().controlSize(.small).tint(accent) }
-                Spacer()
-                if let timing {
-                    ToolElapsedText(tool: timing, color: Color.tronTextSecondary)
-                }
-            }
-            .padding(.horizontal, 12)
-            .frame(minHeight: 44)
-            .tronGlassSurface(accent: accent, tintOpacity: 0.08)
-            if let timing, timing.isRunning {
-                ToolActivityAgeText(tool: timing, color: Color.tronTextMuted)
-            }
-            if let request { toolPayloadBlock("Request", value: request) }
-            if !detailContent.isEmpty, detailContent != response?.prettyPrinted {
-                textPayloadSection(detailContent)
-            }
-            if let response {
-                toolPayloadBlock(subtitle == "Running" ? "Current result" : "Response", value: response)
-            } else if detailContent.isEmpty, request == nil {
-                TronSettingsGroup("Details", accent: accent) {
-                    TronSettingsRow(
-                        icon: icon,
-                        title: "No additional details",
-                        subtitle: "The tool completed without displayable output.",
-                        accent: accent
-                    )
-                }
-            }
-        }
-    }
-
-    private func toolPayloadBlock(_ title: String, value: JSONValue) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title.uppercased())
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(Color.tronTextMuted)
-            TronStructuredJSONView(value: value, title: title, accent: accent)
-        }
-    }
-
-    private func textPayloadSection(_ content: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(subtitle == "Running" ? "LIVE OUTPUT" : displayTitle == "Run command" ? "RESPONSE" : "DETAILS")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                .foregroundStyle(Color.tronTextMuted)
-            if displayTitle == "Run command" {
-                ScrollView(.horizontal, showsIndicators: true) {
-                    Text(content)
-                        .font(TronTypography.codeContent)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .textSelection(.enabled)
-                        .padding(14)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-                .tronGlassSurface(accent: accent, tintOpacity: 0.08)
-            } else {
-                TronMarkdownView(text: content, streaming: subtitle == "Running")
-                    .padding(14)
-                    .tronGlassSurface(accent: accent, tintOpacity: 0.08)
-            }
-        }
-    }
-
-    private var resolvedContent: String {
-        if !content.isEmpty { return content }
-        return fallbackContent?.prettyPrinted ?? ""
+    private var detailTool: ChatToolPresentation {
+        ChatToolPresentation(
+            id: timing?.id ?? "",
+            title: title,
+            subtitle: subtitle,
+            request: request,
+            response: response,
+            content: content,
+            fallbackContent: fallbackContent,
+            error: error,
+            startedAt: timing?.startedAt,
+            completedAt: timing?.completedAt,
+            durationMs: timing?.durationMs,
+            lastProgressAt: timing?.lastProgressAt,
+            progressSequence: timing?.progressSequence,
+            outputTruncated: timing?.outputTruncated ?? outputTruncated
+        )
     }
 
     private var accessibilityLabel: String {
@@ -528,42 +467,33 @@ struct ToolCard: View {
     }
     private var accent: Color { error ? .tronError : .tronAccentText }
     private var surfaceAccent: Color { error ? .tronError : subtitle == "Running" ? .tronAmber : .tronEmerald }
-    private var displayTitle: String {
-        switch title.lowercased() {
-        case "read": "Read file"
-        case "write": "Write file"
-        case "edit": "Edit file"
-        case "bash": "Run command"
-        case "grep": "Search text"
-        case "find": "Find files"
-        case "ls": "List files"
-        default: title
-        }
-    }
+    private var displayTitle: String { ToolDetailPresentation.displayTitle(for: title) }
     private var icon: String {
-        if error { return "exclamationmark.triangle.fill" }
-        return switch title.lowercased() {
-        case "read": "doc.text"
-        case "write": "square.and.pencil"
-        case "edit": "pencil.and.outline"
-        case "bash": "terminal"
-        case "grep": "text.magnifyingglass"
-        case "find": "doc.text.magnifyingglass"
-        case "ls": "folder"
-        default: "wrench.and.screwdriver"
-        }
+        error ? "exclamationmark.triangle.fill" : ToolDetailPresentation.icon(for: title)
     }
 }
 
 struct ToolRunView: View {
     let run: ChatToolRunPresentation
+    @State private var detailRoute: ToolDetailRoute?
+    @State private var detailDetent: PresentationDetent = .medium
 
-    @ViewBuilder var body: some View {
-        if let tool = run.tools.first, run.tools.count == 1 {
-            ToolCard(data: tool)
-        } else {
-            ToolRunChip(run: run)
+    var body: some View {
+        Group {
+            if let tool = run.tools.first, run.tools.count == 1 {
+                ToolCard(data: tool) { toolID in
+                    detailDetent = .medium
+                    detailRoute = ToolDetailRoute(toolID: toolID)
+                }
+            } else {
+                ToolRunChip(run: run)
+            }
         }
+        .toolDetailSheet(
+            route: $detailRoute,
+            detent: $detailDetent,
+            tool: detailRoute?.resolve(in: run.tools)
+        )
     }
 }
 
@@ -623,7 +553,7 @@ private struct ToolRunChip: View {
                 .defaultScrollAnchor(.top, for: .alignment)
                 .defaultScrollAnchor(.top, for: .sizeChanges)
                 .tronScrollEdgeChrome()
-                .navigationTitle("")
+                .tronToolDetailNavigationChrome()
                 .toolbar {
                     ToolbarItem(placement: .principal) {
                         TronSheetTitle(title: run.title, accent: surfaceAccent)
@@ -678,35 +608,6 @@ private struct ToolElapsedText: View {
     }
 }
 
-private struct ToolActivityAgeText: View {
-    let tool: ChatToolPresentation
-    let color: Color
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            if let update = ToolTiming.date(tool.lastProgressAt),
-               let start = ToolTiming.date(tool.startedAt) {
-                let age = max(0, Int(context.date.timeIntervalSince(update)))
-                let label = update <= start && age > 1
-                    ? "No additional runtime output yet · \(ageLabel(age))"
-                    : "Last runtime update \(ageLabel(age))"
-                Text(label)
-                    .font(TronFont.mono(10, weight: .medium))
-                    .foregroundStyle(color)
-                    .monospacedDigit()
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityLabel(label)
-            }
-        }
-    }
-
-    private func ageLabel(_ seconds: Int) -> String {
-        if seconds < 2 { return "just now" }
-        if seconds < 60 { return "\(seconds)s ago" }
-        return "\(seconds / 60)m \(seconds % 60)s ago"
-    }
-}
-
 private struct ToolRunElapsedText: View {
     let run: ChatToolRunPresentation
     let color: Color
@@ -732,8 +633,64 @@ private struct ToolRunElapsedText: View {
     }
 }
 
-private struct ToolDetailPresentation: Identifiable {
-    let id = UUID()
+struct ToolDetailRoute: Identifiable, Hashable {
+    let toolID: String
+    var id: String { toolID }
+
+    func resolve(in tools: [ChatToolPresentation]) -> ChatToolPresentation? {
+        tools.first { $0.id == toolID }
+    }
+}
+
+private struct ToolDetailSheetHost: ViewModifier {
+    @Binding var route: ToolDetailRoute?
+    @Binding var detent: PresentationDetent
+    let tool: ChatToolPresentation?
+
+    func body(content: Content) -> some View {
+        content.sheet(item: $route) { _ in
+            if let tool {
+                let accent: Color = tool.error ? .tronError : .tronEmerald
+                NavigationStack {
+                    ToolDetailSheet(
+                        tool: tool,
+                        density: detent == .large ? .expanded : .glance
+                    )
+                    .tronToolDetailNavigationChrome()
+                    .toolbar {
+                        ToolbarItem(placement: .principal) {
+                            TronSheetTitle(
+                                title: ToolDetailPresentation.displayTitle(for: tool.title),
+                                accent: accent
+                            )
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button { route = nil } label: {
+                                Image(systemName: "checkmark")
+                                    .font(TronTypography.buttonSM)
+                                    .foregroundStyle(Color.tronEmerald)
+                            }
+                            .accessibilityLabel("Done")
+                        }
+                    }
+                }
+                .tronTopBlur(.sheet)
+                .presentationDetents([.medium, .large], selection: $detent)
+                .presentationDragIndicator(.hidden)
+                .tronPresentation()
+            }
+        }
+    }
+}
+
+private extension View {
+    func toolDetailSheet(
+        route: Binding<ToolDetailRoute?>,
+        detent: Binding<PresentationDetent>,
+        tool: ChatToolPresentation?
+    ) -> some View {
+        modifier(ToolDetailSheetHost(route: route, detent: detent, tool: tool))
+    }
 }
 
 private struct SummaryNotice: View {

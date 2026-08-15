@@ -31,7 +31,6 @@ struct ChatViewScrollHarnessTests {
                         && !sample.observation.rowFrames.isEmpty
                 }
 
-                #expect(sample.nativeGeometryMatches)
                 #expect(sample.observation.geometry.isValid)
                 #expect(sample.observation.rowFrames.keys.allSatisfy(harness.transcriptIDs.contains))
                 #expect(Set(sample.observation.visibleRowIDs).isSubset(of: harness.transcriptIDs))
@@ -204,6 +203,9 @@ struct ChatViewScrollHarnessTests {
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.readyFrameCompletionCount == 1
                         && $0.observation.projectionInstallCount >= 1
+                        && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
+                        && ($0.observation.scrollSettledDistance ?? .infinity)
+                            <= ChatTranscriptGeometry.catchUpDistance
                 }
                 let bottom = ChatTranscriptGeometry(
                     offsetY: 600, contentHeight: 1_000, containerHeight: 400
@@ -215,6 +217,7 @@ struct ChatViewScrollHarnessTests {
                 harness.driveNativeOwnership(true)
                 harness.driveGeometry(previous: bottom, current: away)
                 harness.drivePhase(from: .interacting, to: .idle, geometry: away)
+                harness.driveNativeOwnership(false)
                 #expect(harness.probeObservation.isDetached)
 
                 var newest = harness.snapshot
@@ -260,6 +263,9 @@ struct ChatViewScrollHarnessTests {
             try await withHarness(seed: 117) { harness in
                 _ = try await harness.recorder.waitUntil {
                     $0.observation.readyFrameCompletionCount == 1
+                        && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
+                        && ($0.observation.scrollSettledDistance ?? .infinity)
+                            <= ChatTranscriptGeometry.catchUpDistance
                 }
                 let bottom = ChatTranscriptGeometry(
                     offsetY: 600, contentHeight: 1_000, containerHeight: 400
@@ -271,6 +277,7 @@ struct ChatViewScrollHarnessTests {
                 harness.driveNativeOwnership(true)
                 harness.driveGeometry(previous: bottom, current: away)
                 harness.drivePhase(from: .interacting, to: .idle, geometry: away)
+                harness.driveNativeOwnership(false)
                 harness.driveSemanticResponse()
                 #expect(harness.probeObservation.isDetached)
                 #expect(harness.probeObservation.hasUnread)

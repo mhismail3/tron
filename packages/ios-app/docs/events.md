@@ -16,11 +16,16 @@ bounded authoritative retry path.
 `AppModel.handle(_:)` owns cross-domain routing; `SessionPresentationStore` exclusively
 admits and reduces mounted-session topics:
 
-- `session.summary` enters `SessionCatalogCoordinator`'s monotonic phase/name/count
-  projection, so runs started by terminal or another mobile client update dashboard
-  rows without subscribing every device to every transcript. Unknown summaries request
-  discovery without fabricating a row; paginated list refreshes carry typed latest-load
-  admission and one revision, restarting rather than installing mixed or stale pages;
+- `session.summary` enters `SessionCatalogCoordinator`'s ID-indexed monotonic
+  phase/name/count projection, so runs started by terminal or another mobile client update
+  known dashboard rows synchronously without subscribing every device to every transcript or
+  issuing a list request. A summary makes only that row live before full catalog completion;
+  unknown summaries request discovery without fabricating a row. `session.listChanged` marks
+  the shared traversal dirty instead of cancel/restarting it. User-scoped 500-row pagination
+  has exact page/item/identity/cursor bounds and publishes atomically. Mixed page revisions
+  and expired continuation leases restart once from a nil cursor and then retain the previous catalog silently; this expected
+  optimistic invalidation no longer creates the intrusive “Sessions changed while loading the
+  dashboard” popup or another routine synchronization alert;
 - session snapshot/change topics enter the store's composed synchronization quarantine and
   update only the currently subscribed mounted or synchronizing authority. Baseline plus the
   contiguous suffix reduce before snapshot/token publication in one MainActor turn. Full snapshots
@@ -42,9 +47,15 @@ admits and reduces mounted-session topics:
   identity from invocation through completion so final assistant text cannot jump
   ahead of or reinsert it. Only consecutive tool calls consolidate; thinking or
   other canonical content flushes the group and remains in exact transcript order.
-  Every chip has a locally ticking elapsed clock; its detail
-  sheet shows the bounded readable live-output tail, current structured result, and
-  age of the most recent runtime update. Exact current-runtime durations are used
+  Every chip has a locally ticking elapsed clock. Its open detail sheet continues to
+  consume the newest immutable call presentation, showing status, the bounded readable
+  live-output tail, explicit output-truncation state only when the runtime flag or
+  structured truncation contract says `truncated: true`, and the age of the most recent
+  runtime update without automatic scrolling. Known built-ins derive only a semantic
+  primary summary from exact request/result keys; compact protocol identifiers, timing,
+  and progress remain first in Technical details, followed directly by complete Request JSON
+  and Result JSON in that order. Result JSON prefers the response, then content-only output,
+  then only a fallback distinct from Request. Exact current-runtime durations are used
   when available; older canonical history derives only an observed call-to-result
   interval because Pi JSONL does not persist tool execution timing;
 - structure/context/resource invalidations reload an already-presented History,
@@ -66,8 +77,10 @@ admits and reduces mounted-session topics:
 A newly navigated chat opens exactly once and replaces any disposable cached or
 previously expanded projection with a fresh bounded authoritative latest tail.
 It enters the visible event-rendering state as soon as the authoritative two-phase
-handshake completes. Native scroll positioning remains best-effort and never gates
-readiness because physical SwiftUI can coalesce geometry callbacks. The composer
+handshake completes. Readiness does not wait on native scroll positioning, but final opening-tail
+placement is armed with the exact installed timeline-tail rendered ID. It ignores auxiliary rows and
+transient boundary geometry until that expected current-layout row and correlated viewport evidence prove
+the lazy transcript is materialized; direct user interaction cancels that arm. The composer
 remains visible throughout opening, while sending stays disabled until readiness.
 Session subscription ownership is token-scoped end to end. The open response remains
 provisional until sync acknowledgement and exact route-intent revalidation; baseline plus its
@@ -90,9 +103,12 @@ client also normalizes the impossible legacy combination of an idle phase and re
 overlay to an interrupted chip; it does not expose a fake Stop action for extension-owned detached
 work. Current Gateways project that background work separately through extension UI state. Tron
 does not mount the retired `pi-subagents` async/fleet editor widgets; the run continues on the Mac
-and the app catches up without presenting transport errors as modal alerts. Foreground activation
-coalesces to one responsiveness/list/session reconciliation and releases its owned slot on success,
-failure, cancellation, or lifecycle replacement. Switch, forget, current-device revoke, and final
+and the app catches up without presenting transport errors as modal alerts. Backgrounding gates and
+cancels only disposable catalog/foreground reconciliation, never the route, accepted work, or responsive
+socket. Foreground activation coalesces to one responsiveness pass, then runs catalog convergence,
+mounted-session restoration, and terminal reattachment concurrently; catalog retention or failure alone
+does not replace a responsive socket. The owned foreground slot releases on success, failure,
+cancellation, or lifecycle replacement. Switch, forget, current-device revoke, and final
 teardown invalidate that reconciliation, reconnect/debounce tasks, profile-scoped reads, and
 presentation intake before entering the serial retire/close chain; a late old-profile completion is
 discarded and no newer handshake can start ahead of an older close. Possibly-sent mutation

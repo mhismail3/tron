@@ -69,6 +69,7 @@ final class ChatHostedProbe {
     private var prependPageContinuation: CheckedContinuation<Void, Error>?
     private var isReady = false
     private(set) var revision = 0
+    private(set) var usesDrivenScrollAuthority = false
 
     var observation: ChatHostedObservation {
         let visibleRowIDs = rowFrames
@@ -187,6 +188,7 @@ final class ChatHostedProbe {
         current: ChatTranscriptGeometry,
         viewport: Bool = false
     ) {
+        usesDrivenScrollAuthority = true
         controlEventCount &+= 1
         geometryControl?(previous, current, viewport)
         refreshControlledState()
@@ -194,6 +196,7 @@ final class ChatHostedProbe {
     }
 
     func drivePhase(from: ScrollPhase, to: ScrollPhase, geometry: ChatTranscriptGeometry?) {
+        usesDrivenScrollAuthority = true
         controlEventCount &+= 1
         phaseControl?(from, to, geometry)
         refreshControlledState()
@@ -201,6 +204,7 @@ final class ChatHostedProbe {
     }
 
     func driveNativeOwnership(_ owned: Bool) {
+        usesDrivenScrollAuthority = true
         controlEventCount &+= 1
         nativeControl?(owned)
         refreshControlledState()

@@ -91,15 +91,6 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         URL(fileURLWithPath: cwd).lastPathComponent.isEmpty ? cwd : URL(fileURLWithPath: cwd).lastPathComponent
     }
 
-    var safeCachedProjection: SessionSummary {
-        guard phase.isActive else { return self }
-        return SessionSummary(
-            id: id, name: name, cwd: cwd, kind: kind, parentSessionId: parentSessionId,
-            createdAt: createdAt, updatedAt: updatedAt, messageCount: messageCount,
-            firstMessage: firstMessage, phase: .interrupted, summaryRevision: summaryRevision
-        )
-    }
-
     func relativeActivityDescription(relativeTo now: Date = .now) -> String {
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

@@ -26,7 +26,6 @@ struct GatewaySessionOpenResponse: Decodable {
 
 @MainActor
 protocol SessionPresentationStoreDelegate: AnyObject {
-    func sessionPresentationStoreDidUpdateSummary(_ snapshot: SessionSnapshot)
     func sessionPresentationStoreDidRequestCatalogRefresh()
     func sessionPresentationStoreDidPublishEditorRequest(
         target: SessionPresentationIdentity,
@@ -703,7 +702,6 @@ final class SessionPresentationStore {
             authoritativeTailSnapshot = installedTail
             if case .freshPresentation = mode { hasLoadedTranscriptHistory = false }
             advanceChatProjection(canonical: true)
-            delegate?.sessionPresentationStoreDidUpdateSummary(installed)
             switch lease.intent {
             case .presentation:
                 deferredEffectsByTarget[installedTarget, default: []].append(contentsOf: replayEffects)
@@ -1000,7 +998,6 @@ final class SessionPresentationStore {
                 hasLoadedTranscriptHistory = false
             }
             advanceChatProjection(canonical: true)
-            delegate?.sessionPresentationStoreDidUpdateSummary(installed)
             if installed.transcriptStart == incoming.transcriptStart,
                installed.transcript.count == incoming.transcript.count {
                 delegate?.sessionPresentationStoreCheckpointCache()

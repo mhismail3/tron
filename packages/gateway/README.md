@@ -102,9 +102,15 @@ canonical per-workspace directories under `agentDir/sessions`, remain authoritat
 not move or mirror those files. `session.list` defaults to user sessions, while `scope: "all"`
 additively includes extension-owned children classified from nested canonical storage or their
 durable `subagent-*` session metadata. Ordinary user forks remain user sessions. Every
-session-list page carries
-the same registry revision; clients restart pagination if summaries change between
-pages instead of installing a torn dashboard. `session.open` carries a
+session-list traversal is one immutable, disposable catalog materialization: every
+page carries the same structural `listRevision`, and its authenticated opaque cursor
+is bound to the connection, scope, materialization, offset, and revision. Traversal
+leases expire after 30 seconds, are released on disconnect, and are bounded by
+per-client lease quotas plus per-lease/global row and encoded-byte limits with LRU eviction. Runtime `session.summary` revisions remain independent, so activity heartbeats
+and ordinary row updates neither rescan nor tear catalog pagination; a later traversal
+observes newer canonical truth. Clients still fail closed and restart from a nil cursor
+when interoperating with an older Gateway that changes revisions between pages.
+`session.open` carries a
 byte-bounded authoritative transcript tail with `transcriptStart` and
 `transcriptTotal`; `session.transcript` pages backward through the same canonical
 Pi branch without enlarging the WebSocket frame limit. Snapshot tails and pages are

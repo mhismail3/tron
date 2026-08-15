@@ -82,6 +82,30 @@ struct SnapshotCacheTests {
         #expect(metrics.byteCount > 0)
     }
 
+    @Test("newest generation wins when checkpoint tasks arrive out of order")
+    func newestGenerationWins() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = SnapshotCache(root: root)
+        let newer = SessionSummary(
+            id: "session", name: "newer", cwd: "/workspace", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:02Z",
+            messageCount: 2, firstMessage: "newer", phase: .running, summaryRevision: 2
+        )
+        let older = SessionSummary(
+            id: "session", name: "older", cwd: "/workspace", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
+            messageCount: 1, firstMessage: "older", phase: .idle, summaryRevision: 1
+        )
+
+        await cache.save(profileID: "profile", generation: 2, sessions: [newer], snapshots: [])
+        await cache.save(profileID: "profile", generation: 1, sessions: [older], snapshots: [])
+
+        let loaded = await cache.load(profileID: "profile")
+        #expect(loaded.sessions.first?.name == "newer")
+        #expect(loaded.sessions.first?.summaryRevision == 2)
+    }
+
     @Test("records unwritable cache destinations as failed saves")
     func recordsFailedSave() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .notDirectory)

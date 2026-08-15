@@ -20,6 +20,7 @@ import type { GatewayLogger } from "./logger.js";
 import type { CommandReceiptStore } from "./command-receipts.js";
 import { safeJson } from "../sessions/projection.js";
 import { pageCatalog } from "./model-pagination.js";
+import { SessionListPaginationStore } from "./session-list-pagination.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
@@ -65,8 +66,13 @@ export interface GatewayServiceDependencies {
 
 export class GatewayService {
   private restartRequested = false;
+  private readonly sessionListPages = new SessionListPaginationStore();
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {}
+
+  releaseClient(clientID: string): void {
+    this.sessionListPages.releaseClient(clientID);
+  }
 
   info(): JsonValue {
     const { config } = this.dependencies;
@@ -143,17 +149,13 @@ export class GatewayService {
 
       case "session.list": {
         const scope = params.scope === undefined ? "user" : oneOf(params.scope, "scope", ["user", "all"] as const);
-        const { sessions, listRevision } = await this.dependencies.sessions.catalog(scope);
-        const rawCursor = optionalString(params.cursor, "cursor", 20);
-        const offset = rawCursor === undefined ? 0 : integer(Number(rawCursor), "cursor", 0, Number.MAX_SAFE_INTEGER);
+        const cursor = optionalString(params.cursor, "cursor", 96);
         const limit = params.limit === undefined ? 100 : integer(params.limit, "limit", 1, 500);
-        const page = sessions.slice(offset, offset + limit);
-        const nextOffset = offset + page.length;
-        return safeJson({
-          sessions: page,
-          listRevision,
-          ...(nextOffset < sessions.length ? { nextCursor: String(nextOffset) } : {}),
-        });
+        if (cursor !== undefined) {
+          return safeJson(this.sessionListPages.nextPage(client.id, scope, cursor, limit));
+        }
+        const catalog = await this.dependencies.sessions.catalog(scope);
+        return safeJson(this.sessionListPages.firstPage(client.id, scope, catalog, limit));
       }
       case "session.create": {
         const created = await this.mutation(client, method, params, async () => {
