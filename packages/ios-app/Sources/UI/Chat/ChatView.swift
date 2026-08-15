@@ -13,6 +13,11 @@ enum ChatAttachmentImportPolicy {
     static let maximumFileSelection = 10
 }
 
+struct ChatSemanticFrameObservation: Equatable {
+    let layoutEpoch: Int
+    let frame: CGRect
+}
+
 struct ChatView: View {
     let sessionID: String
     private let initialEditorText: String?
@@ -35,16 +40,12 @@ struct ChatView: View {
     @State private var showSettings = false
     @State private var openPresentation: ChatOpenPresentationState
     @State private var openingTask: Task<Void, Never>?
-    @State private var pagingOwner = ChatPagingOwner()
-    @State private var catchUpTask: Task<Void, Never>?
     @State private var modelPresentationGeneration: Int?
     @State private var composerTextHeight: CGFloat = 20
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
-    @State private var scrollCoordinator = ChatScrollCoordinator()
+    @State private var scrollCoordinator: ChatScrollCoordinator
     @State private var performanceTracker: ChatPerformanceTracker
-    @State private var visibleTranscriptRowIDs: [String] = []
     @State private var transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
-    @State private var transcriptGeometry = ChatTranscriptGeometry.zero
     @Namespace private var composerGlassNamespace
     // UITextView is the responder owner. This mirrors delegate callbacks for
     // placeholder/scroll presentation; SwiftUI FocusState must not compete with
@@ -67,6 +68,7 @@ struct ChatView: View {
         self.displayFrameScheduler = displayFrameScheduler
         self.performanceSignposts = performanceSignposts
         _composerScope = State(initialValue: nil)
+        _scrollCoordinator = State(initialValue: ChatScrollCoordinator(frameScheduler: displayFrameScheduler))
         _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
     }
@@ -84,6 +86,7 @@ struct ChatView: View {
         self.displayFrameScheduler = displayFrameScheduler
         self.performanceSignposts = performanceSignposts
         _composerScope = State(initialValue: nil)
+        _scrollCoordinator = State(initialValue: ChatScrollCoordinator(frameScheduler: displayFrameScheduler))
         _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
     }
@@ -178,9 +181,7 @@ struct ChatView: View {
             if let target = presentationTarget { model.revokePresentationIntake(target) }
             openingTask?.cancel()
             openingTask = nil
-            pagingOwner.cancel()
-            catchUpTask?.cancel()
-            catchUpTask = nil
+            scrollCoordinator.cancel()
             performanceTracker.cancelAll()
             cancelAttachmentPresentation(includingActive: true)
             if let generation = modelPresentationGeneration {
@@ -237,54 +238,36 @@ struct ChatView: View {
         .defaultScrollAnchor(.top, for: .alignment)
         .scrollPosition($transcriptScrollPosition)
         .tronScrollEdgeChrome()
-        .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.15) { ids in
-            visibleTranscriptRowIDs = ids.filter { $0 != "transcript-bottom" }
-            #if HOSTED_TEST
-            hostedProbe?.updateVisibleRowIDs(visibleTranscriptRowIDs)
-            #endif
-        }
         .onChange(of: transcriptScrollPosition.isPositionedByUser) { _, positionedByUser in
+            if positionedByUser { performanceTracker.discardScroll() }
             scrollCoordinator.scrollPositionChanged(isPositionedByUser: positionedByUser)
         }
         .onScrollGeometryChange(for: ChatTranscriptGeometry.self) { geometry in
             ChatTranscriptGeometry(geometry)
         } action: { previous, geometry in
-            transcriptGeometry = geometry
             #if HOSTED_TEST
             hostedProbe?.updateGeometry(geometry)
             #endif
             guard isTranscriptReady else { return }
-            let requestedFollow: Bool
             if geometry.hasViewportChange(from: previous) {
-                // Viewport ownership wins even when streaming growth lands in
-                // the same layout frame; treating that mixed sample as ordinary
-                // transcript growth races keyboard/composer positioning.
-                requestedFollow = scrollCoordinator.viewportChanged(previous: previous, current: geometry)
+                scrollCoordinator.viewportChanged(previous: previous, current: geometry)
             } else {
-                requestedFollow = scrollCoordinator.geometryChanged(previous: previous, current: geometry)
-            }
-            if requestedFollow {
-                scrollToTail(animated: false)
-            } else {
-                releaseSettledScrollBindingIfNeeded(geometry)
+                scrollCoordinator.geometryChanged(previous: previous, current: geometry)
             }
         }
         .onScrollPhaseChange { oldPhase, newPhase, context in
             if newPhase == .interacting || newPhase == .tracking || newPhase == .decelerating {
-                catchUpTask?.cancel()
-                catchUpTask = nil
                 performanceTracker.discardScroll()
             }
             let finalGeometry = ChatTranscriptGeometry(context.geometry)
-            if scrollCoordinator.scrollPhaseChanged(
+            scrollCoordinator.scrollPhaseChanged(
                 from: oldPhase,
                 to: newPhase,
                 finalGeometry: finalGeometry
-            ) {
-                scrollToTail(animated: false)
-            } else if newPhase == .idle {
-                releaseSettledScrollBindingIfNeeded(finalGeometry)
-            }
+            )
+        }
+        .onChange(of: scrollCoordinator.commandRevision) { _, _ in
+            executePendingScrollCommand()
         }
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: responseState, initial: true) { previous, current in
@@ -293,7 +276,7 @@ struct ChatView: View {
             if ChatUnreadResponsePolicy.shouldMarkUnread(
                 previous: previous,
                 current: current,
-                userScrolledAway: scrollCoordinator.userScrolledAway
+                userScrolledAway: scrollCoordinator.shouldTrackUnreadResponse
             ) {
                 scrollCoordinator.semanticResponseArrived()
             }
@@ -306,19 +289,27 @@ struct ChatView: View {
         id: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
+        let rowLayoutEpoch = scrollCoordinator.layoutEpoch
         let row = content()
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .id(id)
-        #if HOSTED_TEST
-        row.onGeometryChange(for: CGRect.self) { geometry in
-            geometry.frame(in: .scrollView(axis: .vertical))
-        } action: { frame in
-            hostedProbe?.updateRowFrame(id: id, frame: frame)
+        row.onGeometryChange(for: ChatSemanticFrameObservation.self) { geometry in
+            ChatSemanticFrameObservation(
+                layoutEpoch: rowLayoutEpoch,
+                frame: geometry.frame(in: .scrollView(axis: .vertical))
+            )
+        } action: { sample in
+            scrollCoordinator.semanticFrameChanged(
+                renderedID: id,
+                layoutEpoch: sample.layoutEpoch,
+                frame: sample.frame
+            )
+            #if HOSTED_TEST
+            hostedProbe?.updateRowFrame(id: id, frame: sample.frame)
+            hostedProbe?.recordMaximumSemanticExcursion(scrollCoordinator.maximumPrependSemanticExcursion)
+            #endif
         }
-        #else
-        row
-        #endif
     }
 
     private var selectedAuthoritativeSnapshot: SessionSnapshot? {
@@ -441,13 +432,10 @@ struct ChatView: View {
         }
         #endif
         openingTask?.cancel()
-        pagingOwner.cancel()
+        performanceTracker.discardScroll()
         modelPresentationGeneration = nil
-        scrollCoordinator.resetForPresentation()
         let epoch = openPresentation.begin()
-        transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
-        transcriptGeometry = .zero
-        visibleTranscriptRowIDs = []
+        scrollCoordinator.resetForPresentation(epoch)
         let task = Task { @MainActor in
             let interval = performanceSignposts.begin(.firstReadyFrame)
             do {
@@ -483,12 +471,10 @@ struct ChatView: View {
     #if HOSTED_TEST
     @MainActor
     private func beginHostedPresentation(probe: ChatHostedProbe) async {
-        scrollCoordinator.resetForPresentation()
+        performanceTracker.discardScroll()
         let epoch = openPresentation.begin()
+        scrollCoordinator.resetForPresentation(epoch)
         let interval = performanceSignposts.begin(.firstReadyFrame)
-        transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
-        transcriptGeometry = .zero
-        visibleTranscriptRowIDs = []
         guard selectedAuthoritativeSnapshot != nil,
               openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
             performanceSignposts.end(interval, result: .failure, metrics: .none)
@@ -499,9 +485,74 @@ struct ChatView: View {
             )
             return
         }
+        probe.installScrollControls(
+            geometry: { previous, current, viewport in
+                if viewport {
+                    scrollCoordinator.viewportChanged(previous: previous, current: current)
+                } else {
+                    scrollCoordinator.geometryChanged(previous: previous, current: current)
+                }
+            },
+            phase: { old, new, geometry in
+                scrollCoordinator.scrollPhaseChanged(from: old, to: new, finalGeometry: geometry)
+            },
+            native: { owned in
+                scrollCoordinator.scrollPositionChanged(isPositionedByUser: owned)
+            },
+            catchUp: { reduceMotion in
+                scrollCoordinator.requestCatchUp(reduceMotion: reduceMotion)
+            },
+            semanticResponse: {
+                scrollCoordinator.semanticResponseArrived()
+            },
+            frame: {
+                try await displayFrameScheduler.nextFrame()
+            },
+            state: {
+                ChatHostedScrollState(
+                    isDetached: scrollCoordinator.userScrolledAway,
+                    hasUnread: scrollCoordinator.hasUnreadContent,
+                    isWaitingForPrependSemanticFrame: scrollCoordinator.isWaitingForPrependSemanticFrame
+                )
+            },
+            prepend: {
+                guard let snapshot = model.authoritativeSnapshot(for: sessionID) else { return false }
+                let timeline = ChatTranscriptPresentation.timeline(
+                    in: snapshot,
+                    performanceSignposts: performanceSignposts
+                )
+                let anchor = scrollCoordinator.semanticAnchor(in: timeline)
+                return scrollCoordinator.beginPrepend(
+                    anchor: anchor,
+                    load: {
+                        do { try await probe.waitForPrependPageRelease() }
+                        catch { return nil }
+                        let installedLayout = scrollCoordinator.beginInstalledPageLayoutEpoch()
+                        guard let anchor,
+                              let current = model.authoritativeSnapshot(for: sessionID) else { return nil }
+                        let currentTimeline = ChatTranscriptPresentation.timeline(
+                            in: current,
+                            performanceSignposts: performanceSignposts
+                        )
+                        guard let renderedID = currentTimeline.renderedIDBySemanticID[anchor.semanticID] else {
+                            return nil
+                        }
+                        return ChatPrependPage(
+                            renderedAnchorID: renderedID,
+                            installedLayout: installedLayout
+                        )
+                    },
+                    completion: { probe.recordPrependCompletion($0) }
+                )
+            },
+            invalidatePresentation: {
+                scrollCoordinator.resetForPresentation()
+            }
+        )
         probe.markReady()
         positionLatestTail(epoch: epoch)
         _ = await completeFirstReadyFrame(interval, epoch: epoch)
+        probe.recordReadyFrameCompletion()
     }
     #endif
 
@@ -535,100 +586,54 @@ struct ChatView: View {
         guard !Task.isCancelled,
               openPresentation.epoch == epoch,
               openPresentation.phase == .ready else { return }
-        scrollCoordinator.beginOpeningBottomScroll()
-        performanceTracker.beginScrollCommand()
-        var transaction = Transaction()
-        transaction.disablesAnimations = true
-        withTransaction(transaction) {
-            transcriptScrollPosition.scrollTo(edge: .bottom)
-        }
+        scrollCoordinator.requestOpeningTail()
     }
 
     @MainActor
-    private func releaseSettledScrollBindingIfNeeded(_ geometry: ChatTranscriptGeometry) {
-        guard geometry.isAtCatchUpBoundary,
-              scrollCoordinator.canReleaseSettledScrollBinding else { return }
-        performanceTracker.settleScroll()
-        #if HOSTED_TEST
-        hostedProbe?.recordScrollSettle(distanceFromBottom: geometry.distanceFromBottom)
-        #endif
-        guard transcriptScrollPosition.isPositionedByUser
-                || transcriptScrollPosition.edge != nil
-                || transcriptScrollPosition.point != nil
-                || transcriptScrollPosition.viewID != nil else { return }
-        // ScrollPosition targets persist across safe-area changes. Once the
-        // requested/user movement has physically settled at the tail, clear the
-        // binding without moving the viewport so keyboard and composer layout
-        // cannot replay a stale edge target.
-        transcriptScrollPosition = ScrollPosition(idType: String.self)
-    }
-
-    @MainActor
-    private func scrollToTail(animated: Bool, force: Bool = false) {
-        guard scrollCoordinator.beginAutomaticBottomScroll(force: force) else { return }
+    private func executePendingScrollCommand() {
+        guard let command = scrollCoordinator.command else { return }
         performanceTracker.beginScrollCommand()
         let update = {
-            transcriptScrollPosition.scrollTo(edge: .bottom)
+            switch command.destination {
+            case .resetToBottom:
+                transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
+            case .tail:
+                transcriptScrollPosition.scrollTo(edge: .bottom)
+            case .offsetY(let offsetY):
+                transcriptScrollPosition.scrollTo(y: offsetY)
+            case .releaseBinding:
+                transcriptScrollPosition = ScrollPosition(idType: String.self)
+            }
         }
-        if animated && !reduceMotion {
-            withAnimation(.smooth(duration: 0.26), update)
-        } else {
+        switch command.animation {
+        case .disabled:
             var transaction = Transaction()
             transaction.disablesAnimations = true
             withTransaction(transaction, update)
+        case .smooth(let duration):
+            if reduceMotion {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction, update)
+            } else {
+                withAnimation(.smooth(duration: duration), update)
+            }
         }
-        if force { scrollCoordinator.clearUnreadAfterExplicitJump() }
+        if command.destination == .releaseBinding {
+            performanceTracker.settleScroll()
+            #if HOSTED_TEST
+            hostedProbe?.recordScrollSettle(distanceFromBottom: 0)
+            #endif
+        }
+        #if HOSTED_TEST
+        hostedProbe?.recordScrollCommand(isAutomatic: command.origin == .automaticFollow)
+        #endif
+        scrollCoordinator.commandApplied(command)
     }
 
     @MainActor
     private func catchUpToTail() {
-        catchUpTask?.cancel()
-        catchUpTask = nil
-        guard scrollCoordinator.beginAutomaticBottomScroll(force: true) else { return }
-        performanceTracker.beginScrollCommand()
-        // The tap is the durable follow decision, not the eventual animation
-        // callback. New streamed growth therefore remains pinned immediately.
-        scrollCoordinator.clearUnreadAfterExplicitJump()
-
-        if reduceMotion {
-            var transaction = Transaction()
-            transaction.disablesAnimations = true
-            withTransaction(transaction) {
-                transcriptScrollPosition.scrollTo(edge: .bottom)
-            }
-            return
-        }
-
-        let longDistanceThreshold = max(320, transcriptGeometry.containerHeight * 0.8)
-        guard transcriptGeometry.distanceFromBottom > longDistanceThreshold else {
-            withAnimation(.smooth(duration: 0.30)) {
-                transcriptScrollPosition.scrollTo(edge: .bottom)
-            }
-            return
-        }
-
-        // Do not animate through a long lazy transcript: jump invisibly to a
-        // small reveal distance, then animate only the final visible approach.
-        let revealDistance = min(140, max(80, transcriptGeometry.containerHeight * 0.18))
-        let bottomOffset = transcriptGeometry.contentHeight
-            + transcriptGeometry.bottomInset
-            - transcriptGeometry.containerHeight
-        var stagedPosition = transcriptScrollPosition
-        stagedPosition.scrollTo(y: max(0, bottomOffset - revealDistance))
-        var stagingTransaction = Transaction()
-        stagingTransaction.disablesAnimations = true
-        withTransaction(stagingTransaction) {
-            transcriptScrollPosition = stagedPosition
-        }
-
-        catchUpTask = Task { @MainActor in
-            await Task.yield()
-            guard !Task.isCancelled else { return }
-            withAnimation(.smooth(duration: 0.30)) {
-                transcriptScrollPosition.scrollTo(edge: .bottom)
-            }
-            catchUpTask = nil
-        }
+        scrollCoordinator.requestCatchUp(reduceMotion: reduceMotion)
     }
 
     private func earlierMessagesChip(snapshot: SessionSnapshot) -> some View {
@@ -636,96 +641,47 @@ struct ChatView: View {
             let sessionID = snapshot.sessionId
             let runtimeGeneration = snapshot.runtimeGeneration
             let previousStart = snapshot.transcriptStart ?? 0
-            let previousGeometry = transcriptGeometry
-            let visibleIDs = Set(visibleTranscriptRowIDs)
-            let anchorID = ChatTranscriptPresentation.timeline(
+            let timeline = ChatTranscriptPresentation.timeline(
                 in: snapshot,
                 performanceSignposts: performanceSignposts
-            ).ids.first(where: visibleIDs.contains)
-            let wasScrolledAway = scrollCoordinator.userScrolledAway
+            )
+            let anchor = scrollCoordinator.semanticAnchor(in: timeline)
             guard let presentationGeneration = modelPresentationGeneration else { return }
-            let currentPagingGeneration = pagingOwner.begin()
-            scrollCoordinator.beginPrependingHistory()
             let performanceGeneration = performanceTracker.beginPrepend()
-            let task = Task { @MainActor in
-                var performanceResult = PerformanceResult.discarded
-                defer {
-                    if Task.isCancelled { performanceResult = .cancelled }
-                    performanceTracker.endPrepend(
-                        generation: performanceGeneration,
-                        result: performanceResult
+            let began = scrollCoordinator.beginPrepend(
+                anchor: anchor,
+                load: {
+                    await model.loadEarlierTranscript(
+                        sessionID: sessionID,
+                        presentationGeneration: presentationGeneration
                     )
-                    if pagingOwner.finish(generation: currentPagingGeneration) {
-                        scrollCoordinator.endPrependingHistory(preserveScrolledAway: wasScrolledAway)
-                    }
-                }
-                await model.loadEarlierTranscript(
-                    sessionID: sessionID,
-                    presentationGeneration: presentationGeneration
-                )
-                guard !Task.isCancelled,
-                      modelPresentationGeneration == presentationGeneration else { return }
-                guard let current = model.authoritativeSnapshot(for: sessionID),
-                      current.sessionId == sessionID,
-                      current.runtimeGeneration == runtimeGeneration,
-                      (current.transcriptStart ?? previousStart) < previousStart else { return }
-
-                // Restore the semantic row first, then allow bounded late-layout
-                // corrections while Markdown/attachments settle. Every pass is
-                // generation-scoped and cancellation-aware.
-                if let anchorID, scrollCoordinator.canRestorePrependPosition {
-                    var position = transcriptScrollPosition
-                    position.scrollTo(id: anchorID, anchor: .top)
-                    transcriptScrollPosition = position
-                }
-                var lastHeight = transcriptGeometry.contentHeight
-                var stablePasses = 0
-                var didSettle = false
-                var requestedOffsetY: CGFloat?
-                for _ in 0..<60 {
                     guard !Task.isCancelled,
                           modelPresentationGeneration == presentationGeneration,
-                          scrollCoordinator.canRestorePrependPosition else { return }
-                    try? await Task.sleep(for: .milliseconds(16))
-                    guard scrollCoordinator.canRestorePrependPosition else { return }
-                    let height = transcriptGeometry.contentHeight
-                    let isStable = height > previousGeometry.contentHeight + 0.5 && abs(height - lastHeight) < 0.5
-                    stablePasses = isStable ? stablePasses + 1 : 0
-                    let delta = height - previousGeometry.contentHeight
-                    if delta > 0.5 {
-                        let targetOffsetY = max(0, previousGeometry.offsetY + delta)
-                        var position = transcriptScrollPosition
-                        position.scrollTo(y: targetOffsetY)
-                        transcriptScrollPosition = position
-                        requestedOffsetY = targetOffsetY
+                          let current = model.authoritativeSnapshot(for: sessionID),
+                          current.sessionId == sessionID,
+                          current.runtimeGeneration == runtimeGeneration,
+                          (current.transcriptStart ?? previousStart) < previousStart else { return nil }
+                    let installedLayout = scrollCoordinator.beginInstalledPageLayoutEpoch()
+                    guard let anchor else { return nil }
+                    let currentTimeline = ChatTranscriptPresentation.timeline(
+                        in: current,
+                        performanceSignposts: performanceSignposts
+                    )
+                    guard let renderedID = currentTimeline.renderedIDBySemanticID[anchor.semanticID] else {
+                        return nil
                     }
-                    if stablePasses >= 4 {
-                        didSettle = true
-                        break
-                    }
-                    lastHeight = height
+                    return ChatPrependPage(
+                        renderedAnchorID: renderedID,
+                        installedLayout: installedLayout
+                    )
+                },
+                completion: { result in
+                    performanceTracker.endPrepend(generation: performanceGeneration, result: result)
                 }
-                guard model.presentationGeneration(for: sessionID) == presentationGeneration,
-                      model.authoritativeSnapshot(for: sessionID)?.runtimeGeneration == runtimeGeneration,
-                      modelPresentationGeneration == presentationGeneration else {
-                    performanceResult = .discarded
-                    return
-                }
-                guard didSettle, let requestedOffsetY else {
-                    performanceResult = .failure
-                    return
-                }
-                performanceResult = await ChatPrependSettlement.result(
-                    after: displayFrameScheduler,
-                    requestedOffsetY: requestedOffsetY,
-                    isCurrent: {
-                        scrollCoordinator.canRestorePrependPosition
-                            && modelPresentationGeneration == presentationGeneration
-                    },
-                    observedOffsetY: { transcriptGeometry.offsetY }
-                )
+            )
+            if !began {
+                performanceTracker.endPrepend(generation: performanceGeneration, result: .discarded)
             }
-            pagingOwner.install(task, generation: currentPagingGeneration)
         } label: {
             HStack(spacing: 7) {
                 if model.loadingEarlierTranscript {

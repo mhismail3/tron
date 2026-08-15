@@ -6,21 +6,65 @@ import UIKit
 @MainActor
 @Suite("Hosted ChatView scroll harness", .serialized)
 struct ChatViewScrollHarnessTests {
+    @Test("hosted aggregate counters and retained row frames are bounded")
+    func hostedEvidenceBounds() {
+        let probe = ChatHostedProbe()
+        for index in 0..<300 {
+            probe.updateRowFrame(
+                id: "synthetic-row-\(index)",
+                frame: CGRect(x: 0, y: index, width: 10, height: 10)
+            )
+        }
+        #expect(probe.observation.rowFrames.count == 256)
+        #expect(probe.observation.semanticFrameCallbackCount == 300)
+    }
+
     @Test("harness renders the production scroll view and semantic row geometry")
     func harnessFidelity() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 101) { harness in
                 let sample = try await harness.recorder.waitUntil { sample in
                     sample.observation.isReady
+                        && sample.observation.scrollSettledDistance != nil
                         && sample.observation.geometry.contentHeight > sample.observation.geometry.containerHeight
                         && !sample.observation.visibleRowIDs.isEmpty
                         && !sample.observation.rowFrames.isEmpty
                 }
 
-                #expect(harness.containsNativeTranscriptScrollView(matching: sample.observation.geometry))
+                #expect(sample.nativeGeometryMatches)
                 #expect(sample.observation.geometry.isValid)
                 #expect(sample.observation.rowFrames.keys.allSatisfy(harness.transcriptIDs.contains))
                 #expect(Set(sample.observation.visibleRowIDs).isSubset(of: harness.transcriptIDs))
+            }
+        }
+    }
+
+    @Test("a real visible semantic frame computes a zero-excursion prepend correction")
+    func semanticAnchorCorrection() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 106) { harness in
+                let sample = try await harness.recorder.waitUntil { sample in
+                    sample.observation.isReady
+                        && sample.observation.rowFrames.keys.contains(where: {
+                            sample.observation.visibleRowIDs.contains($0)
+                        })
+                }
+                guard let rowID = sample.observation.visibleRowIDs.first(where: {
+                    sample.observation.rowFrames[$0] != nil
+                }), let capturedFrame = sample.observation.rowFrames[rowID] else {
+                    Issue.record("expected a visible semantic frame")
+                    return
+                }
+                let insertedPrefixHeight: CGFloat = 173
+                let installedFrameMinY = capturedFrame.minY + insertedPrefixHeight
+                let requestedOffset = ChatScrollCoordinator.prependCorrectionOffset(
+                    currentOffsetY: sample.observation.geometry.offsetY,
+                    capturedViewportOffsetY: capturedFrame.minY,
+                    installedFrameMinY: installedFrameMinY
+                )
+                let restoredFrameMinY = installedFrameMinY
+                    - (requestedOffset - sample.observation.geometry.offsetY)
+                #expect(abs(restoredFrameMinY - capturedFrame.minY) <= 1)
             }
         }
     }
@@ -40,6 +84,7 @@ struct ChatViewScrollHarnessTests {
                     <= ChatTranscriptGeometry.catchUpDistance)
                 #expect(sample.observation.visibleRowIDs.contains(harness.lastTranscriptID))
                 #expect(!sample.observation.visibleRowIDs.contains(harness.firstTranscriptID))
+                #expect(sample.observation.scrollCommandCount > 0)
                 #expect(scrollEvents.first == .begin(.scrollCommandSettle))
                 #expect(scrollEvents.contains(.end(.scrollCommandSettle, .success, .none)))
                 #expect(!scrollEvents.contains(.end(.scrollCommandSettle, .failure, .none)))
@@ -52,9 +97,8 @@ struct ChatViewScrollHarnessTests {
     func firstReadyFrame() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 104) { harness in
-                while harness.firstReadyEvents.count < 2 {
-                    try Task.checkCancellation()
-                    await Task.yield()
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
                 }
                 #expect(harness.firstReadyEvents == [
                     .begin(.firstReadyFrame),
@@ -69,14 +113,115 @@ struct ChatViewScrollHarnessTests {
         try await withTestWatchdog(timeout: .seconds(10)) {
             let scheduler = DisplayFrameScheduler { throw CancellationError() }
             try await withHarness(seed: 105, displayFrameScheduler: scheduler) { harness in
-                while harness.firstReadyEvents.count < 2 {
-                    try Task.checkCancellation()
-                    await Task.yield()
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
                 }
                 #expect(harness.firstReadyEvents == [
                     .begin(.firstReadyFrame),
                     .end(.firstReadyFrame, .cancelled, .none),
                 ])
+            }
+        }
+    }
+
+    @Test("actual ChatView executor emits one automatic command per frame and none while detached")
+    func drivenCoordinatorExecutor() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 107) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                }
+
+                let baseline = harness.recorder.samples.last?.observation.automaticScrollCommandCount ?? 0
+                let bottom = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
+                )
+                let firstGrowth = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_100, containerHeight: 400
+                )
+                let secondGrowth = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_180, containerHeight: 400
+                )
+                harness.driveGeometry(previous: bottom, current: firstGrowth)
+                harness.driveGeometry(previous: firstGrowth, current: secondGrowth)
+                try await harness.driveFrameBoundary()
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.automaticScrollCommandCount == baseline + 1
+                }
+
+                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
+                harness.driveNativeOwnership(true)
+                let away = ChatTranscriptGeometry(
+                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
+                )
+                harness.driveGeometry(previous: bottom, current: away)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
+                harness.driveSemanticResponse()
+                #expect(harness.probeObservation.isDetached)
+                #expect(harness.probeObservation.hasUnread)
+                let commandsBeforeDetachedGrowth = harness.probeObservation.scrollCommandCount
+                harness.driveGeometry(
+                    previous: away,
+                    current: ChatTranscriptGeometry(
+                        offsetY: 300, contentHeight: 1_200, containerHeight: 400
+                    )
+                )
+                harness.driveGeometry(
+                    previous: away,
+                    current: ChatTranscriptGeometry(
+                        offsetY: 300, contentHeight: 1_200, containerHeight: 320, bottomInset: 80
+                    ),
+                    viewport: true
+                )
+                try await harness.driveFrameBoundary()
+                #expect(
+                    harness.probeObservation.scrollCommandCount
+                        == commandsBeforeDetachedGrowth
+                )
+
+                let commandsBeforeCatchUp = harness.probeObservation.scrollCommandCount
+                harness.driveCatchUp(reduceMotion: true)
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.scrollCommandCount == commandsBeforeCatchUp + 1
+                }
+                harness.drivePhase(from: .idle, to: .interacting, geometry: away)
+                #expect(harness.probeObservation.isDetached)
+                #expect(harness.probeObservation.hasUnread)
+            }
+        }
+    }
+
+    @Test("hosted exact page barrier rejects repeat and stale prepend completion")
+    func hostedPrependBarrier() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 108) { harness in
+                _ = try await harness.recorder.waitUntil { sample in
+                    sample.observation.readyFrameCompletionCount == 1
+                        && sample.observation.visibleRowIDs.contains(where: {
+                            sample.observation.rowFrames[$0] != nil
+                        })
+                }
+                guard harness.drivePrepend() else {
+                    Issue.record("expected measured hosted prepend admission")
+                    return
+                }
+                #expect(!harness.drivePrepend())
+                _ = try await harness.recorder.waitUntil { $0.observation.prependLoadWaiting }
+                let callbacksBeforeRelease = harness.probeObservation.semanticFrameCallbackCount
+                harness.releasePrependPage()
+                let completed = try await harness.recorder.waitUntil {
+                    $0.observation.prependCompletionResult == .success
+                }
+                #expect(completed.observation.semanticFrameCallbackCount > callbacksBeforeRelease)
+                #expect(completed.observation.maximumSemanticExcursion <= 2)
+
+                #expect(harness.drivePrepend())
+                _ = try await harness.recorder.waitUntil { $0.observation.prependLoadWaiting }
+                harness.drivePresentationInvalidation()
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.prependCompletionResult == .discarded
+                }
+                harness.releasePrependPage()
             }
         }
     }
@@ -99,6 +244,12 @@ struct ChatViewScrollHarnessTests {
                 let samples = harness.recorder.samples
                 #expect(samples.count >= 3)
                 #expect(Set(samples.map(\.frameIndex)).count == samples.count)
+                for (previous, current) in zip(samples, samples.dropFirst()) {
+                    #expect(
+                        current.observation.automaticScrollCommandCount
+                            - previous.observation.automaticScrollCommandCount <= 1
+                    )
+                }
             }
         }
     }
@@ -130,6 +281,7 @@ final class ChatViewScrollHarness {
     let lastTranscriptID: String
     let recorder: PresentedFrameRecorder
     let signposts: RecordingPerformanceSignposts
+    let probe: ChatHostedProbe
 
     private let suiteName: String
     private let cacheRoot: URL
@@ -174,6 +326,7 @@ final class ChatViewScrollHarness {
         }
 
         let probe = ChatHostedProbe()
+        self.probe = probe
         let sessionID = snapshot.sessionId
         let root = AnyView(
             NavigationStack {
@@ -198,8 +351,47 @@ final class ChatViewScrollHarness {
         hostingController.view.setNeedsLayout()
         hostingController.view.layoutIfNeeded()
 
-        recorder = PresentedFrameRecorder(probe: probe)
+        let hostedView = hostingController.view!
+        recorder = PresentedFrameRecorder(probe: probe) { geometry in
+            Self.containsNativeTranscriptScrollView(in: hostedView, matching: geometry)
+        }
         recorder.start()
+    }
+
+    var probeObservation: ChatHostedObservation { probe.observation }
+
+    func driveGeometry(
+        previous: ChatTranscriptGeometry,
+        current: ChatTranscriptGeometry,
+        viewport: Bool = false
+    ) {
+        probe.driveGeometry(previous: previous, current: current, viewport: viewport)
+    }
+
+    func drivePhase(from: ScrollPhase, to: ScrollPhase, geometry: ChatTranscriptGeometry?) {
+        probe.drivePhase(from: from, to: to, geometry: geometry)
+    }
+
+    func driveNativeOwnership(_ owned: Bool) {
+        probe.driveNativeOwnership(owned)
+    }
+
+    func driveSemanticResponse() {
+        probe.driveSemanticResponse()
+    }
+
+    func driveCatchUp(reduceMotion: Bool) {
+        probe.driveCatchUp(reduceMotion: reduceMotion)
+    }
+
+    func drivePrepend() -> Bool { probe.drivePrepend() }
+
+    func releasePrependPage() { probe.releasePrependPage() }
+
+    func drivePresentationInvalidation() { probe.drivePresentationInvalidation() }
+
+    func driveFrameBoundary() async throws {
+        try await probe.driveFrameBoundary()
     }
 
     var firstReadyEvents: [RecordingPerformanceSignposts.Event] {
@@ -210,8 +402,11 @@ final class ChatViewScrollHarness {
         signposts.events().filter { $0.operation == .scrollCommandSettle }
     }
 
-    func containsNativeTranscriptScrollView(matching geometry: ChatTranscriptGeometry) -> Bool {
-        Self.scrollViews(in: hostingController.view).contains { scrollView in
+    private static func containsNativeTranscriptScrollView(
+        in view: UIView,
+        matching geometry: ChatTranscriptGeometry
+    ) -> Bool {
+        Self.scrollViews(in: view).contains { scrollView in
             !(scrollView is UITextView)
                 && scrollView.contentSize.height > scrollView.bounds.height
                 && abs(scrollView.contentSize.height - geometry.contentHeight) <= 2
@@ -250,6 +445,7 @@ final class PresentedFrameRecorder: NSObject {
     struct Sample: Sendable {
         let frameIndex: Int
         let observation: ChatHostedObservation
+        let nativeGeometryMatches: Bool
     }
 
     private struct Waiter {
@@ -259,6 +455,7 @@ final class PresentedFrameRecorder: NSObject {
     }
 
     private let probe: ChatHostedProbe
+    private let nativeGeometryMatches: @MainActor (ChatTranscriptGeometry) -> Bool
     private var displayLink: CADisplayLink?
     private var frameIndex = 0
     private var lastRevision = -1
@@ -266,8 +463,12 @@ final class PresentedFrameRecorder: NSObject {
     private var nextWaiterID = 0
     private(set) var samples: [Sample] = []
 
-    init(probe: ChatHostedProbe) {
+    init(
+        probe: ChatHostedProbe,
+        nativeGeometryMatches: @escaping @MainActor (ChatTranscriptGeometry) -> Bool
+    ) {
         self.probe = probe
+        self.nativeGeometryMatches = nativeGeometryMatches
     }
 
     func start() {
@@ -307,7 +508,11 @@ final class PresentedFrameRecorder: NSObject {
         let observation = probe.observation
         guard observation.revision != lastRevision else { return }
         lastRevision = observation.revision
-        let sample = Sample(frameIndex: frameIndex, observation: observation)
+        let sample = Sample(
+            frameIndex: frameIndex,
+            observation: observation,
+            nativeGeometryMatches: nativeGeometryMatches(observation.geometry)
+        )
         samples.append(sample)
         if samples.count > 256 { samples.removeFirst(samples.count - 256) }
 

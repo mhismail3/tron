@@ -467,6 +467,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
             encoding: .utf8
         )
+        let scrollCoordinator = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatScrollCoordinator.swift"),
+            encoding: .utf8
+        )
         #expect(chat.contains("Load earlier messages"))
         #expect(!chat.contains("New response"))
         #expect(chat.components(separatedBy: ".chatTranscriptPill()").count - 1 >= 2)
@@ -480,7 +484,9 @@ struct PresentationStyleGuardTests {
         #expect(catchUpButton.contains(".accessibilityLabel(\"Catch up\")"))
         #expect(catchUpButton.contains("catchUpToTail()"))
         #expect(!catchUpButton.contains(".chatTranscriptPill()"))
-        #expect(chat.contains("withAnimation(.smooth(duration: 0.30))"))
+        #expect(scrollCoordinator.contains(".smooth(duration: 0.30)"))
+        #expect(chat.contains("case .smooth(let duration)"))
+        #expect(chat.contains("withAnimation(.smooth(duration: duration)"))
         #expect(chat.contains("GlassEffectContainer(spacing: 8)"))
         #expect(chat.contains("if scrollCoordinator.userScrolledAway"))
         #expect(transcript.contains("struct ChatTranscriptPillModifier: ViewModifier"))
@@ -557,6 +563,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
             encoding: .utf8
         )
+        let scrollCoordinator = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatScrollCoordinator.swift"),
+            encoding: .utf8
+        )
         #expect(transcript.contains("struct TranscriptNotice: View"))
         #expect(transcript.contains("struct ToolRunView: View"))
         #expect(transcript.contains("RoundedRectangle(cornerRadius: 9"))
@@ -595,7 +605,8 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains(".defaultScrollAnchor(.top, for: .alignment)"))
         #expect(!chat.contains(".defaultScrollAnchor(.bottom, for: .alignment)"))
         #expect(!chat.contains(".defaultScrollAnchor(.bottom, for: .sizeChanges)"))
-        #expect(chat.contains("releaseSettledScrollBindingIfNeeded"))
+        #expect(scrollCoordinator.contains("publish(.releaseBinding"))
+        #expect(!chat.contains("releaseSettledScrollBindingIfNeeded"))
         #expect(chat.contains("transcriptScrollPosition = ScrollPosition(idType: String.self)"))
         #expect(chat.contains("transcriptScrollPosition.isPositionedByUser"))
         #expect(!chat.contains("composerHeight"))

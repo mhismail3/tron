@@ -85,11 +85,6 @@ struct ChatTranscriptGeometry: Equatable {
         abs(containerHeight - previous.containerHeight) > 0.5
             || abs(bottomInset - previous.bottomInset) > 0.5
     }
-
-    func isViewportOnlyChange(from previous: Self) -> Bool {
-        abs(contentHeight - previous.contentHeight) <= 0.5
-            && hasViewportChange(from: previous)
-    }
 }
 
 enum ChatOpenPresentationPhase: Equatable {
@@ -318,6 +313,8 @@ enum ChatTranscriptRenderItem: Hashable, Identifiable {
 struct ChatTranscriptTimeline {
     let items: [ChatTranscriptRenderItem]
     let toolResults: [String: TranscriptItem]
+    let preferredSemanticIDByRenderedID: [String: String]
+    let renderedIDBySemanticID: [String: String]
 
     var ids: [String] { items.map(\.id) }
 }
@@ -565,8 +562,34 @@ enum ChatTranscriptPresentation {
         }
         flushTools()
 
+        var preferredSemanticIDByRenderedID: [String: String] = [:]
+        var renderedIDBySemanticID: [String: String] = [:]
+        for item in rendered {
+            switch item {
+            case .transcript(let transcript):
+                preferredSemanticIDByRenderedID[item.id] = transcript.id
+                renderedIDBySemanticID[transcript.id] = item.id
+            case .message(let message):
+                // Slice identity is stable for an unchanged canonical message.
+                preferredSemanticIDByRenderedID[item.id] = message.id
+                renderedIDBySemanticID[message.id] = item.id
+            case .toolRun(let run):
+                // The last already-visible call survives when an earlier page
+                // extends this run across the page boundary. Map every call to
+                // the current outer row so the semantic anchor survives regrouping.
+                if let semanticID = run.tools.last?.id {
+                    preferredSemanticIDByRenderedID[item.id] = semanticID
+                }
+                for tool in run.tools { renderedIDBySemanticID[tool.id] = item.id }
+            }
+        }
         projectedCount = rendered.count
-        return ChatTranscriptTimeline(items: rendered, toolResults: results)
+        return ChatTranscriptTimeline(
+            items: rendered,
+            toolResults: results,
+            preferredSemanticIDByRenderedID: preferredSemanticIDByRenderedID,
+            renderedIDBySemanticID: renderedIDBySemanticID
+        )
     }
 
     static func renderItems(in snapshot: SessionSnapshot) -> [ChatTranscriptRenderItem] {

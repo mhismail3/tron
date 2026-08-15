@@ -40,53 +40,6 @@ struct ChatPerformanceTrackerTests {
         ])
     }
 
-    @Test("prepend success requires a presented frame within one point")
-    func prependPhysicalSettlement() async {
-        let counter = FrameCounter()
-        let scheduler = DisplayFrameScheduler { counter.value += 1 }
-
-        let success = await ChatPrependSettlement.result(
-            after: scheduler,
-            requestedOffsetY: 120,
-            isCurrent: { true },
-            observedOffsetY: { 120.75 }
-        )
-        let failure = await ChatPrependSettlement.result(
-            after: scheduler,
-            requestedOffsetY: 120,
-            isCurrent: { true },
-            observedOffsetY: { 121.25 }
-        )
-        let discarded = await ChatPrependSettlement.result(
-            after: scheduler,
-            requestedOffsetY: 120,
-            isCurrent: { false },
-            observedOffsetY: { 120 }
-        )
-
-        #expect(success == .success)
-        #expect(failure == .failure)
-        #expect(discarded == .discarded)
-        #expect(counter.value == 3)
-    }
-
-    @Test("paging restart clears the cancelled task and rejects stale finish")
-    func pagingRestart() {
-        let owner = ChatPagingOwner()
-        let staleGeneration = owner.begin()
-        owner.install(Task {}, generation: staleGeneration)
-        #expect(owner.hasTask)
-
-        let currentGeneration = owner.begin()
-
-        #expect(!owner.hasTask)
-        #expect(currentGeneration != staleGeneration)
-        #expect(!owner.finish(generation: staleGeneration))
-        owner.install(Task {}, generation: currentGeneration)
-        #expect(owner.finish(generation: currentGeneration))
-        #expect(!owner.hasTask)
-    }
-
     @Test("teardown cancels each live interval once")
     func teardown() {
         let signposts = RecordingPerformanceSignposts()
@@ -103,9 +56,5 @@ struct ChatPerformanceTrackerTests {
             .end(.scrollCommandSettle, .cancelled, .none),
             .end(.prependSettle, .cancelled, .none),
         ])
-    }
-
-    private final class FrameCounter {
-        var value = 0
     }
 }

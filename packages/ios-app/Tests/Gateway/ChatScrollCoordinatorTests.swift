@@ -8,271 +8,582 @@ struct ChatScrollCoordinatorTests {
     private let bottom = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_000, containerHeight: 400)
     private let away = ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_000, containerHeight: 400)
 
-    @Test("native ownership and gesture completion durably detach")
-    func nativeOwnershipDetaches() {
+    @Test("pinned streaming growth coalesces to one command per displayed frame")
+    func pinnedGrowthCoalesces() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let first = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_080, containerHeight: 400)
+            let second = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_160, containerHeight: 400)
+            coordinator.geometryChanged(previous: bottom, current: first)
+            coordinator.geometryChanged(previous: first, current: second)
+            await frames.waitForRequest(count: 1)
+            #expect(coordinator.command == nil)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(command.destination == .tail)
+            #expect(frames.requestCount == 1)
+        }
+    }
+
+    @Test("growth arriving before an earlier tail command settles remains logically pinned")
+    func continuousGrowthWhileSettling() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let first = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_120, containerHeight: 400)
+            coordinator.geometryChanged(previous: bottom, current: first)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let firstCommand = try await coordinator.hostedNextCommand()
+            coordinator.commandApplied(firstCommand)
+
+            let second = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_200, containerHeight: 400)
+            coordinator.geometryChanged(previous: first, current: second)
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            let secondCommand = try await coordinator.hostedNextCommand()
+            #expect(secondCommand.destination == .tail)
+            #expect(!coordinator.userScrolledAway)
+        }
+    }
+
+    @Test("growth inside practical bottom tolerance emits no command")
+    func noWriteInsideTolerance() async throws {
+        let frames = ManualScrollFrameScheduler()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+        let near = ChatTranscriptGeometry(offsetY: 675, contentHeight: 1_080, containerHeight: 400)
+        coordinator.geometryChanged(previous: bottom, current: near)
+        #expect(frames.requestCount == 0)
+        #expect(coordinator.command?.destination == .releaseBinding)
+    }
+
+    @Test("geometry and native ownership callback permutations both detach")
+    func callbackOrdering() {
+        let nativeFirst = ChatScrollCoordinator()
+        nativeFirst.scrollPositionChanged(isPositionedByUser: true)
+        nativeFirst.geometryChanged(previous: bottom, current: away)
+        nativeFirst.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
+        #expect(nativeFirst.userScrolledAway)
+
+        let geometryFirst = ChatScrollCoordinator()
+        geometryFirst.geometryChanged(previous: bottom, current: away)
+        geometryFirst.scrollPositionChanged(isPositionedByUser: true)
+        #expect(geometryFirst.userScrolledAway)
+    }
+
+    @Test("geometry-first detachment consumes direct return through later viewport settlement")
+    func geometryFirstDetachmentConsumesDirectReturn() {
         let coordinator = ChatScrollCoordinator()
-        coordinator.scrollPositionChanged(isPositionedByUser: true)
         coordinator.geometryChanged(previous: bottom, current: away)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
-        #expect(coordinator.userScrolledAway)
-        #expect(!coordinator.canAutomaticallyFollow)
-        #expect(!coordinator.beginAutomaticBottomScroll())
-    }
-
-    @Test("geometry arriving before native ownership preserves upward intent")
-    func geometryBeforeOwnershipDetaches() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.geometryChanged(previous: bottom, current: away)
-        #expect(!coordinator.userScrolledAway)
         coordinator.scrollPositionChanged(isPositionedByUser: true)
         #expect(coordinator.userScrolledAway)
-        #expect(!coordinator.canAutomaticallyFollow)
-    }
 
-    @Test("phase final geometry preserves callback ordering")
-    func phaseFinalGeometry() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
-        #expect(coordinator.userScrolledAway)
-        coordinator.geometryChanged(previous: away, current: bottom)
-        #expect(!coordinator.userScrolledAway)
-    }
-
-    @Test("pinned measured growth grants one command and progress without growth grants none")
-    func pinnedGrowthCoalesces() {
-        let coordinator = ChatScrollCoordinator()
-        let grown = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_080, containerHeight: 400)
-        #expect(coordinator.geometryChanged(previous: bottom, current: grown))
-        #expect(coordinator.beginAutomaticBottomScroll())
-        #expect(!coordinator.geometryChanged(previous: grown, current: grown))
-        coordinator.confirmAutomaticBottomScroll(
-            ChatTranscriptGeometry(offsetY: 680, contentHeight: 1_080, containerHeight: 400)
+        let expanded = ChatTranscriptGeometry(
+            offsetY: 300,
+            contentHeight: 1_000,
+            containerHeight: 700
         )
-        #expect(coordinator.canAutomaticallyFollow)
-    }
-
-    @Test("every measured streaming growth reissues a coalescible bottom command")
-    func continuousGrowthKeepsFollowing() {
-        let coordinator = ChatScrollCoordinator()
-        let firstGrowth = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_080, containerHeight: 400)
-        let secondGrowth = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_160, containerHeight: 400)
-        #expect(coordinator.geometryChanged(previous: bottom, current: firstGrowth))
-        #expect(coordinator.beginAutomaticBottomScroll())
-        #expect(coordinator.geometryChanged(previous: firstGrowth, current: secondGrowth))
-        #expect(coordinator.beginAutomaticBottomScroll())
-        #expect(!coordinator.userScrolledAway)
-    }
-
-    @Test("native ownership plus stationary growth does not manufacture scroll-away")
-    func stationaryGrowthDoesNotDetach() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
-        coordinator.scrollPositionChanged(isPositionedByUser: true)
-        let grown = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_080, containerHeight: 400)
-        #expect(!coordinator.geometryChanged(previous: bottom, current: grown))
-        #expect(!coordinator.userScrolledAway)
-        #expect(coordinator.scrollPhaseChanged(
-            from: .interacting,
-            to: .idle,
-            finalGeometry: grown
-        ))
-        #expect(!coordinator.userScrolledAway)
-    }
-
-    @Test("user-driven settling commits upward movement only when it reaches idle")
-    func userDrivenSettlingDetachesAtIdle() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
-        coordinator.scrollPositionChanged(isPositionedByUser: true)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .animating, finalGeometry: nil)
-        #expect(!coordinator.userScrolledAway)
-        coordinator.scrollPhaseChanged(from: .animating, to: .idle, finalGeometry: away)
+        coordinator.viewportChanged(previous: away, current: expanded)
+        coordinator.geometryChanged(previous: expanded, current: expanded)
+        coordinator.scrollPhaseChanged(from: .idle, to: .idle, finalGeometry: expanded)
         #expect(coordinator.userScrolledAway)
         #expect(!coordinator.isAtBottom)
+        #expect(coordinator.command == nil)
     }
 
-    @Test("settled bottom releases persistent scroll bindings only at idle")
-    func settledBottomBindingRelease() {
+    @Test("native positioning after released binding emits a new typed release at tail")
+    func nativePositioningRearmsBindingRelease() {
         let coordinator = ChatScrollCoordinator()
-        #expect(coordinator.canReleaseSettledScrollBinding)
+        coordinator.geometryChanged(previous: bottom, current: bottom)
+        let firstRelease = coordinator.command!
+        #expect(firstRelease.destination == .releaseBinding)
+        coordinator.commandApplied(firstRelease)
+        #expect(coordinator.command == nil)
 
-        coordinator.scrollPhaseChanged(from: .idle, to: .animating, finalGeometry: bottom)
-        #expect(coordinator.isScrollAnimating)
-        #expect(!coordinator.canReleaseSettledScrollBinding)
-
-        coordinator.scrollPhaseChanged(from: .animating, to: .idle, finalGeometry: bottom)
-        #expect(!coordinator.isScrollAnimating)
-        #expect(coordinator.canReleaseSettledScrollBinding)
-
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
-        #expect(!coordinator.canReleaseSettledScrollBinding)
-    }
-
-    @Test("bottom rubber-banding never detaches or exposes catch-up")
-    func bottomRubberBandStaysPinned() {
-        let coordinator = ChatScrollCoordinator()
-        let overscrolledBottom = ChatTranscriptGeometry(
-            offsetY: 630, contentHeight: 1_000, containerHeight: 400
-        )
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
         coordinator.scrollPositionChanged(isPositionedByUser: true)
-        coordinator.geometryChanged(previous: bottom, current: overscrolledBottom)
-        coordinator.geometryChanged(previous: overscrolledBottom, current: bottom)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: bottom)
-        #expect(!coordinator.userScrolledAway)
-        #expect(!coordinator.hasUnreadContent)
-        #expect(coordinator.isAtBottom)
+        coordinator.geometryChanged(previous: bottom, current: bottom)
+        #expect(coordinator.command?.destination == .releaseBinding)
+        #expect(coordinator.command?.origin == .binding)
     }
 
-    @Test("scrolling back to the exact bottom clears unread and resumes following")
-    func manualReturnToBottomRepins() {
+    @Test("detached stream viewport composer and image-like settlement emit zero writes")
+    func detachedLayoutNeverWrites() {
+        let frames = ManualScrollFrameScheduler()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.geometryChanged(previous: bottom, current: away)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
+        let stream = ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_080, containerHeight: 400)
+        coordinator.geometryChanged(previous: away, current: stream)
+        let composer = ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_080, containerHeight: 320, bottomInset: 80)
+        coordinator.viewportChanged(previous: stream, current: composer)
+        let image = ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_240, containerHeight: 320, bottomInset: 80)
+        coordinator.geometryChanged(previous: composer, current: image)
+        coordinator.semanticResponseArrived()
+        #expect(coordinator.userScrolledAway)
+        #expect(coordinator.hasUnreadContent)
+        #expect(frames.requestCount == 0)
+        #expect(coordinator.command == nil)
+    }
+
+    @Test("viewport expansion and later unattributed boundary settlement preserve detachment")
+    func viewportExpansionPreservesDetachment() {
         let coordinator = ChatScrollCoordinator()
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
         coordinator.scrollPositionChanged(isPositionedByUser: true)
         coordinator.geometryChanged(previous: bottom, current: away)
         coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
         coordinator.semanticResponseArrived()
+
+        let expanded = ChatTranscriptGeometry(
+            offsetY: 300,
+            contentHeight: 1_000,
+            containerHeight: 700
+        )
+        coordinator.viewportChanged(previous: away, current: expanded)
+        coordinator.geometryChanged(previous: expanded, current: expanded)
+        coordinator.scrollPhaseChanged(from: .idle, to: .idle, finalGeometry: expanded)
         #expect(coordinator.userScrolledAway)
         #expect(coordinator.hasUnreadContent)
+        #expect(!coordinator.isAtBottom)
+        #expect(coordinator.command == nil)
 
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
         coordinator.scrollPositionChanged(isPositionedByUser: true)
-        coordinator.geometryChanged(previous: away, current: bottom)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: bottom)
+        coordinator.geometryChanged(previous: away, current: expanded)
         #expect(!coordinator.userScrolledAway)
         #expect(!coordinator.hasUnreadContent)
-
-        let grown = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_080, containerHeight: 400)
-        #expect(coordinator.geometryChanged(previous: bottom, current: grown))
+        #expect(coordinator.command?.destination == .releaseBinding)
     }
 
-    @Test("detached growth preserves viewport and marks semantic responses unread")
-    func detachedGrowthAndUnread() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.scrollPositionChanged(isPositionedByUser: true)
-        coordinator.geometryChanged(previous: bottom, current: away)
-        let grownAway = ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_080, containerHeight: 400)
-        #expect(!coordinator.geometryChanged(previous: away, current: grownAway))
+    @Test("native ownership end and accessibility phase preserve one-shot direct tail return")
+    func directTailReturnAdmission() {
+        let native = detachedCoordinator(at: away, withUnread: false)
+        native.scrollPositionChanged(isPositionedByUser: true)
+        native.scrollPositionChanged(isPositionedByUser: false)
+        native.geometryChanged(previous: away, current: bottom)
+        #expect(!native.userScrolledAway)
+        #expect(native.command?.destination == .releaseBinding)
+
+        let accessibility = detachedCoordinator(at: away, withUnread: false)
+        accessibility.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
+        accessibility.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: bottom)
+        #expect(!accessibility.userScrolledAway)
+        #expect(accessibility.command?.destination == .releaseBinding)
+    }
+
+    @Test("direct interaction cancels a pending automatic frame command")
+    func interactionCancelsPendingFollow() async {
+        let frames = ManualScrollFrameScheduler()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+        let grown = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_100, containerHeight: 400)
+        coordinator.geometryChanged(previous: bottom, current: grown)
+        await frames.waitForRequest(count: 1)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: grown)
+        frames.releaseNext()
+        #expect(coordinator.command == nil)
+        #expect(coordinator.isUserInteracting)
+    }
+
+    @Test("long catch-up stages and finishes on separate display frames")
+    func catchUpFrameSeparation() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let farAway = ChatTranscriptGeometry(offsetY: 0, contentHeight: 1_000, containerHeight: 400)
+            coordinator.geometryChanged(previous: farAway, current: farAway)
+            coordinator.requestCatchUp(reduceMotion: false)
+            let staged = try await coordinator.hostedNextCommand()
+            guard case .offsetY = staged.destination else {
+                Issue.record("expected staged point command")
+                return
+            }
+            #expect(frames.requestCount == 0)
+            coordinator.commandApplied(staged)
+            await frames.waitForRequest(count: 1)
+            #expect(coordinator.command == nil)
+            frames.releaseNext()
+            let final = try await coordinator.hostedNextCommand()
+            #expect(final.destination == .tail)
+            #expect(final.animation == .smooth(duration: 0.30))
+        }
+    }
+
+    @Test("response during staged catch-up survives interruption as unread")
+    func stagedCatchUpInterruption() {
+        let farAway = ChatTranscriptGeometry(offsetY: 0, contentHeight: 1_000, containerHeight: 400)
+        let coordinator = detachedCoordinator(at: farAway, withUnread: false)
+        coordinator.requestCatchUp(reduceMotion: false)
+        #expect(coordinator.command?.destination == .offsetY(520))
+        #expect(!coordinator.hasUnreadContent)
         coordinator.semanticResponseArrived()
         #expect(coordinator.hasUnreadContent)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: farAway)
+        #expect(coordinator.userScrolledAway)
+        #expect(coordinator.hasUnreadContent)
+        #expect(coordinator.command == nil)
     }
 
-    @Test("prepend suppresses automatic following and restores detached state")
+    @Test("response during final catch-up command survives interruption as unread")
+    func finalCatchUpInterruption() {
+        let coordinator = detachedCoordinator(at: away, withUnread: false)
+        coordinator.requestCatchUp(reduceMotion: false)
+        #expect(coordinator.command?.destination == .tail)
+        coordinator.semanticResponseArrived()
+        #expect(coordinator.hasUnreadContent)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
+        #expect(coordinator.userScrolledAway)
+        #expect(coordinator.hasUnreadContent)
+        #expect(coordinator.command == nil)
+    }
+
+    @Test("interaction during catch-up physical settlement restores detachment; exact boundary settles")
+    func settlingCatchUpInterruptionAndSuccess() {
+        let interrupted = detachedCoordinator(at: away, withUnread: false)
+        interrupted.requestCatchUp(reduceMotion: true)
+        let command = interrupted.command!
+        interrupted.commandApplied(command)
+        interrupted.semanticResponseArrived()
+        #expect(interrupted.hasUnreadContent)
+        interrupted.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
+        #expect(interrupted.userScrolledAway)
+        #expect(interrupted.hasUnreadContent)
+        #expect(interrupted.command == nil)
+
+        let settled = detachedCoordinator(at: away)
+        settled.requestCatchUp(reduceMotion: true)
+        #expect(settled.hasUnreadContent)
+        settled.commandApplied(settled.command!)
+        settled.semanticResponseArrived()
+        #expect(settled.hasUnreadContent)
+        settled.geometryChanged(previous: away, current: bottom)
+        #expect(!settled.userScrolledAway)
+        #expect(!settled.hasUnreadContent)
+        #expect(settled.command?.destination == .releaseBinding)
+    }
+
+    @Test("presentation reset revokes an unacknowledged command")
+    func presentationResetRevokesCommand() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.resetForPresentation(1)
+        coordinator.requestOpeningTail()
+        let stale = coordinator.command
+        #expect(stale?.presentation == 1)
+        coordinator.resetForPresentation(2)
+        let current = coordinator.command
+        if let stale { coordinator.commandApplied(stale) }
+        #expect(current?.destination == .resetToBottom)
+        #expect(coordinator.command == current)
+    }
+
+    @Test("semantic frame projection is count bounded")
+    func semanticFramesAreBounded() {
+        let coordinator = ChatScrollCoordinator()
+        for index in 0..<300 {
+            coordinator.semanticFrameChanged(
+                renderedID: "row-\(index)",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: index, width: 100, height: 40)
+            )
+        }
+        #expect(coordinator.hostedSemanticFrameCount == 256)
+    }
+
+    @Test("Reduce Motion catch-up is one nonanimated tail command")
+    func reduceMotionCatchUp() async throws {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: away, current: away)
+        coordinator.requestCatchUp(reduceMotion: true)
+        let command = try await coordinator.hostedNextCommand()
+        #expect(command.destination == .tail)
+        #expect(command.animation == .disabled)
+    }
+
+    @Test("missing measured anchor discards without starting page load")
+    func missingAnchorDoesNotLoad() {
+        let coordinator = ChatScrollCoordinator()
+        let results = ScrollResultRecorder()
+        let loads = ScrollCounter()
+        let began = coordinator.beginPrepend(
+            anchor: nil,
+            load: { loads.value &+= 1; return nil },
+            completion: { results.record($0) }
+        )
+        #expect(!began)
+        #expect(loads.value == 0)
+        #expect(results.values == [.discarded])
+    }
+
+    @Test("repeat prepend cannot cancel useful work")
     func prependOwnership() {
         let coordinator = ChatScrollCoordinator()
-        coordinator.beginPrependingHistory()
-        #expect(!coordinator.beginAutomaticBottomScroll())
-        let grown = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_200, containerHeight: 400)
-        #expect(!coordinator.geometryChanged(previous: bottom, current: grown))
-        coordinator.endPrependingHistory(preserveScrolledAway: true)
-        #expect(coordinator.userScrolledAway)
-    }
-
-    @Test("a new user gesture cancels prepend correction and owns final state")
-    func userInterruptsPrependRestoration() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.beginPrependingHistory()
-        #expect(coordinator.canRestorePrependPosition)
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
-        #expect(!coordinator.canRestorePrependPosition)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
-        coordinator.endPrependingHistory(preserveScrolledAway: false)
-        #expect(coordinator.userScrolledAway)
-        #expect(!coordinator.isAtBottom)
-    }
-
-    @Test("composer inset change is viewport geometry, not transcript growth")
-    func composerInsetDoesNotManufactureGrowth() {
-        let coordinator = ChatScrollCoordinator()
-        let before = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_000, containerHeight: 400, bottomInset: 72)
-        let after = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_000, containerHeight: 320, bottomInset: 152)
-        #expect(after.isViewportOnlyChange(from: before))
-        #expect(coordinator.viewportChanged(previous: before, current: after))
-        #expect(!coordinator.hasUnreadContent)
-        #expect(!coordinator.isAtBottom)
-        #expect(coordinator.beginAutomaticBottomScroll())
-    }
-
-    @Test("mixed viewport resize and transcript growth follows only pinned readers")
-    func mixedViewportAndGrowthOwnership() {
-        let pinned = ChatScrollCoordinator()
-        let mixed = ChatTranscriptGeometry(
-            offsetY: 600, contentHeight: 1_080, containerHeight: 320, bottomInset: 80
+        coordinator.geometryChanged(previous: away, current: away)
+        coordinator.semanticFrameChanged(
+            renderedID: "row",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 20, width: 100, height: 40)
         )
-        #expect(mixed.hasViewportChange(from: bottom))
-        #expect(pinned.viewportChanged(previous: bottom, current: mixed))
-
-        let detached = ChatScrollCoordinator()
-        detached.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
-        detached.scrollPositionChanged(isPositionedByUser: true)
-        detached.geometryChanged(previous: bottom, current: away)
-        detached.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
-        #expect(!detached.viewportChanged(previous: away, current: mixed))
-        #expect(detached.userScrolledAway)
+        let results = ScrollResultRecorder()
+        let anchor = ChatSemanticAnchor(semanticID: "semantic", renderedID: "row", layoutEpoch: coordinator.layoutEpoch, viewportOffsetY: 20)
+        let began = coordinator.beginPrepend(
+            anchor: anchor,
+            load: { nil },
+            completion: { results.record($0) }
+        )
+        #expect(began)
+        let repeated = coordinator.beginPrepend(anchor: anchor, load: { nil }, completion: { _ in })
+        #expect(!repeated)
+        coordinator.cancel()
+        #expect(results.values == [.cancelled])
     }
 
-    @Test("viewport changes preserve an existing detached reader")
-    func detachedViewportChangeStaysDetached() {
+    @Test("prepend passively waits for newer exact-epoch semantic samples after every correction")
+    func prependEpochAndLateCorrection() async throws {
+        try await withTestWatchdog { @MainActor in
+            let coordinator = ChatScrollCoordinator()
+            coordinator.geometryChanged(previous: away, current: away)
+            coordinator.semanticFrameChanged(
+                renderedID: "old-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 40)
+            )
+            let anchor = ChatSemanticAnchor(
+                semanticID: "semantic",
+                renderedID: "old-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                viewportOffsetY: 20
+            )
+            let results = ScrollResultRecorder()
+            let oldEpoch = coordinator.layoutEpoch
+            let began = coordinator.beginPrepend(anchor: anchor, load: {
+                let installedLayout = coordinator.beginInstalledPageLayoutEpoch()
+                return ChatPrependPage(
+                    renderedAnchorID: "new-row",
+                    installedLayout: installedLayout
+                )
+            }, completion: { results.record($0) })
+            #expect(began)
+
+            try await coordinator.hostedWaitForPrependSemanticSample()
+            #expect(coordinator.isWaitingForPrependSemanticFrame)
+            coordinator.semanticFrameChanged(
+                renderedID: "new-row",
+                layoutEpoch: oldEpoch,
+                frame: CGRect(x: 0, y: 220, width: 100, height: 40)
+            )
+            #expect(coordinator.command == nil)
+
+            let installedEpoch = coordinator.layoutEpoch
+            let unchangedFrame = CGRect(x: 0, y: 220, width: 100, height: 40)
+            #expect(ChatSemanticFrameObservation(layoutEpoch: oldEpoch, frame: unchangedFrame)
+                != ChatSemanticFrameObservation(layoutEpoch: installedEpoch, frame: unchangedFrame))
+            coordinator.semanticFrameChanged(
+                renderedID: "new-row",
+                layoutEpoch: installedEpoch,
+                frame: unchangedFrame
+            )
+            let first = try await coordinator.hostedNextCommand()
+            #expect(first.destination == .offsetY(500))
+            coordinator.commandApplied(first)
+            #expect(coordinator.command == nil)
+            #expect(coordinator.isWaitingForPrependSemanticFrame)
+
+            coordinator.geometryChanged(
+                previous: away,
+                current: ChatTranscriptGeometry(offsetY: 500, contentHeight: 1_000, containerHeight: 400)
+            )
+            coordinator.semanticFrameChanged(
+                renderedID: "new-row",
+                layoutEpoch: oldEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 40)
+            )
+            #expect(coordinator.command == nil)
+            coordinator.semanticFrameChanged(
+                renderedID: "new-row",
+                layoutEpoch: installedEpoch,
+                frame: CGRect(x: 0, y: 25, width: 100, height: 40)
+            )
+            let late = try await coordinator.hostedNextCommand()
+            #expect(late.destination == .offsetY(505))
+            coordinator.commandApplied(late)
+            #expect(coordinator.command == nil)
+            #expect(coordinator.isWaitingForPrependSemanticFrame)
+
+            coordinator.geometryChanged(
+                previous: ChatTranscriptGeometry(offsetY: 500, contentHeight: 1_000, containerHeight: 400),
+                current: ChatTranscriptGeometry(offsetY: 505, contentHeight: 1_000, containerHeight: 400)
+            )
+            coordinator.semanticFrameChanged(
+                renderedID: "new-row",
+                layoutEpoch: installedEpoch,
+                frame: CGRect(x: 0, y: 20.5, width: 100, height: 40)
+            )
+            try await results.waitForValue()
+            #expect(results.values == [.success])
+        }
+    }
+
+    @Test("prepend admits an exact sample that arrives before the page continuation returns")
+    func prependSampleBeforePageReturn() async throws {
+        try await withTestWatchdog { @MainActor in
+            let coordinator = ChatScrollCoordinator()
+            coordinator.geometryChanged(previous: away, current: away)
+            coordinator.semanticFrameChanged(
+                renderedID: "old-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 40)
+            )
+            let anchor = ChatSemanticAnchor(
+                semanticID: "semantic",
+                renderedID: "old-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                viewportOffsetY: 20
+            )
+            let began = coordinator.beginPrepend(anchor: anchor, load: {
+                let installedLayout = coordinator.beginInstalledPageLayoutEpoch()
+                coordinator.semanticFrameChanged(
+                    renderedID: "new-row",
+                    layoutEpoch: installedLayout.value,
+                    frame: CGRect(x: 0, y: 220, width: 100, height: 40)
+                )
+                return ChatPrependPage(
+                    renderedAnchorID: "new-row",
+                    installedLayout: installedLayout
+                )
+            }, completion: { _ in })
+            #expect(began)
+
+            let command = try await coordinator.hostedNextCommand()
+            #expect(command.destination == .offsetY(500))
+            coordinator.cancel()
+        }
+    }
+
+    @Test("semantic anchor correction preserves viewport offset without total-height input")
+    func semanticAnchorCorrection() {
+        #expect(ChatScrollCoordinator.prependCorrectionOffset(
+            currentOffsetY: 300,
+            capturedViewportOffsetY: 20,
+            installedFrameMinY: 220
+        ) == 500)
+    }
+
+    @Test("gesture interruption synchronously suppresses pending prepend commands")
+    func gestureInterruptsPrepend() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: away, current: away)
+        coordinator.semanticFrameChanged(
+            renderedID: "row",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 10, width: 100, height: 40)
+        )
+        let completed = ScrollResultRecorder()
+        let began = coordinator.beginPrepend(
+            anchor: ChatSemanticAnchor(semanticID: "semantic", renderedID: "row", layoutEpoch: coordinator.layoutEpoch, viewportOffsetY: 10),
+            load: { nil },
+            completion: { completed.record($0) }
+        )
+        #expect(began)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
+        #expect(coordinator.command == nil)
+        coordinator.cancel()
+        #expect(completed.values == [.cancelled])
+    }
+
+    private func detachedCoordinator(
+        at geometry: ChatTranscriptGeometry,
+        withUnread: Bool = true
+    ) -> ChatScrollCoordinator {
         let coordinator = ChatScrollCoordinator()
         coordinator.scrollPositionChanged(isPositionedByUser: true)
-        coordinator.geometryChanged(previous: bottom, current: away)
-        coordinator.semanticResponseArrived()
-        let resized = ChatTranscriptGeometry(
-            offsetY: 300, contentHeight: 1_000, containerHeight: 700, bottomInset: 0
-        )
-        #expect(resized.isAtExactBottom)
-        #expect(!coordinator.viewportChanged(previous: away, current: resized))
-        #expect(coordinator.userScrolledAway)
-        #expect(coordinator.hasUnreadContent)
-        #expect(!coordinator.isAtBottom)
+        coordinator.geometryChanged(previous: bottom, current: geometry)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: geometry)
+        if withUnread { coordinator.semanticResponseArrived() }
+        return coordinator
+    }
+}
+
+@MainActor
+private final class ScrollCounter {
+    var value = 0
+}
+
+@MainActor
+private final class ScrollResultRecorder {
+    private struct Waiter {
+        let id: Int
+        let continuation: CheckedContinuation<Void, Error>
+    }
+    private(set) var values: [PerformanceResult] = []
+    private var waiters: [Waiter] = []
+    private var nextWaiterID = 0
+
+    func record(_ value: PerformanceResult) {
+        values.append(value)
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.continuation.resume() }
     }
 
-    @Test("manual scrolling to the practical tail boundary hides catch-up")
-    func practicalBottomRepins() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
-        coordinator.scrollPositionChanged(isPositionedByUser: true)
-        coordinator.geometryChanged(previous: bottom, current: away)
-        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
-        coordinator.semanticResponseArrived()
-
-        let roundedTail = ChatTranscriptGeometry(
-            offsetY: 589, contentHeight: 1_000, containerHeight: 400
-        )
-        coordinator.geometryChanged(previous: away, current: roundedTail)
-        #expect(!coordinator.userScrolledAway)
-        #expect(!coordinator.hasUnreadContent)
-        #expect(coordinator.isAtBottom)
+    func waitForValue() async throws {
+        guard values.isEmpty else { return }
+        let id = nextWaiterID
+        nextWaiterID &+= 1
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
+                else { waiters.append(.init(id: id, continuation: continuation)) }
+            }
+        } onCancel: {
+            Task { @MainActor in self.cancel(id: id) }
+        }
     }
 
-    @Test("opening positioning can reissue bottom ownership without enabling ordinary follow")
-    func openingPositioningOwnership() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.scrollPositionChanged(isPositionedByUser: true)
-        coordinator.geometryChanged(previous: bottom, current: away)
-        #expect(!coordinator.canAutomaticallyFollow)
-        coordinator.beginOpeningBottomScroll()
-        coordinator.beginOpeningBottomScroll()
-        #expect(coordinator.beginAutomaticBottomScroll())
+    private func cancel(id: Int) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: index).continuation.resume(throwing: CancellationError())
+    }
+}
+
+@MainActor
+private final class ManualScrollFrameScheduler {
+    private var continuations: [Int: CheckedContinuation<Void, Error>] = [:]
+    private var nextContinuationID = 0
+    private var requestWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private(set) var requestCount = 0
+
+    lazy var scheduler = DisplayFrameScheduler { [weak self] in
+        guard let self else { throw CancellationError() }
+        try await self.wait()
     }
 
-    @Test("explicit app jump claims ownership and clears unread only after intent")
-    func explicitJump() {
-        let coordinator = ChatScrollCoordinator()
-        coordinator.scrollPositionChanged(isPositionedByUser: true)
-        coordinator.geometryChanged(previous: bottom, current: away)
-        coordinator.semanticResponseArrived()
-        #expect(coordinator.hasUnreadContent)
-        #expect(coordinator.beginAutomaticBottomScroll(force: true))
-        coordinator.clearUnreadAfterExplicitJump()
-        #expect(!coordinator.hasUnreadContent)
-        #expect(!coordinator.userScrolledAway)
-        #expect(coordinator.isAtBottom)
+    private func wait() async throws {
+        let id = nextContinuationID
+        nextContinuationID &+= 1
+        requestCount &+= 1
+        let ready = requestWaiters.filter { $0.0 <= requestCount }
+        requestWaiters.removeAll { $0.0 <= requestCount }
+        ready.forEach { $0.1.resume() }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
+                else { continuations[id] = continuation }
+            }
+        } onCancel: {
+            Task { @MainActor in self.cancel(id: id) }
+        }
+    }
 
-        let growthDuringJump = ChatTranscriptGeometry(
-            offsetY: 300, contentHeight: 1_080, containerHeight: 400
-        )
-        #expect(coordinator.geometryChanged(previous: away, current: growthDuringJump))
+    func waitForRequest(count: Int) async {
+        guard requestCount < count else { return }
+        await withCheckedContinuation { requestWaiters.append((count, $0)) }
+    }
+
+    func releaseNext() {
+        guard let id = continuations.keys.min(), let continuation = continuations.removeValue(forKey: id) else { return }
+        continuation.resume()
+    }
+
+    private func cancel(id: Int) {
+        continuations.removeValue(forKey: id)?.resume(throwing: CancellationError())
     }
 }

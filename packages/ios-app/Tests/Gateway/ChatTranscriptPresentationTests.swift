@@ -491,7 +491,8 @@ struct ChatTranscriptPresentationTests {
         ]
         """)
 
-        let rendered = ChatTranscriptPresentation.renderItems(in: snapshot)
+        let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
+        let rendered = timeline.items
         #expect(rendered.count == 1)
         guard case .toolRun(let run) = rendered.first else {
             Issue.record("Expected one grouped tool run")
@@ -502,6 +503,34 @@ struct ChatTranscriptPresentationTests {
         #expect(run.tools[0].response == nil)
         #expect(run.tools[1].request == .object(["command": .string("pwd")]))
         #expect(run.title == "Used 2 tools")
+        #expect(timeline.preferredSemanticIDByRenderedID[run.id] == "call-2")
+        #expect(timeline.renderedIDBySemanticID["call-1"] == run.id)
+        #expect(timeline.renderedIDBySemanticID["call-2"] == run.id)
+    }
+
+    @Test("semantic tool anchor survives page-boundary regrouping when the outer row changes")
+    func semanticAnchorSurvivesPageBoundaryRegrouping() throws {
+        let current = try fixture(transcript: """
+        [
+          {"id":"assistant-2","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"call-part-2","type":"toolCall","toolCallId":"call-2","name":"bash","arguments":{"command":"pwd"}}]},
+          {"id":"result-2","parentId":"assistant-2","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"toolResult","content":[{"id":"result-text-2","type":"text","text":"/workspace"}],"toolCallId":"call-2","toolName":"bash","isError":false}
+        ]
+        """)
+        let before = ChatTranscriptPresentation.timeline(in: current)
+        #expect(before.ids == ["tool-run-call-2"])
+        #expect(before.preferredSemanticIDByRenderedID["tool-run-call-2"] == "call-2")
+
+        let prepended = try fixture(transcript: """
+        [
+          {"id":"assistant-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call-part-1","type":"toolCall","toolCallId":"call-1","name":"read","arguments":{"path":"one"}}]},
+          {"id":"result-1","parentId":"assistant-1","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"result-text-1","type":"text","text":"one"}],"toolCallId":"call-1","toolName":"read","isError":false},
+          {"id":"assistant-2","parentId":"result-1","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"call-part-2","type":"toolCall","toolCallId":"call-2","name":"bash","arguments":{"command":"pwd"}}]},
+          {"id":"result-2","parentId":"assistant-2","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"toolResult","content":[{"id":"result-text-2","type":"text","text":"/workspace"}],"toolCallId":"call-2","toolName":"bash","isError":false}
+        ]
+        """)
+        let after = ChatTranscriptPresentation.timeline(in: prepended)
+        #expect(after.ids == ["tool-run-call-1"])
+        #expect(after.renderedIDBySemanticID["call-2"] == "tool-run-call-1")
     }
 
     @Test("parallel live tools keep one stable canonical row through settlement")

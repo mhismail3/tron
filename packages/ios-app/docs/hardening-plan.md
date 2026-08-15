@@ -1,6 +1,6 @@
 # Tron iOS hardening plan
 
-Status: implementation in progress — Phases 0–2, Phase 3A–3C, and the separate provisional UI removal milestone are complete; comprehensive Phase 4/5 chat projection and scroll hardening is the next priority, followed by the remaining Phase 3D/3E extraction cleanup.
+Status: implementation in progress — Phases 0–2, Phase 3A–3C, and the separate provisional UI removal milestone are complete; Phase 4/5.1 deterministic scroll-command and semantic-prepend ownership is complete, and atomic incremental chat projection is next before the remaining Phase 3D/3E cleanup.
 
 Source and owning documentation at tracked HEAD are authoritative; untracked `.pi` runtime artifacts and historical audit line numbers are not.
 
@@ -69,9 +69,9 @@ Eight independent read-only audits covered state architecture, chat scrolling/pe
 
 **0B.3a — Deterministic generated scenarios: complete.** A test-only seeded builder produces byte-bounded opening tails, on-demand 10,000-entry paging ranges, long history pages, 100–256-tool bursts, 30/60 Hz cumulative Markdown updates, and synthetic high-resolution attachment data. Focused tests fix exact counts, bounds, overlap/gap behavior, rates, IDs, and privacy-safe content. It creates no production cache, transcript mirror, runtime, or session owner.
 
-**0B.3b — Hosted presented-frame scroll harness: complete.** Test builds can admit a synthetic snapshot through the existing authoritative read gate and bypass only network opening. The harness mounts the real `ChatView`, lazy transcript, composer inset, and native scroll view; semantic row frames, visibility, and geometry are coalesced to one latest sample per `CADisplayLink` frame. Focused tests prove native-scroll fidelity, latest-tail visibility, authority gating, watchdog-bounded waits, and at-most-one recorded sample per presented frame. No test hook ships in Beta or production.
+**0B.3b — Hosted presented-frame scroll harness: complete.** Test builds can admit a synthetic snapshot through the existing authoritative read gate and bypass only network opening. The harness mounts the real `ChatView`, lazy transcript, composer inset, and native scroll view; bounded semantic row frames and geometry are sampled per `CADisplayLink` frame, and hosted visibility is derived from measured viewport intersection rather than a production visibility callback. Focused tests prove native-scroll fidelity, latest-tail visibility, authority gating, watchdog-bounded waits, and at-most-one recorded sample per presented frame. No test hook ships in Beta or production.
 
-**0B.4 — Privacy-safe instrumentation and performance evidence: complete.** The typed signpost vocabulary is installed. Gateway connection, disposable cache load/save, visible session open, authoritative sync/resync attempts, uncertain-command receipt resolution, and terminal attach/replay now expose only closed result codes and aggregate item/byte counts. Shared interval handling removed duplicate terminal replay installation and centralizes success/failure/cancellation closure. Focused spies characterize these boundaries without admitting profile IDs, session IDs, paths, command IDs, model names, prompts, transcript content, terminal output, or filenames. Deterministic chat projection records only projected row count, and first-ready timing ends on the next actual `CADisplayLink` presentation rather than model readiness. Generation-owned scroll and prepend intervals discard replaced commands, reject stale prepend completion, and cancel exactly once at teardown; stale paging defer blocks cannot clear a newer paging owner. Prepend success is recorded only after the next presented frame confirms the requested offset within one point. The reproducible five-sample simulator and pinned-device timing, hitch, allocation, and memory evidence is recorded in `performance-baseline.md`; high-variance allocator deltas and internally inconsistent XCTest frame-rate estimates are reports, not gates.
+**0B.4 — Privacy-safe instrumentation and performance evidence: complete.** The typed signpost vocabulary is installed. Gateway connection, disposable cache load/save, visible session open, authoritative sync/resync attempts, uncertain-command receipt resolution, and terminal attach/replay now expose only closed result codes and aggregate item/byte counts. Shared interval handling removed duplicate terminal replay installation and centralizes success/failure/cancellation closure. Focused spies characterize these boundaries without admitting profile IDs, session IDs, paths, command IDs, model names, prompts, transcript content, terminal output, or filenames. Deterministic chat projection records only projected row count, and first-ready timing ends on the next actual `CADisplayLink` presentation rather than model readiness. Generation-owned scroll and prepend intervals discard replaced commands, reject stale prepend completion, and cancel exactly once at teardown; stale paging defer blocks cannot clear a newer paging owner. Prepend success is recorded only after an exact post-install semantic-frame sample confirms the anchor within one point. The reproducible five-sample simulator and pinned-device timing, hitch, allocation, and memory evidence is recorded in `performance-baseline.md`; high-variance allocator deltas and internally inconsistent XCTest frame-rate estimates are reports, not gates.
 
 **0B.5 — System-service seams: complete.** Camera authorization and capture-session ownership now sit behind narrow injectable providers while `CameraModel` retains the existing UI-facing state machine; deterministic tests cover grant/deny/setup failure, session commands, torch ownership, flip, and no-output capture without touching hardware. The pairing QR controller shares authorization, delegates serial session start/stop, cancels pending permission on disappearance, and admits exactly one result under hardware-free tests. The share extension reduces ordered fragments outside its controller, uses store/app-opener seams, and packages a privacy manifest alongside the app; focused bundle tests and a read-only archive verifier require both manifests. Presentation source guards now retain visual policy assertions without pinning moved projection, scroll-algorithm, or explanatory-comment spellings.
 
@@ -84,10 +84,8 @@ Eight independent read-only audits covered state architecture, chat scrolling/pe
 ### Verified performance risks
 
 - `ChatTranscriptPresentation.timeline(in:)` is built synchronously in `ChatView` and performs whole-transcript scans, allocations, deep equality, and eager JSON pretty-printing.
-- Geometry and visibility are broad `ChatView` state, so viewport activity can re-enter transcript projection.
+- Timeline construction still occurs synchronously in `ChatView.body`, so geometry-driven body evaluation can re-enter whole-transcript projection until the atomic projection store lands.
 - Markdown and thinking repeatedly parse complete strings; a single large message defeats outer row laziness.
-- Every measured height increase while pinned may issue another bottom `ScrollPosition` write.
-- History prepend combines a semantic row command with up to 60 raw-offset corrections and permits a repeat-tap ownership race.
 - Transcript thumbnails fetch, decode, and retain full-resolution images for 64-point chips without shared byte-bounded deduplication.
 - Expanded-history merge, snapshot decode, JSON round trips, cache save scheduling, and full-file attachment work need tighter off-main and bounded ownership.
 
@@ -283,7 +281,7 @@ Exit gate:
 
 Deliverables:
 
-- First land frame-coalesced scroll-command ownership, or keep exactly one atomic row-list commit per admitted authoritative update until Phase 5's reducer is active; asynchronous publication must not amplify the current height-driven command loop.
+- **Complete:** frame-coalesced typed scroll-command ownership is active before asynchronous projection work; publication cannot amplify a height-driven command loop.
 - Move timeline projection out of `ChatView.body` into `ChatPresentationStore` and prepare it off-main from immutable tagged inputs.
 - Use latest-request-wins cancellation/coalescing and reject stale/out-of-order results by the full session/presentation/runtime/authoritative/projection tag.
 - Recompute only changed canonical entries, the streaming tail, affected tool groups, or a newly prepended page.
@@ -304,17 +302,19 @@ Exit gate:
 - Cancelled/out-of-order projection, reconnect replacement, and prepend-overlap completions cannot install.
 - MainActor publication plus the defined SwiftUI diff/command boundary stays within the calibrated budget.
 
-### Phase 5 — Make scrolling and prepend deterministic
+### Phase 5 — Make scrolling and prepend deterministic — production ownership and focused hosted gate complete; physical evidence pending
 
 Deliverables:
 
-- Move raw geometry/visibility out of broad `ChatView` observed state into a scroll event reducer.
-- Emit one optional scroll command from one owner; coalesce follow-tail to at most one command per display frame and skip writes already inside the practical bottom boundary.
-- Preserve direct user interaction as absolute authority.
-- Replace 60-frame prepend polling with a generation/token-scoped anchor transaction. Capture a semantic anchor's frame relative to the viewport in the real-scroll harness, and maintain canonical-item-to-rendered-anchor mapping even when page-boundary tool grouping changes the outer row.
-- Restore in one disabled-animation transaction from before/after semantic anchor or inserted-prefix-boundary measurements. Permit at most one generation-scoped late correction, measuring only the inserted prefix and never unrelated tail/composer growth.
-- Keep the load token active until anchor settlement; an old cancellation/defer cannot end a newer prepend.
-- Keep detached readers detached during resize, stream, image settlement, and prepend.
+- **Complete:** raw geometry and semantic row frames leave broad `ChatView` state and enter one scroll reducer; the obsolete production visibility callback is deleted.
+- **Complete:** one owner emits a typed optional command, coalesces follow-tail to at most one command per display frame, and skips writes inside the practical bottom boundary.
+- **Complete:** direct/native/accessibility interaction is absolute authority and synchronously cancels pending automatic commands.
+- **Complete:** the 60-frame prepend polling loop is replaced by one generation/token-scoped semantic-anchor transaction; canonical-to-rendered mapping survives page-boundary tool grouping.
+- **Complete:** exact page install advances a layout epoch carried by the row geometry transform, so an unchanged numeric frame still emits an exact post-epoch sample. Prepend passively waits for that sample, requires a strictly newer exact sample after each correction, permits at most one late correction, and succeeds only within one point. No next-frame assumption or total tail/content height drives correction.
+- **Complete:** the load token stays active through settlement, repeat taps are no-ops, and stale work cannot end a newer transaction.
+- **Complete:** geometry-first detachment consumes its one-shot direct-return arm, so viewport expansion and later unattributed tail samples cannot release it; native/direct/accessibility return still releases at an attributed tail. Catch-up retains prior and newly arriving unread state through staged/final/settling phases, restores it on interruption, and clears it only after physical tail settlement.
+- **Complete:** hosted aggregate evidence drives the actual coordinator/executor, bounds retained row frames, admits at most one automatic command per displayed frame, and records zero detached writes without exposing content or identifiers in the added counters.
+- **Remaining checkpoint:** physical-device evidence for the final one-point/two-point excursion gate and the still-observed native SwiftUI geometry diagnostic.
 
 Exit gate:
 

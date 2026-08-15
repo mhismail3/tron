@@ -270,23 +270,34 @@ practical tail boundary, its persistent `ScrollPosition` target is cleared witho
 changes cannot replay stale edge ownership. Viewport resize owns mixed resize/streaming frames:
 a pinned reader receives only a bottom-edge command, while a detached reader receives no app
 position write. Native ownership arriving after geometry consumes preserved directional evidence
-instead of losing an upward gesture. Direct interactive scrolling always wins. A compact scroll coordinator is the sole owner of following intent: it
-combines native `ScrollPosition` ownership, phase-final geometry, inset-aware bottom
-distance, prepend ownership, and durable user scroll-away. A separate lightweight
-performance tracker owns only interval generations: a replacement command discards
-its predecessor, practical-tail observation settles the active command even when
-SwiftUI already cleared its binding, and stale paging defer work cannot close a newer
-prepend or paging owner. Upward user geometry is
+instead of losing an upward gesture. Direct interactive scrolling always wins. `ChatScrollCoordinator` is the sole owner of
+raw geometry and semantic-row frame intake; pinned/detached and unread
+state; presentation and command generations; display-frame follow and catch-up tasks;
+and the exact paging/semantic-anchor transaction. It publishes one exact-token typed
+command for `ChatView` to execute and acknowledge; presentation reset and settled
+binding release are command destinations rather than direct view policy. Automatic streaming growth is
+latest-sample-wins behind one injected display-frame wait, emits at most one tail
+command per presented frame, and emits none inside the practical bottom boundary.
+Direct/native/accessibility interaction synchronously invalidates pending automatic
+commands. The performance tracker owns interval generations only. Upward user geometry is
 the only ordinary transition from pinned to detached; native ownership alone cannot
 detach a reader when streamed growth moves the physical bottom. A gesture commits
 detachment only after its settled geometry has moved toward older content, so bottom-edge
-rubber-banding cannot flash the catch-up control. While detached, a fixed action-sized circular
+rubber-banding cannot flash the catch-up control. Viewport expansion or later
+unattributed tail geometry cannot release detachment; only an admitted direct/native/
+accessibility return or a catch-up command that physically settles at the boundary may do so.
+While detached, a fixed action-sized circular
 glass down-arrow morphs from the composer's trailing edge; multiline editor height can never
 resize it. Reaching the practical tail boundary (with a small inset-rounding tolerance) or
-tapping that control immediately re-pins the transcript. Long-distance
-catch-up jumps without animation to a small reveal distance and smoothly animates only the
-final approach, avoiding a jittery traversal through lazy history. Every later measured
-height increase reissues a coalescible bottom command until another upward gesture.
+tapping that control starts an owned catch-up transaction. Long-distance catch-up
+jumps without animation to a small reveal distance, waits for the next actual display
+frame, and smoothly animates only the final approach; Reduce Motion uses one
+disabled-animation tail command. Catch-up remains explicit state through physical
+settlement; prior and newly arriving unread state remains admitted throughout staged,
+final, and settling phases. Interruption away from the tail restores detached/unread
+ownership, while successful physical settlement clears unread only at completion.
+Every later measured height increase coalesces into
+the next display-frame command until another upward gesture.
 Progress-only tool mutations cannot request a tail position. Keyboard and composer layout may
 restore a logically pinned tail but cannot change the durable pinned/detached mode. Async editor
 height measurements carry a latest-revision guard, so an older wrap measurement cannot overwrite
@@ -558,8 +569,19 @@ square previews with dedicated image sheets. A pending photo is a stable,
 non-morphing preview target; its separate remove control owns a 44-point hit
 region. Pending and sent photo chips share the historical medium-detent,
 concentrically rounded preview with native pinch and double-tap zoom. Earlier-history loading, context summaries, and unread-response navigation share one
-content-sized compact pill treatment while preserving 44-point semantic targets and the
-exact visible transcript offset when rows prepend. The multiline composer
+content-sized compact pill treatment while preserving 44-point semantic targets. A
+history request captures the visually first measured semantic frame intersecting the
+viewport; threshold visibility cannot authorize loading. Canonical-to-rendered metadata
+maps every tool call to its single compact grouped transcript chip, so page-boundary
+regrouping cannot lose that visible semantic anchor. Exact page install advances a
+layout/projection epoch, and the row geometry transform includes that epoch so an exact
+post-install sample is emitted even when its numeric frame is unchanged. Settlement
+waits passively for that exact sample; after each disabled-animation correction the
+owner requires a strictly newer sample of the same semantic frame, permits at most one
+late correction, and succeeds only within one point. There is no next-frame assumption,
+total content-height polling loop, unanchored success, or stale defer
+that can end a newer paging token. The
+multiline composer
 gives its capped UIKit text view sole ownership of caret visibility and internal
 scrolling. The composer itself is the transcript ScrollView's bottom safe-area inset;
 no height preference or synthetic transcript spacer mirrors its geometry.
