@@ -17,6 +17,11 @@ struct ChatHostedObservation: Sendable {
     let automaticScrollCommandCount: Int
     let geometryCallbackCount: Int
     let semanticFrameCallbackCount: Int
+    let projectionSubmitCount: Int
+    let projectionWorkAdmissionCount: Int
+    let projectionInstallCount: Int
+    let installedProjectionRowCount: Int
+    let installedProjectionSourceOrdinal: Int?
     let maximumSemanticExcursion: CGFloat
     let controlEventCount: Int
     let isDetached: Bool
@@ -38,6 +43,11 @@ final class ChatHostedProbe {
     private var automaticScrollCommandCount = 0
     private var geometryCallbackCount = 0
     private var semanticFrameCallbackCount = 0
+    private var projectionSubmitCount = 0
+    private var projectionWorkAdmissionCount = 0
+    private var projectionInstallCount = 0
+    private var installedProjectionRowCount = 0
+    private var installedProjectionSourceOrdinal: Int?
     private var maximumSemanticExcursion: CGFloat = 0
     private var controlEventCount = 0
     private var isDetached = false
@@ -78,6 +88,11 @@ final class ChatHostedProbe {
             automaticScrollCommandCount: automaticScrollCommandCount,
             geometryCallbackCount: geometryCallbackCount,
             semanticFrameCallbackCount: semanticFrameCallbackCount,
+            projectionSubmitCount: projectionSubmitCount,
+            projectionWorkAdmissionCount: projectionWorkAdmissionCount,
+            projectionInstallCount: projectionInstallCount,
+            installedProjectionRowCount: installedProjectionRowCount,
+            installedProjectionSourceOrdinal: installedProjectionSourceOrdinal,
             maximumSemanticExcursion: maximumSemanticExcursion,
             controlEventCount: controlEventCount,
             isDetached: isDetached,
@@ -120,6 +135,19 @@ final class ChatHostedProbe {
     func recordScrollCommand(isAutomatic: Bool) {
         scrollCommandCount &+= 1
         if isAutomatic { automaticScrollCommandCount &+= 1 }
+        revision &+= 1
+    }
+
+    func recordProjectionSubmit(startedWork: Bool) {
+        projectionSubmitCount &+= 1
+        if startedWork { projectionWorkAdmissionCount &+= 1 }
+        revision &+= 1
+    }
+
+    func recordProjectionInstall(rowCount: Int, sourceOrdinal: Int) {
+        projectionInstallCount &+= 1
+        installedProjectionRowCount = max(0, rowCount)
+        installedProjectionSourceOrdinal = max(0, sourceOrdinal)
         revision &+= 1
     }
 

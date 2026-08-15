@@ -133,6 +133,7 @@ struct ChatViewScrollHarnessTests {
                 }
 
                 let baseline = harness.recorder.samples.last?.observation.automaticScrollCommandCount ?? 0
+                let projectionWorkBaseline = harness.probeObservation.projectionWorkAdmissionCount
                 let bottom = ChatTranscriptGeometry(
                     offsetY: 600, contentHeight: 1_000, containerHeight: 400
                 )
@@ -179,6 +180,10 @@ struct ChatViewScrollHarnessTests {
                     harness.probeObservation.scrollCommandCount
                         == commandsBeforeDetachedGrowth
                 )
+                #expect(
+                    harness.probeObservation.projectionWorkAdmissionCount
+                        == projectionWorkBaseline
+                )
 
                 let commandsBeforeCatchUp = harness.probeObservation.scrollCommandCount
                 harness.driveCatchUp(reduceMotion: true)
@@ -188,6 +193,55 @@ struct ChatViewScrollHarnessTests {
                 harness.drivePhase(from: .idle, to: .interacting, geometry: away)
                 #expect(harness.probeObservation.isDetached)
                 #expect(harness.probeObservation.hasUnread)
+            }
+        }
+    }
+
+    @Test("streaming burst installs only its newest projection while detached scrolling stays writable")
+    func streamingBurstLatestProjection() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 118) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                        && $0.observation.projectionInstallCount >= 1
+                }
+                let bottom = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
+                )
+                let away = ChatTranscriptGeometry(
+                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
+                )
+                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: bottom, current: away)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
+                #expect(harness.probeObservation.isDetached)
+
+                var newest = harness.snapshot
+                let initialSequence = newest.eventSequence
+                for offset in 1...30 {
+                    newest.revision += 1
+                    newest.eventSequence = initialSequence + offset
+                    newest.streaming = newest.transcript.last
+                    harness.replaceAuthoritativeSnapshot(newest)
+                }
+
+                harness.driveComposerViewportTransition()
+                harness.driveGeometry(
+                    previous: away,
+                    current: ChatTranscriptGeometry(
+                        offsetY: 300,
+                        contentHeight: 1_120,
+                        containerHeight: 320,
+                        bottomInset: 80
+                    ),
+                    viewport: true
+                )
+                let newestInstall = try await harness.recorder.waitUntil {
+                    $0.observation.installedProjectionSourceOrdinal == newest.eventSequence
+                }
+                #expect(newestInstall.observation.installedProjectionRowCount > 0)
+                #expect(newestInstall.observation.isDetached)
             }
         }
     }
@@ -339,6 +393,7 @@ final class ChatViewScrollHarness {
     let signposts: RecordingPerformanceSignposts
     let probe: ChatHostedProbe
 
+    private let model: AppModel
     private let suiteName: String
     private let cacheRoot: URL
     private let defaults: UserDefaults
@@ -373,6 +428,7 @@ final class ChatViewScrollHarness {
             profiles: GatewayProfileStore(defaults: defaults),
             cache: SnapshotCache(root: cacheRoot)
         )
+        self.model = model
         guard model.authoritativeSnapshot(for: snapshot.sessionId) == nil else {
             throw HarnessError.invalidAuthorityBoundary
         }
@@ -415,6 +471,10 @@ final class ChatViewScrollHarness {
     }
 
     var probeObservation: ChatHostedObservation { probe.observation }
+
+    func replaceAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
+        model.replaceHostedAuthoritativeSnapshot(snapshot)
+    }
 
     func driveGeometry(
         previous: ChatTranscriptGeometry,

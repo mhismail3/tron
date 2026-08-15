@@ -44,6 +44,7 @@ struct ChatView: View {
     @State private var composerTextHeight: CGFloat = 20
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
     @State private var scrollCoordinator: ChatScrollCoordinator
+    @State private var transcriptPresentation: ChatTranscriptPresentationStore
     @State private var performanceTracker: ChatPerformanceTracker
     @State private var transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
     @Namespace private var composerGlassNamespace
@@ -69,6 +70,9 @@ struct ChatView: View {
         self.performanceSignposts = performanceSignposts
         _composerScope = State(initialValue: nil)
         _scrollCoordinator = State(initialValue: ChatScrollCoordinator(frameScheduler: displayFrameScheduler))
+        _transcriptPresentation = State(initialValue: ChatTranscriptPresentationStore(
+            performanceSignposts: performanceSignposts
+        ))
         _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
     }
@@ -87,6 +91,9 @@ struct ChatView: View {
         self.performanceSignposts = performanceSignposts
         _composerScope = State(initialValue: nil)
         _scrollCoordinator = State(initialValue: ChatScrollCoordinator(frameScheduler: displayFrameScheduler))
+        _transcriptPresentation = State(initialValue: ChatTranscriptPresentationStore(
+            performanceSignposts: performanceSignposts
+        ))
         _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
         _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
     }
@@ -177,11 +184,38 @@ struct ChatView: View {
             Text(ComposerEditorRequestPolicy.confirmationMessage)
         }
         .task(id: sessionID) { await beginOpeningPresentation() }
+        .onChange(of: transcriptProjectionSource, initial: true) { _, source in
+            guard let currentSource = transcriptProjectionSource else {
+                transcriptPresentation.reset()
+                return
+            }
+            // Ignore a callback captured before opening installed its mounted
+            // generation; the newer exact source owns submission.
+            guard source == currentSource,
+                  let snapshot = selectedAuthoritativeSnapshot,
+                  snapshot.sessionId == currentSource.sessionID else { return }
+            // Prepend owns the exact page projection/layout-epoch transaction.
+            guard !scrollCoordinator.isPrependingHistory else { return }
+            let startedWork = transcriptPresentation.submit(snapshot: snapshot, tag: currentSource)
+            #if HOSTED_TEST
+            hostedProbe?.recordProjectionSubmit(startedWork: startedWork)
+            #endif
+        }
+        #if HOSTED_TEST
+        .onChange(of: transcriptPresentation.installed?.tag) { _, tag in
+            guard let tag, let installed = transcriptPresentation.installed else { return }
+            hostedProbe?.recordProjectionInstall(
+                rowCount: installed.timeline.items.count,
+                sourceOrdinal: tag.eventSequence
+            )
+        }
+        #endif
         .onDisappear {
             if let target = presentationTarget { model.revokePresentationIntake(target) }
             openingTask?.cancel()
             openingTask = nil
             scrollCoordinator.cancel()
+            transcriptPresentation.reset()
             performanceTracker.cancelAll()
             cancelAttachmentPresentation(includingActive: true)
             if let generation = modelPresentationGeneration {
@@ -203,17 +237,15 @@ struct ChatView: View {
                             earlierMessagesChip(snapshot: snapshot)
                         }
                     }
-                    let timeline = ChatTranscriptPresentation.timeline(
-                        in: snapshot,
-                        performanceSignposts: performanceSignposts
-                    )
-                    ForEach(timeline.items) { item in
-                        stableTranscriptRow(id: item.id) {
-                            ChatTranscriptRenderRow(
-                                item: item,
-                                hiddenThinkingLabel: snapshot.extensionUI.hiddenThinkingLabel
-                            )
-                            .equatable()
+                    if let timeline = transcriptPresentation.installed?.timeline {
+                        ForEach(timeline.items) { item in
+                            stableTranscriptRow(id: item.id) {
+                                ChatTranscriptRenderRow(
+                                    item: item,
+                                    hiddenThinkingLabel: snapshot.extensionUI.hiddenThinkingLabel
+                                )
+                                .equatable()
+                            }
                         }
                     }
                     runtimeRows(snapshot)
@@ -247,6 +279,9 @@ struct ChatView: View {
         } action: { previous, geometry in
             #if HOSTED_TEST
             hostedProbe?.updateGeometry(geometry)
+            if isTranscriptReady, geometry.isAtCatchUpBoundary {
+                hostedProbe?.recordScrollSettle(distanceFromBottom: geometry.distanceFromBottom)
+            }
             #endif
             guard isTranscriptReady else { return }
             if geometry.hasViewportChange(from: previous) {
@@ -325,6 +360,42 @@ struct ChatView: View {
     private var presentationTarget: AppModel.SessionPresentationTarget? {
         modelPresentationGeneration.map {
             AppModel.SessionPresentationTarget(sessionID: sessionID, generation: $0)
+        }
+    }
+
+    private var transcriptProjectionSource: ChatTranscriptProjectionTag? {
+        guard let snapshot = selectedAuthoritativeSnapshot,
+              let generation = modelPresentationGeneration,
+              snapshot.sessionId == sessionID else { return nil }
+        return ChatTranscriptProjectionTag(
+            snapshot: snapshot,
+            presentationGeneration: generation
+        )
+    }
+
+    @MainActor
+    private func installCurrentTranscriptProjection(
+        presentationGeneration: Int
+    ) async throws -> InstalledChatTranscript {
+        while true {
+            try Task.checkCancellation()
+            guard modelPresentationGeneration == presentationGeneration,
+                  let snapshot = model.authoritativeSnapshot(for: sessionID),
+                  snapshot.sessionId == sessionID else { throw CancellationError() }
+            let tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: presentationGeneration
+            )
+            transcriptPresentation.submit(snapshot: snapshot, tag: tag)
+            do {
+                let installed = try await transcriptPresentation.waitForInstall(of: tag)
+                guard modelPresentationGeneration == presentationGeneration else {
+                    throw CancellationError()
+                }
+                if transcriptProjectionSource == tag { return installed }
+            } catch ChatTranscriptPresentationStoreError.superseded {
+                continue
+            }
         }
     }
 
@@ -440,25 +511,50 @@ struct ChatView: View {
         openingTask?.cancel()
         performanceTracker.discardScroll()
         modelPresentationGeneration = nil
+        transcriptPresentation.reset()
         let epoch = openPresentation.begin()
         scrollCoordinator.resetForPresentation(epoch)
         let task = Task { @MainActor in
             let interval = performanceSignposts.begin(.firstReadyFrame)
+            var openedGeneration: Int?
             do {
                 let generation = try await model.openSessionPresentation(
                     sessionID,
                     composerScope: composerScope
                 )
+                openedGeneration = generation
                 guard !Task.isCancelled,
-                      openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
+                      model.authoritativeSnapshot(for: sessionID)?.sessionId == sessionID else {
                     performanceSignposts.end(interval, result: .discarded, metrics: .none)
                     await model.closeSessionPresentation(sessionID, generation: generation)
                     return
                 }
                 modelPresentationGeneration = generation
+                let installed = try await installCurrentTranscriptProjection(
+                    presentationGeneration: generation
+                )
+                guard !Task.isCancelled,
+                      transcriptProjectionSource == installed.tag,
+                      openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
+                    performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                    await model.closeSessionPresentation(sessionID, generation: generation)
+                    if modelPresentationGeneration == generation {
+                        modelPresentationGeneration = nil
+                        transcriptPresentation.reset()
+                    }
+                    return
+                }
+                openedGeneration = nil
                 positionLatestTail(epoch: epoch)
                 _ = await completeFirstReadyFrame(interval, epoch: epoch)
             } catch {
+                if let generation = openedGeneration {
+                    await model.closeSessionPresentation(sessionID, generation: generation)
+                    if modelPresentationGeneration == generation {
+                        modelPresentationGeneration = nil
+                        transcriptPresentation.reset()
+                    }
+                }
                 let result = PerformanceResult.forFailure(error)
                 performanceSignposts.end(interval, result: result, metrics: .none)
                 if result == .cancelled { return }
@@ -478,17 +574,33 @@ struct ChatView: View {
     @MainActor
     private func beginHostedPresentation(probe: ChatHostedProbe) async {
         performanceTracker.discardScroll()
+        transcriptPresentation.reset()
         let epoch = openPresentation.begin()
         scrollCoordinator.resetForPresentation(epoch)
         let interval = performanceSignposts.begin(.firstReadyFrame)
-        guard selectedAuthoritativeSnapshot != nil,
-              openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
+        guard selectedAuthoritativeSnapshot != nil else {
             performanceSignposts.end(interval, result: .failure, metrics: .none)
             _ = openPresentation.fail(
                 sessionID: sessionID,
                 epoch: epoch,
                 message: "Hosted authoritative snapshot unavailable"
             )
+            return
+        }
+        modelPresentationGeneration = epoch
+        do {
+            _ = try await installCurrentTranscriptProjection(presentationGeneration: epoch)
+        } catch {
+            performanceSignposts.end(interval, result: PerformanceResult.forFailure(error), metrics: .none)
+            _ = openPresentation.fail(
+                sessionID: sessionID,
+                epoch: epoch,
+                message: "Hosted transcript projection unavailable"
+            )
+            return
+        }
+        guard openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
+            performanceSignposts.end(interval, result: .discarded, metrics: .none)
             return
         }
         probe.installScrollControls(
@@ -525,27 +637,23 @@ struct ChatView: View {
                 )
             },
             prepend: {
-                guard let snapshot = model.authoritativeSnapshot(for: sessionID) else { return false }
-                let timeline = ChatTranscriptPresentation.timeline(
-                    in: snapshot,
-                    performanceSignposts: performanceSignposts
-                )
-                let anchor = scrollCoordinator.semanticAnchor(in: timeline)
+                guard let installed = transcriptPresentation.installed,
+                      installed.tag == transcriptProjectionSource else { return false }
+                let anchor = scrollCoordinator.semanticAnchor(in: installed.timeline)
                 return scrollCoordinator.beginPrepend(
                     anchor: anchor,
                     load: {
                         do { try await probe.waitForPrependPageRelease() }
                         catch { return nil }
-                        let installedLayout = scrollCoordinator.beginInstalledPageLayoutEpoch()
                         guard let anchor,
-                              let current = model.authoritativeSnapshot(for: sessionID) else { return nil }
-                        let currentTimeline = ChatTranscriptPresentation.timeline(
-                            in: current,
-                            performanceSignposts: performanceSignposts
-                        )
-                        guard let renderedID = currentTimeline.renderedIDBySemanticID[anchor.semanticID] else {
+                              let generation = modelPresentationGeneration else { return nil }
+                        guard let current = try? await installCurrentTranscriptProjection(
+                            presentationGeneration: generation
+                        ),
+                              let renderedID = current.timeline.renderedIDBySemanticID[anchor.semanticID] else {
                             return nil
                         }
+                        let installedLayout = scrollCoordinator.beginInstalledPageLayoutEpoch()
                         return ChatPrependPage(
                             renderedAnchorID: renderedID,
                             installedLayout: installedLayout
@@ -630,9 +738,6 @@ struct ChatView: View {
         }
         if command.destination == .releaseBinding {
             performanceTracker.settleScroll()
-            #if HOSTED_TEST
-            hostedProbe?.recordScrollSettle(distanceFromBottom: 0)
-            #endif
         }
         #if HOSTED_TEST
         hostedProbe?.recordScrollCommand(isAutomatic: command.origin == .automaticFollow)
@@ -650,11 +755,9 @@ struct ChatView: View {
             let sessionID = snapshot.sessionId
             let runtimeGeneration = snapshot.runtimeGeneration
             let previousStart = snapshot.transcriptStart ?? 0
-            let timeline = ChatTranscriptPresentation.timeline(
-                in: snapshot,
-                performanceSignposts: performanceSignposts
-            )
-            let anchor = scrollCoordinator.semanticAnchor(in: timeline)
+            guard let installed = transcriptPresentation.installed,
+                  installed.tag == transcriptProjectionSource else { return }
+            let anchor = scrollCoordinator.semanticAnchor(in: installed.timeline)
             guard let presentationGeneration = modelPresentationGeneration else { return }
             let performanceGeneration = performanceTracker.beginPrepend()
             let began = scrollCoordinator.beginPrepend(
@@ -670,15 +773,14 @@ struct ChatView: View {
                           current.sessionId == sessionID,
                           current.runtimeGeneration == runtimeGeneration,
                           (current.transcriptStart ?? previousStart) < previousStart else { return nil }
-                    let installedLayout = scrollCoordinator.beginInstalledPageLayoutEpoch()
                     guard let anchor else { return nil }
-                    let currentTimeline = ChatTranscriptPresentation.timeline(
-                        in: current,
-                        performanceSignposts: performanceSignposts
-                    )
-                    guard let renderedID = currentTimeline.renderedIDBySemanticID[anchor.semanticID] else {
+                    guard let installed = try? await installCurrentTranscriptProjection(
+                        presentationGeneration: presentationGeneration
+                    ),
+                          let renderedID = installed.timeline.renderedIDBySemanticID[anchor.semanticID] else {
                         return nil
                     }
+                    let installedLayout = scrollCoordinator.beginInstalledPageLayoutEpoch()
                     return ChatPrependPage(
                         renderedAnchorID: renderedID,
                         installedLayout: installedLayout

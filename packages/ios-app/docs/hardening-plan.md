@@ -1,6 +1,6 @@
 # Tron iOS hardening plan
 
-Status: implementation in progress — Phases 0–2, Phase 3A–3C, and the separate provisional UI removal milestone are complete; Phase 4/5.1 deterministic scroll-command and semantic-prepend ownership is complete, and atomic incremental chat projection is next before the remaining Phase 3D/3E cleanup.
+Status: implementation in progress — Phases 0–2, Phase 3A–3C, and the separate provisional UI removal milestone are complete; Phase 4/5.1 deterministic scroll ownership and Phase 4/5.2 exact-tagged off-main atomic timeline projection are complete. Incremental per-entry/detail projection and physical-device chat acceptance remain before the remaining Phase 3D/3E cleanup.
 
 Source and owning documentation at tracked HEAD are authoritative; untracked `.pi` runtime artifacts and historical audit line numbers are not.
 
@@ -83,8 +83,8 @@ Eight independent read-only audits covered state architecture, chat scrolling/pe
 
 ### Verified performance risks
 
-- `ChatTranscriptPresentation.timeline(in:)` is built synchronously in `ChatView` and performs whole-transcript scans, allocations, deep equality, and eager JSON pretty-printing.
-- Timeline construction still occurs synchronously in `ChatView.body`, so geometry-driven body evaluation can re-enter whole-transcript projection until the atomic projection store lands.
+- Whole-timeline projection is now serialized/coalesced off MainActor and removed from `ChatView.body`; it still performs whole-transcript scans and eager JSON formatting inside the detached builder until incremental entry/detail projection lands.
+- Large single-message Markdown and thinking updates still parse complete changed strings on the rendering path.
 - Markdown and thinking repeatedly parse complete strings; a single large message defeats outer row laziness.
 - Transcript thumbnails fetch, decode, and retain full-resolution images for 64-point chips without shared byte-bounded deduplication.
 - Expanded-history merge, snapshot decode, JSON round trips, cache save scheduling, and full-file attachment work need tighter off-main and bounded ownership.
@@ -282,8 +282,8 @@ Exit gate:
 Deliverables:
 
 - **Complete:** frame-coalesced typed scroll-command ownership is active before asynchronous projection work; publication cannot amplify a height-driven command loop.
-- Move timeline projection out of `ChatView.body` into `ChatPresentationStore` and prepare it off-main from immutable tagged inputs.
-- Use latest-request-wins cancellation/coalescing and reject stale/out-of-order results by the full session/presentation/runtime/authoritative/projection tag.
+- **Complete:** move timeline projection out of `ChatView.body` into `ChatTranscriptPresentationStore` and prepare it off-main from immutable tagged inputs.
+- **Complete:** serialize detached builds, coalesce to one pending newest snapshot, and reject stale/out-of-order results by the full session/presentation/runtime/authoritative/paging tag, including A→B→A.
 - Recompute only changed canonical entries, the streaming tail, affected tool groups, or a newly prepended page.
 - Atomically publish the complete ordered lightweight descriptor spine with shallow version equality before reveal; background cache fills do not publish a projection revision unless visible row output changes.
 - Separate compact tool summaries from detail payloads; resolve/format request, response, and output only when a detail sheet opens through the exact session/presentation/runtime/tool identity, never mutable global selection.
@@ -296,7 +296,7 @@ Deliverables:
 
 Exit gate:
 
-- Typing, geometry, toolbar width, sheet state, attachment-menu state, and unchanged snapshots cause zero timeline projections.
+- **Complete for whole-timeline projection:** typing, geometry, toolbar width, sheet state, attachment-menu state, and unchanged snapshots cause zero timeline projection work.
 - A tool-progress event updates only the owning tool/run descriptor and dependent tail state.
 - Tool chips animate appearance and changes consistently with thinking traces, and timestamp layout introduces no flexible unused leading gap.
 - Cancelled/out-of-order projection, reconnect replacement, and prepend-overlap completions cannot install.
@@ -307,7 +307,7 @@ Exit gate:
 Deliverables:
 
 - **Complete:** raw geometry and semantic row frames leave broad `ChatView` state and enter one scroll reducer; the obsolete production visibility callback is deleted.
-- **Complete:** one owner emits a typed optional command, coalesces follow-tail to at most one command per display frame, and skips writes inside the practical bottom boundary.
+- **Complete:** one owner emits a typed optional command, coalesces follow-tail to at most one command per display frame, and skips writes inside the practical bottom boundary. Physical bottom distance uses native `visibleRect.maxY` plus bottom inset rather than independently settling offset/container arithmetic.
 - **Complete:** direct/native/accessibility interaction is absolute authority and synchronously cancels pending automatic commands; geometry-first manual return to the measured tail clears catch-up without requiring a button tap.
 - **Complete:** the 60-frame prepend polling loop is replaced by one generation/token-scoped semantic-anchor transaction; canonical-to-rendered mapping survives page-boundary tool grouping.
 - **Complete:** exact page install advances a layout epoch carried by the row geometry transform, so an unchanged numeric frame still emits an exact post-epoch sample. Prepend passively waits for that sample, requires a strictly newer exact sample after each correction, permits at most one late correction, and succeeds only within one point. No next-frame assumption or total tail/content height drives correction.

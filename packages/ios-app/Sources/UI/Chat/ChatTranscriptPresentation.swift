@@ -46,12 +46,22 @@ struct ChatTranscriptGeometry: Equatable {
     let contentHeight: CGFloat
     let containerHeight: CGFloat
     let bottomInset: CGFloat
+    /// Native visible content edge in the scroll content coordinate space.
+    /// Synthetic tests may omit it and use the legacy-field fallback.
+    let visibleBottomY: CGFloat?
 
-    init(offsetY: CGFloat, contentHeight: CGFloat, containerHeight: CGFloat, bottomInset: CGFloat = 0) {
+    init(
+        offsetY: CGFloat,
+        contentHeight: CGFloat,
+        containerHeight: CGFloat,
+        bottomInset: CGFloat = 0,
+        visibleBottomY: CGFloat? = nil
+    ) {
         self.offsetY = offsetY
         self.contentHeight = contentHeight
         self.containerHeight = containerHeight
         self.bottomInset = bottomInset
+        self.visibleBottomY = visibleBottomY
     }
 
     init(_ geometry: ScrollGeometry) {
@@ -59,16 +69,22 @@ struct ChatTranscriptGeometry: Equatable {
             offsetY: geometry.contentOffset.y,
             contentHeight: geometry.contentSize.height,
             containerHeight: geometry.containerSize.height,
-            bottomInset: geometry.contentInsets.bottom
+            bottomInset: geometry.contentInsets.bottom,
+            visibleBottomY: geometry.visibleRect.maxY
         )
     }
 
     static let zero = ChatTranscriptGeometry(offsetY: 0, contentHeight: 0, containerHeight: 0)
     var isValid: Bool { contentHeight > 0 && containerHeight > 0 }
     var distanceFromBottom: CGFloat {
-        // ScrollGeometry's content offset is measured through the content insets;
-        // the physical bottom is therefore content + bottom inset - viewport.
-        let rawDistance = contentHeight + bottomInset - offsetY - containerHeight
+        // `visibleRect` is SwiftUI's native, atomically derived content-space
+        // viewport. Do not reconstruct it from offset/container/inset fields,
+        // which can settle in different LazyVStack/keyboard layout frames.
+        let rawDistance = if let visibleBottomY {
+            contentHeight + bottomInset - visibleBottomY
+        } else {
+            contentHeight + bottomInset - offsetY - containerHeight
+        }
         guard rawDistance.isFinite else { return .greatestFiniteMagnitude }
         return max(0, rawDistance)
     }
@@ -163,7 +179,7 @@ struct ChatResponseState: Equatable {
     }
 }
 
-struct ChatToolPresentation: Hashable, Identifiable {
+struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     let id: String
     let title: String
     let subtitle: String
@@ -239,7 +255,7 @@ enum ChatTokenCountPresentation {
     }
 }
 
-struct ChatToolRunPresentation: Hashable, Identifiable {
+struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     let tools: [ChatToolPresentation]
     let anchorID: String
 
@@ -264,19 +280,19 @@ struct ChatToolRunPresentation: Hashable, Identifiable {
     }
 }
 
-struct ChatThinkingSegment: Hashable, Identifiable {
+struct ChatThinkingSegment: Hashable, Identifiable, Sendable {
     let id: String
     let text: String
 }
 
-struct ChatThinkingRun: Hashable, Identifiable {
+struct ChatThinkingRun: Hashable, Identifiable, Sendable {
     /// The first canonical thinking part anchors the run while later lines
     /// arrive, so SwiftUI can fade only the newly appended segments.
     let id: String
     let segments: [ChatThinkingSegment]
 }
 
-enum ChatMessagePart: Hashable, Identifiable {
+enum ChatMessagePart: Hashable, Identifiable, Sendable {
     case content(ContentPart)
     case thinking(ChatThinkingRun)
 
@@ -288,7 +304,7 @@ enum ChatMessagePart: Hashable, Identifiable {
     }
 }
 
-struct ChatMessagePresentation: Hashable, Identifiable {
+struct ChatMessagePresentation: Hashable, Identifiable, Sendable {
     let id: String
     let item: TranscriptItem
     let parts: [ChatMessagePart]
@@ -296,7 +312,7 @@ struct ChatMessagePresentation: Hashable, Identifiable {
     let showsFooter: Bool
 }
 
-enum ChatTranscriptRenderItem: Hashable, Identifiable {
+enum ChatTranscriptRenderItem: Hashable, Identifiable, Sendable {
     case transcript(TranscriptItem)
     case message(ChatMessagePresentation)
     case toolRun(ChatToolRunPresentation)
@@ -310,13 +326,20 @@ enum ChatTranscriptRenderItem: Hashable, Identifiable {
     }
 }
 
-struct ChatTranscriptTimeline {
+struct ChatTranscriptTimeline: Hashable, Sendable {
     let items: [ChatTranscriptRenderItem]
     let toolResults: [String: TranscriptItem]
     let preferredSemanticIDByRenderedID: [String: String]
     let renderedIDBySemanticID: [String: String]
 
     var ids: [String] { items.map(\.id) }
+
+    var isInternallyConsistent: Bool {
+        let renderedIDs = Set(ids)
+        return renderedIDs.count == items.count
+            && preferredSemanticIDByRenderedID.keys.allSatisfy(renderedIDs.contains)
+            && renderedIDBySemanticID.values.allSatisfy(renderedIDs.contains)
+    }
 }
 
 enum ChatToolbarTitleLayout {

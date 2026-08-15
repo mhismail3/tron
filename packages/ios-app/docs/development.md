@@ -280,8 +280,11 @@ data only. The production `DisplayFrameScheduler` is a one-shot,
 cancellation-aware display-link boundary used by first-ready, pinned follow, and
 long-distance catch-up staging. Semantic prepend settlement instead waits passively
 for exact epoch-qualified row callbacks and requires a strictly newer callback after
-each correction. First-ready timing cannot end before its frame resumes.
-`ChatScrollCoordinatorTests` use watchdog-bounded
+each correction. First-ready timing cannot end before the exact initial transcript
+projection installs and its frame resumes. `ChatTranscriptPresentationStoreTests` use
+watchdog-bounded synchronous builder barriers to prove serial off-main work, same-tag
+coalescing, newest-wins and A→B→A admission, paging-tag distinction, reset rejection,
+and MainActor responsiveness. `ChatScrollCoordinatorTests` use watchdog-bounded
 barriers rather than sleeps or yields to prove callback-order equivalence, immediate
 catch-up dismissal for geometry-first manual return to the tail, pinned keyboard/composer
 following, one follow command per frame, no writes for detached layout/stream/keyboard
@@ -291,14 +294,18 @@ repeat-prepend ownership, post-install layout-epoch rejection, unchanged-frame e
 callbacks, and exact semantic remeasurement with at most one late correction and no
 frame retry or total-height polling. Hosted controls drive the production
 coordinator/executor; new evidence is bounded aggregate callback/command/frame and
-maximum-excursion data only. The obsolete visibility modifier is removed; the native
-SwiftUI geometry modifier still reports a multiple-update-per-frame diagnostic in hosted
-runs and remains a physical/projection checkpoint.
+maximum-excursion data only. Hosted streaming bursts must install only their newest
+exact source while detached composer/viewport work remains writable and creates no
+projection work. Native bottom evidence comes from `ScrollGeometry.visibleRect.maxY`
+plus the bottom inset; the harness no longer substitutes a hard-coded settled distance.
+The obsolete visibility modifier is removed; the native SwiftUI geometry modifier still
+reports a multiple-update-per-frame diagnostic in hosted runs and remains a physical checkpoint.
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/ChatScrollCoordinatorTests \
+  -only-testing:TronMobileTests/ChatTranscriptPresentationStoreTests \
   -only-testing:TronMobileTests/ChatTranscriptPresentationTests \
   -only-testing:TronMobileTests/ChatViewScrollHarnessTests \
   -only-testing:TronMobileTests/ChatPerformanceTrackerTests

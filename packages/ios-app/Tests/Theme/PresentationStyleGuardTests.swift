@@ -490,6 +490,8 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains("GlassEffectContainer(spacing: 8)"))
         #expect(chat.contains("if scrollCoordinator.shouldShowCatchUpButton"))
         #expect(scrollCoordinator.contains("var shouldShowCatchUpButton: Bool { userScrolledAway }"))
+        #expect(chat.contains("ChatTranscriptPresentationStore"))
+        #expect(!chat.contains("ChatTranscriptPresentation.timeline("))
         #expect(transcript.contains("struct ChatTranscriptPillModifier: ViewModifier"))
         #expect(transcript.contains("TronTypography.sizeBodySM"))
         #expect(transcript.contains(".padding(.vertical, 6)"))

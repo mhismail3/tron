@@ -92,13 +92,18 @@ cursor-paginated sessions and model catalogs, and replaces local state with
 authoritative snapshots. Session snapshots carry a byte-bounded current
 transcript tail; `transcriptStart`/`transcriptTotal` expose earlier canonical Pi
 entries, which the chat can request backward without risking an oversized
-WebSocket frame. The synchronous transcript projection is measured at its pure
-snapshot-to-timeline boundary and reports only aggregate projected row count. Opening
+WebSocket frame. `ChatTranscriptPresentationStore` serializes snapshot-to-timeline
+preparation off MainActor, coalesces a burst to one pending newest source, and atomically
+installs only an exact tag containing session, mounted presentation, runtime, revision,
+event sequence, and paging bounds/edge identity. It retains at most one installed, one
+building, and one pending immutable snapshot/timeline; it is disposable projection state,
+not a session mirror or event journal. Projection instrumentation reports only aggregate row
+count. Opening
 a new chat presentation always synchronizes a fresh authoritative bounded latest page; disposable cached or previously paged prefixes are never revealed as
 its baseline. The transcript remains behind a nonblank opening surface until the
-two-phase `session.open`/`session.sync` handshake installs its authoritative tail,
-then the whole stage fades and rises in (opacity only under Reduce Motion). That
-handshake immediately marks the stage ready; the first-ready performance interval
+two-phase `session.open`/`session.sync` handshake installs its authoritative tail and
+the exact initial transcript projection, then the whole stage fades and rises in (opacity
+only under Reduce Motion). The first-ready performance interval
 closes only after the next display-link frame proves that ready state was presented.
 Native `ScrollPosition` starts at the
 bottom and receives one same-turn best-effort positioning hint before interaction
@@ -249,7 +254,13 @@ materialize inherited effective values as project overrides. Write-only proxy dr
 redacted state, encode clearing explicitly, and are scrubbed after a confirmed save. Global defaults
 always use the global model catalog; project defaults use the captured session catalog.
 Chat uses one presentation timeline rather than separate canonical, streaming,
-and live-tool tails. Tool calls, progress, and results join by `toolCallId`; the
+and live-tool tails. `ChatView.body` never constructs that timeline: typing, focus,
+geometry, toolbar, and sheet invalidations reuse the installed immutable value, while
+streaming revisions are serialized/coalesced off-main. Exact-tag waiters let prepend retain
+its existing semantic-alias and layout-epoch transaction. This adopts the useful
+pre-Gateway principles of a non-render-path measurement/projection owner and coalesced
+stream updates without reviving the retired Engine, local event reconstruction, or scroll
+proxy architecture. Tool calls, progress, and results join by `toolCallId`; the
 Gateway supplies a monotonic per-run ordinal for parallel calls, and the grouped
 row keeps the first call's identity as it moves from invocation to completion.
 Consolidation applies only to consecutive tool calls: every canonical thinking,
@@ -289,7 +300,10 @@ accessibility return or a catch-up command that physically settles at the bounda
 If final bottom geometry arrives before native ownership, that exact callback pair admits the
 manual return immediately, clears unread state, and removes the catch-up control without a tap.
 A mixed viewport/scroll callback does the same only when direct interaction and measured movement
-toward the tail are both present; keyboard resize alone cannot release detachment.
+toward the tail are both present; keyboard resize alone cannot release detachment. Bottom
+distance uses SwiftUI's atomically derived native `visibleRect.maxY` plus the bottom content
+inset, rather than reconstructing a visible edge from offset/container values that may belong
+to different lazy-layout or keyboard frames.
 While detached, a fixed action-sized circular
 glass down-arrow morphs from the composer's trailing edge; multiline editor height can never
 resize it. Reaching the practical tail boundary (with a small inset-rounding tolerance) or

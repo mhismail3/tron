@@ -4,6 +4,20 @@ import Testing
 
 @Suite("Chat transcript presentation")
 struct ChatTranscriptPresentationTests {
+    @Test("native visible edge is authoritative over independently settling inset fields")
+    func nativeVisibleBottomDistance() {
+        let geometry = ChatTranscriptGeometry(
+            offsetY: 400,
+            contentHeight: 1_000,
+            containerHeight: 400,
+            bottomInset: 200,
+            visibleBottomY: 1_200
+        )
+
+        #expect(geometry.distanceFromBottom == 0)
+        #expect(geometry.isAtCatchUpBoundary)
+    }
+
     @Test("retired subagent chrome is hidden while unrelated extension widgets remain")
     func retiredSubagentWidgetPolicy() {
         let widgets = [

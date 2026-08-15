@@ -108,6 +108,30 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.command?.destination == .releaseBinding)
     }
 
+    @Test("native visible edge admits manual tail despite stale inset arithmetic")
+    func nativeVisibleEdgeAdmitsManualTail() {
+        let coordinator = detachedCoordinator(at: away, withUnread: true)
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
+        let visibleTail = ChatTranscriptGeometry(
+            offsetY: 400,
+            contentHeight: 1_000,
+            containerHeight: 400,
+            bottomInset: 200,
+            visibleBottomY: 1_200
+        )
+        coordinator.geometryChanged(previous: away, current: visibleTail)
+        coordinator.scrollPhaseChanged(
+            from: .interacting,
+            to: .idle,
+            finalGeometry: visibleTail
+        )
+
+        #expect(!coordinator.shouldShowCatchUpButton)
+        #expect(!coordinator.hasUnreadContent)
+        #expect(coordinator.isAtBottom)
+        #expect(coordinator.command?.destination == .releaseBinding)
+    }
+
     @Test("manual return to tail remains pinned through keyboard viewport contraction")
     func manualReturnThenKeyboardFollowsTail() async throws {
         try await withTestWatchdog { @MainActor in
