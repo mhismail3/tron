@@ -867,10 +867,10 @@ export class RuntimeSlot {
       });
       let admitted: boolean;
       try {
-        admitted = await Promise.race([
-          accepted,
-          new Promise<boolean>((_, reject) => setTimeout(() => reject(new GatewayError("internal", "The agent runtime did not complete prompt preflight")), 5_000)),
-        ]);
+        // Pi's preflight callback is the sole authority for whether canonical work
+        // was admitted. A gateway-local deadline cannot safely reject this RPC:
+        // the same uncancelled runtime call could still accept and start later.
+        admitted = await accepted;
       } finally {
         this.pendingQueueAdmission = undefined;
       }

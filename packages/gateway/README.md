@@ -93,6 +93,9 @@ order; reordering is authoritative within either behavior, and changing behavior
 moves an entry into the corresponding delivery stage. Attachments remain bound to
 their original queued identity and cannot be fabricated by clients. Queue snapshots
 are bounded to 32 entries, 64 KiB per display message, and 256 KiB total.
+Prompt RPC admission follows the pinned runtime's preflight callback as its sole outcome;
+the Gateway does not race it against a local deadline that could report rejection while
+the same uncancelled runtime call later starts canonical work.
 
 Session structure/context/resource invalidations refresh
 already-presented secondary surfaces. Provider, settings, trust, package, and

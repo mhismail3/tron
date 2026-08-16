@@ -269,6 +269,50 @@ export default function (pi) {
     expect(snapshots.some((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
   });
 
+  it("uses runtime preflight as the sole prompt-admission outcome", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-prompt-preflight-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const session = (slot as unknown as {
+      runtime: { session: { prompt: (
+        text: string,
+        options?: { preflightResult?: (accepted: boolean) => void },
+      ) => Promise<void> } };
+    }).runtime.session;
+    let startedResolve!: () => void;
+    const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+    vi.spyOn(session, "prompt").mockImplementationOnce(async (_text, options) => {
+      startedResolve();
+      await new Promise((resolve) => setTimeout(resolve, 6_000));
+      options?.preflightResult?.(true);
+    });
+
+    vi.useFakeTimers();
+    try {
+      const prompting = slot.prompt("delayed preflight");
+      await started;
+      await vi.advanceTimersByTimeAsync(6_000);
+      await expect(prompting).resolves.toMatchObject({ operationId: expect.any(String) });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("clears branch-summary operation state when tree navigation rejects or is cancelled", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-navigation-cleanup-"));
     const agentDir = join(root, "agent");
