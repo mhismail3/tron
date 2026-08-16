@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
 import { resolveBindHost, resolveTronHome } from "../config.js";
 import type { ContentPart, JsonValue, SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import { GatewayClientError, GatewayProtocolClient } from "./gateway-client.js";
+import { readLocalCredential } from "./local-credential.js";
 
-interface LocalAuthDocument { bearerToken: string }
 interface SnapshotEnvelope { session: SessionSnapshot; syncToken: string; subscriptionToken: string }
 interface SessionMutationEnvelope { sessionId: string }
 interface SessionListEnvelope { sessions: Array<{ id: string; name?: string; firstMessage: string; cwd: string }>; nextCursor?: string; listRevision: number }
@@ -46,12 +44,6 @@ function renderDelta(previous: string, current: string): string {
   return `\n${current}`;
 }
 
-async function localToken(tronHome: string): Promise<string> {
-  const document = JSON.parse(await readFile(join(tronHome, "gateway", "local-auth.json"), "utf8")) as LocalAuthDocument;
-  if (typeof document.bearerToken !== "string" || document.bearerToken.length < 32) throw new Error("Tron local credential is invalid");
-  return document.bearerToken;
-}
-
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -76,21 +68,68 @@ async function synchronize(client: GatewayProtocolClient, sessionId: string): Pr
   return baseline;
 }
 
-async function listSessions(client: GatewayProtocolClient): Promise<SessionListEnvelope["sessions"]> {
+export async function listSessions(
+  client: Pick<GatewayProtocolClient, "request">,
+  limits: {
+    pageSize?: number;
+    maximumPages?: number;
+    maximumSessions?: number;
+    maximumBytes?: number;
+    revisionRestarts?: number;
+  } = {},
+): Promise<SessionListEnvelope["sessions"]> {
+  const pageSize = limits.pageSize ?? 200;
+  const maximumPages = limits.maximumPages ?? 126;
+  const maximumSessions = limits.maximumSessions ?? 25_000;
+  const maximumBytes = limits.maximumBytes ?? 8 * 1_024 * 1_024;
+  const revisionRestarts = limits.revisionRestarts ?? 1;
+  if (![pageSize, maximumPages, maximumSessions, maximumBytes].every((value) => Number.isSafeInteger(value) && value > 0)
+    || !Number.isSafeInteger(revisionRestarts) || revisionRestarts < 0) {
+    throw new Error("Terminal session catalog bounds are invalid");
+  }
   const sessions: SessionListEnvelope["sessions"] = [];
+  const ids = new Set<string>();
+  const cursors = new Set<string>();
+  let retainedBytes = 0;
   let cursor: string | undefined;
   let revision: number | undefined;
-  do {
+  for (let page = 0; page < maximumPages; page += 1) {
     const result = await client.request("session.list", {
       cursor: cursor ?? null,
-      limit: 200,
+      limit: pageSize,
     }) as unknown as SessionListEnvelope;
-    if (revision !== undefined && revision !== result.listRevision) return listSessions(client);
+    if (!result || typeof result !== "object" || !Array.isArray(result.sessions)
+      || result.sessions.length > pageSize || !Number.isSafeInteger(result.listRevision)
+      || (result.nextCursor !== undefined
+        && (typeof result.nextCursor !== "string" || Buffer.byteLength(result.nextCursor) > 500))) {
+      throw new Error("Gateway returned a malformed session catalog page");
+    }
+    if (revision !== undefined && revision !== result.listRevision) {
+      if (revisionRestarts < 1) throw new Error("Gateway session catalog changed repeatedly during traversal");
+      return listSessions(client, { ...limits, revisionRestarts: revisionRestarts - 1 });
+    }
     revision = result.listRevision;
-    sessions.push(...result.sessions);
+    for (const session of result.sessions) {
+      if (!session || typeof session !== "object" || typeof session.id !== "string" || session.id.length === 0
+        || typeof session.cwd !== "string" || typeof session.firstMessage !== "string"
+        || (session.name !== undefined && typeof session.name !== "string") || ids.has(session.id)) {
+        throw new Error("Gateway returned a malformed or ambiguous session catalog");
+      }
+      ids.add(session.id);
+      retainedBytes += Buffer.byteLength(JSON.stringify(session));
+      if (sessions.length >= maximumSessions || retainedBytes > maximumBytes) {
+        throw new Error("Gateway session catalog exceeds terminal client capacity");
+      }
+      sessions.push(session);
+    }
     cursor = result.nextCursor;
-  } while (cursor);
-  return sessions;
+    if (!cursor) return sessions;
+    if (result.sessions.length === 0 || cursors.has(cursor)) {
+      throw new Error("Gateway session catalog cursor stalled");
+    }
+    cursors.add(cursor);
+  }
+  throw new Error("Gateway session catalog exceeds its bounded page count");
 }
 
 function usage(): never {
@@ -107,7 +146,7 @@ export async function runTerminalChat(): Promise<void> {
   const requestedHost = argument("--host") ?? process.env.TRON_GATEWAY_HOST;
   const host = requestedHost ? resolveBindHost(requestedHost) : resolveBindHost("tailscale");
   const socketURL = `ws://${host.includes(":") ? `[${host}]` : host}:${port}/v1/socket`;
-  let client = new GatewayProtocolClient(socketURL, await localToken(tronHome));
+  let client = new GatewayProtocolClient(socketURL, await readLocalCredential(tronHome));
   await client.connect();
 
   const requestedSession = argument("--session");
@@ -185,7 +224,7 @@ export async function runTerminalChat(): Promise<void> {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
       process.stderr.write("\n[Tron disconnected; reconnecting…]\n");
       while (true) {
-        client = new GatewayProtocolClient(socketURL, await localToken(tronHome));
+        client = new GatewayProtocolClient(socketURL, await readLocalCredential(tronHome));
         try {
           await connectResilient(client);
           baseline = await synchronize(client, sessionId);

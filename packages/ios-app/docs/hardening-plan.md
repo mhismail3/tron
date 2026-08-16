@@ -410,6 +410,8 @@ Exit gate:
 
 ### Phase 9 — Final cleanup, review, and release checkpoint
 
+The Gateway terminal client now bounds local credential reads and automatic session traversal, rejects malformed/duplicate/cyclic catalogs, and restarts mixed revisions at most once without changing its runtime attachment or reconnect semantics.
+
 Deliverables:
 
 - Remove obsolete compatibility code only when the supported protocol/version contract proves it retired.

@@ -328,8 +328,11 @@ scripts/tron chat --session <session-id>
 scripts/tron chat
 ```
 
-This client uses the stable Tron protocol, local wrapper credential, atomic
-snapshot/event catch-up, command IDs, and reconnect convergence. It does not open
+This client uses the stable Tron protocol, a 64 KiB-bounded local wrapper credential,
+atomic snapshot/event catch-up, command IDs, and reconnect convergence. Automatic
+session selection admits at most 126 pages/25,000 unique rows/8 MiB, rejects cursor
+cycles and malformed pages, and restarts mixed revisions once rather than recursing.
+It does not open
 or watch JSONL directly. Running `pi --session <same-file>` concurrently remains
 unsupported because that creates a second mutable runtime owner.
 
