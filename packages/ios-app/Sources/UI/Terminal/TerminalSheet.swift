@@ -11,7 +11,6 @@ private final class TerminalController {
     var history: [TerminalSummary] = []
     private var presentation: TerminalPresentationTarget?
     private var intent: TerminalPresentationIntent?
-    private var resizeTask: Task<Void, Never>?
 
     func isRunning(model: AppModel) -> Bool {
         guard let terminal else { return false }
@@ -85,8 +84,6 @@ private final class TerminalController {
     }
 
     func stop(model: AppModel) {
-        resizeTask?.cancel()
-        resizeTask = nil
         intent = nil
         terminal = nil
         guard let presentation else { return }
@@ -115,17 +112,16 @@ private final class TerminalController {
               terminal?.exitedAt == nil,
               let intent,
               model.ownsTerminalIntent(intent) else { return }
-        resizeTask?.cancel()
-        resizeTask = Task {
-            try? await Task.sleep(for: .milliseconds(120))
-            guard !Task.isCancelled, owns(intent, model: model) else { return }
+        Task {
             do {
                 try await model.resizeTerminal(
                     id,
-                    columns: max(20, min(columns, 400)),
-                    rows: max(5, min(rows, 200)),
+                    columns: columns,
+                    rows: rows,
                     intent: intent
                 )
+            } catch is CancellationError {
+                return
             } catch {
                 guard owns(intent, model: model) else { return }
                 self.error = error.localizedDescription
@@ -148,8 +144,6 @@ private final class TerminalController {
     }
 
     private func beginIntent(model: AppModel) -> TerminalPresentationIntent? {
-        resizeTask?.cancel()
-        resizeTask = nil
         guard let presentation,
               let next = model.beginTerminalIntent(for: presentation) else { return nil }
         intent = next

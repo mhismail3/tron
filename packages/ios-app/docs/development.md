@@ -125,7 +125,9 @@ global 16-terminal, 256-chunk, and 1 MiB pending-event bounds, the three-attempt
 typed event reduction, and the install/reattach/discard decision for terminal-open responses that resolve on
 the same, a replacement, or no current connection. `TerminalCoordinator` owns all terminal requests,
 receipt-aware commands, attach/replay intervals, compensating detach cleanup, reconciliation, and reconnect
-reattachment; `AppModel` only routes admitted events/lifecycle work and preserves its UI façade.
+reattachment; `AppModel` only routes admitted events/lifecycle work and preserves its UI façade. The
+same lifecycle suite drives an injected monotonic clock to prove the 120 ms resize boundary, same-intent
+coalescing, established dimension clamps, independent presentation slots, and revocation with no late wire send.
 `SessionPresentationStoreTests` own observation forwarding, cold-cache non-authority,
 disconnect/profile-reset semantics, all-topic revocation, old-close/new-open arbitration, stale and
 revoked secondary-response rejection, exact subscription-token admission, and suspended paging

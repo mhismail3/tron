@@ -6,6 +6,7 @@ import Observation
 final class TerminalCoordinator {
     struct Retirement {
         fileprivate let cleanupTasks: [Task<Void, Never>]
+        fileprivate let resizeTasks: [Task<Void, Error>]
     }
 
     private struct ListParams: Codable, Sendable { let sessionId: String }
@@ -60,6 +61,7 @@ final class TerminalCoordinator {
     private let lifecycle: GatewayLifecycleCoordinator
     private let mutationExecutor: ConfirmedMutationExecutor
     private let uuidSource: UUIDSource
+    private let clock: MonotonicClock
     private let performanceSignposts: any PerformanceSignposting
     private let installedSubscriptionToken: @MainActor (String) -> String?
 
@@ -68,15 +70,25 @@ final class TerminalCoordinator {
         let task: Task<Void, Never>
     }
 
+    private struct ResizeFlight {
+        let token: UInt64
+        let task: Task<Void, Error>
+        var dispatched: Bool
+    }
+
     private var reducer = TerminalReducer()
     private var cleanupGeneration: UInt64 = 0
     private var cleanupTasks: [TerminalDetachClaim: CleanupFlight] = [:]
+    private var resizeGeneration: UInt64 = 0
+    private var resizeTasks: [TerminalPresentationIntent: ResizeFlight] = [:]
+    private var allResizeTasks: [UInt64: Task<Void, Error>] = [:]
 
     init(
         client: GatewayClient,
         lifecycle: GatewayLifecycleCoordinator,
         mutationExecutor: ConfirmedMutationExecutor,
         uuidSource: UUIDSource,
+        clock: MonotonicClock,
         performanceSignposts: any PerformanceSignposting,
         installedSubscriptionToken: @escaping @MainActor (String) -> String?
     ) {
@@ -84,6 +96,7 @@ final class TerminalCoordinator {
         self.lifecycle = lifecycle
         self.mutationExecutor = mutationExecutor
         self.uuidSource = uuidSource
+        self.clock = clock
         self.performanceSignposts = performanceSignposts
         self.installedSubscriptionToken = installedSubscriptionToken
     }
@@ -93,12 +106,14 @@ final class TerminalCoordinator {
     }
 
     func beginIntent(for target: TerminalPresentationTarget) -> TerminalPresentationIntent? {
+        cancelResizeTasks(for: target)
         guard let transition = reducer.beginIntent(for: target) else { return nil }
         scheduleDetaches(transition.detached)
         return transition.intent
     }
 
     func closePresentation(_ target: TerminalPresentationTarget) {
+        cancelResizeTasks(for: target)
         scheduleDetaches(reducer.revokePresentation(target))
     }
 
@@ -266,25 +281,50 @@ final class TerminalCoordinator {
         }
     }
 
-    func resizeImmediately(
+    func resize(
         _ terminalID: String,
         columns: Int,
         rows: Int,
         intent: TerminalPresentationIntent
     ) async throws {
         guard reducer.owns(intent) else { throw CancellationError() }
-        let commandID = uuidSource.next().uuidString
-        let params = ResizeParams(
-            terminalId: terminalID,
-            columns: columns,
-            rows: rows,
-            commandId: commandID
-        )
-        let _: ResizeResponse = try await mutationExecutor.perform(
-            method: "terminal.resize",
-            commandID: commandID
-        ) {
-            try await client.request("terminal.resize", params)
+        if let previous = resizeTasks.removeValue(forKey: intent), !previous.dispatched {
+            previous.task.cancel()
+        }
+        resizeGeneration &+= 1
+        let token = resizeGeneration
+        let boundedColumns = max(20, min(columns, 400))
+        let boundedRows = max(5, min(rows, 200))
+        let task = Task {
+            try await clock.sleep(.milliseconds(120))
+            try Task.checkCancellation()
+            guard markResizeDispatched(intent: intent, token: token),
+                  reducer.owns(intent) else { throw CancellationError() }
+            try await resizeImmediately(
+                terminalID,
+                columns: boundedColumns,
+                rows: boundedRows,
+                intent: intent
+            )
+        }
+        resizeTasks[intent] = ResizeFlight(token: token, task: task, dispatched: false)
+        allResizeTasks[token] = task
+        defer {
+            allResizeTasks.removeValue(forKey: token)
+            if resizeTasks[intent]?.token == token {
+                resizeTasks.removeValue(forKey: intent)
+            }
+        }
+        do {
+            try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+            guard resizeTasks[intent]?.token == token else { throw CancellationError() }
+        } catch {
+            guard resizeTasks[intent]?.token == token else { throw CancellationError() }
+            throw error
         }
     }
 
@@ -339,15 +379,20 @@ final class TerminalCoordinator {
     }
 
     func beginRetirement() -> Retirement {
-        let tasks = cleanupTasks.values.map(\.task)
+        let cleanup = cleanupTasks.values.map(\.task)
+        let resizes = Array(allResizeTasks.values)
         cleanupTasks.removeAll()
-        tasks.forEach { $0.cancel() }
+        resizeTasks.removeAll()
+        allResizeTasks.removeAll()
+        cleanup.forEach { $0.cancel() }
+        resizes.forEach { $0.cancel() }
         reducer.clear()
-        return Retirement(cleanupTasks: tasks)
+        return Retirement(cleanupTasks: cleanup, resizeTasks: resizes)
     }
 
     func finishRetirement(_ retirement: Retirement) async {
         for task in retirement.cleanupTasks { await task.value }
+        for task in retirement.resizeTasks { _ = try? await task.value }
     }
 
     private func beginAttach(
@@ -447,6 +492,46 @@ final class TerminalCoordinator {
             )
         }
         cleanupTasks[claim] = CleanupFlight(token: token, task: task)
+    }
+
+    private func resizeImmediately(
+        _ terminalID: String,
+        columns: Int,
+        rows: Int,
+        intent: TerminalPresentationIntent
+    ) async throws {
+        guard reducer.owns(intent) else { throw CancellationError() }
+        let commandID = uuidSource.next().uuidString
+        let params = ResizeParams(
+            terminalId: terminalID,
+            columns: columns,
+            rows: rows,
+            commandId: commandID
+        )
+        let _: ResizeResponse = try await mutationExecutor.perform(
+            method: "terminal.resize",
+            commandID: commandID
+        ) {
+            try await client.request("terminal.resize", params)
+        }
+    }
+
+    private func markResizeDispatched(
+        intent: TerminalPresentationIntent,
+        token: UInt64
+    ) -> Bool {
+        guard var flight = resizeTasks[intent], flight.token == token else { return false }
+        flight.dispatched = true
+        resizeTasks[intent] = flight
+        return true
+    }
+
+    private func cancelResizeTasks(for presentation: TerminalPresentationTarget) {
+        let intents = resizeTasks.keys.filter { $0.presentation == presentation }
+        for intent in intents {
+            guard let flight = resizeTasks.removeValue(forKey: intent) else { continue }
+            if !flight.dispatched { flight.task.cancel() }
+        }
     }
 
     private func cancelCleanup(_ claim: TerminalDetachClaim) async {

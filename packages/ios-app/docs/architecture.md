@@ -107,7 +107,9 @@ installer and closes its interval only after reset, delta, and contiguous quaran
 opened-session ownership before creating a PTY, preventing orphan terminal creation during route/reconnect
 races. Stale successful attachments schedule an exact-connection compensating detach unless a newer
 presentation still owns that terminal; a matching new attach cancels and joins unsent cleanup first.
-`AppModel` retains only the terminal façade and cross-domain
+Resize debounce is keyed by exact presentation intent inside the owner: 120 ms and the existing
+20...400-column/5...200-row bounds are unchanged, supersession is silent, distinct presentations remain
+independent, and intent/route/profile retirement cancels pending work. `AppModel` retains only the terminal façade and cross-domain
 Gateway event/lifecycle routing; canonical session subscription ownership stays in `SessionPresentationStore`.
 It loads a bounded disposable cache first, connects, fetches
 cursor-paginated sessions and model catalogs, and replaces local state with

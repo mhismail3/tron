@@ -189,7 +189,7 @@ Owns the complete ordered lightweight descriptor spine, stable presentation iden
 
 ### `TerminalCoordinator`
 
-Owns terminal request execution, terminal/session identity, attach lifecycle, cleanup and reconnect tasks, replay epoch, bounded chunks, and teardown around one pure `TerminalReducer`. A reset replay replaces native terminal content even when sequence numbers do not increase. The remaining 120 ms resize debounce stays presentation-local only until its intent-keyed deterministic-clock extraction lands.
+Owns terminal request execution, terminal/session identity, attach lifecycle, cleanup and reconnect tasks, replay epoch, bounded chunks, intent-keyed 120 ms resize debounce, and teardown around one pure `TerminalReducer`. A reset replay replaces native terminal content even when sequence numbers do not increase.
 
 ## Current worktree checkpoint
 
@@ -285,7 +285,7 @@ Independent owner milestones:
 - **3A lifecycle/catalog — complete:** compose lifecycle and catalog owners behind the existing façade.
 - **3B session presentation/mutations: complete.** Presentation/synchronization/secondary ownership lives in `SessionPresentationStore`; explicit command construction lives in `SessionMutationService`; one `ConfirmedMutationExecutor` resolves possibly-sent receipts across domains.
 - **3C scoped configuration/drafts — complete:** 3C.1 moved security-scoped file access, read/upload sequencing, and exact lifecycle/profile admission into `SessionImportCoordinator`; 3C.2 extracted settings/trust projection and request ownership; 3C.3 extracted provider/model catalog and operation-keyed authentication ownership; 3C.4 extracted separate package and custom-model configuration owners plus revision-safe custom-model save admission; 3C.5 extracted bounded profile/session text drafts and exact-presentation attachment/upload/editor/submission ownership into `ComposerDraftCoordinator`. Existing session wire mutations remain in `SessionMutationService`, and confirmed receipts remain in `ConfirmedMutationExecutor`.
-- **3D terminal/event reducers — orchestration and typed reduction complete; resize debounce pending:** terminal output/exit payloads decode once into typed `Sendable` preparations before MainActor routing. Observable `TerminalCoordinator` now owns every terminal request DTO/wire operation, receipt-aware command, presentation/intent, cleanup task, compensating detach, attach/replay interval, gap reconciliation, and reconnect reattachment around its sole pure `TerminalReducer`. `AppModel` retains only façade delegation plus centralized connection event/lifecycle routing, and canonical session cursor/subscription ownership remains in `SessionPresentationStore`. Move only the unchanged 120 ms intent-keyed resize debounce out of the terminal view in the next focused commit.
+- **3D terminal/event reducers — complete:** terminal output/exit payloads decode once into typed `Sendable` preparations before MainActor routing. Observable `TerminalCoordinator` owns every terminal request DTO/wire operation, receipt-aware command, presentation/intent, cleanup task, compensating detach, attach/replay interval, gap reconciliation, reconnect reattachment, and the unchanged 120 ms intent-keyed resize debounce around its sole pure `TerminalReducer`. Resize requests clamp to the established 20...400 columns and 5...200 rows, coalesce only within one intent, run independently across presentations, and cancel on intent replacement, presentation close, or profile retirement. `AppModel` retains only façade delegation plus centralized connection event/lifecycle routing, and canonical session cursor/subscription ownership remains in `SessionPresentationStore`.
 - **3E boundary cleanup — direct view calls complete; remaining cleanup pending:** transcript blobs route through the lifecycle-bound media owner, while project Git inspection and bounded logs route through `GatewayDiagnosticsService`. Views no longer construct Gateway requests or parse those wire objects; transport-safe log fields moved to the service while color/icon/date presentation remains UI-owned. One shared `ToolExecutionStatePolicy` now owns newest-state and ordering semantics for both the canonical session reducer and sparse transcript projector, eliminating their drift risk. Continue splitting remaining DTO/UI files at existing type boundaries without changing Codable/presentation contracts.
 
 Each submilestone leaves a compiling façade and moves its focused tests/docs with the owner; do not land all extractions in one diff.
@@ -379,10 +379,10 @@ Exit gate:
 
 Independent owner milestones:
 
-- **7A workspace/onboarding:** path-keyed trust and setup state with stale-response rejection.
-- **7B provider auth:** operation-keyed authentication from begin through cancellation/completion.
-- **7C camera/QR:** generation-scoped lifecycle phases and serialized AVFoundation ownership through injected adapters.
-- **7D terminal:** one cancellable lifecycle task, replay reset identity, resize ownership, and late-attach cleanup.
+- **7A workspace/onboarding — complete:** path-keyed trust and setup state reject stale responses.
+- **7B provider auth — complete:** authentication remains operation-keyed from begin through cancellation/completion.
+- **7C camera/QR — complete:** generation-scoped lifecycle phases and injected adapters own serialized AVFoundation work.
+- **7D terminal — reducer/orchestration/resize/late-cleanup complete; sheet lifecycle consolidation pending:** exact presentation intents own replay reset identity, attach cleanup, and resize work. Consolidate the remaining sheet-local start/show/open/send/terminate task launches only with focused cancellation tests and no control or error-surface changes.
 - **7E administrative surfaces:** explicit idle/loading/value/failure state, visible errors for user actions, and best-effort swallowing only for documented teardown.
 - **7F file/UI ownership:** split oversized onboarding/settings/terminal files and move large resolved resources/packages behind existing on-demand detail sheets while preserving the same UX.
 

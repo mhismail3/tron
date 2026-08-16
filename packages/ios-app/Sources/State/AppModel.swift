@@ -242,6 +242,7 @@ final class AppModel {
             lifecycle: lifecycle,
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource,
+            clock: clock,
             performanceSignposts: performanceSignposts,
             installedSubscriptionToken: { sessionPresentation.installedSubscriptionToken(for: $0) }
         )
@@ -1480,7 +1481,7 @@ final class AppModel {
         rows: Int,
         intent: TerminalPresentationIntent
     ) async throws {
-        try await terminal.resizeImmediately(
+        try await terminal.resize(
             id,
             columns: columns,
             rows: rows,

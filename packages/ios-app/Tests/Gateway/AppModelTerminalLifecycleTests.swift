@@ -464,6 +464,209 @@ struct AppModelTerminalLifecycleTests {
         }
     }
 
+    @Test("resize debounce is intent-keyed, bounded, coalesced, and revoked with presentation")
+    func resizeDebounceOwnership() async throws {
+        try await withHarness { harness in
+            let target = harness.model.beginTerminalPresentation(sessionID: "session")
+            let intent = try #require(harness.model.beginTerminalIntent(for: target))
+            let first = Task {
+                try await harness.model.resizeTerminal(
+                    "terminal",
+                    columns: 80,
+                    rows: 24,
+                    intent: intent
+                )
+            }
+            try await harness.clock.waitUntilSleeping(count: 1)
+            let second = Task {
+                try await harness.model.resizeTerminal(
+                    "terminal",
+                    columns: 1_000,
+                    rows: 1,
+                    intent: intent
+                )
+            }
+            do {
+                try await first.value
+                Issue.record("superseded resize unexpectedly completed")
+            } catch {
+                #expect(error is CancellationError)
+            }
+            try await harness.clock.waitUntilSleeping(count: 1)
+            harness.clock.advance(by: .milliseconds(120))
+            let resize = try await request(in: harness.socket, frameIndex: 1)
+            #expect(resize.method == "terminal.resize")
+            #expect(resize.params?.objectValue?["columns"] == .number(400))
+            #expect(resize.params?.objectValue?["rows"] == .number(5))
+            await harness.socket.enqueue(successResponse(
+                id: resize.id,
+                result: .object(["resized": .bool(true)])
+            ))
+            try await second.value
+
+            let revoked = Task {
+                try await harness.model.resizeTerminal(
+                    "terminal",
+                    columns: 100,
+                    rows: 30,
+                    intent: intent
+                )
+            }
+            try await harness.clock.waitUntilSleeping(count: 1)
+            harness.model.closeTerminalPresentation(target)
+            do {
+                try await revoked.value
+                Issue.record("revoked resize unexpectedly completed")
+            } catch {
+                #expect(error is CancellationError)
+            }
+            harness.clock.advance(by: .seconds(1))
+            #expect(await harness.socket.sentFrames().count == 2)
+        }
+    }
+
+    @Test("caller cancellation distinguishes unsent resize from possibly-sent resize")
+    func resizeCallerCancellation() async throws {
+        try await withHarness { harness in
+            let target = harness.model.beginTerminalPresentation(sessionID: "session")
+            let intent = try #require(harness.model.beginTerminalIntent(for: target))
+            let unsent = Task {
+                try await harness.model.resizeTerminal(
+                    "terminal",
+                    columns: 80,
+                    rows: 24,
+                    intent: intent
+                )
+            }
+            try await harness.clock.waitUntilSleeping(count: 1)
+            unsent.cancel()
+            do {
+                try await unsent.value
+                Issue.record("cancelled unsent resize unexpectedly completed")
+            } catch {
+                #expect(error is CancellationError)
+            }
+            harness.clock.advance(by: .seconds(1))
+            #expect(await harness.socket.sentFrames().count == 1)
+
+            await harness.socket.suspendSends()
+            let dispatched = Task {
+                try await harness.model.resizeTerminal(
+                    "terminal",
+                    columns: 100,
+                    rows: 30,
+                    intent: intent
+                )
+            }
+            try await harness.clock.waitUntilSleeping(count: 1)
+            harness.clock.advance(by: .milliseconds(120))
+            try await harness.socket.waitUntilSendInvoked(count: 2)
+            dispatched.cancel()
+            do {
+                try await dispatched.value
+                Issue.record("cancelled possibly-sent resize unexpectedly completed")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "outcome_unknown")
+            } catch {
+                Issue.record("unexpected error: \(error)")
+            }
+        }
+    }
+
+    @Test("in-flight resize supersession completes obsolete work silently")
+    func inFlightResizeSupersession() async throws {
+        try await withHarness { harness in
+            let target = harness.model.beginTerminalPresentation(sessionID: "session")
+            let intent = try #require(harness.model.beginTerminalIntent(for: target))
+            await harness.socket.suspendSends()
+            let first = Task {
+                try await harness.model.resizeTerminal(
+                    "terminal",
+                    columns: 80,
+                    rows: 24,
+                    intent: intent
+                )
+            }
+            try await harness.clock.waitUntilSleeping(count: 1)
+            harness.clock.advance(by: .milliseconds(120))
+            try await harness.socket.waitUntilSendInvoked(count: 2)
+
+            let second = Task {
+                try await harness.model.resizeTerminal(
+                    "terminal",
+                    columns: 100,
+                    rows: 30,
+                    intent: intent
+                )
+            }
+            try await harness.clock.waitUntilSleeping(count: 1)
+            harness.clock.advance(by: .milliseconds(120))
+            try await harness.socket.waitUntilSendInvoked(count: 3)
+            await harness.socket.releaseSend()
+
+            let requests = [
+                try await request(in: harness.socket, frameIndex: 1),
+                try await request(in: harness.socket, frameIndex: 2),
+            ]
+            for request in requests {
+                await harness.socket.enqueue(successResponse(
+                    id: request.id,
+                    result: .object(["resized": .bool(true)])
+                ))
+            }
+            do {
+                try await first.value
+                Issue.record("obsolete in-flight resize unexpectedly remained current")
+            } catch {
+                #expect(error is CancellationError)
+            }
+            try await second.value
+        }
+    }
+
+    @Test("distinct terminal presentations debounce resize independently")
+    func independentResizeDebounce() async throws {
+        try await withHarness { harness in
+            let firstTarget = harness.model.beginTerminalPresentation(sessionID: "session")
+            let firstIntent = try #require(harness.model.beginTerminalIntent(for: firstTarget))
+            let secondTarget = harness.model.beginTerminalPresentation(sessionID: "session")
+            let secondIntent = try #require(harness.model.beginTerminalIntent(for: secondTarget))
+            let first = Task {
+                try await harness.model.resizeTerminal(
+                    "terminal-1",
+                    columns: 80,
+                    rows: 24,
+                    intent: firstIntent
+                )
+            }
+            let second = Task {
+                try await harness.model.resizeTerminal(
+                    "terminal-2",
+                    columns: 100,
+                    rows: 30,
+                    intent: secondIntent
+                )
+            }
+            try await harness.clock.waitUntilSleeping(count: 2)
+            harness.clock.advance(by: .milliseconds(120))
+            let requests = [
+                try await request(in: harness.socket, frameIndex: 1),
+                try await request(in: harness.socket, frameIndex: 2),
+            ]
+            #expect(Set(requests.compactMap { $0.params?.objectValue?["terminalId"]?.stringValue }) == [
+                "terminal-1", "terminal-2",
+            ])
+            for request in requests {
+                await harness.socket.enqueue(successResponse(
+                    id: request.id,
+                    result: .object(["resized": .bool(true)])
+                ))
+            }
+            try await first.value
+            try await second.value
+        }
+    }
+
     @Test("terminal open requires the exact installed session subscription")
     func openRequiresSubscription() async throws {
         try await withHarness { harness in
@@ -528,6 +731,10 @@ struct AppModelTerminalLifecycleTests {
                     intent: intent
                 )
             }
+            try await harness.clock.waitUntilSleeping(count: 1)
+            harness.clock.advance(by: .milliseconds(119))
+            #expect(await harness.socket.sentFrames().count == 3)
+            harness.clock.advance(by: .milliseconds(1))
             let resize = try await request(in: harness.socket, frameIndex: 3)
             #expect(resize.method == "terminal.resize")
             #expect(resize.params?.objectValue?["columns"] == .number(120))
@@ -625,6 +832,7 @@ struct AppModelTerminalLifecycleTests {
         let socket: ScriptedGatewaySocket
         let client: GatewayClient
         let model: AppModel
+        let clock: ManualClock
     }
 
     private struct Request {
@@ -642,11 +850,13 @@ struct AppModelTerminalLifecycleTests {
             socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
             uuidSource: SequenceUUIDSource(gatewayIDs).source
         )
+        let clock = ManualClock()
         let model = AppModel(
             client: client,
             cache: SnapshotCache(
                 root: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-            )
+            ),
+            clock: clock.clock
         )
         await socket.enqueue(helloFrame())
         try await model.connectHostedGateway(
@@ -660,7 +870,7 @@ struct AppModelTerminalLifecycleTests {
             ),
             token: "token"
         )
-        return Harness(socket: socket, client: client, model: model)
+        return Harness(socket: socket, client: client, model: model, clock: clock)
     }
 
     private func request(in socket: ScriptedGatewaySocket, frameIndex: Int) async throws -> Request {
