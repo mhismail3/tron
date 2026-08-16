@@ -14,6 +14,7 @@ struct SessionContextSheet: View {
     @State private var compacting = false
     @State private var exportedURL: URL?
     @State private var exporting = false
+    @State private var exportTask: Task<Void, Never>?
     @State private var gitBranch: String?
     @State private var gitDirty = false
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -92,6 +93,14 @@ struct SessionContextSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)
+        .onDisappear {
+            exportTask?.cancel()
+            exportTask = nil
+            if let exportedURL {
+                self.exportedURL = nil
+                Task { await model.discardExportArtifact(exportedURL) }
+            }
+        }
     }
 
     private func contextUsageCard(_ snapshot: SessionSnapshot) -> some View {
@@ -336,8 +345,10 @@ struct SessionContextSheet: View {
         TronSettingsGroup("Export and Share", accent: .tronBlue) {
             VStack(spacing: 0) {
                 manageRow(icon: "doc.richtext", title: exporting ? "Exporting…" : "HTML Export", accent: .tronBlue) { prepareExport("html") }
+                    .disabled(exporting)
                 TronSettingsDivider(accent: .tronBlue)
                 manageRow(icon: "doc.text", title: exporting ? "Exporting…" : "JSONL Export", accent: .tronBlue) { prepareExport("jsonl") }
+                    .disabled(exporting)
                 if let exportedURL {
                     TronSettingsDivider(accent: .tronBlue)
                     ShareLink(item: exportedURL) {
@@ -406,11 +417,32 @@ struct SessionContextSheet: View {
     }
 
     private func prepareExport(_ format: String) {
+        guard !exporting else { return }
         exporting = true
-        Task {
-            defer { exporting = false }
-            do { exportedURL = try await model.exportSession(sessionID: sessionID, format: format) }
-            catch { model.lastError = error.localizedDescription }
+        exportTask = Task {
+            defer {
+                exporting = false
+                exportTask = nil
+            }
+            do {
+                let artifact = try await model.exportSession(sessionID: sessionID, format: format)
+                guard !Task.isCancelled else {
+                    await model.discardExportArtifact(artifact)
+                    return
+                }
+                if let previous = exportedURL {
+                    await model.discardExportArtifact(previous)
+                }
+                guard !Task.isCancelled else {
+                    await model.discardExportArtifact(artifact)
+                    return
+                }
+                exportedURL = artifact
+            } catch is CancellationError {
+                return
+            } catch {
+                model.lastError = error.localizedDescription
+            }
         }
     }
 }

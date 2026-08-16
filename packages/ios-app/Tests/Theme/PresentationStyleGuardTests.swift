@@ -436,6 +436,9 @@ struct PresentationStyleGuardTests {
         )
         #expect(context.contains("ProjectResourcesView(sessionID: sessionID)"))
         #expect(context.contains("snapshot.stats.latestCacheHitRate"))
+        #expect(context.contains("guard !exporting else { return }"))
+        #expect(context.components(separatedBy: ".disabled(exporting)").count == 3)
+        #expect(context.contains("await model.discardExportArtifact(exportedURL)"))
         #expect(context.contains("let sessionID: String"))
         for title in ["Extensions", "Prompts", "Skills", "Context Files", "Tools"] {
             #expect(resources.contains("\(title)"))

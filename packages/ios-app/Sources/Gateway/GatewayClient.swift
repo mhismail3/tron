@@ -340,11 +340,19 @@ actor GatewayClient {
         return try JSONDecoder.gateway.decode(Envelope.self, from: responseData).upload.id
     }
 
-    func blob(id: String) async throws -> (Data, String) {
-        guard let profile, let token else {
+    func blob(id: String, maximumBytes: Int) async throws -> (Data, String) {
+        guard let profile, let token, let connectionID = connection?.id else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
-        return try await blob(id: id, profile: profile, token: token)
+        let value = try await boundedBlob(
+            id: id,
+            profile: profile,
+            token: token,
+            maximumBytes: maximumBytes
+        )
+        try requireEpoch(connectionID)
+        guard self.profile?.id == profile.id else { throw CancellationError() }
+        return value
     }
 
     func blob(
@@ -366,23 +374,6 @@ actor GatewayClient {
         try requireEpoch(connectionID)
         guard self.profile?.id == profileID else { throw CancellationError() }
         return value
-    }
-
-    private func blob(
-        id: String,
-        profile: GatewayProfile,
-        token: String
-    ) async throws -> (Data, String) {
-        guard let url = profile.httpURL(path: "/v1/blobs/\(id)") else {
-            throw Self.invalidProfileEndpoint()
-        }
-        var request = URLRequest(url: url, timeoutInterval: 30)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw GatewayFailure(code: "blob_failed", message: "The image is no longer available. Refresh the session.", retryable: true, details: nil)
-        }
-        return (data, http.value(forHTTPHeaderField: "Content-Type") ?? "application/octet-stream")
     }
 
     private func boundedBlob(

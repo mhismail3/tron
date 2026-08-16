@@ -201,8 +201,12 @@ session-keyed context/tree/resources/commands. `AppModel` routes cross-domain ef
 a weak delegate and retains no token, snapshot graph, presentation generation, or secondary
 projection mirror. Revocation synchronously rejects every sequenced topic, not only full snapshots.
 Paging, exports, and secondary reads capture an exact unrevoked target plus installed token and
-revalidate both after suspension. Paging is read-only at the Gateway and cannot revive event
-subscription ownership after close. Cold cache snapshots never enter the store's authoritative read gate.
+revalidate both after suspension. Export blob responses are capped at 25 MiB before accumulation;
+Gateway-provided names reduce to a 160-byte last path component and each artifact enters a unique,
+protected, backup-excluded temporary directory. Exact route revalidation removes a stale artifact,
+and app launch plus every new export prune malformed or older-than-24-hour disposable artifacts. Paging is read-only
+at the Gateway and cannot revive event subscription ownership after close. Cold cache snapshots never
+enter the store's authoritative read gate.
 `session.open` uses
 a two-phase subscription barrier: the authoritative snapshot and ephemeral sync
 token are returned first. The snapshot and subscription token remain provisional and

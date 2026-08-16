@@ -96,6 +96,7 @@ final class AppModel {
     private let clock: MonotonicClock
     private let uuidSource: UUIDSource
     private let performanceSignposts: any PerformanceSignposting
+    private let exportArtifacts: SessionExportArtifactStore
     private let mutationExecutor: ConfirmedMutationExecutor
     private let sessionMutations: SessionMutationService
     private let sessionImports: SessionImportCoordinator
@@ -184,7 +185,8 @@ final class AppModel {
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
         sessionImportFileAccess: SessionImportFileAccess = .live,
         sessionImportUpload: SessionImportUpload? = nil,
-        composerUpload: ComposerUploadOperation? = nil
+        composerUpload: ComposerUploadOperation? = nil,
+        exportArtifacts: SessionExportArtifactStore = SessionExportArtifactStore()
     ) {
         let resolvedPairingCommit = pairingCommit ?? { profile, token in
             try profiles.save(profile, token: token)
@@ -301,6 +303,8 @@ final class AppModel {
         self.clock = clock
         self.uuidSource = uuidSource
         self.performanceSignposts = performanceSignposts
+        self.exportArtifacts = exportArtifacts
+        Task { try? await exportArtifacts.prune() }
         #if HOSTED_TEST
         if ProcessInfo.processInfo.arguments.contains("--tron-reset-ui-test-state") {
             for profile in profiles.profiles { try? profiles.remove(profile) }
@@ -1170,16 +1174,29 @@ final class AppModel {
             sessionID: sessionID,
             token: subscriptionToken
         ) else { throw CancellationError() }
-        let data = try await client.blob(id: response.blobId).0
+        try Task.checkCancellation()
+        let data = try await client.blob(
+            id: response.blobId,
+            maximumBytes: SessionExportArtifactPolicy.maximumEncodedBytes
+        ).0
         guard sessionPresentation.ownsInstalledSubscription(
             sessionID: sessionID,
             token: subscriptionToken
         ) else { throw CancellationError() }
-        let directory = FileManager.default.temporaryDirectory.appending(path: "TronExports", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let destination = directory.appending(path: response.name, directoryHint: .notDirectory)
-        try data.write(to: destination, options: .atomic)
-        return destination
+        try Task.checkCancellation()
+        let artifact = try await exportArtifacts.write(data, suggestedName: response.name)
+        guard !Task.isCancelled, sessionPresentation.ownsInstalledSubscription(
+            sessionID: sessionID,
+            token: subscriptionToken
+        ) else {
+            await exportArtifacts.discard(artifact)
+            throw CancellationError()
+        }
+        return artifact
+    }
+
+    func discardExportArtifact(_ artifact: URL) async {
+        await exportArtifacts.discard(artifact)
     }
 
     func deleteSession(_ id: String) async throws {
