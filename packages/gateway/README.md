@@ -135,7 +135,10 @@ Primary operation groups are `system`, `device`, `legacy`, `session`,
 `extension`, `provider`, `model`, `auth`, `settings`, `trust`, `packages`,
 `models.custom`, `filesystem`, `git`, `terminal`, and uploads/blobs over HTTP.
 `session.list` and `model.list` are cursor-paginated so Pi catalogs remain
-complete without exceeding bounded gateway frames. Pi's configured `sessionDir`, or its
+complete without exceeding bounded gateway frames. Workspace browsing streams directory entries
+from an identity-checked directory handle and fails visibly, without returning a partial listing,
+above 1,000 examined entries or 768 KiB of projected metadata; ordinary folders retain the established directory-first
+ordering and exact paths. Pi's configured `sessionDir`, or its
 canonical per-workspace directories under `agentDir/sessions`, remain authoritative; Tron does
 not move or mirror those files. `session.list` defaults to user sessions, while `scope: "all"`
 additively includes extension-owned children classified from nested canonical storage or their

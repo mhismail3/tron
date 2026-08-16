@@ -379,7 +379,7 @@ Exit gate:
 
 Independent owner milestones:
 
-- **7A workspace/onboarding — complete:** path-keyed trust and setup state reject stale responses.
+- **7A workspace/onboarding — complete:** path-keyed trust and setup state reject stale responses. Gateway workspace browsing streams instead of materializing directory contents and atomically rejects folders above 1,000 examined entries or 768 KiB of projected metadata, so the existing error surface remains honest rather than installing a partial folder list.
 - **7B provider auth — complete:** authentication remains operation-keyed from begin through cancellation/completion.
 - **7C camera/QR — complete:** generation-scoped lifecycle phases and injected adapters own serialized AVFoundation work.
 - **7D terminal — complete:** exact presentation intents own replay reset identity, attach cleanup, and resize work. The sheet presentation controller owns one phase-aware start/show/open lifecycle flight plus one bounded latest pending navigation: superseded reads cancel, while possibly-sent attach/open work finishes so the terminal owner can compensate stale success before admitting only the newest route. A revoked open may resolve a completed receipt for cleanup but cannot replay a confirmed-missing command into a new PTY. Input and explicit terminate mutations retain independent receipt-aware command semantics, and action failures remain visible without removing the installed renderer.
