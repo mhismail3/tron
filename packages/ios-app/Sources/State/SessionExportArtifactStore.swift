@@ -66,6 +66,58 @@ actor SessionExportArtifactStore {
         }
     }
 
+    func adopt(_ source: URL, suggestedName: String) throws -> URL {
+        let values = try source.resourceValues(forKeys: [
+            .fileSizeKey,
+            .isRegularFileKey,
+            .isSymbolicLinkKey,
+        ])
+        guard values.isRegularFile == true,
+              values.isSymbolicLink != true,
+              let fileSize = values.fileSize,
+              fileSize <= maximumBytes else {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+        try prune()
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.complete]
+        )
+        var rootValues = URLResourceValues()
+        rootValues.isExcludedFromBackup = true
+        var mutableRoot = root
+        try mutableRoot.setResourceValues(rootValues)
+
+        let folder = root.appending(path: uuid().uuidString, directoryHint: .isDirectory)
+        do {
+            try FileManager.default.createDirectory(
+                at: folder,
+                withIntermediateDirectories: false,
+                attributes: [.protectionKey: FileProtectionType.complete]
+            )
+            let destination = folder.appending(
+                path: Self.safeFilename(suggestedName),
+                directoryHint: .notDirectory
+            )
+            try FileManager.default.moveItem(at: source, to: destination)
+            let admitted = try destination.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard admitted.isRegularFile == true,
+                  let admittedSize = admitted.fileSize,
+                  admittedSize <= maximumBytes else {
+                throw URLError(.dataLengthExceedsMaximum)
+            }
+            try FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.complete],
+                ofItemAtPath: destination.path
+            )
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
+    }
+
     func discard(_ artifact: URL) {
         let folder = artifact.deletingLastPathComponent()
         guard folder.deletingLastPathComponent().standardizedFileURL == root.standardizedFileURL else { return }

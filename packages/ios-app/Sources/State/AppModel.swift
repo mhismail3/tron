@@ -1175,16 +1175,17 @@ final class AppModel {
             token: subscriptionToken
         ) else { throw CancellationError() }
         try Task.checkCancellation()
-        let data = try await client.blob(
+        let stagedURL = try await client.blobFile(
             id: response.blobId,
             maximumBytes: SessionExportArtifactPolicy.maximumEncodedBytes
-        ).0
+        )
+        defer { BoundedHTTPFileStaging.shared.discard(stagedURL) }
         guard sessionPresentation.ownsInstalledSubscription(
             sessionID: sessionID,
             token: subscriptionToken
         ) else { throw CancellationError() }
         try Task.checkCancellation()
-        let artifact = try await exportArtifacts.write(data, suggestedName: response.name)
+        let artifact = try await exportArtifacts.adopt(stagedURL, suggestedName: response.name)
         guard !Task.isCancelled, sessionPresentation.ownsInstalledSubscription(
             sessionID: sessionID,
             token: subscriptionToken

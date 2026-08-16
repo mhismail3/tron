@@ -39,6 +39,7 @@ actor GatewayClient {
     private let uuidSource: UUIDSource
     private let frameDecoder: GatewayFrameDecoder
     private let boundedHTTPDataTransport: BoundedHTTPDataTransport
+    private let boundedHTTPFileTransport: BoundedHTTPFileTransport
     private let performanceSignposts: any PerformanceSignposting
     private var connection: ConnectionEpoch?
     private var generation = 0
@@ -53,6 +54,7 @@ actor GatewayClient {
         uuidSource: UUIDSource = .random,
         frameDecoder: GatewayFrameDecoder = .gateway,
         boundedHTTPDataTransport: BoundedHTTPDataTransport = .urlSession,
+        boundedHTTPFileTransport: BoundedHTTPFileTransport = .urlSession,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
     ) {
         self.socketFactory = socketFactory
@@ -60,6 +62,7 @@ actor GatewayClient {
         self.uuidSource = uuidSource
         self.frameDecoder = frameDecoder
         self.boundedHTTPDataTransport = boundedHTTPDataTransport
+        self.boundedHTTPFileTransport = boundedHTTPFileTransport
         self.performanceSignposts = performanceSignposts
         var continuation: AsyncStream<GatewayEventDelivery>.Continuation!
         events = AsyncStream(bufferingPolicy: .bufferingNewest(512)) { continuation = $0 }
@@ -394,6 +397,26 @@ actor GatewayClient {
         return value
     }
 
+    func blobFile(id: String, maximumBytes: Int) async throws -> URL {
+        guard let profile, let token, let connectionID = connection?.id else {
+            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
+        }
+        let downloaded = try await boundedBlobFile(
+            id: id,
+            profile: profile,
+            token: token,
+            maximumBytes: maximumBytes
+        )
+        do {
+            try requireEpoch(connectionID)
+            guard self.profile?.id == profile.id else { throw CancellationError() }
+            return downloaded.url
+        } catch {
+            BoundedHTTPFileStaging.shared.discard(downloaded.url)
+            throw error
+        }
+    }
+
     private func boundedBlob(
         id: String,
         profile: GatewayProfile,
@@ -413,6 +436,28 @@ actor GatewayClient {
             throw GatewayFailure(code: "blob_failed", message: "The image is no longer available. Refresh the session.", retryable: true, details: nil)
         }
         return (data, http.value(forHTTPHeaderField: "Content-Type") ?? "application/octet-stream")
+    }
+
+    private func boundedBlobFile(
+        id: String,
+        profile: GatewayProfile,
+        token: String,
+        maximumBytes: Int
+    ) async throws -> BoundedHTTPDownloadedFile {
+        guard let url = profile.httpURL(path: "/v1/blobs/\(id)") else {
+            throw Self.invalidProfileEndpoint()
+        }
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let downloaded = try await boundedHTTPFileTransport.download(
+            for: request,
+            maximumBytes: maximumBytes
+        )
+        guard downloaded.response.statusCode == 200 else {
+            BoundedHTTPFileStaging.shared.discard(downloaded.url)
+            throw GatewayFailure(code: "blob_failed", message: "The export is no longer available. Try exporting again.", retryable: true, details: nil)
+        }
+        return downloaded
     }
 
     private func startReceive(epochID: Int) {

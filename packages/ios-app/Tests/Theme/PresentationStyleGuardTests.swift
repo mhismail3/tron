@@ -679,6 +679,34 @@ struct PresentationStyleGuardTests {
         #expect(boundedTransport.contains("chunk.count <= maximumBytes - data.count"))
     }
 
+    @Test("session exports stay file-backed and lifecycle-owned")
+    func fileBackedSessionExports() throws {
+        let model = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/AppModel.swift"),
+            encoding: .utf8
+        )
+        let client = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Gateway/GatewayClient.swift"),
+            encoding: .utf8
+        )
+        let transport = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Gateway/BoundedHTTPFileTransport.swift"),
+            encoding: .utf8
+        )
+        let artifacts = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/SessionExportArtifactStore.swift"),
+            encoding: .utf8
+        )
+        #expect(model.contains("client.blobFile("))
+        #expect(model.contains("exportArtifacts.adopt(stagedURL"))
+        #expect(!model.contains("exportArtifacts.write(data"))
+        #expect(client.contains("boundedHTTPFileTransport.download("))
+        #expect(transport.contains("URLSessionDownloadDelegate"))
+        #expect(transport.contains("admitProgress(totalBytesWritten)"))
+        #expect(transport.contains("maximumFiles: Int = 32"))
+        #expect(artifacts.contains("FileManager.default.moveItem(at: source, to: destination)"))
+    }
+
     @Test("thinking traces stay complete, compact, and noninteractive")
     func thinkingTraceAccessibility() throws {
         let transcript = try String(

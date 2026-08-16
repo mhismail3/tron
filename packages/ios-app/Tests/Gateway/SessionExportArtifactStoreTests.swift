@@ -59,6 +59,32 @@ struct SessionExportArtifactStoreTests {
         }
     }
 
+    @Test("staged files move into protected ownership without data buffering")
+    func adoptPolicy() async throws {
+        let root = temporaryRoot()
+        let staging = temporaryRoot()
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: staging)
+        }
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        let source = staging.appending(path: "download")
+        try Data(repeating: 7, count: 8).write(to: source)
+        let store = SessionExportArtifactStore(root: root, maximumBytes: 8)
+
+        let artifact = try await store.adopt(source, suggestedName: "../session.jsonl")
+        #expect(!FileManager.default.fileExists(atPath: source.path))
+        #expect(artifact.lastPathComponent == "session.jsonl")
+        #expect(try Data(contentsOf: artifact) == Data(repeating: 7, count: 8))
+
+        let oversized = staging.appending(path: "oversized")
+        try Data(repeating: 8, count: 9).write(to: oversized)
+        await #expect(throws: URLError.self) {
+            try await store.adopt(oversized, suggestedName: "large.jsonl")
+        }
+        #expect(FileManager.default.fileExists(atPath: oversized.path))
+    }
+
     @Test("pruning and discard remove only owned artifacts")
     func cleanup() async throws {
         let root = temporaryRoot()
