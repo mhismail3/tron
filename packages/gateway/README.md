@@ -33,7 +33,13 @@ does not maintain a session database or event journal.
 - Uploads: transient and bounded; unclaimed staging expires, while prompt attachments remain session-owned until canonical deletion
 
 Legacy `~/.tron/auth.json` is not gateway auth and is never overwritten. It is
-read only by the explicit legacy importer.
+read only by the explicit legacy importer. That importer rejects duplicate or
+oversized identities and bounded page/history/payload overflow, detects stalled
+cursors, and persists each completed legacy-to-canonical mapping before moving
+to the next session so a retry safely skips partial success. Known append or
+index-write failures remove the new canonical file; cleanup failure is surfaced
+with the original failure, while process termination in the narrow interval
+before the index rename remains outside that cleanup.
 
 ## Transport
 
