@@ -46,6 +46,11 @@ enum TerminalOutputAdmission: Equatable, Sendable {
     case gap(after: Int)
 }
 
+enum TerminalEventReduction: Equatable, Sendable {
+    case none
+    case reconcile(terminalID: String)
+}
+
 struct TerminalReplayInstallation: Equatable, Sendable {
     let admittedCount: Int
     let requiresReconciliation: Bool
@@ -334,6 +339,33 @@ struct TerminalCoordinator {
 
     func attachedTerminalIDs() -> [String] {
         Array(attachmentOwnersByTerminalID.keys)
+    }
+
+    mutating func admit(
+        _ event: PreparedTerminalEvent,
+        connectionID: Int,
+        exitedAt: @autoclosure () -> String
+    ) -> TerminalEventReduction {
+        switch event {
+        case .output(let output):
+            if case .gap = admitOutput(
+                terminalID: output.terminalId,
+                sequence: output.sequence,
+                data: output.data,
+                connectionID: connectionID
+            ) {
+                return .reconcile(terminalID: output.terminalId)
+            }
+        case .exit(let exit):
+            _ = admitExit(
+                terminalID: exit.terminalId,
+                sequence: exit.sequence,
+                exitCode: exit.exitCode,
+                exitedAt: exitedAt(),
+                connectionID: connectionID
+            )
+        }
+        return .none
     }
 
     mutating func admitOutput(

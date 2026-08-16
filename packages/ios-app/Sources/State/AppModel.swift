@@ -1738,30 +1738,15 @@ final class AppModel {
                 event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…",
                 replacing: .packageProgress
             )
-        case "terminal.output":
-            if let connectionID = gatewayConnectionID,
-               let object = event.payload.objectValue,
-               let terminalID = object["terminalId"]?.stringValue,
-               let sequence = object["sequence"]?.intValue,
-               let data = object["data"]?.stringValue,
-               case .gap = terminalState.admitOutput(
-                terminalID: terminalID,
-                sequence: sequence,
-                data: data,
-                connectionID: connectionID
-               ) {
+        case "terminal.output", "terminal.exit":
+            guard let connectionID = gatewayConnectionID,
+                  case .terminalEvent(let terminalEvent) = event.preparation else { break }
+            if case .reconcile(let terminalID) = terminalState.admit(
+                terminalEvent,
+                connectionID: connectionID,
+                exitedAt: ISO8601DateFormatter().string(from: .now)
+            ) {
                 reconcileTerminal(terminalID)
-            }
-        case "terminal.exit":
-            if let connectionID = gatewayConnectionID,
-               let id = event.payload.objectValue?["terminalId"]?.stringValue {
-                _ = terminalState.admitExit(
-                    terminalID: id,
-                    sequence: event.payload.objectValue?["sequence"]?.intValue,
-                    exitCode: event.payload.objectValue?["exitCode"]?.intValue,
-                    exitedAt: ISO8601DateFormatter().string(from: .now),
-                    connectionID: connectionID
-                )
             }
         default:
             break

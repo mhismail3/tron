@@ -186,6 +186,45 @@ struct TerminalCoordinatorTests {
         #expect(exhaustedAttempt == nil)
     }
 
+    @Test("typed terminal events reduce through existing replay and recovery rules")
+    func typedEventReduction() throws {
+        var coordinator = TerminalCoordinator()
+        let target = coordinator.beginPresentation(sessionID: "session")
+        let transition = coordinator.beginIntent(for: target)
+        let intent = try #require(transition?.intent)
+        let pendingLease = coordinator.beginAttachment(
+            terminalID: "terminal",
+            intent: intent,
+            connectionID: 17
+        )
+        let lease = try #require(pendingLease)
+        _ = coordinator.installReplay(
+            [TerminalChunk(sequence: 1, data: "one")],
+            terminal: terminal(sequence: 1),
+            reset: false,
+            after: 0,
+            lease: lease
+        )
+
+        #expect(coordinator.admit(
+            .output(PreparedTerminalOutputEvent(terminalId: "terminal", sequence: 2, data: "two")),
+            connectionID: 17,
+            exitedAt: "unused"
+        ) == .none)
+        #expect(coordinator.replay(for: "terminal").chunks.last == TerminalChunk(sequence: 2, data: "two"))
+        #expect(coordinator.admit(
+            .exit(PreparedTerminalExitEvent(terminalId: "terminal", sequence: 2, exitCode: 0)),
+            connectionID: 17,
+            exitedAt: "2026-01-01T00:00:03Z"
+        ) == .none)
+        #expect(coordinator.hasExited("terminal"))
+        #expect(coordinator.admit(
+            .output(PreparedTerminalOutputEvent(terminalId: "terminal", sequence: 4, data: "gap")),
+            connectionID: 17,
+            exitedAt: "unused"
+        ) == .reconcile(terminalID: "terminal"))
+    }
+
     private func terminal(sequence: Int) -> TerminalSummary {
         TerminalSummary(
             id: "terminal",

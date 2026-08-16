@@ -39,7 +39,7 @@ or event-admission policy; `GatewayClient` remains the only decoder and client
 runtime. Each inbound response/event frame crosses one discriminated `JSONDecoder`
 entry point. Typed event views decode directly from that original decoder's payload
 container; network bytes are not serialized and parsed again. The client actor best-effort
-prepares large session snapshots, summaries, envelopes, streaming items, tool states, interactions, and widgets before delivery, so
+prepares large session snapshots, summaries, envelopes, streaming items, tool states, interactions, widgets, and terminal output/exit payloads before delivery, so
 the MainActor reducer installs typed `Sendable` values instead of re-encoding and
 decoding dynamic payloads. Raw event payloads remain attached for global extension
 points and unknown topics; malformed known event data preserves its former live-reducer
@@ -97,7 +97,7 @@ contains independently measured authoritative synchronization attempts; invalida
 attempts end as discarded rather than being mislabeled as successful. Receipt timing
 begins only after an uncertain mutation response, never for an ordinary confirmed
 mutation. `TerminalCoordinator` owns presentation intents, per-terminal operations,
-shared attachment leases, a global 16-terminal/256-chunk/1 MiB in-flight event quarantine,
+shared attachment leases, typed terminal-event reduction, a global 16-terminal/256-chunk/1 MiB in-flight event quarantine,
 replay revisions, and post-detach event admission. Terminal open/attach uses one replay installer and closes
 its interval only after reset, delta, and contiguous quarantined chunks are admitted.
 Stale successful attachments schedule an exact-connection compensating detach unless a

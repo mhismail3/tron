@@ -63,6 +63,50 @@ struct GatewayProtocolContractTests {
         #expect(nodes.first?.depth == 0)
     }
 
+    @Test("terminal events prepare typed payloads from original frame bytes")
+    func terminalEventPreparation() throws {
+        let output = try JSONDecoder.gateway.decode(GatewayEvent.self, from: Data(#"{"type":"event","topic":"terminal.output","sessionId":null,"payload":{"terminalId":"terminal-1","sequence":7,"data":"hello"}}"#.utf8))
+        let exit = try JSONDecoder.gateway.decode(GatewayEvent.self, from: Data(#"{"type":"event","topic":"terminal.exit","sessionId":null,"payload":{"terminalId":"terminal-1","sequence":8,"exitCode":0}}"#.utf8))
+
+        #expect(output.preparation == .terminalEvent(.output(PreparedTerminalOutputEvent(
+            terminalId: "terminal-1",
+            sequence: 7,
+            data: "hello"
+        ))))
+        #expect(exit.preparation == .terminalEvent(.exit(PreparedTerminalExitEvent(
+            terminalId: "terminal-1",
+            sequence: 8,
+            exitCode: 0
+        ))))
+        #expect(output.sessionCursor == nil)
+        #expect(exit.isConsumableSessionReplay)
+    }
+
+    @Test("malformed known terminal payload remains an inert event")
+    func malformedTerminalEventPreparation() throws {
+        let event = try JSONDecoder.gateway.decode(GatewayEvent.self, from: Data(#"{"type":"event","topic":"terminal.output","sessionId":null,"payload":{"terminalId":"terminal-1","sequence":"bad"}}"#.utf8))
+        #expect(event.preparation == .none)
+    }
+
+    @Test("synthetic terminal events use the same typed preparation")
+    func syntheticTerminalEventPreparation() {
+        let event = GatewayEvent(
+            type: "event",
+            topic: "terminal.exit",
+            sessionId: nil,
+            payload: .object([
+                "terminalId": .string("terminal-2"),
+                "sequence": .number(9),
+                "exitCode": .number(1),
+            ])
+        )
+        #expect(event.preparation == .terminalEvent(.exit(PreparedTerminalExitEvent(
+            terminalId: "terminal-2",
+            sequence: 9,
+            exitCode: 1
+        ))))
+    }
+
     @Test("stored gateway profiles migrate when device identity was absent")
     func profileMigration() throws {
         let data = Data(#"{"id":"machine","label":"Mac","host":"100.64.0.1","port":9847,"machineId":"machine"}"#.utf8)

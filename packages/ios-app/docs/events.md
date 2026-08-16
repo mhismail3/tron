@@ -66,7 +66,9 @@ admits and reduces mounted-session topics:
   interval because Pi JSONL does not persist tool execution timing;
 - structure/context/resource invalidations reload an already-presented History,
   Fork, Manage Session, or Project Resources surface from the runtime;
-- terminal output is admitted only for a current presentation lease, sequence-checked,
+- terminal output/exit payloads decode into typed `Sendable` preparations from the original
+  event frame before MainActor routing; malformed known payloads remain inert rather than failing
+  the transport. Terminal output is admitted only for a current presentation lease, sequence-checked,
   and deduplicated; frames arriving during attach or gap recovery are held in a bounded
   local quarantine and joined contiguously to `terminal.attach(afterSequence:)` replay.
   A remaining gap schedules at most three immediate recovery attempts before waiting for

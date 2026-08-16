@@ -51,11 +51,29 @@ struct GatewayEventCursor: Sendable, Equatable {
     let eventSequence: Int
 }
 
+struct PreparedTerminalOutputEvent: Decodable, Sendable, Equatable {
+    let terminalId: String
+    let sequence: Int
+    let data: String
+}
+
+struct PreparedTerminalExitEvent: Decodable, Sendable, Equatable {
+    let terminalId: String
+    let sequence: Int?
+    let exitCode: Int?
+}
+
+enum PreparedTerminalEvent: Sendable, Equatable {
+    case output(PreparedTerminalOutputEvent)
+    case exit(PreparedTerminalExitEvent)
+}
+
 enum GatewayEventPreparation: Sendable, Equatable {
     case none
     case sessionSummary(SessionSummaryUpdate)
     case sessionSnapshot(SessionSnapshot)
     case sessionEvent(PreparedSessionEvent)
+    case terminalEvent(PreparedTerminalEvent)
 }
 
 struct GatewayEvent: Decodable, Sendable, Equatable {
@@ -112,7 +130,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
                 runtimeGeneration: event.envelope.runtimeGeneration,
                 eventSequence: event.envelope.eventSequence
             )
-        case .none, .sessionSummary:
+        case .none, .sessionSummary, .terminalEvent:
             return nil
         }
     }
@@ -139,7 +157,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             }
         case .none:
             return !topic.hasPrefix("session.")
-        case .sessionSummary:
+        case .sessionSummary, .terminalEvent:
             return true
         }
     }
@@ -150,6 +168,12 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             return (try? SessionSummaryUpdate(from: decoder)).map(GatewayEventPreparation.sessionSummary) ?? .none
         case "session.snapshot":
             return (try? SessionSnapshot(from: decoder)).map(GatewayEventPreparation.sessionSnapshot) ?? .none
+        case "terminal.output":
+            return (try? PreparedTerminalOutputEvent(from: decoder))
+                .map { .terminalEvent(.output($0)) } ?? .none
+        case "terminal.exit":
+            return (try? PreparedTerminalExitEvent(from: decoder))
+                .map { .terminalEvent(.exit($0)) } ?? .none
         case let topic where topic.hasPrefix("session.") && topic != "session.listChanged":
             guard let container = try? decoder.container(keyedBy: SessionEventCodingKeys.self),
                   let runtimeGeneration = try? container.decode(String.self, forKey: .runtimeGeneration),
@@ -206,6 +230,12 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
         case "session.snapshot":
             return (try? payload.decode(SessionSnapshot.self))
                 .map(GatewayEventPreparation.sessionSnapshot) ?? .none
+        case "terminal.output":
+            return (try? payload.decode(PreparedTerminalOutputEvent.self))
+                .map { .terminalEvent(.output($0)) } ?? .none
+        case "terminal.exit":
+            return (try? payload.decode(PreparedTerminalExitEvent.self))
+                .map { .terminalEvent(.exit($0)) } ?? .none
         case let topic where topic.hasPrefix("session.") && topic != "session.listChanged":
             guard let envelope = try? payload.decode(SessionEventEnvelope.self) else { return .none }
             let preparedData: PreparedSessionEventData
