@@ -21,45 +21,19 @@ struct SessionImportFileAccess {
             return size
         },
         copy: { source, destination, expectedSize in
-            let copyTask = Task.detached(priority: .userInitiated) {
-                guard FileManager.default.createFile(
-                    atPath: destination.path,
-                    contents: nil,
-                    attributes: [
-                        .posixPermissions: 0o600,
-                        .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication,
-                    ]
-                ) else { throw CocoaError(.fileWriteUnknown) }
-                let input = try FileHandle(forReadingFrom: source)
-                let output = try FileHandle(forWritingTo: destination)
-                do {
-                    var copied = 0
-                    while let chunk = try input.read(upToCount: 64 * 1_024), !chunk.isEmpty {
-                        try Task.checkCancellation()
-                        guard chunk.count <= expectedSize - copied else {
-                            throw GatewayFailure(
-                                code: "invalid_request",
-                                message: "The session import changed size while it was being read.",
-                                retryable: false,
-                                details: nil
-                            )
-                        }
-                        try output.write(contentsOf: chunk)
-                        copied += chunk.count
-                    }
-                    try output.synchronize()
-                } catch {
-                    try? input.close()
-                    try? output.close()
-                    throw error
-                }
-                try input.close()
-                try output.close()
-            }
-            try await withTaskCancellationHandler {
-                try await copyTask.value
-            } onCancel: {
-                copyTask.cancel()
+            do {
+                try await BoundedFileCopy.copy(
+                    from: source,
+                    to: destination,
+                    expectedSize: expectedSize
+                )
+            } catch BoundedFileCopyError.changedSize {
+                throw GatewayFailure(
+                    code: "invalid_request",
+                    message: "The session import changed size while it was being read.",
+                    retryable: false,
+                    details: nil
+                )
             }
         },
         stopAccessing: { $0.stopAccessingSecurityScopedResource() }

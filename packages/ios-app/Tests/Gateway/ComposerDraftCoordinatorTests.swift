@@ -164,6 +164,112 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("document file upload stages bytes without preview materialization")
+    func documentFileUpload() async throws {
+        try await withTestWatchdog { @MainActor in
+            let data = Data("document".utf8)
+            let access = ComposerFileAccessRecorder(data: data)
+            let uploaded = UploadedDataBox()
+            let coordinator = ComposerDraftCoordinator(
+                upload: { _, _, _ in Issue.record("unexpected data upload"); return "unused" },
+                fileUpload: { name, mimeType, file, byteCount in
+                    #expect(name == "notes.txt")
+                    #expect(mimeType == "text/plain")
+                    #expect(byteCount == data.count)
+                    uploaded.value = try Data(contentsOf: file)
+                    return "document-id"
+                },
+                attachmentFileAccess: access.seam,
+                send: { _, _, _, _ in },
+                admitsLifecycleGeneration: { $0 == 1 }
+            )
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 9)
+            _ = coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1
+            )
+
+            try await coordinator.uploadFile(URL(fileURLWithPath: "/tmp/notes.txt"), target: target)
+
+            #expect(uploaded.value == data)
+            #expect(access.startCount == 1)
+            #expect(access.stopCount == 1)
+            #expect(access.previewCount == 0)
+            #expect(access.stagingIsClean)
+            let attachment = try #require(coordinator.pendingAttachments(for: target).first)
+            #expect(attachment.id == "document-id")
+            #expect(attachment.previewData == nil)
+            #expect(attachment.fullPreviewData == nil)
+        }
+    }
+
+    @Test("image file upload preserves bounded and full preview data")
+    func imageFileUploadPreview() async throws {
+        try await withTestWatchdog { @MainActor in
+            let fixture = try SessionScenarioBuilder(seed: 92).generatedImageFixture(
+                format: .jpeg,
+                pixelWidth: 1_200,
+                pixelHeight: 800,
+                orientation: .right
+            )
+            let access = ComposerFileAccessRecorder(data: fixture.encodedData)
+            let coordinator = ComposerDraftCoordinator(
+                upload: { _, _, _ in Issue.record("unexpected data upload"); return "unused" },
+                fileUpload: { _, _, _, _ in "image-id" },
+                attachmentFileAccess: access.seam,
+                send: { _, _, _, _ in },
+                admitsLifecycleGeneration: { $0 == 1 }
+            )
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 10)
+            _ = coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1
+            )
+
+            try await coordinator.uploadFile(URL(fileURLWithPath: "/tmp/photo.jpg"), target: target)
+
+            #expect(access.previewCount == 1)
+            #expect(access.stagingIsClean)
+            let attachment = try #require(coordinator.pendingAttachments(for: target).first)
+            #expect(attachment.fullPreviewData == fixture.encodedData)
+            #expect(try #require(attachment.previewData).count <= ComposerAttachmentPreviewPolicy.maximumEncodedBytes)
+        }
+    }
+
+    @Test("file uploads publish by completion and revoked work cleans staging")
+    func fileUploadCompletionAndRevocation() async throws {
+        try await withTestWatchdog { @MainActor in
+            let access = ComposerFileAccessRecorder(data: Data("file".utf8))
+            let gate = ComposerFileUploadGate()
+            let coordinator = ComposerDraftCoordinator(
+                upload: { _, _, _ in Issue.record("unexpected data upload"); return "unused" },
+                fileUpload: { name, _, file, _ in try await gate.upload(name: name, file: file) },
+                attachmentFileAccess: access.seam,
+                send: { _, _, _, _ in },
+                admitsLifecycleGeneration: { $0 == 1 }
+            )
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 11)
+            _ = coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1
+            )
+            let first = Task {
+                try await coordinator.uploadFile(URL(fileURLWithPath: "/tmp/first.txt"), target: target)
+            }
+            await gate.waitForUploads(1)
+            let second = Task {
+                try await coordinator.uploadFile(URL(fileURLWithPath: "/tmp/second.txt"), target: target)
+            }
+            await gate.waitForUploads(2)
+            await gate.complete(index: 1, result: .success("second-id"))
+            try await second.value
+            #expect(coordinator.pendingAttachments(for: target).map(\.id) == ["second-id"])
+
+            coordinator.revoke(target)
+            await #expect(throws: CancellationError.self) { try await first.value }
+            #expect(access.startCount == 2)
+            #expect(access.stopCount == 2)
+            #expect(access.stagingIsClean)
+        }
+    }
+
     @Test("revocation rejects late upload success and failure across A-B-A")
     func uploadRevocation() async throws {
         try await withTestWatchdog { @MainActor in
@@ -435,6 +541,93 @@ private struct ComposerSendCall: Equatable {
     let behavior: String?
 }
 
+private actor ComposerFileUploadGate {
+    private struct Pending {
+        let id: UUID
+        let continuation: CheckedContinuation<String, Error>
+    }
+
+    private var continuations: [Pending] = []
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func upload(name: String, file: URL) async throws -> String {
+        #expect(FileManager.default.fileExists(atPath: file.path))
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                continuations.append(Pending(id: id, continuation: continuation))
+                waiters.forEach { $0.resume() }
+                waiters.removeAll()
+            }
+        } onCancel: {
+            Task { await self.cancel(id) }
+        }
+    }
+
+    func waitForUploads(_ count: Int) async {
+        while continuations.count < count {
+            await withCheckedContinuation { waiters.append($0) }
+        }
+    }
+
+    func complete(index: Int, result: Result<String, Error>) {
+        continuations.remove(at: index).continuation.resume(with: result)
+    }
+
+    private func cancel(_ id: UUID) {
+        guard let index = continuations.firstIndex(where: { $0.id == id }) else { return }
+        continuations.remove(at: index).continuation.resume(throwing: CancellationError())
+    }
+}
+
+@MainActor
+private final class UploadedDataBox {
+    var value: Data?
+}
+
+@MainActor
+private final class ComposerFileAccessRecorder {
+    private let data: Data
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+    private(set) var previewCount = 0
+    private(set) var destinations: [URL] = []
+
+    init(data: Data) {
+        self.data = data
+    }
+
+    var stagingIsClean: Bool {
+        destinations.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    var seam: ComposerAttachmentFileAccess {
+        ComposerAttachmentFileAccess(
+            startAccessing: { [weak self] _ in
+                self?.startCount += 1
+                return true
+            },
+            size: { [weak self] _ in
+                guard let self else { throw CancellationError() }
+                return self.data.count
+            },
+            copy: { [weak self] _, destination, _ in
+                guard let self else { throw CancellationError() }
+                self.destinations.append(destination)
+                try self.data.write(to: destination, options: .withoutOverwriting)
+            },
+            previewData: { [weak self] file, expectedSize in
+                guard let self else { throw CancellationError() }
+                self.previewCount += 1
+                let data = try Data(contentsOf: file)
+                #expect(data.count == expectedSize)
+                return data
+            },
+            stopAccessing: { [weak self] _ in self?.stopCount += 1 }
+        )
+    }
+}
+
 @MainActor
 private final class ComposerAdmissionState {
     var generation = 1
@@ -469,6 +662,10 @@ private final class ComposerHarness {
             return try await withCheckedThrowingContinuation { continuation in
                 self.uploadContinuations.append(continuation)
             }
+        },
+        fileUpload: { _, _, _, _ in
+            Issue.record("unexpected file upload")
+            throw CancellationError()
         },
         send: { [weak self] text, sessionID, uploadIDs, behavior in
             guard let self else { throw CancellationError() }

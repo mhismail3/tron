@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UniformTypeIdentifiers
 
 struct ComposerDraftScope: Hashable, Sendable {
     let profileID: String
@@ -88,6 +89,49 @@ typealias ComposerUploadOperation = @MainActor @Sendable (
     _ data: Data
 ) async throws -> String
 
+typealias ComposerFileUploadOperation = @MainActor @Sendable (
+    _ name: String,
+    _ mimeType: String,
+    _ fileURL: URL,
+    _ byteCount: Int
+) async throws -> String
+
+@MainActor
+struct ComposerAttachmentFileAccess {
+    let startAccessing: (URL) -> Bool
+    let size: (URL) throws -> Int
+    let copy: (URL, URL, Int) async throws -> Void
+    let previewData: (URL, Int) async throws -> Data
+    let stopAccessing: (URL) -> Void
+
+    static let live = ComposerAttachmentFileAccess(
+        startAccessing: { $0.startAccessingSecurityScopedResource() },
+        size: { url in
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard values.isRegularFile == true, let size = values.fileSize, size >= 0 else {
+                throw CocoaError(.fileReadInvalidFileName)
+            }
+            return size
+        },
+        copy: { source, destination, expectedSize in
+            try await BoundedFileCopy.copy(from: source, to: destination, expectedSize: expectedSize)
+        },
+        previewData: { file, expectedSize in
+            let task = Task.detached(priority: .userInitiated) {
+                let data = try Data(contentsOf: file, options: .mappedIfSafe)
+                guard data.count == expectedSize else { throw BoundedFileCopyError.changedSize }
+                return data
+            }
+            return try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        },
+        stopAccessing: { $0.stopAccessingSecurityScopedResource() }
+    )
+}
+
 typealias ComposerSendOperation = @MainActor @Sendable (
     _ text: String,
     _ sessionID: String,
@@ -144,6 +188,8 @@ final class ComposerDraftCoordinator {
     }
 
     private let uploadOperation: ComposerUploadOperation
+    private let fileUploadOperation: ComposerFileUploadOperation
+    private let attachmentFileAccess: ComposerAttachmentFileAccess
     private let sendOperation: ComposerSendOperation
     @ObservationIgnored private let admitsLifecycleGeneration: @MainActor (Int) -> Bool
 
@@ -153,15 +199,20 @@ final class ComposerDraftCoordinator {
     private var attachmentsByTarget: [SessionPresentationIdentity: [PendingAttachment]] = [:]
     private var editorRequestByTarget: [SessionPresentationIdentity: ComposerEditorRequest] = [:]
     private var uploadAdmissions = Set<UploadAdmission>()
+    private var uploadTasks: [UploadAdmission: Task<String, Error>] = [:]
     private var submissionByTarget: [SessionPresentationIdentity: SubmissionAdmission] = [:]
     private var sequence: UInt64 = 0
 
     init(
         upload: @escaping ComposerUploadOperation,
+        fileUpload: @escaping ComposerFileUploadOperation,
+        attachmentFileAccess: ComposerAttachmentFileAccess = .live,
         send: @escaping ComposerSendOperation,
         admitsLifecycleGeneration: @escaping @MainActor (Int) -> Bool
     ) {
         uploadOperation = upload
+        fileUploadOperation = fileUpload
+        self.attachmentFileAccess = attachmentFileAccess
         sendOperation = send
         self.admitsLifecycleGeneration = admitsLifecycleGeneration
     }
@@ -306,9 +357,16 @@ final class ComposerDraftCoordinator {
     ) async throws {
         let admission = try beginUpload(target: target, bytes: data.count)
         defer { uploadAdmissions.remove(admission) }
+        let task = Task { try await uploadOperation(name, mimeType, data) }
+        uploadTasks[admission] = task
+        defer { uploadTasks[admission] = nil }
         let id: String
         do {
-            id = try await uploadOperation(name, mimeType, data)
+            id = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
         } catch {
             try require(admission)
             throw error
@@ -324,6 +382,112 @@ final class ComposerDraftCoordinator {
             size: data.count,
             previewData: previewData,
             fullPreviewData: previewData == nil ? nil : data
+        ))
+    }
+
+    func uploadFile(
+        _ source: URL,
+        target: SessionPresentationIdentity
+    ) async throws {
+        guard admits(target) else { throw CancellationError() }
+        let scoped = attachmentFileAccess.startAccessing(source)
+        let size: Int
+        do {
+            size = try attachmentFileAccess.size(source)
+        } catch {
+            if scoped { attachmentFileAccess.stopAccessing(source) }
+            if error is CancellationError { throw error }
+            throw GatewayFailure(
+                code: "upload_failed",
+                message: "Attachments must be regular files containing 1 byte through 25 MiB.",
+                retryable: false,
+                details: nil
+            )
+        }
+        guard size > 0, size <= ComposerAttachmentPolicy.maximumTotalBytes else {
+            if scoped { attachmentFileAccess.stopAccessing(source) }
+            throw GatewayFailure(
+                code: "upload_failed",
+                message: "Attachments must be regular files containing 1 byte through 25 MiB.",
+                retryable: false,
+                details: nil
+            )
+        }
+        let admission: UploadAdmission
+        do {
+            admission = try beginUpload(target: target, bytes: size)
+        } catch {
+            if scoped { attachmentFileAccess.stopAccessing(source) }
+            throw error
+        }
+        defer { uploadAdmissions.remove(admission) }
+
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "tron-attachment-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let staged = directory.appending(path: "content", directoryHint: .notDirectory)
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: false,
+                attributes: [
+                    .posixPermissions: 0o700,
+                    .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication,
+                ]
+            )
+            try await attachmentFileAccess.copy(source, staged, size)
+        } catch {
+            if scoped { attachmentFileAccess.stopAccessing(source) }
+            try? FileManager.default.removeItem(at: directory)
+            try require(admission)
+            if error is BoundedFileCopyError {
+                throw GatewayFailure(
+                    code: "upload_failed",
+                    message: "The attachment changed size while it was being read.",
+                    retryable: false,
+                    details: nil
+                )
+            }
+            throw error
+        }
+        if scoped { attachmentFileAccess.stopAccessing(source) }
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try require(admission)
+
+        let name = source.lastPathComponent
+        let mimeType = UTType(filenameExtension: source.pathExtension)?.preferredMIMEType
+            ?? "application/octet-stream"
+        let task = Task { try await fileUploadOperation(name, mimeType, staged, size) }
+        uploadTasks[admission] = task
+        defer { uploadTasks[admission] = nil }
+        let id: String
+        do {
+            id = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
+            }
+        } catch {
+            try require(admission)
+            throw error
+        }
+        let fullPreviewData: Data?
+        let previewData: Data?
+        if mimeType.hasPrefix("image/") {
+            let data = try await attachmentFileAccess.previewData(staged, size)
+            fullPreviewData = data
+            previewData = await ComposerAttachmentPreviewPolicy.prepare(data)
+        } else {
+            fullPreviewData = nil
+            previewData = nil
+        }
+        try require(admission)
+        attachmentsByTarget[target, default: []].append(PendingAttachment(
+            id: id,
+            name: name,
+            mimeType: mimeType,
+            size: size,
+            previewData: previewData,
+            fullPreviewData: previewData == nil ? nil : fullPreviewData
         ))
     }
 
@@ -528,6 +692,9 @@ final class ComposerDraftCoordinator {
         attachmentsByTarget[lease.target] = nil
         editorRequestByTarget[lease.target] = nil
         submissionByTarget[lease.target] = nil
+        for (admission, task) in uploadTasks where admission.target == lease.target {
+            task.cancel()
+        }
         uploadAdmissions = uploadAdmissions.filter { $0.target != lease.target }
         self.lease = nil
         evictInactiveDraftsIfNeeded()

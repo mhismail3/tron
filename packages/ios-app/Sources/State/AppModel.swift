@@ -186,6 +186,8 @@ final class AppModel {
         sessionImportFileAccess: SessionImportFileAccess = .live,
         sessionImportUpload: SessionImportUpload? = nil,
         composerUpload: ComposerUploadOperation? = nil,
+        composerFileUpload: ComposerFileUploadOperation? = nil,
+        composerAttachmentFileAccess: ComposerAttachmentFileAccess = .live,
         exportArtifacts: SessionExportArtifactStore = SessionExportArtifactStore()
     ) {
         let resolvedPairingCommit = pairingCommit ?? { profile, token in
@@ -252,6 +254,15 @@ final class AppModel {
             upload: composerUpload ?? { name, mimeType, data in
                 try await client.upload(name: name, mimeType: mimeType, data: data)
             },
+            fileUpload: composerFileUpload ?? { name, mimeType, fileURL, byteCount in
+                try await client.upload(
+                    name: name,
+                    mimeType: mimeType,
+                    fileURL: fileURL,
+                    byteCount: byteCount
+                )
+            },
+            attachmentFileAccess: composerAttachmentFileAccess,
             send: { text, sessionID, uploadIDs, behavior in
                 try await sessionMutations.prompt(text, sessionID: sessionID, uploadIDs: uploadIDs, behavior: behavior)
             },
@@ -1257,6 +1268,13 @@ final class AppModel {
             data: data,
             target: target
         )
+    }
+
+    func uploadFile(
+        _ url: URL,
+        target: SessionPresentationTarget
+    ) async throws {
+        try await composerDrafts.uploadFile(url, target: target)
     }
 
     @discardableResult

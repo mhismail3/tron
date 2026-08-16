@@ -333,8 +333,9 @@ profile/session draft; reopen and repeated preparation cannot overwrite retained
 observes explicit selected-profile identity through `SessionShellProfileRouteOwner`; an A → B → A change
 synchronously revokes the current presentation and clears its navigation route before another profile can
 reuse the screen's prior draft scope. File attachments and session imports require a regular file no larger than
-25 MiB and reject changed sizes before upload. Session imports copy through a bounded off-main stream into a
-protected temporary file, then release security-scoped access before the first network suspension. Staged attachment retention beyond a
+25 MiB and reject changed sizes before upload. Session imports and document attachments copy through one bounded
+off-main stream into protected temporary files, then release security-scoped access before the first network suspension.
+Non-image documents never become full request `Data`; image files retain bytes only for the established explicit preview. Staged attachment retention beyond a
 presentation remains a Phase 8D product decision; abandoned unclaimed remote IDs expire under the bounded Gateway
 store rather than being transferred speculatively. Guided and advanced editor changes share one monotonic
 revision owner; automatic invalidation loads cannot replace either form of unsaved input, and only
