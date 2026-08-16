@@ -436,7 +436,6 @@ struct ChatView: View {
                         managementAvailability: managementAvailability,
                         isMutating: !mutatingQueuedMessageIDs.isEmpty,
                         onEdit: { queuedMessageEditor = .init(id: message.id) },
-                        onDelete: { Task { await removeQueuedMessage(message.id) } },
                         onClear: { Task { await clearQueuedMessages() } },
                         canMoveEarlier: index > 0 && messages[index - 1].behavior == message.behavior,
                         canMoveLater: index + 1 < messages.count && messages[index + 1].behavior == message.behavior,

@@ -363,8 +363,8 @@ visual transforms do not grant detached readers automatic writes or replay same-
 `GatewayProtocolContractTests`, `SharedProtocolFixtureTests`, and
 `SessionMutationServiceTests` cover revisioned queue projection and replacement commands.
 `QueuedMessagePresentationTests` own capability/field admission for editing; presentation guards
-retain intrinsic cards capped at the user-prompt bound, direct 44-point Edit/Remove targets, an
-explicit legacy lock, and Tron surfaces instead of stock forms.
+retain intrinsic cards capped at the user-prompt bound, whole-card interactive Liquid Glass,
+leading-toolbar removal, an explicit legacy lock, and Tron surfaces instead of stock forms.
 Native bottom evidence comes from `ScrollGeometry.visibleRect.maxY`
 plus the bottom inset; the harness no longer substitutes a hard-coded settled distance.
 The obsolete visibility modifier is removed; the native SwiftUI geometry modifier still

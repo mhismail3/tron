@@ -474,9 +474,10 @@ Authoritative queued entries render after active runtime state as right-anchored
 that hug their content and wrap at the same 364-point maximum as a user prompt. They retain stable
 identity, delivery stage, position, text, and attachment count. Queue cards and the transcript
 timeline are installed from the same exact tagged source, so consuming a queued entry cannot remove
-its card one frame before the corresponding canonical prompt installs. Direct 44-point Edit and
-Remove controls own the primary actions; the secondary menu retains same-stage reorder and clear-all,
-and the editor supports text and behavior changes against an optimistic queue revision. Conflicts
+its card one frame before the corresponding canonical prompt installs. Manageable cards use one
+interactive, accent-tinted Liquid Glass surface; tapping anywhere opens the editor without adding
+inline action chrome. The editor's leading toolbar owns removal, while a long-press menu retains
+same-stage reorder and clear-all. Text and behavior changes use an optimistic queue revision. Conflicts
 wait for the next authoritative snapshot rather than fabricating a local queue. Steering is always
 presented before follow-up to match runtime delivery order. Older Gateways retain a visibly locked
 read-only string projection that directs the user to update Tron on Mac.
