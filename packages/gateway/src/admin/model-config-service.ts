@@ -6,6 +6,53 @@ import { GatewayError } from "../errors.js";
 import { readJson, updateJsonLocked } from "../util/json.js";
 import { object } from "../util/validation.js";
 
+export const MODEL_CONFIG_MAX_BYTES = 768 * 1_024;
+const MODEL_CONFIG_MAX_DEPTH = 64;
+const MODEL_CONFIG_MAX_NODES = 32_768;
+const MODEL_CONFIG_MAX_COLLECTION_MEMBERS = 8_192;
+
+function assertBoundedDocument(
+  value: unknown,
+  code: "invalid_request" | "conflict",
+  enforceCanonicalBytes = false,
+): void {
+  const pending: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  let nodes = 0;
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    nodes += 1;
+    if (nodes > MODEL_CONFIG_MAX_NODES) throw new GatewayError(code, "Custom model configuration exceeds its node limit");
+    if (current.depth > MODEL_CONFIG_MAX_DEPTH) throw new GatewayError(code, "Custom model configuration exceeds its depth limit");
+    if (current.value === null || ["string", "boolean"].includes(typeof current.value)) continue;
+    if (typeof current.value === "number") {
+      if (!Number.isFinite(current.value)) throw new GatewayError(code, "Custom model configuration contains a non-finite number");
+      continue;
+    }
+    if (typeof current.value !== "object") throw new GatewayError(code, "Custom model configuration contains non-JSON data");
+    const values = Array.isArray(current.value) ? current.value : Object.values(current.value);
+    if (values.length > MODEL_CONFIG_MAX_COLLECTION_MEMBERS) {
+      throw new GatewayError(code, "Custom model configuration exceeds its collection limit");
+    }
+    for (const child of values) pending.push({ value: child, depth: current.depth + 1 });
+  }
+  if (enforceCanonicalBytes) canonicalDocument(value, code);
+}
+
+function canonicalDocument(value: unknown, code: "invalid_request" | "conflict"): string {
+  const encoded = `${JSON.stringify(value, null, 2)}\n`;
+  if (Buffer.byteLength(encoded) > MODEL_CONFIG_MAX_BYTES) {
+    throw new GatewayError(code, "Custom model configuration exceeds its 768 KiB limit");
+  }
+  return encoded;
+}
+
+function boundedReadFailure(error: unknown): never {
+  if (error instanceof RangeError || error instanceof SyntaxError) {
+    throw new GatewayError("conflict", "Canonical custom model configuration is invalid or exceeds its 768 KiB limit");
+  }
+  throw error;
+}
+
 function redact(value: unknown, key = ""): unknown {
   if (/key|secret|token|authorization/i.test(key) && typeof value === "string") return "<redacted>";
   if (Array.isArray(value)) return value.map((item) => redact(item));
@@ -43,12 +90,20 @@ export class ModelConfigService {
   }
 
   async get(): Promise<{ document: unknown; redacted: boolean }> {
-    const document = await readJson<Record<string, unknown>>(this.path, { providers: {} });
-    return { document: redact(document), redacted: JSON.stringify(document) !== JSON.stringify(redact(document)) };
+    let document: Record<string, unknown>;
+    try {
+      document = await readJson<Record<string, unknown>>(this.path, { providers: {} }, MODEL_CONFIG_MAX_BYTES);
+    } catch (error) {
+      boundedReadFailure(error);
+    }
+    assertBoundedDocument(document, "conflict");
+    const redactedDocument = redact(document);
+    return { document: redactedDocument, redacted: JSON.stringify(document) !== JSON.stringify(redactedDocument) };
   }
 
   async validate(raw: unknown): Promise<{ valid: true; providerCount: number }> {
     const document = object(raw, "models document");
+    assertBoundedDocument(document, "invalid_request", true);
     const providers = object(document.providers, "models.providers");
     if (Object.keys(providers).length > 100) throw new GatewayError("invalid_request", "At most 100 custom providers are allowed");
     for (const [providerId, value] of Object.entries(providers)) {
@@ -63,7 +118,7 @@ export class ModelConfigService {
     const root = await mkdtemp(join(tmpdir(), "tron-model-validation-"));
     const candidate = join(root, "models.json");
     try {
-      await writeFile(candidate, `${JSON.stringify(document)}\n`, { mode: 0o600 });
+      await writeFile(candidate, canonicalDocument(document, "invalid_request"), { mode: 0o600 });
       const runtime = await ModelRuntime.create({ modelsPath: candidate, refreshOnCreate: false });
       const error = runtime.getError();
       if (error) throw new GatewayError("invalid_request", `Custom model configuration is invalid: ${error}`);
@@ -76,8 +131,16 @@ export class ModelConfigService {
   async put(raw: unknown): Promise<{ requiresRestart: true }> {
     const document = object(raw, "models document");
     await this.validate(document);
-    await updateJsonLocked<Record<string, unknown>>(this.path, { providers: {} }, (current) =>
-      restoreRedacted(document, current) as Record<string, unknown>);
+    try {
+      await updateJsonLocked<Record<string, unknown>>(this.path, { providers: {} }, (current) => {
+        assertBoundedDocument(current, "conflict");
+        const restored = restoreRedacted(document, current) as Record<string, unknown>;
+        assertBoundedDocument(restored, "conflict", true);
+        return restored;
+      }, MODEL_CONFIG_MAX_BYTES);
+    } catch (error) {
+      boundedReadFailure(error);
+    }
     return { requiresRestart: true };
   }
 }

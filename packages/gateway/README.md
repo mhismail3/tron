@@ -230,9 +230,11 @@ state and publish the settled snapshot before the serialized mutation lane advan
 Session statistics include the runtime-calculated latest cache-hit rate used by the
 terminal footer, so mobile clients do not invent a different ratio.
 Custom model documents are validated by a temporary instance of the pinned runtime
-before an atomic write. Read projections redact secret-looking strings; matching
-redaction placeholders are restored from canonical state during update so mobile
-editing cannot erase credentials it was never allowed to read.
+before an atomic write. Canonical reads, validation files, redaction traversal, and locked
+updates share a 768 KiB file ceiling plus bounded depth, nodes, and collection members.
+Read projections redact secret-looking strings; matching redaction placeholders are restored
+from canonical state during update so mobile editing cannot erase credentials it was never
+allowed to read.
 
 Administrative restart is a drain, not an abort: the Gateway freezes new mutations,
 allows every admitted agent run to settle canonically, then exits with the supervised
