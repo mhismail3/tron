@@ -7,6 +7,14 @@ import Testing
 @MainActor
 @Suite("Package configuration coordinator")
 struct PackageConfigurationCoordinatorTests {
+    @Test("resolved resource overview uses bounded top-level summaries")
+    func resourceSummary() {
+        #expect(PackageResourceSummaryPolicy.summary(for: .object(["skills": .array([])])) == "1 top-level category")
+        #expect(PackageResourceSummaryPolicy.summary(for: .object(["skills": .array([]), "tools": .array([])])) == "2 top-level categories")
+        #expect(PackageResourceSummaryPolicy.summary(for: .array([.string("one"), .string("two")])) == "2 resolved items")
+        #expect(PackageResourceSummaryPolicy.summary(for: .string("opaque")) == "Resolved package resource details")
+    }
+
     @Test("target-keyed inventories admit independently and newest same-target load wins")
     func inventoryAdmission() async throws {
         try await runScenario {

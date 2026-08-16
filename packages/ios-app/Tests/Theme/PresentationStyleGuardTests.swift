@@ -98,8 +98,8 @@ struct PresentationStyleGuardTests {
     func noStockSettingsCollections() {
         let composedOwners = [
             "AgentDefaultsSettingsView.swift", "AgentExtensionSettings.swift", "AppearanceSettingsView.swift",
-            "ConnectionSettingsView.swift", "ProviderSettingsView.swift", "RuntimeSettingsViews.swift",
-            "SettingsView.swift", "ProjectResourcesView.swift", "ExtensionInteractionSheet.swift",
+            "ConnectionSettingsView.swift", "PackagesSettingsView.swift", "ProviderSettingsView.swift",
+            "RuntimeSettingsViews.swift", "SettingsView.swift", "ProjectResourcesView.swift", "ExtensionInteractionSheet.swift",
             "SessionContextSheet.swift", "SessionTreeSheet.swift",
         ]
         for (url, source) in uiSources where composedOwners.contains(url.lastPathComponent) {
@@ -404,6 +404,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/AgentExtensionSettings.swift"),
             encoding: .utf8
         )
+        let packages = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/PackagesSettingsView.swift"),
+            encoding: .utf8
+        )
         #expect(context.contains("ProjectResourcesView(sessionID: sessionID)"))
         #expect(context.contains("snapshot.stats.latestCacheHitRate"))
         #expect(context.contains("let sessionID: String"))
@@ -423,6 +427,13 @@ struct PresentationStyleGuardTests {
         #expect(diagnostics.contains("request(\"git.inspect\""))
         #expect(diagnostics.contains("request(\"system.logs\""))
         #expect(settings.contains("Advanced JSON"))
+        let packageOverview = packages.components(separatedBy: "struct PackageResolvedResourcesView").first ?? ""
+        let packageDetail = packages.components(separatedBy: "struct PackageResolvedResourcesView").dropFirst().first ?? ""
+        #expect(packageOverview.contains("TronProgressiveSheetLink("))
+        #expect(packageOverview.contains("accessibilityLabel: \"Inspect resolved resources, \\(summary)\""))
+        #expect(packageOverview.contains("Inspect Resolved Resources"))
+        #expect(!packageOverview.contains("TronStructuredJSONView"))
+        #expect(packageDetail.contains("TronStructuredJSONView"))
         let runtimeSettings = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/RuntimeSettingsViews.swift"),
             encoding: .utf8
@@ -1138,7 +1149,7 @@ struct PresentationStyleGuardTests {
     func sheetReloadActions() throws {
         let sheetOwners = [
             "Sources/UI/Chat/SessionTreeSheet.swift",
-            "Sources/UI/Settings/AgentExtensionSettings.swift",
+            "Sources/UI/Settings/PackagesSettingsView.swift",
             "Sources/UI/Settings/ProviderSettingsView.swift",
         ]
         for path in sheetOwners {
