@@ -99,7 +99,7 @@ struct PresentationStyleGuardTests {
         let composedOwners = [
             "AgentDefaultsSettingsView.swift", "AppearanceSettingsView.swift", "ConnectionSettingsView.swift",
             "CustomModelsSettingsView.swift", "GatewayDiagnosticsView.swift", "PackagesSettingsView.swift", "ProviderSettingsView.swift",
-            "RuntimeSettingsViews.swift", "SettingsView.swift", "ProjectResourcesView.swift", "ExtensionInteractionSheet.swift",
+            "ResourceSettingsView.swift", "RuntimeBehaviorSettingsView.swift", "SettingsView.swift", "ProjectResourcesView.swift", "ExtensionInteractionSheet.swift",
             "SessionContextSheet.swift", "SessionTreeSheet.swift",
         ]
         for (url, source) in uiSources where composedOwners.contains(url.lastPathComponent) {
@@ -155,7 +155,7 @@ struct PresentationStyleGuardTests {
             )
             let allowedNavigationChevrons = url.lastPathComponent == "OnboardingView.swift"
                 || url.lastPathComponent == "AuthPromptSheet.swift"
-                || url.lastPathComponent == "RuntimeSettingsViews.swift"
+                || url.lastPathComponent == "RuntimeBehaviorSettingsView.swift"
             if !allowedNavigationChevrons {
                 #expect(
                     !source.contains("Image(systemName: \"chevron.right\")"),
@@ -439,7 +439,7 @@ struct PresentationStyleGuardTests {
         #expect(!packageOverview.contains("TronStructuredJSONView"))
         #expect(packageDetail.contains("TronStructuredJSONView"))
         let runtimeSettings = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/RuntimeSettingsViews.swift"),
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ResourceSettingsView.swift"),
             encoding: .utf8
         )
         #expect(runtimeSettings.contains("Additional Locations"))
