@@ -2,8 +2,9 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "@earendil-works/pi-coding-agent";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
+import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { BlobStore } from "./blob-store.js";
-import type { ContentPart, JsonValue, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
+import type { CommandInfo, ContentPart, JsonValue, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
 
 const MAX_TEXT = 64_000;
 const MAX_JSON_STRING = 100_000;
@@ -547,11 +548,55 @@ function preview(item: TranscriptItem | undefined, entry: SessionEntry): string 
   }
 }
 
+export const COMMAND_CATALOG_ITEMS = 1_000;
+export const COMMAND_CATALOG_STRING_BYTES = 8_192;
+export const COMMAND_CATALOG_BYTES = 700_000;
+
+/** Validates the complete runtime-owned command catalog before generic JSON
+ * projection can silently trim it. Ordering and object identity are preserved. */
+export function admitCommandCatalog(commands: CommandInfo[]): CommandInfo[] {
+  if (commands.length > COMMAND_CATALOG_ITEMS) {
+    throw new GatewayError("conflict", "Command catalog exceeds its item limit");
+  }
+  const identities = new Set<string>();
+  for (const command of commands) {
+    const fields = [command.name, command.description, command.argumentHint, command.sourcePath];
+    const identity = `${command.source}:${command.name}`;
+    if (typeof command.name !== "string" || command.name.length === 0
+      || !["extension", "skill", "prompt"].includes(command.source)
+      || fields.some((field) => field !== undefined
+        && (typeof field !== "string" || Buffer.byteLength(field) > COMMAND_CATALOG_STRING_BYTES))
+      || identities.has(identity)) {
+      throw new GatewayError("conflict", "Command catalog contains an invalid or duplicate command");
+    }
+    identities.add(identity);
+  }
+  if (Buffer.byteLength(JSON.stringify(commands)) > COMMAND_CATALOG_BYTES) {
+    throw new GatewayError("conflict", "Command catalog exceeds its encoded byte limit");
+  }
+  return commands;
+}
+
 // safeJson intentionally bounds arrays to 1,000 values. Keep the tree page
 // within that generic transport bound so selected nodes are never discarded
 // after projectTree has chosen the newest useful history.
-const MAX_TREE_NODES = 1_000;
+export const MAX_TREE_NODES = 1_000;
 export const TREE_PROJECTION_BYTES = 700_000;
+export const TREE_PROJECTION_STRING_BYTES = 8_192;
+
+function validateProjectedTreeNode(node: SessionTreeNode): void {
+  const required = [node.id, node.kind];
+  const optionalNonempty = [node.parentId ?? undefined, node.label, node.role];
+  if (!isGatewayTimestamp(node.timestamp)
+    || required.some((field) => typeof field !== "string" || field.length === 0
+      || Buffer.byteLength(field) > TREE_PROJECTION_STRING_BYTES)
+    || optionalNonempty.some((field) => field !== undefined
+      && (typeof field !== "string" || field.length === 0
+        || Buffer.byteLength(field) > TREE_PROJECTION_STRING_BYTES))
+    || typeof node.preview !== "string" || Buffer.byteLength(node.preview) > TREE_PROJECTION_STRING_BYTES) {
+    throw new GatewayError("conflict", "Session tree contains an invalid or oversized string");
+  }
+}
 
 function projectedTreeNode(
   node: PiSessionTreeNode,
@@ -584,6 +629,9 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
   }
   while (work.length > 0) {
     const { source, depth } = work.pop()!;
+    if (byId.has(source.entry.id)) {
+      throw new GatewayError("conflict", "Session tree contains a duplicate canonical entry ID");
+    }
     byId.set(source.entry.id, projectedTreeNode(source, blobs, depth, currentPath));
     for (let index = source.children.length - 1; index >= 0; index -= 1) {
       work.push({ source: source.children[index]!, depth: depth + 1 });
@@ -596,9 +644,17 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
   const selected: SessionTreeNode[] = [];
   let bytes = 2;
   const entries = manager.getEntries();
+  const canonicalEntryIDs = new Set<string>();
+  for (const entry of entries) {
+    if (canonicalEntryIDs.has(entry.id)) {
+      throw new GatewayError("conflict", "Session tree contains a duplicate canonical entry ID");
+    }
+    canonicalEntryIDs.add(entry.id);
+  }
   for (let index = entries.length - 1; index >= 0 && selected.length < MAX_TREE_NODES; index -= 1) {
     const node = byId.get(entries[index]!.id);
     if (!node) continue;
+    validateProjectedTreeNode(node);
     const nodeBytes = Buffer.byteLength(JSON.stringify(node)) + 1;
     if (bytes + nodeBytes > TREE_PROJECTION_BYTES) break;
     bytes += nodeBytes;

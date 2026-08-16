@@ -214,8 +214,14 @@ a correlated protocol error instead of disconnecting the device. `session.contex
 and `session.resources` return runtime-native resource projections. The resource
 projection includes display-safe extension, prompt, skill, context-file, and tool
 metadata while canonical resource files and runtime loaders remain authoritative.
-`session.tree` returns a bounded flat outline with depth, child-count, role, and
+`session.tree` returns the existing newest-first-selected, chronologically restored
+flat outline of at most 1,000 nodes and 700 KiB with depth, child-count, role, and
 current-path metadata; it never recursively serializes an unbounded canonical tree.
+The projection rejects duplicate canonical entry IDs and oversized retained strings;
+omitted older parents are valid because the bounded outline is not a canonical mirror.
+`session.commands` preserves runtime sort order and rejects catalogs above 1,000 rows
+or 700 KiB, duplicate full `source:name` identities, empty names, or command metadata
+strings above 8 KiB before generic JSON projection can truncate the response.
 Summarizing tree navigation owns foreground branch-summary state only for the exact
 awaited call; success, extension cancellation, and provider failure all retire that
 state and publish the settled snapshot before the serialized mutation lane advances.

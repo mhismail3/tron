@@ -3,6 +3,10 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { BlobStore } from "./blob-store.js";
 import type { SessionSnapshot } from "../protocol/types.js";
 import {
+  admitCommandCatalog,
+  COMMAND_CATALOG_BYTES,
+  COMMAND_CATALOG_ITEMS,
+  COMMAND_CATALOG_STRING_BYTES,
   fitSessionSnapshot,
   projectJson,
   projectToolOutput,
@@ -15,6 +19,35 @@ import {
   TRANSCRIPT_PAGE_ITEMS,
   TREE_PROJECTION_BYTES,
 } from "./projection.js";
+
+describe("catalog projection admission", () => {
+  it("admits command catalogs atomically without changing their order", () => {
+    const commands = [
+      { name: "zeta", source: "prompt" as const, argumentHint: "[value]" },
+      { name: "alpha", source: "extension" as const, description: "Alpha" },
+    ];
+    expect(admitCommandCatalog(commands)).toBe(commands);
+    expect(admitCommandCatalog(commands).map((command) => command.name)).toEqual(["zeta", "alpha"]);
+  });
+
+  it("rejects duplicate, malformed, count-excess, and byte-excess command catalogs", () => {
+    expect(() => admitCommandCatalog([
+      { name: "same", source: "skill" },
+      { name: "same", source: "skill", description: "duplicate" },
+    ])).toThrow(/duplicate/);
+    expect(() => admitCommandCatalog([{ name: "", source: "prompt" }])).toThrow(/invalid/);
+    expect(() => admitCommandCatalog([{
+      name: "valid", source: "prompt", sourcePath: "x".repeat(COMMAND_CATALOG_STRING_BYTES + 1),
+    }])).toThrow(/invalid/);
+    expect(() => admitCommandCatalog(Array.from({ length: COMMAND_CATALOG_ITEMS + 1 }, (_, index) => ({
+      name: `command-${index}`, source: "extension" as const,
+    })))).toThrow(/item limit/);
+    expect(() => admitCommandCatalog(Array.from({ length: 100 }, (_, index) => ({
+      name: `command-${index}`, source: "prompt" as const,
+      description: "x".repeat(Math.ceil(COMMAND_CATALOG_BYTES / 100)),
+    })))).toThrow(/byte limit/);
+  });
+});
 
 describe("transcript projection", () => {
   it("preserves Pi entry IDs and branch order", () => {
@@ -156,11 +189,33 @@ describe("transcript projection", () => {
       manager.appendMessage({ role: "user", content: `message ${index}`, timestamp: index });
     }
     const tree = projectTree(manager, new BlobStore());
-    expect(tree.length).toBeGreaterThan(0);
-    expect(tree.length).toBeLessThanOrEqual(1_000);
+    expect(tree).toHaveLength(1_000);
+    expect(tree[0]).toMatchObject({ depth: 4_000, isCurrentPath: true });
     expect(tree.at(-1)).toMatchObject({ depth: 4_999, isCurrentPath: true });
     expect(Buffer.byteLength(JSON.stringify(tree))).toBeLessThanOrEqual(TREE_PROJECTION_BYTES);
     expect(JSON.stringify(tree)).not.toContain('"children"');
+  });
+
+  it("rejects duplicate canonical tree IDs and oversized retained strings", () => {
+    const duplicate = SessionManager.inMemory("/tmp/duplicate-tree-id");
+    duplicate.appendMessage({ role: "user", content: "one", timestamp: 1 });
+    const entry = duplicate.getEntries()[0]!;
+    const duplicateEntries = {
+      getTree: () => duplicate.getTree(),
+      getBranch: () => duplicate.getBranch(),
+      getEntries: () => [entry, entry],
+    } as unknown as SessionManager;
+    expect(() => projectTree(duplicateEntries, new BlobStore())).toThrow(/duplicate canonical entry ID/);
+
+    const oversized = SessionManager.inMemory("/tmp/oversized-tree-string");
+    oversized.appendCustomEntry("x".repeat(8_193), {});
+    expect(() => projectTree(oversized, new BlobStore())).toThrow(/oversized string/);
+
+    const malformedTimestamp = SessionManager.inMemory("/tmp/malformed-tree-timestamp");
+    malformedTimestamp.appendMessage({ role: "user", content: "message", timestamp: 1 });
+    const malformedEntry = malformedTimestamp.getEntries()[0]! as { timestamp: string };
+    malformedEntry.timestamp = "not-a-timestamp";
+    expect(() => projectTree(malformedTimestamp, new BlobStore())).toThrow(/invalid or oversized string/);
   });
 
   it("marks abandoned branches outside the current path", () => {

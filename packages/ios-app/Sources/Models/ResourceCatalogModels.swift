@@ -10,6 +10,42 @@ struct CommandInfo: Codable, Hashable, Identifiable, Sendable {
     var id: String { "\(source.rawValue):\(name)" }
 }
 
+enum CommandCatalogPolicy {
+    static let maximumCommands = 1_000
+    static let maximumStringBytes = 8_192
+    static let maximumEncodedBytes = 700_000
+
+    static func admit(_ commands: [CommandInfo]) throws -> [CommandInfo] {
+        guard commands.count <= maximumCommands else { throw invalidCatalog() }
+        var identities = Set<String>()
+        identities.reserveCapacity(commands.count)
+        for command in commands {
+            guard !command.name.isEmpty,
+                  command.name.utf8.count <= maximumStringBytes,
+                  command.description.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
+                  command.argumentHint.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
+                  command.sourcePath.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
+                  identities.insert(command.id).inserted else {
+                throw invalidCatalog()
+            }
+        }
+        guard let encoded = try? JSONEncoder.gateway.encode(commands),
+              encoded.count <= maximumEncodedBytes else {
+            throw invalidCatalog()
+        }
+        return commands
+    }
+
+    private static func invalidCatalog() -> GatewayFailure {
+        GatewayFailure(
+            code: "invalid_response",
+            message: "The command catalog from the Mac is invalid or too large.",
+            retryable: true,
+            details: nil
+        )
+    }
+}
+
 struct PackageSummary: Codable, Hashable, Identifiable, Sendable {
     enum Scope: String, Codable, Sendable { case user, project }
     let source: String

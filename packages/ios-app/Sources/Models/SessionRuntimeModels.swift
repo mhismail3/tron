@@ -218,3 +218,47 @@ struct SessionTreeNode: Codable, Hashable, Identifiable, Sendable {
     let childCount: Int
     let isCurrentPath: Bool
 }
+
+enum SessionTreePolicy {
+    static let maximumNodes = 1_000
+    static let maximumStringBytes = 8_192
+    static let maximumTimestampBytes = 64
+    static let maximumEncodedBytes = 700_000
+
+    static func admit(_ nodes: [SessionTreeNode]) throws -> [SessionTreeNode] {
+        guard nodes.count <= maximumNodes else { throw invalidTree() }
+        var identities = Set<String>()
+        identities.reserveCapacity(nodes.count)
+        for node in nodes {
+            guard !node.id.isEmpty,
+                  node.id.utf8.count <= maximumStringBytes,
+                  node.parentId.map({ !$0.isEmpty && $0.utf8.count <= maximumStringBytes }) ?? true,
+                  !node.timestamp.isEmpty,
+                  node.timestamp.utf8.count <= maximumTimestampBytes,
+                  GatewayTimestamp.parse(node.timestamp) != nil,
+                  !node.kind.isEmpty,
+                  node.kind.utf8.count <= maximumStringBytes,
+                  node.label.map({ !$0.isEmpty && $0.utf8.count <= maximumStringBytes }) ?? true,
+                  node.preview.utf8.count <= maximumStringBytes,
+                  node.depth >= 0,
+                  node.childCount >= 0,
+                  identities.insert(node.id).inserted else {
+                throw invalidTree()
+            }
+        }
+        guard let encoded = try? JSONEncoder.gateway.encode(nodes),
+              encoded.count <= maximumEncodedBytes else {
+            throw invalidTree()
+        }
+        return nodes
+    }
+
+    private static func invalidTree() -> GatewayFailure {
+        GatewayFailure(
+            code: "invalid_response",
+            message: "The session tree from the Mac is invalid or too large.",
+            retryable: true,
+            details: nil
+        )
+    }
+}

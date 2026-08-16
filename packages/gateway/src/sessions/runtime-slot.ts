@@ -32,6 +32,7 @@ import type { TrustService } from "../admin/trust-service.js";
 import { BLOB_MAX_ITEM_BYTES, type BlobStore } from "./blob-store.js";
 import { ExtensionUIBroker } from "./extension-ui.js";
 import {
+  admitCommandCatalog,
   fitSessionSnapshot,
   projectJson,
   projectMessage,
@@ -1203,7 +1204,9 @@ export class RuntimeSlot {
       source: "skill",
       sourcePath: skill.filePath,
     }));
-    return [...extension, ...prompts, ...skills].sort((a, b) => a.name.localeCompare(b.name));
+    return admitCommandCatalog(
+      [...extension, ...prompts, ...skills].sort((a, b) => a.name.localeCompare(b.name)),
+    );
   }
 
   context(): JsonValue {

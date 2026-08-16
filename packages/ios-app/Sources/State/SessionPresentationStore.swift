@@ -410,7 +410,8 @@ final class SessionPresentationStore {
         do {
             let loaded: [SessionTreeNode] = try await client.request("session.tree", Params(sessionId: sessionID))
             guard ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
-            sessionTree = loaded
+            let admitted = try SessionTreePolicy.admit(loaded)
+            sessionTree = admitted
         } catch { delegate?.sessionPresentationStoreSurface(error) }
     }
 
@@ -421,7 +422,8 @@ final class SessionPresentationStore {
         do {
             let response: Response = try await client.request("session.commands", Params(sessionId: sessionID))
             guard ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
-            commands = response.commands
+            let admitted = try CommandCatalogPolicy.admit(response.commands)
+            commands = admitted
         } catch { delegate?.sessionPresentationStoreSurface(error) }
     }
 
