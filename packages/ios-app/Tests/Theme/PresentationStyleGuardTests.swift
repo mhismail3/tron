@@ -333,6 +333,16 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
             encoding: .utf8
         )
+        let newSession = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/NewSessionSheet.swift"),
+            encoding: .utf8
+        )
+        #expect(shell.contains("NewSessionSheet(onCreated: present)"))
+        #expect(!shell.contains("struct NewSessionSheet: View"))
+        #expect(newSession.contains("@State private var configurationOwner = NewSessionConfigurationOwner()"))
+        #expect(newSession.contains("@State private var creationOwner = NewSessionCreationOwner()"))
+        #expect(newSession.contains(".task(id: NewSessionConfigurationLoadID("))
+        #expect(newSession.contains(".disabled(creating || !configurationReady)"))
         #expect(shell.contains("@State private var presentedSession: AppModel.SessionNavigationRoute?"))
         #expect(shell.contains(".navigationDestination(item: $presentedSession)"))
         #expect(shell.contains("initialEditorText: route.editorText"))

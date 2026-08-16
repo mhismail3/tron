@@ -608,7 +608,9 @@ immediate revocation; revoking this iPhone also removes its local profile.
 The gateway migration does not define a new visual language. The pre-migration
 client remains the interaction baseline. The session shell remains mounted under
 the adaptive first-run sheet, and session creation retains the floating action
-instead of adding a new toolbar destination. Tron preserves its bundled font
+instead of adding a new toolbar destination. Dashboard navigation/history and the
+new-session form have separate source owners without changing sheet identity,
+focus, detents, configuration readiness, or creation admission. Tron preserves its bundled font
 catalog, existing `fontFamily`/`monoFontFamily`/`fontAxisValues` preferences, and
 variable font axes. `TronFontLoader` builds `UIFontDescriptor` instances for
 custom weights, Recursive `MONO`/`CASL`, and Source Serif optical sizing; missing

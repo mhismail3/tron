@@ -129,7 +129,9 @@ reattachment; `AppModel` only routes admitted events/lifecycle work and preserve
 same lifecycle suite drives an injected monotonic clock to prove the 120 ms resize boundary, same-intent
 coalescing, established dimension clamps, independent presentation slots, and revocation with no late wire send.
 The onboarding flow retains step/state orchestration while navigation-title, pairing-field, page, card, and info-row
-chrome lives in a separate presentation component file with unchanged UIKit/SwiftUI behavior.
+chrome lives in a separate presentation component file with unchanged UIKit/SwiftUI behavior. The dashboard shell
+and new-session sheet are separate presentation owners; the sheet retains the same configuration/creation state
+owners, focus behavior, controls, detents, and mutation admission.
 `ChatView` retains route/composer/transcript composition while attachment controls and chips, entrance/render
 rows, and extension widgets live in separate presentation files with unchanged identities and transitions.
 Conversation-turn rendering and lifecycle-safe media chips remain in `TranscriptRow.swift`; transcript event
