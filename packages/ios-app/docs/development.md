@@ -129,7 +129,11 @@ reattachment; `AppModel` only routes admitted events/lifecycle work and preserve
 same lifecycle suite drives an injected monotonic clock to prove the 120 ms resize boundary, same-intent
 coalescing, established dimension clamps, independent presentation slots, and revocation with no late wire send.
 The onboarding flow retains step/state orchestration while navigation-title, pairing-field, page, card, and info-row
-chrome lives in a separate presentation component file with unchanged UIKit/SwiftUI behavior. The dashboard shell
+chrome lives in a separate presentation component file with unchanged UIKit/SwiftUI behavior. Workspace browsing
+uses one generation-owned cancellable load flight; only the newest path request may clear its exclusive busy
+phase, publish an error, or request transient reconnect recovery, and dismissal synchronously retires that
+presentation state. Possibly-sent folder creation may finish canonically, but navigation/dismissal generation-gates
+its completion UI and an intervening path request prevents its parent refresh from replacing newer navigation. The dashboard shell
 and new-session sheet are separate presentation owners; the sheet retains the same configuration/creation state
 owners, focus behavior, controls, detents, and mutation admission.
 `ChatView` retains route/composer/transcript composition while attachment controls and chips, entrance/render

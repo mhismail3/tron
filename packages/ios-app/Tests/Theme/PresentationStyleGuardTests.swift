@@ -171,6 +171,18 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Onboarding/WorkspaceBrowser.swift"),
             encoding: .utf8
         )
+        let owner = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Onboarding/WorkspaceBrowserOwner.swift"),
+            encoding: .utf8
+        )
+        #expect(browser.contains("@State private var loadOwner = WorkspaceBrowserOwner()"))
+        #expect(browser.contains(".onDisappear { loadOwner.cancel() }"))
+        #expect(!browser.contains("defer { navigating = false; loading = false }"))
+        #expect(owner.contains("guard self.generation == generation else { return }"))
+        #expect(owner.contains("flight?.cancel()"))
+        #expect(owner.contains("loading = !navigation"))
+        #expect(owner.contains("func createFolder("))
+        #expect(browser.contains("let parent = currentPath"))
         let folderRows = try #require(
             browser.components(separatedBy: "ForEach(directories)").dropFirst().first?
                 .components(separatedBy: "private func browserGroup").first

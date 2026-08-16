@@ -1402,12 +1402,15 @@ final class AppModel {
     func createFolder(parent: String, name: String) async throws {
         struct Params: Codable { let parent, name, commandId: String }
         struct Response: Codable { let path: String }
+        let workspaceGeneration = workspaceLoadGeneration
         let commandID = uuidSource.next().uuidString
         let params = Params(parent: parent, name: name, commandId: commandID)
         let response: Response = try await mutationExecutor.perform(method: "filesystem.mkdir", commandID: commandID) {
             try await client.request("filesystem.mkdir", params)
         }
-        try await loadWorkspace(path: parent)
+        if workspaceLoadGeneration == workspaceGeneration {
+            try await loadWorkspace(path: parent)
+        }
         defaultWorkspace = response.path
     }
 
