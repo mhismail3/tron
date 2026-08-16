@@ -43,6 +43,33 @@ struct PresentationStyleGuardTests {
         #expect(presentation.contains("blocks = ColdParser.parse(source)"))
     }
 
+    @Test("bounded text preparation stays off-main, exact-source keyed, and renderer supplied")
+    func boundedTextPreparationOwnership() throws {
+        let cache = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTextPreparation.swift"),
+            encoding: .utf8
+        )
+        let store = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptPresentationStore.swift"),
+            encoding: .utf8
+        )
+        let transcript = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
+            encoding: .utf8
+        )
+        #expect(cache.contains("actor ChatTextPreparationCache"))
+        #expect(cache.contains("maximumAccountedBytes = 4 * 1_024 * 1_024"))
+        #expect(cache.contains("maximumConcurrentPreparations = 2"))
+        #expect(cache.contains("maximumSourceBytes = 320_000"))
+        #expect(cache.contains("snapshot.transcript.suffix(ChatTranscriptPageRequest.maximumItemCount)"))
+        #expect(store.contains("preparedText: built.preparedText"))
+        #expect(store.contains("handleMemoryPressure()"))
+        #expect(transcript.contains("TronMarkdownView(document: document"))
+        #expect(transcript.contains("preparedText.thinkingInline("))
+        #expect(!cache.contains("Task.sleep"))
+        #expect(!cache.contains("Task.yield"))
+    }
+
     @Test("app-owned UI never falls back to system fonts or stock bordered controls")
     func noRetiredDefaults() {
         let forbidden: [(String, String)] = [

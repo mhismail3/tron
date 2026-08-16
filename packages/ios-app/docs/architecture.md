@@ -313,10 +313,17 @@ the exact immutable document to `TronMarkdownView`; tables intentionally remain 
 Block and list identities combine exact content with UTF-8 source ranges, so equal duplicates remain
 distinct. An unchanged exact block retains identity and its subtree-local interaction state; changed
 content or block type resets identity, intentionally clearing `CodeBlock` copy confirmation and any
-other stale subtree state rather than transferring it to different source. This checkpoint adds no
-cache or prefix parser. A future incremental path must prove exact cold equality and fall back to a
-full parse for open or closed fences, table promotion, lists, quotes, and incomplete inline syntax
-because appended text can reclassify prior source across each of those boundaries.
+other stale subtree state rather than transferring it to different source. The projection worker now
+prepares exact-source Markdown documents and attributed thinking segments off-MainActor under one
+shared disposable LRU: 4 MiB accounted source/presentation bytes, 512 Markdown revisions, 4,096
+thinking segments, and 320,000 bytes per source. Two preparations may run concurrently; one projection
+warms at most 32 new Markdown and 128 new thinking values from its bounded 512-entry render-critical
+tail. Installed rows receive only their tiny exact-source slice, while misses, oversized values, and
+older explicitly paged history retain the unchanged cold renderer. Scope/reset replacement and memory
+pressure clear both worker and installed prepared values, and generation admission prevents stale work
+from restoring them. This checkpoint adds no prefix parser. A future incremental path must prove exact
+cold equality and fall back to a full parse for open or closed fences, table promotion, lists, quotes,
+and incomplete inline syntax because appended text can reclassify prior source across each boundary.
 Any streaming fragment carrying a tool-call ID—including malformed text or extension content—is
 returned to global assembly so canonical result suppression and placement remain exact.
 Assembler-emitted unique tool sites retain canonical presentation bases, call classification, group

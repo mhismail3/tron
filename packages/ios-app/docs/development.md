@@ -287,22 +287,25 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/SessionScenarioBuilderTests \
   -only-testing:TronMobileTests/MarkdownPresentationTests \
+  -only-testing:TronMobileTests/ChatTextPreparationTests \
+  -only-testing:TronMobileTests/ChatTranscriptPresentationStoreTests \
   -only-testing:TronMobileTests/PresentationStyleGuardTests
 ```
 
-Phase 6.0 source characterization and the provisional budget decision are
-complete, as is the Phase 6.1 source implementation. Physical pixel, text
-selection, VoiceOver, Dynamic Type, frame, and memory acceptance remains pending;
-the Phase 6 exit gate is not met. Phase 6.1 keeps exactly one cold Markdown parser
-in `MarkdownPresentation.swift`. The renderer consumes its immutable document,
-including preconstructed inline attribution and source-based accessibility text;
-it does not parse again. Exact unchanged block content and UTF-8 range preserve
-subtree identity, while changed content or type resets it so copy confirmation and
-other local interaction state cannot transfer to a different block. Do not add
-prefix reuse until differential tests prove cold equivalence. Fence closure,
-table promotion, list/quote continuation, and incomplete inline syntax can
-reclassify an earlier prefix, so every uncertain state must retain a full-parse
-fallback. The Phase 6.2 cache and Phase 6.3 media loader remain pending.
+Phase 6.0 source characterization and provisional budgets, Phase 6.1 pure Markdown
+presentation, and the bounded Phase 6.2 Markdown/thinking preparation cache are complete.
+Physical pixel, text selection, VoiceOver, Dynamic Type, frame, and memory acceptance
+remains pending; the Phase 6 exit gate is not met. `MarkdownPresentation.swift` remains
+the sole cold parser. The renderer consumes an exact immutable document with preconstructed
+inline attribution and source-based accessibility text. The projection worker warms only the
+bounded render-critical tail, prepares at most two values concurrently, admits newest source
+per identity, and installs only exact row-local slices. The shared 4 MiB LRU, 512 Markdown,
+4,096 thinking, and 320,000-byte source ceilings are conjunctive; memory pressure and scope
+replacement clear prepared values. Misses and older explicitly paged rows retain the exact
+cold fallback, so no placeholder or visual behavior was added. Do not add prefix reuse until
+differential tests prove cold equivalence. Fence closure, table promotion, list/quote
+continuation, and incomplete inline syntax can reclassify an earlier prefix, so every uncertain
+state must retain a full-parse fallback. The Phase 6.3 media loader remains pending.
 
 `ChatViewScrollHarnessTests` mount the actual `ChatView`, `LazyVStack`, composer
 inset, and native `UIScrollView` in a fixed hosted window. Test-only authority

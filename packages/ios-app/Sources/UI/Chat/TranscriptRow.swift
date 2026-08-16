@@ -6,6 +6,7 @@ struct TranscriptRow: View, Equatable {
     var toolResults: [String: TranscriptItem] = [:]
     var rendersToolCalls = true
     var projectedMessageParts: [ChatMessagePart]? = nil
+    var preparedText: ChatTextPreparationSnapshot = .empty
     var showsMessageFooter = true
     var hiddenThinkingLabel: String? = nil
 
@@ -67,6 +68,7 @@ struct TranscriptRow: View, Equatable {
                     case .thinking(let run):
                         ThinkingBlock(
                             segments: run.segments,
+                            preparedText: preparedText,
                             label: hiddenThinkingLabel,
                             animatesInsertion: streaming
                         )
@@ -79,7 +81,14 @@ struct TranscriptRow: View, Equatable {
                                 UserPromptText(text: part.text ?? "")
                                     .padding(.leading, UserPromptTextLayoutPolicy.leadingInset)
                             } else {
-                                MarkdownText(text: part.text ?? "", streaming: streaming)
+                                MarkdownText(
+                                    text: part.text ?? "",
+                                    document: preparedText.markdownDocument(
+                                        identity: part.id,
+                                        source: part.text ?? ""
+                                    ),
+                                    streaming: streaming
+                                )
                             }
                         case .thinking:
                             EmptyView() // Adjacent thinking is projected as one run above.
@@ -350,13 +359,20 @@ struct TranscriptNotice: View {
 
 private struct ThinkingBlock: View {
     let segments: [ChatThinkingSegment]
+    let preparedText: ChatTextPreparationSnapshot
     let label: String?
     let animatesInsertion: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var visibleSegmentIDs: Set<String>
 
-    init(segments: [ChatThinkingSegment], label: String?, animatesInsertion: Bool) {
+    init(
+        segments: [ChatThinkingSegment],
+        preparedText: ChatTextPreparationSnapshot,
+        label: String?,
+        animatesInsertion: Bool
+    ) {
         self.segments = segments
+        self.preparedText = preparedText
         self.label = label
         self.animatesInsertion = animatesInsertion
         _visibleSegmentIDs = State(initialValue: animatesInsertion ? [] : Set(segments.map(\.id)))
@@ -385,16 +401,23 @@ private struct ThinkingBlock: View {
         segments.enumerated().reduce(Text("")) { paragraph, element in
             let (index, segment) = element
             let separator = index == 0 ? Text("") : Text(" ")
-            return paragraph + separator + rendered(segment.text)
+            return paragraph + separator + rendered(segment)
                 .foregroundColor(Color.tronTextSecondary.opacity(segmentOpacity(segment.id)))
         }
     }
 
-    private func rendered(_ value: String) -> Text {
+    private func rendered(_ segment: ChatThinkingSegment) -> Text {
+        if let prepared = preparedText.thinkingInline(
+            identity: segment.id,
+            source: segment.text
+        ) {
+            if let attributed = prepared.attributedString { return Text(attributed) }
+            return Text(prepared.source)
+        }
         guard let attributed = try? AttributedString(
-            markdown: value,
+            markdown: segment.text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) else { return Text(value) }
+        ) else { return Text(segment.text) }
         return Text(attributed)
     }
 
@@ -430,8 +453,13 @@ private struct ThinkingBlock: View {
 
 private struct MarkdownText: View {
     let text: String
+    let document: MarkdownPresentation.Document?
     let streaming: Bool
-    var body: some View { TronMarkdownView(text: text, streaming: streaming) }
+
+    @ViewBuilder var body: some View {
+        if let document { TronMarkdownView(document: document, streaming: streaming) }
+        else { TronMarkdownView(text: text, streaming: streaming) }
+    }
 }
 
 struct ToolCard: View {

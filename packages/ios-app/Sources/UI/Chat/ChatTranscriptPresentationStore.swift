@@ -98,6 +98,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
     let tag: ChatTranscriptProjectionTag
     let timeline: ChatTranscriptTimeline
     let runtimeItems: [ChatTranscriptRenderItem]
+    let preparedText: ChatTextPreparationSnapshot
     let queuedMessages: [SessionSnapshot.QueuedMessage]
     let queueRevision: Int?
     let supportsQueueManagement: Bool
@@ -108,6 +109,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
         tag: ChatTranscriptProjectionTag,
         timeline: ChatTranscriptTimeline,
         runtimeItems: [ChatTranscriptRenderItem],
+        preparedText: ChatTextPreparationSnapshot = .empty,
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
         queueRevision: Int? = nil,
         supportsQueueManagement: Bool = false,
@@ -116,6 +118,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
         self.tag = tag
         self.timeline = timeline
         self.runtimeItems = runtimeItems
+        self.preparedText = preparedText
         self.queuedMessages = queuedMessages
         self.queueRevision = queueRevision
         self.supportsQueueManagement = supportsQueueManagement
@@ -133,6 +136,21 @@ struct InstalledChatTranscript: Hashable, Sendable {
     }
     func containsDisplayedID(_ id: String) -> Bool {
         timeline.containsID(id) || runtimeIDSet.contains(id)
+    }
+
+    func replacingPreparedText(
+        _ preparedText: ChatTextPreparationSnapshot
+    ) -> InstalledChatTranscript {
+        InstalledChatTranscript(
+            tag: tag,
+            timeline: timeline,
+            runtimeItems: runtimeItems,
+            preparedText: preparedText,
+            queuedMessages: queuedMessages,
+            queueRevision: queueRevision,
+            supportsQueueManagement: supportsQueueManagement,
+            sourceWindow: sourceWindow
+        )
     }
 }
 
@@ -235,6 +253,7 @@ typealias ChatTranscriptProjectionWorkGate = @Sendable (ChatTranscriptProjection
 
 private struct BuiltChatTranscript: Sendable {
     let timeline: ChatTranscriptTimeline
+    let preparedText: ChatTextPreparationSnapshot
     let isInternallyConsistent: Bool
 }
 
@@ -290,14 +309,18 @@ private actor ChatTranscriptProjectionWorker {
         let projectionKey: ProjectionKey
         let canonicalKey: CanonicalKey
         let candidate: ChatTranscriptProjectionCandidate
+        let preparedText: ChatTextPreparationSnapshot
     }
 
     private let performanceSignposts: any PerformanceSignposting
     private let workRecorder: ChatTranscriptProjectionWorkRecorder?
+    private let textPreparationCache = ChatTextPreparationCache()
     #if HOSTED_TEST
     private let workGate: ChatTranscriptProjectionWorkGate?
     #endif
     private var basis: Basis?
+    private var textPreparationScope: Scope?
+    private var textPreparationGeneration = 0
     private var retiredBeforeEpoch = 0
     private var newestCacheEpoch = 0
 
@@ -323,11 +346,31 @@ private actor ChatTranscriptProjectionWorker {
 
     /// Monotonic retirement cannot erase a basis installed for a newer reset
     /// epoch, even when an older retirement message was delayed behind work.
-    func retire(before cacheEpoch: Int) {
+    func retire(before cacheEpoch: Int) async {
         retiredBeforeEpoch = max(retiredBeforeEpoch, cacheEpoch)
         newestCacheEpoch = max(newestCacheEpoch, cacheEpoch)
         if let basis, basis.scope.cacheEpoch < retiredBeforeEpoch {
             self.basis = nil
+        }
+        if let textPreparationScope,
+           textPreparationScope.cacheEpoch < retiredBeforeEpoch {
+            self.textPreparationScope = nil
+            await textPreparationCache.removeAll()
+        }
+    }
+
+    func removePreparedText() async {
+        textPreparationGeneration &+= 1
+        textPreparationScope = nil
+        await textPreparationCache.removeAll()
+        if let basis {
+            self.basis = Basis(
+                scope: basis.scope,
+                projectionKey: basis.projectionKey,
+                canonicalKey: basis.canonicalKey,
+                candidate: basis.candidate,
+                preparedText: .empty
+            )
         }
     }
 
@@ -335,7 +378,7 @@ private actor ChatTranscriptProjectionWorker {
         snapshot: SessionSnapshot,
         tag: ChatTranscriptProjectionTag,
         cacheEpoch: Int
-    ) -> BuiltChatTranscript {
+    ) async -> BuiltChatTranscript {
         newestCacheEpoch = max(newestCacheEpoch, cacheEpoch)
         let scope = Scope(tag: tag, cacheEpoch: cacheEpoch)
         if let basis, basis.scope.cacheEpoch < cacheEpoch {
@@ -344,11 +387,17 @@ private actor ChatTranscriptProjectionWorker {
             self.basis = nil
         }
 
+        if textPreparationScope != scope {
+            textPreparationScope = scope
+            await textPreparationCache.removeAll()
+        }
+
         let projectionKey = ProjectionKey(tag: tag, snapshot: snapshot)
         let canonicalKey = CanonicalKey(tag: tag)
         if let basis, basis.scope == scope, basis.projectionKey == projectionKey {
             return BuiltChatTranscript(
                 timeline: basis.candidate.timeline,
+                preparedText: basis.preparedText,
                 isInternallyConsistent: basis.candidate.isValid
             )
         }
@@ -373,16 +422,29 @@ private actor ChatTranscriptProjectionWorker {
             )
         }
 
+        let admittedTextPreparationGeneration = textPreparationGeneration
+        let prepared = await textPreparationCache.prepare(
+            ChatTextPreparationPolicy.sources(in: snapshot)
+        )
+        let preparedText: ChatTextPreparationSnapshot
+        if admittedTextPreparationGeneration == textPreparationGeneration {
+            preparedText = prepared
+        } else {
+            preparedText = .empty
+            await textPreparationCache.removeAll()
+        }
         if cacheEpoch >= retiredBeforeEpoch, cacheEpoch == newestCacheEpoch {
             basis = Basis(
                 scope: scope,
                 projectionKey: projectionKey,
                 canonicalKey: canonicalKey,
-                candidate: candidate
+                candidate: candidate,
+                preparedText: preparedText
             )
         }
         return BuiltChatTranscript(
             timeline: candidate.timeline,
+            preparedText: preparedText,
             isInternallyConsistent: candidate.isValid
         )
     }
@@ -617,6 +679,14 @@ final class ChatTranscriptPresentationStore {
         pendingEntranceOrder.removeAll(keepingCapacity: true)
     }
 
+    func handleMemoryPressure() {
+        if let installed { self.installed = installed.replacingPreparedText(.empty) }
+        if let readyToInstall {
+            self.readyToInstall = readyToInstall.replacingPreparedText(.empty)
+        }
+        Task { await projectionWorker.removePreparedText() }
+    }
+
     func reset() {
         generation &+= 1
         let retiredEpoch = generation
@@ -656,6 +726,7 @@ final class ChatTranscriptPresentationStore {
                     tag: next.tag,
                     timeline: built.timeline,
                     runtimeItems: runtimeItems,
+                    preparedText: built.preparedText,
                     queuedMessages: next.snapshot.displayedQueuedMessages,
                     queueRevision: next.snapshot.queueRevision,
                     supportsQueueManagement: next.snapshot.queuedItems != nil,

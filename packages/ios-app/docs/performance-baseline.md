@@ -60,12 +60,12 @@ calibrate a real scrolling cadence threshold on the pinned device.
 ## Phase 6 provisional ratchets
 
 These later decisions do not rewrite or reinterpret the historical measurements
-above. Checkpoints 6.0/6.1 only characterize cumulative Markdown/media fixtures
-and extract the existing cold Markdown presentation; they add no cache, media
-loader, truncation, placeholder, parser dialect, or incremental-prefix production
-path.
+above. Checkpoints 6.0/6.1 characterize cumulative Markdown/media fixtures and
+extract the existing cold Markdown presentation. Phase 6.2 now adds the bounded
+text-preparation cache described below without adding truncation, placeholders, a
+parser dialect, or an incremental-prefix production path. The media loader remains pending.
 
-The Phase 6.0 provisional decision for the future Phase 6.2 text cache is 4 MiB
+The implemented Phase 6.2 text cache retains the Phase 6.0 provisional 4 MiB
 (4,194,304 bytes) shared across accounted source and presentation storage, 512
 Markdown revisions, and 4,096 thinking
 segments. The 512 count aligns with the Gateway page item ceiling and bounds a
@@ -79,7 +79,10 @@ projected-content wire ceiling. Consequently the byte ratchet can hold at most 1
 maximum-size sources (13 × 320,000 = 4,160,000 bytes; 14 × 320,000 = 4,480,000
 bytes, over budget), regardless of the 512 count. Preparation concurrency two
 limits simultaneous maximum source inputs to 640,000 bytes; newest-only admission
-per identity prevents both completed revisions from becoming retained state. The
+per identity prevents both completed revisions from becoming retained state. One
+projection eagerly prepares at most 32 new Markdown and 128 new thinking values
+from its newest bounded 512-entry tail; exact older cache hits remain usable while
+uncached explicitly paged history uses the cold fallback. The
 4 MiB admitted cache plus up to 640,000 bytes of source work is only a provisional
 working-set floor: attributed-string construction and framework allocations still
 require peak-memory calibration.
@@ -106,8 +109,8 @@ These values are provisional safety ratchets rather than measured release target
 Pinned-device cold/warm 30/60 Hz Markdown, maximum-source, thinking-segment, image
 page, memory-pressure, preview, pixel/accessibility equivalence, displayed frames,
 and peak-memory evidence is still required. Phase 6.0 source characterization and
-budget decisions and the Phase 6.1 source implementation are complete; physical
-acceptance and the Phase 6 exit gate remain pending.
+budgets, Phase 6.1 pure presentation, and Phase 6.2 bounded text preparation are
+complete; physical acceptance and the Phase 6 exit gate remain pending.
 
 ## Reproduction
 

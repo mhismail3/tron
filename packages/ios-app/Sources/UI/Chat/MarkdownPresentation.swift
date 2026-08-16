@@ -11,6 +11,10 @@ enum MarkdownPresentation: Sendable {
             self.source = source
             blocks = ColdParser.parse(source)
         }
+
+        var accountedByteCount: Int {
+            source.utf8.count + blocks.reduce(0) { $0 + $1.accountedByteCount }
+        }
     }
 
     struct SourceRange: Hashable, Sendable {
@@ -40,6 +44,12 @@ enum MarkdownPresentation: Sendable {
                 options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
             )
         }
+
+        var accountedByteCount: Int {
+            // Source storage plus a conservative source-sized presentation charge
+            // for the attributed value's characters and runs.
+            source.utf8.count * 2
+        }
     }
 
     struct Block: Identifiable, Hashable, Sendable {
@@ -51,11 +61,34 @@ enum MarkdownPresentation: Sendable {
             case list([ListItem])
             case table([[String]])
             case rule
+
+            var accountedByteCount: Int {
+                switch self {
+                case .paragraph(let inline), .quote(let inline):
+                    inline.accountedByteCount
+                case .heading(_, let inline):
+                    inline.accountedByteCount
+                case .code(let language, let code):
+                    (language?.utf8.count ?? 0) + code.utf8.count
+                case .list(let items):
+                    items.reduce(0) { $0 + $1.accountedByteCount }
+                case .table(let rows):
+                    rows.reduce(0) { total, row in
+                        total + row.reduce(0) { $0 + $1.utf8.count }
+                    }
+                case .rule:
+                    0
+                }
+            }
         }
 
         let id: SourceIdentity
         let sourceRange: SourceRange
         let kind: Kind
+
+        var accountedByteCount: Int {
+            id.content.utf8.count + kind.accountedByteCount
+        }
     }
 
     struct ListItem: Identifiable, Hashable, Sendable {
@@ -64,6 +97,10 @@ enum MarkdownPresentation: Sendable {
         let depth: Int
         let marker: String
         let inline: Inline
+
+        var accountedByteCount: Int {
+            id.content.utf8.count + marker.utf8.count + inline.accountedByteCount
+        }
     }
 
     private struct SourceLine {

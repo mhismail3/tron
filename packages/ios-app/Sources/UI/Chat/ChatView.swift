@@ -274,6 +274,11 @@ struct ChatView: View {
             }
             #endif
         }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didReceiveMemoryWarningNotification
+        )) { _ in
+            transcriptPresentation.handleMemoryPressure()
+        }
         .onDisappear {
             if let target = presentationTarget { model.revokePresentationIntake(target) }
             openingTask?.cancel()
@@ -320,6 +325,7 @@ struct ChatView: View {
                                 ) {
                                     ChatTranscriptRenderRow(
                                         item: item,
+                                        preparedText: installed.preparedText.slice(for: item),
                                         hiddenThinkingLabel: snapshot.extensionUI.hiddenThinkingLabel
                                     )
                                     .equatable()
@@ -1730,6 +1736,7 @@ private struct ChatQueuedMessageEntranceRow<Content: View>: View {
 
 private struct ChatTranscriptRenderRow: View, Equatable {
     let item: ChatTranscriptRenderItem
+    let preparedText: ChatTextPreparationSnapshot
     let hiddenThinkingLabel: String?
 
     @ViewBuilder var body: some View {
@@ -1738,6 +1745,7 @@ private struct ChatTranscriptRenderRow: View, Equatable {
             TranscriptRow(
                 item: transcript,
                 rendersToolCalls: false,
+                preparedText: preparedText,
                 hiddenThinkingLabel: hiddenThinkingLabel
             )
         case .message(let message):
@@ -1746,6 +1754,7 @@ private struct ChatTranscriptRenderRow: View, Equatable {
                 streaming: message.streaming,
                 rendersToolCalls: false,
                 projectedMessageParts: message.parts,
+                preparedText: preparedText,
                 showsMessageFooter: message.showsFooter,
                 hiddenThinkingLabel: hiddenThinkingLabel
             )

@@ -68,6 +68,26 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("installed text preparation is bounded to its exact source and drops on memory pressure")
+    func preparedTextMemoryPressure() async throws {
+        try await withTestWatchdog { @MainActor in
+            let snapshot = try SessionScenarioBuilder(seed: 1_213)
+                .openingTail(targetEncodedBytes: 16_000)
+            #expect(!ChatTextPreparationPolicy.sources(in: snapshot).isEmpty)
+            let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 7)
+            let store = ChatTranscriptPresentationStore()
+
+            store.submit(snapshot: snapshot, tag: tag)
+            let installed = try await store.waitForInstall(of: tag)
+            #expect(installed.preparedText != .empty)
+
+            store.handleMemoryPressure()
+            #expect(store.installed?.tag == tag)
+            #expect(store.installed?.timeline == installed.timeline)
+            #expect(store.installed?.preparedText == .empty)
+        }
+    }
+
     @Test("newest exact source wins while detached work stays serial")
     func newestWinsSerially() async throws {
         try await withTestWatchdog { @MainActor in
