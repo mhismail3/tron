@@ -61,8 +61,10 @@ ambiguous command receipt; failed session-folder cleanup remains pending in the 
 on later inventory work. Transient image/export blobs reject individual values above 25 MiB or MIME metadata above 1 KiB
 and retain at most 128 items/200 MiB; exact content deduplicates and access refreshes 30-minute idle
 expiry. Generated exports move into protected transient storage and stream to authenticated readers with backpressure,
-without retained export `Buffer` values. Active downloads survive pruning; expired IDs admit no new readers, and physical
-capacity releases after the final reader. Startup scavenges transient files only after the Gateway binds successfully.
+without retained export `Buffer` values. Default admission allows at most 32 concurrent blob readers and four simultaneous
+export generations, derived from the existing item/aggregate limits; canonical session files above the item ceiling fail
+before SDK export work begins. Active downloads survive pruning; expired IDs admit no new readers, and physical capacity
+releases after the final reader. Startup scavenges transient files only after the Gateway binds successfully.
 Capacity admission never evicts an ID already published to a client: excess projected images become bounded omission
 text, while later requests can retry after expiry. Blob storage rejects control-bearing MIME metadata. Downloads remain
 full-body responses without Range support.

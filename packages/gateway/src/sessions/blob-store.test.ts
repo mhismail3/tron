@@ -231,6 +231,49 @@ describe("bounded blob store", () => {
     await expect(readFile(directory)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("bounds concurrent readers and releases admission exactly once", async () => {
+    const store = new BlobStore({
+      maximumItemBytes: 4,
+      maximumItems: 4,
+      maximumTotalBytes: 16,
+      maximumReaders: 1,
+    });
+    const id = store.registerData(Buffer.from("data"), "text/plain");
+    const first = await store.acquire(id);
+    await expect(store.acquire(id)).rejects.toMatchObject({ code: "busy", retryable: true });
+    await first.release();
+    await first.release();
+    const replacement = await store.acquire(id);
+    await replacement.release();
+  });
+
+  it("bounds simultaneous file production without polling", async () => {
+    const store = new BlobStore({
+      maximumItemBytes: 4,
+      maximumItems: 4,
+      maximumTotalBytes: 16,
+      maximumFileProductions: 1,
+    });
+    let release!: () => void;
+    let started!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const didStart = new Promise<void>((resolve) => { started = resolve; });
+    const first = store.withFileProductionAdmission(async () => {
+      started();
+      await held;
+      return "done";
+    });
+    await didStart;
+    await expect(store.withFileProductionAdmission(async () => "second"))
+      .rejects.toMatchObject({ code: "busy", retryable: true });
+    release();
+    await expect(first).resolves.toBe("done");
+    await expect(store.withFileProductionAdmission(() => { throw new Error("sync failure"); }))
+      .rejects.toThrow("sync failure");
+    await expect(store.withFileProductionAdmission(async () => "replacement"))
+      .resolves.toBe("replacement");
+  });
+
   it("prunes expired values while retaining the exact age boundary", () => {
     let now = 10;
     const store = new BlobStore(

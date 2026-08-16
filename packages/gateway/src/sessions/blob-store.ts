@@ -43,6 +43,8 @@ interface BlobStoreLimits {
   maximumItemBytes: number;
   maximumItems: number;
   maximumTotalBytes: number;
+  maximumReaders?: number;
+  maximumFileProductions?: number;
 }
 
 function isConfirmedMissingBlob(error: unknown): boolean {
@@ -62,7 +64,12 @@ export class BlobStore {
   private totalBytes = 0;
   private pendingFileItems = 0;
   private pendingFileBytes = 0;
+  private activeReaders = 0;
+  private activeFileProductions = 0;
+  private readonly maximumReaders: number;
+  private readonly maximumFileProductions: number;
   private readonly fileRegistrations = new Set<Promise<string>>();
+  private readonly fileProductions = new Set<Promise<unknown>>();
   private mutationTail = Promise.resolve();
   private initialization?: Promise<void>;
   private initialized = false;
@@ -74,8 +81,13 @@ export class BlobStore {
     private readonly now: () => number = Date.now,
     private readonly directory?: string,
   ) {
+    const ratio = Math.max(1, Math.floor(limits.maximumTotalBytes / Math.max(1, limits.maximumItemBytes)));
+    this.maximumReaders = limits.maximumReaders ?? Math.max(4, Math.floor(limits.maximumItems / 4));
+    this.maximumFileProductions = limits.maximumFileProductions ?? Math.max(1, Math.floor(ratio / 2));
     if (limits.maximumItemBytes < 0 || limits.maximumItems < 1
-      || limits.maximumTotalBytes < limits.maximumItemBytes) {
+      || limits.maximumTotalBytes < limits.maximumItemBytes
+      || !Number.isSafeInteger(this.maximumReaders) || this.maximumReaders < 1
+      || !Number.isSafeInteger(this.maximumFileProductions) || this.maximumFileProductions < 1) {
       throw new Error("Invalid blob store limits");
     }
   }
@@ -133,6 +145,28 @@ export class BlobStore {
     });
     this.totalBytes += data.length;
     return id;
+  }
+
+  async withFileProductionAdmission<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.disposed) throw new GatewayError("internal", "Blob storage is not available");
+    if (this.activeFileProductions >= this.maximumFileProductions) {
+      throw new GatewayError("busy", "Concurrent export generation reached its bounded capacity", true);
+    }
+    this.activeFileProductions += 1;
+    let production: Promise<T>;
+    try {
+      production = operation();
+    } catch (error) {
+      this.activeFileProductions = Math.max(0, this.activeFileProductions - 1);
+      throw error;
+    }
+    this.fileProductions.add(production);
+    try {
+      return await production;
+    } finally {
+      this.fileProductions.delete(production);
+      this.activeFileProductions = Math.max(0, this.activeFileProductions - 1);
+    }
   }
 
   registerFile(source: string, mimeType: string): Promise<string> {
@@ -253,9 +287,14 @@ export class BlobStore {
   }
 
   async acquire(id: string): Promise<BlobLease> {
+    if (this.disposed) throw new GatewayError("not_found", "Blob is not available; refresh the session snapshot");
     const value = this.available(id);
+    if (this.activeReaders >= this.maximumReaders) {
+      throw new GatewayError("busy", "Concurrent blob downloads reached their bounded capacity", true);
+    }
     this.touch(value);
     value.activeReaders += 1;
+    this.activeReaders += 1;
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     let stream: Readable;
     try {
@@ -270,6 +309,7 @@ export class BlobStore {
       }
     } catch (error) {
       value.activeReaders -= 1;
+      this.activeReaders = Math.max(0, this.activeReaders - 1);
       await handle?.close().catch(() => {});
       if (isConfirmedMissingBlob(error)) {
         this.retire(id, value);
@@ -289,6 +329,7 @@ export class BlobStore {
         stream.destroy();
         await handle?.close().catch(() => {});
         value.activeReaders = Math.max(0, value.activeReaders - 1);
+        this.activeReaders = Math.max(0, this.activeReaders - 1);
         if (value.retired && value.activeReaders === 0) await this.cleanup(id, value);
         else if (!value.retired) this.touch(value);
       },
@@ -312,6 +353,7 @@ export class BlobStore {
 
   private async finishDispose(): Promise<void> {
     if (this.initialization) await this.initialization.catch(() => {});
+    await Promise.allSettled([...this.fileProductions]);
     await Promise.allSettled([...this.fileRegistrations]);
     await this.serialize(async () => {});
     await Promise.all([...this.blobs].map(async ([id, value]) => {

@@ -106,6 +106,7 @@ export class RuntimeSlot {
   private readonly toolProgressTimers = new Map<string, NodeJS.Timeout>();
   private readonly toolProgressPublishedAt = new Map<string, number>();
   private activeOperationId: string | undefined;
+  private activeExports = 0;
   private operation: SessionOperationState | undefined;
   private retry: RetryState | undefined;
   private resourceReloadOptions: { resolveProjectTrust: () => Promise<boolean> } | undefined;
@@ -169,7 +170,8 @@ export class RuntimeSlot {
   }
 
   get isBusy(): boolean {
-    return this.effectivePhase === "running"
+    return this.activeExports > 0
+      || this.effectivePhase === "running"
       || this.effectivePhase === "compacting"
       || this.effectivePhase === "retrying"
       || this.runtime?.session.isBashRunning === true;
@@ -1321,21 +1323,42 @@ export class RuntimeSlot {
 
   async export(format: "html" | "jsonl"): Promise<{ blobId: string; name: string; mimeType: string }> {
     this.assertUsable();
-    const directory = await mkdtemp(join(tmpdir(), "tron-session-export-"));
+    this.activeExports += 1;
     try {
-      const output = join(directory, `session.${format}`);
-      const path = format === "html"
-        ? await this.runtime.session.exportToHtml(output)
-        : this.runtime.session.exportToJsonl(output);
-      const mimeType = format === "html" ? "text/html; charset=utf-8" : "application/x-ndjson";
-      const name = `${basename(this.runtime.session.sessionName ?? this.id).replace(/[^A-Za-z0-9._-]+/g, "-")}.${format}`;
-      const metadata = await stat(path);
-      if (!metadata.isFile() || metadata.size > BLOB_MAX_ITEM_BYTES) {
-        throw new GatewayError("conflict", "Session export exceeds the 25 MiB limit");
-      }
-      return { blobId: await this.dependencies.blobs.registerFile(path, mimeType), name, mimeType };
+      return await this.lane.run(() => this.dependencies.blobs.withFileProductionAdmission(async () => {
+        this.assertUsable();
+        if (this.runtime.session.isStreaming
+          || this.effectivePhase === "running"
+          || this.effectivePhase === "compacting"
+          || this.effectivePhase === "retrying"
+          || this.runtime.session.isBashRunning) {
+          throw new GatewayError("busy", "Session must be idle for this operation");
+        }
+        const source = this.runtime.session.sessionFile;
+        if (!source) throw new GatewayError("conflict", "Session has no file to export");
+        const sourceMetadata = await stat(source);
+        if (!sourceMetadata.isFile() || sourceMetadata.size > BLOB_MAX_ITEM_BYTES) {
+          throw new GatewayError("conflict", "Session export exceeds the 25 MiB limit");
+        }
+        const directory = await mkdtemp(join(tmpdir(), "tron-session-export-"));
+        try {
+          const output = join(directory, `session.${format}`);
+          const path = format === "html"
+            ? await this.runtime.session.exportToHtml(output)
+            : this.runtime.session.exportToJsonl(output);
+          const mimeType = format === "html" ? "text/html; charset=utf-8" : "application/x-ndjson";
+          const name = `${basename(this.runtime.session.sessionName ?? this.id).replace(/[^A-Za-z0-9._-]+/g, "-")}.${format}`;
+          const metadata = await stat(path);
+          if (!metadata.isFile() || metadata.size > BLOB_MAX_ITEM_BYTES) {
+            throw new GatewayError("conflict", "Session export exceeds the 25 MiB limit");
+          }
+          return { blobId: await this.dependencies.blobs.registerFile(path, mimeType), name, mimeType };
+        } finally {
+          await rm(directory, { recursive: true, force: true });
+        }
+      }));
     } finally {
-      await rm(directory, { recursive: true, force: true });
+      this.activeExports = Math.max(0, this.activeExports - 1);
     }
   }
 
