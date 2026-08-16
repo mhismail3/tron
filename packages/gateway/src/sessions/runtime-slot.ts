@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
@@ -29,7 +29,7 @@ import type {
 } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { TrustService } from "../admin/trust-service.js";
-import type { BlobStore } from "./blob-store.js";
+import { BLOB_MAX_ITEM_BYTES, type BlobStore } from "./blob-store.js";
 import { ExtensionUIBroker } from "./extension-ui.js";
 import {
   fitSessionSnapshot,
@@ -1296,6 +1296,10 @@ export class RuntimeSlot {
         : this.runtime.session.exportToJsonl(output);
       const mimeType = format === "html" ? "text/html; charset=utf-8" : "application/x-ndjson";
       const name = `${basename(this.runtime.session.sessionName ?? this.id).replace(/[^A-Za-z0-9._-]+/g, "-")}.${format}`;
+      const metadata = await stat(path);
+      if (!metadata.isFile() || metadata.size > BLOB_MAX_ITEM_BYTES) {
+        throw new GatewayError("conflict", "Session export exceeds the 25 MiB limit");
+      }
       return { blobId: this.dependencies.blobs.registerData(await readFile(path), mimeType), name, mimeType };
     } finally {
       await rm(directory, { recursive: true, force: true });

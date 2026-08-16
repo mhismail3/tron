@@ -45,6 +45,41 @@ describe("transcript projection", () => {
     expect(transcript[4]).toMatchObject({ kind: "label", targetId: assistant, label: "checkpoint" });
   });
 
+  it("omits oversized or capacity-excess images without failing the snapshot", () => {
+    const manager = SessionManager.inMemory("/tmp/project");
+    const entry = manager.appendMessage({
+      role: "user",
+      content: [
+        { type: "image", data: Buffer.from("one").toString("base64"), mimeType: "image/png" },
+        { type: "image", data: Buffer.from("two").toString("base64"), mimeType: "image/png" },
+      ],
+      timestamp: 1,
+    });
+    const blobs = new BlobStore({ maximumItemBytes: 3, maximumItems: 1, maximumTotalBytes: 3 });
+    const projected = projectTranscript(manager, blobs)[0];
+    expect(projected).toMatchObject({
+      id: entry,
+      content: [
+        { id: `${entry}:0`, type: "image" },
+        { id: `${entry}:1`, type: "text", text: "Image omitted from this bounded mobile projection" },
+      ],
+    });
+    const firstBlob = projected?.kind === "message" && projected.content[0]?.type === "image"
+      ? projected.content[0].blobId
+      : "";
+    expect(blobs.get(firstBlob).data.toString()).toBe("one");
+
+    const oversized = SessionManager.inMemory("/tmp/project");
+    oversized.appendMessage({
+      role: "user",
+      content: [{ type: "image", data: Buffer.from("four").toString("base64"), mimeType: "image/png" }],
+      timestamp: 2,
+    });
+    expect(projectTranscript(oversized, blobs)[0]).toMatchObject({
+      content: [{ type: "text", text: "Image omitted from this bounded mobile projection" }],
+    });
+  });
+
   it("projects uploaded file envelopes as path-free attachment parts", () => {
     const manager = SessionManager.inMemory("/tmp/project");
     const entry = manager.appendMessage({

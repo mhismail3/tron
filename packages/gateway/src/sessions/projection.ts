@@ -1,6 +1,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { SessionEntry, SessionManager, SessionTreeNode as PiSessionTreeNode } from "@earendil-works/pi-coding-agent";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import { GatewayError } from "../errors.js";
 import type { BlobStore } from "./blob-store.js";
 import type { ContentPart, JsonValue, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
 
@@ -314,9 +315,16 @@ function projectContent(content: ProjectableContent, blobs: BlobStore, ownerId: 
           ? projectUserText(part.text, ownerId, nextIndex)
           : [{ id: `${ownerId}:${nextIndex()}`, type: "text", text: boundedText(part.text) }];
         break;
-      case "image":
-        candidates = [{ id: `${ownerId}:${nextIndex()}`, type: "image", mimeType: part.mimeType, blobId: blobs.register(part.data, part.mimeType) }];
+      case "image": {
+        const id = `${ownerId}:${nextIndex()}`;
+        try {
+          candidates = [{ id, type: "image", mimeType: part.mimeType, blobId: blobs.register(part.data, part.mimeType) }];
+        } catch (error) {
+          if (!(error instanceof GatewayError) || (error.code !== "conflict" && error.code !== "busy")) throw error;
+          candidates = [{ id, type: "text", text: "Image omitted from this bounded mobile projection" }];
+        }
         break;
+      }
       case "thinking":
         candidates = [{ id: `${ownerId}:${nextIndex()}`, type: "thinking", text: boundedText(part.thinking), ...(part.redacted ? { redacted: true } : {}) }];
         break;

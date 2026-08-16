@@ -52,7 +52,11 @@ one prompt cannot materialize more than the per-request byte ceiling. Successful
 their staging folder; deleting a canonical session removes its claimed attachment folders. Cleanup
 failure is best effort after canonical import/deletion success and cannot turn that success into an
 ambiguous command receipt; failed session-folder cleanup remains pending in the live store and retries
-on later inventory work. The retired `/engine` protocol is not exposed.
+on later inventory work. Transient image/export blobs reject individual values above 25 MiB or MIME metadata above 1 KiB
+and retain at most 128 items/200 MiB; exact content deduplicates and access refreshes 30-minute idle
+expiry. Capacity admission never evicts an ID already published to a client: excess projected images
+become bounded omission text, while later requests can retry after expiry. Generated exports are
+size-checked before their first full-file read. The retired `/engine` protocol is not exposed.
 
 Every WebSocket starts with:
 
