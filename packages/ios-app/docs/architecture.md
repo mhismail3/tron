@@ -118,7 +118,12 @@ coalesces a burst to one pending newest source, and atomically installs only an 
 containing session, mounted presentation, runtime, canonical/timeline generations, and paging
 bounds/edge identity. It retains at most one installed, one building, and one pending immutable
 snapshot/timeline; it is disposable projection state, not a session mirror or event journal.
-Projection instrumentation reports only aggregate row count. Opening
+One deterministic `ChatTranscriptProjectionKernel` converts exact canonical entries into ordered
+raw atoms and then globally assembles call/result joins, bootstrap filtering, ordinals, barriers,
+grouping, compatibility normalization, and semantic maps. Raw fragments retain the complete
+currently visible disposable history—even beyond one 512-item page—because explicitly loaded
+history cannot be evicted until forward reload exists. Projection instrumentation reports only an
+aggregate mode and entry/fragment/tool/atom/rendered counts; it carries no identifiers or content. Opening
 a new chat presentation always synchronizes a fresh authoritative bounded latest page; disposable cached or previously paged prefixes are never revealed as
 its baseline. The transcript remains behind a nonblank opening surface until the
 two-phase `session.open`/`session.sync` handshake installs its authoritative tail and
@@ -274,9 +279,12 @@ materialize inherited effective values as project overrides. Write-only proxy dr
 redacted state, encode clearing explicitly, and are scrubbed after a confirmed save. Global defaults
 always use the global model catalog; project defaults use the captured session catalog.
 Chat exposes one logical presentation timeline rather than independently rendered canonical,
-streaming, and live-tool arrays. Internally its random-access row collection can share an immutable
-canonical prefix with a tiny streaming suffix, so ordinary text/thinking/image streaming updates do
-not scan, copy, validate, or retain another copy of a 10,000-row prefix. Canonical and timeline
+streaming, and live-tool arrays. Its cold oracle and detached worker use the same raw-atom/global-
+assembler kernel; there is no output-producing test builder or second cold projector. Internally its
+random-access row collection can share an immutable canonical prefix with a tiny streaming suffix,
+so ordinary text/thinking/image streaming updates do not scan, copy, validate, or retain another
+copy of a 10,000-row prefix. Exact raw fragments are the seam for later sparse reuse, but this kernel
+checkpoint does not yet reuse changed-entry fragments or patch tool rows. Canonical and timeline
 mutation generations advance only for projection-relevant changes; status, editor, widget, and other
 sequenced events do not manufacture projection work. Tool-bearing/running states conservatively use
 the cold projector unless parity is proven. `ChatView.body` never constructs the timeline: typing,

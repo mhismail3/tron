@@ -289,13 +289,19 @@ cancellation-aware display-link boundary used by first-ready, pinned follow, and
 long-distance catch-up staging. Semantic prepend settlement instead waits passively
 for exact epoch-qualified row callbacks and requires a strictly newer callback after
 each correction. First-ready timing cannot end before the exact initial transcript
-projection installs and its frame resumes. `ChatTranscriptPresentationStoreTests` use
-watchdog-bounded synchronous builder barriers to prove serial off-main work, same-tag
-coalescing, newest-wins and A→B→A admission, paging-tag distinction, reset rejection,
-MainActor responsiveness, display-frame-gated atomic installation, runtime-only cache reuse,
-bounded geometry-admitted entrance ownership, and one canonical scan across thirty updates of a
-10,000-entry text stream. Cold/incremental parity tests require
-identical rows, order, tool state, and semantic maps. `SessionPresentationStoreTests` also
+projection installs and its frame resumes. `ChatTranscriptPresentationStoreTests` use a
+watchdog-bounded synchronous `HOSTED_TEST`-only work gate immediately before the real production
+kernel to prove serial off-main work, same-tag coalescing, newest-wins and A→B→A admission,
+paging-tag distinction, reset-epoch rejection, MainActor responsiveness, and deterministic
+completed-before-frame replacement/reset races without sleeps or polling. They also cover atomic installation,
+runtime-only cache reuse, bounded geometry-admitted entrance ownership, and one canonical scan across
+thirty updates of a 10,000-entry text stream. The gate can delay work but cannot manufacture output
+or disable production projection semantics. `ChatTranscriptProjectionKernelTests` characterize raw
+atoms and the sole global assembler across barriers, canonical call/result joins, orphan results,
+bootstrap configuration, exact compaction ordinals, 100/256-tool bursts, semantic maps, and visible
+history beyond one 512-item page. Its aggregate work recorder exposes only mode and numeric
+entry/fragment/tool/atom/rendered counts. Cold/incremental parity tests require identical rows, order,
+tool state, and semantic maps. `SessionPresentationStoreTests` also
 prove exact page `start`/`end`/count admission and that return-to-latest compacts loaded
 history back to the retained authoritative tail. `ChatScrollCoordinatorTests` use watchdog-bounded
 barriers rather than sleeps or yields to prove callback-order equivalence, immediate

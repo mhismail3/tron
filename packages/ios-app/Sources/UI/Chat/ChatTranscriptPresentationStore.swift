@@ -177,10 +177,11 @@ enum ChatTranscriptPresentationStoreError: Error, Equatable, Sendable {
     case invalidProjection
 }
 
-typealias ChatTranscriptProjectionBuilder = @Sendable (
-    SessionSnapshot,
-    ChatTranscriptProjectionTag
-) -> ChatTranscriptTimeline
+#if HOSTED_TEST
+/// Deterministic `HOSTED_TEST`-only scheduling seam. It may delay the real
+/// production kernel but cannot replace or manufacture projection output.
+typealias ChatTranscriptProjectionWorkGate = @Sendable (ChatTranscriptProjectionTag) -> Void
+#endif
 
 private struct BuiltChatTranscript: Sendable {
     let timeline: ChatTranscriptTimeline
@@ -189,6 +190,7 @@ private struct BuiltChatTranscript: Sendable {
 
 private actor ChatTranscriptProjectionWorker {
     private struct TimelineKey: Equatable, Sendable {
+        let cacheEpoch: Int
         let sessionID: String
         let presentationGeneration: Int
         let runtimeGeneration: String
@@ -202,7 +204,8 @@ private actor ChatTranscriptProjectionWorker {
         let streaming: TranscriptItem?
         let toolExecutions: [ToolExecutionState]
 
-        init(tag: ChatTranscriptProjectionTag, snapshot: SessionSnapshot) {
+        init(tag: ChatTranscriptProjectionTag, snapshot: SessionSnapshot, cacheEpoch: Int) {
+            self.cacheEpoch = cacheEpoch
             sessionID = tag.sessionID
             presentationGeneration = tag.presentationGeneration
             runtimeGeneration = tag.runtimeGeneration
@@ -219,6 +222,7 @@ private actor ChatTranscriptProjectionWorker {
     }
 
     private struct CanonicalBaseKey: Equatable, Sendable {
+        let cacheEpoch: Int
         let sessionID: String
         let presentationGeneration: Int
         let runtimeGeneration: String
@@ -231,7 +235,8 @@ private actor ChatTranscriptProjectionWorker {
         let phase: SessionPhase
         let toolExecutions: [ToolExecutionState]
 
-        init(tag: ChatTranscriptProjectionTag, snapshot: SessionSnapshot) {
+        init(tag: ChatTranscriptProjectionTag, snapshot: SessionSnapshot, cacheEpoch: Int) {
+            self.cacheEpoch = cacheEpoch
             sessionID = tag.sessionID
             presentationGeneration = tag.presentationGeneration
             runtimeGeneration = tag.runtimeGeneration
@@ -246,8 +251,11 @@ private actor ChatTranscriptProjectionWorker {
         }
     }
 
-    private let builder: ChatTranscriptProjectionBuilder
-    private let usesIncrementalProjection: Bool
+    private let performanceSignposts: any PerformanceSignposting
+    private let workRecorder: ChatTranscriptProjectionWorkRecorder?
+    #if HOSTED_TEST
+    private let workGate: ChatTranscriptProjectionWorkGate?
+    #endif
     private var canonicalBaseKey: CanonicalBaseKey?
     private var canonicalBase: ChatTranscriptTimeline?
     private var canonicalBaseIsInternallyConsistent = false
@@ -255,20 +263,51 @@ private actor ChatTranscriptProjectionWorker {
     private var lastTimeline: ChatTranscriptTimeline?
     private var lastTimelineIsInternallyConsistent = false
 
+    #if HOSTED_TEST
     init(
-        builder: @escaping ChatTranscriptProjectionBuilder,
-        usesIncrementalProjection: Bool
+        performanceSignposts: any PerformanceSignposting,
+        workRecorder: ChatTranscriptProjectionWorkRecorder?,
+        workGate: ChatTranscriptProjectionWorkGate?
     ) {
-        self.builder = builder
-        self.usesIncrementalProjection = usesIncrementalProjection
+        self.performanceSignposts = performanceSignposts
+        self.workRecorder = workRecorder
+        self.workGate = workGate
     }
+    #else
+    init(
+        performanceSignposts: any PerformanceSignposting,
+        workRecorder: ChatTranscriptProjectionWorkRecorder?
+    ) {
+        self.performanceSignposts = performanceSignposts
+        self.workRecorder = workRecorder
+    }
+    #endif
+
+    private func cold(snapshot: SessionSnapshot) -> ChatTranscriptTimeline {
+        ChatTranscriptProjectionKernel.cold(
+            snapshot: snapshot,
+            performanceSignposts: performanceSignposts,
+            workRecorder: workRecorder
+        ).timeline
+    }
+
+    #if HOSTED_TEST
+    private func hostedGatedCold(
+        snapshot: SessionSnapshot,
+        tag: ChatTranscriptProjectionTag
+    ) -> ChatTranscriptTimeline {
+        workGate?(tag)
+        return cold(snapshot: snapshot)
+    }
+    #endif
 
     func build(
         snapshot: SessionSnapshot,
-        tag: ChatTranscriptProjectionTag
+        tag: ChatTranscriptProjectionTag,
+        cacheEpoch: Int
     ) -> BuiltChatTranscript {
-        let timelineKey = TimelineKey(tag: tag, snapshot: snapshot)
-        if usesIncrementalProjection, lastTimelineKey == timelineKey, let lastTimeline {
+        let timelineKey = TimelineKey(tag: tag, snapshot: snapshot, cacheEpoch: cacheEpoch)
+        if lastTimelineKey == timelineKey, let lastTimeline {
             return BuiltChatTranscript(
                 timeline: lastTimeline,
                 isInternallyConsistent: lastTimelineIsInternallyConsistent
@@ -277,32 +316,43 @@ private actor ChatTranscriptProjectionWorker {
 
         let timeline: ChatTranscriptTimeline
         let isInternallyConsistent: Bool
-        if usesIncrementalProjection,
-           snapshot.toolExecutions.allSatisfy({ $0.status != .running }),
+        if snapshot.toolExecutions.allSatisfy({ $0.status != .running }),
            let streaming = snapshot.streaming,
            let live = ChatTranscriptPresentation.isolatedStreamingTimeline(streaming) {
-            let key = CanonicalBaseKey(tag: tag, snapshot: snapshot)
+            let key = CanonicalBaseKey(tag: tag, snapshot: snapshot, cacheEpoch: cacheEpoch)
             if canonicalBaseKey != key || canonicalBase == nil {
                 var baseSnapshot = snapshot
                 baseSnapshot.streaming = nil
-                canonicalBase = builder(baseSnapshot, tag)
+                #if HOSTED_TEST
+                canonicalBase = hostedGatedCold(snapshot: baseSnapshot, tag: tag)
+                #else
+                canonicalBase = cold(snapshot: baseSnapshot)
+                #endif
                 canonicalBaseKey = key
                 canonicalBaseIsInternallyConsistent = canonicalBase!.isInternallyConsistent
             }
             timeline = canonicalBase!.appendingLive(live)
             isInternallyConsistent = canonicalBaseIsInternallyConsistent
                 && live.isInternallyConsistent
-        } else if usesIncrementalProjection, snapshot.streaming == nil {
-            let key = CanonicalBaseKey(tag: tag, snapshot: snapshot)
+        } else if snapshot.streaming == nil {
+            let key = CanonicalBaseKey(tag: tag, snapshot: snapshot, cacheEpoch: cacheEpoch)
             if canonicalBaseKey != key || canonicalBase == nil {
-                canonicalBase = builder(snapshot, tag)
+                #if HOSTED_TEST
+                canonicalBase = hostedGatedCold(snapshot: snapshot, tag: tag)
+                #else
+                canonicalBase = cold(snapshot: snapshot)
+                #endif
                 canonicalBaseKey = key
                 canonicalBaseIsInternallyConsistent = canonicalBase!.isInternallyConsistent
             }
             timeline = canonicalBase!
             isInternallyConsistent = canonicalBaseIsInternallyConsistent
         } else {
-            timeline = builder(snapshot, tag)
+            #if HOSTED_TEST
+            timeline = hostedGatedCold(snapshot: snapshot, tag: tag)
+            #else
+            timeline = cold(snapshot: snapshot)
+            #endif
             isInternallyConsistent = timeline.isInternallyConsistent
         }
         lastTimelineKey = timelineKey
@@ -321,8 +371,6 @@ private actor ChatTranscriptProjectionWorker {
 @MainActor
 @Observable
 final class ChatTranscriptPresentationStore {
-    typealias Builder = ChatTranscriptProjectionBuilder
-
     private struct PendingProjection: Sendable {
         let snapshot: SessionSnapshot
         let tag: ChatTranscriptProjectionTag
@@ -334,6 +382,14 @@ final class ChatTranscriptPresentationStore {
         let tag: ChatTranscriptProjectionTag
         let continuation: CheckedContinuation<InstalledChatTranscript, Error>
     }
+
+    #if HOSTED_TEST
+    private struct HostedCompletionWaiter {
+        let id: UInt64
+        let tag: ChatTranscriptProjectionTag
+        let continuation: CheckedContinuation<Void, Error>
+    }
+    #endif
 
     private(set) var installed: InstalledChatTranscript?
     private(set) var pendingEntranceIDs: Set<String> = []
@@ -351,31 +407,42 @@ final class ChatTranscriptPresentationStore {
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var waiters: [Waiter] = []
     @ObservationIgnored private var nextWaiterID: UInt64 = 0
+    #if HOSTED_TEST
+    @ObservationIgnored private var hostedCompletionWaiters: [HostedCompletionWaiter] = []
+    @ObservationIgnored private var nextHostedCompletionWaiterID: UInt64 = 0
+    #endif
 
+    #if HOSTED_TEST
     init(
         maximumWaiters: Int = 32,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
+        workRecorder: ChatTranscriptProjectionWorkRecorder? = nil,
         installationFrameScheduler: DisplayFrameScheduler? = nil,
-        builder: Builder? = nil
+        workGate: ChatTranscriptProjectionWorkGate? = nil
     ) {
         self.maximumWaiters = max(1, maximumWaiters)
         self.installationFrameScheduler = installationFrameScheduler
-        let admittedBuilder: Builder
-        if let builder {
-            admittedBuilder = builder
-        } else {
-            admittedBuilder = { snapshot, _ in
-                ChatTranscriptPresentation.timeline(
-                    in: snapshot,
-                    performanceSignposts: performanceSignposts
-                )
-            }
-        }
         projectionWorker = ChatTranscriptProjectionWorker(
-            builder: admittedBuilder,
-            usesIncrementalProjection: builder == nil
+            performanceSignposts: performanceSignposts,
+            workRecorder: workRecorder,
+            workGate: workGate
         )
     }
+    #else
+    init(
+        maximumWaiters: Int = 32,
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
+        workRecorder: ChatTranscriptProjectionWorkRecorder? = nil,
+        installationFrameScheduler: DisplayFrameScheduler? = nil
+    ) {
+        self.maximumWaiters = max(1, maximumWaiters)
+        self.installationFrameScheduler = installationFrameScheduler
+        projectionWorker = ChatTranscriptProjectionWorker(
+            performanceSignposts: performanceSignposts,
+            workRecorder: workRecorder
+        )
+    }
+    #endif
 
     /// Returns true only when this exact source introduced new projection work.
     @discardableResult
@@ -407,6 +474,9 @@ final class ChatTranscriptPresentationStore {
         desiredTag = tag
         pending = PendingProjection(snapshot: snapshot, tag: tag, generation: generation)
         failWaiters(except: tag, error: .superseded)
+        #if HOSTED_TEST
+        failHostedCompletionWaiters(except: tag, error: .superseded)
+        #endif
         startWorkerIfNeeded()
         return true
     }
@@ -446,6 +516,45 @@ final class ChatTranscriptPresentationStore {
         }
     }
 
+    #if HOSTED_TEST
+    /// Deterministic observation for frame-publication race tests. This exposes
+    /// no production scheduling control and resumes only after MainActor admits
+    /// a complete, validated projection for frame-gated installation.
+    func hostedWaitForCompletedProjection(of tag: ChatTranscriptProjectionTag) async throws {
+        if installed?.tag == tag || readyToInstall?.tag == tag { return }
+        guard desiredTag == tag || pending?.tag == tag || buildingTag == tag else {
+            throw ChatTranscriptPresentationStoreError.superseded
+        }
+
+        nextHostedCompletionWaiterID &+= 1
+        let waiterID = nextHostedCompletionWaiterID
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else if readyToInstall?.tag == tag {
+                    continuation.resume()
+                } else if desiredTag == tag || pending?.tag == tag || buildingTag == tag {
+                    hostedCompletionWaiters.append(.init(
+                        id: waiterID,
+                        tag: tag,
+                        continuation: continuation
+                    ))
+                } else {
+                    continuation.resume(
+                        throwing: ChatTranscriptPresentationStoreError.superseded
+                    )
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelHostedCompletionWaiter(id: waiterID)
+            }
+        }
+    }
+    #endif
+
     func entranceState(for id: String) -> ChatTranscriptEntranceState {
         if admittedEntranceIDs.contains(id) { return .admitted }
         if pendingEntranceIDs.contains(id) { return .pending }
@@ -479,6 +588,9 @@ final class ChatTranscriptPresentationStore {
         pendingEntranceIDs.removeAll(keepingCapacity: false)
         admittedEntranceIDs.removeAll(keepingCapacity: false)
         failAllWaiters(with: CancellationError())
+        #if HOSTED_TEST
+        failAllHostedCompletionWaiters(with: CancellationError())
+        #endif
     }
 
     private func startWorkerIfNeeded() {
@@ -490,14 +602,14 @@ final class ChatTranscriptPresentationStore {
                 self.buildingTag = next.tag
                 let built = await self.projectionWorker.build(
                     snapshot: next.snapshot,
-                    tag: next.tag
+                    tag: next.tag,
+                    cacheEpoch: next.generation
                 )
                 guard !Task.isCancelled else { break }
                 self.buildingTag = nil
                 guard self.generation == next.generation else { continue }
 
-                let runtimeItems = ChatNotificationPresentation.runtime(in: next.snapshot)
-                    .map(ChatTranscriptRenderItem.notification)
+                let runtimeItems = ChatTranscriptProjectionKernel.runtimeItems(in: next.snapshot)
                 let output = InstalledChatTranscript(
                     tag: next.tag,
                     timeline: built.timeline,
@@ -509,6 +621,12 @@ final class ChatTranscriptPresentationStore {
                     if self.desiredTag == next.tag {
                         self.desiredTag = nil
                         self.failWaiters(for: next.tag, error: .invalidProjection)
+                        #if HOSTED_TEST
+                        self.failHostedCompletionWaiters(
+                            for: next.tag,
+                            error: .invalidProjection
+                        )
+                        #endif
                     }
                     continue
                 }
@@ -523,6 +641,9 @@ final class ChatTranscriptPresentationStore {
     }
 
     private func admitCompleted(_ output: InstalledChatTranscript) {
+        #if HOSTED_TEST
+        resumeHostedCompletionWaiters(for: output.tag)
+        #endif
         guard installationFrameScheduler != nil else {
             install(output)
             resumeWaiters(with: output)
@@ -600,4 +721,45 @@ final class ChatTranscriptPresentationStore {
         guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
         waiters.remove(at: index).continuation.resume(throwing: CancellationError())
     }
+
+    #if HOSTED_TEST
+    private func resumeHostedCompletionWaiters(for tag: ChatTranscriptProjectionTag) {
+        let completed = hostedCompletionWaiters.filter { $0.tag == tag }
+        hostedCompletionWaiters.removeAll { $0.tag == tag }
+        completed.forEach { $0.continuation.resume() }
+    }
+
+    private func failHostedCompletionWaiters(
+        for tag: ChatTranscriptProjectionTag,
+        error: ChatTranscriptPresentationStoreError
+    ) {
+        let rejected = hostedCompletionWaiters.filter { $0.tag == tag }
+        hostedCompletionWaiters.removeAll { $0.tag == tag }
+        rejected.forEach { $0.continuation.resume(throwing: error) }
+    }
+
+    private func failHostedCompletionWaiters(
+        except tag: ChatTranscriptProjectionTag,
+        error: ChatTranscriptPresentationStoreError
+    ) {
+        let rejected = hostedCompletionWaiters.filter { $0.tag != tag }
+        hostedCompletionWaiters.removeAll { $0.tag != tag }
+        rejected.forEach { $0.continuation.resume(throwing: error) }
+    }
+
+    private func failAllHostedCompletionWaiters(with error: Error) {
+        let rejected = hostedCompletionWaiters
+        hostedCompletionWaiters.removeAll(keepingCapacity: false)
+        rejected.forEach { $0.continuation.resume(throwing: error) }
+    }
+
+    private func cancelHostedCompletionWaiter(id: UInt64) {
+        guard let index = hostedCompletionWaiters.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        hostedCompletionWaiters.remove(at: index).continuation.resume(
+            throwing: CancellationError()
+        )
+    }
+    #endif
 }

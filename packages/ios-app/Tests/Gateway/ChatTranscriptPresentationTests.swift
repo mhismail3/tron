@@ -923,7 +923,7 @@ struct ChatTranscriptPresentationTests {
         ]
         """)
 
-        let rendered = ChatTranscriptPresentation.renderItems(in: snapshot)
+        let rendered = ChatTranscriptPresentation.timeline(in: snapshot).items
         #expect(rendered.count == 3)
         #expect(rendered.map(\.id) == ["tool-run-call", "assistant-text", "bash"])
     }
@@ -937,7 +937,7 @@ struct ChatTranscriptPresentationTests {
         """)
         snapshot.toolExecutions = [tool("wait", "subagent_wait", startedAt: "2026-01-01T00:00:01Z")]
 
-        guard case .toolRun(let run) = ChatTranscriptPresentation.renderItems(in: snapshot).first else {
+        guard case .toolRun(let run) = ChatTranscriptPresentation.timeline(in: snapshot).items.first else {
             Issue.record("Expected retained tool run")
             return
         }

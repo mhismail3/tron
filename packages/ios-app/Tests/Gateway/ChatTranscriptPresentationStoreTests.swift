@@ -12,7 +12,7 @@ struct ChatTranscriptPresentationStoreTests {
                 .openingTail(targetEncodedBytes: 8_000)
             let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 7)
             let barrier = TranscriptProjectionBarrier()
-            let store = ChatTranscriptPresentationStore(builder: barrier.build)
+            let store = ChatTranscriptPresentationStore(workGate: barrier.block)
 
             #expect(store.submit(snapshot: snapshot, tag: tag))
             #expect(!store.submit(snapshot: snapshot, tag: tag))
@@ -40,7 +40,7 @@ struct ChatTranscriptPresentationStoreTests {
             let firstTag = ChatTranscriptProjectionTag(snapshot: first, presentationGeneration: 8)
             let newestTag = ChatTranscriptProjectionTag(snapshot: newest, presentationGeneration: 8)
             let barrier = TranscriptProjectionBarrier()
-            let store = ChatTranscriptPresentationStore(builder: barrier.build)
+            let store = ChatTranscriptPresentationStore(workGate: barrier.block)
 
             store.submit(snapshot: first, tag: firstTag)
             await barrier.waitForBuildCount(1)
@@ -72,7 +72,7 @@ struct ChatTranscriptPresentationStoreTests {
             let aTag = ChatTranscriptProjectionTag(snapshot: a, presentationGeneration: 9)
             let bTag = ChatTranscriptProjectionTag(snapshot: b, presentationGeneration: 9)
             let barrier = TranscriptProjectionBarrier()
-            let store = ChatTranscriptPresentationStore(builder: barrier.build)
+            let store = ChatTranscriptPresentationStore(workGate: barrier.block)
 
             store.submit(snapshot: a, tag: aTag)
             await barrier.waitForBuildCount(1)
@@ -167,7 +167,7 @@ struct ChatTranscriptPresentationStoreTests {
                 presentationGeneration: 11
             )
             let barrier = TranscriptProjectionBarrier()
-            let store = ChatTranscriptPresentationStore(builder: barrier.build)
+            let store = ChatTranscriptPresentationStore(workGate: barrier.block)
 
             store.submit(snapshot: snapshot, tag: tag)
             await barrier.waitForBuildCount(1)
@@ -207,7 +207,7 @@ struct ChatTranscriptPresentationStoreTests {
             let frames = ManualProjectionFrameScheduler()
             let store = ChatTranscriptPresentationStore(
                 installationFrameScheduler: frames.scheduler,
-                builder: builds.build
+                workGate: builds.block
             )
 
             store.submit(snapshot: snapshot, tag: tag)
@@ -220,6 +220,89 @@ struct ChatTranscriptPresentationStoreTests {
             let installed = try await store.waitForInstall(of: tag)
             #expect(installed.tag == tag)
             #expect(store.installed?.tag == tag)
+        }
+    }
+
+    @Test("two completed projections before one frame publish only the newest")
+    func newestCompletedProjectionWinsFrameRace() async throws {
+        try await withTestWatchdog { @MainActor in
+            var first = try SessionScenarioBuilder(seed: 1_223)
+                .openingTail(targetEncodedBytes: 8_000)
+            first.revision = 70
+            first.eventSequence = 80
+            var newest = first
+            newest.revision = 71
+            newest.eventSequence = 81
+            newest.streaming = newest.transcript.last
+            let firstTag = ChatTranscriptProjectionTag(
+                snapshot: first,
+                presentationGeneration: 22
+            )
+            let newestTag = ChatTranscriptProjectionTag(
+                snapshot: newest,
+                presentationGeneration: 22
+            )
+            let frames = ManualProjectionFrameScheduler()
+            let store = ChatTranscriptPresentationStore(
+                installationFrameScheduler: frames.scheduler
+            )
+
+            store.submit(snapshot: first, tag: firstTag)
+            let firstWaiter = Task { @MainActor in
+                try await store.waitForInstall(of: firstTag)
+            }
+            try await store.hostedWaitForCompletedProjection(of: firstTag)
+            await frames.waitForRequest(count: 1)
+
+            store.submit(snapshot: newest, tag: newestTag)
+            try await store.hostedWaitForCompletedProjection(of: newestTag)
+            #expect(store.installed == nil)
+            #expect(frames.requestCount == 1)
+
+            frames.releaseNext()
+            let installed = try await store.waitForInstall(of: newestTag)
+            #expect(installed.tag == newestTag)
+            #expect(store.installed?.tag == newestTag)
+            await #expect(throws: ChatTranscriptPresentationStoreError.superseded) {
+                try await firstWaiter.value
+            }
+        }
+    }
+
+    @Test("reset after completion but before frame prevents install and rejects waiter")
+    func resetWinsCompletedProjectionFrameRace() async throws {
+        try await withTestWatchdog { @MainActor in
+            let snapshot = try SessionScenarioBuilder(seed: 1_224)
+                .openingTail(targetEncodedBytes: 8_000)
+            let tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 23
+            )
+            let frames = ManualProjectionFrameScheduler()
+            let store = ChatTranscriptPresentationStore(
+                installationFrameScheduler: frames.scheduler
+            )
+
+            store.submit(snapshot: snapshot, tag: tag)
+            let waiter = Task { @MainActor in
+                try await store.waitForInstall(of: tag)
+            }
+            try await store.hostedWaitForCompletedProjection(of: tag)
+            await frames.waitForRequest(count: 1)
+            #expect(store.installed == nil)
+
+            store.reset()
+            frames.releaseNext()
+            do {
+                _ = try await waiter.value
+                Issue.record("Reset projection waiter unexpectedly installed")
+            } catch {
+                #expect(
+                    error is CancellationError
+                        || error as? ChatTranscriptPresentationStoreError == .superseded
+                )
+            }
+            #expect(store.installed == nil)
         }
     }
 
@@ -483,7 +566,7 @@ struct ChatTranscriptPresentationStoreTests {
                 .openingTail(targetEncodedBytes: 8_000)
             let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 12)
             let barrier = TranscriptProjectionBarrier()
-            let store = ChatTranscriptPresentationStore(builder: barrier.build)
+            let store = ChatTranscriptPresentationStore(workGate: barrier.block)
 
             store.submit(snapshot: snapshot, tag: tag)
             await barrier.waitForBuildCount(1)
@@ -543,10 +626,7 @@ private final class TranscriptProjectionBarrier: @unchecked Sendable {
         lock.withLock { maximumActiveBuilds }
     }
 
-    func build(
-        snapshot: SessionSnapshot,
-        tag: ChatTranscriptProjectionTag
-    ) -> ChatTranscriptTimeline {
+    func block(tag: ChatTranscriptProjectionTag) {
         let semaphore = DispatchSemaphore(value: 0)
         lock.lock()
         builds.append(.init(tag: tag, semaphore: semaphore))
@@ -560,7 +640,6 @@ private final class TranscriptProjectionBarrier: @unchecked Sendable {
 
         semaphore.wait()
         lock.withLock { activeBuilds -= 1 }
-        return ChatTranscriptPresentation.timeline(in: snapshot)
     }
 
     func waitForBuildCount(_ target: Int) async {
