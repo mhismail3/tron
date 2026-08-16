@@ -130,6 +130,7 @@ actor GatewayClient {
             try requireEpoch(epochID)
             let data = try await withTimeout(duration: .seconds(15)) { try await socket.receive() }
             try requireEpoch(epochID)
+            try GatewayFramePolicy.validateInboundBytes(data)
             let decoded = try JSONDecoder.gateway.decode(GatewayHello.self, from: data)
             try requireEpoch(epochID)
             guard decoded.type == "hello", decoded.protocolVersion == 2, decoded.minProtocolVersion <= 2 else {

@@ -47,7 +47,12 @@ container; network bytes are not serialized and parsed again. The client actor b
 prepares large session snapshots, summaries, envelopes, streaming items, tool states, interactions, widgets, and terminal output/exit payloads before delivery, so
 the MainActor reducer installs typed `Sendable` values instead of re-encoding and
 decoding dynamic payloads. Raw event payloads remain attached for global extension
-points and unknown topics; malformed known event data preserves its former live-reducer
+points and unknown topics. Every Gateway coder is fresh per operation; shared static Foundation
+coder instances are forbidden across concurrent frame preparation. Inbound bytes reject frames above
+the Gateway's 1 MiB protocol ceiling before JSON parsing. Dynamic `JSONValue` admission
+is capped at depth 64, 32,768 nodes, 8,192 members per collection, 1 MiB per UTF-8 string, and
+4 MiB of aggregate strings including object keys. Non-finite numbers fail coding, and integer
+projection uses exact range-safe conversion. Malformed known event data preserves its former live-reducer
 no-op semantics rather than becoming a transport failure, while a non-consumable
 quarantined suffix forces another authoritative attempt before its baseline can publish.
 Gateway connection and disposable cache intervals use the shared typed

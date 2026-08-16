@@ -293,11 +293,27 @@ enum GatewayInboundFrame: Decodable, Sendable, Equatable {
     }
 }
 
+enum GatewayFramePolicy {
+    static let maximumInboundBytes = 1_048_576
+
+    static func validateInboundBytes(_ data: Data) throws {
+        guard data.count <= maximumInboundBytes else {
+            throw GatewayFailure(
+                code: "frame_too_large",
+                message: "The Mac sent a Gateway frame larger than the supported protocol limit.",
+                retryable: true,
+                details: nil
+            )
+        }
+    }
+}
+
 struct GatewayFrameDecoder: Sendable {
     let decode: @Sendable (Data) throws -> GatewayInboundFrame
 
     static let gateway = GatewayFrameDecoder { data in
-        try JSONDecoder().decode(GatewayInboundFrame.self, from: data)
+        try GatewayFramePolicy.validateInboundBytes(data)
+        return try JSONDecoder.gateway.decode(GatewayInboundFrame.self, from: data)
     }
 }
 

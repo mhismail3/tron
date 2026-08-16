@@ -52,6 +52,18 @@ struct GatewayClientTransportTests {
         #expect(factory.requests.isEmpty)
     }
 
+    @Test("oversized hello fails before handshake JSON decoding")
+    func oversizedHelloFailsClosed() async {
+        let socket = ScriptedGatewaySocket()
+        let factory = ScriptedGatewaySocketFactory(socket: socket)
+        let client = GatewayClient(socketFactory: factory.factory)
+        await socket.enqueue(Data(repeating: 0x20, count: GatewayFramePolicy.maximumInboundBytes + 1))
+
+        await #expect(throws: GatewayFailure.self) {
+            try await client.connect(profile: profile, token: "token")
+        }
+    }
+
     @Test("hello and request frames use injected IDs without changing their byte protocol")
     func deterministicHelloAndRequestIDs() async throws {
         try await withTestWatchdog {
