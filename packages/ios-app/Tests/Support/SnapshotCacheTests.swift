@@ -4,6 +4,30 @@ import Testing
 
 @Suite("Disposable snapshot cache")
 struct SnapshotCacheTests {
+    @Test("ratchets bound disposable cache files and individual projections")
+    func ratchets() {
+        #expect(SnapshotCachePolicy.maximumEncodedBytes == 8_388_608)
+        #expect(SnapshotCachePolicy.maximumSessionCount == 250)
+        #expect(SnapshotCachePolicy.maximumTranscriptEntriesPerSnapshot == 500)
+        #expect(SnapshotCachePolicy.maximumEncodedSessionBytes == 131_072)
+        #expect(SnapshotCachePolicy.maximumEncodedSnapshotBytes == 2_097_152)
+        #expect(SnapshotCachePolicy.maximumEncodedTranscriptItemBytes == 524_288)
+    }
+
+    @Test("writes use protection-at-creation and backup-excluded root policies")
+    func filePolicySourceContract() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Support/SnapshotCache.swift"),
+            encoding: .utf8
+        )
+        #expect(source.contains("options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]"))
+        #expect(source.contains("values.isExcludedFromBackup = true"))
+    }
+
     @Test("turns in-flight state into interrupted offline state")
     func storesBoundedSnapshot() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
@@ -127,6 +151,92 @@ struct SnapshotCacheTests {
         }
         #expect(metrics.itemCount == 0)
         #expect(metrics.byteCount > 0)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+    }
+
+    @Test("encoded files stay bounded, duplicate IDs retain first authority, and the root is backup excluded")
+    func encodedByteBoundAndDeduplication() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = SnapshotCache(root: root)
+        let payload = String(repeating: "x", count: 100_000)
+        var sessions = [SessionSummary(
+            id: "oversized", name: nil, cwd: "/workspace", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            messageCount: 1, firstMessage: String(repeating: "oversized", count: 131_072), phase: .idle
+        )]
+        sessions += (0..<100).map { index in
+            SessionSummary(
+                id: "session-\(index)", name: "first-\(index)", cwd: "/workspace", parentSessionId: nil,
+                createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+                messageCount: 1, firstMessage: payload, phase: .idle
+            )
+        }
+        sessions.append(SessionSummary(
+            id: "session-0", name: "duplicate", cwd: "/other", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
+            messageCount: 2, firstMessage: "duplicate", phase: .running
+        ))
+
+        await cache.save(profileID: "profile", sessions: sessions, snapshots: [])
+        let file = try #require(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
+        let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+        #expect((attributes[.size] as? NSNumber)?.intValue ?? .max <= SnapshotCachePolicy.maximumEncodedBytes)
+        #if !targetEnvironment(simulator)
+        #expect(attributes[.protectionKey] as? FileProtectionType == .completeUntilFirstUserAuthentication)
+        #endif
+        #expect(try root.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+
+        let loaded = await cache.load(profileID: "profile")
+        #expect(Set(loaded.sessions.map(\.id)).count == loaded.sessions.count)
+        #expect(loaded.sessions.first?.name == "first-0")
+        #expect(!loaded.sessions.contains { $0.id == "oversized" })
+        #expect(loaded.sessions.count < sessions.count)
+    }
+
+    @Test("oversized and corrupt files self-clean without unbounded reads")
+    func malformedFilesSelfClean() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = SnapshotCache(root: root)
+        await cache.save(profileID: "profile", sessions: [], snapshots: [])
+        let file = try #require(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
+
+        try Data(count: SnapshotCachePolicy.maximumEncodedBytes + 1).write(to: file)
+        let oversized = await cache.load(profileID: "profile")
+        #expect(oversized.sessions.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: file.path))
+
+        await cache.save(profileID: "profile", sessions: [], snapshots: [])
+        let replacement = try #require(FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first)
+        try Data("{not-json".utf8).write(to: replacement)
+        let corrupt = await cache.load(profileID: "profile")
+        #expect(corrupt.snapshots.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: replacement.path))
+    }
+
+    @Test("profile removal deletes only the matching disposable cache")
+    func profileRemovalIsIsolated() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = SnapshotCache(root: root)
+        let first = SessionSummary(
+            id: "first", name: nil, cwd: "/one", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            messageCount: 0, firstMessage: "", phase: .idle
+        )
+        let second = SessionSummary(
+            id: "second", name: nil, cwd: "/two", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            messageCount: 0, firstMessage: "", phase: .idle
+        )
+        await cache.save(profileID: "profile-a", sessions: [first], snapshots: [])
+        await cache.save(profileID: "profile-b", sessions: [second], snapshots: [])
+
+        await cache.remove(profileID: "profile-a")
+        await cache.save(profileID: "profile-a", generation: .max, sessions: [first], snapshots: [])
+        #expect((await cache.load(profileID: "profile-a")).sessions.isEmpty)
+        #expect((await cache.load(profileID: "profile-b")).sessions.map(\.id) == ["second"])
     }
 
     @Test("newest generation wins when checkpoint tasks arrive out of order")

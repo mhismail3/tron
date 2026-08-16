@@ -616,7 +616,10 @@ final class AppModel {
     func forgetCurrentGateway() async {
         let forgottenProfileID = profiles.selected?.id
         if await lifecycle.forgetCurrentGateway() {
-            if let forgottenProfileID { composerDrafts.removeProfile(forgottenProfileID) }
+            if let forgottenProfileID {
+                composerDrafts.removeProfile(forgottenProfileID)
+                await cache.remove(profileID: forgottenProfileID)
+            }
             setupComplete = false
         }
     }
@@ -842,6 +845,7 @@ final class AppModel {
             if let profile = profiles.selected, profile.deviceId == id,
                await lifecycle.forget(profile: profile) {
                 composerDrafts.removeProfile(profile.id)
+                await cache.remove(profileID: profile.id)
                 setupComplete = false
             }
         }

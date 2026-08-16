@@ -395,7 +395,7 @@ Exit gate:
 
 Independent owner milestones:
 
-- **8A cache:** byte-bounded, generation-ordered/coalesced, duplicate-safe, profile-deletable, backup-excluded, protected-at-creation, corrupt/old self-cleaning `SnapshotCache`.
+- **8A cache complete:** `SnapshotCache` is generation-ordered, duplicate-safe, profile-deletable, backup-excluded, and protected during atomic creation. Deterministic count/per-item admission keeps each profile file at or below 8 MiB; file-size admission keeps reads at that exact ceiling, conservative string/collection shape admission rejects oversized values before JSON encoding, and corrupt, obsolete, or oversized files self-delete. Focused temporary-directory tests ratchet capacity, overflow, generation, deletion isolation, backup/protection policy, and malformed-file cleanup.
 - **8B profiles/enrollment:** transactional metadata/Keychain replacement, validated persisted endpoints, no force-unwrapped URL construction, and attempt-owned pairing commit.
 - **8C share inbox:** bounded UUID entries with capacity/expiry/eviction policy, protected backup-excluded atomic storage, corruption cleanup, and an explicit destination lease `(profile/auth epoch, session ID, presentation generation)`. Bind the lease at claim time; if none exists, retain unclaimed content. Clear only after acknowledged acceptance; uncertain outcomes remain claimed for receipt reconciliation and are never submitted again automatically. Share UX requires the approval below.
 - **8D uploads:** attachment count/size preflight, streamed/file-backed transport, bounded draft thumbnails, and deterministic remote staged-upload cleanup/expiry through a narrowly owned Gateway contract where required.

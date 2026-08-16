@@ -857,11 +857,15 @@ rounded UIKit fields, or system search and segmented styles.
 
 ## Offline cache
 
-`SnapshotCache` admits snapshots only for the bounded session summary set,
-limits transcript size and session count, strips transient interactions and
-streaming state, and rewrites active phases to `interrupted`. Load/save signposts
-report only admitted aggregate item and encoded-byte counts. It is disposable
-presentation state, not session truth.
+`SnapshotCache` admits duplicate-free snapshots only for the bounded session summary set,
+limits transcript size, individual encoded projections, session count, and each profile file to
+8 MiB, strips transient interactions, diagnostics, and streaming state, and rewrites active phases to
+`interrupted`. File-size admission precedes reads, which consume at most the exact ceiling; conservative
+string/collection shape admission rejects oversized in-memory projections before JSON encoding. Corrupt, obsolete, or oversized
+files self-delete. Cache roots are backup-excluded, files request complete-until-first-authentication
+protection as part of atomic creation, profile removal deletes only its hashed file, and generation
+ordering rejects stale checkpoints. Load/save signposts report only admitted aggregate item and
+encoded-byte counts. It is disposable presentation state, not session truth.
 
 ## Removed architecture
 
