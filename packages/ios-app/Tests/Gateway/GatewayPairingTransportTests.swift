@@ -122,6 +122,23 @@ struct GatewayPairingTransportTests {
         }
     }
 
+    @Test("pairing responses are rejected above the transport budget")
+    func oversizedResponse() async {
+        let oversized = String(repeating: "x", count: GatewayPairingPolicy.maximumResponseBytes + 1)
+        let pairer = GatewayPairer(transport: PairingHTTPRecorder(
+            response: Self.response(status: 200, body: oversized)
+        ).transport)
+
+        do {
+            _ = try await pairer.pair(invitation, deviceName: "Test iPhone")
+            Issue.record("oversized pairing response unexpectedly succeeded")
+        } catch let error as URLError {
+            #expect(error.code == .dataLengthExceedsMaximum)
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+    }
+
     @Test("a malformed 200 response remains a decoding failure")
     func malformedSuccess() async throws {
         let recorder = PairingHTTPRecorder(response: Self.response(status: 200, body: #"{"token":"only"}"#))

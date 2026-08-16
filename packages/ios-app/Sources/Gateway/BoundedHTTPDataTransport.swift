@@ -43,7 +43,7 @@ struct BoundedHTTPBodyAccumulator {
     }
 }
 
-private final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var accumulator: BoundedHTTPBodyAccumulator
     private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>?

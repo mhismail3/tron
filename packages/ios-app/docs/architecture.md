@@ -598,9 +598,11 @@ APNs implementation under the unchanged production bundle identifier. This
 one-way cleanup does not request notification permission or restore push delivery.
 
 Pairing accepts only `tron://pair` invitations containing a host, port, and
-8–32-character one-time code. `GatewayPairer` alone owns the narrow HTTP-data
-boundary for `POST /v1/pair`; it builds the request and deterministically maps
-HTTP status and response bytes while the transport owns no pairing policy. The
+8–32-character one-time code; missing values and every duplicate query key fail closed.
+`GatewayPairer` alone owns the narrow HTTP-data boundary for `POST /v1/pair`; it builds
+the request and deterministically maps HTTP status and response bytes. Production transport
+rejects declared or streamed responses above 64 KiB, and the pairer repeats that admission
+before decoding so injected transports cannot bypass the contract. The
 permanent returned device token goes directly to Keychain. Gateway profiles
 persist non-secret connection metadata only.
 

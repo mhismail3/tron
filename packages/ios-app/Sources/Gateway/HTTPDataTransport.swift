@@ -8,12 +8,9 @@ struct HTTPDataTransport: Sendable {
     }
 
     static let urlSession = HTTPDataTransport { request in
-        let session = URLSession(configuration: .ephemeral)
-        defer { session.invalidateAndCancel() }
-        let (data, response) = try await session.data(for: request)
-        guard let response = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
-        }
-        return (data, response)
+        try await BoundedURLSessionDataLoader.load(
+            request,
+            maximumBytes: GatewayPairingPolicy.maximumResponseBytes
+        )
     }
 }
