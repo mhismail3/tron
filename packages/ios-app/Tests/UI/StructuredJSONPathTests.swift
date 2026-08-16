@@ -52,6 +52,34 @@ struct StructuredJSONPathTests {
         #expect(StructuredJSONPath.resolve(updated, components: path) == .string("completed"))
     }
 
+    @Test("large array fields preserve exact index identity without eager tuple projection")
+    func largeArrayFieldCollection() {
+        let values = (0 ..< 10_000).map { JSONValue.string("/tmp/item-\($0).txt") }
+        let fields = StructuredJSONFields(array: values)
+
+        #expect(fields.count == 10_000)
+        #expect(fields[0].id == .index(0))
+        #expect(fields[0].label == "item-0.txt")
+        #expect(fields[9_999].id == .index(9_999))
+        #expect(fields[9_999].label == "item-9999.txt")
+        #expect(fields[9_999].value == values[9_999])
+    }
+
+    @Test("object fields retain preferred ordering, labels, and structural key identity")
+    func objectFieldCollection() {
+        let fields = StructuredJSONFields(object: [
+            "z_value": .number(3),
+            "status": .string("ready"),
+            "answer": .bool(true),
+            "camelCase": .null,
+        ])
+
+        #expect(fields.map(\.component) == [
+            .key("status"), .key("answer"), .key("camelCase"), .key("z_value"),
+        ])
+        #expect(fields.map(\.label) == ["Status", "Answer", "Camel Case", "Z Value"])
+    }
+
     @Test("removed or type-changed paths fail closed")
     func missingPath() {
         let path: [StructuredJSONPathComponent] = [.key("items"), .index(2)]

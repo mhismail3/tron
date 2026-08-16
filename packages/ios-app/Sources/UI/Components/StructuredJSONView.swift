@@ -55,6 +55,95 @@ enum StructuredJSONPath {
     }
 }
 
+struct StructuredJSONField: Identifiable, Sendable {
+    let position: Int
+    let component: StructuredJSONPathComponent
+    let value: JSONValue
+
+    var id: StructuredJSONPathComponent { component }
+
+    var label: String {
+        switch component {
+        case .key(let key): Self.humanized(key)
+        case .index(let index): Self.arrayItemTitle(value, index: index)
+        }
+    }
+
+    private static func arrayItemTitle(_ value: JSONValue, index: Int) -> String {
+        if let text = value.stringValue, !text.isEmpty {
+            return URL(fileURLWithPath: text).lastPathComponent.ifEmpty(text)
+        }
+        guard let object = value.objectValue else { return "Entry \(index + 1)" }
+        for key in ["name", "title", "displayName", "label", "id", "source", "path", "filePath", "command"] {
+            guard let text = object[key]?.stringValue, !text.isEmpty else { continue }
+            return ["path", "filePath"].contains(key)
+                ? URL(fileURLWithPath: text).lastPathComponent.ifEmpty(text)
+                : text
+        }
+        if let provider = object["provider"]?.stringValue,
+           let id = object["modelId"]?.stringValue ?? object["id"]?.stringValue {
+            return "\(provider) / \(id)"
+        }
+        return "Entry \(index + 1)"
+    }
+
+    private static func humanized(_ value: String) -> String {
+        value.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
+            .replacingOccurrences(of: "_", with: " ")
+            .capitalized
+    }
+}
+
+struct StructuredJSONFields: RandomAccessCollection, Sendable {
+    typealias Index = Int
+
+    private enum Storage: Sendable {
+        case object(values: [String: JSONValue], keys: [String])
+        case array([JSONValue])
+    }
+
+    private let storage: Storage
+    let startIndex = 0
+    let endIndex: Int
+
+    init(object: [String: JSONValue]) {
+        let keys = object.keys.sorted { Self.fieldRank($0) < Self.fieldRank($1) }
+        storage = .object(values: object, keys: keys)
+        endIndex = keys.count
+    }
+
+    init(array: [JSONValue]) {
+        storage = .array(array)
+        endIndex = array.count
+    }
+
+    subscript(position: Int) -> StructuredJSONField {
+        precondition(indices.contains(position))
+        switch storage {
+        case .object(let values, let keys):
+            let key = keys[position]
+            return StructuredJSONField(
+                position: position,
+                component: .key(key),
+                value: values[key]!
+            )
+        case .array(let values):
+            let value = values[position]
+            return StructuredJSONField(
+                position: position,
+                component: .index(position),
+                value: value
+            )
+        }
+    }
+
+    private static func fieldRank(_ key: String) -> String {
+        let preferred = ["status", "summary", "answer", "report", "result", "message", "warnings", "sources", "citations"]
+        let rank = preferred.firstIndex(of: key) ?? preferred.count
+        return String(format: "%02d-%@", rank, key.lowercased())
+    }
+}
+
 private struct JSONFieldSelection: Identifiable {
     let title: String
     let components: [StructuredJSONPathComponent]
@@ -83,17 +172,9 @@ struct TronStructuredJSONView: View {
         VStack(alignment: .leading, spacing: TronSpacing.section) {
             switch value {
             case .object(let fields):
-                fieldSection(fields.sorted { fieldRank($0.key) < fieldRank($1.key) }.map {
-                    (label: humanized($0.key), component: .key($0.key), value: $0.value)
-                })
+                fieldSection(StructuredJSONFields(object: fields))
             case .array(let values):
-                fieldSection(values.enumerated().map {
-                    (
-                        label: arrayItemTitle($0.element, index: $0.offset),
-                        component: .index($0.offset),
-                        value: $0.element
-                    )
-                })
+                fieldSection(StructuredJSONFields(array: values))
             case .string(let text): primitive(text)
             case .number(let number): primitive(number.formatted())
             case .bool(let value): primitive(value ? "True" : "False")
@@ -140,9 +221,7 @@ struct TronStructuredJSONView: View {
     }
 
     @ViewBuilder
-    private func fieldSection(
-        _ fields: [(label: String, component: StructuredJSONPathComponent, value: JSONValue)]
-    ) -> some View {
+    private func fieldSection(_ fields: StructuredJSONFields) -> some View {
         if fields.isEmpty {
             primitive("Empty collection")
         } else {
@@ -152,8 +231,8 @@ struct TronStructuredJSONView: View {
                     .foregroundStyle(Color.tronTextMuted)
                 TronGlassCard(accent: accent) {
                     LazyVStack(spacing: 0) {
-                        ForEach(Array(fields.enumerated()), id: \.offset) { index, field in
-                            if index > 0 { TronSettingsDivider(accent: accent) }
+                        ForEach(fields) { field in
+                            if field.position > 0 { TronSettingsDivider(accent: accent) }
                             Button {
                                 selectedField = JSONFieldSelection(
                                     title: field.label,
@@ -204,35 +283,6 @@ struct TronStructuredJSONView: View {
             .tronGlassSurface(accent: accent, tintOpacity: 0.10)
     }
 
-    private func arrayItemTitle(_ value: JSONValue, index: Int) -> String {
-        if let text = value.stringValue, !text.isEmpty {
-            return URL(fileURLWithPath: text).lastPathComponent.ifEmpty(text)
-        }
-        guard let object = value.objectValue else { return "Entry \(index + 1)" }
-        for key in ["name", "title", "displayName", "label", "id", "source", "path", "filePath", "command"] {
-            guard let text = object[key]?.stringValue, !text.isEmpty else { continue }
-            return ["path", "filePath"].contains(key)
-                ? URL(fileURLWithPath: text).lastPathComponent.ifEmpty(text)
-                : text
-        }
-        if let provider = object["provider"]?.stringValue,
-           let id = object["modelId"]?.stringValue ?? object["id"]?.stringValue {
-            return "\(provider) / \(id)"
-        }
-        return "Entry \(index + 1)"
-    }
-
-    private func humanized(_ value: String) -> String {
-        value.replacingOccurrences(of: "([a-z0-9])([A-Z])", with: "$1 $2", options: .regularExpression)
-            .replacingOccurrences(of: "_", with: " ")
-            .capitalized
-    }
-
-    private func fieldRank(_ key: String) -> String {
-        let preferred = ["status", "summary", "answer", "report", "result", "message", "warnings", "sources", "citations"]
-        let rank = preferred.firstIndex(of: key) ?? preferred.count
-        return String(format: "%02d-%@", rank, key.lowercased())
-    }
 }
 
 private struct JSONFieldSheet: View {
