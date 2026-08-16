@@ -60,9 +60,13 @@ failure is best effort after canonical import/deletion success and cannot turn t
 ambiguous command receipt; failed session-folder cleanup remains pending in the live store and retries
 on later inventory work. Transient image/export blobs reject individual values above 25 MiB or MIME metadata above 1 KiB
 and retain at most 128 items/200 MiB; exact content deduplicates and access refreshes 30-minute idle
-expiry. Capacity admission never evicts an ID already published to a client: excess projected images
-become bounded omission text, while later requests can retry after expiry. Generated exports are
-size-checked before their first full-file read. The retired `/engine` protocol is not exposed.
+expiry. Generated exports move into protected transient storage and stream to authenticated readers with backpressure,
+without retained export `Buffer` values. Active downloads survive pruning; expired IDs admit no new readers, and physical
+capacity releases after the final reader. Startup scavenges transient files only after the Gateway binds successfully.
+Capacity admission never evicts an ID already published to a client: excess projected images become bounded omission
+text, while later requests can retry after expiry. Blob storage rejects control-bearing MIME metadata. Downloads remain
+full-body responses without Range support.
+The retired `/engine` protocol is not exposed.
 
 Every WebSocket starts with:
 

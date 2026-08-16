@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
@@ -1333,7 +1333,7 @@ export class RuntimeSlot {
       if (!metadata.isFile() || metadata.size > BLOB_MAX_ITEM_BYTES) {
         throw new GatewayError("conflict", "Session export exceeds the 25 MiB limit");
       }
-      return { blobId: this.dependencies.blobs.registerData(await readFile(path), mimeType), name, mimeType };
+      return { blobId: await this.dependencies.blobs.registerFile(path, mimeType), name, mimeType };
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

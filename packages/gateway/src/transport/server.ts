@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server as HTTPServer, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { GatewayError, publicError } from "../errors.js";
@@ -155,6 +156,7 @@ export class GatewayServer {
   private readonly clients = new Map<string, Connection>();
   private readonly pairingLimiter = new RateLimiter(10, 10 * 60_000);
   private readonly heartbeat: NodeJS.Timeout;
+  private ready = false;
   private shuttingDown = false;
 
   constructor(
@@ -187,7 +189,7 @@ export class GatewayServer {
     this.heartbeat.unref();
   }
 
-  async listen(): Promise<void> {
+  async listen(afterBind: () => Promise<void> = async () => {}): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       this.server.once("error", reject);
       this.server.listen(this.options.port, this.options.host, () => {
@@ -195,6 +197,13 @@ export class GatewayServer {
         resolve();
       });
     });
+    try {
+      await afterBind();
+      this.ready = true;
+    } catch (error) {
+      await new Promise<void>((resolve) => this.server.close(() => resolve()));
+      throw error;
+    }
     this.options.logger.log("info", `Gateway listening on ${this.options.host}:${this.options.port}`);
   }
 
@@ -240,6 +249,18 @@ export class GatewayServer {
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
     try {
       const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+      if (!this.ready) {
+        const info = this.options.service.info() as Record<string, JsonValue>;
+        if (request.method === "GET" && url.pathname === "/health") {
+          return sendJson(response, 503, {
+            status: "starting",
+            gatewayVersion: info.gatewayVersion,
+            protocolVersion: info.protocolVersion,
+            minProtocolVersion: info.minProtocolVersion,
+          });
+        }
+        return sendJson(response, 503, { error: { code: "busy", message: "Gateway is starting", retryable: true } });
+      }
       if (request.method === "GET" && url.pathname === "/health") {
         const info = this.options.service.info() as Record<string, JsonValue>;
         return sendJson(response, this.shuttingDown ? 503 : 200, {
@@ -279,18 +300,26 @@ export class GatewayServer {
       }
       if (request.method === "GET" && url.pathname.startsWith("/v1/blobs/")) {
         const id = decodeURIComponent(url.pathname.slice("/v1/blobs/".length));
-        const blob = this.options.sessions.getBlob(id);
-        response.writeHead(200, {
-          "content-type": blob.mimeType,
-          "content-length": blob.data.length,
-          "cache-control": "private, max-age=300",
-          "x-content-type-options": "nosniff",
-        });
-        response.end(blob.data);
+        const lease = await this.options.sessions.acquireBlob(id);
+        try {
+          response.writeHead(200, {
+            "content-type": lease.mimeType,
+            "content-length": lease.size,
+            "cache-control": "private, max-age=300",
+            "x-content-type-options": "nosniff",
+          });
+          await pipeline(lease.stream, response);
+        } finally {
+          await lease.release();
+        }
         return;
       }
       sendJson(response, 404, { error: { code: "not_found", message: "Route not found" } });
     } catch (error) {
+      if (response.headersSent) {
+        response.destroy(error instanceof Error ? error : undefined);
+        return;
+      }
       const failure = publicError(error);
       const status = failure.code === "unauthenticated" ? 401
         : failure.code === "not_found" ? 404
@@ -313,7 +342,7 @@ export class GatewayServer {
         return;
       }
       const authenticated = await this.options.devices.authenticate(bearer(request));
-      if (!authenticated || this.shuttingDown) {
+      if (!authenticated || !this.ready || this.shuttingDown) {
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
@@ -527,6 +556,7 @@ export class GatewayServer {
   async close(): Promise<void> {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
+    this.ready = false;
     clearInterval(this.heartbeat);
     for (const client of this.clients.values()) {
       this.send(client, { type: "event", topic: "system.stopping", payload: {} });

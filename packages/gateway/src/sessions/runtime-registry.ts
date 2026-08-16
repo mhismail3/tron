@@ -13,7 +13,7 @@ export class RuntimeRegistry {
   private readonly slots = new Map<string, RuntimeSlot>();
   private readonly mutex = new AsyncMutex();
   private readonly catalogMutex = new AsyncMutex();
-  private readonly blobs = new BlobStore();
+  private readonly blobs: BlobStore;
   private readonly markers: RunMarkerStore;
   private interrupted = new Set<string>();
   private readonly subscribers = new Map<string, Set<string>>();
@@ -37,6 +37,7 @@ export class RuntimeRegistry {
       sessionListChanged: () => void;
     },
   ) {
+    this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.markers = new RunMarkerStore(options.tronHome);
   }
 
@@ -48,6 +49,10 @@ export class RuntimeRegistry {
     this.interrupted = await this.markers.interruptedSessionIds();
     this.evictionTimer = setInterval(() => void this.evictIdle(), 60_000);
     this.evictionTimer.unref();
+  }
+
+  initializeBlobStorage(): Promise<void> {
+    return this.blobs.initialize();
   }
 
   private hooks() {
@@ -471,9 +476,10 @@ export class RuntimeRegistry {
       if (!slot.isBusy) await slot.dispose();
     }));
     this.slots.clear();
+    await this.blobs.dispose();
   }
 
-  getBlob(id: string): { data: Buffer; mimeType: string } {
-    return this.blobs.get(id);
+  acquireBlob(id: string) {
+    return this.blobs.acquire(id);
   }
 }

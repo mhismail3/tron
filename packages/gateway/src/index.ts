@@ -160,4 +160,4 @@ process.on("unhandledRejection", (error) => {
 
 const enrollmentTimer = setInterval(() => void devices.ensureEnrollment(), 60_000);
 enrollmentTimer.unref();
-await transport.listen();
+await transport.listen(() => sessions.initializeBlobStorage());
