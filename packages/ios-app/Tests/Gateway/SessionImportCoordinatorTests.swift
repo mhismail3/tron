@@ -122,7 +122,7 @@ struct SessionImportCoordinatorTests {
             try await gate.waitUntilStarted()
             #expect(access.stopCount == 1)
 
-            harness.profiles.select(harness.replacementProfile)
+            try harness.profiles.select(harness.replacementProfile)
             await gate.succeed(with: "old-upload")
 
             await expectCancellation(importing)
@@ -183,7 +183,10 @@ struct SessionImportCoordinatorTests {
             let profiles = GatewayProfileStore(defaults: defaults)
             let access = FileAccessRecorder(
                 data: Data("read".utf8),
-                onRead: { profiles.select(replacement) }
+                onRead: {
+                    do { try profiles.select(replacement) }
+                    catch { Issue.record("profile replacement failed: \(error)") }
+                }
             )
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(
@@ -250,7 +253,7 @@ struct SessionImportCoordinatorTests {
 
             let mutation = try await request(in: harness.socket, frameIndex: 1)
             #expect(mutation.method == "session.import")
-            harness.profiles.select(harness.replacementProfile)
+            try harness.profiles.select(harness.replacementProfile)
             await harness.socket.enqueue(successResponse(
                 id: mutation.id,
                 result: .object(["sessionId": .string("old-profile-result")])
@@ -537,7 +540,7 @@ struct SessionImportCoordinatorTests {
             ))
             let refresh = try await request(in: socket, frameIndex: 2)
             #expect(refresh.method == "session.list")
-            profiles.select(replacement)
+            try profiles.select(replacement)
             await socket.enqueue(errorResponse(
                 id: refresh.id,
                 code: "synthetic_refresh_failure",

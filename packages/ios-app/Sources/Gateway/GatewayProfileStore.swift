@@ -66,10 +66,12 @@ final class GatewayProfileStore {
         }
     }
 
-    func select(_ profile: GatewayProfile) {
+    func select(_ profile: GatewayProfile) throws {
         let current = document
-        guard current.profiles.contains(where: { $0.id == profile.id }) else { return }
-        try? metadata.save(GatewayProfileDocument(
+        guard current.profiles.contains(where: { $0.id == profile.id }) else {
+            throw GatewayProfileStoreError.unknownProfile
+        }
+        try metadata.save(GatewayProfileDocument(
             profiles: current.profiles,
             selectedProfileID: profile.id
         ))
@@ -118,6 +120,7 @@ final class GatewayProfileStore {
 
 enum GatewayProfileStoreError: Error {
     case invalidEndpoint
+    case unknownProfile
     case rollbackFailed(commit: Error, rollback: Error)
 }
 

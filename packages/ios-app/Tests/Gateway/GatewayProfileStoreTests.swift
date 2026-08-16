@@ -89,6 +89,60 @@ struct GatewayProfileStoreTests {
         #expect(metadata.saveCount == 1)
     }
 
+    @Test("selection persistence failure preserves the prior selected profile")
+    func selectionFailurePreservesPriorProfile() throws {
+        let first = profile(id: "first", label: "First")
+        let second = profile(id: "second", label: "Second")
+        let original = GatewayProfileDocument(profiles: [first, second], selectedProfileID: first.id)
+        let metadata = RecordingProfileMetadata(document: original)
+        metadata.failSaveCalls = [1]
+        let store = GatewayProfileStore(metadata: metadata, tokens: RecordingTokenStore())
+
+        #expect(throws: ProfileStorageProbeError.self) { try store.select(second) }
+        #expect(metadata.document == original)
+        #expect(store.selected == first)
+    }
+
+    @Test("failed selection persistence blocks replacement cache and connection admission")
+    func failedSelectionBlocksLifecycleAdmission() async {
+        let first = profile(id: "first", label: "First")
+        let second = profile(id: "second", label: "Second")
+        let original = GatewayProfileDocument(profiles: [first, second], selectedProfileID: first.id)
+        let metadata = RecordingProfileMetadata(document: original)
+        metadata.failSaveCalls = [1]
+        let store = GatewayProfileStore(
+            metadata: metadata,
+            tokens: RecordingTokenStore(values: [first.id: "first-token", second.id: "second-token"])
+        )
+        let socket = ScriptedGatewaySocket()
+        let socketFactory = ScriptedGatewaySocketFactory(socket: socket)
+        let coordinator = GatewayLifecycleCoordinator(
+            client: GatewayClient(socketFactory: socketFactory.factory),
+            profiles: store,
+            clock: .continuous,
+            reconnectDelayPolicy: .standard,
+            uuidSource: .random,
+            pairer: GatewayPairer(),
+            pairingCommit: { _, _ in },
+            profileTokenLookup: { profile in
+                profile.id == second.id ? "second-token" : "first-token"
+            }
+        )
+        let delegate = ProfileSelectionLifecycleProbe()
+        coordinator.delegate = delegate
+
+        await coordinator.switchGateway(second)
+
+        #expect(store.selected == first)
+        #expect(delegate.loadedProfileIDs.isEmpty)
+        #expect(delegate.surfaceCount == 1)
+        #expect(socketFactory.requests.isEmpty)
+        if case .offline = coordinator.connectionState {} else {
+            Issue.record("failed selection persistence did not leave an offline lifecycle")
+        }
+        await coordinator.teardown()
+    }
+
     @Test("credential deletion failure restores removed profile metadata")
     func removalRollback() throws {
         let first = profile(id: "first", label: "First")
@@ -182,6 +236,27 @@ struct GatewayProfileStoreTests {
             deviceId: "device-\(id)"
         )
     }
+}
+
+@MainActor
+private final class ProfileSelectionLifecycleProbe: GatewayLifecycleProjectionDelegate {
+    private(set) var loadedProfileIDs: [String] = []
+    private(set) var surfaceCount = 0
+
+    func lifecycleLoadCache(
+        profileID: String,
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async {
+        loadedProfileIDs.append(profileID)
+    }
+
+    func lifecycleInvalidateSessionConnectionOwnership() {}
+    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
+    func lifecycleRetireProjection(final: Bool) async {}
+    func lifecycleSurface(_ error: Error) { surfaceCount += 1 }
 }
 
 private enum ProfileStorageProbeError: Error { case failed }

@@ -263,7 +263,15 @@ final class GatewayLifecycleCoordinator {
             ))
             return
         }
-        profiles.select(profile)
+        do {
+            try profiles.select(profile)
+        } catch {
+            finishTransition(generation)
+            connectionState = .offline(error.localizedDescription)
+            hasResolvedLaunchState = true
+            delegate?.lifecycleSurface(error)
+            return
+        }
         finishTransition(generation)
         let admission = Admission(generation: generation, connectionID: nil)
         await delegate?.lifecycleLoadCache(profileID: profile.id, admission: admission)
