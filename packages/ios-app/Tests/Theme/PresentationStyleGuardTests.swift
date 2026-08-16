@@ -97,8 +97,8 @@ struct PresentationStyleGuardTests {
     @Test("settings and modal details use composed glass groups instead of stock collections")
     func noStockSettingsCollections() {
         let composedOwners = [
-            "AgentDefaultsSettingsView.swift", "AgentExtensionSettings.swift", "AppearanceSettingsView.swift",
-            "ConnectionSettingsView.swift", "PackagesSettingsView.swift", "ProviderSettingsView.swift",
+            "AgentDefaultsSettingsView.swift", "AppearanceSettingsView.swift", "ConnectionSettingsView.swift",
+            "CustomModelsSettingsView.swift", "GatewayDiagnosticsView.swift", "PackagesSettingsView.swift", "ProviderSettingsView.swift",
             "RuntimeSettingsViews.swift", "SettingsView.swift", "ProjectResourcesView.swift", "ExtensionInteractionSheet.swift",
             "SessionContextSheet.swift", "SessionTreeSheet.swift",
         ]
@@ -400,8 +400,12 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ProjectResourcesView.swift"),
             encoding: .utf8
         )
+        let customModels = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/CustomModelsSettingsView.swift"),
+            encoding: .utf8
+        )
         let settings = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/AgentExtensionSettings.swift"),
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/GatewayDiagnosticsView.swift"),
             encoding: .utf8
         )
         let packages = try String(
@@ -426,7 +430,7 @@ struct PresentationStyleGuardTests {
         #expect(!settings.contains("model.client"))
         #expect(diagnostics.contains("request(\"git.inspect\""))
         #expect(diagnostics.contains("request(\"system.logs\""))
-        #expect(settings.contains("Advanced JSON"))
+        #expect(customModels.contains("Advanced JSON"))
         let packageOverview = packages.components(separatedBy: "struct PackageResolvedResourcesView").first ?? ""
         let packageDetail = packages.components(separatedBy: "struct PackageResolvedResourcesView").dropFirst().first ?? ""
         #expect(packageOverview.contains("TronProgressiveSheetLink("))

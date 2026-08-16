@@ -132,8 +132,8 @@ The onboarding flow retains step/state orchestration while navigation-title, pai
 chrome lives in a separate presentation component file with unchanged UIKit/SwiftUI behavior.
 `ChatView` retains route/composer/transcript composition while attachment controls and chips, entrance/render
 rows, and extension widgets live in separate presentation files with unchanged identities and transitions.
-The settings shell and its appearance, connection/import, provider, agent-default, and package destinations live
-in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators.
+The settings shell and its appearance, connection/import, provider, agent-default, package, trust, custom-model,
+and diagnostics destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators.
 Resolved package JSON is constructed only inside its progressive detail destination; the overview retains a
 constant-depth top-level count instead of recursively rendering a potentially large resource tree.
 Terminal sheet composition, presentation lifecycle/error state, and native SwiftTerm/keyboard rendering live
