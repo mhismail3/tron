@@ -429,8 +429,11 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
 ```
 
 `ChatPerformanceBaselineTests` is opt-in and records five post-warm-up timing,
-CPU, physical-memory, malloc-zone allocation, and scroll-animation signpost
-samples against the 10,000-entry hosted fixture. `Tron Device Performance` uses
+CPU, physical-memory, and malloc-zone allocation samples. Its opening benchmark
+also records the scroll-animation signpost against the 10,000-entry hosted fixture;
+separate microbenchmarks measure cumulative Markdown preparation throughput and
+static thumbnail/full-preview decode boundaries without claiming arrival cadence,
+projection coalescing, or media-owner lifecycle behavior. `Tron Device Performance` uses
 the provisioned app identity with `HOSTED_TEST` for test/profile actions; its archive
 action points to `Prod` so hosted hooks cannot enter an archive. Run the test only at
 explicit checkpoints and keep device identifiers

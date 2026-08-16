@@ -109,6 +109,36 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         XCTAssertTrue(settledGroup.waitForExistence(timeout: 5))
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@", "Used 3 tools")).count, 1)
         XCTAssertLessThan(settledGroup.frame.maxY, app.textViews["Message input"].frame.minY)
+
+        settledGroup.tap()
+        XCTAssertTrue(app.staticTexts["Used 3 tools"].waitForExistence(timeout: 4))
+        let completedCommand = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Run command")).firstMatch
+        XCTAssertTrue(completedCommand.waitForExistence(timeout: 4))
+        completedCommand.tap()
+        XCTAssertTrue(app.staticTexts["Run command"].waitForExistence(timeout: 4))
+        let technicalDetails = app.buttons["Technical details"]
+        XCTAssertTrue(technicalDetails.waitForExistence(timeout: 4))
+        technicalDetails.tap()
+        XCTAssertTrue(app.staticTexts["Technical details"].waitForExistence(timeout: 4))
+        let requestJSON = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Inspect Request JSON")).firstMatch
+        let resultJSON = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Inspect Result JSON")).firstMatch
+        XCTAssertTrue(requestJSON.waitForExistence(timeout: 4))
+        XCTAssertTrue(resultJSON.waitForExistence(timeout: 4))
+        XCTAssertLessThan(requestJSON.frame.minY, resultJSON.frame.minY)
+        assertAccessibilityAuditPasses(app, screen: "tool technical details")
+
+        tapHittableDone(app)
+        XCTAssertTrue(technicalDetails.waitForExistence(timeout: 4))
+        XCTAssertTrue(technicalDetails.isHittable)
+
+        tapHittableDone(app)
+        XCTAssertTrue(completedCommand.waitForExistence(timeout: 4))
+        XCTAssertTrue(completedCommand.isHittable)
+
+        tapHittableDone(app)
+        XCTAssertTrue(settledGroup.waitForExistence(timeout: 4))
+        XCTAssertTrue(settledGroup.isHittable)
+
         if app.keyboards.firstMatch.exists {
             XCUIDevice.shared.press(.home)
             app.activate()
@@ -317,6 +347,23 @@ final class TronGatewayEndToEndUITests: XCTestCase {
             line: line
         )
         return input
+    }
+
+    @MainActor
+    private func tapHittableDone(
+        _ app: XCUIApplication,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let buttons = app.buttons.matching(identifier: "Done")
+        for index in 0..<buttons.count {
+            let button = buttons.element(boundBy: index)
+            if button.isHittable {
+                button.tap()
+                return
+            }
+        }
+        XCTFail("The active sheet must expose one hittable Done action", file: file, line: line)
     }
 
     @MainActor

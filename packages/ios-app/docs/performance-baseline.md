@@ -115,6 +115,17 @@ inserted into the thumbnail LRU, receive priority at the shared slot, are decode
 ImageIO path, and only one full-preview flight is owned at a time. Consequently only one admitted
 encoded response/decode working set exists at once.
 
+### Phase 6 simulator workload checkpoint
+
+The opt-in baseline suite now measures previously unrepresented preparation throughput and decode boundaries in addition to opening. A five-sample iPhone 17 Pro simulator run on the committed Test configuration consumed 180 cumulative adversarial Markdown revisions derived from the 30/60 Hz source fixtures as a parser/cache throughput workload, one exact maximum-source cold/warm preparation, one thinking segment, sixteen 2,048 × 1,536 oriented thumbnail decodes, and one full-preview decode. Arrival cadence, projection coalescing, single-flight ownership, caching, and eviction remain covered by their deterministic owner tests and require separate displayed-frame/physical calibration; these two microbenchmarks do not claim to measure them.
+
+| Workload | Clock | CPU | Peak physical | Allocator reserved |
+|---|---:|---:|---:|---:|
+| Streaming text/thinking preparation throughput | 0.044 s | 0.045 s | 33,085 kB | 65,945,600 B |
+| Thumbnail/full-preview decode boundary | 1.317 s | 1.325 s | 81,054 kB | 44,613,632 B |
+
+Live allocation deltas remain high-variance diagnostics, matching the original baseline policy. These simulator measurements prove reproducible workload ownership and provide comparison points; they do not replace pinned-device displayed-frame, thermal, or peak-memory acceptance.
+
 These values are provisional safety ratchets rather than measured release targets.
 Pinned-device cold/warm 30/60 Hz Markdown, maximum-source, thinking-segment, image
 page, memory-pressure, preview, pixel/accessibility equivalence, displayed frames,
@@ -132,7 +143,7 @@ explicit environment value is enabled, so normal focused/full suites remain fast
 TRON_PERFORMANCE_BASELINE_VALUE=1 xcodebuild test-without-building \
   -project TronMobile.xcodeproj -scheme 'Tron Fast' -configuration Test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/ChatPerformanceBaselineTests/testMaximumPagedSessionOpeningBaseline \
+  -only-testing:TronMobileTests/ChatPerformanceBaselineTests \
   -resultBundlePath /tmp/tron-perf-simulator.xcresult
 
 # Provisioned pinned device
@@ -140,7 +151,7 @@ TRON_PERFORMANCE_BASELINE_VALUE=1 xcodebuild test-without-building \
   -project TronMobile.xcodeproj -scheme 'Tron Device Performance' \
   -configuration DeviceTest -destination 'platform=iOS,id=<pinned-device-udid>' \
   -derivedDataPath /tmp/tron-perf-device-derived \
-  -only-testing:TronMobileTests/ChatPerformanceBaselineTests/testMaximumPagedSessionOpeningBaseline \
+  -only-testing:TronMobileTests/ChatPerformanceBaselineTests \
   -resultBundlePath /tmp/tron-perf-device.xcresult
 ```
 

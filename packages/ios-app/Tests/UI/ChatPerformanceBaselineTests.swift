@@ -66,6 +66,88 @@ final class ChatPerformanceBaselineTests: XCTestCase {
         }
     }
 
+    func testStreamingTextPreparationThroughputBaseline() throws {
+        guard ProcessInfo.processInfo.environment["TRON_PERFORMANCE_BASELINE"] == "1" else {
+            throw XCTSkip("Run explicitly to collect the pinned performance baseline.")
+        }
+        let builder = SessionScenarioBuilder(seed: 6_401)
+        let updates = builder.markdownStream(updateCount: 60, rate: 30)
+            + builder.markdownStream(updateCount: 120, rate: 60)
+        let maximumSource = String(repeating: "x", count: ChatTextPreparationPolicy.maximumSourceBytes)
+        let options = XCTMeasureOptions()
+        options.iterationCount = 5
+        let metrics: [any XCTMetric] = [
+            XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric(), ProcessAllocationMetric(),
+        ]
+
+        var retirementFailed = false
+        measure(metrics: metrics, options: options) {
+            guard !retirementFailed else { return }
+            let completed = DispatchSemaphore(value: 0)
+            let task = Task {
+                defer { completed.signal() }
+                let cache = ChatTextPreparationCache(
+                    maximumNewMarkdownPreparations: ChatTextPreparationPolicy.maximumMarkdownRevisions,
+                    maximumNewThinkingPreparations: ChatTextPreparationPolicy.maximumThinkingSegments
+                )
+                for update in updates {
+                    if Task.isCancelled { return }
+                    _ = await cache.prepare([.init(
+                        identity: .init(kind: .markdown, value: "streaming"),
+                        source: update.text
+                    )])
+                }
+                if Task.isCancelled { return }
+                _ = await cache.prepare([
+                    .init(identity: .init(kind: .markdown, value: "maximum"), source: maximumSource),
+                    .init(identity: .init(kind: .thinking, value: "thinking"), source: "bounded thinking…"),
+                ])
+                if Task.isCancelled { return }
+                _ = await cache.prepare([
+                    .init(identity: .init(kind: .markdown, value: "maximum"), source: maximumSource),
+                ])
+            }
+            if completed.wait(timeout: .now() + 30) != .success {
+                task.cancel()
+                if completed.wait(timeout: .now() + 5) != .success {
+                    retirementFailed = true
+                    XCTFail("Timed-out preparation work did not retire; remaining measurement iterations are suppressed")
+                    return
+                }
+                XCTFail("Streaming text preparation timed out")
+            }
+        }
+        XCTAssertFalse(retirementFailed)
+    }
+
+    func testImageDecodePreparationBaseline() throws {
+        guard ProcessInfo.processInfo.environment["TRON_PERFORMANCE_BASELINE"] == "1" else {
+            throw XCTSkip("Run explicitly to collect the pinned performance baseline.")
+        }
+        let fixture = try SessionScenarioBuilder(seed: 6_402).generatedImageFixture(
+            format: .jpeg,
+            pixelWidth: 2_048,
+            pixelHeight: 1_536,
+            orientation: .right
+        )
+        let options = XCTMeasureOptions()
+        options.iterationCount = 5
+        let metrics: [any XCTMetric] = [
+            XCTClockMetric(), XCTCPUMetric(), XCTMemoryMetric(), ProcessAllocationMetric(),
+        ]
+
+        measure(metrics: metrics, options: options) {
+            do {
+                for _ in 0..<16 {
+                    _ = try ChatMediaLoader.decodeThumbnail(fixture.encodedData)
+                }
+                _ = try ChatMediaLoader.decodeFullPreview(fixture.encodedData)
+            } catch {
+                XCTFail("Unable to decode the deterministic media fixture: \(error)")
+            }
+        }
+    }
+
     @MainActor
     private static var maximumFramesPerSecond: Int {
         UIApplication.shared.connectedScenes
