@@ -219,6 +219,7 @@ struct PackageConfigurationCoordinatorTests {
             let harness = try await makeHarness()
             harness.owner.installHostedUpdates([
                 update("update-me", scope: .user),
+                update("update-me", scope: .project),
                 update("keep-me", scope: .user),
             ], for: .global)
             let mutation = Task {
@@ -226,10 +227,10 @@ struct PackageConfigurationCoordinatorTests {
             }
             try await harness.socket.waitUntilSent(count: 2)
             let pending = try request(await harness.socket.sentFrames()[1])
-            #expect(harness.owner.updates(for: .global).map(\.source) == ["update-me", "keep-me"])
+            #expect(harness.owner.updates(for: .global).map(\.id) == ["user:update-me", "project:update-me", "user:keep-me"])
             await harness.socket.enqueue(response(id: pending.id, result: .object([:])))
             try await harness.socket.waitUntilSent(count: 3)
-            #expect(harness.owner.updates(for: .global).map(\.source) == ["keep-me"])
+            #expect(harness.owner.updates(for: .global).map(\.id) == ["project:update-me", "user:keep-me"])
             let reload = try request(await harness.socket.sentFrames()[2])
             await harness.socket.enqueue(response(id: reload.id, result: inventory("updated")))
             try await mutation.value
@@ -408,7 +409,12 @@ struct PackageConfigurationCoordinatorTests {
                 "filtered": .bool(false),
                 "installedPath": .null,
             ])]),
-            "resources": .object([:]),
+            "resources": .object([
+                "extensions": .array([]),
+                "skills": .array([]),
+                "prompts": .array([]),
+                "themes": .array([]),
+            ]),
         ])
     }
 

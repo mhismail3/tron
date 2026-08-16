@@ -95,7 +95,8 @@ final class PackageConfigurationCoordinator {
                   mutationAdmission.map({ admits($0, generations: mutationGenerationByTarget) }) ?? true else {
                 return false
             }
-            inventoryByTarget[target] = inventory
+            let admitted = try PackageCatalogPolicy.admit(inventory)
+            inventoryByTarget[target] = admitted
             return true
         } catch {
             guard admits(admission, generations: loadGenerationByTarget),
@@ -117,7 +118,8 @@ final class PackageConfigurationCoordinator {
                 timeout: Self.checkUpdatesTimeout
             )
             guard admits(admission, generations: updateGenerationByTarget) else { return false }
-            updatesByTarget[target] = response.updates
+            let admitted = try PackageCatalogPolicy.admit(response.updates)
+            updatesByTarget[target] = admitted
             return true
         } catch {
             guard admits(admission, generations: updateGenerationByTarget) else { return false }
@@ -157,7 +159,8 @@ final class PackageConfigurationCoordinator {
         case (.update, nil):
             updatesByTarget[target] = []
         case (.update, .some(let source)), (.remove, .some(let source)):
-            updatesByTarget[target]?.removeAll { $0.source == source }
+            let scope: PackageSummary.Scope = local ? .project : .user
+            updatesByTarget[target]?.removeAll { $0.source == source && $0.scope == scope }
         default:
             break
         }

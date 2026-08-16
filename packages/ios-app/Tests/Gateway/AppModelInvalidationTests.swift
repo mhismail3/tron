@@ -320,7 +320,15 @@ struct AppModelInvalidationTests {
         try await respond(
             toFrameAt: 2,
             on: socket,
-            result: .object(["packages": .array([]), "resources": .object([:])])
+            result: .object([
+                "packages": .array([]),
+                "resources": .object([
+                    "extensions": .array([]),
+                    "skills": .array([]),
+                    "prompts": .array([]),
+                    "themes": .array([]),
+                ]),
+            ])
         )
         _ = await packages.value
 

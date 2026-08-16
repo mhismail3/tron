@@ -32,6 +32,104 @@ struct PackageUpdate: Codable, Hashable, Identifiable, Sendable {
     var id: String { "\(scope.rawValue):\(source)" }
 }
 
+enum PackageCatalogPolicy {
+    private struct UpdateEnvelope: Encodable {
+        let updates: [PackageUpdate]
+    }
+
+    static let maximumPackages = 256
+    static let maximumUpdates = 256
+    static let maximumStringBytes = 8_192
+
+    static func admit(_ inventory: PackageInventory) throws -> PackageInventory {
+        guard inventory.packages.count <= maximumPackages else { throw invalidCatalog() }
+        var identities = Set<String>()
+        identities.reserveCapacity(inventory.packages.count)
+        for package in inventory.packages {
+            guard !package.source.isEmpty,
+                  package.source.utf8.count <= maximumStringBytes,
+                  package.id.utf8.count <= maximumStringBytes,
+                  package.installedPath.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
+                  identities.insert(package.id).inserted else {
+                throw invalidCatalog()
+            }
+        }
+        try validateResources(inventory.resources)
+        guard let encoded = try? JSONEncoder().encode(inventory), encoded.count <= 768 * 1_024 else {
+            throw invalidCatalog()
+        }
+        return inventory
+    }
+
+    static func admit(_ updates: [PackageUpdate]) throws -> [PackageUpdate] {
+        guard updates.count <= maximumUpdates else { throw invalidCatalog() }
+        var identities = Set<String>()
+        identities.reserveCapacity(updates.count)
+        for update in updates {
+            guard !update.source.isEmpty,
+                  update.source.utf8.count <= maximumStringBytes,
+                  update.id.utf8.count <= maximumStringBytes,
+                  !update.displayName.isEmpty,
+                  update.displayName.utf8.count <= maximumStringBytes,
+                  !update.type.isEmpty,
+                  update.type.utf8.count <= maximumStringBytes,
+                  identities.insert(update.id).inserted else {
+                throw invalidCatalog()
+            }
+        }
+        guard let encoded = try? JSONEncoder().encode(UpdateEnvelope(updates: updates)),
+              encoded.count <= 768 * 1_024 else {
+            throw invalidCatalog()
+        }
+        return updates
+    }
+
+    private static func validateResources(_ resources: JSONValue) throws {
+        guard case .object(let root) = resources,
+              Set(root.keys) == Set(["extensions", "skills", "prompts", "themes"]) else {
+            throw invalidCatalog()
+        }
+        for kind in ["extensions", "skills", "prompts", "themes"] {
+            guard case .array(let values)? = root[kind], values.count <= 1_000 else {
+                throw invalidCatalog()
+            }
+            var paths = Set<String>()
+            paths.reserveCapacity(values.count)
+            for value in values {
+                guard case .object(let item) = value,
+                      case .string(let path)? = item["path"],
+                      !path.isEmpty,
+                      path.utf8.count <= maximumStringBytes,
+                      case .bool? = item["enabled"],
+                      case .object(let metadata)? = item["metadata"],
+                      case .string(let source)? = metadata["source"],
+                      !source.isEmpty,
+                      source.utf8.count <= maximumStringBytes,
+                      case .string(let scope)? = metadata["scope"],
+                      ["user", "project", "temporary"].contains(scope),
+                      case .string(let origin)? = metadata["origin"],
+                      ["package", "top-level"].contains(origin),
+                      metadata["baseDir"].map({ value in
+                          if case .string(let path) = value { return path.utf8.count <= maximumStringBytes }
+                          return false
+                      }) ?? true,
+                      paths.insert(path).inserted else {
+                    throw invalidCatalog()
+                }
+            }
+        }
+    }
+
+    private static func invalidCatalog() -> GatewayFailure {
+        GatewayFailure(
+            code: "invalid_response",
+            message: "The package catalog from the Mac is invalid or too large.",
+            retryable: true,
+            details: nil
+        )
+    }
+}
+
 struct ProviderSummary: Codable, Hashable, Identifiable, Sendable {
     let id: String
     let name: String

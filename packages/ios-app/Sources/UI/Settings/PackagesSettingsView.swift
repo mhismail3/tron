@@ -87,7 +87,7 @@ struct PackagesSettingsView: View {
                             .disabled(projectCWD == nil)
                         Button("Install Package") { install() }
                             .buttonStyle(TronActionButtonStyle(role: .primary))
-                            .disabled(source.isEmpty || workingSources.contains(source))
+                            .disabled(source.isEmpty || workingSources.contains("install:\(source)"))
                     }
                     .padding(12)
                 }
@@ -151,10 +151,10 @@ struct PackagesSettingsView: View {
         TronValueRow(
             icon: "shippingbox.fill",
             title: package.source,
-            detail: [package.scope == .project ? "Project" : "Global", package.filtered ? "Filtered" : nil, updates.contains { $0.source == package.source } ? "Update available" : nil]
+            detail: [package.scope == .project ? "Project" : "Global", package.filtered ? "Filtered" : nil, updates.contains { $0.id == package.id } ? "Update available" : nil]
                 .compactMap { $0 }.joined(separator: " · ")
         ) {
-            if workingSources.contains(package.source) {
+            if workingSources.contains(package.id) {
                 ProgressView().controlSize(.small)
             } else {
                 Menu {
@@ -169,9 +169,10 @@ struct PackagesSettingsView: View {
 
     private func install() {
         let value = source
-        workingSources.insert(value)
+        let identity = "install:\(value)"
+        workingSources.insert(identity)
         Task {
-            defer { workingSources.remove(value) }
+            defer { workingSources.remove(identity) }
             do {
                 try await model.mutatePackage(action: .install, source: value, local: local, target: target)
                 source = ""
@@ -180,19 +181,19 @@ struct PackagesSettingsView: View {
     }
 
     private func update(_ package: PackageSummary) {
-        workingSources.insert(package.source)
+        workingSources.insert(package.id)
         Task {
-            defer { workingSources.remove(package.source) }
+            defer { workingSources.remove(package.id) }
             do { try await model.mutatePackage(action: .update, source: package.source, local: package.scope == .project, target: target) }
             catch { model.presentConfigurationActionError(error) }
         }
     }
 
     private func remove(_ package: PackageSummary) {
-        workingSources.insert(package.source)
+        workingSources.insert(package.id)
         packageToRemove = nil
         Task {
-            defer { workingSources.remove(package.source) }
+            defer { workingSources.remove(package.id) }
             do { try await model.mutatePackage(action: .remove, source: package.source, local: package.scope == .project, target: target) }
             catch { model.presentConfigurationActionError(error) }
         }
