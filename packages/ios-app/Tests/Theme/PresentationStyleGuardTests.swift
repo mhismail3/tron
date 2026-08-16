@@ -97,8 +97,10 @@ struct PresentationStyleGuardTests {
     @Test("settings and modal details use composed glass groups instead of stock collections")
     func noStockSettingsCollections() {
         let composedOwners = [
-            "AgentExtensionSettings.swift", "RuntimeSettingsViews.swift", "SettingsView.swift", "ProjectResourcesView.swift",
-            "ExtensionInteractionSheet.swift", "SessionContextSheet.swift", "SessionTreeSheet.swift",
+            "AgentDefaultsSettingsView.swift", "AgentExtensionSettings.swift", "AppearanceSettingsView.swift",
+            "ConnectionSettingsView.swift", "ProviderSettingsView.swift", "RuntimeSettingsViews.swift",
+            "SettingsView.swift", "ProjectResourcesView.swift", "ExtensionInteractionSheet.swift",
+            "SessionContextSheet.swift", "SessionTreeSheet.swift",
         ]
         for (url, source) in uiSources where composedOwners.contains(url.lastPathComponent) {
             #expect(source.matches(#"\b(Form|List)(\([^\n]*\))?\s*\{"#) == 0,
@@ -342,18 +344,39 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/SettingsView.swift"),
             encoding: .utf8
         )
+        let providerSettings = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ProviderSettingsView.swift"),
+            encoding: .utf8
+        )
         let providers = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Onboarding/SetupComponents.swift"),
             encoding: .utf8
         )
+        let appearance = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/AppearanceSettingsView.swift"),
+            encoding: .utf8
+        )
+        let connections = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ConnectionSettingsView.swift"),
+            encoding: .utf8
+        )
+        let defaults = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/AgentDefaultsSettingsView.swift"),
+            encoding: .utf8
+        )
         #expect(!settings.contains("NavigationLink"))
-        #expect(settings.contains("private struct TronProgressiveSheetLink"))
+        #expect(settings.contains("struct TronProgressiveSheetLink"))
+        #expect(!settings.contains("struct AppearanceSettingsView"))
+        #expect(appearance.contains("struct AppearanceSettingsView"))
+        #expect(connections.contains("struct ConnectionsSettingsView"))
+        #expect(providerSettings.contains("struct ProvidersSettingsView"))
+        #expect(defaults.contains("struct AgentDefaultsSettingsView"))
         #expect(settings.contains(".sheet(isPresented: $isPresented)"))
         #expect(!settings.contains("Button(\"Log Out\""))
         #expect(settings.contains("enum Scope { case dashboard, project }"))
         #expect(settings.contains("if scope == .project"))
-        #expect(settings.contains(".providerAuthPresenter()"))
-        #expect(settings.contains("currently visible provider"))
+        #expect(providerSettings.contains(".providerAuthPresenter()"))
+        #expect(providerSettings.contains("currently visible provider"))
         #expect(providers.contains("Button(\"Log Out\", systemImage: \"rectangle.portrait.and.arrow.right\", role: .destructive)"))
         #expect(providers.contains("Image(systemName: \"ellipsis\")"))
     }
@@ -1093,7 +1116,7 @@ struct PresentationStyleGuardTests {
         let sheetOwners = [
             "Sources/UI/Chat/SessionTreeSheet.swift",
             "Sources/UI/Settings/AgentExtensionSettings.swift",
-            "Sources/UI/Settings/SettingsView.swift",
+            "Sources/UI/Settings/ProviderSettingsView.swift",
         ]
         for path in sheetOwners {
             let source = try String(contentsOf: packageRoot.appending(path: path), encoding: .utf8)
