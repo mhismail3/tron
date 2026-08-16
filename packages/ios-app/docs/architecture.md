@@ -114,7 +114,12 @@ races. Stale successful attachments schedule an exact-connection compensating de
 presentation still owns that terminal; a matching new attach cancels and joins unsent cleanup first.
 Resize debounce is keyed by exact presentation intent inside the owner: 120 ms and the existing
 20...400-column/5...200-row bounds are unchanged, supersession is silent, distinct presentations remain
-independent, and intent/route/profile retirement cancels pending work. `AppModel` retains only the terminal façade and cross-domain
+independent, and intent/route/profile retirement cancels pending work. The sheet presentation controller
+owns one active start/show/open flight and one latest pending route. Read-only phases cancel on replacement;
+possibly-sent attach/open phases finish under their revoked intent so stale completed receipts reach compensating
+cleanup, while an exact-intent replay gate prevents a confirmed-missing open from creating a new PTY. Only the
+newest pending route launches afterward, and terminal action failures use a dedicated visible alert without
+removing the native renderer. `AppModel` retains only the terminal façade and cross-domain
 Gateway event/lifecycle routing; canonical session subscription ownership stays in `SessionPresentationStore`.
 It loads a bounded disposable cache first, connects, fetches
 cursor-paginated sessions and model catalogs, and replaces local state with

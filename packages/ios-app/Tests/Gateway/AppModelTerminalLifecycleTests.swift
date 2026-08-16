@@ -72,6 +72,37 @@ struct AppModelTerminalLifecycleTests {
         }
     }
 
+    @Test("a completed open after presentation revocation is compensated")
+    func staleOpenIsCompensated() async throws {
+        try await withHarness { harness in
+            try installHostedTerminalSession(on: harness.model)
+            let target = harness.model.beginTerminalPresentation(sessionID: "session")
+            let intent = try #require(harness.model.beginTerminalIntent(for: target))
+            let opening = Task {
+                try await harness.model.openTerminal(intent: intent, columns: 80, rows: 24)
+            }
+            let open = try await request(in: harness.socket, frameIndex: 1)
+            harness.model.closeTerminalPresentation(target)
+            let replay = terminalReplayResult(chunks: [], terminalID: "opened-terminal")
+            await harness.socket.enqueue(successResponse(
+                id: open.id,
+                result: .object([
+                    "terminal": replay.objectValue!["terminal"]!,
+                    "replay": replay,
+                ])
+            ))
+            await expectCancellation(opening)
+
+            let detach = try await request(in: harness.socket, frameIndex: 2)
+            #expect(detach.method == "terminal.detach")
+            #expect(detach.params?.objectValue?["terminalId"] == .string("opened-terminal"))
+            await harness.socket.enqueue(successResponse(
+                id: detach.id,
+                result: .object(["detached": .bool(true)])
+            ))
+        }
+    }
+
     @Test("events delivered before an open response join its admitted replay")
     func pendingOpenEventsAreQuarantined() async throws {
         try await withHarness { harness in
@@ -461,6 +492,203 @@ struct AppModelTerminalLifecycleTests {
             }
             for _ in 0..<20 { await Task.yield() }
             #expect(await harness.socket.sentFrames().count == 5)
+        }
+    }
+
+    @Test("terminal presentation lifecycle cancels a superseded read before connection work")
+    func presentationLifecycleCancelsSupersededRead() async throws {
+        try await withHarness { harness in
+            try installHostedTerminalSession(on: harness.model)
+            let controller = TerminalController()
+            await harness.socket.suspendSends()
+            controller.start(sessionID: "session", model: harness.model)
+            try await harness.socket.waitUntilSendInvoked(count: 2)
+            controller.show(terminalSummary(id: "terminal-b"), model: harness.model)
+            try await harness.socket.waitUntilSendInvoked(count: 3)
+            await harness.socket.releaseSend()
+
+            let attach = try await request(in: harness.socket, frameIndex: 1)
+            #expect(attach.method == "terminal.attach")
+            #expect(attach.params?.objectValue?["terminalId"] == .string("terminal-b"))
+            await harness.socket.enqueue(successResponse(
+                id: attach.id,
+                result: terminalReplayResult(chunks: [], terminalID: "terminal-b")
+            ))
+            try await eventually { controller.terminal?.id == "terminal-b" }
+            #expect(await harness.socket.sentFrames().count == 2)
+            controller.stop(model: harness.model)
+        }
+    }
+
+    @Test("revoked terminal open never replays a confirmed-missing command")
+    func revokedOpenDoesNotReplayMissingCommand() async throws {
+        try await withHarness { harness in
+            try installHostedTerminalSession(on: harness.model)
+            let controller = TerminalController()
+            controller.start(sessionID: "session", model: harness.model)
+            let list = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.failNextSend(GatewayFailure(
+                code: "disconnected",
+                message: "synthetic",
+                retryable: true,
+                details: nil
+            ))
+            await harness.socket.enqueue(successResponse(
+                id: list.id,
+                result: .object(["terminals": .array([])])
+            ))
+            let status = try await request(in: harness.socket, frameIndex: 2)
+            #expect(status.method == "command.status")
+            #expect(status.params?.objectValue?["method"] == .string("terminal.open"))
+
+            controller.show(terminalSummary(id: "terminal-b"), model: harness.model)
+            await harness.socket.enqueue(successResponse(
+                id: status.id,
+                result: .object(["status": .string("missing")])
+            ))
+            let attach = try await request(in: harness.socket, frameIndex: 3)
+            #expect(attach.method == "terminal.attach")
+            #expect(attach.params?.objectValue?["terminalId"] == .string("terminal-b"))
+            await harness.socket.enqueue(successResponse(
+                id: attach.id,
+                result: terminalReplayResult(chunks: [], terminalID: "terminal-b")
+            ))
+            try await eventually { controller.terminal?.id == "terminal-b" }
+
+            let methods = try await harness.socket.sentFrames().dropFirst().map { data in
+                try JSONDecoder.gateway.decode(JSONValue.self, from: data)
+                    .objectValue?["method"]?.stringValue
+            }
+            #expect(!methods.compactMap { $0 }.contains("terminal.open"))
+            controller.stop(model: harness.model)
+        }
+    }
+
+    @Test("terminal presentation lifecycle preserves in-flight cleanup and coalesces navigation")
+    func presentationLifecycleCoalescesNavigation() async throws {
+        try await withHarness { harness in
+            try installHostedTerminalSession(on: harness.model)
+            let controller = TerminalController()
+            let existing = terminalSummary(id: "terminal-a")
+            controller.start(sessionID: "session", model: harness.model)
+
+            let list = try await request(in: harness.socket, frameIndex: 1)
+            #expect(list.method == "terminal.list")
+            await harness.socket.enqueue(successResponse(
+                id: list.id,
+                result: .object(["terminals": try JSONValue.encode([existing])])
+            ))
+            let initialAttach = try await request(in: harness.socket, frameIndex: 2)
+            #expect(initialAttach.method == "terminal.attach")
+            await harness.socket.enqueue(successResponse(
+                id: initialAttach.id,
+                result: terminalReplayResult(chunks: [], terminalID: existing.id)
+            ))
+            try await eventually { controller.terminal?.id == existing.id }
+
+            await harness.socket.suspendSends()
+            controller.show(terminalSummary(id: "terminal-b"), model: harness.model)
+            try await harness.socket.waitUntilSendInvoked(count: 5)
+            controller.show(terminalSummary(id: "terminal-c"), model: harness.model)
+            controller.show(terminalSummary(id: "terminal-d"), model: harness.model)
+            #expect(await harness.socket.sentFrames().count == 3)
+            await harness.socket.releaseSend()
+
+            let firstWave = [
+                try await request(in: harness.socket, frameIndex: 3),
+                try await request(in: harness.socket, frameIndex: 4),
+            ]
+            for request in firstWave {
+                switch request.method {
+                case "terminal.detach":
+                    #expect(request.params?.objectValue?["terminalId"] == .string(existing.id))
+                    await harness.socket.enqueue(successResponse(
+                        id: request.id,
+                        result: .object(["detached": .bool(true)])
+                    ))
+                case "terminal.attach":
+                    #expect(request.params?.objectValue?["terminalId"] == .string("terminal-b"))
+                    await harness.socket.enqueue(successResponse(
+                        id: request.id,
+                        result: terminalReplayResult(chunks: [], terminalID: "terminal-b")
+                    ))
+                default:
+                    Issue.record("unexpected request: \(request.method)")
+                }
+            }
+
+            let secondWave = [
+                try await request(in: harness.socket, frameIndex: 5),
+                try await request(in: harness.socket, frameIndex: 6),
+            ]
+            for request in secondWave {
+                switch request.method {
+                case "terminal.detach":
+                    #expect(request.params?.objectValue?["terminalId"] == .string("terminal-b"))
+                    await harness.socket.enqueue(successResponse(
+                        id: request.id,
+                        result: .object(["detached": .bool(true)])
+                    ))
+                case "terminal.attach":
+                    #expect(request.params?.objectValue?["terminalId"] == .string("terminal-d"))
+                    await harness.socket.enqueue(successResponse(
+                        id: request.id,
+                        result: terminalReplayResult(chunks: [], terminalID: "terminal-d")
+                    ))
+                default:
+                    Issue.record("unexpected request: \(request.method)")
+                }
+            }
+            try await eventually { controller.terminal?.id == "terminal-d" }
+            let sent = try await harness.socket.sentFrames().dropFirst().map { data in
+                try JSONDecoder.gateway.decode(JSONValue.self, from: data)
+            }
+            let attachedIDs = sent.compactMap { frame -> String? in
+                guard frame.objectValue?["method"] == .string("terminal.attach") else { return nil }
+                return frame.objectValue?["params"]?.objectValue?["terminalId"]?.stringValue
+            }
+            #expect(attachedIDs == ["terminal-a", "terminal-b", "terminal-d"])
+            controller.stop(model: harness.model)
+        }
+    }
+
+    @Test("terminal action failures remain visible while the renderer stays installed")
+    func terminalActionFailureIsVisible() async throws {
+        try await withHarness { harness in
+            try installHostedTerminalSession(on: harness.model)
+            let controller = TerminalController()
+            let existing = terminalSummary(id: "terminal")
+            controller.start(sessionID: "session", model: harness.model)
+            let list = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.enqueue(successResponse(
+                id: list.id,
+                result: .object(["terminals": try JSONValue.encode([existing])])
+            ))
+            let attach = try await request(in: harness.socket, frameIndex: 2)
+            await harness.socket.enqueue(successResponse(
+                id: attach.id,
+                result: terminalReplayResult(chunks: [], terminalID: existing.id)
+            ))
+            try await eventually { controller.terminal?.id == existing.id }
+
+            controller.terminate(model: harness.model)
+            let terminate = try await request(in: harness.socket, frameIndex: 3)
+            #expect(terminate.method == "terminal.terminate")
+            await harness.socket.enqueue(failureResponse(
+                id: terminate.id,
+                failure: GatewayFailure(
+                    code: "denied",
+                    message: "Termination denied",
+                    retryable: false,
+                    details: nil
+                )
+            ))
+            try await eventually { controller.actionError == "Termination denied" }
+            #expect(controller.terminal?.id == existing.id)
+            #expect(controller.connectionPhase == .connected)
+            controller.clearActionError()
+            #expect(controller.actionError == nil)
+            controller.stop(model: harness.model)
         }
     }
 
@@ -902,6 +1130,18 @@ struct AppModelTerminalLifecycleTests {
         Issue.record("condition did not become true")
     }
 
+    private func terminalSummary(id: String, sequence: Int = 0) -> TerminalSummary {
+        TerminalSummary(
+            id: id,
+            sessionId: "session",
+            cwd: "/workspace",
+            createdAt: "2026-01-01T00:00:00Z",
+            exitedAt: nil,
+            exitCode: nil,
+            sequence: sequence
+        )
+    }
+
     private func terminalReplayResult(
         sequence: Int,
         data: String,
@@ -967,6 +1207,15 @@ struct AppModelTerminalLifecycleTests {
 
     private func helloFrame() -> Data {
         Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8)
+    }
+
+    private func failureResponse(id: String, failure: GatewayFailure) -> Data {
+        try! JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"),
+            "id": .string(id),
+            "ok": .bool(false),
+            "error": try! JSONValue.encode(failure),
+        ]))
     }
 
     private func successResponse(id: String, result: JSONValue) -> Data {

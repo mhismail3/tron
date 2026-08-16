@@ -120,7 +120,7 @@ frames through visible open, synchronization/resynchronization, uncertain receip
 and terminal replay boundaries. `AppModelTerminalLifecycleTests` retain cross-owner façade coverage for
 presentation revocation, stale-attach compensation, out-of-order reset rejection, pending-event quarantine,
 gap coalescing/follow-up, shared multi-presentation leases, post-detach rejection, final teardown, exact
-list/write/resize/terminate wire contracts, and nested replay observation. `TerminalReducerTests` pin the
+list/write/resize/terminate wire contracts, phase-aware sheet navigation cancellation/coalescing, and nested replay observation. `TerminalReducerTests` pin the
 global 16-terminal, 256-chunk, and 1 MiB pending-event bounds, the three-attempt immediate recovery ceiling,
 typed event reduction, and the install/reattach/discard decision for terminal-open responses that resolve on
 the same, a replacement, or no current connection. `TerminalCoordinator` owns all terminal requests,
@@ -129,7 +129,11 @@ reattachment; `AppModel` only routes admitted events/lifecycle work and preserve
 same lifecycle suite drives an injected monotonic clock to prove the 120 ms resize boundary, same-intent
 coalescing, established dimension clamps, independent presentation slots, and revocation with no late wire send.
 Terminal sheet composition, presentation lifecycle/error state, and native SwiftTerm/keyboard rendering live
-in separate source files; the style guard pins that boundary so renderer code cannot regain Gateway/AppModel work.
+in separate source files. The presentation owner permits one active start/show/open flight and one newest pending
+route; read replacement cancels safely, while attach/open replacement waits for stale compensation before launching
+the pending route. Focused cases also require completed stale-open compensation, prevent confirmed-missing
+open replay after revocation, and keep terminate/write/resize failures visible while the renderer remains installed.
+The style guard pins that boundary so renderer code cannot regain Gateway/AppModel work.
 `SessionPresentationStoreTests` own observation forwarding, cold-cache non-authority,
 disconnect/profile-reset semantics, all-topic revocation, old-close/new-open arbitration, stale and
 revoked secondary-response rejection, exact subscription-token admission, and suspended paging

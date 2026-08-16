@@ -28,9 +28,14 @@ final class ConfirmedMutationExecutor {
     func perform<Response: Codable>(
         method: String,
         commandID: String,
+        replayAdmission: @escaping @MainActor () -> Bool = { true },
         send: () async throws -> Response
     ) async throws -> Response {
-        let value = try await performValue(method: method, commandID: commandID) {
+        let value = try await performValue(
+            method: method,
+            commandID: commandID,
+            replayAdmission: replayAdmission
+        ) {
             try JSONValue.encode(try await send())
         }
         return try value.decode(Response.self)
@@ -39,6 +44,7 @@ final class ConfirmedMutationExecutor {
     func performValue(
         method: String,
         commandID: String,
+        replayAdmission: @escaping @MainActor () -> Bool = { true },
         send: () async throws -> JSONValue
     ) async throws -> JSONValue {
         guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
@@ -105,6 +111,10 @@ final class ConfirmedMutationExecutor {
                                     commandID: commandID,
                                     lastFailure: lastFailure
                                 )
+                            }
+                            guard replayAdmission() else {
+                                result = .cancelled
+                                throw CancellationError()
                             }
                             let resolved = try await send()
                             try lifecycle.require(admission)

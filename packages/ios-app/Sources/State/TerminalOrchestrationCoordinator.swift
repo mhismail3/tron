@@ -138,7 +138,11 @@ final class TerminalCoordinator {
         let request = Task {
             try await client.request("terminal.list", ListParams(sessionId: sessionID)) as ListResponse
         }
-        let response = try await request.value
+        let response = try await withTaskCancellationHandler {
+            try await request.value
+        } onCancel: {
+            request.cancel()
+        }
         try lifecycle.requireConnection(admission)
         guard reducer.owns(intent),
               installedSubscriptionToken(sessionID) == subscriptionToken,
@@ -171,7 +175,11 @@ final class TerminalCoordinator {
                 commandId: commandID
             )
             let request = Task {
-                try await mutationExecutor.perform(method: "terminal.open", commandID: commandID) {
+                try await mutationExecutor.perform(
+                    method: "terminal.open",
+                    commandID: commandID,
+                    replayAdmission: { [weak self] in self?.reducer.owns(intent) == true }
+                ) {
                     try await client.request("terminal.open", params)
                 } as OpenResponse
             }

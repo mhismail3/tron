@@ -67,7 +67,7 @@ struct TerminalSheet: View {
             }
         }
         .task {
-            await controller.start(sessionID: sessionID, model: model)
+            controller.start(sessionID: sessionID, model: model)
         }
         .onDisappear { controller.stop(model: model) }
         .confirmationDialog("Quit this terminal?", isPresented: $confirmQuit, titleVisibility: .visible) {
@@ -75,6 +75,14 @@ struct TerminalSheet: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The shell and its running process group will stop. Closing the sheet alone only detaches.")
+        }
+        .alert("Terminal action failed", isPresented: Binding(
+            get: { controller.actionError != nil },
+            set: { if !$0 { controller.clearActionError() } }
+        )) {
+            Button("OK") { controller.clearActionError() }
+        } message: {
+            Text(controller.actionError ?? "The terminal command could not be completed.")
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.large])
@@ -87,14 +95,14 @@ struct TerminalSheet: View {
         Menu {
             if !controller.isRunning(model: model) {
                 Button("Open Live Terminal", systemImage: "terminal") {
-                    Task { await controller.openLive(model: model) }
+                    controller.openLive(model: model)
                 }
             }
             if !controller.history.isEmpty {
                 Section {
                     ForEach(controller.history) { terminal in
                         Button {
-                            Task { await controller.show(terminal, model: model) }
+                            controller.show(terminal, model: model)
                         } label: {
                             Text(terminal.exitedAt ?? terminal.createdAt)
                         }
