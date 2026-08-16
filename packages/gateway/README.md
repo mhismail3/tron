@@ -53,7 +53,9 @@ The pairing limiter keeps the exact rolling per-address window while retaining a
 least-recently-used address keys and periodically deleting expired windows; address churn cannot
 create append-only process state. Paired-device storage admits at most 256 unique device IDs and
 token hashes with bounded names/timestamps; capacity rejection leaves the one-time invitation valid
-so an old device can be revoked before retrying. Uploads retain the 25 MiB per-request limit and additionally
+so an old device can be revoked before retrying. Device metadata is capped at 1 MiB, the local wrapper
+credential at 4 KiB, and the one-time invitation at 16 KiB before JSON decode. Local credentials and
+invitations also require exact versions, purposes, bounded identities/codes, and canonical timestamps. Uploads retain the 25 MiB per-request limit and additionally
 serialize reservation and commit against 128-entry and eight-times-per-upload (200 MiB by default) aggregate ceilings.
 A separate admission permits at most half that ratio concurrently (four default 25 MiB bodies). Authenticated request
 chunks stream directly into protected store-owned files; exact declared and observed sizes are checked before atomic
