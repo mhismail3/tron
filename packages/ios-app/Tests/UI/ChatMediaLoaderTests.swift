@@ -11,11 +11,42 @@ struct ChatMediaLoaderTests {
         #expect(ChatMediaPolicy.maximumDecodedThumbnailBytes == 4_194_304)
         #expect(ChatMediaPolicy.maximumThumbnailCount == 64)
         #expect(ChatMediaPolicy.maximumThumbnailPixelDimension == 192)
+        #expect(ChatMediaPolicy.maximumFullPreviewPixelDimension == 4_096)
+        #expect(ChatMediaPolicy.maximumDecodedFullPreviewBytes == 67_108_864)
         #expect(ChatMediaPolicy.maximumEncodedBytes == 26_214_400)
         #expect(ChatMediaPolicy.maximumConcurrentPreparations == 1)
         #expect(ChatMediaPolicy.maximumThumbnailFlights == 32)
         #expect(ChatMediaPolicy.admitsEncodedByteCount(26_214_400))
         #expect(!ChatMediaPolicy.admitsEncodedByteCount(26_214_401))
+        #expect(ChatMediaPolicy.decodedByteCount(bytesPerRow: 16_384, height: 4_096, maximum: 67_108_864) == 67_108_864)
+        #expect(ChatMediaPolicy.decodedByteCount(bytesPerRow: 16_385, height: 4_096, maximum: 67_108_864) == nil)
+        #expect(ChatMediaPolicy.decodedByteCount(bytesPerRow: .max, height: 2, maximum: .max) == nil)
+        #expect(ChatMediaPolicy.decodedByteCount(bytesPerRow: -1, height: 1, maximum: 1) == nil)
+    }
+
+    @Test("full previews are orientation-correct and bounded before decoded publication")
+    func boundedFullPreviewDecode() throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_313).generatedImageFixture(
+            format: .jpeg,
+            pixelWidth: 5_000,
+            pixelHeight: 16,
+            orientation: .right
+        )
+        let decoded = try ChatMediaLoader.decodeFullPreview(fixture.encodedData)
+        let image = try #require(decoded.cgImage)
+
+        #expect(max(image.width, image.height) == ChatMediaPolicy.maximumFullPreviewPixelDimension)
+        #expect(min(image.width, image.height) > 0)
+        let decodedBytes = try #require(ChatMediaPolicy.decodedByteCount(
+            bytesPerRow: image.bytesPerRow,
+            height: image.height,
+            maximum: ChatMediaPolicy.maximumDecodedFullPreviewBytes
+        ))
+        #expect(decodedBytes <= ChatMediaPolicy.maximumDecodedFullPreviewBytes)
+        #expect(image.height > image.width)
+        #expect(throws: ChatMediaLoadError.invalidImage) {
+            try ChatMediaLoader.decodeFullPreview(Data("not-an-image".utf8))
+        }
     }
 
     @Test("oriented high-resolution images downsample off-main to the exact pixel ceiling")

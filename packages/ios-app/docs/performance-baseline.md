@@ -99,18 +99,21 @@ concurrent duplicate wire, decode, and peak allocations.
 
 The encoded admission ceiling is 25 MiB (26,214,400 bytes). One uncached full
 preview bounds preview multiplicity and keeps it out of the thumbnail LRU; it does
-not claim that a full decoded preview fits the 4 MiB thumbnail budget. Worst-case
-peak reasoning must therefore include the 4 MiB decoded thumbnail budget, one
-admitted encoded payload up to 25 MiB, and one full decoded preview whose physical
-allocation is still uncalibrated. None of these cache/media owners exists at the
-6.1 source checkpoint.
+not claim that a full decoded preview fits the 4 MiB thumbnail budget. Full-preview
+ImageIO preparation applies orientation and downsamples before publication to at
+most 4,096 pixels on either axis and 64 MiB (67,108,864 bytes) of decoded rows.
+Worst-case peak reasoning must therefore include the 4 MiB decoded thumbnail budget,
+one admitted encoded payload up to 25 MiB, and one decoded preview up to 64 MiB,
+plus framework/transient decode overhead still requiring physical calibration.
+None of these cache/media owners exists at the 6.1 source checkpoint.
 
 The loader enforces these values with profile/lifecycle/connection/blob single-flight identity,
 one shared preparation slot, a 32-thumbnail-flight admission ceiling, transport-level declared and
 streamed response limits, off-main ImageIO downsampling, deterministic LRU eviction, exact
 late-publication rejection, and app-lifetime memory-pressure cancellation. Full previews are never
-inserted into the thumbnail LRU, receive priority at the shared slot, and only one full-preview flight
-is owned at a time. Consequently only one admitted encoded response/decode working set exists at once.
+inserted into the thumbnail LRU, receive priority at the shared slot, are decoded through the bounded
+ImageIO path, and only one full-preview flight is owned at a time. Consequently only one admitted
+encoded response/decode working set exists at once.
 
 These values are provisional safety ratchets rather than measured release targets.
 Pinned-device cold/warm 30/60 Hz Markdown, maximum-source, thinking-segment, image

@@ -23,6 +23,7 @@ typealias ChatMediaAdmission = @MainActor (ChatMediaIdentity) -> Bool
 enum ChatMediaLoadError: Error, Equatable, Sendable {
     case capacityExceeded
     case encodedPayloadTooLarge
+    case decodedPayloadTooLarge
     case invalidImage
     case staleIdentity
 }
@@ -31,12 +32,21 @@ enum ChatMediaPolicy {
     static let maximumDecodedThumbnailBytes = 4 * 1_024 * 1_024
     static let maximumThumbnailCount = 64
     static let maximumThumbnailPixelDimension = 192
+    static let maximumFullPreviewPixelDimension = 4_096
+    static let maximumDecodedFullPreviewBytes = 64 * 1_024 * 1_024
     static let maximumEncodedBytes = 25 * 1_024 * 1_024
     static let maximumConcurrentPreparations = 1
     static let maximumThumbnailFlights = 32
 
     static func admitsEncodedByteCount(_ count: Int) -> Bool {
         count >= 0 && count <= maximumEncodedBytes
+    }
+
+    static func decodedByteCount(bytesPerRow: Int, height: Int, maximum: Int) -> Int? {
+        guard bytesPerRow >= 0, height >= 0, maximum >= 0 else { return nil }
+        let (count, overflow) = bytesPerRow.multipliedReportingOverflow(by: height)
+        guard !overflow, count <= maximum else { return nil }
+        return count
     }
 }
 
@@ -332,8 +342,32 @@ final class ChatMediaLoader {
     }
 
     nonisolated static func decodeFullPreview(_ data: Data) throws -> UIImage {
-        guard let image = UIImage(data: data) else { throw ChatMediaLoadError.invalidImage }
-        return image.preparingForDisplay() ?? image
+        guard let source = CGImageSourceCreateWithData(data as CFData, [
+            kCGImageSourceShouldCache: false,
+        ] as CFDictionary) else {
+            throw ChatMediaLoadError.invalidImage
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: ChatMediaPolicy.maximumFullPreviewPixelDimension,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            options as CFDictionary
+        ) else {
+            throw ChatMediaLoadError.invalidImage
+        }
+        guard ChatMediaPolicy.decodedByteCount(
+            bytesPerRow: image.bytesPerRow,
+            height: image.height,
+            maximum: ChatMediaPolicy.maximumDecodedFullPreviewBytes
+        ) != nil else {
+            throw ChatMediaLoadError.decodedPayloadTooLarge
+        }
+        return UIImage(cgImage: image)
     }
 
     nonisolated static func decodeThumbnail(_ data: Data) throws -> (UIImage, Int) {
@@ -355,8 +389,13 @@ final class ChatMediaLoader {
         ) else {
             throw ChatMediaLoadError.invalidImage
         }
-        let (decodedBytes, overflow) = image.bytesPerRow.multipliedReportingOverflow(by: image.height)
-        guard !overflow, decodedBytes >= 0 else { throw ChatMediaLoadError.invalidImage }
+        guard let decodedBytes = ChatMediaPolicy.decodedByteCount(
+            bytesPerRow: image.bytesPerRow,
+            height: image.height,
+            maximum: ChatMediaPolicy.maximumDecodedThumbnailBytes
+        ) else {
+            throw ChatMediaLoadError.decodedPayloadTooLarge
+        }
         return (UIImage(cgImage: image), decodedBytes)
     }
 

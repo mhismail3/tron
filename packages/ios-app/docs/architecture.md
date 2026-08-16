@@ -547,9 +547,11 @@ while receiving them, then applies image orientation while downsampling off-main
 and retains at most 64 items/4 MiB decoded under deterministic LRU. Lifecycle replacement and the
 app-lifetime memory-pressure observer advance exact invalidation generations, cancel flights, and clear
 the cache; late fetch or detached-decode completion cannot repopulate it.
-A preview opens immediately with the thumbnail and may replace it with one uncached full image; each
-sheet owns an exact lease, and dismissal cancels the underlying flight only after its final lease retires,
-so full-resolution lifetime remains sheet-owned. One gateway runtime is the sole mutable
+A preview opens immediately with the thumbnail and may replace it with one uncached full image. Full-preview
+ImageIO decode applies orientation and downsamples before publication to at most 4,096 pixels on either axis
+and 64 MiB of decoded rows, preventing compressed dimensions from forcing an unbounded eager allocation.
+Each sheet owns an exact lease, and dismissal cancels the underlying flight only after its final lease retires,
+so full-preview lifetime remains sheet-owned. One gateway runtime is the sole mutable
 owner of a canonical session; terminal and mobile chat clients must attach to
 that owner rather than opening the same JSONL in separate Pi processes. Its
 historical context ring projects the
