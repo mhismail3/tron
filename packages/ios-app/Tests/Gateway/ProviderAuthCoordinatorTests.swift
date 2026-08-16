@@ -78,6 +78,126 @@ struct ProviderAuthCoordinatorTests {
         }
     }
 
+    @Test("provider catalogs are count, byte, and identity bounded")
+    func providerCatalogBounds() throws {
+        #expect(ProviderCatalogPolicy.maximumItems == 1_000)
+        #expect(ProviderCatalogPolicy.maximumStringBytes == 4_194_304)
+        #expect(throws: GatewayFailure.self) {
+            try ProviderCatalogPolicy.validate([
+                providerSummary(id: "same"),
+                providerSummary(id: "same"),
+            ])
+        }
+        #expect(throws: GatewayFailure.self) {
+            try ProviderCatalogPolicy.validate(
+                (0...ProviderCatalogPolicy.maximumItems).map { providerSummary(id: "p-\($0)") }
+            )
+        }
+        #expect(throws: GatewayFailure.self) {
+            try ProviderCatalogPolicy.validate([
+                providerSummary(
+                    id: "large",
+                    name: String(repeating: "x", count: ProviderCatalogPolicy.maximumStringBytes + 1)
+                ),
+            ])
+        }
+    }
+
+    @Test("duplicate model identities across pages reject atomic publication")
+    func duplicateModelRejected() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            let load = Task { await harness.owner.refreshCatalog(target: .global) }
+            try await harness.socket.waitUntilSent(count: 3)
+            let first = try await requests(in: 1...2, socket: harness.socket)
+            let provider = try #require(first.first { $0.method == "provider.list" })
+            let model = try #require(first.first { $0.method == "model.list" })
+            await harness.socket.enqueue(response(id: provider.id, result: providerResult("provider")))
+            await harness.socket.enqueue(response(id: model.id, result: modelResult("duplicate", nextCursor: "next")))
+            try await harness.socket.waitUntilSent(count: 4)
+            let second = try request(await harness.socket.sentFrames()[3])
+            await harness.socket.enqueue(response(id: second.id, result: modelResult("duplicate")))
+
+            #expect(!(await load.value))
+            #expect(harness.owner.catalog(for: .global) == nil)
+            #expect(harness.delegate.errors == ["Tron returned an invalid or oversized model catalog."])
+            await harness.client.close()
+        }
+    }
+
+    @Test("model catalog pages are item, page, and identity bounded")
+    func modelCatalogBounds() throws {
+        #expect(ModelCatalogPolicy.requestPageSize == 500)
+        #expect(ModelCatalogPolicy.maximumPages == 50)
+        #expect(ModelCatalogPolicy.maximumItems == 25_000)
+        #expect(ModelCatalogPolicy.maximumStringBytes == 16_777_216)
+        #expect(ModelCatalogPolicy.admitsStringBytes(current: 16_777_215, candidate: 1))
+        #expect(!ModelCatalogPolicy.admitsStringBytes(current: 16_777_215, candidate: 2))
+        #expect(!ModelCatalogPolicy.admitsStringBytes(current: .max, candidate: 0))
+
+        var oversized = ModelCatalogAccumulator()
+        #expect(throws: GatewayFailure.self) {
+            try oversized.append(
+                (0...ModelCatalogPolicy.requestPageSize).map { modelSummary(provider: "p", id: "m-\($0)") },
+                hasNextPage: false
+            )
+        }
+        #expect(oversized.models.isEmpty)
+
+        var duplicate = ModelCatalogAccumulator()
+        #expect(throws: GatewayFailure.self) {
+            try duplicate.append([
+                modelSummary(provider: "p", id: "same"),
+                modelSummary(provider: "p", id: "same"),
+            ], hasNextPage: false)
+        }
+        #expect(duplicate.models.isEmpty)
+        try duplicate.append([modelSummary(provider: "p", id: "same")], hasNextPage: false)
+        #expect(duplicate.models.count == 1)
+
+        let largeName = String(repeating: "x", count: 1_000_000)
+        var byteBounded = ModelCatalogAccumulator()
+        try byteBounded.append(
+            (0..<16).map {
+                ModelSummary(
+                    provider: "p", id: "large-\($0)", name: largeName,
+                    reasoning: false, input: ["text"], contextWindow: 4_096,
+                    maxTokens: 1_024, available: true
+                )
+            },
+            hasNextPage: true
+        )
+        #expect(throws: GatewayFailure.self) {
+            try byteBounded.append([
+                ModelSummary(
+                    provider: "p", id: "large-17", name: largeName,
+                    reasoning: false, input: ["text"], contextWindow: 4_096,
+                    maxTokens: 1_024, available: true
+                ),
+            ], hasNextPage: false)
+        }
+        #expect(byteBounded.models.count == 16)
+
+        var exactBoundary = ModelCatalogAccumulator()
+        for page in 0..<ModelCatalogPolicy.maximumPages {
+            try exactBoundary.append(
+                (0..<ModelCatalogPolicy.requestPageSize).map {
+                    modelSummary(provider: "p", id: "boundary-\(page)-\($0)")
+                },
+                hasNextPage: page + 1 < ModelCatalogPolicy.maximumPages
+            )
+        }
+        #expect(exactBoundary.models.count == ModelCatalogPolicy.maximumItems)
+
+        var runaway = ModelCatalogAccumulator()
+        for _ in 0..<(ModelCatalogPolicy.maximumPages - 1) {
+            try runaway.append([], hasNextPage: true)
+        }
+        #expect(throws: GatewayFailure.self) {
+            try runaway.append([], hasNextPage: true)
+        }
+    }
+
     @Test("profile clear rejects parallel catalog responses and later pagination")
     func profileClearRejectsCatalogBoundaries() async throws {
         try await runScenario {
@@ -984,6 +1104,18 @@ struct ProviderAuthCoordinatorTests {
         }
     }
 
+    private func providerSummary(id: String, name: String? = nil) -> ProviderSummary {
+        ProviderSummary(
+            id: id,
+            name: name ?? id,
+            configured: false,
+            authSource: nil,
+            credentialType: nil,
+            authMethods: [],
+            modelCount: 1
+        )
+    }
+
     private func providerResult(_ marker: String) -> JSONValue {
         .object(["providers": .array([.object([
             "id": .string(marker),
@@ -994,6 +1126,19 @@ struct ProviderAuthCoordinatorTests {
             "authMethods": .array([]),
             "modelCount": .number(1),
         ])])])
+    }
+
+    private func modelSummary(provider: String, id: String) -> ModelSummary {
+        ModelSummary(
+            provider: provider,
+            id: id,
+            name: id,
+            reasoning: false,
+            input: ["text"],
+            contextWindow: 4_096,
+            maxTokens: 1_024,
+            available: true
+        )
     }
 
     private func modelResult(_ marker: String, nextCursor: String? = nil) -> JSONValue {

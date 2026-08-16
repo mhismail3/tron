@@ -89,7 +89,7 @@ struct ModelPicker: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 8) {
-                ForEach(filtered) { model in
+                ForEach(filtered, id: \.ref) { model in
                     Button { selection = model.ref } label: {
                         HStack(spacing: 12) {
                             Image(systemName: selection == model.ref ? "checkmark.circle.fill" : "cpu")

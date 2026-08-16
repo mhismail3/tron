@@ -46,6 +46,104 @@ protocol ProviderAuthCoordinatorDelegate: AnyObject {
     func providerAuthCoordinatorSetCompletionError(_ message: String?)
 }
 
+enum ProviderCatalogPolicy {
+    static let maximumItems = 1_000
+    static let maximumStringBytes = 4 * 1_048_576
+
+    static func validate(_ providers: [ProviderSummary]) throws {
+        guard providers.count <= maximumItems else { throw invalidCatalog() }
+        var identities = Set<String>()
+        var stringBytes = 0
+        for provider in providers {
+            guard identities.insert(provider.id).inserted else { throw invalidCatalog() }
+            let values = [provider.id, provider.name]
+                + [provider.authSource, provider.credentialType].compactMap { $0 }
+                + provider.authMethods
+            for value in values {
+                let count = value.utf8.count
+                guard stringBytes <= maximumStringBytes,
+                      count <= maximumStringBytes - stringBytes else {
+                    throw invalidCatalog()
+                }
+                stringBytes += count
+            }
+        }
+    }
+
+    private static func invalidCatalog() -> GatewayFailure {
+        GatewayFailure(
+            code: "invalid_catalog",
+            message: "Tron returned an invalid or oversized provider catalog.",
+            retryable: true,
+            details: nil
+        )
+    }
+}
+
+enum ModelCatalogPolicy {
+    static let requestPageSize = 500
+    static let maximumPages = 50
+    static let maximumItems = 25_000
+    static let maximumStringBytes = 16 * 1_048_576
+
+    static func admitsStringBytes(current: Int, candidate: Int) -> Bool {
+        guard current >= 0, current <= maximumStringBytes, candidate >= 0 else { return false }
+        return candidate <= maximumStringBytes - current
+    }
+}
+
+struct ModelCatalogAccumulator {
+    private(set) var models: [ModelSummary] = []
+    private var identities = Set<ModelRef>()
+    private var pageCount = 0
+    private var stringBytes = 0
+
+    mutating func append(_ page: [ModelSummary], hasNextPage: Bool) throws {
+        guard pageCount < ModelCatalogPolicy.maximumPages,
+              !(hasNextPage && pageCount + 1 == ModelCatalogPolicy.maximumPages),
+              page.count <= ModelCatalogPolicy.requestPageSize,
+              page.count <= ModelCatalogPolicy.maximumItems - models.count else {
+            throw invalidPagination()
+        }
+        var pageIdentities = Set<ModelRef>()
+        var pageStringBytes = 0
+        for model in page {
+            guard pageIdentities.insert(model.ref).inserted,
+                  !identities.contains(model.ref),
+                  let bytes = Self.stringByteCount(model),
+                  bytes <= Int.max - pageStringBytes else { throw invalidPagination() }
+            pageStringBytes += bytes
+        }
+        guard ModelCatalogPolicy.admitsStringBytes(
+            current: stringBytes,
+            candidate: pageStringBytes
+        ) else { throw invalidPagination() }
+        identities.formUnion(pageIdentities)
+        models.append(contentsOf: page)
+        pageCount += 1
+        stringBytes += pageStringBytes
+    }
+
+    private static func stringByteCount(_ model: ModelSummary) -> Int? {
+        var total = 0
+        for value in [model.provider, model.id, model.name] + model.input {
+            let count = value.utf8.count
+            guard count <= Int.max - total else { return nil }
+            total += count
+        }
+        return total
+    }
+
+    private func invalidPagination() -> GatewayFailure {
+        GatewayFailure(
+            code: "invalid_pagination",
+            message: "Tron returned an invalid or oversized model catalog.",
+            retryable: true,
+            details: nil
+        )
+    }
+}
+
 /// Owns disposable provider/model projections and operation-keyed provider
 /// authentication state. Gateway provider state remains canonical.
 @MainActor
@@ -170,16 +268,20 @@ final class ProviderAuthCoordinator {
                 "provider.list",
                 ProviderParams(sessionId: target.sessionID)
             )
-            var models: [ModelSummary] = []
+            var accumulator = ModelCatalogAccumulator()
             var cursor: String?
             var seenCursors = Set<String>()
             repeat {
                 let response: ModelResponse = try await client.request(
                     "model.list",
-                    ModelParams(sessionId: target.sessionID, cursor: cursor, limit: 500)
+                    ModelParams(
+                        sessionId: target.sessionID,
+                        cursor: cursor,
+                        limit: ModelCatalogPolicy.requestPageSize
+                    )
                 )
                 guard admits(admission) else { return false }
-                models.append(contentsOf: response.models)
+                try accumulator.append(response.models, hasNextPage: response.nextCursor != nil)
                 cursor = response.nextCursor
                 if let cursor, !seenCursors.insert(cursor).inserted {
                     throw GatewayFailure(
@@ -192,7 +294,8 @@ final class ProviderAuthCoordinator {
             } while cursor != nil
             let providers = try await providerRequest.providers
             guard admits(admission) else { return false }
-            catalogByTarget[target] = ProviderCatalog(providers: providers, models: models)
+            try ProviderCatalogPolicy.validate(providers)
+            catalogByTarget[target] = ProviderCatalog(providers: providers, models: accumulator.models)
             return true
         } catch {
             guard admits(admission) else { return false }

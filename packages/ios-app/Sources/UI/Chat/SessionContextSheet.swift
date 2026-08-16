@@ -223,7 +223,10 @@ struct SessionContextSheet: View {
         TronSettingsGroup("Configuration", accent: .tronPurple) {
             VStack(spacing: 0) {
                 Menu {
-                    ForEach(model.providerCatalog(for: .session(id: sessionID))?.models.filter(\.available) ?? []) { candidate in
+                    ForEach(
+                        model.providerCatalog(for: .session(id: sessionID))?.models.filter(\.available) ?? [],
+                        id: \.ref
+                    ) { candidate in
                         Button {
                             Task {
                                 do { try await model.setModel(candidate.ref, sessionID: sessionID) }

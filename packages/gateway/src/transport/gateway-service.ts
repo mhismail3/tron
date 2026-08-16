@@ -19,10 +19,13 @@ import type { LegacyImportService } from "../admin/legacy-import-service.js";
 import type { GatewayLogger } from "./logger.js";
 import type { CommandReceiptStore } from "./command-receipts.js";
 import { safeJson } from "../sessions/projection.js";
-import { pageCatalog } from "./model-pagination.js";
+import { ModelCatalogPager } from "./model-pagination.js";
 import { SessionListPaginationStore } from "./session-list-pagination.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
+const PROVIDER_CATALOG_MAX_STRING_BYTES = 4 * 1_048_576;
+const PROVIDER_CATALOG_MAX_FIELD_CHARACTERS = 100_000;
 
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "gateway.restart",
@@ -68,6 +71,7 @@ export interface GatewayServiceDependencies {
 export class GatewayService {
   private restartRequested = false;
   private readonly sessionListPages = new SessionListPaginationStore();
+  private readonly modelCatalogPages = new ModelCatalogPager();
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {}
 
@@ -556,26 +560,60 @@ export class GatewayService {
         configured: auth !== undefined,
         authSource: auth?.source ?? null,
         credentialType: credentials.get(provider.id) ?? null,
-        authMethods: [provider.auth.apiKey?.login ? "api_key" : null, provider.auth.oauth ? "oauth" : null].filter(Boolean),
+        authMethods: [provider.auth.apiKey?.login ? "api_key" : null, provider.auth.oauth ? "oauth" : null]
+          .filter((value): value is string => value !== null),
         modelCount: provider.getModels().length,
       };
     }));
+    validateProviderCatalog(providers);
     return safeJson({ providers });
   }
 
   private async models(modelRuntime: ModelRuntime, cursor: unknown, limit: unknown): Promise<JsonValue> {
-    const available = new Set((await modelRuntime.getAvailable()).map((model) => `${model.provider}\0${model.id}`));
-    const catalog = modelRuntime.getModels().map((model) => ({
-      provider: model.provider,
-      id: model.id,
-      name: model.name,
-      reasoning: model.reasoning,
-      input: model.input,
-      contextWindow: model.contextWindow,
-      maxTokens: model.maxTokens,
-      available: available.has(`${model.provider}\0${model.id}`),
-    }));
-    const page = pageCatalog(catalog, cursor, limit);
+    const page = await this.modelCatalogPages.page(modelRuntime, cursor, limit, async () => {
+      const available = new Set((await modelRuntime.getAvailable()).map((model) => `${model.provider}\0${model.id}`));
+      return modelRuntime.getModels().map((model) => ({
+        provider: model.provider,
+        id: model.id,
+        name: model.name,
+        reasoning: model.reasoning,
+        input: model.input,
+        contextWindow: model.contextWindow,
+        maxTokens: model.maxTokens,
+        available: available.has(`${model.provider}\0${model.id}`),
+      }));
+    });
     return safeJson({ models: page.items, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) });
+  }
+}
+
+export function validateProviderCatalog(providers: Array<{
+  id: string;
+  name: string;
+  authSource: string | null;
+  credentialType: string | null;
+  authMethods: string[];
+}>): void {
+  if (providers.length > PROVIDER_CATALOG_MAX_ITEMS) {
+    throw new GatewayError("conflict", "Provider catalog exceeds the item limit");
+  }
+  const identities = new Set<string>();
+  let stringBytes = 0;
+  for (const provider of providers) {
+    if (identities.has(provider.id)) {
+      throw new GatewayError("conflict", "Provider catalog contains duplicate IDs");
+    }
+    identities.add(provider.id);
+    const values = [provider.id, provider.name, ...provider.authMethods];
+    if (provider.authSource) values.push(provider.authSource);
+    if (provider.credentialType) values.push(provider.credentialType);
+    for (const value of values) {
+      const bytes = Buffer.byteLength(value);
+      if (value.length > PROVIDER_CATALOG_MAX_FIELD_CHARACTERS
+        || bytes > PROVIDER_CATALOG_MAX_STRING_BYTES - stringBytes) {
+        throw new GatewayError("conflict", "Provider catalog exceeds the string limit");
+      }
+      stringBytes += bytes;
+    }
   }
 }
