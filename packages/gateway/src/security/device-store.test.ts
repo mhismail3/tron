@@ -38,6 +38,38 @@ describe("DeviceStore", () => {
     });
   });
 
+  it("rejects pairing beyond capacity without consuming the invitation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-gateway-device-bound-"));
+    const store = new DeviceStore(root, "machine-id", { maximumDevices: 1 });
+    await store.initialize();
+    const firstEnrollment = await store.ensureEnrollment();
+    await store.pair(firstEnrollment.code, "First");
+    const secondEnrollment = await store.ensureEnrollment();
+    await expect(store.pair(secondEnrollment.code, "Second")).rejects.toMatchObject({ code: "conflict" });
+    await expect(store.ensureEnrollment()).resolves.toMatchObject({ code: secondEnrollment.code });
+    expect(await store.listDevices()).toHaveLength(1);
+  });
+
+  it("rejects duplicate or oversized persisted device catalogs", async () => {
+    const { root, store } = await fixture();
+    const enrollment = await store.ensureEnrollment();
+    await store.pair(enrollment.code, "Phone");
+    const path = join(root, "gateway", "devices.json");
+    const document = JSON.parse(await readFile(path, "utf8"));
+    document.devices.push({
+      ...document.devices[0],
+      id: "alias",
+      tokenHash: `${document.devices[0].tokenHash}=`,
+    });
+    await writeFile(path, `${JSON.stringify(document)}\n`);
+    await expect(store.listDevices()).rejects.toMatchObject({ code: "conflict" });
+    await expect(store.authenticate("not-a-token")).rejects.toMatchObject({ code: "conflict" });
+
+    document.devices = [{ ...document.devices[0], createdAt: "2026-02-30T10:00:00Z" }];
+    await writeFile(path, `${JSON.stringify(document)}\n`);
+    await expect(store.listDevices()).rejects.toMatchObject({ code: "conflict" });
+  });
+
   it("revokes one paired device", async () => {
     const { store } = await fixture();
     const enrollment = await store.ensureEnrollment();

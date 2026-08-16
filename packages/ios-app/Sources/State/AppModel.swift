@@ -828,8 +828,9 @@ final class AppModel {
         let generation = deviceLoadGeneration
         do {
             let response: Response = try await client.request("device.list", EmptyParams())
+            let admitted = try PairedDeviceCatalogPolicy.admit(response.devices)
             guard deviceLoadGeneration == generation else { return }
-            pairedDevices = response.devices
+            pairedDevices = admitted
         } catch {
             guard deviceLoadGeneration == generation else { return }
             surface(error)
