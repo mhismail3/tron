@@ -31,6 +31,30 @@ describe("UploadStore", () => {
     await expect(store.materialize([image.id], "session")).rejects.toMatchObject({ code: "not_found" });
   });
 
+  it("bounds concurrent body accumulation and releases admission exactly once", async () => {
+    const store = new UploadStore(await root(), 8, { maximumAggregateBytes: 32 });
+    const first = store.beginBodyAdmission();
+    const second = store.beginBodyAdmission();
+    expect(() => store.beginBodyAdmission()).toThrow(/Concurrent upload bodies/);
+    first();
+    first();
+    const replacement = store.beginBodyAdmission();
+    replacement();
+    second();
+  });
+
+  it("scopes body admission across success, failure, and concurrent rejection", async () => {
+    const store = new UploadStore(await root(), 8, { maximumAggregateBytes: 16 });
+    let reject!: (error: Error) => void;
+    const held = store.withBodyAdmission(async () => new Promise<never>((_, rejectOperation) => {
+      reject = rejectOperation;
+    }));
+    await expect(store.withBodyAdmission(async () => "second")).rejects.toMatchObject({ code: "busy" });
+    reject(new Error("read failed"));
+    await expect(held).rejects.toThrow("read failed");
+    await expect(store.withBodyAdmission(async () => "recovered")).resolves.toBe("recovered");
+  });
+
   it("serializes aggregate count and byte admission without partial folders", async () => {
     const store = new UploadStore(await root(), 8, {
       maximumEntries: 1,

@@ -62,6 +62,8 @@ export class UploadStore {
   private readonly now: () => number;
   private readonly uuid: () => string;
   private readonly pendingSessionRemovals = new Set<string>();
+  private readonly maximumConcurrentBodies: number;
+  private activeBodyAdmissions = 0;
   private mutationTail = Promise.resolve();
 
   constructor(
@@ -73,11 +75,34 @@ export class UploadStore {
     this.maximumEntries = options.maximumEntries ?? 128;
     this.maximumAggregateBytes = options.maximumAggregateBytes ?? maximumBytes * 8;
     this.maximumUnclaimedAgeMs = options.maximumUnclaimedAgeMs ?? 24 * 60 * 60_000;
+    this.maximumConcurrentBodies = Math.max(1, Math.floor(this.maximumAggregateBytes / maximumBytes / 2));
     this.now = options.now ?? Date.now;
     this.uuid = options.uuid ?? randomUUID;
     if (![maximumBytes, this.maximumEntries, this.maximumAggregateBytes, this.maximumUnclaimedAgeMs].every(Number.isSafeInteger)
       || maximumBytes < 1 || this.maximumEntries < 1 || this.maximumAggregateBytes < maximumBytes || this.maximumUnclaimedAgeMs < 1) {
       throw new Error("Upload store bounds are invalid");
+    }
+  }
+
+  beginBodyAdmission(): () => void {
+    if (this.activeBodyAdmissions >= this.maximumConcurrentBodies) {
+      throw new GatewayError("busy", "Concurrent upload bodies reached their bounded capacity", true);
+    }
+    this.activeBodyAdmissions += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.activeBodyAdmissions = Math.max(0, this.activeBodyAdmissions - 1);
+    };
+  }
+
+  async withBodyAdmission<T>(operation: () => Promise<T>): Promise<T> {
+    const release = this.beginBodyAdmission();
+    try {
+      return await operation();
+    } finally {
+      release();
     }
   }
 

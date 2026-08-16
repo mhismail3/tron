@@ -121,8 +121,12 @@ export function encodeOutboundFrame(value: unknown, maximum: number): string | u
 }
 
 async function readBody(request: IncomingMessage, maximum: number): Promise<Buffer> {
-  const declared = Number(request.headers["content-length"] ?? 0);
-  if (declared > maximum) throw new GatewayError("invalid_request", "Request body is too large");
+  const rawDeclared = request.headers["content-length"];
+  const declared = rawDeclared === undefined ? undefined : Number(rawDeclared);
+  if (declared !== undefined
+    && (!Number.isSafeInteger(declared) || declared < 0 || declared > maximum)) {
+    throw new GatewayError("invalid_request", "Request body is too large");
+  }
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const value of request) {
@@ -248,10 +252,13 @@ export class GatewayServer {
       if (!authenticated) return sendJson(response, 401, { error: { code: "unauthenticated", message: "Pairing token is invalid" } });
 
       if (request.method === "POST" && url.pathname === "/v1/uploads") {
-        const name = url.searchParams.get("name") ?? "attachment";
-        const mimeType = request.headers["content-type"] ?? "application/octet-stream";
-        const upload = await this.options.uploads.save(name, mimeType, await readBody(request, this.options.maxUploadBytes));
-        return sendJson(response, 201, { upload: { id: upload.id, name: upload.name, mimeType: upload.mimeType, size: upload.size } });
+        return this.options.uploads.withBodyAdmission(async () => {
+          const name = url.searchParams.get("name") ?? "attachment";
+          const mimeType = request.headers["content-type"] ?? "application/octet-stream";
+          const body = await readBody(request, this.options.maxUploadBytes);
+          const upload = await this.options.uploads.save(name, mimeType, body);
+          return sendJson(response, 201, { upload: { id: upload.id, name: upload.name, mimeType: upload.mimeType, size: upload.size } });
+        });
       }
       if (request.method === "GET" && url.pathname.startsWith("/v1/blobs/")) {
         const id = decodeURIComponent(url.pathname.slice("/v1/blobs/".length));

@@ -46,7 +46,10 @@ read only by the explicit legacy importer.
 The pairing limiter keeps the exact rolling per-address window while retaining at most 4,096
 least-recently-used address keys and periodically deleting expired windows; address churn cannot
 create append-only process state. Uploads retain the 25 MiB per-request limit and additionally
-serialize admission against 128-entry and eight-times-per-upload (200 MiB by default) aggregate ceilings. Unclaimed uploads
+serialize admission against 128-entry and eight-times-per-upload (200 MiB by default) aggregate ceilings. Before body
+accumulation, a separate admission permits at most half that ratio concurrently (four default 25 MiB bodies), accounting
+for chunk storage plus final contiguous-buffer assembly; every success, rejection, overflow, or disconnect releases its slot.
+Unclaimed uploads
 expire after 24 hours, malformed/partial folders self-clean, prompt attachment IDs are unique, and
 one prompt cannot materialize more than the per-request byte ceiling. Successful imports remove
 their staging folder; deleting a canonical session removes its claimed attachment folders. Cleanup
