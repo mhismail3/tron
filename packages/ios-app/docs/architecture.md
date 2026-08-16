@@ -77,9 +77,13 @@ outside it and cannot mount a chat. Cached or stale non-idle rows present as res
 the canonical phase; only a live Gateway-authoritative interrupted phase uses the amber warning.
 A profile boundary synchronously invalidates lifecycle admission, chains behind any preceding
 retirement, revokes profile-scoped loads and presentation intake, and awaits the exact transport close
-before another profile may connect. Pairing pre-encodes profile metadata and
-commits the Keychain token before selecting that profile, so credential failure cannot leave selected
-metadata without its owned secret. Every suspended connect/reconnect/cache boundary revalidates that
+before another profile may connect. Pairing pre-encodes profile metadata and uses one transactional profile
+store boundary: atomic Keychain upsert succeeds before a single-document metadata commit, metadata failure
+restores the exact prior credential (or removes a newly created one), and credential-deletion failure restores
+removed metadata. Removal and rollback failures remain observable to lifecycle ownership, which retains
+profile-scoped drafts/cache and enters recoverable offline state instead of reporting a successful forget.
+Corrupt v2 metadata self-cleans and valid legacy metadata migrates on the next write, so
+credential failure cannot leave selected metadata without its owned secret. Every suspended connect/reconnect/cache boundary revalidates that
 lifecycle admission. Mutation receipt reconciliation captures generation-only admission so it may
 resolve across a same-profile reconnect, but profile replacement invalidates it before any poll or
 replay. Connection-owned terminal-open results that resolve after a same-lifecycle reconnect must attach

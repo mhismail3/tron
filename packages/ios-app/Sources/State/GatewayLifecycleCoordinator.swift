@@ -276,7 +276,16 @@ final class GatewayLifecycleCoordinator {
         guard !isTornDown else { return false }
         let generation = await beginTransition()
         guard phase.generation == generation else { return false }
-        if let profile = profiles.selected { profiles.remove(profile) }
+        if let profile = profiles.selected {
+            do { try profiles.remove(profile) }
+            catch {
+                finishTransition(generation)
+                connectionState = .offline(error.localizedDescription)
+                hasResolvedLaunchState = true
+                delegate?.lifecycleSurface(error)
+                return false
+            }
+        }
         finishTransition(generation)
         connectionState = .unpaired
         hasResolvedLaunchState = true
@@ -288,7 +297,14 @@ final class GatewayLifecycleCoordinator {
         guard !isTornDown else { return false }
         let generation = await beginTransition()
         guard phase.generation == generation else { return false }
-        profiles.remove(profile)
+        do { try profiles.remove(profile) }
+        catch {
+            finishTransition(generation)
+            connectionState = .offline(error.localizedDescription)
+            hasResolvedLaunchState = true
+            delegate?.lifecycleSurface(error)
+            return false
+        }
         finishTransition(generation)
         connectionState = .unpaired
         hasResolvedLaunchState = true

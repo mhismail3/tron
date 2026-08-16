@@ -303,7 +303,7 @@ final class AppModel {
         self.performanceSignposts = performanceSignposts
         #if HOSTED_TEST
         if ProcessInfo.processInfo.arguments.contains("--tron-reset-ui-test-state") {
-            for profile in profiles.profiles { profiles.remove(profile) }
+            for profile in profiles.profiles { try? profiles.remove(profile) }
             UserDefaults.standard.removeObject(forKey: "tronSetupComplete.v1")
             UserDefaults.standard.removeObject(forKey: "piSetupComplete.v1")
             UserDefaults.standard.removeObject(forKey: "defaultWorkspace.v1")
