@@ -77,7 +77,18 @@ struct ChatTranscriptPresentationStoreTests {
             store.submit(snapshot: a, tag: aTag)
             await barrier.waitForBuildCount(1)
             store.submit(snapshot: b, tag: bTag)
+            let registration = CompletionWaiterRegistration()
+            let bCompletion = Task { @MainActor in
+                try await store.hostedWaitForCompletedProjection(
+                    of: bTag,
+                    onRegistered: registration.signal
+                )
+            }
+            await registration.wait()
             #expect(!store.submit(snapshot: a, tag: aTag))
+            await #expect(throws: ChatTranscriptPresentationStoreError.superseded) {
+                try await bCompletion.value
+            }
             barrier.releaseBuild(at: 0)
 
             let installed = try await store.waitForInstall(of: aTag)
@@ -346,7 +357,7 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(installed.timeline == cold)
             #expect(installed.timeline.items.canonical.count == cold.items.count - 1)
             #expect(installed.timeline.items.live.count == 1)
-            #expect(signposts.events().filter { $0 == .begin(.chatProjection) }.count == 1)
+            #expect(signposts.events().filter { $0 == .begin(.chatProjection) }.count == 31)
         }
     }
 
@@ -534,6 +545,243 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("reset session and runtime scope changes force cold projection after sparse work")
+    func scopeRetirementForcesCold() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_225)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.phase = .running
+            snapshot.toolExecutions = [ToolExecutionState(
+                toolCallId: "runtime-tool",
+                toolName: "read",
+                order: 0,
+                status: .running,
+                arguments: .object([:]),
+                partialResult: nil,
+                result: nil,
+                output: "first",
+                isError: false,
+                startedAt: "2026-01-01T00:00:00Z",
+                updatedAt: "2026-01-01T00:00:00Z",
+                progressSequence: 1
+            )]
+            let reports = StoreProjectionWorkRecorder()
+            let store = ChatTranscriptPresentationStore(workRecorder: reports.record)
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 24)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            snapshot.toolExecutions = [ToolExecutionState(
+                toolCallId: "runtime-tool",
+                toolName: "read",
+                order: 0,
+                status: .running,
+                arguments: .object([:]),
+                partialResult: nil,
+                result: nil,
+                output: "second",
+                isError: false,
+                startedAt: "2026-01-01T00:00:00Z",
+                updatedAt: "2026-01-01T00:00:01Z",
+                progressSequence: 2
+            )]
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 24)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+            #expect(reports.modes == [.cold, .toolPayloadPatch])
+
+            store.reset()
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 24)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            snapshot.sessionId = "replacement-session"
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 24)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            snapshot.runtimeGeneration = "replacement-runtime"
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 24)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            #expect(reports.modes == [
+                .cold, .toolPayloadPatch, .cold, .cold, .cold,
+            ])
+            #expect(store.installed?.timeline == ChatTranscriptPresentation.timeline(in: snapshot))
+        }
+    }
+
+    @Test("entrance bookkeeping retires oldest pending and admitted rows at the page bound")
+    func entranceBookkeepingIsGloballyBounded() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) { @MainActor in
+            let maximum = ChatTranscriptPageRequest.maximumItemCount
+            func messages(prefix: String, count: Int) -> [TranscriptItem] {
+                (0..<count).map { index in
+                    .message(.init(
+                        id: "\(prefix)-\(index)", parentId: nil,
+                        timestamp: "2026-01-01T00:00:00Z", kind: .message, role: .user,
+                        content: [.init(
+                            id: "\(prefix)-\(index)-text", type: .text, text: "row",
+                            attachment: nil, redacted: nil, mimeType: nil, blobId: nil,
+                            toolCallId: nil, name: nil, arguments: nil
+                        )],
+                        provider: nil, modelId: nil, stopReason: nil, errorMessage: nil,
+                        toolCallId: nil, toolName: nil, isError: nil, details: nil, usage: nil,
+                        startedAt: nil, completedAt: nil, durationMs: nil, lastProgressAt: nil,
+                        progressSequence: nil
+                    ))
+                }
+            }
+            let builder = SessionScenarioBuilder(seed: 1_230)
+            var snapshot = try builder.openingTail(targetEncodedBytes: 8_000)
+            snapshot.transcript = messages(prefix: "initial", count: 1)
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 1
+            snapshot.phase = .idle
+            snapshot.streaming = nil
+            snapshot.toolExecutions = []
+            let store = ChatTranscriptPresentationStore()
+
+            var tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 26,
+                canonicalGeneration: 1,
+                timelineGeneration: 1
+            )
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            let first = messages(prefix: "first", count: 400)
+            snapshot.transcript.append(contentsOf: first)
+            snapshot.transcriptTotal = snapshot.transcript.count
+            tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 26,
+                canonicalGeneration: 2,
+                timelineGeneration: 2
+            )
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+            #expect(store.pendingEntranceIDs.count == 400)
+            #expect(store.admittedEntranceIDs.isEmpty)
+
+            let second = messages(prefix: "second", count: 400)
+            snapshot.transcript.append(contentsOf: second)
+            snapshot.transcriptTotal = snapshot.transcript.count
+            tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 26,
+                canonicalGeneration: 3,
+                timelineGeneration: 3
+            )
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            #expect(store.pendingEntranceIDs.count == maximum)
+            #expect(store.admittedEntranceIDs.isEmpty)
+            #expect(store.entranceState(for: first[0].id) == .none)
+            #expect(store.entranceState(for: first[287].id) == .none)
+            #expect(store.entranceState(for: first[288].id) == .pending)
+            for item in first + second where store.entranceState(for: item.id) == .pending {
+                #expect(store.resolveEntrance(id: item.id, isVisible: true))
+            }
+            #expect(store.pendingEntranceIDs.isEmpty)
+            #expect(store.admittedEntranceIDs.count == maximum)
+
+            let third = messages(prefix: "third", count: 400)
+            snapshot.transcript.append(contentsOf: third)
+            snapshot.transcriptTotal = snapshot.transcript.count
+            tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 26,
+                canonicalGeneration: 4,
+                timelineGeneration: 4
+            )
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+            #expect(store.pendingEntranceIDs.count == 400)
+            #expect(store.admittedEntranceIDs.count == maximum)
+            for item in third {
+                #expect(store.resolveEntrance(id: item.id, isVisible: true))
+            }
+
+            #expect(store.pendingEntranceIDs.isEmpty)
+            #expect(store.admittedEntranceIDs.count == maximum)
+            #expect(store.entranceState(for: first[288].id) == .none)
+            #expect(store.entranceState(for: second[287].id) == .none)
+            #expect(store.entranceState(for: second[288].id) == .admitted)
+            #expect(store.entranceState(for: third.last?.id ?? "") == .admitted)
+        }
+    }
+
+    @Test("one tool patch in ten thousand rows shares identity and creates no entrances")
+    func tenThousandRowPatchUsesTransitionFastPath() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) { @MainActor in
+            let builder = SessionScenarioBuilder(seed: 1_226)
+            var snapshot = try builder.openingTail(targetEncodedBytes: 8_000)
+            snapshot.transcript = builder.historyPage(count: 10_000, longRowBytes: 8)
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 10_000
+            snapshot.phase = .running
+            snapshot.toolExecutions = [storeRuntimeTool(output: "old", progressSequence: 1)]
+            let reports = StoreProjectionWorkRecorder()
+            let store = ChatTranscriptPresentationStore(workRecorder: reports.record)
+            var tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 25,
+                canonicalGeneration: 700,
+                timelineGeneration: 1
+            )
+            store.submit(snapshot: snapshot, tag: tag)
+            let initial = try await store.waitForInstall(of: tag)
+            let initialIDs = initial.timeline.ids
+            let initialPreferred = initial.timeline.preferredSemanticIDByRenderedID
+            let initialReverse = initial.timeline.renderedIDBySemanticID
+
+            snapshot.toolExecutions = [storeRuntimeTool(output: "new", progressSequence: 2)]
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 25,
+                canonicalGeneration: 700,
+                timelineGeneration: 2
+            )
+            store.submit(snapshot: snapshot, tag: tag)
+            let patched = try await store.waitForInstall(of: tag)
+
+            #expect(reports.values.last?.mode == .toolPayloadPatch)
+            #expect(reports.values.last?.sourceEntriesExamined == 0)
+            #expect(reports.values.last?.atomsAssembled == 0)
+            #expect(reports.values.last?.toolsInspected == 1)
+            #expect(patched.timeline.sharesCanonicalIdentitySpine(with: initial.timeline))
+            #expect(patched.timeline.ids == initialIDs)
+            #expect(patched.timeline.preferredSemanticIDByRenderedID == initialPreferred)
+            #expect(patched.timeline.renderedIDBySemanticID == initialReverse)
+            #expect(store.pendingEntranceIDs.count <= ChatTranscriptPageRequest.maximumItemCount)
+            #expect(store.admittedEntranceIDs.count <= ChatTranscriptPageRequest.maximumItemCount)
+        }
+    }
+
+    @Test("maximum malformed source bounds are conservative")
+    func maximumSourceWindowBounds() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 1_227)
+            .openingTail(targetEncodedBytes: 8_000)
+        snapshot.transcript = SessionScenarioBuilder(seed: 1_228)
+            .historyPage(count: ChatTranscriptPageRequest.maximumItemCount + 1, longRowBytes: 8)
+        snapshot.transcriptStart = Int.max
+        snapshot.transcriptTotal = Int.max
+
+        let window = InstalledChatTranscript.SourceWindow(snapshot: snapshot)
+        #expect(window.start == nil)
+        #expect(!window.hasExactBounds)
+        #expect(window.ids.count == ChatTranscriptPageRequest.maximumItemCount)
+    }
+
     @Test("maximum canonical page prepares off-main and installs one complete timeline")
     func maximumPageProjection() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) { @MainActor in
@@ -596,6 +844,62 @@ private func streamingMessage(update: Int) throws -> TranscriptItem {
         from: Data("""
         {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"thinking","type":"thinking","text":"Working"},{"id":"answer","type":"text","text":"update-\(update)"}]}
         """.utf8)
+    )
+}
+
+private final class StoreProjectionWorkRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var reports: [ChatTranscriptProjectionWorkReport] = []
+
+    var modes: [ChatTranscriptProjectionMode] { lock.withLock { reports.map(\.mode) } }
+    var values: [ChatTranscriptProjectionWorkReport] { lock.withLock { reports } }
+
+    func record(_ report: ChatTranscriptProjectionWorkReport) {
+        lock.withLock { reports.append(report) }
+    }
+}
+
+private final class CompletionWaiterRegistration: @unchecked Sendable {
+    private let lock = NSLock()
+    private var registered = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func signal() {
+        let ready = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            registered = true
+            defer { waiters.removeAll() }
+            return waiters
+        }
+        ready.forEach { $0.resume() }
+    }
+
+    func wait() async {
+        if lock.withLock({ registered }) { return }
+        await withCheckedContinuation { continuation in
+            let resumeImmediately = lock.withLock { () -> Bool in
+                if registered { return true }
+                waiters.append(continuation)
+                return false
+            }
+            if resumeImmediately { continuation.resume() }
+        }
+    }
+}
+
+private func storeRuntimeTool(output: String, progressSequence: Int) -> ToolExecutionState {
+    ToolExecutionState(
+        toolCallId: "runtime-tool",
+        toolName: "read",
+        order: 0,
+        status: .running,
+        arguments: .object([:]),
+        partialResult: nil,
+        result: nil,
+        output: output,
+        isError: false,
+        startedAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:0\(progressSequence)Z",
+        progressSequence: progressSequence
     )
 }
 

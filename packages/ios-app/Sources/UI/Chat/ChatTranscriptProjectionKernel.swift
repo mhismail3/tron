@@ -2,6 +2,9 @@ import Foundation
 
 enum ChatTranscriptProjectionMode: String, Hashable, Sendable {
     case cold
+    case fragmentReuse
+    case toolPayloadPatch
+    case isolatedStreamingSuffix
 }
 
 /// Aggregate-only evidence about disposable transcript projection work. These
@@ -61,21 +64,57 @@ struct ChatTranscriptProjectionFragment: Hashable, Sendable {
     var isConfiguration: Bool { atoms.contains(.configuration) }
 }
 
+fileprivate enum ChatToolPatchClassification: Hashable, Sendable {
+    case canonical
+    case streaming
+    case unanchoredRuntime
+}
+
+fileprivate struct ChatToolPatchSite: Hashable, Sendable {
+    let renderedIndex: Int
+    let toolIndex: Int
+    let canonicalBase: ChatToolPresentation?
+    let classification: ChatToolPatchClassification
+}
+
+fileprivate struct ChatToolPlacementSignature: Hashable, Sendable {
+    let unanchoredBeforeStreaming: Bool
+    let runCallIDs: [[String]]
+}
+
+fileprivate struct ChatToolPatchMetadata: Hashable, Sendable {
+    let sitesByCallID: [String: [ChatToolPatchSite]]
+    let placement: ChatToolPlacementSignature
+}
+
+fileprivate struct ChatTranscriptProjectionSourceWindow: Hashable, Sendable {
+    let start: Int
+    let end: Int
+}
+
 struct ChatTranscriptProjectionCandidate: Sendable {
     let timeline: ChatTranscriptTimeline
     let fragments: [ChatTranscriptProjectionFragment]
     let streamingFragment: ChatTranscriptProjectionFragment?
     let runtimeItems: [ChatTranscriptRenderItem]
     let workReport: ChatTranscriptProjectionWorkReport
+    fileprivate let phase: SessionPhase
+    fileprivate let toolExecutions: [ToolExecutionState]
+    fileprivate let patchMetadata: ChatToolPatchMetadata
+    fileprivate let usesIsolatedStreamingSuffix: Bool
+    fileprivate let sourceWindow: ChatTranscriptProjectionSourceWindow?
 
     var isValid: Bool {
-        let displayed = timeline.ids + runtimeItems.map(\.id)
-        return timeline.isInternallyConsistent && Set(displayed).count == displayed.count
+        guard timeline.isInternallyConsistent else { return false }
+        let runtimeIDs = runtimeItems.map(\.id)
+        return Set(runtimeIDs).count == runtimeIDs.count
+            && runtimeIDs.allSatisfy { !timeline.containsID($0) }
     }
 }
 
-/// The sole deterministic cold projection implementation. Future incremental
-/// work may reuse exact raw fragments, but must feed this same global assembler.
+/// The sole deterministic transcript projector and global assembler. Incremental
+/// paths may reuse exact source fragments or patch assembler-proven tool sites,
+/// but no path constructs a competing complete timeline.
 enum ChatTranscriptProjectionKernel {
     static func fragment(for item: TranscriptItem) -> ChatTranscriptProjectionFragment {
         var atoms: [ChatTranscriptProjectionRawAtom] = []
@@ -93,17 +132,13 @@ enum ChatTranscriptProjectionKernel {
         if item.kind == .message, item.role != .toolResult {
             for part in ChatTranscriptPresentation.messageParts(in: item) {
                 if case .content(let content) = part, let callID = content.toolCallId {
-                    // Preserve the prior canonical visibility contract exactly:
-                    // any content reference carrying a call ID suppresses its
-                    // joined result row, while missing IDs do not fabricate one.
+                    // Any content reference carrying a call ID suppresses its
+                    // joined result row, including malformed extension content.
                     atoms.append(.toolCall(callID))
                 }
                 atoms.append(.messagePart(part))
             }
         } else {
-            // The canonical stream can contain malformed or extension-authored
-            // content on any entry kind. The prior projector treated every such
-            // call reference as visible, including references on tool results.
             for content in item.content ?? [] {
                 if let callID = content.toolCallId { atoms.append(.toolCall(callID)) }
             }
@@ -113,9 +148,11 @@ enum ChatTranscriptProjectionKernel {
     }
 
     static func visibleItems(in snapshot: SessionSnapshot) -> [TranscriptItem] {
-        visibleFragments(
+        let streamingFragment = snapshot.streaming.map(fragment)
+        return visibleFragments(
             from: snapshot.transcript.map(fragment),
-            transcriptStart: snapshot.transcriptStart
+            transcriptStart: snapshot.transcriptStart,
+            additionalVisibleCallIDs: streamingFragment?.toolCallIDs ?? []
         ).map(\.source)
     }
 
@@ -129,51 +166,557 @@ enum ChatTranscriptProjectionKernel {
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
         workRecorder: ChatTranscriptProjectionWorkRecorder? = nil
     ) -> ChatTranscriptProjectionCandidate {
-        let interval = performanceSignposts.begin(.chatProjection)
-        let fragments = snapshot.transcript.map(fragment)
-        let streamingFragment = snapshot.streaming.map(fragment)
+        cold(
+            snapshot: snapshot,
+            isolatesStreamingSuffix: false,
+            performanceSignposts: performanceSignposts,
+            workRecorder: workRecorder
+        )
+    }
+
+    /// The worker may request the proven isolated storage topology on its first
+    /// build. The public cold oracle above always feeds streaming through the
+    /// global assembler, so differential parity never compares an optimization
+    /// with itself.
+    static func coldForWorker(
+        snapshot: SessionSnapshot,
+        performanceSignposts: any PerformanceSignposting,
+        workRecorder: ChatTranscriptProjectionWorkRecorder?
+    ) -> ChatTranscriptProjectionCandidate {
+        cold(
+            snapshot: snapshot,
+            isolatesStreamingSuffix: true,
+            performanceSignposts: performanceSignposts,
+            workRecorder: workRecorder
+        )
+    }
+
+    private static func cold(
+        snapshot: SessionSnapshot,
+        isolatesStreamingSuffix: Bool,
+        performanceSignposts: any PerformanceSignposting,
+        workRecorder: ChatTranscriptProjectionWorkRecorder?
+    ) -> ChatTranscriptProjectionCandidate {
+        measured(performanceSignposts: performanceSignposts, workRecorder: workRecorder) {
+            let fragments = snapshot.transcript.map(fragment)
+            let streamingFragment = snapshot.streaming.map(fragment)
+            let projection: AssembledProjection
+            if isolatesStreamingSuffix {
+                projection = assembledProjection(
+                    snapshot: snapshot,
+                    fragments: fragments,
+                    streamingFragment: streamingFragment
+                )
+            } else {
+                let assembly = assemble(
+                    snapshot: snapshot,
+                    fragments: fragments,
+                    streamingFragment: streamingFragment
+                )
+                projection = AssembledProjection(
+                    timeline: assembly.timeline,
+                    toolsInspected: assembly.toolsInspected,
+                    patchMetadata: assembly.patchMetadata,
+                    usesIsolatedStreamingSuffix: false
+                )
+            }
+            let report = ChatTranscriptProjectionWorkReport(
+                mode: .cold,
+                sourceEntriesExamined: fragments.count,
+                fragmentsReused: 0,
+                fragmentsRebuilt: fragments.count,
+                toolsInspected: projection.toolsInspected,
+                toolsPatched: 0,
+                atomsAssembled: atomCount(fragments, streamingFragment),
+                renderedItemCount: projection.timeline.items.count
+            )
+            return candidate(
+                snapshot: snapshot,
+                fragments: fragments,
+                streamingFragment: streamingFragment,
+                projection: projection,
+                report: report
+            )
+        }
+    }
+
+    /// The worker calls this only for a basis in the same cache/session/
+    /// presentation/runtime scope. `canonicalSourceUnchanged` is the canonical
+    /// generation and exact-window fast proof; every other source change still
+    /// aligns fragments by ordinal or an explicitly conservative ordered spine.
+    static func incremental(
+        snapshot: SessionSnapshot,
+        previous: ChatTranscriptProjectionCandidate,
+        canonicalSourceUnchanged: Bool,
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
+        workRecorder: ChatTranscriptProjectionWorkRecorder? = nil
+    ) -> ChatTranscriptProjectionCandidate {
+        if canonicalSourceUnchanged,
+           snapshot.phase == previous.phase,
+           snapshot.toolExecutions == previous.toolExecutions,
+           snapshot.toolExecutions.allSatisfy({ $0.status != .running }),
+           let streaming = snapshot.streaming,
+           previous.streamingFragment == nil || previous.usesIsolatedStreamingSuffix {
+            let streamingFragment = previous.streamingFragment?.source == streaming
+                ? previous.streamingFragment!
+                : fragment(for: streaming)
+            if let live = isolatedStreamingTimeline(fragment: streamingFragment) {
+                return measured(performanceSignposts: performanceSignposts, workRecorder: workRecorder) {
+                let timeline = previous.timeline.appendingLive(live)
+                let report = ChatTranscriptProjectionWorkReport(
+                    mode: .isolatedStreamingSuffix,
+                    sourceEntriesExamined: 1,
+                    fragmentsReused: 0,
+                    fragmentsRebuilt: 0,
+                    toolsInspected: 0,
+                    toolsPatched: 0,
+                    atomsAssembled: streamingFragment.atoms.count,
+                    renderedItemCount: timeline.items.count
+                )
+                return ChatTranscriptProjectionCandidate(
+                    timeline: timeline,
+                    fragments: previous.fragments,
+                    streamingFragment: streamingFragment,
+                    runtimeItems: runtimeItems(in: snapshot),
+                    workReport: report,
+                    phase: snapshot.phase,
+                    toolExecutions: snapshot.toolExecutions,
+                    patchMetadata: previous.patchMetadata,
+                    usesIsolatedStreamingSuffix: true,
+                    sourceWindow: previous.sourceWindow
+                )
+                }
+            }
+        }
+
+        if canonicalSourceUnchanged,
+           let patched = toolPayloadPatch(
+                snapshot: snapshot,
+                previous: previous,
+                performanceSignposts: performanceSignposts,
+                workRecorder: workRecorder
+           ) {
+            return patched
+        }
+
+        return measured(performanceSignposts: performanceSignposts, workRecorder: workRecorder) {
+            let reuse = reusableFragments(snapshot: snapshot, previous: previous)
+            let streamingFragment: ChatTranscriptProjectionFragment?
+            if let incoming = snapshot.streaming {
+                if previous.streamingFragment?.source == incoming {
+                    streamingFragment = previous.streamingFragment
+                } else {
+                    streamingFragment = fragment(for: incoming)
+                }
+            } else {
+                streamingFragment = nil
+            }
+            let projection = assembledProjection(
+                snapshot: snapshot,
+                fragments: reuse.fragments,
+                streamingFragment: streamingFragment
+            )
+            let report = ChatTranscriptProjectionWorkReport(
+                mode: reuse.reused > 0 ? .fragmentReuse : .cold,
+                sourceEntriesExamined: snapshot.transcript.count,
+                fragmentsReused: reuse.reused,
+                fragmentsRebuilt: reuse.fragments.count - reuse.reused,
+                toolsInspected: projection.toolsInspected,
+                toolsPatched: 0,
+                atomsAssembled: atomCount(reuse.fragments, streamingFragment),
+                renderedItemCount: projection.timeline.items.count
+            )
+            return candidate(
+                snapshot: snapshot,
+                fragments: reuse.fragments,
+                streamingFragment: streamingFragment,
+                projection: projection,
+                report: report
+            )
+        }
+    }
+
+    /// Public compatibility entry point; suffix production remains inside this
+    /// kernel rather than in the presentation facade or worker.
+    static func isolatedStreamingTimeline(_ item: TranscriptItem) -> ChatTranscriptTimeline? {
+        isolatedStreamingTimeline(fragment: fragment(for: item))
+    }
+
+    private static func isolatedStreamingTimeline(
+        fragment: ChatTranscriptProjectionFragment
+    ) -> ChatTranscriptTimeline? {
+        let item = fragment.source
+        guard item.kind == .message, item.role != .toolResult,
+              fragment.toolCallIDs.isEmpty else { return nil }
+        let parts = fragment.messageParts
+        guard !parts.contains(where: { part in
+            if case .content(let content) = part { return content.type == .toolCall }
+            return false
+        }) else { return nil }
+
+        let hasFooter = !(item.errorMessage ?? "").isEmpty
+        let rendered: [ChatTranscriptRenderItem]
+        if parts.isEmpty, !hasFooter {
+            rendered = []
+        } else {
+            rendered = [.message(ChatMessagePresentation(
+                id: "streaming",
+                item: item,
+                parts: parts,
+                streaming: true,
+                showsFooter: true
+            ))]
+        }
+        let preferred = rendered.isEmpty ? [:] : ["streaming": "streaming"]
+        let reverse = rendered.isEmpty ? [:] : ["streaming": "streaming"]
+        return ChatTranscriptTimeline(
+            items: ChatTranscriptItems(canonical: [], live: rendered),
+            preferredSemanticIDByRenderedID: ChatSemanticIndex(canonical: [:], live: preferred),
+            renderedIDBySemanticID: ChatSemanticIndex(canonical: [:], live: reverse)
+        )
+    }
+
+    private struct FragmentReuse {
+        let fragments: [ChatTranscriptProjectionFragment]
+        let reused: Int
+    }
+
+    private static func reusableFragments(
+        snapshot: SessionSnapshot,
+        previous: ChatTranscriptProjectionCandidate
+    ) -> FragmentReuse {
+        let incoming = snapshot.transcript
+        var exactPreviousOffset: Int?
+        var exactIncomingRange: Range<Int>?
+        var previousIndexByIncomingIndex: [Int: Int] = [:]
+
+        // Exact windows use global ordinal intersection. They do not consult IDs
+        // for alignment, and equality is required at the proven ordinal.
+        let previousBounds = previous.sourceWindow
+        let incomingBounds = exactWindow(
+            start: snapshot.transcriptStart,
+            total: snapshot.transcriptTotal,
+            count: incoming.count
+        )
+        if let previousBounds, let incomingBounds {
+            let overlapStart = max(previousBounds.start, incomingBounds.start)
+            let overlapEnd = min(previousBounds.end, incomingBounds.end)
+            if overlapStart < overlapEnd {
+                exactPreviousOffset = incomingBounds.start - previousBounds.start
+                exactIncomingRange = (overlapStart - incomingBounds.start)..<(overlapEnd - incomingBounds.start)
+            }
+        } else if let alignment = conservativeOrderedAlignment(
+            previous: previous.fragments,
+            incoming: incoming
+        ) {
+            for pair in alignment { previousIndexByIncomingIndex[pair.incoming] = pair.previous }
+        }
+
+        var fragments: [ChatTranscriptProjectionFragment] = []
+        fragments.reserveCapacity(incoming.count)
+        var reused = 0
+        for (index, item) in incoming.enumerated() {
+            let previousIndex: Int? = if let exactPreviousOffset, exactIncomingRange?.contains(index) == true {
+                index + exactPreviousOffset
+            } else {
+                previousIndexByIncomingIndex[index]
+            }
+            if let previousIndex,
+               previous.fragments.indices.contains(previousIndex),
+               previous.fragments[previousIndex].source == item {
+                fragments.append(previous.fragments[previousIndex])
+                reused += 1
+            } else {
+                fragments.append(fragment(for: item))
+            }
+        }
+        return FragmentReuse(fragments: fragments, reused: reused)
+    }
+
+    private static func exactWindow(
+        start: Int?,
+        total: Int?,
+        count: Int
+    ) -> ChatTranscriptProjectionSourceWindow? {
+        guard let start, let total,
+              start >= 0, count >= 0, total >= start,
+              total - start == count else { return nil }
+        return ChatTranscriptProjectionSourceWindow(start: start, end: total)
+    }
+
+    private struct AlignmentPair {
+        let previous: Int
+        let incoming: Int
+    }
+
+    /// Legacy/inexact bounds may reuse only one unique, contiguous ordered spine.
+    /// IDs establish position, never equality: the caller still requires the
+    /// complete `TranscriptItem` to match before reusing a fragment.
+    private static func conservativeOrderedAlignment(
+        previous: [ChatTranscriptProjectionFragment],
+        incoming: [TranscriptItem]
+    ) -> [AlignmentPair]? {
+        let previousIDs = previous.map { $0.source.id }
+        let incomingIDs = incoming.map(\.id)
+        guard Set(previousIDs).count == previousIDs.count,
+              Set(incomingIDs).count == incomingIDs.count else { return nil }
+        let previousIndex = Dictionary(uniqueKeysWithValues: previousIDs.enumerated().map { ($0.element, $0.offset) })
+        let pairs = incomingIDs.enumerated().compactMap { incomingIndex, id -> AlignmentPair? in
+            previousIndex[id].map { AlignmentPair(previous: $0, incoming: incomingIndex) }
+        }
+        guard !pairs.isEmpty else { return nil }
+        for index in pairs.indices.dropFirst() {
+            guard pairs[index].previous == pairs[index - 1].previous + 1,
+                  pairs[index].incoming == pairs[index - 1].incoming + 1 else { return nil }
+        }
+        return pairs
+    }
+
+    private struct AssembledProjection {
+        let timeline: ChatTranscriptTimeline
+        let toolsInspected: Int
+        let patchMetadata: ChatToolPatchMetadata
+        let usesIsolatedStreamingSuffix: Bool
+    }
+
+    private static func assembledProjection(
+        snapshot: SessionSnapshot,
+        fragments: [ChatTranscriptProjectionFragment],
+        streamingFragment: ChatTranscriptProjectionFragment?
+    ) -> AssembledProjection {
+        if snapshot.toolExecutions.allSatisfy({ $0.status != .running }),
+           let streamingFragment,
+           let live = isolatedStreamingTimeline(fragment: streamingFragment) {
+            var baseSnapshot = snapshot
+            baseSnapshot.streaming = nil
+            let base = assemble(
+                snapshot: baseSnapshot,
+                fragments: fragments,
+                streamingFragment: nil
+            )
+            let placement = ChatToolPlacementSignature(
+                unanchoredBeforeStreaming: specialBeforeStreaming(
+                    snapshot: snapshot,
+                    metadata: base.patchMetadata
+                ),
+                runCallIDs: base.patchMetadata.placement.runCallIDs
+            )
+            return AssembledProjection(
+                timeline: base.timeline.appendingLive(live),
+                toolsInspected: base.toolsInspected,
+                patchMetadata: ChatToolPatchMetadata(
+                    sitesByCallID: base.patchMetadata.sitesByCallID,
+                    placement: placement
+                ),
+                usesIsolatedStreamingSuffix: true
+            )
+        }
         let assembly = assemble(
             snapshot: snapshot,
             fragments: fragments,
             streamingFragment: streamingFragment
         )
-        let runtimeItems = runtimeItems(in: snapshot)
-        let report = ChatTranscriptProjectionWorkReport(
-            mode: .cold,
-            sourceEntriesExamined: fragments.count,
-            fragmentsReused: 0,
-            fragmentsRebuilt: fragments.count,
+        return AssembledProjection(
+            timeline: assembly.timeline,
             toolsInspected: assembly.toolsInspected,
-            toolsPatched: 0,
-            atomsAssembled: fragments.reduce(0) { $0 + $1.atoms.count }
-                + (streamingFragment?.atoms.count ?? 0),
-            renderedItemCount: assembly.timeline.items.count
+            patchMetadata: assembly.patchMetadata,
+            usesIsolatedStreamingSuffix: false
         )
+    }
+
+    private static func candidate(
+        snapshot: SessionSnapshot,
+        fragments: [ChatTranscriptProjectionFragment],
+        streamingFragment: ChatTranscriptProjectionFragment?,
+        projection: AssembledProjection,
+        report: ChatTranscriptProjectionWorkReport
+    ) -> ChatTranscriptProjectionCandidate {
+        ChatTranscriptProjectionCandidate(
+            timeline: projection.timeline,
+            fragments: fragments,
+            streamingFragment: streamingFragment,
+            runtimeItems: runtimeItems(in: snapshot),
+            workReport: report,
+            phase: snapshot.phase,
+            toolExecutions: snapshot.toolExecutions,
+            patchMetadata: projection.patchMetadata,
+            usesIsolatedStreamingSuffix: projection.usesIsolatedStreamingSuffix,
+            sourceWindow: exactWindow(
+                start: snapshot.transcriptStart,
+                total: snapshot.transcriptTotal,
+                count: fragments.count
+            )
+        )
+    }
+
+    private static func measured(
+        performanceSignposts: any PerformanceSignposting,
+        workRecorder: ChatTranscriptProjectionWorkRecorder?,
+        operation: () -> ChatTranscriptProjectionCandidate
+    ) -> ChatTranscriptProjectionCandidate {
+        let interval = performanceSignposts.begin(.chatProjection)
+        let result = operation()
         performanceSignposts.end(
             interval,
             result: .success,
-            metrics: PerformanceMetrics(itemCount: report.renderedItemCount)
+            metrics: PerformanceMetrics(itemCount: result.workReport.renderedItemCount)
         )
-        workRecorder?(report)
-        return ChatTranscriptProjectionCandidate(
-            timeline: assembly.timeline,
-            fragments: fragments,
-            streamingFragment: streamingFragment,
-            runtimeItems: runtimeItems,
-            workReport: report
-        )
+        workRecorder?(result.workReport)
+        return result
+    }
+
+    private static func atomCount(
+        _ fragments: [ChatTranscriptProjectionFragment],
+        _ streamingFragment: ChatTranscriptProjectionFragment?
+    ) -> Int {
+        fragments.reduce(0) { $0 + $1.atoms.count } + (streamingFragment?.atoms.count ?? 0)
+    }
+
+    private static func toolPayloadPatch(
+        snapshot: SessionSnapshot,
+        previous: ChatTranscriptProjectionCandidate,
+        performanceSignposts: any PerformanceSignposting,
+        workRecorder: ChatTranscriptProjectionWorkRecorder?
+    ) -> ChatTranscriptProjectionCandidate? {
+        guard snapshot.phase == previous.phase,
+              snapshot.streaming == previous.streamingFragment?.source,
+              snapshot.toolExecutions != previous.toolExecutions else { return nil }
+
+        let oldStates = uniqueRuntimeStates(previous.toolExecutions)
+        let newStates = uniqueRuntimeStates(snapshot.toolExecutions)
+        guard let oldStates, let newStates,
+              Set(oldStates.keys) == Set(newStates.keys) else { return nil }
+
+        let changed = oldStates.keys.filter { oldStates[$0] != newStates[$0] }
+        guard !changed.isEmpty else { return nil }
+        for callID in oldStates.keys {
+            guard let old = oldStates[callID], let new = newStates[callID],
+                  old.order == new.order,
+                  old.startedAt == new.startedAt else { return nil }
+        }
+        for callID in changed {
+            guard previous.patchMetadata.sitesByCallID[callID]?.count == 1 else { return nil }
+        }
+        guard specialBeforeStreaming(snapshot: snapshot, metadata: previous.patchMetadata)
+                == previous.patchMetadata.placement.unanchoredBeforeStreaming else { return nil }
+
+        return measured(performanceSignposts: performanceSignposts, workRecorder: workRecorder) {
+            var runsByIndex: [Int: ChatToolRunPresentation] = [:]
+            for callID in changed {
+                let site = previous.patchMetadata.sitesByCallID[callID]![0]
+                let currentRun: ChatToolRunPresentation
+                if let prepared = runsByIndex[site.renderedIndex] {
+                    currentRun = prepared
+                } else {
+                    guard case .toolRun(let run) = previous.timeline.items[site.renderedIndex] else {
+                        preconditionFailure("Assembler tool patch site did not reference a tool run")
+                    }
+                    currentRun = run
+                }
+                guard currentRun.tools.indices.contains(site.toolIndex),
+                      currentRun.tools[site.toolIndex].id == callID,
+                      let live = newStates[callID] else {
+                    preconditionFailure("Assembler tool patch site lost its canonical call")
+                }
+                let updated: ChatToolPresentation
+                switch site.classification {
+                case .canonical, .streaming:
+                    guard let canonical = site.canonicalBase else {
+                        preconditionFailure("Canonical patch site lost its presentation base")
+                    }
+                    updated = foregroundPresentation(resolved(canonical, live: live), phase: snapshot.phase)
+                case .unanchoredRuntime:
+                    updated = foregroundPresentation(livePresentation(live), phase: snapshot.phase)
+                }
+                var tools = currentRun.tools
+                tools[site.toolIndex] = updated
+                runsByIndex[site.renderedIndex] = ChatToolRunPresentation(
+                    tools: tools,
+                    anchorID: currentRun.anchorID
+                )
+            }
+
+            var replacements: [Int: ChatTranscriptRenderItem] = [:]
+            for (index, run) in runsByIndex {
+                let item = ChatTranscriptRenderItem.toolRun(run)
+                precondition(item.id == previous.timeline.items[index].id)
+                replacements[index] = item
+            }
+            let timeline = previous.timeline.replacingCanonicalRows(replacements)
+            let report = ChatTranscriptProjectionWorkReport(
+                mode: .toolPayloadPatch,
+                sourceEntriesExamined: 0,
+                fragmentsReused: 0,
+                fragmentsRebuilt: 0,
+                toolsInspected: newStates.count,
+                toolsPatched: changed.count,
+                atomsAssembled: 0,
+                renderedItemCount: timeline.items.count
+            )
+            return ChatTranscriptProjectionCandidate(
+                timeline: timeline,
+                fragments: previous.fragments,
+                streamingFragment: previous.streamingFragment,
+                runtimeItems: runtimeItems(in: snapshot),
+                workReport: report,
+                phase: snapshot.phase,
+                toolExecutions: snapshot.toolExecutions,
+                patchMetadata: previous.patchMetadata,
+                usesIsolatedStreamingSuffix: previous.usesIsolatedStreamingSuffix,
+                sourceWindow: previous.sourceWindow
+            )
+        }
+    }
+
+    private static func uniqueRuntimeStates(
+        _ states: [ToolExecutionState]
+    ) -> [String: ToolExecutionState]? {
+        var result: [String: ToolExecutionState] = [:]
+        result.reserveCapacity(states.count)
+        for state in states {
+            guard result.updateValue(state, forKey: state.toolCallId) == nil else { return nil }
+        }
+        return result
+    }
+
+    private static func specialBeforeStreaming(
+        snapshot: SessionSnapshot,
+        metadata: ChatToolPatchMetadata
+    ) -> Bool {
+        guard let streaming = snapshot.streaming,
+              hasNonToolPresentation(streaming),
+              !metadata.sitesByCallID.values.joined().contains(where: {
+                  $0.classification == .streaming
+              }) else { return false }
+        let unanchoredIDs = metadata.sitesByCallID.compactMap { callID, sites -> String? in
+            sites.contains(where: { $0.classification == .unanchoredRuntime }) ? callID : nil
+        }
+        guard !unanchoredIDs.isEmpty else { return false }
+        let states = uniqueRuntimeStates(snapshot.toolExecutions)
+        return states.map { states in
+            unanchoredIDs.allSatisfy { states[$0]?.status != .running }
+        } ?? false
     }
 
     private struct Assembly {
         let timeline: ChatTranscriptTimeline
         let toolsInspected: Int
+        let patchMetadata: ChatToolPatchMetadata
+    }
+
+    private struct PreparedTool {
+        let presentation: ChatToolPresentation
+        let canonicalBase: ChatToolPresentation?
+        let classification: ChatToolPatchClassification
     }
 
     private static func visibleFragments(
         from fragments: [ChatTranscriptProjectionFragment],
-        transcriptStart: Int?
+        transcriptStart: Int?,
+        additionalVisibleCallIDs: [String] = []
     ) -> [ChatTranscriptProjectionFragment] {
         let visibleCallIDs = Set(fragments.flatMap(\.toolCallIDs))
+            .union(additionalVisibleCallIDs)
         var conversationHasBegun = (transcriptStart ?? 0) > 0
         return fragments.filter { fragment in
             if fragment.beginsConversation { conversationHasBegun = true }
@@ -201,25 +744,43 @@ enum ChatTranscriptProjectionKernel {
         )
         var toolsInspected = snapshot.toolExecutions.count
         var rendered: [ChatTranscriptRenderItem] = []
-        var pendingTools: [ChatToolPresentation] = []
+        var pendingTools: [PreparedTool] = []
         var pendingToolIndexByCallID: [String: Int] = [:]
         var anchoredCallIDs = Set<String>()
+        var sitesByCallID: [String: [ChatToolPatchSite]] = [:]
+        var runCallIDs: [[String]] = []
 
-        func appendTools(_ tools: [ChatToolPresentation]) {
-            for tool in tools.map({ foregroundPresentation($0, phase: snapshot.phase) }) {
-                anchoredCallIDs.insert(tool.id)
-                if let index = pendingToolIndexByCallID[tool.id] {
-                    pendingTools[index] = tool
+        func appendTools(_ tools: [PreparedTool]) {
+            for prepared in tools {
+                let value = PreparedTool(
+                    presentation: foregroundPresentation(prepared.presentation, phase: snapshot.phase),
+                    canonicalBase: prepared.canonicalBase,
+                    classification: prepared.classification
+                )
+                anchoredCallIDs.insert(value.presentation.id)
+                if let index = pendingToolIndexByCallID[value.presentation.id] {
+                    pendingTools[index] = value
                 } else {
-                    pendingToolIndexByCallID[tool.id] = pendingTools.count
-                    pendingTools.append(tool)
+                    pendingToolIndexByCallID[value.presentation.id] = pendingTools.count
+                    pendingTools.append(value)
                 }
             }
         }
 
         func flushTools() {
             guard !pendingTools.isEmpty else { return }
-            rendered.append(.toolRun(ChatToolRunPresentation(tools: pendingTools)))
+            let renderedIndex = rendered.count
+            let presentations = pendingTools.map(\.presentation)
+            rendered.append(.toolRun(ChatToolRunPresentation(tools: presentations)))
+            runCallIDs.append(presentations.map(\.id))
+            for (toolIndex, prepared) in pendingTools.enumerated() {
+                sitesByCallID[prepared.presentation.id, default: []].append(ChatToolPatchSite(
+                    renderedIndex: renderedIndex,
+                    toolIndex: toolIndex,
+                    canonicalBase: prepared.canonicalBase,
+                    classification: prepared.classification
+                ))
+            }
             pendingTools.removeAll(keepingCapacity: true)
             pendingToolIndexByCallID.removeAll(keepingCapacity: true)
         }
@@ -244,11 +805,18 @@ enum ChatTranscriptProjectionKernel {
 
         let rawOrdinalByID: [String: Int]
         if let transcriptStart = snapshot.transcriptStart,
-           transcriptStart + fragments.count == snapshot.transcriptTotal {
+           let transcriptTotal = snapshot.transcriptTotal,
+           transcriptStart >= 0, transcriptTotal >= transcriptStart,
+           transcriptTotal - transcriptStart == fragments.count {
             var ordinals: [String: Int] = [:]
             var duplicates = Set<String>()
             for (offset, fragment) in fragments.enumerated() {
-                if ordinals.updateValue(transcriptStart + offset, forKey: fragment.source.id) != nil {
+                let (ordinal, overflow) = transcriptStart.addingReportingOverflow(offset)
+                guard !overflow else {
+                    ordinals.removeAll(keepingCapacity: false)
+                    break
+                }
+                if ordinals.updateValue(ordinal, forKey: fragment.source.id) != nil {
                     duplicates.insert(fragment.source.id)
                 }
             }
@@ -260,7 +828,7 @@ enum ChatTranscriptProjectionKernel {
 
         func appendFragment(
             _ fragment: ChatTranscriptProjectionFragment,
-            tools: [ChatToolPresentation],
+            tools: [PreparedTool],
             streaming: Bool
         ) {
             let item = fragment.source
@@ -280,7 +848,10 @@ enum ChatTranscriptProjectionKernel {
                 return
             }
 
-            let toolsByID = Dictionary(tools.map { ($0.id, $0) }, uniquingKeysWith: { _, newest in newest })
+            let toolsByID = Dictionary(
+                tools.map { ($0.presentation.id, $0) },
+                uniquingKeysWith: { _, newest in newest }
+            )
             var content: [ChatMessagePart] = []
             var slice = 0
             var renderedFooter = false
@@ -311,38 +882,62 @@ enum ChatTranscriptProjectionKernel {
             }
         }
 
-        for fragment in visibleFragments(from: fragments, transcriptStart: snapshot.transcriptStart) {
-            let tools = toolPresentations(in: fragment.source, results: results).map {
-                resolved($0, live: liveByID[$0.id])
+        for fragment in visibleFragments(
+            from: fragments,
+            transcriptStart: snapshot.transcriptStart,
+            additionalVisibleCallIDs: streamingFragment?.toolCallIDs ?? []
+        ) {
+            let tools = toolPresentations(in: fragment.source, results: results).map { canonical in
+                PreparedTool(
+                    presentation: resolved(canonical, live: liveByID[canonical.id]),
+                    canonicalBase: canonical,
+                    classification: .canonical
+                )
             }
             toolsInspected += tools.count
             appendFragment(fragment, tools: tools, streaming: false)
         }
 
-        let streamingTools = streamingFragment.map {
-            toolPresentations(in: $0.source, results: results)
+        let streamingTools = streamingFragment.map { fragment in
+            toolPresentations(in: fragment.source, results: results)
                 .filter { !anchoredCallIDs.contains($0.id) }
-                .map { resolved($0, live: liveByID[$0.id]) }
+                .map { canonical in
+                    PreparedTool(
+                        presentation: resolved(canonical, live: liveByID[canonical.id]),
+                        canonicalBase: canonical,
+                        classification: .streaming
+                    )
+                }
         } ?? []
         toolsInspected += streamingTools.count
-        let streamingCallIDs = Set(streamingTools.map(\.id))
-        let unanchoredLive = snapshot.toolExecutions
+        let streamingCallIDs = Set(streamingTools.map { $0.presentation.id })
+        let unanchoredLive = liveByID.values
             .filter { !anchoredCallIDs.contains($0.toolCallId) && !streamingCallIDs.contains($0.toolCallId) }
             .sorted(by: toolStateOrder)
-            .map(livePresentation)
+            .map { state in
+                PreparedTool(
+                    presentation: livePresentation(state),
+                    canonicalBase: nil,
+                    classification: .unanchoredRuntime
+                )
+            }
 
+        let beforeStreaming: Bool
         if let streamingFragment {
             if streamingTools.isEmpty, !unanchoredLive.isEmpty,
-               unanchoredLive.allSatisfy({ $0.subtitle != "Running" }),
+               unanchoredLive.allSatisfy({ $0.presentation.subtitle != "Running" }),
                hasNonToolPresentation(streamingFragment.source) {
+                beforeStreaming = true
                 appendTools(unanchoredLive)
                 flushTools()
                 appendFragment(streamingFragment, tools: [], streaming: true)
             } else {
+                beforeStreaming = false
                 appendFragment(streamingFragment, tools: streamingTools, streaming: true)
                 appendTools(unanchoredLive)
             }
         } else {
+            beforeStreaming = false
             appendTools(streamingTools)
             appendTools(unanchoredLive)
         }
@@ -376,7 +971,14 @@ enum ChatTranscriptProjectionKernel {
                 preferredSemanticIDByRenderedID: ChatSemanticIndex(canonical: preferredSemanticIDByRenderedID),
                 renderedIDBySemanticID: ChatSemanticIndex(canonical: renderedIDBySemanticID)
             ),
-            toolsInspected: toolsInspected
+            toolsInspected: toolsInspected,
+            patchMetadata: ChatToolPatchMetadata(
+                sitesByCallID: sitesByCallID,
+                placement: ChatToolPlacementSignature(
+                    unanchoredBeforeStreaming: beforeStreaming,
+                    runCallIDs: runCallIDs
+                )
+            )
         )
     }
 

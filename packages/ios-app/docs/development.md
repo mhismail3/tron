@@ -292,16 +292,26 @@ each correction. First-ready timing cannot end before the exact initial transcri
 projection installs and its frame resumes. `ChatTranscriptPresentationStoreTests` use a
 watchdog-bounded synchronous `HOSTED_TEST`-only work gate immediately before the real production
 kernel to prove serial off-main work, same-tag coalescing, newest-wins and A→B→A admission,
-paging-tag distinction, reset-epoch rejection, MainActor responsiveness, and deterministic
-completed-before-frame replacement/reset races without sleeps or polling. They also cover atomic installation,
-runtime-only cache reuse, bounded geometry-admitted entrance ownership, and one canonical scan across
-thirty updates of a 10,000-entry text stream. The gate can delay work but cannot manufacture output
-or disable production projection semantics. `ChatTranscriptProjectionKernelTests` characterize raw
-atoms and the sole global assembler across barriers, canonical call/result joins, orphan results,
-bootstrap configuration, exact compaction ordinals, 100/256-tool bursts, semantic maps, and visible
-history beyond one 512-item page. Its aggregate work recorder exposes only mode and numeric
-entry/fragment/tool/atom/rendered counts. Cold/incremental parity tests require identical rows, order,
-tool state, and semantic maps. `SessionPresentationStoreTests` also
+paging-tag distinction, monotonic reset retirement, session/runtime scope rejection, MainActor
+responsiveness, and deterministic completed-before-frame replacement/reset races without sleeps or
+polling. They also cover atomic installation, runtime-only exact-key reuse, 512-item FIFO bounds for
+both pending and admitted geometry-owned entrances across more than 512 accumulated rows, and isolated
+suffix work across thirty updates of a 10,000-entry text stream. The
+gate can delay work but cannot manufacture output or disable production projection semantics.
+`ChatTranscriptProjectionKernelTests` characterize raw atoms and the sole global assembler across
+barriers, canonical call/result joins, orphan results, bootstrap configuration, exact compaction
+ordinals, semantic maps, and visible history beyond one 512-item page. Sparse cases cover exact
+prepend/append/rollover ordinal intersection, a one-entry middle replacement beyond 512, same-ID
+payload changes, conservative inexact and duplicate behavior, canonical-result assembly, one patched
+tool in 10,000 history rows and 100/256-tool runs, anchored completion, structural phase/membership/
+order/start/duplicate/stream-placement fallbacks, newest-state duplicate delivery reversal,
+streaming-call result placement (including malformed text/extension call references in cold-worker
+and incremental paths), maximum-bound overflow rejection, bounded flat overrides across one
+and multiple rows, assembly reset, and isolated suffix sharing. Every accepted incremental output is
+compared with the cold oracle. The aggregate recorder
+exposes only the closed `cold`, `fragmentReuse`, `toolPayloadPatch`, and `isolatedStreamingSuffix`
+modes plus numeric entry/fragment/tool/atom/rendered counts; a pure patch must report zero source
+entries and atoms, inspect the complete unique runtime membership, and count only distinct patched tools. `SessionPresentationStoreTests` also
 prove exact page `start`/`end`/count admission and that return-to-latest compacts loaded
 history back to the retained authoritative tail. `ChatScrollCoordinatorTests` use watchdog-bounded
 barriers rather than sleeps or yields to prove callback-order equivalence, immediate

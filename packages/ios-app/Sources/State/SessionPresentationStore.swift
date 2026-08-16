@@ -222,12 +222,20 @@ final class SessionPresentationStore {
               let current = snapshot,
               let before = current.transcriptStart,
               before > 0 else { return }
+        let expectedTotal: Int
+        if let transcriptTotal = current.transcriptTotal {
+            expectedTotal = transcriptTotal
+        } else {
+            let (derivedTotal, overflow) = before.addingReportingOverflow(current.transcript.count)
+            guard !overflow else { return }
+            expectedTotal = derivedTotal
+        }
         let request = ChatTranscriptPageRequest(
             sessionID: sessionID,
             presentationGeneration: presentationGeneration,
             runtimeGeneration: current.runtimeGeneration,
             before: before,
-            expectedTotal: current.transcriptTotal ?? before + current.transcript.count,
+            expectedTotal: expectedTotal,
             expectedNextEntryID: current.transcript.first?.id
         )
         struct Params: Codable { let sessionId: String; let before: Int; let expectedNextEntryId: String? }
@@ -1110,7 +1118,9 @@ final class SessionPresentationStore {
     ) -> SessionSnapshot {
         guard current.sessionId == authoritative.sessionId,
               current.runtimeGeneration == authoritative.runtimeGeneration,
-              !current.transcript.isEmpty else { return authoritative }
+              !current.transcript.isEmpty,
+              (current.transcriptStart ?? 0) >= 0,
+              (authoritative.transcriptStart ?? 0) >= 0 else { return authoritative }
         guard !authoritative.transcript.isEmpty else {
             guard authoritative.phase.isActive else { return authoritative }
             var merged = authoritative
@@ -1130,13 +1140,20 @@ final class SessionPresentationStore {
         }).first else {
             let currentStart = current.transcriptStart ?? 0
             let authoritativeStart = authoritative.transcriptStart ?? 0
-            let currentEnd = currentStart + current.transcript.count
-            guard authoritative.phase.isActive, authoritativeStart == currentEnd else { return authoritative }
+            let (currentEnd, currentEndOverflow) = currentStart.addingReportingOverflow(
+                current.transcript.count
+            )
+            guard !currentEndOverflow,
+                  authoritative.phase.isActive,
+                  authoritativeStart == currentEnd else { return authoritative }
+            let (authoritativeEnd, authoritativeEndOverflow) = authoritativeStart
+                .addingReportingOverflow(authoritative.transcript.count)
+            guard !authoritativeEndOverflow else { return authoritative }
             var merged = authoritative
             merged.transcript = current.transcript + authoritative.transcript
             merged.transcriptStart = currentStart
             merged.transcriptTotal = max(
-                authoritative.transcriptTotal ?? authoritativeStart + authoritative.transcript.count,
+                authoritative.transcriptTotal ?? authoritativeEnd,
                 current.transcriptTotal ?? currentEnd
             )
             return merged
@@ -1152,10 +1169,13 @@ final class SessionPresentationStore {
         var merged = authoritative
         merged.transcript = Array(loadedPrefix) + authoritative.transcript
         merged.transcriptStart = max(0, current.transcriptStart ?? 0)
-        merged.transcriptTotal = max(
+        let (mergedEnd, mergedEndOverflow) = merged.transcriptStart!
+            .addingReportingOverflow(merged.transcript.count)
+        let knownTotal = max(
             authoritative.transcriptTotal ?? authoritative.transcript.count,
-            merged.transcriptStart! + merged.transcript.count
+            current.transcriptTotal ?? 0
         )
+        merged.transcriptTotal = mergedEndOverflow ? knownTotal : max(knownTotal, mergedEnd)
         return merged
     }
 

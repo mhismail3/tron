@@ -340,6 +340,29 @@ struct AppModelEventTests {
         #expect(merged.transcriptTotal == 28)
     }
 
+    @Test("maximum malformed transcript bounds never fabricate adjacent continuity")
+    func maximumTranscriptBoundsAreConservative() throws {
+        let baseline = try loadSnapshot()
+        var current = baseline
+        current.transcript = Array(baseline.transcript.prefix(1))
+        current.transcriptStart = Int.max
+        current.transcriptTotal = Int.max
+
+        var authoritative = baseline
+        authoritative.eventSequence += 1
+        authoritative.phase = .running
+        authoritative.transcript = Array(baseline.transcript.suffix(1))
+        authoritative.transcriptStart = Int.max
+        authoritative.transcriptTotal = Int.max
+
+        let merged = AppModel.mergingVisibleTranscript(
+            current: current,
+            authoritative: authoritative
+        )
+        #expect(merged.transcript == authoritative.transcript)
+        #expect(merged.transcriptStart == Int.max)
+    }
+
     @Test("active snapshots never fabricate continuity across a missing range")
     func activeSnapshotRejectsTranscriptGap() throws {
         let baseline = try loadSnapshot()

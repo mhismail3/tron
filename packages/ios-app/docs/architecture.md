@@ -122,8 +122,11 @@ One deterministic `ChatTranscriptProjectionKernel` converts exact canonical entr
 raw atoms and then globally assembles call/result joins, bootstrap filtering, ordinals, barriers,
 grouping, compatibility normalization, and semantic maps. Raw fragments retain the complete
 currently visible disposable history—even beyond one 512-item page—because explicitly loaded
-history cannot be evicted until forward reload exists. Projection instrumentation reports only an
-aggregate mode and entry/fragment/tool/atom/rendered counts; it carries no identifiers or content. Opening
+history cannot be evicted until forward reload exists. Projection instrumentation reports only a closed privacy-safe mode (`cold`, `fragmentReuse`,
+`toolPayloadPatch`, or `isolatedStreamingSuffix`) and aggregate entry/fragment/tool/atom/rendered
+counts; it carries no identifiers or content. A pure tool patch reports zero source entries and atoms,
+counts every runtime membership state examined in `toolsInspected`, and reports only the distinct
+descriptors changed in `toolsPatched`. Opening
 a new chat presentation always synchronizes a fresh authoritative bounded latest page; disposable cached or previously paged prefixes are never revealed as
 its baseline. The transcript remains behind a nonblank opening surface until the
 two-phase `session.open`/`session.sync` handshake installs its authoritative tail and
@@ -280,14 +283,32 @@ redacted state, encode clearing explicitly, and are scrubbed after a confirmed s
 always use the global model catalog; project defaults use the captured session catalog.
 Chat exposes one logical presentation timeline rather than independently rendered canonical,
 streaming, and live-tool arrays. Its cold oracle and detached worker use the same raw-atom/global-
-assembler kernel; there is no output-producing test builder or second cold projector. Internally its
-random-access row collection can share an immutable canonical prefix with a tiny streaming suffix,
-so ordinary text/thinking/image streaming updates do not scan, copy, validate, or retain another
-copy of a 10,000-row prefix. Exact raw fragments are the seam for later sparse reuse, but this kernel
-checkpoint does not yet reuse changed-entry fragments or patch tool rows. Canonical and timeline
-mutation generations advance only for projection-relevant changes; status, editor, widget, and other
-sequenced events do not manufacture projection work. Tool-bearing/running states conservatively use
-the cold projector unless parity is proven. `ChatView.body` never constructs the timeline: typing,
+assembler kernel; there is no output-producing test builder, suffix builder, or second cold projector.
+The worker retains one complete disposable basis scoped by cache epoch, session, mounted presentation,
+and runtime, plus an exact projection-key return. A newer epoch clears the older basis before reuse;
+reset sends monotonic retirement that cannot erase a newer epoch. Exact source windows reuse fragments
+only when the complete prior `TranscriptItem` equals the incoming item at the intersecting global
+ordinal. Inexact legacy windows require one unique contiguous ordered-spine proof and still require
+complete source equality; duplicates and ambiguity assemble cold. Streaming call IDs participate in
+the same global result-visibility set, so a canonical result joins at its streaming call position rather
+than rendering first as an orphan. Every mixed fragment set returns to the same global assembler for
+joins, bootstrap filtering, grouping, ordinals, and semantic maps. Exact-bound checks use subtraction
+or reporting-overflow arithmetic and conservatively reject malformed maximum values.
+
+The random-access row collection is a flat immutable canonical base with direct index overrides and a
+tiny live suffix. A global assembly resets overrides; repeated runtime payload updates share the base
+and replace only affected tool-run rows rather than chaining overlays or copying 10,000 descriptors.
+Rendered identity spines and sets are cached/split so ordinary text/thinking/image streaming updates
+share the canonical rows and identities while the kernel constructs only the isolated live suffix.
+Any streaming fragment carrying a tool-call ID—including malformed text or extension content—is
+returned to global assembly so canonical result suppression and placement remain exact.
+Assembler-emitted unique tool sites retain canonical presentation bases, call classification, group
+order, and placement facts. Runtime-only patching requires unchanged canonical source, exact streaming,
+phase, unique membership, classification/order/start topology, stable run identity/order, and unchanged
+before-streaming placement. It patches immutable tool descriptors only; canonical result changes,
+membership/order/phase ambiguity, duplicate calls, or placement flips reuse fragments and globally
+assemble. Status, editor, widget, and other unrelated sequenced events do not manufacture projection
+work. `ChatView.body` never constructs the timeline: typing,
 focus, geometry, toolbar, and sheet invalidations reuse the installed immutable value, while
 streaming revisions are serialized/coalesced off-main and observable installs are limited to a
 display-frame boundary. Exact-tag waiters let prepend retain
@@ -604,10 +625,12 @@ canonical entry share a presentation-only global-ordinal identity, so “Compact
 “Context compacted” in place without changing Gateway identity or semantic scroll maps.
 
 Runtime pills install atomically beside the exact tagged timeline. Working/status-only revisions reuse
-the unchanged expensive transcript projection. Bounded entrance candidates are admitted by current
-row geometry: visible/pinned discrete rows fade with a small non-layout transform exactly once,
-realized offscreen rows become visible without replay, and direct interaction discards unresolved
-candidates. `ChatScrollCoordinator` alone may consume one smooth follow for an admitted discrete
+the unchanged expensive transcript projection. Pending and admitted entrance ownership each retain
+at most the 512-item page bound in deterministic FIFO order. Retired pending rows become visible
+without replay, while retired admitted rows preserve their local revealed state. Candidates are
+admitted by current row geometry: visible/pinned discrete rows fade with a small non-layout transform
+exactly once, realized offscreen rows become visible without replay, and direct interaction discards
+unresolved candidates. `ChatScrollCoordinator` alone may consume one smooth follow for an admitted discrete
 insertion; continuous Markdown growth remains coalesced and nonanimated, while detached readers
 receive no writes and Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
 the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.

@@ -78,11 +78,19 @@ struct InstalledChatTranscript: Hashable, Sendable {
             let maximum = ChatTranscriptPageRequest.maximumItemCount
             let dropped = max(0, sourceCount - maximum)
             ids = Array(snapshot.transcript.suffix(maximum).map(\.id))
-            start = sourceStart.map { $0 + dropped }
+            if let sourceStart, sourceStart >= 0 {
+                let (boundedStart, overflow) = sourceStart.addingReportingOverflow(dropped)
+                start = overflow ? nil : boundedStart
+            } else {
+                start = nil
+            }
             total = snapshot.transcriptTotal
-            hasExactBounds = sourceStart.map {
-                $0 + sourceCount == snapshot.transcriptTotal
-            } == true
+            hasExactBounds = if let sourceStart, let total,
+                                sourceStart >= 0, total >= sourceStart {
+                total - sourceStart == sourceCount
+            } else {
+                false
+            }
             hasUniqueIDs = Set(ids).count == ids.count
         }
     }
@@ -91,7 +99,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
     let timeline: ChatTranscriptTimeline
     let runtimeItems: [ChatTranscriptRenderItem]
     let sourceWindow: SourceWindow
-    let displayedIDSet: Set<String>
+    private let runtimeIDSet: Set<String>
 
     init(
         tag: ChatTranscriptProjectionTag,
@@ -103,21 +111,27 @@ struct InstalledChatTranscript: Hashable, Sendable {
         self.timeline = timeline
         self.runtimeItems = runtimeItems
         self.sourceWindow = sourceWindow
-        displayedIDSet = Set(timeline.ids).union(runtimeItems.map(\.id))
+        runtimeIDSet = Set(runtimeItems.map(\.id))
     }
 
     var displayedItems: ChatDisplayedTranscriptItems {
         ChatDisplayedTranscriptItems(timeline: timeline.items, runtime: runtimeItems)
     }
-    var displayedIDs: [String] { timeline.ids + runtimeItems.map(\.id) }
-    func containsDisplayedID(_ id: String) -> Bool { displayedIDSet.contains(id) }
+    var hasUniqueDisplayedIDs: Bool {
+        timeline.isInternallyConsistent
+            && runtimeIDSet.count == runtimeItems.count
+            && runtimeIDSet.allSatisfy { !timeline.containsID($0) }
+    }
+    func containsDisplayedID(_ id: String) -> Bool {
+        timeline.containsID(id) || runtimeIDSet.contains(id)
+    }
 }
 
 enum ChatTranscriptTransitionPolicy {
     static func discreteInsertedIDs(
         previous: InstalledChatTranscript?,
         next: InstalledChatTranscript
-    ) -> Set<String> {
+    ) -> [String] {
         guard let previous,
               previous.tag.matchesIdentity(of: next.tag) else { return [] }
         let sameSource = previous.sourceWindow.originalStart == next.sourceWindow.originalStart
@@ -125,15 +139,38 @@ enum ChatTranscriptTransitionPolicy {
             && previous.sourceWindow.start == next.sourceWindow.start
             && previous.sourceWindow.total == next.sourceWindow.total
             && previous.sourceWindow.ids == next.sourceWindow.ids
-        let renderedPrefixExtension = next.timeline.items.canonical.map(\.id)
-            .starts(with: previous.timeline.items.canonical.map(\.id))
-        guard sameSource
-                || isExactForwardEvolution(from: previous.sourceWindow, to: next.sourceWindow)
-                || renderedPrefixExtension else { return [] }
+        let sharesCanonicalIdentity = previous.timeline
+            .sharesCanonicalIdentitySpine(with: next.timeline)
+        let admitsEvolution: Bool
+        if sameSource || sharesCanonicalIdentity {
+            admitsEvolution = true
+        } else if isExactForwardEvolution(from: previous.sourceWindow, to: next.sourceWindow) {
+            admitsEvolution = true
+        } else {
+            admitsEvolution = next.timeline.ids.canonical
+                .starts(with: previous.timeline.ids.canonical)
+        }
+        guard admitsEvolution else { return [] }
 
-        let previousIDs = Set(previous.displayedIDs)
-        let inserted = next.displayedIDs.filter { !previousIDs.contains($0) }
-        return Set(inserted.prefix(ChatTranscriptPageRequest.maximumItemCount))
+        var inserted: [String] = []
+        var insertedSet = Set<String>()
+        func admit<S: Sequence>(_ candidates: S) where S.Element == String {
+            for id in candidates {
+                guard inserted.count < ChatTranscriptPageRequest.maximumItemCount else { return }
+                if !previous.containsDisplayedID(id), insertedSet.insert(id).inserted {
+                    inserted.append(id)
+                }
+            }
+        }
+        if sharesCanonicalIdentity {
+            admit(next.timeline.ids.live)
+        } else {
+            admit(next.timeline.ids)
+        }
+        if inserted.count < ChatTranscriptPageRequest.maximumItemCount {
+            admit(next.runtimeItems.lazy.map(\.id))
+        }
+        return inserted
     }
 
     /// Source ordinals, rather than rendered grouping, distinguish a forward
@@ -163,10 +200,14 @@ enum ChatTranscriptTransitionPolicy {
         let previousOffset = overlapStart - previousStart
         let nextOffset = overlapStart - nextStart
         guard previousOffset >= 0, nextOffset >= 0,
-              previousOffset + overlapCount <= previous.ids.count,
-              nextOffset + overlapCount <= next.ids.count else { return false }
-        return previous.ids[previousOffset..<(previousOffset + overlapCount)].elementsEqual(
-            next.ids[nextOffset..<(nextOffset + overlapCount)]
+              previousOffset <= previous.ids.count,
+              nextOffset <= next.ids.count,
+              overlapCount <= previous.ids.count - previousOffset,
+              overlapCount <= next.ids.count - nextOffset else { return false }
+        let previousEnd = previousOffset + overlapCount
+        let nextEnd = nextOffset + overlapCount
+        return previous.ids[previousOffset..<previousEnd].elementsEqual(
+            next.ids[nextOffset..<nextEnd]
         )
     }
 }
@@ -189,66 +230,57 @@ private struct BuiltChatTranscript: Sendable {
 }
 
 private actor ChatTranscriptProjectionWorker {
-    private struct TimelineKey: Equatable, Sendable {
+    private struct Scope: Equatable, Sendable {
         let cacheEpoch: Int
         let sessionID: String
         let presentationGeneration: Int
         let runtimeGeneration: String
+
+        init(tag: ChatTranscriptProjectionTag, cacheEpoch: Int) {
+            self.cacheEpoch = cacheEpoch
+            sessionID = tag.sessionID
+            presentationGeneration = tag.presentationGeneration
+            runtimeGeneration = tag.runtimeGeneration
+        }
+    }
+
+    private struct CanonicalKey: Equatable, Sendable {
         let canonicalGeneration: Int
         let transcriptStart: Int?
         let transcriptTotal: Int?
         let transcriptCount: Int
         let firstTranscriptID: String?
         let lastTranscriptID: String?
-        let phase: SessionPhase
-        let streaming: TranscriptItem?
-        let toolExecutions: [ToolExecutionState]
 
-        init(tag: ChatTranscriptProjectionTag, snapshot: SessionSnapshot, cacheEpoch: Int) {
-            self.cacheEpoch = cacheEpoch
-            sessionID = tag.sessionID
-            presentationGeneration = tag.presentationGeneration
-            runtimeGeneration = tag.runtimeGeneration
+        init(tag: ChatTranscriptProjectionTag) {
             canonicalGeneration = tag.canonicalGeneration
             transcriptStart = tag.transcriptStart
             transcriptTotal = tag.transcriptTotal
             transcriptCount = tag.transcriptCount
             firstTranscriptID = tag.firstTranscriptID
             lastTranscriptID = tag.lastTranscriptID
+        }
+    }
+
+    private struct ProjectionKey: Equatable, Sendable {
+        let canonical: CanonicalKey
+        let phase: SessionPhase
+        let streaming: TranscriptItem?
+        let toolExecutions: [ToolExecutionState]
+
+        init(tag: ChatTranscriptProjectionTag, snapshot: SessionSnapshot) {
+            canonical = CanonicalKey(tag: tag)
             phase = snapshot.phase
             streaming = snapshot.streaming
             toolExecutions = snapshot.toolExecutions
         }
     }
 
-    private struct CanonicalBaseKey: Equatable, Sendable {
-        let cacheEpoch: Int
-        let sessionID: String
-        let presentationGeneration: Int
-        let runtimeGeneration: String
-        let canonicalGeneration: Int
-        let transcriptStart: Int?
-        let transcriptTotal: Int?
-        let transcriptCount: Int
-        let firstTranscriptID: String?
-        let lastTranscriptID: String?
-        let phase: SessionPhase
-        let toolExecutions: [ToolExecutionState]
-
-        init(tag: ChatTranscriptProjectionTag, snapshot: SessionSnapshot, cacheEpoch: Int) {
-            self.cacheEpoch = cacheEpoch
-            sessionID = tag.sessionID
-            presentationGeneration = tag.presentationGeneration
-            runtimeGeneration = tag.runtimeGeneration
-            canonicalGeneration = tag.canonicalGeneration
-            transcriptStart = tag.transcriptStart
-            transcriptTotal = tag.transcriptTotal
-            transcriptCount = tag.transcriptCount
-            firstTranscriptID = tag.firstTranscriptID
-            lastTranscriptID = tag.lastTranscriptID
-            phase = snapshot.phase
-            toolExecutions = snapshot.toolExecutions
-        }
+    private struct Basis: Sendable {
+        let scope: Scope
+        let projectionKey: ProjectionKey
+        let canonicalKey: CanonicalKey
+        let candidate: ChatTranscriptProjectionCandidate
     }
 
     private let performanceSignposts: any PerformanceSignposting
@@ -256,12 +288,9 @@ private actor ChatTranscriptProjectionWorker {
     #if HOSTED_TEST
     private let workGate: ChatTranscriptProjectionWorkGate?
     #endif
-    private var canonicalBaseKey: CanonicalBaseKey?
-    private var canonicalBase: ChatTranscriptTimeline?
-    private var canonicalBaseIsInternallyConsistent = false
-    private var lastTimelineKey: TimelineKey?
-    private var lastTimeline: ChatTranscriptTimeline?
-    private var lastTimelineIsInternallyConsistent = false
+    private var basis: Basis?
+    private var retiredBeforeEpoch = 0
+    private var newestCacheEpoch = 0
 
     #if HOSTED_TEST
     init(
@@ -283,84 +312,69 @@ private actor ChatTranscriptProjectionWorker {
     }
     #endif
 
-    private func cold(snapshot: SessionSnapshot) -> ChatTranscriptTimeline {
-        ChatTranscriptProjectionKernel.cold(
-            snapshot: snapshot,
-            performanceSignposts: performanceSignposts,
-            workRecorder: workRecorder
-        ).timeline
+    /// Monotonic retirement cannot erase a basis installed for a newer reset
+    /// epoch, even when an older retirement message was delayed behind work.
+    func retire(before cacheEpoch: Int) {
+        retiredBeforeEpoch = max(retiredBeforeEpoch, cacheEpoch)
+        newestCacheEpoch = max(newestCacheEpoch, cacheEpoch)
+        if let basis, basis.scope.cacheEpoch < retiredBeforeEpoch {
+            self.basis = nil
+        }
     }
-
-    #if HOSTED_TEST
-    private func hostedGatedCold(
-        snapshot: SessionSnapshot,
-        tag: ChatTranscriptProjectionTag
-    ) -> ChatTranscriptTimeline {
-        workGate?(tag)
-        return cold(snapshot: snapshot)
-    }
-    #endif
 
     func build(
         snapshot: SessionSnapshot,
         tag: ChatTranscriptProjectionTag,
         cacheEpoch: Int
     ) -> BuiltChatTranscript {
-        let timelineKey = TimelineKey(tag: tag, snapshot: snapshot, cacheEpoch: cacheEpoch)
-        if lastTimelineKey == timelineKey, let lastTimeline {
+        newestCacheEpoch = max(newestCacheEpoch, cacheEpoch)
+        let scope = Scope(tag: tag, cacheEpoch: cacheEpoch)
+        if let basis, basis.scope.cacheEpoch < cacheEpoch {
+            // A newer epoch must dispose the old complete history before any
+            // eligibility check, not after an incremental build succeeds.
+            self.basis = nil
+        }
+
+        let projectionKey = ProjectionKey(tag: tag, snapshot: snapshot)
+        let canonicalKey = CanonicalKey(tag: tag)
+        if let basis, basis.scope == scope, basis.projectionKey == projectionKey {
             return BuiltChatTranscript(
-                timeline: lastTimeline,
-                isInternallyConsistent: lastTimelineIsInternallyConsistent
+                timeline: basis.candidate.timeline,
+                isInternallyConsistent: basis.candidate.isValid
             )
         }
 
-        let timeline: ChatTranscriptTimeline
-        let isInternallyConsistent: Bool
-        if snapshot.toolExecutions.allSatisfy({ $0.status != .running }),
-           let streaming = snapshot.streaming,
-           let live = ChatTranscriptPresentation.isolatedStreamingTimeline(streaming) {
-            let key = CanonicalBaseKey(tag: tag, snapshot: snapshot, cacheEpoch: cacheEpoch)
-            if canonicalBaseKey != key || canonicalBase == nil {
-                var baseSnapshot = snapshot
-                baseSnapshot.streaming = nil
-                #if HOSTED_TEST
-                canonicalBase = hostedGatedCold(snapshot: baseSnapshot, tag: tag)
-                #else
-                canonicalBase = cold(snapshot: baseSnapshot)
-                #endif
-                canonicalBaseKey = key
-                canonicalBaseIsInternallyConsistent = canonicalBase!.isInternallyConsistent
-            }
-            timeline = canonicalBase!.appendingLive(live)
-            isInternallyConsistent = canonicalBaseIsInternallyConsistent
-                && live.isInternallyConsistent
-        } else if snapshot.streaming == nil {
-            let key = CanonicalBaseKey(tag: tag, snapshot: snapshot, cacheEpoch: cacheEpoch)
-            if canonicalBaseKey != key || canonicalBase == nil {
-                #if HOSTED_TEST
-                canonicalBase = hostedGatedCold(snapshot: snapshot, tag: tag)
-                #else
-                canonicalBase = cold(snapshot: snapshot)
-                #endif
-                canonicalBaseKey = key
-                canonicalBaseIsInternallyConsistent = canonicalBase!.isInternallyConsistent
-            }
-            timeline = canonicalBase!
-            isInternallyConsistent = canonicalBaseIsInternallyConsistent
+        #if HOSTED_TEST
+        workGate?(tag)
+        #endif
+        let candidate: ChatTranscriptProjectionCandidate
+        if let basis, basis.scope == scope {
+            candidate = ChatTranscriptProjectionKernel.incremental(
+                snapshot: snapshot,
+                previous: basis.candidate,
+                canonicalSourceUnchanged: basis.canonicalKey == canonicalKey,
+                performanceSignposts: performanceSignposts,
+                workRecorder: workRecorder
+            )
         } else {
-            #if HOSTED_TEST
-            timeline = hostedGatedCold(snapshot: snapshot, tag: tag)
-            #else
-            timeline = cold(snapshot: snapshot)
-            #endif
-            isInternallyConsistent = timeline.isInternallyConsistent
+            candidate = ChatTranscriptProjectionKernel.coldForWorker(
+                snapshot: snapshot,
+                performanceSignposts: performanceSignposts,
+                workRecorder: workRecorder
+            )
         }
-        lastTimelineKey = timelineKey
-        lastTimeline = timeline
-        lastTimelineIsInternallyConsistent = isInternallyConsistent
+
+        if cacheEpoch >= retiredBeforeEpoch, cacheEpoch == newestCacheEpoch {
+            basis = Basis(
+                scope: scope,
+                projectionKey: projectionKey,
+                canonicalKey: canonicalKey,
+                candidate: candidate
+            )
+        }
         return BuiltChatTranscript(
-            timeline: timeline,
-            isInternallyConsistent: isInternallyConsistent
+            timeline: candidate.timeline,
+            isInternallyConsistent: candidate.isValid
         )
     }
 }
@@ -395,6 +409,8 @@ final class ChatTranscriptPresentationStore {
     private(set) var pendingEntranceIDs: Set<String> = []
     private(set) var admittedEntranceIDs: Set<String> = []
 
+    @ObservationIgnored private var pendingEntranceOrder: [String] = []
+    @ObservationIgnored private var admittedEntranceOrder: [String] = []
     @ObservationIgnored private let projectionWorker: ChatTranscriptProjectionWorker
     @ObservationIgnored private let installationFrameScheduler: DisplayFrameScheduler?
     @ObservationIgnored private let maximumWaiters: Int
@@ -459,6 +475,9 @@ final class ChatTranscriptPresentationStore {
             desiredTag = tag
             pending = nil
             failWaiters(except: tag, error: .superseded)
+            #if HOSTED_TEST
+            failHostedCompletionWaiters(except: tag, error: .superseded)
+            #endif
             return false
         }
         if pending?.tag == tag {
@@ -468,8 +487,7 @@ final class ChatTranscriptPresentationStore {
 
         if let installed, !installed.tag.matchesIdentity(of: tag) {
             self.installed = nil
-            pendingEntranceIDs.removeAll(keepingCapacity: true)
-            admittedEntranceIDs.removeAll(keepingCapacity: true)
+            clearEntranceBookkeeping(keepingCapacity: true)
         }
         desiredTag = tag
         pending = PendingProjection(snapshot: snapshot, tag: tag, generation: generation)
@@ -520,7 +538,10 @@ final class ChatTranscriptPresentationStore {
     /// Deterministic observation for frame-publication race tests. This exposes
     /// no production scheduling control and resumes only after MainActor admits
     /// a complete, validated projection for frame-gated installation.
-    func hostedWaitForCompletedProjection(of tag: ChatTranscriptProjectionTag) async throws {
+    func hostedWaitForCompletedProjection(
+        of tag: ChatTranscriptProjectionTag,
+        onRegistered: (() -> Void)? = nil
+    ) async throws {
         if installed?.tag == tag || readyToInstall?.tag == tag { return }
         guard desiredTag == tag || pending?.tag == tag || buildingTag == tag else {
             throw ChatTranscriptPresentationStoreError.superseded
@@ -541,6 +562,7 @@ final class ChatTranscriptPresentationStore {
                         tag: tag,
                         continuation: continuation
                     ))
+                    onRegistered?()
                 } else {
                     continuation.resume(
                         throwing: ChatTranscriptPresentationStoreError.superseded
@@ -566,7 +588,8 @@ final class ChatTranscriptPresentationStore {
     @discardableResult
     func resolveEntrance(id: String, isVisible: Bool) -> Bool {
         guard pendingEntranceIDs.remove(id) != nil else { return false }
-        if isVisible { admittedEntranceIDs.insert(id) }
+        pendingEntranceOrder.removeAll { $0 == id }
+        if isVisible { appendAdmittedEntrance(id) }
         return isVisible
     }
 
@@ -574,10 +597,13 @@ final class ChatTranscriptPresentationStore {
     /// Clearing here prevents lazily realized offscreen rows from replaying later.
     func discardPendingEntrances() {
         pendingEntranceIDs.removeAll(keepingCapacity: true)
+        pendingEntranceOrder.removeAll(keepingCapacity: true)
     }
 
     func reset() {
         generation &+= 1
+        let retiredEpoch = generation
+        Task { await projectionWorker.retire(before: retiredEpoch) }
         desiredTag = nil
         pending = nil
         buildingTag = nil
@@ -585,8 +611,7 @@ final class ChatTranscriptPresentationStore {
         installFrameTask?.cancel()
         installFrameTask = nil
         installed = nil
-        pendingEntranceIDs.removeAll(keepingCapacity: false)
-        admittedEntranceIDs.removeAll(keepingCapacity: false)
+        clearEntranceBookkeeping(keepingCapacity: false)
         failAllWaiters(with: CancellationError())
         #if HOSTED_TEST
         failAllHostedCompletionWaiters(with: CancellationError())
@@ -617,7 +642,7 @@ final class ChatTranscriptPresentationStore {
                     sourceWindow: .init(snapshot: next.snapshot)
                 )
                 guard built.isInternallyConsistent,
-                      output.displayedIDSet.count == output.displayedItems.count else {
+                      output.hasUniqueDisplayedIDs else {
                     if self.desiredTag == next.tag {
                         self.desiredTag = nil
                         self.failWaiters(for: next.tag, error: .invalidProjection)
@@ -680,11 +705,69 @@ final class ChatTranscriptPresentationStore {
             previous: installed,
             next: output
         )
-        let displayedIDs = output.displayedIDSet
-        pendingEntranceIDs.formIntersection(displayedIDs)
-        admittedEntranceIDs.formIntersection(displayedIDs)
-        pendingEntranceIDs.formUnion(inserted.subtracting(admittedEntranceIDs))
+        synchronizeEntranceBookkeeping(with: output)
+        appendPendingEntrances(inserted)
         installed = output
+    }
+
+    private func synchronizeEntranceBookkeeping(with output: InstalledChatTranscript) {
+        pendingEntranceOrder.removeAll {
+            !pendingEntranceIDs.contains($0) || !output.containsDisplayedID($0)
+        }
+        admittedEntranceOrder.removeAll {
+            !admittedEntranceIDs.contains($0) || !output.containsDisplayedID($0)
+        }
+        pendingEntranceIDs = Set(pendingEntranceOrder)
+        admittedEntranceIDs = Set(admittedEntranceOrder)
+    }
+
+    private func appendPendingEntrances(_ candidates: [String]) {
+        var novel: [String] = []
+        var novelSet = Set<String>()
+        for id in candidates
+            where !admittedEntranceIDs.contains(id)
+                && !pendingEntranceIDs.contains(id)
+                && novelSet.insert(id).inserted {
+            novel.append(id)
+        }
+        let excess = max(
+            0,
+            pendingEntranceOrder.count + novel.count - ChatTranscriptPageRequest.maximumItemCount
+        )
+        Self.retireOldestEntrances(
+            count: excess,
+            order: &pendingEntranceOrder,
+            ids: &pendingEntranceIDs
+        )
+        pendingEntranceOrder.append(contentsOf: novel)
+        pendingEntranceIDs.formUnion(novel)
+    }
+
+    private func appendAdmittedEntrance(_ id: String) {
+        guard admittedEntranceIDs.insert(id).inserted else { return }
+        admittedEntranceOrder.append(id)
+        Self.retireOldestEntrances(
+            count: admittedEntranceOrder.count - ChatTranscriptPageRequest.maximumItemCount,
+            order: &admittedEntranceOrder,
+            ids: &admittedEntranceIDs
+        )
+    }
+
+    private static func retireOldestEntrances(
+        count: Int,
+        order: inout [String],
+        ids: inout Set<String>
+    ) {
+        guard count > 0 else { return }
+        for id in order.prefix(count) { ids.remove(id) }
+        order.removeFirst(count)
+    }
+
+    private func clearEntranceBookkeeping(keepingCapacity: Bool) {
+        pendingEntranceIDs.removeAll(keepingCapacity: keepingCapacity)
+        admittedEntranceIDs.removeAll(keepingCapacity: keepingCapacity)
+        pendingEntranceOrder.removeAll(keepingCapacity: keepingCapacity)
+        admittedEntranceOrder.removeAll(keepingCapacity: keepingCapacity)
     }
 
     private func resumeWaiters(with output: InstalledChatTranscript) {

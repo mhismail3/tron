@@ -51,6 +51,53 @@ struct SnapshotCacheTests {
         #expect(loadMetrics == saveMetrics)
     }
 
+    @Test("malformed maximum source bounds trim without overflow")
+    func maximumSourceBoundsAreConservative() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(
+            path: UUID().uuidString,
+            directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = SnapshotCache(root: root)
+        let item = try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data("""
+        {"id":"entry","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"x"}]}
+        """.utf8))
+        let snapshot = SessionSnapshot(
+            sessionId: "session", runtimeGeneration: "generation", revision: 1,
+            eventSequence: 1, phase: .idle, name: nil, cwd: "/workspace",
+            parentSessionId: nil, model: nil, thinkingLevel: "off",
+            availableThinkingLevels: ["off"], contextUsage: nil,
+            stats: .init(
+                userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0,
+                totalMessages: 0,
+                tokens: .init(input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0),
+                latestCacheHitRate: nil, cost: 0
+            ),
+            queued: .init(steering: [], followUp: []),
+            transcript: Array(repeating: item, count: 501),
+            transcriptStart: Int.max, transcriptTotal: Int.max,
+            streaming: nil, leafEntryId: nil, operation: nil, retry: nil,
+            toolExecutions: [],
+            extensionUI: .init(
+                statuses: [:], working: .init(message: nil, visible: false),
+                hiddenThinkingLabel: nil, widgets: [], title: nil,
+                editorRevision: 0, editorText: "", pendingInteractions: []
+            ),
+            diagnostics: []
+        )
+        let summary = SessionSummary(
+            id: "session", name: nil, cwd: "/workspace", parentSessionId: nil,
+            createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z",
+            messageCount: 501, firstMessage: "x", phase: .idle
+        )
+
+        await cache.save(profileID: "profile", sessions: [summary], snapshots: [snapshot])
+        let loaded = try #require(await cache.load(profileID: "profile").snapshots.first)
+        #expect(loaded.transcript.count == 500)
+        #expect(loaded.transcriptStart == nil)
+        #expect(loaded.transcriptTotal == Int.max)
+    }
+
     @Test("rejects caches from before session-kind classification")
     func rejectsVersionTwoCache() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)

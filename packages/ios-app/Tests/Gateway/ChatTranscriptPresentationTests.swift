@@ -270,6 +270,21 @@ struct ChatTranscriptPresentationTests {
             runtimeGeneration: "runtime-a", transcriptStart: 20,
             transcriptTotal: 48, firstTranscriptID: "entry-20"
         ))
+        let maximum = ChatTranscriptPageRequest(
+            sessionID: "session-a",
+            presentationGeneration: 7,
+            runtimeGeneration: "runtime-a",
+            before: Int.max,
+            expectedTotal: Int.max,
+            expectedNextEntryID: nil
+        )
+        #expect(!maximum.canInstallPage(
+            start: Int.max - 1,
+            end: Int.max,
+            total: Int.max,
+            itemCount: 1,
+            visibleItemCount: 1
+        ))
     }
 
     @Test("bootstrap configuration stays in Manage Session")
@@ -404,6 +419,14 @@ struct ChatTranscriptPresentationTests {
         let malformed = try #require(ChatNotificationPresentation.runtime(in: snapshot).first)
         #expect(malformed.id == "runtime-working")
         #expect(malformed.id != exact.id)
+
+        snapshot.transcriptStart = Int.max
+        snapshot.transcriptTotal = Int.max
+        snapshot.transcript = [try fixture(transcript: """
+        [{"id":"user-max","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"x"}]}]
+        """).transcript[0]]
+        let maximum = try #require(ChatNotificationPresentation.runtime(in: snapshot).first)
+        #expect(maximum.id == "runtime-working")
     }
 
     @Test("canonical compaction ordinals survive bounded tails and prepends")

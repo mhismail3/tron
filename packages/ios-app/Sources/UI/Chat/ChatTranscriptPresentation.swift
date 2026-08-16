@@ -176,7 +176,8 @@ struct ChatTranscriptPageRequest: Equatable {
             && itemCount == end - start
             && itemCount <= Self.maximumItemCount
             && total == expectedTotal
-            && total == before + visibleItemCount
+            && total >= before
+            && total - before == visibleItemCount
     }
 }
 
@@ -415,7 +416,8 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                 guard snapshot.phase == .compacting,
                       let start = snapshot.transcriptStart,
                       let total = snapshot.transcriptTotal,
-                      start + snapshot.transcript.count == total else { return nil }
+                      start >= 0, total >= start,
+                      total - start == snapshot.transcript.count else { return nil }
                 return total
             }()
             values.append(ChatNotificationPresentation(
@@ -518,25 +520,80 @@ enum ChatTranscriptRenderItem: Hashable, Identifiable, Sendable {
     }
 }
 
+/// A flat immutable row spine. Sparse tool updates share the assembly-produced
+/// base and replace only affected indexes; an assembly always starts a fresh
+/// base, so overlays never form a chain.
 struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
     typealias Index = Int
 
-    let canonical: [ChatTranscriptRenderItem]
+    private let canonicalBase: [ChatTranscriptRenderItem]
+    private let canonicalOverrides: [Int: ChatTranscriptRenderItem]
     let live: [ChatTranscriptRenderItem]
 
     init(canonical: [ChatTranscriptRenderItem], live: [ChatTranscriptRenderItem] = []) {
-        self.canonical = canonical
+        canonicalBase = canonical
+        canonicalOverrides = [:]
         self.live = live
     }
 
+    private init(
+        canonicalBase: [ChatTranscriptRenderItem],
+        canonicalOverrides: [Int: ChatTranscriptRenderItem],
+        live: [ChatTranscriptRenderItem]
+    ) {
+        self.canonicalBase = canonicalBase
+        self.canonicalOverrides = canonicalOverrides
+        self.live = live
+    }
+
+    /// Compatibility access for the few cold-path callers that need an Array.
+    /// Render and validation paths use the collection directly.
+    var canonical: [ChatTranscriptRenderItem] {
+        guard !canonicalOverrides.isEmpty else { return canonicalBase }
+        var result = canonicalBase
+        for (index, item) in canonicalOverrides { result[index] = item }
+        return result
+    }
+
+    var canonicalCount: Int { canonicalBase.count }
+    var sparseOverrideCount: Int { canonicalOverrides.count }
     var startIndex: Int { 0 }
-    var endIndex: Int { canonical.count + live.count }
+    var endIndex: Int { canonicalBase.count + live.count }
 
     subscript(position: Int) -> ChatTranscriptRenderItem {
         precondition(indices.contains(position))
-        return position < canonical.count
-            ? canonical[position]
-            : live[position - canonical.count]
+        if position < canonicalBase.count {
+            return canonicalOverrides[position] ?? canonicalBase[position]
+        }
+        return live[position - canonicalBase.count]
+    }
+
+    func replacingCanonical(
+        _ replacements: [Int: ChatTranscriptRenderItem]
+    ) -> ChatTranscriptItems {
+        guard !replacements.isEmpty else { return self }
+        var overrides = canonicalOverrides
+        for (index, item) in replacements {
+            precondition(canonicalBase.indices.contains(index))
+            if item == canonicalBase[index] {
+                overrides.removeValue(forKey: index)
+            } else {
+                overrides[index] = item
+            }
+        }
+        return ChatTranscriptItems(
+            canonicalBase: canonicalBase,
+            canonicalOverrides: overrides,
+            live: live
+        )
+    }
+
+    func replacingLive(_ live: [ChatTranscriptRenderItem]) -> ChatTranscriptItems {
+        ChatTranscriptItems(
+            canonicalBase: canonicalBase,
+            canonicalOverrides: canonicalOverrides,
+            live: live
+        )
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
@@ -569,6 +626,7 @@ struct ChatSemanticIndex: Hashable, Sendable {
     }
 
     static func == (lhs: Self, rhs: Self) -> Bool {
+        if lhs.canonical == rhs.canonical, lhs.live == rhs.live { return true }
         let keys = Set(lhs.canonical.keys)
             .union(lhs.live.keys)
             .union(rhs.canonical.keys)
@@ -586,33 +644,200 @@ struct ChatSemanticIndex: Hashable, Sendable {
     }
 }
 
+struct ChatTranscriptIDs: RandomAccessCollection, Hashable, Sendable {
+    typealias Index = Int
+
+    private final class CanonicalStorage: @unchecked Sendable {
+        let values: [String]
+        let identityDigest: UInt64
+
+        init(_ values: [String]) {
+            self.values = values
+            identityDigest = ChatTranscriptIDs.digest(values)
+        }
+    }
+
+    private let canonicalStorage: CanonicalStorage
+    let live: [String]
+
+    init(canonical: [String], live: [String]) {
+        canonicalStorage = CanonicalStorage(canonical)
+        self.live = live
+    }
+
+    private init(canonicalStorage: CanonicalStorage, live: [String]) {
+        self.canonicalStorage = canonicalStorage
+        self.live = live
+    }
+
+    var canonical: [String] { canonicalStorage.values }
+    var startIndex: Int { 0 }
+    var endIndex: Int { canonicalStorage.values.count + live.count }
+
+    subscript(position: Int) -> String {
+        precondition(indices.contains(position))
+        return position < canonicalStorage.values.count
+            ? canonicalStorage.values[position]
+            : live[position - canonicalStorage.values.count]
+    }
+
+    func replacingLive(_ live: [String]) -> ChatTranscriptIDs {
+        ChatTranscriptIDs(canonicalStorage: canonicalStorage, live: live)
+    }
+
+    func sharesCanonicalStorage(with other: ChatTranscriptIDs) -> Bool {
+        canonicalStorage === other.canonicalStorage
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        if lhs.canonicalStorage === rhs.canonicalStorage {
+            return lhs.live == rhs.live
+        }
+        return lhs.count == rhs.count && lhs.elementsEqual(rhs)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(count)
+        hasher.combine(Self.digest(live, startingAt: canonicalStorage.identityDigest))
+    }
+
+    private static func digest(
+        _ values: [String],
+        startingAt initial: UInt64 = 14_695_981_039_346_656_037
+    ) -> UInt64 {
+        var result = initial
+        for value in values {
+            for byte in value.utf8 {
+                result ^= UInt64(byte)
+                result &*= 1_099_511_628_211
+            }
+            result ^= 0xff
+            result &*= 1_099_511_628_211
+        }
+        return result
+    }
+}
+
+func == (lhs: ChatTranscriptIDs, rhs: [String]) -> Bool {
+    lhs.count == rhs.count && lhs.elementsEqual(rhs)
+}
+
+func == (lhs: [String], rhs: ChatTranscriptIDs) -> Bool { rhs == lhs }
+
 struct ChatTranscriptTimeline: Hashable, Sendable {
     let items: ChatTranscriptItems
     let preferredSemanticIDByRenderedID: ChatSemanticIndex
     let renderedIDBySemanticID: ChatSemanticIndex
+    private let renderedIDs: ChatTranscriptIDs
+    private let canonicalRenderedIDSet: Set<String>
+    private let liveRenderedIDSet: Set<String>
+    private let internallyConsistent: Bool
 
-    var ids: [String] { items.map(\.id) }
+    init(
+        items: ChatTranscriptItems,
+        preferredSemanticIDByRenderedID: ChatSemanticIndex,
+        renderedIDBySemanticID: ChatSemanticIndex
+    ) {
+        self.items = items
+        self.preferredSemanticIDByRenderedID = preferredSemanticIDByRenderedID
+        self.renderedIDBySemanticID = renderedIDBySemanticID
+        let canonicalIDs = (0..<items.canonicalCount).map { items[$0].id }
+        let liveIDs = items.live.map(\.id)
+        let ids = ChatTranscriptIDs(canonical: canonicalIDs, live: liveIDs)
+        let canonicalIDSet = Set(canonicalIDs)
+        let liveIDSet = Set(liveIDs)
+        renderedIDs = ids
+        canonicalRenderedIDSet = canonicalIDSet
+        liveRenderedIDSet = liveIDSet
+        let containsID = { canonicalIDSet.contains($0) || liveIDSet.contains($0) }
+        internallyConsistent = canonicalIDSet.count == canonicalIDs.count
+            && liveIDSet.count == liveIDs.count
+            && canonicalIDSet.isDisjoint(with: liveIDSet)
+            && preferredSemanticIDByRenderedID.allKeysSatisfy(containsID)
+            && renderedIDBySemanticID.allValuesSatisfy(containsID)
+    }
 
-    var isInternallyConsistent: Bool {
-        let renderedIDs = Set(ids)
-        return renderedIDs.count == items.count
-            && preferredSemanticIDByRenderedID.allKeysSatisfy(renderedIDs.contains)
-            && renderedIDBySemanticID.allValuesSatisfy(renderedIDs.contains)
+    private init(
+        items: ChatTranscriptItems,
+        preferredSemanticIDByRenderedID: ChatSemanticIndex,
+        renderedIDBySemanticID: ChatSemanticIndex,
+        renderedIDs: ChatTranscriptIDs,
+        canonicalRenderedIDSet: Set<String>,
+        liveRenderedIDSet: Set<String>,
+        internallyConsistent: Bool
+    ) {
+        self.items = items
+        self.preferredSemanticIDByRenderedID = preferredSemanticIDByRenderedID
+        self.renderedIDBySemanticID = renderedIDBySemanticID
+        self.renderedIDs = renderedIDs
+        self.canonicalRenderedIDSet = canonicalRenderedIDSet
+        self.liveRenderedIDSet = liveRenderedIDSet
+        self.internallyConsistent = internallyConsistent
+    }
+
+    var ids: ChatTranscriptIDs { renderedIDs }
+    var isInternallyConsistent: Bool { internallyConsistent }
+    func sharesCanonicalIdentitySpine(with other: ChatTranscriptTimeline) -> Bool {
+        renderedIDs.sharesCanonicalStorage(with: other.renderedIDs)
+    }
+    func containsID(_ id: String) -> Bool {
+        canonicalRenderedIDSet.contains(id) || liveRenderedIDSet.contains(id)
+    }
+
+    /// Sparse replacements are permitted only after the kernel proves every row
+    /// identity unchanged, so the cached identity spine and semantic maps remain
+    /// the exact canonical values rather than being rebuilt or guessed.
+    func replacingCanonicalRows(
+        _ replacements: [Int: ChatTranscriptRenderItem]
+    ) -> ChatTranscriptTimeline {
+        ChatTranscriptTimeline(
+            items: items.replacingCanonical(replacements),
+            preferredSemanticIDByRenderedID: preferredSemanticIDByRenderedID,
+            renderedIDBySemanticID: renderedIDBySemanticID,
+            renderedIDs: renderedIDs,
+            canonicalRenderedIDSet: canonicalRenderedIDSet,
+            liveRenderedIDSet: liveRenderedIDSet,
+            internallyConsistent: internallyConsistent
+        )
     }
 
     func appendingLive(_ live: ChatTranscriptTimeline) -> ChatTranscriptTimeline {
-        precondition(live.items.canonical.isEmpty)
-        return ChatTranscriptTimeline(
-            items: ChatTranscriptItems(canonical: items.canonical, live: live.items.live),
-            preferredSemanticIDByRenderedID: ChatSemanticIndex(
-                canonical: preferredSemanticIDByRenderedID.canonical,
-                live: live.preferredSemanticIDByRenderedID.live
-            ),
-            renderedIDBySemanticID: ChatSemanticIndex(
-                canonical: renderedIDBySemanticID.canonical,
-                live: live.renderedIDBySemanticID.live
-            )
+        precondition(live.items.canonicalCount == 0)
+        let ids = renderedIDs.replacingLive(live.renderedIDs.live)
+        let canonicalIDSet = canonicalRenderedIDSet
+        let liveIDSet = live.liveRenderedIDSet
+        let preferred = ChatSemanticIndex(
+            canonical: preferredSemanticIDByRenderedID.canonical,
+            live: live.preferredSemanticIDByRenderedID.live
         )
+        let reverse = ChatSemanticIndex(
+            canonical: renderedIDBySemanticID.canonical,
+            live: live.renderedIDBySemanticID.live
+        )
+        return ChatTranscriptTimeline(
+            items: items.replacingLive(live.items.live),
+            preferredSemanticIDByRenderedID: preferred,
+            renderedIDBySemanticID: reverse,
+            renderedIDs: ids,
+            canonicalRenderedIDSet: canonicalIDSet,
+            liveRenderedIDSet: liveIDSet,
+            internallyConsistent: internallyConsistent
+                && live.internallyConsistent
+                && canonicalIDSet.isDisjoint(with: liveIDSet)
+        )
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.items == rhs.items
+            && lhs.preferredSemanticIDByRenderedID == rhs.preferredSemanticIDByRenderedID
+            && lhs.renderedIDBySemanticID == rhs.renderedIDBySemanticID
+    }
+
+    func hash(into hasher: inout Hasher) {
+        // Equality implies identical rendered identities. Hashing the cached
+        // split spine keeps sparse/live publications shallow; content and maps
+        // may legally collide and are still compared exactly by `==`.
+        hasher.combine(renderedIDs)
     }
 }
 
@@ -702,36 +927,10 @@ enum ChatTranscriptPresentation {
         ).timeline
     }
 
-    /// Existing prefix sharing remains until the later sparse-reuse checkpoint.
-    /// Cold/incremental parity tests cover its equality with the common kernel.
+    /// The compatibility wrapper delegates suffix construction to the sole
+    /// output-producing kernel.
     static func isolatedStreamingTimeline(_ item: TranscriptItem) -> ChatTranscriptTimeline? {
-        guard item.kind == .message, item.role != .toolResult else { return nil }
-        let parts = messageParts(in: item)
-        guard !parts.contains(where: { part in
-            if case .content(let content) = part { return content.type == .toolCall }
-            return false
-        }) else { return nil }
-
-        let hasFooter = !(item.errorMessage ?? "").isEmpty
-        let rendered: [ChatTranscriptRenderItem]
-        if parts.isEmpty, !hasFooter {
-            rendered = []
-        } else {
-            rendered = [.message(ChatMessagePresentation(
-                id: "streaming",
-                item: item,
-                parts: parts,
-                streaming: true,
-                showsFooter: true
-            ))]
-        }
-        let preferred = rendered.isEmpty ? [:] : ["streaming": "streaming"]
-        let reverse = rendered.isEmpty ? [:] : ["streaming": "streaming"]
-        return ChatTranscriptTimeline(
-            items: ChatTranscriptItems(canonical: [], live: rendered),
-            preferredSemanticIDByRenderedID: ChatSemanticIndex(canonical: [:], live: preferred),
-            renderedIDBySemanticID: ChatSemanticIndex(canonical: [:], live: reverse)
-        )
+        ChatTranscriptProjectionKernel.isolatedStreamingTimeline(item)
     }
 
     static func attachmentParts(in item: TranscriptItem) -> [ContentPart] {
