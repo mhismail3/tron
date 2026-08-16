@@ -373,8 +373,9 @@ trusted common string key and otherwise lead with their result. Bash commands wr
 using word-preserving line breaks while outputs and other string metadata wrap; all previews bound pathological
 line count, total characters, and per-line length with explicit head/tail omission markers. Small numeric
 and boolean metadata remains unchanged. The final Technical details sub-sheet starts with compact selectable
-execution metadata, then exposes the untouched Request JSON and Result JSON directly in that order without a
-second readable-output projection, structured field traversal, or raw-data disclosure state. Result JSON uses
+execution metadata, then exposes bounded constant-depth Request JSON and Result JSON summary rows in that order.
+Selecting one row opens the untouched payload through progressive structured-field traversal; full raw formatting
+requires that component's separate explicit disclosure and no second readable-output projection is introduced. Result JSON uses
 the authoritative response first, otherwise the complete readable content string, then only a fallback distinct
 from the request; request-only projections cannot duplicate themselves as results. Shared nested
 structured field sheets remain available to unrelated arbitrary-data surfaces and resolve semantic paths
@@ -765,8 +766,8 @@ flow measures every chip against the finite available width; status and scalar t
 Accessibility Dynamic Type without escaping the sheet or changing VoiceOver order. Cached Sendable ISO 8601
 parse strategies handle both fractional and whole-second Gateway timestamps for live timers without repeated
 formatter allocation. Technical execution rows use compact selectable label/value geometry; a bounded bash
-preview records its completeness fact there, followed by direct Request JSON and Result JSON with explicit
-`null` for a truly missing side. Content-only results remain JSON strings, response data wins, and a fallback
+preview records its completeness fact there, followed by on-demand Request JSON and Result JSON summary rows
+with explicit `null` for a truly missing side. Content-only results remain JSON strings, response data wins, and a fallback
 identical to Request is rejected. Running sheets consume the newest immutable tool presentation, update status, timing,
 partial output, and bounded-output disclosure in place, and never move
 the reader's scroll position. Tool chips retain six-point vertical capsule insets and

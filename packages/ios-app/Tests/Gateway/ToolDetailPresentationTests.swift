@@ -4,6 +4,14 @@ import Testing
 
 @Suite("Tool detail semantic presentation")
 struct ToolDetailPresentationTests {
+    @Test("technical payload overview uses bounded top-level summaries")
+    func technicalPayloadSummary() {
+        #expect(ToolTechnicalPayloadSummary.summary(for: .object(["path": .string("a")])) == "1 top-level field")
+        #expect(ToolTechnicalPayloadSummary.summary(for: .object(["path": .string("a"), "line": .number(2)])) == "2 top-level fields")
+        #expect(ToolTechnicalPayloadSummary.summary(for: .array([.bool(true)])) == "1 top-level item")
+        #expect(ToolTechnicalPayloadSummary.summary(for: .string("value")) == "Scalar protocol value")
+    }
+
     @Test("built-in tools foreground their task-critical request values")
     func builtInSummaries() {
         let fixtures: [(String, JSONValue, ToolDetailKind, String, String)] = [

@@ -515,6 +515,7 @@ private struct ToolTechnicalDetailsSheet: View {
     let tool: ChatToolPresentation
     let presentation: ToolDetailPresentation
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedPayload: ToolTechnicalPayload?
 
     private var accent: Color { tool.error ? .tronError : .tronSlate }
 
@@ -547,6 +548,9 @@ private struct ToolTechnicalDetailsSheet: View {
                     .accessibilityLabel("Done")
                 }
             }
+        }
+        .sheet(item: $selectedPayload) { payload in
+            ToolTechnicalPayloadSheet(payload: payload, accent: accent)
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
@@ -636,18 +640,22 @@ private struct ToolTechnicalDetailsSheet: View {
     }
 
     private func payload(_ title: String, value: JSONValue) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let summary = ToolTechnicalPayloadSummary.summary(for: value)
+        return VStack(alignment: .leading, spacing: 8) {
             sectionLabel("\(title) JSON")
-            ScrollView(.horizontal, showsIndicators: true) {
-                Text(value.prettyPrinted)
-                    .font(TronTypography.codeContent)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: true)
-                    .padding(12)
+            Button {
+                selectedPayload = ToolTechnicalPayload(title: title, value: value)
+            } label: {
+                TronSettingsRow(
+                    icon: "curlybraces",
+                    title: "Inspect \(title) JSON",
+                    subtitle: summary,
+                    accent: accent
+                )
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .tronGlassSurface(accent: accent, tintOpacity: 0.08)
+            .buttonStyle(.plain)
+            .accessibilityLabel("Inspect \(title) JSON, \(summary)")
+            .tronGlassSurface(accent: accent, tintOpacity: 0.08, interactive: true)
         }
     }
 
@@ -655,6 +663,64 @@ private struct ToolTechnicalDetailsSheet: View {
         Text(title.uppercased())
             .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
             .foregroundStyle(Color.tronTextMuted)
+    }
+}
+
+enum ToolTechnicalPayloadSummary {
+    static func summary(for value: JSONValue) -> String {
+        if let object = value.objectValue {
+            return "\(object.count) top-level field\(object.count == 1 ? "" : "s")"
+        }
+        if let array = value.arrayValue {
+            return "\(array.count) top-level item\(array.count == 1 ? "" : "s")"
+        }
+        return "Scalar protocol value"
+    }
+}
+
+private struct ToolTechnicalPayload: Identifiable {
+    let title: String
+    let value: JSONValue
+
+    var id: String { title }
+}
+
+private struct ToolTechnicalPayloadSheet: View {
+    let payload: ToolTechnicalPayload
+    let accent: Color
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(.vertical, showsIndicators: true) {
+                TronStructuredJSONView(
+                    value: payload.value,
+                    title: "\(payload.title) JSON",
+                    accent: accent
+                )
+                .padding(18)
+            }
+            .defaultScrollAnchor(.top)
+            .tronScrollEdgeChrome()
+            .tronToolDetailNavigationChrome()
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: "\(payload.title) JSON", accent: accent)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
+        }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .tronPresentation()
     }
 }
 
