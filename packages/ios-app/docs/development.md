@@ -128,6 +128,8 @@ receipt-aware commands, attach/replay intervals, compensating detach cleanup, re
 reattachment; `AppModel` only routes admitted events/lifecycle work and preserves its UI façade. The
 same lifecycle suite drives an injected monotonic clock to prove the 120 ms resize boundary, same-intent
 coalescing, established dimension clamps, independent presentation slots, and revocation with no late wire send.
+The onboarding flow retains step/state orchestration while navigation-title, pairing-field, page, card, and info-row
+chrome lives in a separate presentation component file with unchanged UIKit/SwiftUI behavior.
 `ChatView` retains route/composer/transcript composition while attachment controls and chips, entrance/render
 rows, and extension widgets live in separate presentation files with unchanged identities and transitions.
 The settings shell and its appearance, connection/import, provider, and agent-default destinations live in

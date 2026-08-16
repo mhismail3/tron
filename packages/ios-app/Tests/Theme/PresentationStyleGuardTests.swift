@@ -186,10 +186,19 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Onboarding/OnboardingView.swift"),
             encoding: .utf8
         )
+        let components = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Onboarding/OnboardingPresentationComponents.swift"),
+            encoding: .utf8
+        )
         let presentation = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Theme/TronPresentation.swift"),
             encoding: .utf8
         )
+        #expect(!onboarding.contains("struct PairingCodeField"))
+        #expect(components.contains("struct OnboardingNavigationTitle"))
+        #expect(components.contains("struct PairingCodeField"))
+        #expect(components.contains("struct OnboardingPage"))
+        #expect(components.contains("struct OnboardingCard"))
         #expect(onboarding.contains(".padding(.horizontal, 10)\n        .padding(.vertical, 6)"))
         #expect(onboarding.contains(".frame(width: value == step ? 16 : 6, height: 6)"))
         #expect(onboarding.contains("Label(\"Back\", systemImage: \"chevron.left\")"))
