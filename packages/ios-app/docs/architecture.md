@@ -120,7 +120,9 @@ bounds/edge identity. It retains at most one installed, one building, and one pe
 snapshot/timeline; it is disposable projection state, not a session mirror or event journal.
 One deterministic `ChatTranscriptProjectionKernel` converts exact canonical entries into ordered
 raw atoms and then globally assembles call/result joins, bootstrap filtering, ordinals, barriers,
-grouping, compatibility normalization, and semantic maps. Raw fragments retain the complete
+grouping, compatibility normalization, and semantic maps. `ToolExecutionStatePolicy` is shared with
+`SessionPresentationStore`, so progress-sequence, timestamp, status-tie, explicit-order, start-time,
+and call-ID rules cannot drift between canonical event reduction and sparse rendering. Raw fragments retain the complete
 currently visible disposable history—even beyond one 512-item page—because explicitly loaded
 history cannot be evicted until forward reload exists. Projection instrumentation reports only a closed privacy-safe mode (`cold`, `fragmentReuse`,
 `toolPayloadPatch`, or `isolatedStreamingSuffix`) and aggregate entry/fragment/tool/atom/rendered

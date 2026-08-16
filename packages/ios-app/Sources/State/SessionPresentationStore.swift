@@ -863,7 +863,7 @@ final class SessionPresentationStore {
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
                   case .toolProgress(let tool)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
             if let index = snapshot.toolExecutions.firstIndex(where: { $0.toolCallId == tool.toolCallId }) {
-                if isNewerToolState(tool, than: snapshot.toolExecutions[index]) {
+                if ToolExecutionStatePolicy.shouldReplace(snapshot.toolExecutions[index], with: tool) {
                     snapshot.toolExecutions[index] = tool
                     chatTimelineChanged = true
                 }
@@ -871,7 +871,7 @@ final class SessionPresentationStore {
                 snapshot.toolExecutions.append(tool)
                 chatTimelineChanged = true
             }
-            if chatTimelineChanged { snapshot.toolExecutions.sort(by: toolExecutionOrder) }
+            if chatTimelineChanged { snapshot.toolExecutions.sort(by: ToolExecutionStatePolicy.orderedBefore) }
             advance(&snapshot, envelope)
         case "session.interactions":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
@@ -1061,25 +1061,6 @@ final class SessionPresentationStore {
     private func advanceChatProjection(canonical: Bool) {
         if canonical { chatCanonicalGeneration &+= 1 }
         chatTimelineGeneration &+= 1
-    }
-
-    private func isNewerToolState(_ candidate: ToolExecutionState, than current: ToolExecutionState) -> Bool {
-        if let candidateSequence = candidate.progressSequence,
-           let currentSequence = current.progressSequence,
-           candidateSequence != currentSequence { return candidateSequence > currentSequence }
-        if candidate.updatedAt != current.updatedAt { return candidate.updatedAt > current.updatedAt }
-        let rank: (ToolExecutionState.Status) -> Int = { status in
-            switch status { case .running: 0; case .completed, .failed: 1 }
-        }
-        return rank(candidate.status) >= rank(current.status)
-    }
-
-    private func toolExecutionOrder(_ left: ToolExecutionState, _ right: ToolExecutionState) -> Bool {
-        if let leftOrder = left.order, let rightOrder = right.order, leftOrder != rightOrder { return leftOrder < rightOrder }
-        if left.order != nil, right.order == nil { return true }
-        if left.order == nil, right.order != nil { return false }
-        if left.startedAt != right.startedAt { return left.startedAt < right.startedAt }
-        return left.toolCallId < right.toolCallId
     }
 
     static func installingSnapshot(

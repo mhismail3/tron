@@ -714,7 +714,7 @@ enum ChatTranscriptProjectionKernel {
         )
         let liveByID = Dictionary(
             snapshot.toolExecutions.map { ($0.toolCallId, $0) },
-            uniquingKeysWith: newestToolState
+            uniquingKeysWith: ToolExecutionStatePolicy.newest
         )
         var toolsInspected = snapshot.toolExecutions.count
         var rendered: [ChatTranscriptRenderItem] = []
@@ -885,7 +885,7 @@ enum ChatTranscriptProjectionKernel {
         let streamingCallIDs = Set(streamingTools.map { $0.presentation.id })
         let unanchoredLive = liveByID.values
             .filter { !anchoredCallIDs.contains($0.toolCallId) && !streamingCallIDs.contains($0.toolCallId) }
-            .sorted(by: toolStateOrder)
+            .sorted(by: ToolExecutionStatePolicy.orderedBefore)
             .map { state in
                 PreparedTool(
                     presentation: livePresentation(state),
@@ -934,31 +934,6 @@ enum ChatTranscriptProjectionKernel {
             toolsInspected: toolsInspected,
             patchMetadata: ChatToolPatchMetadata(sitesByCallID: sitesByCallID)
         )
-    }
-
-    private static func newestToolState(_ current: ToolExecutionState, _ candidate: ToolExecutionState) -> ToolExecutionState {
-        if let currentSequence = current.progressSequence,
-           let candidateSequence = candidate.progressSequence,
-           currentSequence != candidateSequence {
-            return currentSequence < candidateSequence ? candidate : current
-        }
-        if current.updatedAt != candidate.updatedAt { return current.updatedAt < candidate.updatedAt ? candidate : current }
-        if toolStatusRank(current.status) != toolStatusRank(candidate.status) {
-            return toolStatusRank(current.status) < toolStatusRank(candidate.status) ? candidate : current
-        }
-        return candidate
-    }
-
-    private static func toolStateOrder(_ left: ToolExecutionState, _ right: ToolExecutionState) -> Bool {
-        if let leftOrder = left.order, let rightOrder = right.order, leftOrder != rightOrder { return leftOrder < rightOrder }
-        if left.order != nil, right.order == nil { return true }
-        if left.order == nil, right.order != nil { return false }
-        if left.startedAt != right.startedAt { return left.startedAt < right.startedAt }
-        return left.toolCallId < right.toolCallId
-    }
-
-    private static func toolStatusRank(_ status: ToolExecutionState.Status) -> Int {
-        switch status { case .running: 0; case .completed, .failed: 1 }
     }
 
     private static func resolved(_ canonical: ChatToolPresentation, live: ToolExecutionState?) -> ChatToolPresentation {
