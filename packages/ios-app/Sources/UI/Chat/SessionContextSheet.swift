@@ -392,16 +392,14 @@ struct SessionContextSheet: View {
 
     private func loadGit(snapshot: SessionSnapshot?) async {
         guard let snapshot else { return }
-        struct Params: Codable { let path: String }
-        guard let value = try? await model.client.requestValue("git.inspect", Params(path: snapshot.cwd)),
-              let object = value.objectValue,
-              object["isRepository"]?.boolValue == true else {
+        guard let inspection = try? await model.gatewayDiagnostics.inspectGit(path: snapshot.cwd),
+              inspection.isRepository else {
             gitBranch = nil
             gitDirty = false
             return
         }
-        gitBranch = object["branch"]?.stringValue
-        gitDirty = object["dirty"]?.boolValue ?? false
+        gitBranch = inspection.branch
+        gitDirty = inspection.isDirty
     }
 
     private func handleForkCreated(_ route: AppModel.SessionNavigationRoute) {

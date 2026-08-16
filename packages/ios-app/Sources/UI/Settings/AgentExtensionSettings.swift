@@ -526,12 +526,7 @@ struct CustomModelsSettingsView: View {
     }
 }
 
-private struct GatewayLogRecord: Identifiable, Hashable {
-    let timestamp: String
-    let level: String
-    let message: String
-    var id: String { "\(timestamp)-\(level)-\(message)" }
-
+private extension GatewayLogRecord {
     var date: Date? {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -697,20 +692,8 @@ struct GatewayDiagnosticsView: View {
     }
 
     private func load() async {
-        struct Params: Codable { let limit: Int }
         loadingLogs = true
         defer { loadingLogs = false }
-        guard let value = try? await model.client.requestValue("system.logs", Params(limit: 300)),
-              let values = value.objectValue?["records"]?.arrayValue else {
-            records = []
-            return
-        }
-        records = values.compactMap { value in
-            guard let object = value.objectValue,
-                  let timestamp = object["timestamp"]?.stringValue,
-                  let level = object["level"]?.stringValue,
-                  let message = object["message"]?.stringValue else { return nil }
-            return GatewayLogRecord(timestamp: timestamp, level: level, message: message)
-        }.reversed()
+        records = (try? await model.gatewayDiagnostics.logs(limit: 300)) ?? []
     }
 }

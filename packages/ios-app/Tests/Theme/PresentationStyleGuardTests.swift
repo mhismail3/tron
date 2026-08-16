@@ -345,8 +345,18 @@ struct PresentationStyleGuardTests {
         for title in ["Extensions", "Prompts", "Skills", "Context Files", "Tools"] {
             #expect(resources.contains("\(title)"))
         }
-        #expect(settings.contains("private struct GatewayLogRecord"))
+        let diagnostics = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/GatewayDiagnosticsService.swift"),
+            encoding: .utf8
+        )
+        #expect(settings.contains("private extension GatewayLogRecord"))
         #expect(settings.contains("Newest entries first"))
+        #expect(context.contains("model.gatewayDiagnostics.inspectGit"))
+        #expect(settings.contains("model.gatewayDiagnostics.logs"))
+        #expect(!context.contains("model.client"))
+        #expect(!settings.contains("model.client"))
+        #expect(diagnostics.contains("request(\"git.inspect\""))
+        #expect(diagnostics.contains("request(\"system.logs\""))
         #expect(settings.contains("Advanced JSON"))
         let runtimeSettings = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/RuntimeSettingsViews.swift"),

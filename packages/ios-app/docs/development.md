@@ -224,6 +224,10 @@ and nested façade observation. `CustomModelConfigurationCoordinatorTests` owns 
 mutation admission, validate-before-put ordering, no-put failure/retirement, current-versus-retired
 validation/put errors, stable put receipts, A → B → A rejection, lifecycle-bound restart failures,
 cancellation-safe presentation, nested observation, and exact draft-revision save admission.
+`GatewayDiagnosticsServiceTests` own the read-only view boundary for exact-path `git.inspect` and
+bounded `system.logs` requests, typed projection, malformed-record skipping, and newest-first ordering.
+Presentation style guards prohibit those views from reaching `model.client`; DTO fields remain in the
+service while log color/icon/date formatting remains in the settings UI.
 `AppModelInvalidationTests` scripts every
 successful response and proves publication cannot schedule its own next load; event tests
 separately prove one generation advance per canonical invalidation. Settings requests use a

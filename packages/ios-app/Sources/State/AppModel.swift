@@ -104,6 +104,7 @@ final class AppModel {
     private let packageConfiguration: PackageConfigurationCoordinator
     private let customModelConfiguration: CustomModelConfigurationCoordinator
     let composerDrafts: ComposerDraftCoordinator
+    let gatewayDiagnostics: GatewayDiagnosticsService
     let chatMedia: ChatMediaLoader
     private let chatMediaMemoryPressureObserver: ChatMediaMemoryPressureObserver
 
@@ -243,6 +244,7 @@ final class AppModel {
             },
             admitsLifecycleGeneration: { lifecycle.admits(.init(generation: $0, connectionID: nil)) }
         )
+        let gatewayDiagnostics = GatewayDiagnosticsService(client: client)
         let chatMedia = ChatMediaLoader(
             fetch: { identity in
                 let value = try await client.blob(
@@ -279,6 +281,7 @@ final class AppModel {
         self.packageConfiguration = packageConfiguration
         self.customModelConfiguration = customModelConfiguration
         self.composerDrafts = composerDrafts
+        self.gatewayDiagnostics = gatewayDiagnostics
         self.chatMedia = chatMedia
         self.chatMediaMemoryPressureObserver = chatMediaMemoryPressureObserver
         self.sessionPresentation = SessionPresentationStore(

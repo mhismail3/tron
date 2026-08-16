@@ -231,6 +231,11 @@ profile retirement—including A → B → A replacement—and both reuse the sh
 executor rather than defining receipt policy. Every throwing mutation boundary rechecks the
 captured owner admission before propagating an error: retired or superseded work becomes
 cancellation, while current-profile uncertainty and application failures remain visible.
+`GatewayDiagnosticsService` is the typed read-only boundary for project Git inspection and bounded
+Gateway log reads. SwiftUI surfaces provide the exact path or log limit and never construct Gateway
+methods or parse wire objects. The service preserves the established absent-repository, malformed-log
+skip, and newest-first projection semantics; `GatewayLogRecord` carries transport-safe fields while its
+color, icon, and date formatting remain UI-owned.
 `AppModel` only exposes observed computed reads and forwards operations; screen-owned
 revisioned draft stores remain local to their existing settings surfaces. Settings
 surfaces use typed `.global` or `.project(cwd:)` targets; installed values and automatic
