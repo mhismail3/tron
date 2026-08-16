@@ -288,6 +288,7 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -only-testing:TronMobileTests/SessionScenarioBuilderTests \
   -only-testing:TronMobileTests/MarkdownPresentationTests \
   -only-testing:TronMobileTests/ChatTextPreparationTests \
+  -only-testing:TronMobileTests/ChatMediaLoaderTests \
   -only-testing:TronMobileTests/ChatTranscriptPresentationStoreTests \
   -only-testing:TronMobileTests/PresentationStyleGuardTests
 ```
@@ -305,7 +306,16 @@ replacement clear prepared values. Misses and older explicitly paged rows retain
 cold fallback, so no placeholder or visual behavior was added. Do not add prefix reuse until
 differential tests prove cold equivalence. Fence closure, table promotion, list/quote
 continuation, and incomplete inline syntax can reclassify an earlier prefix, so every uncertain
-state must retain a full-parse fallback. The Phase 6.3 media loader remains pending.
+state must retain a full-parse fallback.
+
+Phase 6.3 routes transcript blobs through `ChatMediaLoader`; transcript views must not call
+`GatewayClient.blob` directly. Identity includes profile, lifecycle generation, connection, and blob
+ID. Tests own exact 192-pixel oriented downsampling, duplicate single-flight behavior, one shared
+preparation slot, the 32-flight ceiling, 64-item and 4 MiB decoded LRU eviction, transport-level 25 MiB
+response admission, stale-identity and late-publication rejection, uncached one-at-a-time full previews,
+and app-lifetime memory-pressure cleanup. The production row retains its 64-point loading/retry
+surface and opens the existing medium preview immediately from the thumbnail while full resolution
+loads. Physical pixel and peak-memory calibration remains required.
 
 `ChatViewScrollHarnessTests` mount the actual `ChatView`, `LazyVStack`, composer
 inset, and native `UIScrollView` in a fixed hosted window. Test-only authority

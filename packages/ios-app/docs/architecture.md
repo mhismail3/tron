@@ -508,7 +508,17 @@ Images become native image input. Other files remain agent-readable
 through a deterministic canonical path envelope, while the mobile projection
 removes that path and exposes only display-safe name/type/size metadata. Sent
 images and files share one attachment strip above the prompt text: images use the
-same square previews as pending photos and files use named chips. One gateway runtime is the sole mutable
+same square previews as pending photos and files use named chips. Transcript images resolve through one
+`ChatMediaLoader` keyed by profile, lifecycle generation, connection, and blob ID; views never fetch blobs
+directly. Thumbnail fetch/decode is identity-single-flight behind one shared preparation slot and a
+32-flight admission ceiling. Its bounded HTTP delegate rejects declared or streamed bodies over 25 MiB
+while receiving them, then applies image orientation while downsampling off-main to at most 192 pixels
+and retains at most 64 items/4 MiB decoded under deterministic LRU. Lifecycle replacement and the
+app-lifetime memory-pressure observer advance exact invalidation generations, cancel flights, and clear
+the cache; late fetch or detached-decode completion cannot repopulate it.
+A preview opens immediately with the thumbnail and may replace it with one uncached full image; each
+sheet owns an exact lease, and dismissal cancels the underlying flight only after its final lease retires,
+so full-resolution lifetime remains sheet-owned. One gateway runtime is the sole mutable
 owner of a canonical session; terminal and mobile chat clients must attach to
 that owner rather than opening the same JSONL in separate Pi processes. Its
 historical context ring projects the

@@ -1,0 +1,507 @@
+import Foundation
+import Testing
+import UIKit
+@testable import TronMobile
+
+@MainActor
+@Suite("Bounded chat media loader")
+struct ChatMediaLoaderTests {
+    @Test("ratchets match the approved Phase 6 media budget")
+    func ratchets() {
+        #expect(ChatMediaPolicy.maximumDecodedThumbnailBytes == 4_194_304)
+        #expect(ChatMediaPolicy.maximumThumbnailCount == 64)
+        #expect(ChatMediaPolicy.maximumThumbnailPixelDimension == 192)
+        #expect(ChatMediaPolicy.maximumEncodedBytes == 26_214_400)
+        #expect(ChatMediaPolicy.maximumConcurrentPreparations == 1)
+        #expect(ChatMediaPolicy.maximumThumbnailFlights == 32)
+        #expect(ChatMediaPolicy.admitsEncodedByteCount(26_214_400))
+        #expect(!ChatMediaPolicy.admitsEncodedByteCount(26_214_401))
+    }
+
+    @Test("oriented high-resolution images downsample off-main to the exact pixel ceiling")
+    func downsampling() throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_301).generatedImageFixture(
+            format: .jpeg,
+            pixelWidth: 1_200,
+            pixelHeight: 800,
+            orientation: .right
+        )
+        let decoded = try ChatMediaLoader.decodeThumbnail(fixture.encodedData)
+        let image = try #require(decoded.0.cgImage)
+
+        #expect(max(image.width, image.height) == ChatMediaPolicy.maximumThumbnailPixelDimension)
+        #expect(min(image.width, image.height) > 0)
+        #expect(decoded.1 == image.bytesPerRow * image.height)
+        #expect(decoded.1 <= 192 * 192 * 4)
+    }
+
+    @Test("concurrent requests share one exact identity fetch and decode")
+    func singleFlight() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_302).generatedImageFixture(
+            format: .png,
+            pixelWidth: 600,
+            pixelHeight: 400,
+            orientation: .up
+        )
+        let gate = MediaFetchGate(payload: .init(data: fixture.encodedData, mimeType: "image/png"))
+        let loader = ChatMediaLoader(
+            fetch: { identity in try await gate.fetch(identity) },
+            admits: { _ in true }
+        )
+        let identity = mediaIdentity(blobID: "shared")
+
+        async let first = loader.thumbnail(for: identity)
+        async let second = loader.thumbnail(for: identity)
+        await gate.waitForStarts(1)
+        #expect(await gate.startCount == 1)
+        await gate.release()
+        let values = try await (first, second)
+
+        #expect(values.0.cgImage?.width == values.1.cgImage?.width)
+        #expect(await gate.startCount == 1)
+        #expect(loader.metrics().thumbnailCount == 1)
+        #expect(loader.metrics().thumbnailFlights == 0)
+    }
+
+    @Test("the 33rd distinct thumbnail flight is rejected without starting work")
+    func flightCapacity() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_310).generatedImageFixture(
+            format: .png,
+            pixelWidth: 16,
+            pixelHeight: 16,
+            orientation: .up
+        )
+        let gate = MediaFetchGate(payload: .init(data: fixture.encodedData, mimeType: "image/png"))
+        let loader = ChatMediaLoader(
+            fetch: { identity in try await gate.fetch(identity) },
+            admits: { _ in true }
+        )
+        let flights = (0..<ChatMediaPolicy.maximumThumbnailFlights).map { index in
+            Task { try await loader.thumbnail(for: mediaIdentity(blobID: "flight-\(index)")) }
+        }
+        await loader.hostedWaitForThumbnailFlightCount(ChatMediaPolicy.maximumThumbnailFlights)
+        #expect(loader.metrics().thumbnailFlights == ChatMediaPolicy.maximumThumbnailFlights)
+
+        await #expect(throws: ChatMediaLoadError.capacityExceeded) {
+            try await loader.thumbnail(for: mediaIdentity(blobID: "flight-overflow"))
+        }
+        loader.removeAll()
+        await gate.release()
+        for flight in flights { _ = try? await flight.value }
+        #expect(loader.metrics().thumbnailFlights == 0)
+    }
+
+    @Test("item LRU evicts the oldest tiny thumbnail deterministically")
+    func itemBound() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_303).generatedImageFixture(
+            format: .png,
+            pixelWidth: 16,
+            pixelHeight: 16,
+            orientation: .up
+        )
+        let counter = MediaFetchCounter(payload: .init(data: fixture.encodedData, mimeType: "image/png"))
+        let loader = ChatMediaLoader(
+            fetch: { identity in await counter.fetch(identity) },
+            admits: { _ in true }
+        )
+
+        for index in 0...ChatMediaPolicy.maximumThumbnailCount {
+            _ = try await loader.thumbnail(for: mediaIdentity(blobID: "tiny-\(index)"))
+        }
+        #expect(loader.metrics().thumbnailCount == ChatMediaPolicy.maximumThumbnailCount)
+        #expect(await counter.count == 65)
+
+        _ = try await loader.thumbnail(for: mediaIdentity(blobID: "tiny-0"))
+        #expect(await counter.count == 66)
+        #expect(loader.metrics().thumbnailCount == ChatMediaPolicy.maximumThumbnailCount)
+    }
+
+    @Test("decoded-byte LRU stays under four MiB for full thumbnail squares")
+    func decodedByteBound() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_304).generatedImageFixture(
+            format: .jpeg,
+            pixelWidth: 512,
+            pixelHeight: 512,
+            orientation: .up
+        )
+        let loader = ChatMediaLoader(
+            fetch: { _ in .init(data: fixture.encodedData, mimeType: "image/jpeg") },
+            admits: { _ in true }
+        )
+
+        for index in 0..<32 {
+            _ = try await loader.thumbnail(for: mediaIdentity(blobID: "square-\(index)"))
+        }
+        let metrics = loader.metrics()
+        #expect(metrics.decodedThumbnailBytes <= ChatMediaPolicy.maximumDecodedThumbnailBytes)
+        #expect(metrics.thumbnailCount <= 28)
+    }
+
+    @Test("oversized encoded payloads are rejected before decode or insertion")
+    func encodedAdmission() async {
+        let loader = ChatMediaLoader(
+            fetch: { _ in
+                .init(data: Data(count: ChatMediaPolicy.maximumEncodedBytes + 1), mimeType: "image/png")
+            },
+            admits: { _ in true }
+        )
+
+        await #expect(throws: ChatMediaLoadError.encodedPayloadTooLarge) {
+            try await loader.thumbnail(for: mediaIdentity(blobID: "oversized"))
+        }
+        #expect(loader.metrics().thumbnailCount == 0)
+    }
+
+    @Test("a failed decode does not poison an exact identity retry")
+    func retryAfterDecodeFailure() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_309).generatedImageFixture(
+            format: .png,
+            pixelWidth: 24,
+            pixelHeight: 24,
+            orientation: .up
+        )
+        let fetch = MediaRetryFetch(validPayload: .init(data: fixture.encodedData, mimeType: "image/png"))
+        let loader = ChatMediaLoader(
+            fetch: { identity in await fetch.fetch(identity) },
+            admits: { _ in true }
+        )
+        let identity = mediaIdentity(blobID: "retry")
+
+        await #expect(throws: ChatMediaLoadError.invalidImage) {
+            try await loader.thumbnail(for: identity)
+        }
+        _ = try await loader.thumbnail(for: identity)
+        #expect(await fetch.count == 2)
+        #expect(loader.metrics().thumbnailCount == 1)
+    }
+
+    @Test("profile, lifecycle, and connection identity isolate equal blob IDs")
+    func identityIsolation() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_305).generatedImageFixture(
+            format: .png,
+            pixelWidth: 32,
+            pixelHeight: 32,
+            orientation: .up
+        )
+        let counter = MediaFetchCounter(payload: .init(data: fixture.encodedData, mimeType: "image/png"))
+        let loader = ChatMediaLoader(
+            fetch: { identity in await counter.fetch(identity) },
+            admits: { _ in true }
+        )
+        let first = mediaIdentity(profileID: "first", connectionID: 1, blobID: "same")
+        let second = mediaIdentity(profileID: "second", connectionID: 2, blobID: "same")
+        let nextLifecycle = mediaIdentity(
+            profileID: "second",
+            lifecycleGeneration: 8,
+            connectionID: 2,
+            blobID: "same"
+        )
+
+        _ = try await loader.thumbnail(for: first)
+        _ = try await loader.thumbnail(for: second)
+        _ = try await loader.thumbnail(for: nextLifecycle)
+        #expect(await counter.count == 3)
+        #expect(loader.metrics().thumbnailCount == 3)
+    }
+
+    @Test("stale identity never installs fetched media")
+    func staleAdmission() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_306).generatedImageFixture(
+            format: .png,
+            pixelWidth: 32,
+            pixelHeight: 32,
+            orientation: .up
+        )
+        let loader = ChatMediaLoader(
+            fetch: { _ in .init(data: fixture.encodedData, mimeType: "image/png") },
+            admits: { _ in false }
+        )
+
+        await #expect(throws: ChatMediaLoadError.staleIdentity) {
+            try await loader.thumbnail(for: mediaIdentity(blobID: "stale"))
+        }
+        #expect(loader.metrics().thumbnailCount == 0)
+    }
+
+    @Test("one preview lease cannot cancel another owner of the shared flight")
+    func previewLeaseCancellation() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_311).generatedImageFixture(
+            format: .png,
+            pixelWidth: 24,
+            pixelHeight: 24,
+            orientation: .up
+        )
+        let decoded = try #require(UIImage(data: fixture.encodedData))
+        let counter = MediaFetchCounter(payload: .init(data: fixture.encodedData, mimeType: "image/png"))
+        let decodeGate = MediaDecodeGate(image: decoded)
+        let loader = ChatMediaLoader(
+            fetch: { identity in await counter.fetch(identity) },
+            fullPreviewDecode: { data in try await decodeGate.decodeFull(data) },
+            admits: { _ in true }
+        )
+        let identity = mediaIdentity(blobID: "leased-preview")
+        let firstLease = UUID(uuidString: "00000000-0000-0000-0000-000000000011")!
+        let secondLease = UUID(uuidString: "00000000-0000-0000-0000-000000000012")!
+        let first = Task { try await loader.fullPreview(for: identity, leaseID: firstLease) }
+        await decodeGate.waitForStarts(1)
+        let second = Task { try await loader.fullPreview(for: identity, leaseID: secondLease) }
+        await loader.hostedWaitForPreviewLeaseCount(2)
+
+        loader.cancelFullPreview(for: identity, leaseID: firstLease)
+        #expect(loader.metrics().hasFullPreviewFlight)
+        await decodeGate.release()
+        await #expect(throws: ChatMediaLoadError.staleIdentity) { try await first.value }
+        _ = try await second.value
+        #expect(await counter.count == 1)
+        #expect(!loader.metrics().hasFullPreviewFlight)
+    }
+
+    @Test("full previews are single-flight but never enter the thumbnail cache")
+    func fullPreviewLifetime() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_307).generatedImageFixture(
+            format: .jpeg,
+            pixelWidth: 80,
+            pixelHeight: 60,
+            orientation: .up
+        )
+        let counter = MediaFetchCounter(payload: .init(data: fixture.encodedData, mimeType: "image/jpeg"))
+        let loader = ChatMediaLoader(
+            fetch: { identity in await counter.fetch(identity) },
+            admits: { _ in true }
+        )
+        let identity = mediaIdentity(blobID: "preview")
+
+        _ = try await loader.fullPreview(
+            for: identity,
+            leaseID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        )
+        _ = try await loader.fullPreview(
+            for: identity,
+            leaseID: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        )
+        #expect(await counter.count == 2)
+        #expect(loader.metrics().thumbnailCount == 0)
+        #expect(!loader.metrics().hasFullPreviewFlight)
+    }
+
+    @Test("memory pressure clears cached thumbnails and cancels owned flights")
+    func memoryPressure() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_308).generatedImageFixture(
+            format: .png,
+            pixelWidth: 32,
+            pixelHeight: 32,
+            orientation: .up
+        )
+        let loader = ChatMediaLoader(
+            fetch: { _ in .init(data: fixture.encodedData, mimeType: "image/png") },
+            admits: { _ in true }
+        )
+        _ = try await loader.thumbnail(for: mediaIdentity(blobID: "cached"))
+        #expect(loader.metrics().thumbnailCount == 1)
+
+        loader.removeAll()
+        #expect(loader.metrics() == ChatMediaMetrics(
+            thumbnailCount: 0,
+            decodedThumbnailBytes: 0,
+            thumbnailFlights: 0,
+            hasFullPreviewFlight: false
+        ))
+
+        let gate = MediaFetchGate(payload: .init(data: fixture.encodedData, mimeType: "image/png"))
+        let flightLoader = ChatMediaLoader(
+            fetch: { identity in try await gate.fetch(identity) },
+            admits: { _ in true }
+        )
+        let flight = Task { try await flightLoader.thumbnail(for: mediaIdentity(blobID: "flight")) }
+        await gate.waitForStarts(1)
+        #expect(flightLoader.metrics().thumbnailFlights == 1)
+        flightLoader.removeAll()
+        #expect(flightLoader.metrics().thumbnailFlights == 0)
+        await gate.release()
+        await #expect(throws: CancellationError.self) {
+            try await flight.value
+        }
+
+        let decoded = try #require(UIImage(data: fixture.encodedData))
+        let decodeGate = MediaDecodeGate(image: decoded)
+        let decodeLoader = ChatMediaLoader(
+            fetch: { _ in .init(data: fixture.encodedData, mimeType: "image/png") },
+            thumbnailDecode: { data in try await decodeGate.decode(data) },
+            admits: { _ in true }
+        )
+        let decodeFlight = Task {
+            try await decodeLoader.thumbnail(for: mediaIdentity(blobID: "decoding"))
+        }
+        await decodeGate.waitForStarts(1)
+        #expect(decodeLoader.metrics().thumbnailFlights == 1)
+        decodeLoader.removeAll()
+        await decodeGate.release()
+        await #expect(throws: CancellationError.self) {
+            try await decodeFlight.value
+        }
+        #expect(decodeLoader.metrics().thumbnailCount == 0)
+    }
+
+    @Test("the app-lifetime observer clears media on a posted memory warning")
+    func appLifetimeMemoryWarning() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_312).generatedImageFixture(
+            format: .png,
+            pixelWidth: 24,
+            pixelHeight: 24,
+            orientation: .up
+        )
+        let loader = ChatMediaLoader(
+            fetch: { _ in .init(data: fixture.encodedData, mimeType: "image/png") },
+            admits: { _ in true }
+        )
+        _ = try await loader.thumbnail(for: mediaIdentity(blobID: "warning"))
+        #expect(loader.metrics().thumbnailCount == 1)
+        let ready = MediaSignal()
+        let handled = MediaSignal()
+        let observer = ChatMediaMemoryPressureObserver(
+            loader: loader,
+            hostedOnReady: { await ready.signal() },
+            hostedOnHandled: { await handled.signal() }
+        )
+        await ready.wait()
+
+        NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+        await handled.wait()
+        #expect(loader.metrics().thumbnailCount == 0)
+        withExtendedLifetime(observer) {}
+    }
+
+    private func mediaIdentity(
+        profileID: String = "profile",
+        lifecycleGeneration: Int = 7,
+        connectionID: Int = 9,
+        blobID: String
+    ) -> ChatMediaIdentity {
+        ChatMediaIdentity(
+            profileID: profileID,
+            lifecycleGeneration: lifecycleGeneration,
+            connectionID: connectionID,
+            blobID: blobID
+        )
+    }
+}
+
+private actor MediaFetchCounter {
+    let payload: ChatMediaPayload
+    private(set) var count = 0
+
+    init(payload: ChatMediaPayload) { self.payload = payload }
+
+    func fetch(_ identity: ChatMediaIdentity) -> ChatMediaPayload {
+        _ = identity
+        count += 1
+        return payload
+    }
+}
+
+private actor MediaSignal {
+    private var isSignaled = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if isSignaled { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func signal() {
+        isSignaled = true
+        let current = waiters
+        waiters.removeAll()
+        current.forEach { $0.resume() }
+    }
+}
+
+private actor MediaDecodeGate {
+    let image: UIImage
+    private var startCount = 0
+    private var released = false
+    private var decodeWaiters: [CheckedContinuation<Void, Never>] = []
+    private var startWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    init(image: UIImage) { self.image = image }
+
+    func decode(_ data: Data) async throws -> (UIImage, Int) {
+        _ = data
+        startCount += 1
+        let ready = startWaiters.filter { startCount >= $0.count }
+        startWaiters.removeAll { startCount >= $0.count }
+        ready.forEach { $0.continuation.resume() }
+        if !released {
+            await withCheckedContinuation { decodeWaiters.append($0) }
+        }
+        return (image, image.cgImage.map { $0.bytesPerRow * $0.height } ?? 1)
+    }
+
+    func decodeFull(_ data: Data) async throws -> UIImage {
+        let value = try await decode(data)
+        return value.0
+    }
+
+    func waitForStarts(_ count: Int) async {
+        if startCount >= count { return }
+        await withCheckedContinuation { startWaiters.append((count, $0)) }
+    }
+
+    func release() {
+        released = true
+        let waiters = decodeWaiters
+        decodeWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+}
+
+private actor MediaRetryFetch {
+    let validPayload: ChatMediaPayload
+    private(set) var count = 0
+
+    init(validPayload: ChatMediaPayload) { self.validPayload = validPayload }
+
+    func fetch(_ identity: ChatMediaIdentity) -> ChatMediaPayload {
+        _ = identity
+        count += 1
+        if count == 1 {
+            return ChatMediaPayload(data: Data("not-an-image".utf8), mimeType: "image/png")
+        }
+        return validPayload
+    }
+}
+
+private actor MediaFetchGate {
+    let payload: ChatMediaPayload
+    private(set) var startCount = 0
+    private var released = false
+    private var fetchWaiters: [CheckedContinuation<Void, Never>] = []
+    private var startWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    init(payload: ChatMediaPayload) { self.payload = payload }
+
+    func fetch(_ identity: ChatMediaIdentity) async throws -> ChatMediaPayload {
+        _ = identity
+        startCount += 1
+        let ready = startWaiters.filter { startCount >= $0.count }
+        startWaiters.removeAll { startCount >= $0.count }
+        ready.forEach { $0.continuation.resume() }
+        if !released {
+            await withCheckedContinuation { fetchWaiters.append($0) }
+        }
+        try Task.checkCancellation()
+        return payload
+    }
+
+    func waitForStarts(_ count: Int) async {
+        if startCount >= count { return }
+        await withCheckedContinuation { startWaiters.append((count, $0)) }
+    }
+
+    func release() {
+        released = true
+        let waiters = fetchWaiters
+        fetchWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+}

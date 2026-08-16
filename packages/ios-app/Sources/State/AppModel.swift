@@ -2,6 +2,51 @@ import Foundation
 import Observation
 import UIKit
 
+final class ChatMediaMemoryPressureObserver: @unchecked Sendable {
+    private let task: Task<Void, Never>
+
+    @MainActor
+    init(loader: ChatMediaLoader) {
+        task = Self.observe(loader: loader)
+    }
+
+    #if HOSTED_TEST
+    @MainActor
+    init(
+        loader: ChatMediaLoader,
+        hostedOnReady: @escaping @MainActor @Sendable () async -> Void,
+        hostedOnHandled: @escaping @MainActor @Sendable () async -> Void
+    ) {
+        task = Self.observe(
+            loader: loader,
+            onReady: hostedOnReady,
+            onHandled: hostedOnHandled
+        )
+    }
+    #endif
+
+    @MainActor
+    private static func observe(
+        loader: ChatMediaLoader,
+        onReady: (@MainActor @Sendable () async -> Void)? = nil,
+        onHandled: (@MainActor @Sendable () async -> Void)? = nil
+    ) -> Task<Void, Never> {
+        Task { @MainActor [weak loader] in
+            let notifications = NotificationCenter.default.notifications(
+                named: UIApplication.didReceiveMemoryWarningNotification
+            )
+            await onReady?()
+            for await _ in notifications {
+                guard !Task.isCancelled else { return }
+                loader?.removeAll()
+                await onHandled?()
+            }
+        }
+    }
+
+    deinit { task.cancel() }
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -59,6 +104,8 @@ final class AppModel {
     private let packageConfiguration: PackageConfigurationCoordinator
     private let customModelConfiguration: CustomModelConfigurationCoordinator
     let composerDrafts: ComposerDraftCoordinator
+    let chatMedia: ChatMediaLoader
+    private let chatMediaMemoryPressureObserver: ChatMediaMemoryPressureObserver
 
     var connectionState: ConnectionState { lifecycle.connectionState }
     /// False only while the first launch credential/connection decision is
@@ -196,6 +243,25 @@ final class AppModel {
             },
             admitsLifecycleGeneration: { lifecycle.admits(.init(generation: $0, connectionID: nil)) }
         )
+        let chatMedia = ChatMediaLoader(
+            fetch: { identity in
+                let value = try await client.blob(
+                    id: identity.blobID,
+                    profileID: identity.profileID,
+                    connectionID: identity.connectionID,
+                    maximumBytes: ChatMediaPolicy.maximumEncodedBytes
+                )
+                return ChatMediaPayload(data: value.0, mimeType: value.1)
+            },
+            admits: { identity in
+                lifecycle.selectedProfileID == identity.profileID
+                    && lifecycle.admits(.init(
+                        generation: identity.lifecycleGeneration,
+                        connectionID: identity.connectionID
+                    ))
+            }
+        )
+        let chatMediaMemoryPressureObserver = ChatMediaMemoryPressureObserver(loader: chatMedia)
         let resolvedSessionImportUpload = sessionImportUpload ?? { name, mimeType, data in
             try await client.upload(name: name, mimeType: mimeType, data: data)
         }
@@ -213,6 +279,8 @@ final class AppModel {
         self.packageConfiguration = packageConfiguration
         self.customModelConfiguration = customModelConfiguration
         self.composerDrafts = composerDrafts
+        self.chatMedia = chatMedia
+        self.chatMediaMemoryPressureObserver = chatMediaMemoryPressureObserver
         self.sessionPresentation = SessionPresentationStore(
             client: client,
             performanceSignposts: performanceSignposts
@@ -245,6 +313,18 @@ final class AppModel {
 
     func authoritativeSnapshot(for sessionID: String) -> SessionSnapshot? {
         sessionPresentation.authoritativeSnapshot(for: sessionID)
+    }
+
+    func chatMediaIdentity(blobID: String) -> ChatMediaIdentity? {
+        guard let admission = lifecycle.admission,
+              let connectionID = admission.connectionID,
+              let profileID = lifecycle.selectedProfileID else { return nil }
+        return ChatMediaIdentity(
+            profileID: profileID,
+            lifecycleGeneration: admission.generation,
+            connectionID: connectionID,
+            blobID: blobID
+        )
     }
 
     #if HOSTED_TEST
@@ -877,6 +957,7 @@ final class AppModel {
     }
 
     private func invalidateSessionConnectionOwnership() {
+        chatMedia.removeAll()
         sessionPresentation.retireConnection()
     }
 

@@ -836,21 +836,55 @@ private extension View {
 }
 
 private struct TranscriptImageChip: View {
+    private struct LoadKey: Hashable {
+        let identity: ChatMediaIdentity?
+        let attempt: Int
+    }
+
+    private struct PreviewRequest: Hashable {
+        let identity: ChatMediaIdentity
+        let leaseID: UUID
+    }
+
     @Environment(AppModel.self) private var model
     let blobID: String
-    @State private var image: UIImage?
+    @State private var thumbnail: UIImage?
+    @State private var thumbnailIdentity: ChatMediaIdentity?
+    @State private var previewImage: UIImage?
+    @State private var previewRequest: PreviewRequest?
     @State private var showPreview = false
-    @State private var loadFailed = false
+    @State private var failedLoadKey: LoadKey?
     @State private var loadAttempt = 0
+
+    private var identity: ChatMediaIdentity? {
+        model.chatMediaIdentity(blobID: blobID)
+    }
+
+    private var currentThumbnail: UIImage? {
+        thumbnailIdentity == identity ? thumbnail : nil
+    }
+
+    private var loadKey: LoadKey {
+        LoadKey(identity: identity, attempt: loadAttempt)
+    }
+
+    private var loadFailed: Bool {
+        failedLoadKey == loadKey
+    }
 
     var body: some View {
         Button {
-            if image != nil { showPreview = true }
-            else if loadFailed { loadAttempt &+= 1 }
+            if let currentThumbnail, let identity {
+                previewImage = currentThumbnail
+                previewRequest = PreviewRequest(identity: identity, leaseID: UUID())
+                showPreview = true
+            } else if loadFailed {
+                loadAttempt &+= 1
+            }
         } label: {
             Group {
-                if let image {
-                    Image(uiImage: image)
+                if let currentThumbnail {
+                    Image(uiImage: currentThumbnail)
                         .resizable()
                         .scaledToFill()
                 } else if loadFailed {
@@ -879,20 +913,49 @@ private struct TranscriptImageChip: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .trailing)))
         .accessibilityLabel(loadFailed ? "Image attachment unavailable, retry" : "Image attachment")
-        .task(id: loadAttempt) {
-            guard image == nil else { return }
-            loadFailed = false
-            guard let value = try? await model.client.blob(id: blobID),
-                  let loaded = UIImage(data: value.0) else {
-                loadFailed = true
+        .task(id: loadKey) {
+            let requestedKey = loadKey
+            guard let identity = requestedKey.identity else {
+                failedLoadKey = requestedKey
                 return
             }
-            image = loaded
+            guard thumbnailIdentity != identity || thumbnail == nil else { return }
+            do {
+                let loaded = try await model.chatMedia.thumbnail(for: identity)
+                guard !Task.isCancelled, self.identity == identity else { return }
+                thumbnail = loaded
+                thumbnailIdentity = identity
+                if failedLoadKey == requestedKey { failedLoadKey = nil }
+            } catch {
+                guard !Task.isCancelled, loadKey == requestedKey else { return }
+                failedLoadKey = requestedKey
+            }
         }
-        .accessibilityHint(image == nil ? "Loads the unavailable image again" : "Opens a photo preview")
+        .onChange(of: identity) { _, _ in
+            previewImage = nil
+            showPreview = false
+        }
+        .accessibilityHint(currentThumbnail == nil ? "Loads the unavailable image again" : "Opens a photo preview")
         .sheet(isPresented: $showPreview) {
-            if let image {
-                AttachmentImagePreviewSheet(image: image)
+            if let previewImage, let previewRequest {
+                AttachmentImagePreviewSheet(image: previewImage)
+                    .task(id: previewRequest) {
+                        guard let full = try? await model.chatMedia.fullPreview(
+                            for: previewRequest.identity,
+                            leaseID: previewRequest.leaseID
+                        ), !Task.isCancelled,
+                           showPreview,
+                           self.identity == previewRequest.identity else { return }
+                        self.previewImage = full
+                    }
+                    .onDisappear {
+                        model.chatMedia.cancelFullPreview(
+                            for: previewRequest.identity,
+                            leaseID: previewRequest.leaseID
+                        )
+                        self.previewImage = nil
+                        self.previewRequest = nil
+                    }
             }
         }
     }

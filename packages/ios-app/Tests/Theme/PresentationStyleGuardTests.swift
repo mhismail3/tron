@@ -491,10 +491,50 @@ struct PresentationStyleGuardTests {
             .components(separatedBy: "private struct TranscriptFileChip").first ?? ""
         #expect(!sentImageChip.isEmpty)
         #expect(sentImageChip.contains(".frame(width: 64, height: 64)"))
-        #expect(sentImageChip.contains("AttachmentImagePreviewSheet(image: image)"))
+        #expect(sentImageChip.contains("AttachmentImagePreviewSheet(image: previewImage)"))
+        #expect(sentImageChip.contains("model.chatMedia.thumbnail(for: identity)"))
+        #expect(sentImageChip.contains("model.chatMedia.fullPreview("))
+        #expect(sentImageChip.contains("leaseID: previewRequest.leaseID"))
+        #expect(!sentImageChip.contains("model.client.blob"))
         #expect(!sentImageChip.contains(".presentationDetents([.medium, .large])"))
         #expect(!transcript.contains("private struct ZoomableAttachmentImage"))
         #expect(transcript.contains("private struct TranscriptFileChip"))
+    }
+
+    @Test("transcript media is epoch-keyed, downsampled, bounded, and single-flight")
+    func boundedTranscriptMedia() throws {
+        let loader = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/ChatMediaLoader.swift"),
+            encoding: .utf8
+        )
+        let model = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/AppModel.swift"),
+            encoding: .utf8
+        )
+        let client = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Gateway/GatewayClient.swift"),
+            encoding: .utf8
+        )
+        let boundedTransport = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Gateway/BoundedHTTPDataTransport.swift"),
+            encoding: .utf8
+        )
+        #expect(loader.contains("maximumDecodedThumbnailBytes = 4 * 1_024 * 1_024"))
+        #expect(loader.contains("maximumThumbnailCount = 64"))
+        #expect(loader.contains("maximumThumbnailPixelDimension = 192"))
+        #expect(loader.contains("maximumEncodedBytes = 25 * 1_024 * 1_024"))
+        #expect(loader.contains("maximumConcurrentPreparations = 1"))
+        #expect(loader.contains("maximumThumbnailFlights = 32"))
+        #expect(loader.contains("CGImageSourceCreateThumbnailAtIndex"))
+        #expect(loader.contains("thumbnailFlights[identity]"))
+        #expect(loader.contains("previewFlight?.task.cancel()"))
+        #expect(model.contains("func chatMediaIdentity(blobID: String)"))
+        #expect(model.contains("chatMedia.removeAll()"))
+        #expect(client.contains("profile.id == profileID"))
+        #expect(client.contains("connection?.id == connectionID"))
+        #expect(client.contains("maximumBytes: maximumBytes"))
+        #expect(boundedTransport.contains("response.expectedContentLength"))
+        #expect(boundedTransport.contains("chunk.count <= maximumBytes - data.count"))
     }
 
     @Test("thinking traces stay complete, compact, and noninteractive")

@@ -157,9 +157,6 @@ struct ChatTextPreparationTests {
         let first = try message(id: "first", role: "assistant", parts: [
             #"{"id":"first:0","type":"text","text":"one"}"#,
         ])
-        let second = try message(id: "second", role: "assistant", parts: [
-            #"{"id":"second:0","type":"text","text":"two"}"#,
-        ])
         let snapshot = ChatTextPreparationSnapshot(
             markdown: [
                 "first:0": .init(source: "one", document: .init(source: "one")),

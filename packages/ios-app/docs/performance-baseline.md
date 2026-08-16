@@ -63,7 +63,7 @@ These later decisions do not rewrite or reinterpret the historical measurements
 above. Checkpoints 6.0/6.1 characterize cumulative Markdown/media fixtures and
 extract the existing cold Markdown presentation. Phase 6.2 now adds the bounded
 text-preparation cache described below without adding truncation, placeholders, a
-parser dialect, or an incremental-prefix production path. The media loader remains pending.
+parser dialect, or an incremental-prefix production path. Phase 6.3 now implements the bounded media owner described below.
 
 The implemented Phase 6.2 text cache retains the Phase 6.0 provisional 4 MiB
 (4,194,304 bytes) shared across accounted source and presentation storage, 512
@@ -87,7 +87,7 @@ uncached explicitly paged history uses the cold fallback. The
 working-set floor: attributed-string construction and framework allocations still
 require peak-memory calibration.
 
-The Phase 6.0 provisional decision for the future Phase 6.3 media owner derives
+The implemented Phase 6.3 media owner retains the Phase 6.0 provisional limits and derives
 192 pixels from the existing 64-point chip at a 3× display scale. One square
 192-pixel RGBA thumbnail is 192 × 192 × 4 =
 147,456 decoded bytes. Thus the 4 MiB decoded ratchet admits at most 28 full-square
@@ -105,12 +105,19 @@ admitted encoded payload up to 25 MiB, and one full decoded preview whose physic
 allocation is still uncalibrated. None of these cache/media owners exists at the
 6.1 source checkpoint.
 
+The loader enforces these values with profile/lifecycle/connection/blob single-flight identity,
+one shared preparation slot, a 32-thumbnail-flight admission ceiling, transport-level declared and
+streamed response limits, off-main ImageIO downsampling, deterministic LRU eviction, exact
+late-publication rejection, and app-lifetime memory-pressure cancellation. Full previews are never
+inserted into the thumbnail LRU, receive priority at the shared slot, and only one full-preview flight
+is owned at a time. Consequently only one admitted encoded response/decode working set exists at once.
+
 These values are provisional safety ratchets rather than measured release targets.
 Pinned-device cold/warm 30/60 Hz Markdown, maximum-source, thinking-segment, image
 page, memory-pressure, preview, pixel/accessibility equivalence, displayed frames,
 and peak-memory evidence is still required. Phase 6.0 source characterization and
-budgets, Phase 6.1 pure presentation, and Phase 6.2 bounded text preparation are
-complete; physical acceptance and the Phase 6 exit gate remain pending.
+budgets, Phase 6.1 pure presentation, Phase 6.2 bounded text preparation, and Phase 6.3
+bounded media loading are complete; physical acceptance and the Phase 6 exit gate remain pending.
 
 ## Reproduction
 
