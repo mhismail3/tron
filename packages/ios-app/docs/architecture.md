@@ -836,7 +836,9 @@ and current-path metadata so large canonical sessions neither overflow the
 gateway stack nor exceed the mobile frame while history/fork sheets remain
 usable. Manage Session displays the runtime-projected latest cache-hit rate—the
 same canonical formula used by the terminal footer—and never derives a ratio
-from cumulative iOS fields. Terminal presentation retains the
+from cumulative iOS fields. Its user actions surface current failures instead of silently changing
+local presentation. Extension interaction sheets serialize one response/cancellation, retain the sheet
+on rejection, and dismiss only after authoritative acknowledgement. Terminal presentation retains the
 historical connection indicator, options menu, native keyboard integration,
 floating shortcut bar, command-key keyboard, soft edges, and selected bundled
 code font over the gateway's retained PTY. Pending and transcript images use

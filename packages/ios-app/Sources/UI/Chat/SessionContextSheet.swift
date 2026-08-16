@@ -85,7 +85,12 @@ struct SessionContextSheet: View {
             .sheet(isPresented: $showTerminal) { TerminalSheet(sessionID: sessionID) }
             .alert("Rename Session", isPresented: $showRename) {
                 TextField("Name", text: $name)
-                Button("Save") { Task { try? await model.renameSession(sessionID, name: name) } }
+                Button("Save") {
+                    Task {
+                        do { try await model.renameSession(sessionID, name: name) }
+                        catch { surfaceActionError(error) }
+                    }
+                }
                 Button("Cancel", role: .cancel) {}
             }
         }
@@ -154,7 +159,8 @@ struct SessionContextSheet: View {
                     compacting = true
                     Task {
                         defer { compacting = false }
-                        try? await model.compact(sessionID: sessionID)
+                        do { try await model.compact(sessionID: sessionID) }
+                        catch { surfaceActionError(error) }
                     }
                 }
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
@@ -219,7 +225,10 @@ struct SessionContextSheet: View {
                 Menu {
                     ForEach(model.providerCatalog(for: .session(id: sessionID))?.models.filter(\.available) ?? []) { candidate in
                         Button {
-                            Task { try? await model.setModel(candidate.ref, sessionID: sessionID) }
+                            Task {
+                                do { try await model.setModel(candidate.ref, sessionID: sessionID) }
+                                catch { surfaceActionError(error) }
+                            }
                         } label: {
                             if snapshot.model == candidate.ref {
                                 Label(candidate.name, systemImage: "checkmark")
@@ -242,7 +251,10 @@ struct SessionContextSheet: View {
                 Menu {
                     ForEach(snapshot.availableThinkingLevels, id: \.self) { level in
                         Button {
-                            Task { try? await model.setThinking(level, sessionID: sessionID) }
+                            Task {
+                                do { try await model.setThinking(level, sessionID: sessionID) }
+                                catch { surfaceActionError(error) }
+                            }
                         } label: {
                             if snapshot.thinkingLevel == level { Label(level.capitalized, systemImage: "checkmark") }
                             else { Text(level.capitalized) }
@@ -321,9 +333,13 @@ struct SessionContextSheet: View {
                 TronSettingsDivider(accent: .tronAmber)
                 manageRow(icon: "arrow.clockwise", title: "Reload Resources", subtitle: "Reload extensions, skills, prompts, and project resources", accent: .tronAmber) {
                     Task {
-                        try? await model.reloadResources(sessionID: sessionID)
-                        await model.loadContext(sessionID: sessionID)
-                        await model.loadResources(sessionID: sessionID)
+                        do {
+                            try await model.reloadResources(sessionID: sessionID)
+                            await model.loadContext(sessionID: sessionID)
+                            await model.loadResources(sessionID: sessionID)
+                        } catch {
+                            surfaceActionError(error)
+                        }
                     }
                 }
                 TronSettingsDivider(accent: .tronAmber)
@@ -414,6 +430,11 @@ struct SessionContextSheet: View {
     private func handleForkCreated(_ route: AppModel.SessionNavigationRoute) {
         dismiss()
         onForkCreated(route)
+    }
+
+    private func surfaceActionError(_ error: Error) {
+        guard !(error is CancellationError) else { return }
+        model.lastError = error.localizedDescription
     }
 
     private func prepareExport(_ format: String) {

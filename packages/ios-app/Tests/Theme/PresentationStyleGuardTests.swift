@@ -422,6 +422,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ProjectResourcesView.swift"),
             encoding: .utf8
         )
+        let interactions = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ExtensionInteractionSheet.swift"),
+            encoding: .utf8
+        )
         let customModels = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/CustomModelsSettingsView.swift"),
             encoding: .utf8
@@ -439,6 +443,12 @@ struct PresentationStyleGuardTests {
         #expect(context.contains("guard !exporting else { return }"))
         #expect(context.components(separatedBy: ".disabled(exporting)").count == 3)
         #expect(context.contains("await model.discardExportArtifact(exportedURL)"))
+        for action in ["renameSession", "compact", "setModel", "setThinking", "reloadResources"] {
+            #expect(!context.contains("try? await model.\(action)"))
+        }
+        #expect(interactions.contains("guard !submitting else { return }"))
+        #expect(interactions.contains("catch is CancellationError"))
+        #expect(!interactions.contains("try? await model."))
         #expect(context.contains("let sessionID: String"))
         for title in ["Extensions", "Prompts", "Skills", "Context Files", "Tools"] {
             #expect(resources.contains("\(title)"))
@@ -450,7 +460,8 @@ struct PresentationStyleGuardTests {
         #expect(settings.contains("private extension GatewayLogRecord"))
         #expect(settings.contains("Newest entries first"))
         #expect(settings.contains("await model.requestGatewayRestart()"))
-        #expect(!settings.contains("try? await model.restartGateway()"))
+        #expect(settings.contains("records = try await model.gatewayDiagnostics.logs(limit: 300)"))
+        #expect(!settings.contains("try? await model."))
         #expect(context.contains("model.gatewayDiagnostics.inspectGit"))
         let initialContextTask = (context.components(separatedBy: ".task {").dropFirst().first ?? "")
             .components(separatedBy: ".task(id: model.sessionContextRevision").first ?? ""

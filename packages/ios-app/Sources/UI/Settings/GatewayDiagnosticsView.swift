@@ -166,8 +166,15 @@ struct GatewayDiagnosticsView: View {
     }
 
     private func load() async {
+        guard !loadingLogs else { return }
         loadingLogs = true
         defer { loadingLogs = false }
-        records = (try? await model.gatewayDiagnostics.logs(limit: 300)) ?? []
+        do {
+            records = try await model.gatewayDiagnostics.logs(limit: 300)
+        } catch is CancellationError {
+            return
+        } catch {
+            model.lastError = error.localizedDescription
+        }
     }
 }
