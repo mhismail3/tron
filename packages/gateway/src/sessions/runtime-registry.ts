@@ -1,4 +1,4 @@
-import { readdir, realpath, rm } from "node:fs/promises";
+import { opendir, realpath, rm } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
@@ -8,6 +8,18 @@ import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
 import { RunMarkerStore } from "./run-markers.js";
 import { RuntimeSlot, type SessionBroadcast } from "./runtime-slot.js";
+
+const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
+  maximumDirectories: 25_001,
+  maximumEntries: 50_001,
+  maximumTraversalBytes: 8 * 1_024 * 1_024,
+  maximumSessions: 25_000,
+  maximumRetainedBytes: 8 * 1_024 * 1_024,
+  normalizationConcurrency: 16,
+};
+
+type SessionInfo = Awaited<ReturnType<typeof SessionManager.listAll>>[number];
+type CatalogSessionInfo = Omit<SessionInfo, "allMessagesText">;
 
 export class RuntimeRegistry {
   private readonly slots = new Map<string, RuntimeSlot>();
@@ -35,10 +47,14 @@ export class RuntimeRegistry {
       broadcast: SessionBroadcast;
       sessionSummaryChanged: (summary: SessionSummaryUpdate) => void;
       sessionListChanged: () => void;
+      catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
     },
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.markers = new RunMarkerStore(options.tronHome);
+    for (const [name, value] of Object.entries(this.catalogDiscoveryLimits())) {
+      if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid session catalog ${name} bound`);
+    }
   }
 
   get listRevision(): number {
@@ -129,34 +145,92 @@ export class RuntimeRegistry {
     return this.configuredSessionDirectory() ?? join(this.options.agentDir, "sessions");
   }
 
+  private catalogDiscoveryLimits() {
+    return { ...DEFAULT_CATALOG_DISCOVERY_LIMITS, ...this.options.catalogDiscoveryLimits };
+  }
+
+  private catalogCapacityExceeded(): never {
+    throw new GatewayError("busy", "Session catalog discovery exceeds its bounded capacity", true);
+  }
+
   private async sessionInfos() {
+    const limits = this.catalogDiscoveryLimits();
     const pending = [resolve(this.catalogDirectory())];
     const seen = new Set<string>();
-    const sessions = [];
+    const sessions: CatalogSessionInfo[] = [];
+    let entriesExamined = 0;
+    let traversalBytes = Buffer.byteLength(pending[0]!);
+    let retainedBytes = 0;
     while (pending.length > 0) {
       const candidate = pending.pop()!;
       let directory: string;
       try { directory = await realpath(candidate); }
       catch { continue; }
       if (!seen.add(directory)) continue;
-      sessions.push(...await SessionManager.listAll(directory));
-      let entries;
-      try { entries = await readdir(directory, { withFileTypes: true }); }
-      catch { continue; }
-      for (const entry of entries) {
-        if (entry.isDirectory()) pending.push(join(directory, entry.name));
+      traversalBytes += Buffer.byteLength(directory);
+      if (seen.size > limits.maximumDirectories
+        || traversalBytes > limits.maximumTraversalBytes) this.catalogCapacityExceeded();
+
+      try {
+        const entries = await opendir(directory);
+        for await (const entry of entries) {
+          entriesExamined += 1;
+          if (entriesExamined > limits.maximumEntries) this.catalogCapacityExceeded();
+          if (entry.isDirectory()) {
+            const child = join(directory, entry.name);
+            traversalBytes += Buffer.byteLength(child);
+            if (traversalBytes > limits.maximumTraversalBytes) this.catalogCapacityExceeded();
+            pending.push(child);
+          }
+        }
+      } catch (error) {
+        if (error instanceof GatewayError) throw error;
+        continue;
+      }
+
+      // With an explicit directory the pinned SDK lists only that directory's
+      // JSONL files. RuntimeRegistry owns recursion and invokes it once for each
+      // canonical directory, avoiding overlapping descendant materializations.
+      const discovered = await SessionManager.listAll(directory);
+      if (sessions.length + discovered.length > limits.maximumSessions) this.catalogCapacityExceeded();
+      for (const { allMessagesText: _discardedSearchText, ...session } of discovered) {
+        // Gateway search never consumes the SDK's transcript-wide picker text.
+        // Drop it at the SDK boundary instead of retaining a second transcript
+        // projection for the lifetime of catalog materialization.
+        retainedBytes += Buffer.byteLength(JSON.stringify(session));
+        if (retainedBytes > limits.maximumRetainedBytes) this.catalogCapacityExceeded();
+        sessions.push(session);
       }
     }
-    const normalized = await Promise.all(sessions.map(async (session) => ({
-      ...session,
-      path: await realpath(session.path).catch(() => resolve(session.path)),
-      ...(session.parentSessionPath
-        ? { parentSessionPath: await realpath(session.parentSessionPath).catch(() => resolve(session.parentSessionPath!)) }
-        : {}),
-    })));
+
+    const normalized = new Array<CatalogSessionInfo>(sessions.length);
+    let nextIndex = 0;
+    const normalize = async () => {
+      while (true) {
+        const index = nextIndex;
+        nextIndex += 1;
+        const session = sessions[index];
+        if (!session) return;
+        normalized[index] = {
+          ...session,
+          path: await this.canonicalSessionPath(session.path),
+          ...(session.parentSessionPath
+            ? { parentSessionPath: await this.canonicalSessionPath(session.parentSessionPath) }
+            : {}),
+        };
+      }
+    };
+    await Promise.all(Array.from(
+      { length: Math.min(limits.normalizationConcurrency, sessions.length) },
+      normalize,
+    ));
     // Overlapping recursive discovery roots may report the same canonical file
     // more than once. Canonical path aliases are one file, not an ID collision.
     return [...new Map(normalized.map((session) => [resolve(session.path), session])).values()];
+  }
+
+  private canonicalSessionPath(path: string): Promise<string> {
+    return realpath(path).catch(() => resolve(path));
   }
 
   async list(scope: "user" | "all" = "user"): Promise<SessionSummary[]> {

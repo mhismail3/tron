@@ -168,8 +168,12 @@ additively includes extension-owned children classified from nested canonical st
 durable `subagent-*` session metadata. Ordinary user forks remain user sessions. If more than
 one canonical file claims the same embedded session ID, the Gateway omits every ambiguous copy
 and rejects open/delete by that ID until the duplicate is repaired; traversal order never chooses
-canonical ownership. Every session-list traversal is one immutable, disposable catalog materialization: every
-page carries the same structural `listRevision`, and its authenticated opaque cursor
+canonical ownership. Before materialization, recursive discovery streams at most 50,001 directory entries,
+retains at most 25,001 canonical directories/8 MiB of traversal paths, and admits at most 25,000 session
+records/8 MiB of retained metadata; overflow fails retryably without publishing a partial catalog. The pinned
+SDK remains the canonical direct-directory JSONL scanner, while Gateway immediately discards its unused
+transcript-wide picker search text. Canonical path normalization runs with at most 16 concurrent filesystem operations. Every session-list traversal is one
+immutable, disposable catalog materialization: every page carries the same structural `listRevision`, and its authenticated opaque cursor
 is bound to the connection, scope, materialization, offset, and revision. Traversal
 leases expire after 30 seconds, are released on disconnect, and are bounded by
 per-client lease quotas plus per-lease/global row and encoded-byte limits with LRU eviction. Runtime `session.summary` revisions remain independent, so activity heartbeats

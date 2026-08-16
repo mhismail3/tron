@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -73,6 +73,181 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     // Runtime-owned deferred publication may legitimately call snapshot(sequence)
     // here; catalog listing must never call the former zero-argument full snapshot.
     expect(snapshot.mock.calls.filter((arguments_) => arguments_.length === 0)).toHaveLength(0);
+  });
+
+  it("bounds recursive catalog directories and streamed entries before materialization", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-discovery-bounds-"));
+    const agentDir = join(root, "agent");
+    const catalog = join(agentDir, "sessions");
+    await Promise.all([
+      mkdir(join(catalog, "first"), { recursive: true }),
+      mkdir(join(catalog, "second"), { recursive: true }),
+    ]);
+    const makeRegistry = (
+      maximumDirectories: number,
+      maximumEntries: number,
+      maximumTraversalBytes = 8 * 1_024 * 1_024,
+    ) => {
+      const registry = new RuntimeRegistry({
+        agentDir,
+        tronHome: join(root, `tron-${maximumDirectories}-${maximumEntries}-${maximumTraversalBytes}`),
+        idleRuntimeMs: 60_000,
+        trust: new TrustService(agentDir),
+        broadcast: () => {},
+        sessionSummaryChanged: () => {},
+        sessionListChanged: () => {},
+        catalogDiscoveryLimits: { maximumDirectories, maximumEntries, maximumTraversalBytes },
+      });
+      registries.push(registry);
+      return registry;
+    };
+
+    await expect(makeRegistry(2, 2).catalog("all")).rejects.toMatchObject({
+      code: "busy",
+      retryable: true,
+    });
+    await expect(makeRegistry(3, 1).catalog("all")).rejects.toMatchObject({
+      code: "busy",
+      retryable: true,
+    });
+    await expect(makeRegistry(3, 2, 1).catalog("all")).rejects.toMatchObject({ code: "busy" });
+    await expect(makeRegistry(3, 2).catalog("all")).resolves.toMatchObject({ sessions: [] });
+  });
+
+  it("owns recursion without overlapping SDK directory materializations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-direct-sdk-listing-"));
+    const agentDir = join(root, "agent");
+    const catalog = join(agentDir, "sessions");
+    const child = join(catalog, "child");
+    await Promise.all([mkdir(catalog, { recursive: true }), mkdir(child, { recursive: true })]);
+    const directSession = SessionManager.create(root, catalog);
+    const childSession = SessionManager.create(root, child);
+    directSession.appendMessage(fauxAssistantMessage("direct catalog fixture"));
+    childSession.appendMessage(fauxAssistantMessage("child catalog fixture"));
+
+    expect((await SessionManager.listAll(catalog)).map((session) => session.id)).toEqual([
+      directSession.getSessionId(),
+    ]);
+    expect((await SessionManager.listAll(child)).map((session) => session.id)).toEqual([
+      childSession.getSessionId(),
+    ]);
+
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      catalogDiscoveryLimits: { maximumDirectories: 2, maximumSessions: 2 },
+    });
+    registries.push(registry);
+    expect((await registry.catalog("all")).sessions.map((session) => session.id).sort()).toEqual([
+      childSession.getSessionId(), directSession.getSessionId(),
+    ].sort());
+  });
+
+  it("bounds discovered session count and bytes before normalization", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-materialization-bounds-"));
+    const agentDir = join(root, "agent");
+    await mkdir(join(agentDir, "sessions"), { recursive: true });
+    const now = new Date("2026-01-01T00:00:00Z");
+    const infos = ["first", "second"].map((id) => ({
+      id,
+      path: join(agentDir, "sessions", `${id}.jsonl`),
+      cwd: root,
+      created: now,
+      modified: now,
+      messageCount: 0,
+      firstMessage: id,
+      allMessagesText: "unused picker search text ".repeat(20_000),
+    }));
+    const encodedBytes = infos.reduce((total, { allMessagesText: _discarded, ...info }) => (
+      total + Buffer.byteLength(JSON.stringify(info))
+    ), 0);
+    const listAll = vi.spyOn(SessionManager, "listAll").mockResolvedValue(infos as never);
+    const makeRegistry = (maximumSessions: number, maximumRetainedBytes: number) => {
+      const registry = new RuntimeRegistry({
+        agentDir,
+        tronHome: join(root, `tron-${maximumSessions}-${maximumRetainedBytes}`),
+        idleRuntimeMs: 60_000,
+        trust: new TrustService(agentDir),
+        broadcast: () => {},
+        sessionSummaryChanged: () => {},
+        sessionListChanged: () => {},
+        catalogDiscoveryLimits: { maximumSessions, maximumRetainedBytes, normalizationConcurrency: 1 },
+      });
+      registries.push(registry);
+      return registry;
+    };
+
+    try {
+      await expect(makeRegistry(1, encodedBytes).catalog("all")).rejects.toMatchObject({ code: "busy" });
+      await expect(makeRegistry(2, encodedBytes - 1).catalog("all")).rejects.toMatchObject({ code: "busy" });
+      await expect(makeRegistry(2, encodedBytes).catalog("all")).resolves.toMatchObject({
+        sessions: [{ id: "first" }, { id: "second" }],
+      });
+    } finally {
+      listAll.mockRestore();
+    }
+  });
+
+  it("caps canonical session path normalization concurrency", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-normalization-concurrency-"));
+    const agentDir = join(root, "agent");
+    await mkdir(join(agentDir, "sessions"), { recursive: true });
+    const now = new Date("2026-01-01T00:00:00Z");
+    const infos = Array.from({ length: 6 }, (_, index) => ({
+      id: `session-${index}`,
+      path: join(agentDir, "sessions", `session-${index}.jsonl`),
+      cwd: root,
+      created: now,
+      modified: now,
+      messageCount: 0,
+      firstMessage: `session ${index}`,
+    }));
+    const listAll = vi.spyOn(SessionManager, "listAll").mockResolvedValue(infos as never);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      catalogDiscoveryLimits: { normalizationConcurrency: 2 },
+    });
+    registries.push(registry);
+    const internals = registry as unknown as {
+      canonicalSessionPath: (path: string) => Promise<string>;
+    };
+    let active = 0;
+    let maximumActive = 0;
+    let release!: () => void;
+    let reachedCapacity!: () => void;
+    const capacity = new Promise<void>((resolve) => { reachedCapacity = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const canonicalize = vi.spyOn(internals, "canonicalSessionPath").mockImplementation(async (path) => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      if (active === 2) reachedCapacity();
+      await gate;
+      active -= 1;
+      return resolve(path);
+    });
+
+    try {
+      const loading = registry.catalog("all");
+      await capacity;
+      expect(maximumActive).toBe(2);
+      release();
+      await loading;
+      expect(maximumActive).toBe(2);
+    } finally {
+      canonicalize.mockRestore();
+      listAll.mockRestore();
+    }
   });
 
   it("never stamps captured stale catalog fields with a newer summary revision", async () => {
