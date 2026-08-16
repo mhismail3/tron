@@ -132,8 +132,10 @@ complete without exceeding bounded gateway frames. Pi's configured `sessionDir`,
 canonical per-workspace directories under `agentDir/sessions`, remain authoritative; Tron does
 not move or mirror those files. `session.list` defaults to user sessions, while `scope: "all"`
 additively includes extension-owned children classified from nested canonical storage or their
-durable `subagent-*` session metadata. Ordinary user forks remain user sessions. Every
-session-list traversal is one immutable, disposable catalog materialization: every
+durable `subagent-*` session metadata. Ordinary user forks remain user sessions. If more than
+one canonical file claims the same embedded session ID, the Gateway omits every ambiguous copy
+and rejects open/delete by that ID until the duplicate is repaired; traversal order never chooses
+canonical ownership. Every session-list traversal is one immutable, disposable catalog materialization: every
 page carries the same structural `listRevision`, and its authenticated opaque cursor
 is bound to the connection, scope, materialization, offset, and revision. Traversal
 leases expire after 30 seconds, are released on disconnect, and are bounded by

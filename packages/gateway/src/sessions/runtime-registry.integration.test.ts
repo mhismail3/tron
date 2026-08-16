@@ -129,6 +129,61 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(catalog.sessions[0]?.summaryRevision).toBe(latest.summaryRevision);
   });
 
+  it("fails closed when multiple canonical files claim one session ID", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-duplicate-id-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const faux = fauxProvider({ provider: "tron-duplicate-session-id", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("persisted")]);
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("persist duplicate ownership fixture");
+    await waitUntil(() => !slot.isBusy);
+    const internals = registry as unknown as {
+      sessionInfos: () => Promise<Array<Record<string, unknown>>>;
+    };
+    const originalSessionInfos = internals.sessionInfos.bind(registry);
+    const existing = (await originalSessionInfos()).find((session) => session.id === slot.id)!;
+    const duplicate = {
+      ...existing,
+      path: join(root, "duplicate", `${slot.id}.jsonl`),
+    };
+    let reverseDiscoveryOrder = false;
+    const discovery = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => (
+      reverseDiscoveryOrder ? [duplicate, existing] : [existing, duplicate]
+    ));
+
+    const conflicted = await registry.catalog("all");
+    expect(conflicted.sessions.find((session) => session.id === slot.id)).toBeUndefined();
+    reverseDiscoveryOrder = true;
+    const reordered = await registry.catalog("all");
+    expect(reordered.listRevision).toBe(conflicted.listRevision);
+    expect(reordered.sessions.find((session) => session.id === slot.id)).toBeUndefined();
+    await expect(registry.acquire(slot.id)).rejects.toMatchObject({ code: "conflict" });
+    await expect(registry.delete(slot.id)).rejects.toMatchObject({ code: "conflict" });
+
+    discovery.mockRestore();
+    const repaired = await registry.catalog("all");
+    expect(repaired.sessions.filter((session) => session.id === slot.id)).toHaveLength(1);
+    expect((await registry.acquire(slot.id)).id).toBe(slot.id);
+  });
+
   it("runs distinct sessions concurrently and keeps a run alive after its client disconnects", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-runtime-integration-"));
     const agentDir = join(root, "agent");

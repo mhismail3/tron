@@ -19,6 +19,7 @@ export class RuntimeRegistry {
   private readonly subscribers = new Map<string, Set<string>>();
   private readonly summaryRevisions = new Map<string, number>();
   private readonly latestSummaries = new Map<string, SessionSummaryUpdate>();
+  private ambiguousSessionIds = new Set<string>();
   private revision = 0;
   private catalogFingerprint: string | undefined;
   private evictionTimer?: NodeJS.Timeout;
@@ -140,13 +141,16 @@ export class RuntimeRegistry {
         if (entry.isDirectory()) pending.push(join(directory, entry.name));
       }
     }
-    return Promise.all(sessions.map(async (session) => ({
+    const normalized = await Promise.all(sessions.map(async (session) => ({
       ...session,
       path: await realpath(session.path).catch(() => resolve(session.path)),
       ...(session.parentSessionPath
         ? { parentSessionPath: await realpath(session.parentSessionPath).catch(() => resolve(session.parentSessionPath!)) }
         : {}),
     })));
+    // Overlapping recursive discovery roots may report the same canonical file
+    // more than once. Canonical path aliases are one file, not an ID collision.
+    return [...new Map(normalized.map((session) => [resolve(session.path), session])).values()];
   }
 
   async list(scope: "user" | "all" = "user"): Promise<SessionSummary[]> {
@@ -154,19 +158,37 @@ export class RuntimeRegistry {
   }
 
   async catalog(scope: "user" | "all" = "user"): Promise<{ sessions: SessionSummary[]; listRevision: number }> {
+    const snapshot = await this.catalogSnapshot(scope);
+    return { sessions: snapshot.sessions, listRevision: snapshot.listRevision };
+  }
+
+  private catalogSnapshot(scope: "user" | "all") {
     return this.catalogMutex.run(async () => {
-      const sessions = await this.sessionInfos();
-      const fingerprint = JSON.stringify(sessions
+      const infos = await this.sessionInfos();
+      const fingerprint = JSON.stringify(infos
         // Structural membership and classification own listRevision. Mutable
         // row fields are delivered through revisioned session.summary events.
         .map((session) => [session.id, session.path, session.parentSessionPath, session.cwd, session.name])
-        .sort((left, right) => String(left[0]).localeCompare(String(right[0]))));
+        .sort((left, right) => {
+          const byId = String(left[0]).localeCompare(String(right[0]));
+          return byId !== 0 ? byId : JSON.stringify(left).localeCompare(JSON.stringify(right));
+        }));
       if (this.catalogFingerprint === undefined) this.catalogFingerprint = fingerprint;
       else if (this.catalogFingerprint !== fingerprint) {
         this.catalogFingerprint = fingerprint;
         this.revision += 1;
       }
-      return { sessions: await this.projectSessions(sessions, scope), listRevision: this.revision };
+      const counts = new Map<string, number>();
+      for (const session of infos) counts.set(session.id, (counts.get(session.id) ?? 0) + 1);
+      this.ambiguousSessionIds = new Set(
+        [...counts].filter(([, count]) => count > 1).map(([id]) => id),
+      );
+      const unambiguousInfos = infos.filter((session) => !this.ambiguousSessionIds.has(session.id));
+      return {
+        infos: unambiguousInfos,
+        sessions: await this.projectSessions(unambiguousInfos, scope),
+        listRevision: this.revision,
+      };
     });
   }
 
@@ -232,6 +254,7 @@ export class RuntimeRegistry {
   }
 
   async acquire(sessionId: string): Promise<RuntimeSlot> {
+    this.requireUnambiguousSessionId(sessionId);
     const existing = this.slots.get(sessionId);
     if (existing) {
       existing.touch();
@@ -240,12 +263,14 @@ export class RuntimeRegistry {
     return this.mutex.run(async () => {
       const raced = this.slots.get(sessionId);
       if (raced) return raced;
-      const summary = (await this.list("all")).find((session) => session.id === sessionId);
+      const catalog = await this.catalogSnapshot("all");
+      this.requireUnambiguousSessionId(sessionId);
+      const summary = catalog.sessions.find((session) => session.id === sessionId);
       if (!summary) throw new GatewayError("not_found", "Tron session was not found");
       if (summary.kind === "subagent") {
         throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
       }
-      const info = (await this.sessionInfos()).find((session) => session.id === sessionId);
+      const info = catalog.infos.find((session) => session.id === sessionId);
       if (!info) throw new GatewayError("not_found", "Tron session was removed before it could be opened");
       const manager = SessionManager.open(info.path, this.sessionDirectoryFor(info.cwd));
       const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), this.interrupted.has(sessionId));
@@ -285,14 +310,16 @@ export class RuntimeRegistry {
 
   async delete(sessionId: string): Promise<void> {
     await this.mutex.run(async () => {
+      const catalog = await this.catalogSnapshot("all");
+      this.requireUnambiguousSessionId(sessionId);
+      const summary = catalog.sessions.find((session) => session.id === sessionId);
+      if (!summary) throw new GatewayError("not_found", "Tron session was not found");
       const slot = this.slots.get(sessionId);
       if (slot?.isBusy) throw new GatewayError("busy", "Stop the active session before deleting it");
-      const summary = (await this.list("all")).find((session) => session.id === sessionId);
-      if (!summary) throw new GatewayError("not_found", "Tron session was not found");
       if (summary.kind === "subagent") {
         throw new GatewayError("conflict", "Delete the originating user session instead of mutating its runtime-owned subagent session");
       }
-      const info = (await this.sessionInfos()).find((candidate) => candidate.id === sessionId);
+      const info = catalog.infos.find((candidate) => candidate.id === sessionId);
       if (!info) throw new GatewayError("not_found", "Tron session was removed before it could be deleted");
       if (slot) await slot.dispose();
       this.slots.delete(sessionId);
@@ -305,6 +332,15 @@ export class RuntimeRegistry {
       this.revision += 1;
       this.options.sessionListChanged();
     });
+  }
+
+  private requireUnambiguousSessionId(sessionId: string): void {
+    if (this.ambiguousSessionIds.has(sessionId)) {
+      throw new GatewayError(
+        "conflict",
+        "Multiple canonical session files claim this ID; repair or remove the duplicate before continuing",
+      );
+    }
   }
 
   subscribe(clientId: string, sessionId: string): void {
