@@ -61,8 +61,9 @@ struct ChatTranscriptProjectionKernelTests {
             Issue.record("Expected canonical joined tool run")
             return
         }
-        #expect(run.tools.first?.content == "contents")
-        #expect(run.tools.first?.request == .object(["path": .string("README.md")]))
+        let detail = try #require(run.tools.first.flatMap(candidate.toolPayloads.resolving))
+        #expect(detail.content == "contents")
+        #expect(detail.request == .object(["path": .string("README.md")]))
         #expect(candidate.timeline.renderedIDBySemanticID["call"] == "tool-run-call")
         #expect(candidate.timeline.preferredSemanticIDByRenderedID["tool-run-call"] == "call")
         #expect(candidate.isValid)
@@ -201,10 +202,27 @@ struct ChatTranscriptProjectionKernelTests {
         }
         #expect(candidate.timeline.items.count == 1)
         #expect(run.tools.map(\.id) == ["between", "duplicate"])
-        #expect(run.tools.map(\.content) == ["middle", "newest"])
+        #expect(run.tools.compactMap(candidate.toolPayloads.resolving).map(\.content) == ["middle", "newest"])
         #expect(candidate.timeline.renderedIDBySemanticID["duplicate"] == "tool-run-between")
         #expect(candidate.timeline.renderedIDBySemanticID["between"] == "tool-run-between")
         #expect(candidate.isValid)
+    }
+
+    @Test("duplicate call identities across separate runs fail projection admission")
+    func duplicateCallIDsAcrossRunsFailClosed() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant-one","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call-one","type":"toolCall","toolCallId":"duplicate","name":"read","arguments":{"path":"one"}}]},
+          {"id":"user","parentId":"assistant-one","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"continue"}]},
+          {"id":"assistant-two","parentId":"user","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"call-two","type":"toolCall","toolCallId":"duplicate","name":"read","arguments":{"path":"two"}}]}
+        ]
+        """)
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.timeline.items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }.flatMap(\.tools).map(\.id) == ["duplicate", "duplicate"])
+        #expect(!candidate.isValid)
     }
 
     @Test("streaming calls and unanchored runtime tools share canonical global ordering")
@@ -439,7 +457,7 @@ struct ChatTranscriptProjectionKernelTests {
             Issue.record("Expected joined tool result")
             return
         }
-        #expect(run.tools.first?.content == "new")
+        #expect(run.tools.first.flatMap(incremental.toolPayloads.resolving)?.content == "new")
     }
 
     @Test("one runtime tool payload update patches one flat row in ten thousand history entries")
@@ -471,6 +489,7 @@ struct ChatTranscriptProjectionKernelTests {
             renderedItemCount: cold.timeline.items.count
         ))
         #expect(incremental.timeline == cold.timeline)
+        #expect(incremental.toolPayloads == cold.toolPayloads)
         #expect(incremental.timeline.items.sparseOverrideCount == 1)
         #expect(incremental.timeline.ids == cold.timeline.ids)
         #expect(incremental.timeline.preferredSemanticIDByRenderedID == previous.timeline.preferredSemanticIDByRenderedID)
@@ -500,7 +519,9 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(incremental.workReport.toolsInspected == count)
         #expect(incremental.workReport.toolsPatched == 1)
         #expect(incremental.timeline.items.sparseOverrideCount == 1)
-        #expect(incremental.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
+        let cold = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(incremental.timeline == cold.timeline)
+        #expect(incremental.toolPayloads == cold.toolPayloads)
     }
 
     @Test("anchored completion patches only while placement stays stable")
@@ -721,7 +742,7 @@ struct ChatTranscriptProjectionKernelTests {
             return
         }
         #expect(run.tools.map(\.id) == ["duplicate"])
-        #expect(run.tools.first?.content == "newer")
+        #expect(run.tools.first.flatMap(reversed.toolPayloads.resolving)?.content == "newer")
         #expect(run.tools.first?.progressSequence == newer.progressSequence)
 
         let timestampOlder = ToolExecutionState(
@@ -742,7 +763,7 @@ struct ChatTranscriptProjectionKernelTests {
             Issue.record("Expected timestamp-deduplicated runtime run")
             return
         }
-        #expect(timestampRun.tools.first?.content == "timestamp-newer")
+        #expect(timestampRun.tools.first.flatMap(timestampReversed.toolPayloads.resolving)?.content == "timestamp-newer")
     }
 
     @Test("streaming calls suppress canonical orphan results and join them at stream order")
@@ -773,6 +794,7 @@ struct ChatTranscriptProjectionKernelTests {
 
         #expect(cold.timeline.ids == ["user", "streaming", "tool-run-stream-call"])
         #expect(incremental.timeline == cold.timeline)
+        #expect(incremental.toolPayloads == cold.toolPayloads)
         #expect(incremental.workReport.mode == .fragmentReuse)
         #expect(incremental.workReport.fragmentsReused == 2)
         #expect(ChatTranscriptProjectionKernel.visibleItems(in: snapshot).map(\.id) == ["user"])
@@ -780,9 +802,10 @@ struct ChatTranscriptProjectionKernelTests {
             Issue.record("Expected joined stream-position tool run")
             return
         }
-        #expect(run.tools.first?.content == "canonical output")
-        #expect(run.tools.first?.response == .object(["ok": .bool(true)]))
-        #expect(run.tools.first?.request == .object(["path": .string("README.md")]))
+        let detail = try #require(run.tools.first.flatMap(cold.toolPayloads.resolving))
+        #expect(detail.content == "canonical output")
+        #expect(detail.response == .object(["ok": .bool(true)]))
+        #expect(detail.request == .object(["path": .string("README.md")]))
         #expect(cold.timeline.renderedIDBySemanticID["stream-call"] == "tool-run-stream-call")
         #expect(cold.timeline.preferredSemanticIDByRenderedID["tool-run-stream-call"] == "stream-call")
     }

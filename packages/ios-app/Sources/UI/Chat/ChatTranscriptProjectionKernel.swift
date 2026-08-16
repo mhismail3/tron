@@ -88,6 +88,7 @@ fileprivate struct ChatTranscriptProjectionSourceWindow: Hashable, Sendable {
 
 struct ChatTranscriptProjectionCandidate: Sendable {
     let timeline: ChatTranscriptTimeline
+    let toolPayloads: ChatToolPayloadIndex
     let fragments: [ChatTranscriptProjectionFragment]
     let streamingFragment: ChatTranscriptProjectionFragment?
     let runtimeItems: [ChatTranscriptRenderItem]
@@ -101,8 +102,14 @@ struct ChatTranscriptProjectionCandidate: Sendable {
     var isValid: Bool {
         guard timeline.isInternallyConsistent else { return false }
         let runtimeIDs = runtimeItems.map(\.id)
+        let timelineToolIDs = timeline.items.flatMap { item -> [String] in
+            guard case .toolRun(let run) = item else { return [] }
+            return run.tools.map(\.id)
+        }
         return Set(runtimeIDs).count == runtimeIDs.count
             && runtimeIDs.allSatisfy { !timeline.containsID($0) }
+            && Set(timelineToolIDs).count == timelineToolIDs.count
+            && Set(timelineToolIDs) == toolPayloads.callIDs
     }
 }
 
@@ -209,6 +216,7 @@ enum ChatTranscriptProjectionKernel {
                 )
                 projection = AssembledProjection(
                     timeline: assembly.timeline,
+                    toolPayloads: assembly.toolPayloads,
                     toolsInspected: assembly.toolsInspected,
                     patchMetadata: assembly.patchMetadata,
                     usesIsolatedStreamingSuffix: false
@@ -270,6 +278,7 @@ enum ChatTranscriptProjectionKernel {
                 )
                 return ChatTranscriptProjectionCandidate(
                     timeline: timeline,
+                    toolPayloads: previous.toolPayloads,
                     fragments: previous.fragments,
                     streamingFragment: streamingFragment,
                     runtimeItems: runtimeItems(in: snapshot),
@@ -469,6 +478,7 @@ enum ChatTranscriptProjectionKernel {
 
     private struct AssembledProjection {
         let timeline: ChatTranscriptTimeline
+        let toolPayloads: ChatToolPayloadIndex
         let toolsInspected: Int
         let patchMetadata: ChatToolPatchMetadata
         let usesIsolatedStreamingSuffix: Bool
@@ -495,6 +505,7 @@ enum ChatTranscriptProjectionKernel {
             if !hasUnanchoredRuntimeTool(metadata: base.patchMetadata) {
                 return AssembledProjection(
                     timeline: base.timeline.appendingLive(live),
+                    toolPayloads: base.toolPayloads,
                     toolsInspected: base.toolsInspected,
                     patchMetadata: base.patchMetadata,
                     usesIsolatedStreamingSuffix: true
@@ -508,6 +519,7 @@ enum ChatTranscriptProjectionKernel {
         )
         return AssembledProjection(
             timeline: assembly.timeline,
+            toolPayloads: assembly.toolPayloads,
             toolsInspected: assembly.toolsInspected,
             patchMetadata: assembly.patchMetadata,
             usesIsolatedStreamingSuffix: false
@@ -523,6 +535,7 @@ enum ChatTranscriptProjectionKernel {
     ) -> ChatTranscriptProjectionCandidate {
         ChatTranscriptProjectionCandidate(
             timeline: projection.timeline,
+            toolPayloads: projection.toolPayloads,
             fragments: fragments,
             streamingFragment: streamingFragment,
             runtimeItems: runtimeItems(in: snapshot),
@@ -589,6 +602,7 @@ enum ChatTranscriptProjectionKernel {
         }
         return measured(performanceSignposts: performanceSignposts, workRecorder: workRecorder) {
             var runsByIndex: [Int: ChatToolRunPresentation] = [:]
+            var payloadReplacements: [String: ChatToolPayload] = [:]
             for callID in changed {
                 let site = previous.patchMetadata.sitesByCallID[callID]![0]
                 let currentRun: ChatToolRunPresentation
@@ -616,7 +630,8 @@ enum ChatTranscriptProjectionKernel {
                     updated = foregroundPresentation(livePresentation(live), phase: snapshot.phase)
                 }
                 var tools = currentRun.tools
-                tools[site.toolIndex] = updated
+                tools[site.toolIndex] = updated.descriptor
+                payloadReplacements[callID] = updated.payload
                 runsByIndex[site.renderedIndex] = ChatToolRunPresentation(
                     tools: tools,
                     anchorID: currentRun.anchorID
@@ -642,6 +657,7 @@ enum ChatTranscriptProjectionKernel {
             )
             return ChatTranscriptProjectionCandidate(
                 timeline: timeline,
+                toolPayloads: previous.toolPayloads.replacing(payloadReplacements),
                 fragments: previous.fragments,
                 streamingFragment: previous.streamingFragment,
                 runtimeItems: runtimeItems(in: snapshot),
@@ -674,6 +690,7 @@ enum ChatTranscriptProjectionKernel {
 
     private struct Assembly {
         let timeline: ChatTranscriptTimeline
+        let toolPayloads: ChatToolPayloadIndex
         let toolsInspected: Int
         let patchMetadata: ChatToolPatchMetadata
     }
@@ -722,6 +739,7 @@ enum ChatTranscriptProjectionKernel {
         var pendingToolIndexByCallID: [String: Int] = [:]
         var anchoredCallIDs = Set<String>()
         var sitesByCallID: [String: [ChatToolPatchSite]] = [:]
+        var payloadsByCallID: [String: ChatToolPayload] = [:]
 
         func appendTools(_ tools: [PreparedTool]) {
             for prepared in tools {
@@ -731,6 +749,7 @@ enum ChatTranscriptProjectionKernel {
                     classification: prepared.classification
                 )
                 anchoredCallIDs.insert(value.presentation.id)
+                payloadsByCallID[value.presentation.id] = value.presentation.payload
                 if let index = pendingToolIndexByCallID[value.presentation.id] {
                     pendingTools[index] = value
                 } else {
@@ -931,6 +950,7 @@ enum ChatTranscriptProjectionKernel {
                 preferredSemanticIDByRenderedID: ChatSemanticIndex(canonical: preferredSemanticIDByRenderedID),
                 renderedIDBySemanticID: ChatSemanticIndex(canonical: renderedIDBySemanticID)
             ),
+            toolPayloads: ChatToolPayloadIndex(payloadsByCallID),
             toolsInspected: toolsInspected,
             patchMetadata: ChatToolPatchMetadata(sitesByCallID: sitesByCallID)
         )

@@ -135,6 +135,16 @@ struct ChatTranscriptRenderRow: View, Equatable {
     let item: ChatTranscriptRenderItem
     let preparedText: ChatTextPreparationSnapshot
     let hiddenThinkingLabel: String?
+    let installationTag: ChatTranscriptProjectionTag
+    let resolveToolDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        guard lhs.item == rhs.item,
+              lhs.preparedText == rhs.preparedText,
+              lhs.hiddenThinkingLabel == rhs.hiddenThinkingLabel else { return false }
+        guard case .toolRun = lhs.item else { return true }
+        return lhs.installationTag == rhs.installationTag
+    }
 
     @ViewBuilder var body: some View {
         switch item {
@@ -156,8 +166,12 @@ struct ChatTranscriptRenderRow: View, Equatable {
                 hiddenThinkingLabel: hiddenThinkingLabel
             )
         case .toolRun(let run):
-            ToolRunView(run: run)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            ToolRunView(
+                run: run,
+                installationTag: installationTag,
+                resolveDetails: resolveToolDetails
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
         case .notification(let notification):
             ChatNotificationView(presentation: notification)
                 .frame(maxWidth: .infinity, alignment: .center)

@@ -331,6 +331,51 @@ struct ChatTranscriptPresentationTests {
         ))
     }
 
+    @Test("unread observation ignores tool and runtime status while retaining response facts")
+    func unreadObservationEquality() throws {
+        var snapshot = try fixture(transcript: "[]")
+        let baseline = ChatResponseState(snapshot: snapshot)
+
+        snapshot.phase = .running
+        snapshot.toolExecutions = [tool("call", "read", startedAt: "2026-01-01T00:00:00Z")]
+        snapshot.extensionUI.statuses = ["provider": "Working"]
+        #expect(ChatResponseState(snapshot: snapshot) == baseline)
+
+        snapshot.streaming = try message("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"call","name":"read","arguments":{"path":"one"}}]}
+        """)
+        let toolOnly = ChatResponseState(snapshot: snapshot)
+        #expect(toolOnly == baseline)
+        snapshot.streaming = try message("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"call","name":"read","arguments":{"path":"two"}}]}
+        """)
+        #expect(ChatResponseState(snapshot: snapshot) == toolOnly)
+
+        snapshot.streaming = try message("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"text","type":"text","text":"hello"}]}
+        """)
+        #expect(ChatResponseState(snapshot: snapshot) != baseline)
+        snapshot.streaming = try message("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"thinking","type":"thinking","text":"considering"}]}
+        """)
+        #expect(ChatResponseState(snapshot: snapshot) != baseline)
+        snapshot.streaming = try message("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"image","type":"image","mimeType":"image/png","blobId":"blob"}]}
+        """)
+        #expect(ChatResponseState(snapshot: snapshot) != baseline)
+        snapshot.streaming = try message("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[],"errorMessage":"failed"}
+        """)
+        #expect(ChatResponseState(snapshot: snapshot) != baseline)
+
+        snapshot.streaming = nil
+        snapshot.transcript = try transcript("""
+        [{"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"text","type":"text","text":"hello"}]}]
+        """)
+        snapshot.transcriptTotal = 1
+        #expect(ChatResponseState(snapshot: snapshot) != baseline)
+    }
+
     @Test("new response marks unread only while scrolled away")
     func unreadResponsePolicy() throws {
         let previous = ChatResponseState(snapshot: try fixture(transcript: "[]"))
@@ -580,7 +625,8 @@ struct ChatTranscriptPresentationTests {
           ]}
         ]
         """)
-        let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        let timeline = candidate.timeline
 
         #expect(timeline.ids == [
             "assistant",
@@ -596,9 +642,10 @@ struct ChatTranscriptPresentationTests {
             return
         }
         #expect(firstRun.segments.map(\.text) == ["First…"])
-        #expect(toolRun.tools.first?.content == "")
-        #expect(toolRun.tools.first?.request == .object([:]))
-        #expect(toolRun.tools.first?.fallbackContent == .object([:]))
+        let detail = try #require(toolRun.tools.first.flatMap(candidate.toolPayloads.resolving))
+        #expect(detail.content == "")
+        #expect(detail.request == .object([:]))
+        #expect(detail.fallbackContent == .object([:]))
         #expect(lastRun.segments.map(\.text) == ["Second…"])
     }
 
@@ -648,7 +695,8 @@ struct ChatTranscriptPresentationTests {
         ]
         """)
 
-        let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        let timeline = candidate.timeline
         let rendered = timeline.items
         #expect(rendered.count == 1)
         guard case .toolRun(let run) = rendered.first else {
@@ -656,9 +704,10 @@ struct ChatTranscriptPresentationTests {
             return
         }
         #expect(run.tools.map(\.title) == ["read", "bash"])
-        #expect(run.tools[0].request == .object(["path": .string("one")]))
-        #expect(run.tools[0].response == nil)
-        #expect(run.tools[1].request == .object(["command": .string("pwd")]))
+        let details = run.tools.compactMap(candidate.toolPayloads.resolving)
+        #expect(details[0].request == .object(["path": .string("one")]))
+        #expect(details[0].response == nil)
+        #expect(details[1].request == .object(["command": .string("pwd")]))
         #expect(run.title == "Used 2 tools")
         #expect(timeline.preferredSemanticIDByRenderedID[run.id] == "call-2")
         #expect(timeline.renderedIDBySemanticID["call-1"] == run.id)
@@ -834,9 +883,10 @@ struct ChatTranscriptPresentationTests {
             ),
         ]
 
-        let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
-        guard case .toolRun(let run) = timeline.items.first,
-              let tool = run.tools.first else {
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        guard case .toolRun(let run) = candidate.timeline.items.first,
+              let descriptor = run.tools.first,
+              let tool = candidate.toolPayloads.resolving(descriptor) else {
             Issue.record("Expected completed tool row")
             return
         }
@@ -887,11 +937,13 @@ struct ChatTranscriptPresentationTests {
             progressSequence: 14
         )]
 
-        guard case .toolRun(let run) = ChatTranscriptPresentation.timeline(in: snapshot).items.first else {
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        guard case .toolRun(let run) = candidate.timeline.items.first else {
             Issue.record("Expected live tool run")
             return
         }
-        let tool = try #require(run.tools.first)
+        let descriptor = try #require(run.tools.first)
+        let tool = try #require(candidate.toolPayloads.resolving(descriptor))
         #expect(tool.content == "Waiting 12s · reviewer: read")
         #expect(tool.outputTruncated)
         #expect(tool.progressSequence == 14)

@@ -181,25 +181,105 @@ struct ChatTranscriptPageRequest: Equatable {
     }
 }
 
+struct ChatStreamingResponseSignature: Equatable {
+    let itemID: String
+    let parts: [ChatMessagePart]
+    let errorMessage: String?
+
+    init?(_ item: TranscriptItem?) {
+        guard let item else { return nil }
+        let visibleParts = ChatTranscriptPresentation.messageParts(in: item).filter { part in
+            guard case .content(let content) = part else { return true }
+            return content.type != .toolCall
+        }
+        let visibleError = (item.errorMessage ?? "").isEmpty ? nil : item.errorMessage
+        guard !visibleParts.isEmpty || visibleError != nil else { return nil }
+        itemID = item.id
+        parts = visibleParts
+        errorMessage = visibleError
+    }
+}
+
 struct ChatResponseState: Equatable {
     let sessionID: String
     let canonicalEntryCount: Int
     let tailEntryID: String?
-    let streaming: TranscriptItem?
-    let tools: [ToolExecutionState]
-    let phase: SessionPhase
-    let working: ExtensionUIState.Working
-    let statuses: [String: String]
+    let streaming: ChatStreamingResponseSignature?
 
     init(snapshot: SessionSnapshot) {
         sessionID = snapshot.sessionId
         canonicalEntryCount = snapshot.transcriptTotal ?? snapshot.transcript.count
         tailEntryID = snapshot.transcript.last?.id
-        streaming = snapshot.streaming
-        tools = snapshot.toolExecutions
-        phase = snapshot.phase
-        working = snapshot.extensionUI.working
-        statuses = snapshot.extensionUI.statuses
+        streaming = ChatStreamingResponseSignature(snapshot.streaming)
+    }
+}
+
+/// Heavy protocol values are owned separately from the timeline descriptor
+/// spine and are combined only when an installed transcript resolves a detail.
+struct ChatToolPayload: Hashable, Sendable {
+    let request: JSONValue?
+    let response: JSONValue?
+    let content: String
+    let fallbackContent: JSONValue?
+}
+
+struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let error: Bool
+    let startedAt: String?
+    let completedAt: String?
+    let durationMs: Int?
+    let lastProgressAt: String?
+    let progressSequence: Int?
+    let outputTruncated: Bool
+
+    init(_ tool: ChatToolPresentation) {
+        id = tool.id
+        title = tool.title
+        subtitle = tool.subtitle
+        error = tool.error
+        startedAt = tool.startedAt
+        completedAt = tool.completedAt
+        durationMs = tool.durationMs
+        lastProgressAt = tool.lastProgressAt
+        progressSequence = tool.progressSequence
+        outputTruncated = tool.outputTruncated
+    }
+
+    var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
+
+    func elapsedMilliseconds(at date: Date = .now) -> Int? {
+        if !isRunning, let durationMs { return max(0, durationMs) }
+        guard let start = ToolTiming.date(startedAt) else { return durationMs.map { max(0, $0) } }
+        guard isRunning || ToolTiming.date(completedAt) != nil else { return durationMs }
+        let end = isRunning ? date : ToolTiming.date(completedAt)!
+        return max(0, Int((end.timeIntervalSince(start) * 1_000).rounded()))
+    }
+}
+
+struct ChatToolPayloadIndex: Hashable, Sendable {
+    private let values: [String: ChatToolPayload]
+
+    init(_ values: [String: ChatToolPayload] = [:]) {
+        self.values = values
+    }
+
+    var callIDs: Set<String> { Set(values.keys) }
+    var count: Int { values.count }
+
+    func payload(for callID: String) -> ChatToolPayload? { values[callID] }
+
+    func resolving(_ descriptor: ChatToolDescriptor) -> ChatToolPresentation? {
+        guard let payload = values[descriptor.id] else { return nil }
+        return ChatToolPresentation(descriptor: descriptor, payload: payload)
+    }
+
+    func replacing(_ replacements: [String: ChatToolPayload]) -> Self {
+        var updated = values
+        for (callID, payload) in replacements { updated[callID] = payload }
+        return Self(updated)
     }
 }
 
@@ -249,6 +329,33 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         self.lastProgressAt = lastProgressAt
         self.progressSequence = progressSequence
         self.outputTruncated = outputTruncated || response?.hasToolOutputTruncationMetadata == true
+    }
+
+    init(descriptor: ChatToolDescriptor, payload: ChatToolPayload) {
+        id = descriptor.id
+        title = descriptor.title
+        subtitle = descriptor.subtitle
+        request = payload.request
+        response = payload.response
+        content = payload.content
+        fallbackContent = payload.fallbackContent
+        error = descriptor.error
+        startedAt = descriptor.startedAt
+        completedAt = descriptor.completedAt
+        durationMs = descriptor.durationMs
+        lastProgressAt = descriptor.lastProgressAt
+        progressSequence = descriptor.progressSequence
+        outputTruncated = descriptor.outputTruncated
+    }
+
+    var descriptor: ChatToolDescriptor { ChatToolDescriptor(self) }
+    var payload: ChatToolPayload {
+        ChatToolPayload(
+            request: request,
+            response: response,
+            content: content,
+            fallbackContent: fallbackContent
+        )
     }
 
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
@@ -443,14 +550,18 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
 }
 
 struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
-    let tools: [ChatToolPresentation]
+    let tools: [ChatToolDescriptor]
     let anchorID: String
 
-    init(tools: [ChatToolPresentation], anchorID: String? = nil) {
+    init(tools: [ChatToolDescriptor], anchorID: String? = nil) {
         self.tools = tools
         // Callers provide canonical content order or the runtime's monotonic
         // ordinal order. Opaque call IDs are not sortable order keys.
         self.anchorID = anchorID ?? tools.first?.id ?? "empty"
+    }
+
+    init(tools: [ChatToolPresentation], anchorID: String? = nil) {
+        self.init(tools: tools.map(\.descriptor), anchorID: anchorID)
     }
 
     var id: String { "tool-run-" + anchorID }

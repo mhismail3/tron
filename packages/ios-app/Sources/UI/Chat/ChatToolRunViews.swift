@@ -9,7 +9,7 @@ struct ToolCard: View {
     var response: JSONValue? = nil
     var fallbackContent: JSONValue? = nil
     var outputTruncated = false
-    var timing: ChatToolPresentation? = nil
+    var timing: ChatToolDescriptor? = nil
     var onOpenDetails: ((String) -> Void)? = nil
     @State private var detailPresentation: ToolDetailRoute?
     @State private var detailDetent: PresentationDetent = .medium
@@ -24,7 +24,7 @@ struct ToolCard: View {
         response: JSONValue? = nil,
         fallbackContent: JSONValue? = nil,
         outputTruncated: Bool = false,
-        timing: ChatToolPresentation? = nil,
+        timing: ChatToolDescriptor? = nil,
         onOpenDetails: ((String) -> Void)? = nil
     ) {
         self.title = title
@@ -48,6 +48,18 @@ struct ToolCard: View {
             request: data.request,
             response: data.response,
             fallbackContent: data.fallbackContent,
+            outputTruncated: data.outputTruncated,
+            timing: data.descriptor,
+            onOpenDetails: onOpenDetails
+        )
+    }
+
+    init(data: ChatToolDescriptor, onOpenDetails: @escaping (String) -> Void) {
+        self.init(
+            title: data.title,
+            subtitle: data.subtitle,
+            content: "",
+            error: data.error,
             outputTruncated: data.outputTruncated,
             timing: data,
             onOpenDetails: onOpenDetails
@@ -140,7 +152,11 @@ struct ToolCard: View {
 
 struct ToolRunView: View {
     let run: ChatToolRunPresentation
+    let installationTag: ChatTranscriptProjectionTag
+    let resolveDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
     @State private var detailRoute: ToolDetailRoute?
+    @State private var resolvedDetail: ChatToolPresentation?
+    @State private var resolvedGroup: [ChatToolPresentation]?
     @State private var detailDetent: PresentationDetent = .medium
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -148,21 +164,52 @@ struct ToolRunView: View {
         ZStack(alignment: .leading) {
             if let tool = run.tools.first, run.tools.count == 1 {
                 ToolCard(data: tool) { toolID in
+                    guard let detail = resolveDetails([toolID], installationTag)?.first else { return }
                     detailDetent = .medium
+                    resolvedDetail = detail
                     detailRoute = ToolDetailRoute(toolID: toolID)
                 }
                 .transition(toolRunTransition)
             } else {
-                ToolRunChip(run: run)
-                    .transition(toolRunTransition)
+                ToolRunChip(run: run) {
+                    guard let details = resolveDetails(run.tools.map(\.id), installationTag) else { return }
+                    resolvedGroup = details
+                }
+                .transition(toolRunTransition)
             }
         }
         .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: run.tools.count == 1)
         .toolDetailSheet(
             route: $detailRoute,
             detent: $detailDetent,
-            tool: detailRoute?.resolve(in: run.tools)
+            tool: resolvedDetail
         )
+        .sheet(isPresented: Binding(
+            get: { resolvedGroup != nil },
+            set: { if !$0 { resolvedGroup = nil } }
+        )) {
+            if let resolvedGroup {
+                ToolRunDetailSheet(run: run, tools: resolvedGroup)
+            }
+        }
+        .onChange(of: installationTag) { _, currentTag in
+            refreshResolvedDetails(for: currentTag)
+        }
+    }
+
+    private func refreshResolvedDetails(for tag: ChatTranscriptProjectionTag) {
+        if let detailRoute {
+            guard let detail = resolveDetails([detailRoute.toolID], tag)?.first else {
+                self.detailRoute = nil
+                resolvedDetail = nil
+                resolvedGroup = nil
+                return
+            }
+            resolvedDetail = detail
+        }
+        if resolvedGroup != nil {
+            resolvedGroup = resolveDetails(run.tools.map(\.id), tag)
+        }
     }
 
     private var toolRunTransition: AnyTransition {
@@ -172,17 +219,15 @@ struct ToolRunView: View {
 
 private struct ToolRunChip: View {
     let run: ChatToolRunPresentation
-    @State private var showingDetails = false
+    let onOpenDetails: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var tone: ChatNotificationTone {
         if run.failureCount > 0 { return .error }
         return run.isRunning ? .warning : .accent
     }
-    private var surfaceAccent: Color { tone.surfaceColor }
-
     var body: some View {
-        Button { showingDetails = true } label: {
+        Button(action: onOpenDetails) {
             ChatCompactPillSurface(tone: tone, material: .glass, interactive: true) {
                 ChatCompactPillLabel(
                     icon: run.failureCount > 0
@@ -201,44 +246,6 @@ private struct ToolRunChip: View {
         .contentTransition(.opacity)
         .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: visualState)
         .accessibilityLabel(runAccessibilityLabel)
-        .sheet(isPresented: $showingDetails) {
-            NavigationStack {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(run.tools) { tool in
-                            ToolCard(data: tool)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
-                    .padding(.bottom, 18)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-                .defaultScrollAnchor(.top, for: .initialOffset)
-                .defaultScrollAnchor(.top, for: .alignment)
-                .defaultScrollAnchor(.top, for: .sizeChanges)
-                .tronScrollEdgeChrome()
-                .tronToolDetailNavigationChrome()
-                .toolbar {
-                    ToolbarItem(placement: .principal) {
-                        TronSheetTitle(title: run.title, accent: surfaceAccent)
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { showingDetails = false } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
-                        }
-                        .accessibilityLabel("Done")
-                    }
-                }
-            }
-            .tronTopBlur(.sheet)
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
-            .tronPresentation()
-        }
     }
 
     private var runAccessibilityLabel: String {
@@ -263,8 +270,58 @@ private struct ToolRunChip: View {
     }
 }
 
+private struct ToolRunDetailSheet: View {
+    let run: ChatToolRunPresentation
+    let tools: [ChatToolPresentation]
+    @Environment(\.dismiss) private var dismiss
+
+    private var tone: ChatNotificationTone {
+        if run.failureCount > 0 { return .error }
+        return run.isRunning ? .warning : .accent
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(tools) { tool in
+                        ToolCard(data: tool)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 18)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .defaultScrollAnchor(.top, for: .initialOffset)
+            .defaultScrollAnchor(.top, for: .alignment)
+            .defaultScrollAnchor(.top, for: .sizeChanges)
+            .tronScrollEdgeChrome()
+            .tronToolDetailNavigationChrome()
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: run.title, accent: tone.surfaceColor)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
+        }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .tronPresentation()
+    }
+}
+
 private struct ToolElapsedText: View {
-    let tool: ChatToolPresentation
+    let tool: ChatToolDescriptor
     let color: Color
 
     var body: some View {

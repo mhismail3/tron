@@ -967,8 +967,78 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(patched.timeline.ids == initialIDs)
             #expect(patched.timeline.preferredSemanticIDByRenderedID == initialPreferred)
             #expect(patched.timeline.renderedIDBySemanticID == initialReverse)
+            let initialDetail = try #require(initial.resolveToolDetails(
+                callIDs: ["runtime-tool"], installationTag: initial.tag
+            )?.first)
+            let patchedDetail = try #require(patched.resolveToolDetails(
+                callIDs: ["runtime-tool"], installationTag: patched.tag
+            )?.first)
+            #expect(initialDetail.content == "old")
+            #expect(patchedDetail.content == "new")
+            guard case .toolRun(let patchedRun) = patched.timeline.items.last,
+                  let descriptor = patchedRun.tools.first else {
+                Issue.record("Expected patched lightweight tool descriptor")
+                return
+            }
+            #expect(Set(Mirror(reflecting: descriptor).children.compactMap(\.label)).isDisjoint(with: [
+                "request", "response", "content", "fallbackContent",
+            ]))
+            let descriptorCount = patched.timeline.items.reduce(into: 0) { count, item in
+                if case .toolRun(let run) = item { count += run.tools.count }
+            }
+            #expect(patched.toolPayloads.count == descriptorCount)
             #expect(store.pendingEntranceIDs.count <= ChatTranscriptPageRequest.maximumItemCount)
             #expect(store.admittedEntranceIDs.count <= ChatTranscriptPageRequest.maximumItemCount)
+        }
+    }
+
+    @Test("installed payload owner resolves grouped details and rejects stale or missing identities")
+    func installedPayloadResolutionIsExact() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_229)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.transcript = try JSONDecoder.gateway.decode(
+                [TranscriptItem].self,
+                from: Data("""
+                [
+                  {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+                    {"id":"call-a","type":"toolCall","toolCallId":"call-a","name":"read","arguments":{"path":"A.swift"}},
+                    {"id":"call-b","type":"toolCall","toolCallId":"call-b","name":"bash","arguments":{"command":"pwd"}}
+                  ]},
+                  {"id":"result-a","parentId":"assistant","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"text-a","type":"text","text":"alpha"}],"toolCallId":"call-a","toolName":"read","isError":false,"details":{"lines":1}},
+                  {"id":"result-b","parentId":"result-a","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"toolResult","content":[{"id":"text-b","type":"text","text":"beta"}],"toolCallId":"call-b","toolName":"bash","isError":false,"details":{"exitCode":0}}
+                ]
+                """.utf8)
+            )
+            snapshot.streaming = nil
+            snapshot.toolExecutions = []
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 3
+            let store = ChatTranscriptPresentationStore()
+            let firstTag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 31)
+            store.submit(snapshot: snapshot, tag: firstTag)
+            let first = try await store.waitForInstall(of: firstTag)
+
+            let details = try #require(store.resolveToolDetails(
+                callIDs: ["call-a", "call-b"],
+                installationTag: firstTag
+            ))
+            #expect(details.map(\.request) == [
+                .object(["path": .string("A.swift")]),
+                .object(["command": .string("pwd")]),
+            ])
+            #expect(details.map(\.content) == ["alpha", "beta"])
+            #expect(details.map(\.response) == [
+                .object(["lines": .number(1)]),
+                .object(["exitCode": .number(0)]),
+            ])
+            #expect(first.resolveToolDetails(callIDs: ["missing"], installationTag: firstTag) == nil)
+
+            snapshot.eventSequence += 1
+            let secondTag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 31)
+            store.submit(snapshot: snapshot, tag: secondTag)
+            _ = try await store.waitForInstall(of: secondTag)
+            #expect(store.resolveToolDetails(callIDs: ["call-a"], installationTag: firstTag) == nil)
         }
     }
 

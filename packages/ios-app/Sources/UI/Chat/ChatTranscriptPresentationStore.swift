@@ -97,6 +97,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
 
     let tag: ChatTranscriptProjectionTag
     let timeline: ChatTranscriptTimeline
+    let toolPayloads: ChatToolPayloadIndex
     let runtimeItems: [ChatTranscriptRenderItem]
     let preparedText: ChatTextPreparationSnapshot
     let queuedMessages: [SessionSnapshot.QueuedMessage]
@@ -108,6 +109,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
     init(
         tag: ChatTranscriptProjectionTag,
         timeline: ChatTranscriptTimeline,
+        toolPayloads: ChatToolPayloadIndex = .init(),
         runtimeItems: [ChatTranscriptRenderItem],
         preparedText: ChatTextPreparationSnapshot = .empty,
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
@@ -117,6 +119,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
     ) {
         self.tag = tag
         self.timeline = timeline
+        self.toolPayloads = toolPayloads
         self.runtimeItems = runtimeItems
         self.preparedText = preparedText
         self.queuedMessages = queuedMessages
@@ -138,12 +141,39 @@ struct InstalledChatTranscript: Hashable, Sendable {
         timeline.containsID(id) || runtimeIDSet.contains(id)
     }
 
+    func resolveToolDetails(
+        callIDs: [String],
+        installationTag: ChatTranscriptProjectionTag
+    ) -> [ChatToolPresentation]? {
+        guard installationTag == tag,
+              !callIDs.isEmpty,
+              Set(callIDs).count == callIDs.count else { return nil }
+        let descriptors = timeline.items.flatMap { item -> [ChatToolDescriptor] in
+            guard case .toolRun(let run) = item else { return [] }
+            return run.tools
+        }
+        let descriptorByID = Dictionary(
+            descriptors.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        guard descriptorByID.count == descriptors.count else { return nil }
+        var resolved: [ChatToolPresentation] = []
+        resolved.reserveCapacity(callIDs.count)
+        for callID in callIDs {
+            guard let descriptor = descriptorByID[callID],
+                  let detail = toolPayloads.resolving(descriptor) else { return nil }
+            resolved.append(detail)
+        }
+        return resolved
+    }
+
     func replacingPreparedText(
         _ preparedText: ChatTextPreparationSnapshot
     ) -> InstalledChatTranscript {
         InstalledChatTranscript(
             tag: tag,
             timeline: timeline,
+            toolPayloads: toolPayloads,
             runtimeItems: runtimeItems,
             preparedText: preparedText,
             queuedMessages: queuedMessages,
@@ -253,6 +283,7 @@ typealias ChatTranscriptProjectionWorkGate = @Sendable (ChatTranscriptProjection
 
 private struct BuiltChatTranscript: Sendable {
     let timeline: ChatTranscriptTimeline
+    let toolPayloads: ChatToolPayloadIndex
     let preparedText: ChatTextPreparationSnapshot
     let isInternallyConsistent: Bool
 }
@@ -397,6 +428,7 @@ private actor ChatTranscriptProjectionWorker {
         if let basis, basis.scope == scope, basis.projectionKey == projectionKey {
             return BuiltChatTranscript(
                 timeline: basis.candidate.timeline,
+                toolPayloads: basis.candidate.toolPayloads,
                 preparedText: basis.preparedText,
                 isInternallyConsistent: basis.candidate.isValid
             )
@@ -444,6 +476,7 @@ private actor ChatTranscriptProjectionWorker {
         }
         return BuiltChatTranscript(
             timeline: candidate.timeline,
+            toolPayloads: candidate.toolPayloads,
             preparedText: preparedText,
             isInternallyConsistent: candidate.isValid
         )
@@ -648,6 +681,14 @@ final class ChatTranscriptPresentationStore {
     }
     #endif
 
+    func resolveToolDetails(
+        callIDs: [String],
+        installationTag: ChatTranscriptProjectionTag
+    ) -> [ChatToolPresentation]? {
+        guard let installed, installed.tag == installationTag else { return nil }
+        return installed.resolveToolDetails(callIDs: callIDs, installationTag: installationTag)
+    }
+
     func entranceState(for id: String) -> ChatTranscriptEntranceState {
         if admittedEntranceIDs.contains(id) { return .admitted }
         if pendingEntranceIDs.contains(id) { return .pending }
@@ -725,6 +766,7 @@ final class ChatTranscriptPresentationStore {
                 let output = InstalledChatTranscript(
                     tag: next.tag,
                     timeline: built.timeline,
+                    toolPayloads: built.toolPayloads,
                     runtimeItems: runtimeItems,
                     preparedText: built.preparedText,
                     queuedMessages: next.snapshot.displayedQueuedMessages,

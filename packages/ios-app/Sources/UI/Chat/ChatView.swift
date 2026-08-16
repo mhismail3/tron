@@ -282,7 +282,14 @@ struct ChatView: View {
                                     ChatTranscriptRenderRow(
                                         item: item,
                                         preparedText: installed.preparedText.slice(for: item),
-                                        hiddenThinkingLabel: snapshot.extensionUI.hiddenThinkingLabel
+                                        hiddenThinkingLabel: snapshot.extensionUI.hiddenThinkingLabel,
+                                        installationTag: installed.tag,
+                                        resolveToolDetails: { callIDs, tag in
+                                            transcriptPresentation.resolveToolDetails(
+                                                callIDs: callIDs,
+                                                installationTag: tag
+                                            )
+                                        }
                                     )
                                     .equatable()
                                 }
