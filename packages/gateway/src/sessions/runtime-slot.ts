@@ -109,6 +109,8 @@ export class RuntimeSlot {
   private operation: SessionOperationState | undefined;
   private retry: RetryState | undefined;
   private resourceReloadOptions: { resolveProjectTrust: () => Promise<boolean> } | undefined;
+  private projectTrustReloadOverride: boolean | undefined;
+  private trustReloadPending = false;
   private readonly toolExecutions = new Map<string, ToolExecutionState>();
   /** Bounded runtime timing enriches the mobile projection without changing Pi
    * JSONL. Historical entries without retained metadata use timestamp fallback. */
@@ -162,6 +164,7 @@ export class RuntimeSlot {
   }
 
   get modelRuntime(): ModelRuntime {
+    this.assertNoTrustReload();
     return this.runtime.session.modelRuntime;
   }
 
@@ -208,6 +211,7 @@ export class RuntimeSlot {
   }
 
   sessionEnvironment(): Record<string, string> {
+    this.assertNoTrustReload();
     const session = this.runtime.session;
     return {
       PI_SESSION_ID: session.sessionId,
@@ -261,6 +265,13 @@ export class RuntimeSlot {
     await this.bindSession();
   }
 
+  private effectiveResourceReloadOptions(): { resolveProjectTrust: () => Promise<boolean> } | undefined {
+    const override = this.projectTrustReloadOverride;
+    return override === undefined
+      ? this.resourceReloadOptions
+      : { resolveProjectTrust: async () => override };
+  }
+
   private commandActions(): ExtensionCommandContextActions {
     return {
       waitForIdle: () => this.runtime.session.waitForIdle(),
@@ -269,11 +280,9 @@ export class RuntimeSlot {
       navigateTree: (targetId, options) => this.runtime.session.navigateTree(targetId, options),
       switchSession: (sessionPath, options) => this.runtime.switchSession(sessionPath, options),
       reload: async () => {
-        await this.runtime.session.resourceLoader.reload(this.resourceReloadOptions);
+        await this.runtime.session.resourceLoader.reload(this.effectiveResourceReloadOptions());
         await this.runtime.session.reload();
-        this.revision += 1;
-        this.emit("session.resourcesChanged", {});
-        this.publishSnapshot();
+        if (this.projectTrustReloadOverride === undefined) this.commitReload();
       },
     };
   }
@@ -731,6 +740,7 @@ export class RuntimeSlot {
   }
 
   snapshot(sequence = this.eventSequence): SessionSnapshot {
+    this.assertNoTrustReload();
     const session = this.runtime.session;
     this.ensureAgentProjection();
     const contextUsage = session.getContextUsage();
@@ -783,6 +793,7 @@ export class RuntimeSlot {
   }
 
   transcriptPage(before?: number, expectedNextEntryId?: string): TranscriptPage {
+    this.assertNoTrustReload();
     try {
       return projectTranscriptPage(
         this.runtime.session.sessionManager,
@@ -801,7 +812,7 @@ export class RuntimeSlot {
   }
 
   publishSnapshot(): void {
-    if (this.disposed) return;
+    if (this.disposed || this.trustReloadPending) return;
     this.eventSequence += 1;
     this.hooks.broadcast(this.id, "session.snapshot", this.snapshot(this.eventSequence) as unknown as JsonValue);
     const summary = this.summary();
@@ -1164,10 +1175,12 @@ export class RuntimeSlot {
   }
 
   tree(): SessionTreeNode[] {
+    this.assertNoTrustReload();
     return projectTree(this.runtime.session.sessionManager, this.dependencies.blobs);
   }
 
   commands(): CommandInfo[] {
+    this.assertNoTrustReload();
     const session = this.runtime.session;
     const extension: CommandInfo[] = session.extensionRunner.getRegisteredCommands().map((command) => ({
       name: command.invocationName,
@@ -1192,6 +1205,7 @@ export class RuntimeSlot {
   }
 
   context(): JsonValue {
+    this.assertNoTrustReload();
     const session = this.runtime.session;
     return safeJson({
       systemPrompt: session.systemPrompt,
@@ -1206,6 +1220,7 @@ export class RuntimeSlot {
   }
 
   resources(): JsonValue {
+    this.assertNoTrustReload();
     return safeJson({ commands: this.commands(), ...this.resourcesValue() });
   }
 
@@ -1260,18 +1275,36 @@ export class RuntimeSlot {
   }
 
   respondToInteraction(id: string, value: unknown, cancelled: boolean): void {
+    this.assertNoTrustReload();
     this.ui.respond(id, value, cancelled);
   }
 
-  async reload(): Promise<void> {
+  beginTrustReload(): void {
+    if (this.trustReloadPending) return;
+    this.assertIdle();
+    this.trustReloadPending = true;
+  }
+
+  async reload(projectTrusted?: boolean, publish = true, trustTransition = false): Promise<void> {
     await this.lane.run(async () => {
-      this.assertIdle();
-      await this.runtime.session.resourceLoader.reload(this.resourceReloadOptions);
-      await this.runtime.session.reload();
-      this.revision += 1;
-      this.emit("session.resourcesChanged", {});
-      this.publishSnapshot();
+      this.assertIdle(trustTransition);
+      const previousOverride = this.projectTrustReloadOverride;
+      this.projectTrustReloadOverride = projectTrusted;
+      try {
+        await this.runtime.session.resourceLoader.reload(this.effectiveResourceReloadOptions());
+        await this.runtime.session.reload();
+        if (publish) this.commitReload();
+      } finally {
+        this.projectTrustReloadOverride = previousOverride;
+      }
     });
+  }
+
+  commitReload(): void {
+    this.trustReloadPending = false;
+    this.revision += 1;
+    this.emit("session.resourcesChanged", {});
+    this.publishSnapshot();
   }
 
   async importFromJsonl(path: string, cwdOverride?: string): Promise<void> {
@@ -1308,7 +1341,7 @@ export class RuntimeSlot {
 
   async dispose(): Promise<void> {
     if (this.disposed) return;
-    if (this.isBusy) throw new GatewayError("busy", "Cannot evict a busy session runtime");
+    if (this.isBusy || this.trustReloadPending) throw new GatewayError("busy", "Cannot evict a busy session runtime");
     this.disposed = true;
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
     this.stopActivityHeartbeat();
@@ -1318,13 +1351,20 @@ export class RuntimeSlot {
     await this.runtime.dispose();
   }
 
-  private assertUsable(): void {
+  private assertNoTrustReload(): void {
+    if (this.trustReloadPending) {
+      throw new GatewayError("busy", "Project trust is being reconfigured", true);
+    }
+  }
+
+  private assertUsable(allowTrustReload = false): void {
     if (this.disposed) throw new GatewayError("conflict", "Session runtime was disposed", true);
+    if (!allowTrustReload) this.assertNoTrustReload();
     this.touch();
   }
 
-  private assertIdle(): void {
-    this.assertUsable();
+  private assertIdle(allowTrustReload = false): void {
+    this.assertUsable(allowTrustReload);
     if (this.runtime.session.isStreaming || this.isBusy) throw new GatewayError("busy", "Session must be idle for this operation");
   }
 }

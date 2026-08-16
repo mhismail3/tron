@@ -396,8 +396,16 @@ export class GatewayService {
       case "trust.set":
         return this.mutation(client, method, params, async () => {
           const decision = params.decision === null ? null : boolean(params.decision, "decision");
-          const result = await this.dependencies.trust.set(string(params.cwd, "cwd", { max: 4_096 }), decision);
-          await this.dependencies.sessions.reloadProject(result.cwd);
+          const result = await this.dependencies.trust.setAndApply(
+            string(params.cwd, "cwd", { max: 4_096 }),
+            decision,
+            async (inspection) => this.dependencies.sessions.reloadProject(
+              inspection.cwd,
+              inspection.effectiveDecision === true,
+              false,
+            ),
+            async (inspection) => this.dependencies.sessions.commitProjectReload(inspection.cwd),
+          );
           this.dependencies.broadcast("trust.changed", safeJson(result));
           return safeJson(result);
         });

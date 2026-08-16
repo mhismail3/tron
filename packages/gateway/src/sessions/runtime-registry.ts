@@ -20,6 +20,7 @@ export class RuntimeRegistry {
   private readonly summaryRevisions = new Map<string, number>();
   private readonly latestSummaries = new Map<string, SessionSummaryUpdate>();
   private ambiguousSessionIds = new Set<string>();
+  private readonly trustReloadProjects = new Set<string>();
   private revision = 0;
   private catalogFingerprint: string | undefined;
   private evictionTimer?: NodeJS.Timeout;
@@ -240,9 +241,23 @@ export class RuntimeRegistry {
     }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
+  private async projectTrustReloading(cwdInput: string): Promise<boolean> {
+    if (this.trustReloadProjects.size === 0) return false;
+    try {
+      const cwd = await this.options.trust.canonicalDirectory(cwdInput);
+      return this.trustReloadProjects.has(cwd);
+    } catch (error) {
+      if (this.trustReloadProjects.size > 0) return true;
+      throw error;
+    }
+  }
+
   async create(cwdInput: string): Promise<RuntimeSlot> {
     const trust = await this.options.trust.requireResolved(cwdInput);
     return this.mutex.run(async () => {
+      if (this.trustReloadProjects.has(trust.cwd)) {
+        throw new GatewayError("busy", "Project trust is being reconfigured", true);
+      }
       const manager = SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd));
       const id = manager.getSessionId();
       const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false);
@@ -272,6 +287,9 @@ export class RuntimeRegistry {
       }
       const info = catalog.infos.find((session) => session.id === sessionId);
       if (!info) throw new GatewayError("not_found", "Tron session was removed before it could be opened");
+      if (await this.projectTrustReloading(info.cwd)) {
+        throw new GatewayError("busy", "Project trust is being reconfigured", true);
+      }
       const manager = SessionManager.open(info.path, this.sessionDirectoryFor(info.cwd));
       const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), this.interrupted.has(sessionId));
       this.slots.set(sessionId, slot);
@@ -282,6 +300,9 @@ export class RuntimeRegistry {
   async importFromJsonl(path: string, cwdInput: string): Promise<RuntimeSlot> {
     const trust = await this.options.trust.requireResolved(cwdInput);
     return this.mutex.run(async () => {
+      if (this.trustReloadProjects.has(trust.cwd)) {
+        throw new GatewayError("busy", "Project trust is being reconfigured", true);
+      }
       const manager = SessionManager.inMemory(trust.cwd);
       const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false);
       this.slots.set(slot.id, slot);
@@ -299,13 +320,62 @@ export class RuntimeRegistry {
     });
   }
 
-  async reloadProject(cwdInput: string): Promise<void> {
+  async reloadProject(cwdInput: string, projectTrusted?: boolean, publish = true): Promise<void> {
     const cwd = await this.options.trust.canonicalDirectory(cwdInput);
-    const slots = [...this.slots.values()].filter((slot) => slot.cwd === cwd);
-    await Promise.all(slots.map(async (slot) => {
-      if (slot.isBusy) throw new GatewayError("busy", "Stop active sessions before changing project trust", true);
-      await slot.reload();
-    }));
+    const transactional = !publish;
+    const slots = await this.mutex.run(() => {
+      const current = [...this.slots.values()].filter((slot) => slot.cwd === cwd);
+      if (current.some((slot) => slot.isBusy)) {
+        throw new GatewayError("busy", "Stop active sessions before changing project trust", true);
+      }
+      if (transactional) {
+        current.forEach((slot) => slot.beginTrustReload());
+        this.trustReloadProjects.add(cwd);
+      }
+      return current;
+    });
+    const results = await Promise.allSettled(
+      slots.map((slot) => slot.reload(projectTrusted, false, transactional)),
+    );
+    const failures = results.flatMap((result, index) => result.status === "rejected"
+      ? [{ sessionId: slots[index]!.id, reason: result.reason }]
+      : []);
+    if (failures.length === 1) {
+      const { sessionId, reason } = failures[0]!;
+      if (reason instanceof GatewayError) {
+        throw new GatewayError(reason.code, reason.message, reason.retryable, {
+          sessionId,
+          ...(reason.details === undefined ? {} : { cause: reason.details }),
+        });
+      }
+      throw new GatewayError(
+        "internal",
+        reason instanceof Error ? reason.message : "Project runtime rejected the trust reload",
+        false,
+        { sessionId },
+      );
+    }
+    if (failures.length > 1) {
+      throw new GatewayError(
+        "internal",
+        "One or more project runtimes rejected the trust reload",
+        false,
+        { failures: failures.map(({ sessionId, reason }) => ({
+          sessionId,
+          message: reason instanceof Error ? reason.message : "Unknown runtime reload failure",
+        })) },
+      );
+    }
+    if (publish) slots.forEach((slot) => slot.commitReload());
+  }
+
+  async commitProjectReload(cwdInput: string): Promise<void> {
+    const cwd = await this.options.trust.canonicalDirectory(cwdInput);
+    await this.mutex.run(() => {
+      const slots = [...this.slots.values()].filter((slot) => slot.cwd === cwd);
+      slots.forEach((slot) => slot.commitReload());
+      this.trustReloadProjects.delete(cwd);
+    });
   }
 
   async delete(sessionId: string): Promise<void> {
@@ -314,6 +384,9 @@ export class RuntimeRegistry {
       this.requireUnambiguousSessionId(sessionId);
       const summary = catalog.sessions.find((session) => session.id === sessionId);
       if (!summary) throw new GatewayError("not_found", "Tron session was not found");
+      if (await this.projectTrustReloading(summary.cwd)) {
+        throw new GatewayError("busy", "Project trust is being reconfigured", true);
+      }
       const slot = this.slots.get(sessionId);
       if (slot?.isBusy) throw new GatewayError("busy", "Stop the active session before deleting it");
       if (summary.kind === "subagent") {

@@ -249,7 +249,10 @@ untrusted project resources.
 Unresolved trust blocks project resource loading. A trusted project may load
 settings, extensions, skills, prompts, packages, and system prompt files with the
 Mac user's authority. This is not sandboxing. Package and extension source must
-be reviewed before installation.
+be reviewed before installation. Trust mutations serialize, prepare every open project runtime with
+the exact proposed decision, and persist only after all reload attempts settle successfully. A reload
+or persistence failure restores the exact prior saved decision and reapplies that runtime state before the mutation can fail; rollback
+activation failures remain explicit instead of reporting a failed-but-applied trust change.
 
 The PTY implementation uses node-pty's architecture-specific macOS spawn
 helper. The locked package's install hook is followed by Tron's `postinstall`

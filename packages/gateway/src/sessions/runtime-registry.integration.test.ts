@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -655,6 +655,8 @@ export default function (pi) {
       mkdir(join(pi, "prompts"), { recursive: true }),
       mkdir(join(pi, "skills", "review"), { recursive: true }),
     ]);
+    const cwdAlias = join(root, "workspace-alias");
+    await symlink(cwd, cwdAlias);
     await Promise.all([
       writeFile(join(pi, "extensions", "tool.ts"), `export default function (pi) { pi.registerTool({ name: "project_echo", label: "Project echo", description: "Echo project text", parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] }, execute: async (_id, params) => ({ content: [{ type: "text", text: params.text }], details: {} }) }); }\n`),
       writeFile(join(pi, "prompts", "review.md"), `---\ndescription: Review the current change\n---\nReview $ARGUMENTS\n`),
@@ -662,12 +664,13 @@ export default function (pi) {
     ]);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
+    const resourceEvents: string[] = [];
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
       trust,
-      broadcast: () => {},
+      broadcast: (_sessionId, topic) => { resourceEvents.push(topic); },
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
     });
@@ -689,12 +692,23 @@ export default function (pi) {
       expect.objectContaining({ name: "project_echo", description: "Echo project text", scope: "project" }),
     ]));
 
+    resourceEvents.length = 0;
+    await registry.reloadProject(cwd, false, false);
+    expect(() => slot.resources()).toThrow("Project trust is being reconfigured");
+    expect(() => slot.modelRuntime).toThrow("Project trust is being reconfigured");
+    expect(() => slot.sessionEnvironment()).toThrow("Project trust is being reconfigured");
+    expect(() => slot.respondToInteraction("pending", null, true)).toThrow("Project trust is being reconfigured");
+    await expect(registry.create(cwd)).rejects.toMatchObject({ code: "busy", retryable: true });
+    await expect(registry.create(cwdAlias)).rejects.toMatchObject({ code: "busy", retryable: true });
+    await expect(trust.inspect(cwd)).resolves.toMatchObject({ savedDecision: true });
+    expect(resourceEvents).not.toContain("session.resourcesChanged");
     await trust.set(cwd, false);
-    await registry.reloadProject(cwd);
+    await registry.commitProjectReload(cwd);
     const untrusted = slot.resources() as any;
     expect(untrusted.tools).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "project_echo" }),
     ]));
+    expect(resourceEvents).toContain("session.resourcesChanged");
   });
 
   it("owns its catalog, infers nested subagents, and keeps ordinary forks user-visible", async () => {
