@@ -112,9 +112,10 @@ actor GatewayClient {
         try Task.checkCancellation()
         guard generation == epochID else { throw CancellationError() }
 
+        guard let socketURL = profile.socketURL else { throw Self.invalidProfileEndpoint() }
         self.profile = profile
         self.token = token
-        var request = URLRequest(url: profile.socketURL, timeoutInterval: 15)
+        var request = URLRequest(url: socketURL, timeoutInterval: 15)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let socket = socketFactory.makeConnection(request)
         connection = ConnectionEpoch(id: epochID, socket: socket)
@@ -322,10 +323,11 @@ actor GatewayClient {
         guard let profile, let token else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
-        var components = URLComponents(url: profile.httpBaseURL, resolvingAgainstBaseURL: false)!
-        components.path = "/v1/uploads"
-        components.queryItems = [URLQueryItem(name: "name", value: name)]
-        var request = URLRequest(url: components.url!, timeoutInterval: 60)
+        guard let url = profile.httpURL(
+            path: "/v1/uploads",
+            queryItems: [URLQueryItem(name: "name", value: name)]
+        ) else { throw Self.invalidProfileEndpoint() }
+        var request = URLRequest(url: url, timeoutInterval: 60)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
@@ -371,9 +373,10 @@ actor GatewayClient {
         profile: GatewayProfile,
         token: String
     ) async throws -> (Data, String) {
-        var components = URLComponents(url: profile.httpBaseURL, resolvingAgainstBaseURL: false)!
-        components.path = "/v1/blobs/\(id)"
-        var request = URLRequest(url: components.url!, timeoutInterval: 30)
+        guard let url = profile.httpURL(path: "/v1/blobs/\(id)") else {
+            throw Self.invalidProfileEndpoint()
+        }
+        var request = URLRequest(url: url, timeoutInterval: 30)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -388,9 +391,10 @@ actor GatewayClient {
         token: String,
         maximumBytes: Int
     ) async throws -> (Data, String) {
-        var components = URLComponents(url: profile.httpBaseURL, resolvingAgainstBaseURL: false)!
-        components.path = "/v1/blobs/\(id)"
-        var request = URLRequest(url: components.url!, timeoutInterval: 30)
+        guard let url = profile.httpURL(path: "/v1/blobs/\(id)") else {
+            throw Self.invalidProfileEndpoint()
+        }
+        var request = URLRequest(url: url, timeoutInterval: 30)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, http) = try await boundedHTTPDataTransport.data(
             for: request,
@@ -575,6 +579,15 @@ actor GatewayClient {
 
     private func requireEpoch(_ epochID: Int) throws {
         guard ownsEpoch(epochID) else { throw CancellationError() }
+    }
+
+    private nonisolated static func invalidProfileEndpoint() -> GatewayFailure {
+        GatewayFailure(
+            code: "invalid_profile",
+            message: "This saved gateway address is invalid. Pair the Mac again.",
+            retryable: false,
+            details: nil
+        )
     }
 
     private nonisolated static func possiblySentFailure(

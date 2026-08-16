@@ -42,6 +42,7 @@ final class GatewayProfileStore {
     }
 
     func save(_ profile: GatewayProfile, token: String) throws {
+        guard profile.hasValidEndpoint else { throw GatewayProfileStoreError.invalidEndpoint }
         let previousDocument = document
         let previousToken = try tokens.read(profileID: profile.id)
         var values = previousDocument.profiles.filter { $0.id != profile.id }
@@ -99,11 +100,24 @@ final class GatewayProfileStore {
     }
 
     private var document: GatewayProfileDocument {
-        (try? metadata.load()) ?? GatewayProfileDocument(profiles: [], selectedProfileID: nil)
+        guard let loaded = try? metadata.load() else {
+            return GatewayProfileDocument(profiles: [], selectedProfileID: nil)
+        }
+        let profiles = loaded.profiles.filter(\.hasValidEndpoint)
+        let selectedProfileID = profiles.contains { $0.id == loaded.selectedProfileID }
+            ? loaded.selectedProfileID
+            : profiles.first?.id
+        let sanitized = GatewayProfileDocument(
+            profiles: profiles,
+            selectedProfileID: selectedProfileID
+        )
+        if sanitized != loaded { try? metadata.save(sanitized) }
+        return sanitized
     }
 }
 
 enum GatewayProfileStoreError: Error {
+    case invalidEndpoint
     case rollbackFailed(commit: Error, rollback: Error)
 }
 

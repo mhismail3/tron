@@ -82,8 +82,10 @@ store boundary: atomic Keychain upsert succeeds before a single-document metadat
 restores the exact prior credential (or removes a newly created one), and credential-deletion failure restores
 removed metadata. Removal and rollback failures remain observable to lifecycle ownership, which retains
 profile-scoped drafts/cache and enters recoverable offline state instead of reporting a successful forget.
-Corrupt v2 metadata self-cleans and valid legacy metadata migrates on the next write, so
-credential failure cannot leave selected metadata without its owned secret. Every suspended connect/reconnect/cache boundary revalidates that
+Corrupt v2 metadata self-cleans, malformed persisted host/port values are removed before selection,
+and valid legacy metadata migrates on the next write. Gateway socket/upload/blob construction uses
+failable validated URLs and rejects an invalid profile before opening transport, so neither malformed
+metadata nor credential failure can leave selected metadata without its owned secret. Every suspended connect/reconnect/cache boundary revalidates that
 lifecycle admission. Mutation receipt reconciliation captures generation-only admission so it may
 resolve across a same-profile reconnect, but profile replacement invalidates it before any poll or
 replay. Connection-owned terminal-open results that resolve after a same-lifecycle reconnect must attach

@@ -37,6 +37,21 @@ struct GatewayClientTransportTests {
         deviceId: "device"
     )
 
+    @Test("invalid persisted endpoints fail before socket creation")
+    func invalidEndpointFailsClosed() async {
+        let factory = ScriptedGatewaySocketFactory(socket: ScriptedGatewaySocket())
+        let client = GatewayClient(socketFactory: factory.factory)
+        let invalid = GatewayProfile(
+            id: "invalid", label: "Invalid", host: "bad/path", port: 70_000,
+            machineId: "invalid", deviceId: nil
+        )
+
+        await #expect(throws: GatewayFailure.self) {
+            try await client.connect(profile: invalid, token: "token")
+        }
+        #expect(factory.requests.isEmpty)
+    }
+
     @Test("hello and request frames use injected IDs without changing their byte protocol")
     func deterministicHelloAndRequestIDs() async throws {
         try await withTestWatchdog {

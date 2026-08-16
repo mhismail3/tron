@@ -8,21 +8,30 @@ struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
     let machineId: String
     var deviceId: String? = nil
 
-    var httpBaseURL: URL {
+    var hasValidEndpoint: Bool {
+        PairingInvitationParser.canonicalHost(host) != nil
+            && (1...65_535).contains(port)
+            && httpURL() != nil
+            && socketURL != nil
+    }
+
+    func httpURL(path: String = "", queryItems: [URLQueryItem] = []) -> URL? {
         var components = URLComponents()
         components.scheme = "http"
         components.host = host
         components.port = port
-        return components.url!
+        components.path = path
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        return components.url
     }
 
-    var socketURL: URL {
+    var socketURL: URL? {
         var components = URLComponents()
         components.scheme = "ws"
         components.host = host
         components.port = port
         components.path = "/v1/socket"
-        return components.url!
+        return components.url
     }
 }
 

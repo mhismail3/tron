@@ -53,6 +53,27 @@ struct GatewayProfileStoreTests {
         #expect(store.profiles.isEmpty)
     }
 
+    @Test("invalid persisted endpoints self-clean and cannot be saved")
+    func invalidEndpointAdmission() {
+        let invalid = GatewayProfile(
+            id: "invalid", label: "Invalid", host: "bad/path", port: 70_000,
+            machineId: "invalid", deviceId: nil
+        )
+        let metadata = RecordingProfileMetadata(document: .init(
+            profiles: [invalid],
+            selectedProfileID: invalid.id
+        ))
+        let tokens = RecordingTokenStore()
+        let store = GatewayProfileStore(metadata: metadata, tokens: tokens)
+
+        #expect(store.profiles.isEmpty)
+        #expect(metadata.document == GatewayProfileDocument(profiles: [], selectedProfileID: nil))
+        #expect(throws: GatewayProfileStoreError.self) {
+            try store.save(invalid, token: "token")
+        }
+        #expect(tokens.values.isEmpty)
+    }
+
     @Test("successful replacement commits one selected document and token")
     func successfulReplacement() throws {
         let first = profile(id: "first", label: "First")
