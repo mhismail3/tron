@@ -43,7 +43,9 @@ read only by the explicit legacy importer.
 - `GET /v1/blobs/:id` — authenticated transient projected blob
 - `GET /v1/socket` — authenticated protocol version 2 WebSocket
 
-The retired `/engine` protocol is not exposed.
+The pairing limiter keeps the exact rolling per-address window while retaining at most 4,096
+least-recently-used address keys and periodically deleting expired windows; address churn cannot
+create append-only process state. The retired `/engine` protocol is not exposed.
 
 Every WebSocket starts with:
 
