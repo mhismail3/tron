@@ -39,6 +39,7 @@ actor GatewayClient {
     private let uuidSource: UUIDSource
     private let frameDecoder: GatewayFrameDecoder
     private let boundedHTTPDataTransport: BoundedHTTPDataTransport
+    private let boundedHTTPUploadTransport: BoundedHTTPUploadTransport
     private let boundedHTTPFileTransport: BoundedHTTPFileTransport
     private let performanceSignposts: any PerformanceSignposting
     private var connection: ConnectionEpoch?
@@ -54,6 +55,7 @@ actor GatewayClient {
         uuidSource: UUIDSource = .random,
         frameDecoder: GatewayFrameDecoder = .gateway,
         boundedHTTPDataTransport: BoundedHTTPDataTransport = .urlSession,
+        boundedHTTPUploadTransport: BoundedHTTPUploadTransport = .urlSession,
         boundedHTTPFileTransport: BoundedHTTPFileTransport = .urlSession,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
     ) {
@@ -62,6 +64,7 @@ actor GatewayClient {
         self.uuidSource = uuidSource
         self.frameDecoder = frameDecoder
         self.boundedHTTPDataTransport = boundedHTTPDataTransport
+        self.boundedHTTPUploadTransport = boundedHTTPUploadTransport
         self.boundedHTTPFileTransport = boundedHTTPFileTransport
         self.performanceSignposts = performanceSignposts
         var continuation: AsyncStream<GatewayEventDelivery>.Continuation!
@@ -329,14 +332,52 @@ actor GatewayClient {
     }
 
     func upload(name: String, mimeType: String, data: Data) async throws -> String {
-        guard !data.isEmpty, data.count <= GatewayUploadPolicy.maximumRequestBytes else {
-            throw GatewayFailure(
-                code: "upload_failed",
-                message: "Attachments may contain 1 byte through 25 MiB.",
-                retryable: false,
-                details: nil
-            )
-        }
+        try requireUploadSize(data.count)
+        let context = try uploadContext(name: name, mimeType: mimeType)
+        var request = context.request
+        request.httpBody = data
+        let (responseData, http) = try await boundedHTTPDataTransport.data(
+            for: request,
+            maximumBytes: GatewayUploadPolicy.maximumResponseBytes
+        )
+        return try admitUploadResponse(
+            responseData,
+            http: http,
+            context: context,
+            requireConnectionEpoch: true
+        )
+    }
+
+    func upload(
+        name: String,
+        mimeType: String,
+        fileURL: URL,
+        byteCount: Int
+    ) async throws -> String {
+        try requireUploadSize(byteCount)
+        let context = try uploadContext(name: name, mimeType: mimeType)
+        var request = context.request
+        request.setValue(String(byteCount), forHTTPHeaderField: "Content-Length")
+        let (responseData, http) = try await boundedHTTPUploadTransport.data(
+            for: request,
+            fileURL: fileURL,
+            maximumBytes: GatewayUploadPolicy.maximumResponseBytes
+        )
+        return try admitUploadResponse(
+            responseData,
+            http: http,
+            context: context,
+            requireConnectionEpoch: false
+        )
+    }
+
+    private struct UploadContext {
+        let profileID: String
+        let connectionID: Int
+        let request: URLRequest
+    }
+
+    private func uploadContext(name: String, mimeType: String) throws -> UploadContext {
         guard let profile, let token, let connectionID = connection?.id else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
@@ -348,17 +389,32 @@ actor GatewayClient {
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
-        request.httpBody = data
-        let (responseData, http) = try await boundedHTTPDataTransport.data(
-            for: request,
-            maximumBytes: GatewayUploadPolicy.maximumResponseBytes
-        )
-        try requireEpoch(connectionID)
-        guard self.profile?.id == profile.id, http.statusCode == 201 else {
+        return UploadContext(profileID: profile.id, connectionID: connectionID, request: request)
+    }
+
+    private func requireUploadSize(_ byteCount: Int) throws {
+        guard byteCount > 0, byteCount <= GatewayUploadPolicy.maximumRequestBytes else {
+            throw GatewayFailure(
+                code: "upload_failed",
+                message: "Attachments may contain 1 byte through 25 MiB.",
+                retryable: false,
+                details: nil
+            )
+        }
+    }
+
+    private func admitUploadResponse(
+        _ data: Data,
+        http: HTTPURLResponse,
+        context: UploadContext,
+        requireConnectionEpoch: Bool
+    ) throws -> String {
+        if requireConnectionEpoch { try requireEpoch(context.connectionID) }
+        guard profile?.id == context.profileID, http.statusCode == 201 else {
             throw GatewayFailure(code: "upload_failed", message: "The attachment could not be uploaded.", retryable: true, details: nil)
         }
         struct Envelope: Decodable { struct Upload: Decodable { let id: String }; let upload: Upload }
-        return try JSONDecoder.gateway.decode(Envelope.self, from: responseData).upload.id
+        return try JSONDecoder.gateway.decode(Envelope.self, from: data).upload.id
     }
 
     func blob(id: String, maximumBytes: Int) async throws -> (Data, String) {

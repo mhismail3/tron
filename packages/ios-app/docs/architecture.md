@@ -332,9 +332,9 @@ existing explicit Use/Keep disposition. Route-provided initial editor text seeds
 profile/session draft; reopen and repeated preparation cannot overwrite retained edits. `SessionShellView`
 observes explicit selected-profile identity through `SessionShellProfileRouteOwner`; an A → B → A change
 synchronously revokes the current presentation and clears its navigation route before another profile can
-reuse the screen's prior draft scope. File and session imports require a regular file no larger than 25 MiB,
-check size before mapped reading, reject a changed size before upload, and release security-scoped access before
-the first network suspension. Staged attachment retention beyond a
+reuse the screen's prior draft scope. File attachments and session imports require a regular file no larger than
+25 MiB and reject changed sizes before upload. Session imports copy through a bounded off-main stream into a
+protected temporary file, then release security-scoped access before the first network suspension. Staged attachment retention beyond a
 presentation remains a Phase 8D product decision; abandoned unclaimed remote IDs expire under the bounded Gateway
 store rather than being transferred speculatively. Guided and advanced editor changes share one monotonic
 revision owner; automatic invalidation loads cannot replace either form of unsaved input, and only

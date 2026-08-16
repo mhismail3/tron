@@ -11,10 +11,13 @@ struct SessionImportCoordinatorTests {
             let access = FileAccessRecorder(data: Data("session".utf8))
             let harness = try await makeHarness(
                 fileAccess: access.seam,
-                upload: { name, mimeType, data in
+                upload: { name, mimeType, fileURL, byteCount in
                     #expect(name == "session.jsonl")
                     #expect(mimeType == "application/x-ndjson")
-                    #expect(data == Data("session".utf8))
+                    #expect(byteCount == 7)
+                    let stagedData = try Data(contentsOf: fileURL)
+                    #expect(stagedData == Data("session".utf8))
+                    #expect(access.stopCount == 1)
                     return "upload-a"
                 }
             )
@@ -39,6 +42,7 @@ struct SessionImportCoordinatorTests {
             #expect(access.startCount == 1)
             #expect(access.readCount == 1)
             #expect(access.stopCount == 1)
+            #expect(access.stagingIsClean)
             await harness.client.close()
         }
     }
@@ -52,7 +56,7 @@ struct SessionImportCoordinatorTests {
             )
             let harness = try await makeHarness(
                 fileAccess: access.seam,
-                upload: { _, _, _ in
+                upload: { _, _, _, _ in
                     Issue.record("oversized import unexpectedly uploaded")
                     return "unused"
                 }
@@ -78,7 +82,7 @@ struct SessionImportCoordinatorTests {
             let access = FileAccessRecorder(data: Data())
             let harness = try await makeHarness(
                 fileAccess: access.seam,
-                upload: { _, _, _ in
+                upload: { _, _, _, _ in
                     Issue.record("empty import unexpectedly uploaded")
                     return "unused"
                 }
@@ -104,8 +108,8 @@ struct SessionImportCoordinatorTests {
             let gate = UploadGate()
             let harness = try await makeHarness(
                 fileAccess: access.seam,
-                upload: { name, mimeType, data in
-                    try await gate.upload(name: name, mimeType: mimeType, data: data)
+                upload: { name, mimeType, fileURL, byteCount in
+                    try await gate.upload(name: name, mimeType: mimeType, fileURL: fileURL, byteCount: byteCount)
                 }
             )
             let importing = Task {
@@ -135,8 +139,8 @@ struct SessionImportCoordinatorTests {
             let gate = UploadGate()
             let harness = try await makeHarness(
                 fileAccess: access.seam,
-                upload: { name, mimeType, data in
-                    try await gate.upload(name: name, mimeType: mimeType, data: data)
+                upload: { name, mimeType, fileURL, byteCount in
+                    try await gate.upload(name: name, mimeType: mimeType, fileURL: fileURL, byteCount: byteCount)
                 }
             )
             let importing = Task {
@@ -209,7 +213,7 @@ struct SessionImportCoordinatorTests {
                     uuidSource: .random
                 ),
                 fileAccess: access.seam,
-                upload: { _, _, _ in
+                upload: { _, _, _, _ in
                     Issue.record("upload unexpectedly ran after profile replacement")
                     return "unused"
                 }
@@ -234,7 +238,7 @@ struct SessionImportCoordinatorTests {
             let access = FileAccessRecorder(data: Data("mutation".utf8))
             let harness = try await makeHarness(
                 fileAccess: access.seam,
-                upload: { _, _, _ in "mutation-upload" }
+                upload: { _, _, _, _ in "mutation-upload" }
             )
             let importing = Task {
                 try await harness.coordinator.importSession(
@@ -264,7 +268,7 @@ struct SessionImportCoordinatorTests {
             let access = FileAccessRecorder(data: Data("receipt".utf8))
             let harness = try await makeHarness(
                 fileAccess: access.seam,
-                upload: { _, _, _ in "receipt-upload" }
+                upload: { _, _, _, _ in "receipt-upload" }
             )
             await harness.socket.failNextSend(GatewayFailure(
                 code: "disconnected",
@@ -310,7 +314,7 @@ struct SessionImportCoordinatorTests {
             let access = FileAccessRecorder(data: Data("mutation-failure".utf8))
             let harness = try await makeHarness(
                 fileAccess: access.seam,
-                upload: { _, _, _ in "mutation-failure-upload" }
+                upload: { _, _, _, _ in "mutation-failure-upload" }
             )
             let importing = Task {
                 try await harness.coordinator.importSession(
@@ -347,8 +351,8 @@ struct SessionImportCoordinatorTests {
             let gate = UploadGate()
             let harness = try await makeHarness(
                 fileAccess: access.seam,
-                upload: { name, mimeType, data in
-                    try await gate.upload(name: name, mimeType: mimeType, data: data)
+                upload: { name, mimeType, fileURL, byteCount in
+                    try await gate.upload(name: name, mimeType: mimeType, fileURL: fileURL, byteCount: byteCount)
                 }
             )
             let importing = Task {
@@ -379,7 +383,7 @@ struct SessionImportCoordinatorTests {
             )
             let readHarness = try await makeHarness(
                 fileAccess: readAccess.seam,
-                upload: { _, _, _ in
+                upload: { _, _, _, _ in
                     Issue.record("upload unexpectedly ran after read failure")
                     return "unused"
                 },
@@ -398,7 +402,7 @@ struct SessionImportCoordinatorTests {
             let uploadAccess = FileAccessRecorder(data: Data("upload".utf8))
             let uploadHarness = try await makeHarness(
                 fileAccess: uploadAccess.seam,
-                upload: { _, _, _ in throw ImportTestFailure.upload },
+                upload: { _, _, _, _ in throw ImportTestFailure.upload },
                 connect: false
             )
             do {
@@ -411,6 +415,7 @@ struct SessionImportCoordinatorTests {
             #expect(uploadAccess.startCount == 1)
             #expect(uploadAccess.readCount == 1)
             #expect(uploadAccess.stopCount == 1)
+            #expect(uploadAccess.stagingIsClean)
         }
     }
 
@@ -421,8 +426,8 @@ struct SessionImportCoordinatorTests {
             let gate = UploadGate()
             let harness = try await makeHarness(
                 fileAccess: access.seam,
-                upload: { name, mimeType, data in
-                    try await gate.upload(name: name, mimeType: mimeType, data: data)
+                upload: { name, mimeType, fileURL, byteCount in
+                    try await gate.upload(name: name, mimeType: mimeType, fileURL: fileURL, byteCount: byteCount)
                 }
             )
             let importing = Task {
@@ -435,6 +440,7 @@ struct SessionImportCoordinatorTests {
             importing.cancel()
             await expectCancellation(importing)
             #expect(access.stopCount == 1)
+            #expect(access.stagingIsClean)
             #expect(await harness.socket.sentFrames().count == 1)
             await harness.client.close()
         }
@@ -458,7 +464,7 @@ struct SessionImportCoordinatorTests {
                 pairingCommit: { _, _ in },
                 profileTokenLookup: { _ in "token" },
                 sessionImportFileAccess: access.seam,
-                sessionImportUpload: { _, _, _ in "app-upload" }
+                sessionImportUpload: { _, _, _, _ in "app-upload" }
             )
             await socket.enqueue(helloFrame())
             try await model.connectHostedGateway(profile: profile, token: "token")
@@ -512,7 +518,7 @@ struct SessionImportCoordinatorTests {
                 pairingCommit: { _, _ in },
                 profileTokenLookup: { _ in "token" },
                 sessionImportFileAccess: access.seam,
-                sessionImportUpload: { _, _, _ in "refresh-upload" }
+                sessionImportUpload: { _, _, _, _ in "refresh-upload" }
             )
             await socket.enqueue(helloFrame())
             try await model.connectHostedGateway(profile: initial, token: "token")
@@ -572,7 +578,7 @@ struct SessionImportCoordinatorTests {
                 pairingCommit: { _, _ in },
                 profileTokenLookup: { _ in "token" },
                 sessionImportFileAccess: access.seam,
-                sessionImportUpload: { _, _, _ in "route-upload" }
+                sessionImportUpload: { _, _, _, _ in "route-upload" }
             )
             await sockets[0].enqueue(helloFrame())
             try await model.connectHostedGateway(profile: initial, token: "token")
@@ -775,6 +781,7 @@ private final class FileAccessRecorder {
     private(set) var sizeCount = 0
     private(set) var readCount = 0
     private(set) var stopCount = 0
+    private(set) var copiedDestinations: [URL] = []
 
     init(
         data: Data,
@@ -788,6 +795,10 @@ private final class FileAccessRecorder {
         self.onRead = onRead
     }
 
+    var stagingIsClean: Bool {
+        copiedDestinations.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) }
+    }
+
     var seam: SessionImportFileAccess {
         SessionImportFileAccess(
             startAccessing: { [weak self] _ in
@@ -799,12 +810,13 @@ private final class FileAccessRecorder {
                 self.sizeCount += 1
                 return self.declaredSize
             },
-            read: { [weak self] _ in
+            copy: { [weak self] _, destination, _ in
                 guard let self else { throw CancellationError() }
                 self.readCount += 1
+                self.copiedDestinations.append(destination)
                 self.onRead?()
                 if let readError = self.readError { throw readError }
-                return self.data
+                try self.data.write(to: destination, options: .withoutOverwriting)
             },
             stopAccessing: { [weak self] _ in self?.stopCount += 1 }
         )
@@ -826,7 +838,8 @@ private actor UploadGate {
     private var startWaiters: [StartWaiter] = []
     private var completion: Completion?
 
-    func upload(name: String, mimeType: String, data: Data) async throws -> String {
+    func upload(name: String, mimeType: String, fileURL: URL, byteCount: Int) async throws -> String {
+        #expect((try? Data(contentsOf: fileURL).count) == byteCount)
         started = true
         let waiters = startWaiters
         startWaiters.removeAll()

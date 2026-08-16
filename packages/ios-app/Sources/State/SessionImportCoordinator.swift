@@ -8,7 +8,7 @@ enum SessionImportPolicy {
 struct SessionImportFileAccess {
     let startAccessing: (URL) -> Bool
     let size: (URL) throws -> Int
-    let read: (URL) throws -> Data
+    let copy: (URL, URL, Int) async throws -> Void
     let stopAccessing: (URL) -> Void
 
     static let live = SessionImportFileAccess(
@@ -20,7 +20,48 @@ struct SessionImportFileAccess {
             }
             return size
         },
-        read: { try Data(contentsOf: $0, options: .mappedIfSafe) },
+        copy: { source, destination, expectedSize in
+            let copyTask = Task.detached(priority: .userInitiated) {
+                guard FileManager.default.createFile(
+                    atPath: destination.path,
+                    contents: nil,
+                    attributes: [
+                        .posixPermissions: 0o600,
+                        .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication,
+                    ]
+                ) else { throw CocoaError(.fileWriteUnknown) }
+                let input = try FileHandle(forReadingFrom: source)
+                let output = try FileHandle(forWritingTo: destination)
+                do {
+                    var copied = 0
+                    while let chunk = try input.read(upToCount: 64 * 1_024), !chunk.isEmpty {
+                        try Task.checkCancellation()
+                        guard chunk.count <= expectedSize - copied else {
+                            throw GatewayFailure(
+                                code: "invalid_request",
+                                message: "The session import changed size while it was being read.",
+                                retryable: false,
+                                details: nil
+                            )
+                        }
+                        try output.write(contentsOf: chunk)
+                        copied += chunk.count
+                    }
+                    try output.synchronize()
+                } catch {
+                    try? input.close()
+                    try? output.close()
+                    throw error
+                }
+                try input.close()
+                try output.close()
+            }
+            try await withTaskCancellationHandler {
+                try await copyTask.value
+            } onCancel: {
+                copyTask.cancel()
+            }
+        },
         stopAccessing: { $0.stopAccessingSecurityScopedResource() }
     )
 }
@@ -28,7 +69,8 @@ struct SessionImportFileAccess {
 typealias SessionImportUpload = @MainActor (
     _ name: String,
     _ mimeType: String,
-    _ data: Data
+    _ fileURL: URL,
+    _ byteCount: Int
 ) async throws -> String
 
 /// Owns the local-file-to-upload import pipeline while the Gateway remains the
@@ -45,6 +87,12 @@ final class SessionImportCoordinator {
     private struct Admission {
         let lifecycle: GatewayLifecycleCoordinator.Admission
         let profileID: String
+    }
+
+    private struct StagedFile {
+        let directory: URL
+        let file: URL
+        let byteCount: Int
     }
 
     private let lifecycle: GatewayLifecycleCoordinator
@@ -75,13 +123,15 @@ final class SessionImportCoordinator {
         )
         try require(admission)
 
-        let data = try readImportData(from: url)
+        let staged = try await stageImportFile(from: url)
+        defer { try? FileManager.default.removeItem(at: staged.directory) }
         try require(admission)
 
         let uploadID = try await upload(
             url.lastPathComponent,
             "application/x-ndjson",
-            data
+            staged.file,
+            staged.byteCount
         )
         try require(admission)
 
@@ -94,12 +144,12 @@ final class SessionImportCoordinator {
         )
     }
 
-    private func readImportData(from url: URL) throws -> Data {
-        let isSecurityScoped = fileAccess.startAccessing(url)
+    private func stageImportFile(from source: URL) async throws -> StagedFile {
+        let isSecurityScoped = fileAccess.startAccessing(source)
         defer {
-            if isSecurityScoped { fileAccess.stopAccessing(url) }
+            if isSecurityScoped { fileAccess.stopAccessing(source) }
         }
-        let size = try fileAccess.size(url)
+        let size = try fileAccess.size(source)
         guard size > 0, size <= SessionImportPolicy.maximumBytes else {
             throw GatewayFailure(
                 code: "invalid_request",
@@ -108,16 +158,34 @@ final class SessionImportCoordinator {
                 details: nil
             )
         }
-        let data = try fileAccess.read(url)
-        guard data.count == size, data.count <= SessionImportPolicy.maximumBytes else {
-            throw GatewayFailure(
-                code: "invalid_request",
-                message: "The session import changed size while it was being read.",
-                retryable: false,
-                details: nil
+
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "tron-session-import-\(UUID().uuidString)", directoryHint: .isDirectory)
+        do {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: false,
+                attributes: [
+                    .posixPermissions: 0o700,
+                    .protectionKey: FileProtectionType.completeUntilFirstUserAuthentication,
+                ]
             )
+            let staged = directory.appending(path: "session.jsonl", directoryHint: .notDirectory)
+            try await fileAccess.copy(source, staged, size)
+            let values = try staged.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard values.isRegularFile == true, values.fileSize == size else {
+                throw GatewayFailure(
+                    code: "invalid_request",
+                    message: "The session import changed size while it was being read.",
+                    retryable: false,
+                    details: nil
+                )
+            }
+            return StagedFile(directory: directory, file: staged, byteCount: size)
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            throw error
         }
-        return data
     }
 
     func requireCurrent(_ imported: ImportedSession) throws {

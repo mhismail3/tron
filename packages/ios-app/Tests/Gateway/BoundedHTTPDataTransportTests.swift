@@ -75,6 +75,107 @@ struct BoundedHTTPDataTransportTests {
         }
     }
 
+    @Test("file uploads retain bounded responses without constructing an HTTP body")
+    func gatewayFileUploadBoundary() async throws {
+        try await withTestWatchdog {
+            let profile = GatewayProfile(
+                id: "machine", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            let socket = ScriptedGatewaySocket()
+            let recorder = BoundedUploadTransportRecorder()
+            let file = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+            try Data("file-body".utf8).write(to: file)
+            defer { try? FileManager.default.removeItem(at: file) }
+            let transport = BoundedHTTPUploadTransport { request, fileURL, maximumBytes in
+                await recorder.record(request: request, fileURL: fileURL, maximumBytes: maximumBytes)
+                let response = HTTPURLResponse(
+                    url: request.url!, statusCode: 201, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (Data(#"{"upload":{"id":"file-upload"}}"#.utf8), response)
+            }
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                boundedHTTPUploadTransport: transport
+            )
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await client.connectForLifecycle(profile: profile, token: "secret")
+
+            #expect(try await client.upload(
+                name: "session.jsonl",
+                mimeType: "application/x-ndjson",
+                fileURL: file,
+                byteCount: 9
+            ) == "file-upload")
+            let recorded = try #require(await recorder.value)
+            #expect(recorded.maximumBytes == GatewayUploadPolicy.maximumResponseBytes)
+            #expect(recorded.fileURL == file)
+            #expect(recorded.request.httpBody == nil)
+            #expect(recorded.request.url?.path == "/v1/uploads")
+            #expect(recorded.request.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
+            #expect(recorded.request.value(forHTTPHeaderField: "Content-Type") == "application/x-ndjson")
+            #expect(recorded.request.value(forHTTPHeaderField: "Content-Length") == "9")
+            await client.close()
+        }
+    }
+
+    @Test("same-profile reconnect preserves a completed file upload")
+    func gatewayFileUploadReconnect() async throws {
+        try await withTestWatchdog {
+            let profile = GatewayProfile(
+                id: "machine", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            let oldSocket = ScriptedGatewaySocket()
+            let replacementSocket = ScriptedGatewaySocket()
+            let gate = UploadResponseGate()
+            let transport = BoundedHTTPUploadTransport { request, _, _ in
+                try await gate.response(for: request)
+            }
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(sockets: [oldSocket, replacementSocket]).factory,
+                boundedHTTPUploadTransport: transport
+            )
+            await oldSocket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await client.connectForLifecycle(profile: profile, token: "secret")
+
+            let upload = Task {
+                try await client.upload(
+                    name: "session.jsonl",
+                    mimeType: "application/x-ndjson",
+                    fileURL: URL(fileURLWithPath: "/tmp/session.jsonl"),
+                    byteCount: 7
+                )
+            }
+            await gate.waitUntilStarted()
+            await replacementSocket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await client.connectForLifecycle(profile: profile, token: "secret")
+            await gate.succeed()
+
+            #expect(try await upload.value == "reconnected-upload")
+            await client.close()
+        }
+    }
+
+    @Test("file upload transport propagates cancellation to its active operation")
+    func gatewayFileUploadCancellation() async throws {
+        try await withTestWatchdog {
+            let cancellation = UploadCancellationRecorder()
+            let transport = BoundedHTTPUploadTransport { _, _, _ in
+                try await cancellation.suspend()
+            }
+            let request = URLRequest(url: URL(string: "https://gateway.test/v1/uploads")!)
+            let operation = Task {
+                try await transport.data(for: request, fileURL: URL(fileURLWithPath: "/tmp/file"), maximumBytes: 64)
+            }
+            await cancellation.waitUntilStarted()
+            operation.cancel()
+            await #expect(throws: CancellationError.self) { try await operation.value }
+            #expect(await cancellation.wasCancelled)
+        }
+    }
+
     @Test("export blob reads remain file-backed and epoch-bound")
     func gatewayBlobFileBoundary() async throws {
         try await withTestWatchdog {
@@ -167,6 +268,82 @@ struct BoundedHTTPDataTransportTests {
             #expect(await recorder.count == 1)
             await client.close()
         }
+    }
+}
+
+private actor UploadResponseGate {
+    private var request: URLRequest?
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>?
+
+    func response(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        self.request = request
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        return try await withCheckedThrowingContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func waitUntilStarted() async {
+        if request != nil { return }
+        await withCheckedContinuation { startWaiters.append($0) }
+    }
+
+    func succeed() {
+        guard let request, let url = request.url else { return }
+        let response = HTTPURLResponse(url: url, statusCode: 201, httpVersion: nil, headerFields: nil)!
+        continuation?.resume(returning: (Data(#"{"upload":{"id":"reconnected-upload"}}"#.utf8), response))
+        continuation = nil
+    }
+}
+
+private actor BoundedUploadTransportRecorder {
+    struct Value: @unchecked Sendable {
+        let request: URLRequest
+        let fileURL: URL
+        let maximumBytes: Int
+    }
+
+    private(set) var value: Value?
+
+    func record(request: URLRequest, fileURL: URL, maximumBytes: Int) {
+        value = Value(request: request, fileURL: fileURL, maximumBytes: maximumBytes)
+    }
+}
+
+private actor UploadCancellationRecorder {
+    private var started = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
+    private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>?
+    private(set) var wasCancelled = false
+
+    func suspend() async throws -> (Data, HTTPURLResponse) {
+        started = true
+        let waiters = startWaiters
+        startWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+            }
+        } onCancel: {
+            Task { await self.cancel() }
+        }
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    private func cancel() {
+        wasCancelled = true
+        continuation?.resume(throwing: CancellationError())
+        continuation = nil
     }
 }
 

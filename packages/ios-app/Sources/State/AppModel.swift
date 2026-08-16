@@ -277,8 +277,13 @@ final class AppModel {
             }
         )
         let chatMediaMemoryPressureObserver = ChatMediaMemoryPressureObserver(loader: chatMedia)
-        let resolvedSessionImportUpload = sessionImportUpload ?? { name, mimeType, data in
-            try await client.upload(name: name, mimeType: mimeType, data: data)
+        let resolvedSessionImportUpload = sessionImportUpload ?? { name, mimeType, fileURL, byteCount in
+            try await client.upload(
+                name: name,
+                mimeType: mimeType,
+                fileURL: fileURL,
+                byteCount: byteCount
+            )
         }
         self.lifecycle = lifecycle
         self.mutationExecutor = mutationExecutor

@@ -16,6 +16,27 @@ struct BoundedHTTPDataTransport: Sendable {
     }
 }
 
+struct BoundedHTTPUploadTransport: Sendable {
+    let dataForFileRequest: @Sendable (URLRequest, URL, Int) async throws -> (Data, HTTPURLResponse)
+
+    func data(
+        for request: URLRequest,
+        fileURL: URL,
+        maximumBytes: Int
+    ) async throws -> (Data, HTTPURLResponse) {
+        precondition(maximumBytes >= 0)
+        return try await dataForFileRequest(request, fileURL, maximumBytes)
+    }
+
+    static let urlSession = BoundedHTTPUploadTransport { request, fileURL, maximumBytes in
+        try await BoundedURLSessionDataLoader.load(
+            request,
+            uploadFileURL: fileURL,
+            maximumBytes: maximumBytes
+        )
+    }
+}
+
 struct BoundedHTTPBodyAccumulator {
     let maximumBytes: Int
     private(set) var data = Data()
@@ -50,6 +71,7 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
     private var response: HTTPURLResponse?
     private var session: URLSession?
     private var task: URLSessionDataTask?
+    private var cancellationRequested = false
     private var terminalResult: Result<(Data, HTTPURLResponse), Error>?
 
     private init(maximumBytes: Int) {
@@ -58,12 +80,13 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
 
     static func load(
         _ request: URLRequest,
+        uploadFileURL: URL? = nil,
         maximumBytes: Int
     ) async throws -> (Data, HTTPURLResponse) {
         let loader = BoundedURLSessionDataLoader(maximumBytes: maximumBytes)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                loader.start(request, continuation: continuation)
+                loader.start(request, uploadFileURL: uploadFileURL, continuation: continuation)
             }
         } onCancel: {
             loader.cancel()
@@ -72,6 +95,7 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
 
     private func start(
         _ request: URLRequest,
+        uploadFileURL: URL?,
         continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>
     ) {
         lock.lock()
@@ -85,7 +109,11 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
 
         let configuration = URLSessionConfiguration.ephemeral
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-        let task = session.dataTask(with: request)
+        let task: URLSessionDataTask = if let uploadFileURL {
+            session.uploadTask(with: request, fromFile: uploadFileURL)
+        } else {
+            session.dataTask(with: request)
+        }
 
         lock.lock()
         guard terminalResult == nil else {
@@ -101,10 +129,14 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
 
     private func cancel() {
         lock.lock()
+        cancellationRequested = true
         let task = self.task
         lock.unlock()
-        task?.cancel()
-        finish(.failure(CancellationError()))
+        guard let task else {
+            finish(.failure(CancellationError()))
+            return
+        }
+        task.cancel()
     }
 
     func urlSession(
@@ -146,6 +178,13 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
         task: URLSessionTask,
         didCompleteWithError error: Error?
     ) {
+        lock.lock()
+        let cancellationRequested = self.cancellationRequested
+        lock.unlock()
+        if cancellationRequested {
+            finish(.failure(CancellationError()))
+            return
+        }
         if let error {
             finish(.failure(error))
             return
