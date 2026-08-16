@@ -654,7 +654,7 @@ struct PresentationStyleGuardTests {
     @Test("tool details foreground semantic content and isolate technical JSON")
     func toolDetailPresentation() throws {
         let transcript = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatToolRunViews.swift"),
             encoding: .utf8
         )
         let sheet = try String(
@@ -804,6 +804,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
             encoding: .utf8
         )
+        let transcriptEvents = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptEventViews.swift"),
+            encoding: .utf8
+        )
         let compactPill = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatCompactPill.swift"),
             encoding: .utf8
@@ -842,14 +846,14 @@ struct PresentationStyleGuardTests {
         #expect(scrollCoordinator.contains("openingTailPresentation == presentation"))
         #expect(chat.contains("ChatTranscriptPresentationStore"))
         #expect(!chat.contains("ChatTranscriptPresentation.timeline("))
-        #expect(transcript.contains("struct ChatTranscriptPillModifier: ViewModifier"))
-        #expect(transcript.contains("TronTypography.sizeBodySM"))
+        #expect(transcriptEvents.contains("struct ChatTranscriptPillModifier: ViewModifier"))
+        #expect(transcriptEvents.contains("TronTypography.sizeBodySM"))
         #expect(compactPill.contains("static let verticalPadding: CGFloat = 6"))
         #expect(compactPill.occurrences(of: ".padding(.vertical, ChatCompactPillLayoutPolicy.verticalPadding)") == 2)
-        #expect(transcript.contains(".fixedSize(horizontal: false, vertical: true)"))
-        #expect(transcript.contains(".frame(minWidth: 44, minHeight: 44)"))
-        #expect(transcript.contains(".contentShape(Rectangle())"))
-        #expect(!transcript.contains(".fixedSize()"))
+        #expect(transcriptEvents.contains(".fixedSize(horizontal: false, vertical: true)"))
+        #expect(transcriptEvents.contains(".frame(minWidth: 44, minHeight: 44)"))
+        #expect(transcriptEvents.contains(".contentShape(Rectangle())"))
+        #expect(!transcriptEvents.contains(".fixedSize()"))
         #expect(transcriptPresentation.contains("item.tokensBefore.map(ChatTokenCountPresentation.beforeCompaction)"))
         #expect(compactPill.contains("struct ChatCompactPillSurface"))
         #expect(compactPill.contains("case .glass:"))
@@ -860,7 +864,7 @@ struct PresentationStyleGuardTests {
         #expect(compactPill.contains("Color(lightHex: \"#475569\", darkHex: \"#CBD5E1\")"))
         #expect(compactPill.contains("tone.secondaryColor"))
         #expect(!compactPill.contains("tone.color.opacity"))
-        #expect(!transcript.contains("tone.color.opacity"))
+        #expect(!transcriptEvents.contains("tone.color.opacity"))
         #expect(compactPill.contains("paragraph.baseWritingDirection = .natural"))
         #expect(compactPill.contains("func sizeThatFits("))
         let userPrompt = (transcript.components(separatedBy: "UserPromptText(text:").dropFirst().first ?? "")
@@ -1009,6 +1013,14 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
             encoding: .utf8
         )
+        let transcriptEvents = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptEventViews.swift"),
+            encoding: .utf8
+        )
+        let toolRuns = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatToolRunViews.swift"),
+            encoding: .utf8
+        )
         let chat = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
             encoding: .utf8
@@ -1029,24 +1041,24 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptProjectionKernel.swift"),
             encoding: .utf8
         )
-        let notification = (transcript.components(separatedBy: "struct ChatNotificationView").dropFirst().first ?? "")
+        let notification = (transcriptEvents.components(separatedBy: "struct ChatNotificationView").dropFirst().first ?? "")
             .components(separatedBy: "struct TranscriptNotice").first ?? ""
-        let toolCard = (transcript.components(separatedBy: "struct ToolCard").dropFirst().first ?? "")
+        let toolCard = (toolRuns.components(separatedBy: "struct ToolCard").dropFirst().first ?? "")
             .components(separatedBy: "struct ToolRunView").first ?? ""
         let toolCardLabel = (toolCard.components(separatedBy: "var body: some View").dropFirst().first ?? "")
             .components(separatedBy: ".buttonStyle(.plain)").first ?? ""
-        let toolRunChip = (transcript.components(separatedBy: "private struct ToolRunChip").dropFirst().first ?? "")
+        let toolRunChip = (toolRuns.components(separatedBy: "private struct ToolRunChip").dropFirst().first ?? "")
             .components(separatedBy: "private struct ToolElapsedText").first ?? ""
         let toolRunLabel = (toolRunChip.components(separatedBy: "var body: some View").dropFirst().first ?? "")
             .components(separatedBy: ".buttonStyle(.plain)").first ?? ""
-        let toolElapsed = (transcript.components(separatedBy: "private struct ToolElapsedText").dropFirst().first ?? "")
+        let toolElapsed = (toolRuns.components(separatedBy: "private struct ToolElapsedText").dropFirst().first ?? "")
             .components(separatedBy: "private struct ToolRunElapsedText").first ?? ""
-        let toolRunElapsed = (transcript.components(separatedBy: "private struct ToolRunElapsedText").dropFirst().first ?? "")
+        let toolRunElapsed = (toolRuns.components(separatedBy: "private struct ToolRunElapsedText").dropFirst().first ?? "")
             .components(separatedBy: "struct ToolDetailRoute").first ?? ""
-        #expect(transcript.contains("struct TranscriptNotice: View"))
-        #expect(transcript.contains("struct ChatNotificationView: View"))
-        #expect(transcript.contains("struct ToolRunView: View"))
-        #expect(transcript.components(separatedBy: "ChatCompactPillSurface(tone: tone, material: .glass").count - 1 >= 2)
+        #expect(transcriptEvents.contains("struct TranscriptNotice: View"))
+        #expect(transcriptEvents.contains("struct ChatNotificationView: View"))
+        #expect(toolRuns.contains("struct ToolRunView: View"))
+        #expect((transcriptEvents + toolRuns).components(separatedBy: "ChatCompactPillSurface(tone: tone, material: .glass").count - 1 >= 2)
         #expect(notification.contains("pill.frame(minWidth: 44, minHeight: 44)"))
         #expect(notification.contains(".frame(maxWidth: .infinity, minHeight: 44, alignment: .center)"))
         #expect(chat.contains("LazyVStack(alignment: .leading, spacing: 8)"))
@@ -1056,10 +1068,10 @@ struct PresentationStyleGuardTests {
             #expect(!label.contains("Spacer("))
             #expect(!label.contains("maxWidth"))
         }
-        #expect(transcript.contains("value: visualState"))
-        #expect(!transcript.contains("value: detailTool"))
-        #expect(!transcript.contains("value: presentation)"))
-        #expect(!transcript.contains("value: run)"))
+        #expect((transcriptEvents + toolRuns).contains("value: visualState"))
+        #expect(!toolRuns.contains("value: detailTool"))
+        #expect(!toolRuns.contains("value: presentation)"))
+        #expect(!toolRuns.contains("value: run)"))
         #expect(compactPill.contains("struct ChatCompactPillVisualState: Hashable"))
         #expect(compactPill.contains("static let verticalPadding: CGFloat = 6"))
         #expect(compactPill.contains("static let itemSpacing: CGFloat = 7"))

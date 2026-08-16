@@ -704,7 +704,9 @@ compaction/branch/configuration entries, embedded assistant failures, and exact 
 working/status state share one semantic notification projection and capsule primitive. Only a pill
 with real detail content is an interactive Liquid Glass button; no-detail events use a flat tinted
 fill and stroke with identical type and geometry. Tones are Sendable semantic values resolved to
-SwiftUI color only at the view boundary. Under exact tail bounds, a pending compaction and its
+SwiftUI color only at the view boundary. Conversation turns retain one row owner for text, thinking, and
+lifecycle-safe attachments; event/control capsules and tool-run/detail routes are separate presentation owners
+with unchanged SwiftUI identity and private state. Under exact tail bounds, a pending compaction and its
 canonical entry share a presentation-only global-ordinal identity, so “Compacting context” becomes
 “Context compacted” in place without changing Gateway identity or semantic scroll maps.
 
