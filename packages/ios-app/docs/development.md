@@ -231,6 +231,7 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/SharedContentTests \
   -only-testing:TronMobileTests/PrivacyManifestTests
+packages/ios-app/scripts/test-verify-archive-privacy.sh
 packages/ios-app/scripts/verify-archive-privacy.sh <path-to-xcarchive>
 ```
 
