@@ -567,8 +567,11 @@ archive upload, TestFlight distribution, or App Store release automatically.
 ## Gateway fixture work
 
 Protocol DTO changes require matching gateway tests and Swift decoding tests.
-Use provider-qualified models, preserve unknown JSON through `JSONValue`, and
-make new mutation calls carry a UUID `commandId`.
+Keep Swift wire values in their authority-owned model files (`GatewayConnectionModels`,
+`SessionCatalogModels`, `TranscriptModels`, `SessionRuntimeModels`,
+`ResourceCatalogModels`, `WorkspaceModels`, and `TerminalModels`) without adding projection state or custom
+cross-file serialization. Use provider-qualified models, preserve unknown JSON through
+`JSONValue`, and make new mutation calls carry a UUID `commandId`.
 
 ## Privacy
 

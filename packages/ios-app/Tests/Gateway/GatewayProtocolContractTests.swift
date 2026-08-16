@@ -134,6 +134,30 @@ struct GatewayProtocolContractTests {
         #expect(page.nextCursor == "500")
     }
 
+    @Test("resource, workspace, and terminal DTOs preserve their wire shapes")
+    func resourceWorkspaceAndTerminalDTOsDecode() throws {
+        let inventory = try JSONDecoder.gateway.decode(
+            PackageInventory.self,
+            from: Data(#"{"packages":[{"source":"pkg","scope":"project","filtered":false,"installedPath":"/workspace/pkg"}],"resources":{"commands":2}}"#.utf8)
+        )
+        #expect(inventory.packages.first?.id == "project:pkg")
+        #expect(inventory.resources.objectValue?["commands"] == .number(2))
+
+        let workspace = try JSONDecoder.gateway.decode(
+            WorkspaceListing.self,
+            from: Data(#"{"path":"/workspace","parent":"/","entries":[{"name":"src","path":"/workspace/src","kind":"directory","hidden":false}]}"#.utf8)
+        )
+        #expect(workspace.entries.first?.id == "/workspace/src")
+        #expect(workspace.entries.first?.kind == .directory)
+
+        let terminal = try JSONDecoder.gateway.decode(
+            TerminalSummary.self,
+            from: Data(#"{"id":"terminal","sessionId":"session","cwd":"/workspace","createdAt":"2026-01-01T00:00:00Z","exitedAt":null,"exitCode":null,"sequence":9}"#.utf8)
+        )
+        #expect(terminal.sessionId == "session")
+        #expect(terminal.sequence == 9)
+    }
+
     @Test("iOS only requests restart from a drain-capable Gateway")
     func safeRestartCapability() {
         #expect(!AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1"]))

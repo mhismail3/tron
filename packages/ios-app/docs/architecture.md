@@ -20,6 +20,11 @@ implementation detail; all user-facing language calls the agent Tron.
 | `Sources/UI/Theme` | historical Tron colors and descriptor-based bundled typography |
 | `ShareExtension` | app-group share handoff |
 
+`Sources/Models` keeps wire-compatible value types grouped by authority rather than in one DTO
+monolith: gateway connection, session catalog, transcript, session runtime, resource catalog,
+workspace, and terminal files. Cross-file references remain plain value composition; no split model becomes a
+second cache or reducer.
+
 ## State flow
 
 `GatewayClient` performs one authenticated WebSocket connection, protocol hello,
