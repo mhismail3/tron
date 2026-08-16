@@ -374,6 +374,8 @@ using word-preserving line breaks while outputs and other string metadata wrap; 
 line count, total characters, and per-line length with explicit head/tail omission markers. Small numeric
 and boolean metadata remains unchanged. The final Technical details sub-sheet starts with compact selectable
 execution metadata, then exposes bounded constant-depth Request JSON and Result JSON summary rows in that order.
+Primary semantic content, faithful diff expansion, technical payload traversal, and navigation chrome remain
+separate presentation owners while preserving one established sheet hierarchy and detent behavior.
 Selecting one row opens the untouched payload through progressive structured-field traversal; full raw formatting
 requires that component's separate explicit disclosure and no second readable-output projection is introduced. Result JSON uses
 the authoritative response first, otherwise the complete readable content string, then only a fallback distinct

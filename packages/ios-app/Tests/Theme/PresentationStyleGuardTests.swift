@@ -661,6 +661,19 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolDetailSheet.swift"),
             encoding: .utf8
         )
+        let changesSheet = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolChangesSheet.swift"),
+            encoding: .utf8
+        )
+        let technicalSheet = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolTechnicalDetailsSheet.swift"),
+            encoding: .utf8
+        )
+        let navigationChrome = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolDetailNavigationChrome.swift"),
+            encoding: .utf8
+        )
+        let detailSheets = sheet + changesSheet + technicalSheet
         let presentation = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ToolDetailPresentation.swift"),
             encoding: .utf8
@@ -693,21 +706,17 @@ struct PresentationStyleGuardTests {
         #expect(branchPosition < hostPosition)
         #expect(sheet.contains(".defaultScrollAnchor(.top, for: .initialOffset)"))
         #expect(sheet.contains(".defaultScrollAnchor(.top, for: .alignment)"))
-        let navigationChrome = try #require(
-            sheet.components(separatedBy: "func tronToolDetailNavigationChrome() -> some View {").dropFirst().first?
-                .components(separatedBy: "private struct ToolTechnicalMetadataItem").first
-        )
         #expect(navigationChrome.contains("navigationTitle(\"\")"))
         #expect(navigationChrome.contains(".navigationBarTitleDisplayMode(.inline)"))
         #expect(transcript.matches(#"\.tronToolDetailNavigationChrome\(\)"#) == 2)
-        #expect(sheet.matches(#"\.tronToolDetailNavigationChrome\(\)"#) == 3)
+        #expect(detailSheets.matches(#"\.tronToolDetailNavigationChrome\(\)"#) == 3)
         #expect(sheet.contains("title: \"Technical details\""))
         #expect(sheet.contains("ToolTechnicalDetailsSheet"))
         #expect(sheet.contains("ToolChipFlowLayout"))
         #expect(sheet.contains("ToolStatusChip"))
         #expect(sheet.contains("ToolMetadataChip"))
         let chipLayout = try #require(
-            sheet.components(separatedBy: "private struct ToolChipFlowLayout: Layout {").dropFirst().first?
+            sheet.components(separatedBy: "struct ToolChipFlowLayout: Layout {").dropFirst().first?
                 .components(separatedBy: "private struct ToolActivityChip: View {").first
         )
         #expect(chipLayout.contains("let ideal = subview.sizeThatFits(.unspecified)"))
@@ -723,6 +732,7 @@ struct PresentationStyleGuardTests {
         #expect(sheet.contains("diff.visibleLines(for: density)"))
         #expect(sheet.contains("Text($0).foregroundColor(Color.tronTextSecondary)"))
         #expect(sheet.contains("Text(path.basename).foregroundColor(accent)"))
+        #expect(changesSheet.contains("ToolDiffView(lines: diff.lines)"))
         let primaryDetail = try #require(
             sheet.components(separatedBy: "@ViewBuilder private func primarySection").dropFirst().first?
                 .components(separatedBy: "private func pathText").first
@@ -739,7 +749,7 @@ struct PresentationStyleGuardTests {
         )
         #expect(resultDetail.contains(".font(TronTypography.code(size: TronTypography.sizeBodySM))"))
         let technicalDetail = try #require(
-            sheet.components(separatedBy: "private struct ToolTechnicalDetailsSheet").dropFirst().first?
+            technicalSheet.components(separatedBy: "struct ToolTechnicalDetailsSheet").dropFirst().first?
                 .components(separatedBy: "private struct ToolTechnicalMetadataItem").first
         )
         let requestJSON = try #require(technicalDetail.firstRange(of: "payload(\"Request\", value: tool.request ?? .null)")?.lowerBound)

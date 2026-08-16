@@ -133,7 +133,9 @@ chrome lives in a separate presentation component file with unchanged UIKit/Swif
 `ChatView` retains route/composer/transcript composition while attachment controls and chips, entrance/render
 rows, and extension widgets live in separate presentation files with unchanged identities and transitions.
 Conversation-turn rendering and lifecycle-safe media chips remain in `TranscriptRow.swift`; transcript event
-controls and tool-run/detail routing live in dedicated owners without widening their private helper state.
+controls and tool-run/detail routing live in dedicated owners without widening their private helper state. The
+primary tool sheet, diff destination, technical-payload destination, and shared navigation chrome also have
+separate presentation owners; only their directly shared layout/diff primitives use module-internal access.
 The settings shell and its appearance, connection/import, provider, agent-default, runtime-behavior, resource-path,
 package, trust, custom-model, and diagnostics destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators.
 Resolved package JSON is constructed only inside its progressive detail destination; the overview retains a
