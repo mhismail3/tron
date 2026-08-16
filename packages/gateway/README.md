@@ -104,9 +104,10 @@ canonical value. Trust changes reload
 idle live runtimes before acknowledgement; project resources therefore cannot stay
 loaded from an obsolete decision. PTY output has an independent monotonic
 sequence and bounded attach replay for gap/reconnect convergence. Context, tree,
-resources, commands, exports, and terminal inventory require an established open
-subscription for that exact session, preventing stale client selection from
-reading a different live runtime projection.
+resources, commands, exports, terminal inventory, and terminal creation require an established
+open subscription for that exact session. The Gateway validates that ownership before creating a
+PTY, preventing stale client selection or reconnect races from reading a different runtime or leaving
+an orphan terminal process.
 
 Primary operation groups are `system`, `device`, `legacy`, `session`,
 `extension`, `provider`, `model`, `auth`, `settings`, `trust`, `packages`,

@@ -3,28 +3,28 @@ import Testing
 @testable import TronMobile
 
 @Suite("Terminal coordinator invariants")
-struct TerminalCoordinatorTests {
+struct TerminalReducerTests {
     @Test("open responses install only on their request connection")
     func openResponseConnectionDisposition() {
-        #expect(TerminalCoordinator.openResponseDisposition(
+        #expect(TerminalReducer.openResponseDisposition(
             requestLifecycleGeneration: 3,
             requestConnectionID: 7,
             currentLifecycleGeneration: 3,
             currentConnectionID: 7
         ) == .install)
-        #expect(TerminalCoordinator.openResponseDisposition(
+        #expect(TerminalReducer.openResponseDisposition(
             requestLifecycleGeneration: 3,
             requestConnectionID: 7,
             currentLifecycleGeneration: 3,
             currentConnectionID: 8
         ) == .reattach)
-        #expect(TerminalCoordinator.openResponseDisposition(
+        #expect(TerminalReducer.openResponseDisposition(
             requestLifecycleGeneration: 3,
             requestConnectionID: 7,
             currentLifecycleGeneration: 4,
             currentConnectionID: 8
         ) == .discard)
-        #expect(TerminalCoordinator.openResponseDisposition(
+        #expect(TerminalReducer.openResponseDisposition(
             requestLifecycleGeneration: 3,
             requestConnectionID: 7,
             currentLifecycleGeneration: 3,
@@ -34,7 +34,7 @@ struct TerminalCoordinatorTests {
 
     @Test("pending output count is bounded and a dropped prefix requires replay")
     func pendingOutputCountBound() throws {
-        var coordinator = TerminalCoordinator()
+        var coordinator = TerminalReducer()
         let target = coordinator.beginPresentation(sessionID: "session")
         let transition = coordinator.beginIntent(for: target)
         let intent = try #require(transition?.intent)
@@ -70,7 +70,7 @@ struct TerminalCoordinatorTests {
 
     @Test("pending output bytes are bounded and preserve recovery ownership")
     func pendingOutputByteBound() throws {
-        var coordinator = TerminalCoordinator()
+        var coordinator = TerminalReducer()
         let target = coordinator.beginPresentation(sessionID: "session")
         let transition = coordinator.beginIntent(for: target)
         let intent = try #require(transition?.intent)
@@ -108,7 +108,7 @@ struct TerminalCoordinatorTests {
 
     @Test("pending terminal identities are bounded during open")
     func pendingTerminalIdentityBound() throws {
-        var coordinator = TerminalCoordinator()
+        var coordinator = TerminalReducer()
         let target = coordinator.beginPresentation(sessionID: "session")
         let transition = coordinator.beginIntent(for: target)
         let intent = try #require(transition?.intent)
@@ -147,7 +147,7 @@ struct TerminalCoordinatorTests {
 
     @Test("immediate gap recovery has a hard attempt ceiling")
     func recoveryAttemptCeiling() throws {
-        var coordinator = TerminalCoordinator()
+        var coordinator = TerminalReducer()
         let target = coordinator.beginPresentation(sessionID: "session")
         let transition = coordinator.beginIntent(for: target)
         let intent = try #require(transition?.intent)
@@ -188,7 +188,7 @@ struct TerminalCoordinatorTests {
 
     @Test("typed terminal events reduce through existing replay and recovery rules")
     func typedEventReduction() throws {
-        var coordinator = TerminalCoordinator()
+        var coordinator = TerminalReducer()
         let target = coordinator.beginPresentation(sessionID: "session")
         let transition = coordinator.beginIntent(for: target)
         let intent = try #require(transition?.intent)

@@ -114,7 +114,8 @@ does not mount the retired `pi-subagents` async/fleet editor widgets; the run co
 and the app catches up without presenting transport errors as modal alerts. Backgrounding gates and
 cancels only disposable catalog/foreground reconciliation, never the route, accepted work, or responsive
 socket. Foreground activation coalesces to one responsiveness pass, then runs catalog convergence,
-mounted-session restoration, and terminal reattachment concurrently; catalog retention or failure alone
+mounted-session restoration concurrently, then reattaches terminals only after the mounted session's exact
+subscription is installed on that connection; catalog retention or failure alone
 does not replace a responsive socket. The owned foreground slot releases on success, failure,
 cancellation, or lifecycle replacement. Switch, forget, current-device revoke, and final
 teardown invalidate that reconciliation, reconnect/debounce tasks, profile-scoped reads, and

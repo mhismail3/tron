@@ -87,21 +87,28 @@ activation cannot replace an active handshake, and exact attempt generations rej
 or unauthorized completion. Background scene transition cancels only disposable foreground/catalog
 reconciliation, leaves the route and responsive socket intact, and gates event-triggered catalog reads
 until the next active scene starts a fresh shared pass. After event activation, reconnect and foreground
-reconciliation start dashboard convergence, mounted-session restoration, and terminal reattachment
-concurrently; provider/settings/device reads cannot delay mounted chat restoration, and a retained catalog
-failure never replaces an otherwise responsive socket. Final teardown cancels and joins the event listener and shares one
+reconciliation starts dashboard convergence concurrently with mounted-session restoration; terminal
+reattachment follows exact mounted-session synchronization because the Gateway requires that connection's
+subscription before terminal attach. Provider/settings/device reads cannot delay mounted chat restoration,
+and a retained catalog failure never replaces an otherwise responsive socket. Final teardown cancels and joins the event listener and shares one
 completion across concurrent callers; scene backgrounding deliberately does not tear down accepted
 Gateway-owned work. It shares the clock/UUID seams for Gateway reconnect, receipt, debounce,
 and command-ID work. Its visible-open interval
 contains independently measured authoritative synchronization attempts; invalidated
 attempts end as discarded rather than being mislabeled as successful. Receipt timing
 begins only after an uncertain mutation response, never for an ordinary confirmed
-mutation. `TerminalCoordinator` owns presentation intents, per-terminal operations,
-shared attachment leases, typed terminal-event reduction, a global 16-terminal/256-chunk/1 MiB in-flight event quarantine,
-replay revisions, and post-detach event admission. Terminal open/attach uses one replay installer and closes
-its interval only after reset, delta, and contiguous quarantined chunks are admitted.
-Stale successful attachments schedule an exact-connection compensating detach unless a
-newer presentation still owns that terminal.
+mutation. The observable `TerminalCoordinator` owns terminal request DTOs and wire execution,
+presentation/intents, cleanup tasks, receipt-aware commands, attach/replay intervals, gap reconciliation,
+and reconnect reattachment. Its sole `TerminalReducer` kernel owns per-terminal operations, shared
+attachment leases, typed terminal-event reduction, a global 16-terminal/256-chunk/1 MiB in-flight event
+quarantine, replay revisions, and post-detach event admission. Terminal open/attach uses one replay
+installer and closes its interval only after reset, delta, and contiguous quarantined chunks are admitted.
+`terminal.open` requires the exact installed iOS subscription and the Gateway validates the client's
+opened-session ownership before creating a PTY, preventing orphan terminal creation during route/reconnect
+races. Stale successful attachments schedule an exact-connection compensating detach unless a newer
+presentation still owns that terminal; a matching new attach cancels and joins unsent cleanup first.
+`AppModel` retains only the terminal façade and cross-domain
+Gateway event/lifecycle routing; canonical session subscription ownership stays in `SessionPresentationStore`.
 It loads a bounded disposable cache first, connects, fetches
 cursor-paginated sessions and model catalogs, and replaces local state with
 authoritative snapshots. Session snapshots carry a current transcript tail bounded to
@@ -556,9 +563,8 @@ persist non-secret connection metadata only.
 synchronously invalidate and cancel that exact task. Attempt identity is checked
 immediately after HTTP returns, immediately before profile/Keychain save, before
 connect, and after the connect-owned suspension boundaries. Therefore a stale
-pre-commit HTTP result cannot persist or connect. This admission boundary is not
-a Gateway connection epoch: a connection already suspended inside
-`GatewayClient` still requires the Phase 2 generation hardening.
+pre-commit HTTP result cannot persist or connect. Pairing attempt admission is separate from the
+cohesive generation-owned `GatewayClient` connection epoch; both boundaries reject stale suspended work.
 
 The pairing QR controller shares the camera-authorization boundary and delegates
 AVFoundation setup plus serial start/stop to a QR capture-session provider. Its one

@@ -117,12 +117,15 @@ binding, per-client/global count and byte limits, disconnect cleanup, one-scan t
 revision atomicity are owned by `session-list-pagination.test.ts` and
 `runtime-registry.integration.test.ts`. `AppModelPerformanceSignpostTests` drives raw Gateway
 frames through visible open, synchronization/resynchronization, uncertain receipt,
-and terminal replay boundaries. `AppModelTerminalLifecycleTests` own presentation
-revocation, stale-attach compensation, out-of-order reset rejection, pending-event quarantine,
-gap coalescing/follow-up, shared multi-presentation leases, post-detach rejection, and final teardown.
-`TerminalCoordinatorTests` pin the global 16-terminal, 256-chunk, and 1 MiB pending-event
-bounds, the three-attempt immediate recovery ceiling, and the install/reattach/discard decision for
-terminal-open responses that resolve on the same, a replacement, or no current connection.
+and terminal replay boundaries. `AppModelTerminalLifecycleTests` retain cross-owner façade coverage for
+presentation revocation, stale-attach compensation, out-of-order reset rejection, pending-event quarantine,
+gap coalescing/follow-up, shared multi-presentation leases, post-detach rejection, final teardown, exact
+list/write/resize/terminate wire contracts, and nested replay observation. `TerminalReducerTests` pin the
+global 16-terminal, 256-chunk, and 1 MiB pending-event bounds, the three-attempt immediate recovery ceiling,
+typed event reduction, and the install/reattach/discard decision for terminal-open responses that resolve on
+the same, a replacement, or no current connection. `TerminalCoordinator` owns all terminal requests,
+receipt-aware commands, attach/replay intervals, compensating detach cleanup, reconciliation, and reconnect
+reattachment; `AppModel` only routes admitted events/lifecycle work and preserves its UI façade.
 `SessionPresentationStoreTests` own observation forwarding, cold-cache non-authority,
 disconnect/profile-reset semantics, all-topic revocation, old-close/new-open arbitration, stale and
 revoked secondary-response rejection, exact subscription-token admission, and suspended paging

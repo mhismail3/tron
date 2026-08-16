@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import TronMobile
 
@@ -74,6 +75,7 @@ struct AppModelTerminalLifecycleTests {
     @Test("events delivered before an open response join its admitted replay")
     func pendingOpenEventsAreQuarantined() async throws {
         try await withHarness { harness in
+            try installHostedTerminalSession(on: harness.model)
             let target = harness.model.beginTerminalPresentation(sessionID: "session")
             let intent = try #require(harness.model.beginTerminalIntent(for: target))
             let opening = Task {
@@ -175,6 +177,7 @@ struct AppModelTerminalLifecycleTests {
     @Test("an unrelated pending open cannot suppress final-owner detach")
     func pendingOpenDoesNotSuppressDetach() async throws {
         try await withHarness { harness in
+            try installHostedTerminalSession(on: harness.model)
             let attachedTarget = harness.model.beginTerminalPresentation(sessionID: "session")
             let attachedIntent = try #require(harness.model.beginTerminalIntent(for: attachedTarget))
             let attaching = Task {
@@ -219,6 +222,45 @@ struct AppModelTerminalLifecycleTests {
             ))
             _ = try await opening.value
             #expect(harness.model.terminalReplay(for: "opened-terminal").chunks.map(\.data) == ["opened"])
+        }
+    }
+
+    @Test("a newer attachment cancels and joins an unsent matching detach")
+    func newerAttachmentCancelsPendingDetach() async throws {
+        try await withHarness { harness in
+            let firstTarget = harness.model.beginTerminalPresentation(sessionID: "session")
+            let firstIntent = try #require(harness.model.beginTerminalIntent(for: firstTarget))
+            let firstAttach = Task {
+                try await harness.model.attachTerminal("terminal", after: 0, intent: firstIntent)
+            }
+            let firstRequest = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.enqueue(successResponse(
+                id: firstRequest.id,
+                result: terminalReplayResult(sequence: 1, data: "one")
+            ))
+            _ = try await firstAttach.value
+
+            await harness.socket.suspendSends()
+            harness.model.closeTerminalPresentation(firstTarget)
+            try await harness.socket.waitUntilSendInvoked(count: 3)
+
+            let secondTarget = harness.model.beginTerminalPresentation(sessionID: "session")
+            let secondIntent = try #require(harness.model.beginTerminalIntent(for: secondTarget))
+            let secondAttach = Task {
+                try await harness.model.attachTerminal("terminal", after: 1, intent: secondIntent)
+            }
+            try await harness.socket.waitUntilSendInvoked(count: 4)
+            await harness.socket.releaseSend()
+
+            let secondRequest = try await request(in: harness.socket, frameIndex: 2)
+            #expect(secondRequest.method == "terminal.attach")
+            #expect(secondRequest.params?.objectValue?["afterSequence"] == .number(1))
+            await harness.socket.enqueue(successResponse(
+                id: secondRequest.id,
+                result: terminalReplayResult(sequence: 2, data: "two")
+            ))
+            _ = try await secondAttach.value
+            #expect(await harness.socket.sentFrames().count == 3)
         }
     }
 
@@ -422,6 +464,121 @@ struct AppModelTerminalLifecycleTests {
         }
     }
 
+    @Test("terminal open requires the exact installed session subscription")
+    func openRequiresSubscription() async throws {
+        try await withHarness { harness in
+            let target = harness.model.beginTerminalPresentation(sessionID: "session")
+            let intent = try #require(harness.model.beginTerminalIntent(for: target))
+            do {
+                _ = try await harness.model.openTerminal(intent: intent, columns: 80, rows: 24)
+                Issue.record("terminal opened without an installed session subscription")
+            } catch {
+                #expect(error is CancellationError)
+            }
+            #expect(await harness.socket.sentFrames().count == 1)
+        }
+    }
+
+    @Test("terminal list and command façades preserve exact wire contracts")
+    func terminalWireContracts() async throws {
+        try await withHarness { harness in
+            let snapshot = try SessionScenarioBuilder(seed: 7_301).openingTail(targetEncodedBytes: 32_000)
+            harness.model.installHostedSubscribedSnapshot(snapshot)
+            let target = harness.model.beginTerminalPresentation(sessionID: snapshot.sessionId)
+            let intent = try #require(harness.model.beginTerminalIntent(for: target))
+
+            let listing = Task { try await harness.model.listTerminals(intent: intent) }
+            let list = try await request(in: harness.socket, frameIndex: 1)
+            #expect(list.method == "terminal.list")
+            #expect(list.params?.objectValue?["sessionId"] == .string(snapshot.sessionId))
+            let summary = TerminalSummary(
+                id: "terminal",
+                sessionId: snapshot.sessionId,
+                cwd: "/workspace",
+                createdAt: "2026-01-01T00:00:00Z",
+                exitedAt: nil,
+                exitCode: nil,
+                sequence: 0
+            )
+            await harness.socket.enqueue(successResponse(
+                id: list.id,
+                result: .object(["terminals": try JSONValue.encode([summary])])
+            ))
+            #expect(try await listing.value == [summary])
+
+            let writing = Task {
+                try await harness.model.writeTerminal("terminal", data: "hello", intent: intent)
+            }
+            let write = try await request(in: harness.socket, frameIndex: 2)
+            #expect(write.method == "terminal.write")
+            #expect(write.params?.objectValue?["terminalId"] == .string("terminal"))
+            #expect(write.params?.objectValue?["data"] == .string("hello"))
+            #expect(write.params?.objectValue?["writeId"] == write.params?.objectValue?["commandId"])
+            await harness.socket.enqueue(successResponse(
+                id: write.id,
+                result: .object(["written": .bool(true)])
+            ))
+            try await writing.value
+
+            let resizing = Task {
+                try await harness.model.resizeTerminal(
+                    "terminal",
+                    columns: 120,
+                    rows: 40,
+                    intent: intent
+                )
+            }
+            let resize = try await request(in: harness.socket, frameIndex: 3)
+            #expect(resize.method == "terminal.resize")
+            #expect(resize.params?.objectValue?["columns"] == .number(120))
+            #expect(resize.params?.objectValue?["rows"] == .number(40))
+            await harness.socket.enqueue(successResponse(
+                id: resize.id,
+                result: .object(["resized": .bool(true)])
+            ))
+            try await resizing.value
+
+            let terminating = Task {
+                try await harness.model.terminateTerminal("terminal", intent: intent)
+            }
+            let terminate = try await request(in: harness.socket, frameIndex: 4)
+            #expect(terminate.method == "terminal.terminate")
+            #expect(terminate.params?.objectValue?["terminalId"] == .string("terminal"))
+            await harness.socket.enqueue(successResponse(
+                id: terminate.id,
+                result: .object(["terminated": .bool(true)])
+            ))
+            try await terminating.value
+        }
+    }
+
+    @Test("terminal owner mutations invalidate the AppModel replay façade")
+    func terminalFacadeObservation() async throws {
+        try await withHarness { harness in
+            let target = harness.model.beginTerminalPresentation(sessionID: "session")
+            let intent = try #require(harness.model.beginTerminalIntent(for: target))
+            let attaching = Task {
+                try await harness.model.attachTerminal("terminal", after: 0, intent: intent)
+            }
+            let attach = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.enqueue(successResponse(
+                id: attach.id,
+                result: terminalReplayResult(sequence: 1, data: "one")
+            ))
+            _ = try await attaching.value
+
+            let changed = Mutex(false)
+            withObservationTracking {
+                _ = harness.model.terminalReplay(for: "terminal")
+            } onChange: {
+                changed.withLock { $0 = true }
+            }
+            await harness.model.handle(outputEvent(sequence: 2, data: "two"))
+            #expect(changed.withLock { $0 })
+            #expect(harness.model.terminalReplay(for: "terminal").chunks.last?.data == "two")
+        }
+    }
+
     @Test("final teardown invalidates a suspended terminal attach")
     func teardownRejectsSuspendedAttach() async throws {
         try await withHarness { harness in
@@ -443,6 +600,12 @@ struct AppModelTerminalLifecycleTests {
             #expect(harness.model.terminalReplay(for: "terminal") == .empty)
             #expect(!harness.model.ownsTerminalIntent(intent))
         }
+    }
+
+    private func installHostedTerminalSession(on model: AppModel) throws {
+        var snapshot = try SessionScenarioBuilder(seed: 7_300).openingTail(targetEncodedBytes: 32_000)
+        snapshot.sessionId = "session"
+        model.installHostedSubscribedSnapshot(snapshot)
     }
 
     private func withHarness(

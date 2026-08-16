@@ -99,6 +99,7 @@ final class AppModel {
     private let mutationExecutor: ConfirmedMutationExecutor
     private let sessionMutations: SessionMutationService
     private let sessionImports: SessionImportCoordinator
+    private let terminal: TerminalCoordinator
     private let settingsTrust: SettingsTrustCoordinator
     private let providerAuth: ProviderAuthCoordinator
     private let packageConfiguration: PackageConfigurationCoordinator
@@ -141,7 +142,6 @@ final class AppModel {
     var loadingEarlierTranscript: Bool { sessionPresentation.loadingEarlierTranscript }
     var commands: [CommandInfo] { sessionPresentation.commands }
     var resources: JSONValue? { sessionPresentation.resources }
-    private var terminalState = TerminalCoordinator()
     var setupComplete: Bool {
         get {
             if UserDefaults.standard.object(forKey: "tronSetupComplete.v1") != nil {
@@ -169,8 +169,6 @@ final class AppModel {
     private var cacheCheckpointGeneration = 0
     private var pendingCacheCheckpoint: CacheCheckpoint?
     private var hiddenSessionIDs: Set<String> = []
-    private var terminalCleanupGeneration = 0
-    private var terminalCleanupTasks: [Int: Task<Void, Never>] = [:]
     private var workspaceLoadGeneration = 0
 
     init(
@@ -235,6 +233,18 @@ final class AppModel {
             mutationExecutor: mutationExecutor,
             uuidSource: uuidSource
         )
+        let sessionPresentation = SessionPresentationStore(
+            client: client,
+            performanceSignposts: performanceSignposts
+        )
+        let terminal = TerminalCoordinator(
+            client: client,
+            lifecycle: lifecycle,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource,
+            performanceSignposts: performanceSignposts,
+            installedSubscriptionToken: { sessionPresentation.installedSubscriptionToken(for: $0) }
+        )
         let composerDrafts = ComposerDraftCoordinator(
             upload: composerUpload ?? { name, mimeType, data in
                 try await client.upload(name: name, mimeType: mimeType, data: data)
@@ -276,6 +286,7 @@ final class AppModel {
             fileAccess: sessionImportFileAccess,
             upload: resolvedSessionImportUpload
         )
+        self.terminal = terminal
         self.settingsTrust = settingsTrust
         self.providerAuth = providerAuth
         self.packageConfiguration = packageConfiguration
@@ -284,10 +295,7 @@ final class AppModel {
         self.gatewayDiagnostics = gatewayDiagnostics
         self.chatMedia = chatMedia
         self.chatMediaMemoryPressureObserver = chatMediaMemoryPressureObserver
-        self.sessionPresentation = SessionPresentationStore(
-            client: client,
-            performanceSignposts: performanceSignposts
-        )
+        self.sessionPresentation = sessionPresentation
         self.cache = cache
         self.clock = clock
         self.uuidSource = uuidSource
@@ -1413,52 +1421,33 @@ final class AppModel {
     }
 
     func beginTerminalPresentation(sessionID: String) -> TerminalPresentationTarget {
-        terminalState.beginPresentation(sessionID: sessionID)
+        terminal.beginPresentation(sessionID: sessionID)
     }
 
     func beginTerminalIntent(
         for target: TerminalPresentationTarget
     ) -> TerminalPresentationIntent? {
-        guard let transition = terminalState.beginIntent(for: target) else { return nil }
-        scheduleTerminalDetaches(transition.detached)
-        return transition.intent
+        terminal.beginIntent(for: target)
     }
 
     func closeTerminalPresentation(_ target: TerminalPresentationTarget) {
-        scheduleTerminalDetaches(terminalState.revokePresentation(target))
+        terminal.closePresentation(target)
     }
 
     func ownsTerminalIntent(_ intent: TerminalPresentationIntent) -> Bool {
-        terminalState.owns(intent)
+        terminal.owns(intent)
     }
 
     func terminalReplay(for terminalID: String) -> TerminalReplayProjection {
-        terminalState.replay(for: terminalID)
+        terminal.replay(for: terminalID)
     }
 
     func terminalHasExited(_ terminalID: String) -> Bool {
-        terminalState.hasExited(terminalID)
+        terminal.hasExited(terminalID)
     }
 
     func listTerminals(intent: TerminalPresentationIntent) async throws -> [TerminalSummary] {
-        let sessionID = intent.presentation.sessionID
-        let admission = lifecycle.admission
-        let subscriptionToken = sessionPresentation.installedSubscriptionToken(for: sessionID)
-        guard let admission,
-              terminalState.owns(intent),
-              subscriptionToken != nil else {
-            throw GatewayFailure(code: "sync_failed", message: "Open the session before listing terminals.", retryable: true, details: nil)
-        }
-        struct Params: Codable, Sendable { let sessionId: String }
-        struct Response: Decodable, Sendable { let terminals: [TerminalSummary] }
-        let request = Task { try await client.request("terminal.list", Params(sessionId: sessionID)) as Response }
-        let response = try await request.value
-        try requireConnection(admission)
-        guard terminalState.owns(intent),
-              sessionPresentation.installedSubscriptionToken(for: sessionID) == subscriptionToken,
-              response.terminals.allSatisfy({ $0.sessionId == sessionID }) else { throw CancellationError() }
-        terminalState.installInventory(response.terminals, sessionID: sessionID)
-        return response.terminals
+        try await terminal.list(intent: intent)
     }
 
     func openTerminal(
@@ -1466,90 +1455,7 @@ final class AppModel {
         columns: Int,
         rows: Int
     ) async throws -> TerminalSummary {
-        guard let admission = lifecycle.admission,
-              let connectionID = admission.connectionID,
-              let lease = terminalState.beginOpen(intent: intent, connectionID: connectionID) else {
-            throw CancellationError()
-        }
-        return try await measure(.terminalAttachReplay) {
-            struct Params: Codable, Sendable { let sessionId: String; let columns, rows: Int; let commandId: String }
-            struct Replay: Codable, Sendable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
-            struct Response: Codable, Sendable { let terminal: TerminalSummary; let replay: Replay }
-            let commandID = uuidSource.next().uuidString
-            let params = Params(
-                sessionId: intent.presentation.sessionID,
-                columns: columns,
-                rows: rows,
-                commandId: commandID
-            )
-            let request = Task {
-                try await mutationExecutor.perform(method: "terminal.open", commandID: commandID) {
-                    try await client.request("terminal.open", params)
-                } as Response
-            }
-            let response: Response
-            do {
-                response = try await request.value
-            } catch {
-                terminalState.finish(lease)
-                throw error
-            }
-            let currentAdmission = lifecycle.admission
-            let currentConnectionID = currentAdmission?.connectionID
-            switch TerminalCoordinator.openResponseDisposition(
-                requestLifecycleGeneration: admission.generation,
-                requestConnectionID: connectionID,
-                currentLifecycleGeneration: currentAdmission?.generation,
-                currentConnectionID: currentConnectionID
-            ) {
-            case .install:
-                break
-            case .reattach:
-                // Receipt resolution may legitimately cross a reconnect within
-                // one profile lifecycle. Establish terminal event ownership on
-                // the decisive current connection before publishing replay.
-                terminalState.finish(lease)
-                guard terminalState.owns(intent), let currentConnectionID else {
-                    if let currentConnectionID {
-                        scheduleTerminalDetachIfUnowned(TerminalDetachClaim(
-                            terminalID: response.terminal.id,
-                            connectionID: currentConnectionID
-                        ))
-                    }
-                    throw CancellationError()
-                }
-                let terminal = try await attachTerminal(
-                    response.terminal.id,
-                    after: 0,
-                    intent: intent
-                )
-                return (terminal, .none)
-            case .discard:
-                terminalState.finish(lease)
-                throw CancellationError()
-            }
-            guard !Task.isCancelled,
-                  admitsLifecycle(admission),
-                  let installation = terminalState.installReplay(
-                    response.replay.chunks,
-                    terminal: response.terminal,
-                    reset: true,
-                    after: 0,
-                    lease: lease
-                  ) else {
-                terminalState.finish(lease)
-                scheduleTerminalDetachIfUnowned(TerminalDetachClaim(
-                    terminalID: response.terminal.id,
-                    connectionID: connectionID
-                ))
-                throw CancellationError()
-            }
-            if installation.requiresReconciliation { reconcileTerminal(response.terminal.id) }
-            return (
-                response.terminal,
-                PerformanceMetrics(itemCount: installation.admittedCount)
-            )
-        }
+        try await terminal.open(intent: intent, columns: columns, rows: rows)
     }
 
     func attachTerminal(
@@ -1557,96 +1463,7 @@ final class AppModel {
         after: Int,
         intent: TerminalPresentationIntent
     ) async throws -> TerminalSummary {
-        guard let admission = lifecycle.admission,
-              let connectionID = admission.connectionID,
-              let lease = terminalState.beginAttachment(
-                terminalID: id,
-                intent: intent,
-                connectionID: connectionID
-              ) else { throw CancellationError() }
-        return try await performTerminalAttach(
-            id,
-            after: after,
-            lease: lease,
-            admission: admission
-        )
-    }
-
-    private func performTerminalAttach(
-        _ id: String,
-        after: Int,
-        lease: TerminalAttachmentLease,
-        admission: GatewayLifecycleCoordinator.Admission
-    ) async throws -> TerminalSummary {
-        try await measure(.terminalAttachReplay) {
-            struct Params: Codable, Sendable { let terminalId: String; let afterSequence: Int }
-            struct Response: Decodable, Sendable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
-            let request = Task {
-                try await client.request(
-                    "terminal.attach",
-                    Params(terminalId: id, afterSequence: after)
-                ) as Response
-            }
-            let response: Response
-            do {
-                response = try await request.value
-            } catch {
-                terminalState.finish(lease)
-                scheduleTerminalDetachIfUnowned(TerminalDetachClaim(
-                    terminalID: id,
-                    connectionID: lease.connectionID
-                ))
-                throw error
-            }
-            guard !Task.isCancelled,
-                  admitsLifecycle(admission),
-                  let installation = terminalState.installReplay(
-                    response.chunks,
-                    terminal: response.terminal,
-                    reset: response.reset,
-                    after: after,
-                    lease: lease
-                  ) else {
-                terminalState.finish(lease)
-                scheduleTerminalDetachIfUnowned(TerminalDetachClaim(
-                    terminalID: id,
-                    connectionID: lease.connectionID
-                ))
-                if terminalState.requiresReconciliation(id) { reconcileTerminal(id) }
-                throw CancellationError()
-            }
-            if installation.requiresReconciliation { reconcileTerminal(response.terminal.id) }
-            return (
-                response.terminal,
-                PerformanceMetrics(itemCount: installation.admittedCount)
-            )
-        }
-    }
-
-    private func scheduleTerminalDetaches(_ claims: [TerminalDetachClaim]) {
-        for claim in claims { scheduleTerminalDetachIfUnowned(claim) }
-    }
-
-    private func scheduleTerminalDetachIfUnowned(_ claim: TerminalDetachClaim) {
-        guard let admission = lifecycle.admission,
-              admission.connectionID == claim.connectionID else { return }
-        terminalCleanupGeneration &+= 1
-        let cleanupGeneration = terminalCleanupGeneration
-        terminalCleanupTasks[cleanupGeneration] = Task { [weak self] in
-            guard let self else { return }
-            defer { self.terminalCleanupTasks.removeValue(forKey: cleanupGeneration) }
-            guard self.admitsLifecycle(admission),
-                  !self.terminalState.hasCurrentInterest(
-                    in: claim.terminalID,
-                    connectionID: claim.connectionID
-                  ) else { return }
-            struct Params: Codable, Sendable { let terminalId: String }
-            struct Response: Decodable, Sendable { let detached: Bool }
-            let _: Response? = try? await self.client.request(
-                "terminal.detach",
-                Params(terminalId: claim.terminalID)
-            )
-        }
+        try await terminal.attach(id, after: after, intent: intent)
     }
 
     func writeTerminal(
@@ -1654,14 +1471,7 @@ final class AppModel {
         data: String,
         intent: TerminalPresentationIntent
     ) async throws {
-        guard terminalState.owns(intent) else { throw CancellationError() }
-        struct Params: Codable { let terminalId, writeId, data, commandId: String }
-        struct Response: Codable { let written: Bool }
-        let identity = uuidSource.next().uuidString
-        let params = Params(terminalId: id, writeId: identity, data: data, commandId: identity)
-        let _: Response = try await mutationExecutor.perform(method: "terminal.write", commandID: identity) {
-            try await client.request("terminal.write", params)
-        }
+        try await terminal.write(id, data: data, intent: intent)
     }
 
     func resizeTerminal(
@@ -1670,25 +1480,16 @@ final class AppModel {
         rows: Int,
         intent: TerminalPresentationIntent
     ) async throws {
-        guard terminalState.owns(intent) else { throw CancellationError() }
-        struct Params: Codable { let terminalId: String; let columns, rows: Int; let commandId: String }
-        struct Response: Codable { let resized: Bool }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(terminalId: id, columns: columns, rows: rows, commandId: commandID)
-        let _: Response = try await mutationExecutor.perform(method: "terminal.resize", commandID: commandID) {
-            try await client.request("terminal.resize", params)
-        }
+        try await terminal.resizeImmediately(
+            id,
+            columns: columns,
+            rows: rows,
+            intent: intent
+        )
     }
 
     func terminateTerminal(_ id: String, intent: TerminalPresentationIntent) async throws {
-        guard terminalState.owns(intent) else { throw CancellationError() }
-        struct Params: Codable { let terminalId, commandId: String }
-        struct Response: Codable { let terminated: Bool }
-        let commandID = uuidSource.next().uuidString
-        let params = Params(terminalId: id, commandId: commandID)
-        let _: Response = try await mutationExecutor.perform(method: "terminal.terminate", commandID: commandID) {
-            try await client.request("terminal.terminate", params)
-        }
+        try await terminal.terminate(id, intent: intent)
     }
 
     func handle(_ event: GatewayEvent) async {
@@ -1741,13 +1542,11 @@ final class AppModel {
         case "terminal.output", "terminal.exit":
             guard let connectionID = gatewayConnectionID,
                   case .terminalEvent(let terminalEvent) = event.preparation else { break }
-            if case .reconcile(let terminalID) = terminalState.admit(
+            terminal.admit(
                 terminalEvent,
                 connectionID: connectionID,
                 exitedAt: ISO8601DateFormatter().string(from: .now)
-            ) {
-                reconcileTerminal(terminalID)
-            }
+            )
         default:
             break
         }
@@ -1796,46 +1595,6 @@ final class AppModel {
     private func clearLiveConnectionProjection() {
         noticeStore.removeAll()
         sessionCatalog.markDisconnected()
-        terminalState.clear()
-    }
-
-    private func reconcileTerminal(_ terminalID: String) {
-        guard let admission = lifecycle.admission,
-              let connectionID = admission.connectionID,
-              let lease = terminalState.beginReconciliation(
-                terminalID: terminalID,
-                connectionID: connectionID
-              ) else { return }
-        let after = terminalState.replay(for: terminalID).chunks.last?.sequence ?? 0
-        Task { [weak self] in
-            guard let self else { return }
-            _ = try? await self.performTerminalAttach(
-                terminalID,
-                after: after,
-                lease: lease,
-                admission: admission
-            )
-        }
-    }
-
-    private func reattachTerminals(
-        admission: GatewayLifecycleCoordinator.Admission
-    ) async {
-        guard admitsLifecycle(admission),
-              let connectionID = admission.connectionID else { return }
-        for terminalID in terminalState.attachedTerminalIDs() {
-            guard let lease = terminalState.beginReattachment(
-                terminalID: terminalID,
-                connectionID: connectionID
-            ) else { continue }
-            let after = terminalState.replay(for: terminalID).chunks.last?.sequence ?? 0
-            _ = try? await performTerminalAttach(
-                terminalID,
-                after: after,
-                lease: lease,
-                admission: admission
-            )
-        }
     }
 
     private func reconcileSelection() {
@@ -2047,7 +1806,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     func lifecycleReattachTerminals(
         admission: GatewayLifecycleCoordinator.Admission
     ) async {
-        await reattachTerminals(admission: admission)
+        await terminal.reattach(admission: admission)
     }
 
     func lifecycleReconcileForeground(
@@ -2056,9 +1815,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         try await client.ensureResponsive()
         try requireLifecycle(admission)
         async let catalog = refreshSessions()
-        async let mounted = sessionPresentation.reconnectMountedPresentation()
-        async let terminals: Void = reattachTerminals(admission: admission)
-        _ = await (catalog, mounted, terminals)
+        await sessionPresentation.reconnectMountedPresentation()
+        await terminal.reattach(admission: admission)
+        _ = await catalog
         try requireLifecycle(admission)
     }
 
@@ -2066,11 +1825,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         let catalog = catalogRefreshTask
         let cacheCheckpoint = cacheCheckpointTask
         let events = final ? eventTask : nil
-        let terminalCleanup = Array(terminalCleanupTasks.values)
+        let terminalRetirement = terminal.beginRetirement()
         cancelCatalogRefresh()
         cancelCacheCheckpoints()
-        terminalCleanupTasks.removeAll()
-        terminalCleanup.forEach { $0.cancel() }
         if final {
             events?.cancel()
             eventTask = nil
@@ -2082,7 +1839,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
         _ = await catalog?.value
         await cacheCheckpoint?.value
-        for task in terminalCleanup { await task.value }
+        await terminal.finishRetirement(terminalRetirement)
         await events?.value
     }
 

@@ -616,9 +616,9 @@ final class GatewayLifecycleCoordinator {
                         self.gatewayInfo = connection.info
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()
                         async let refresh: Void = self.delegate?.lifecycleRefreshAll(admission: admission) ?? ()
-                        async let restore: Void = self.delegate?.lifecycleRestoreMountedPresentation(admission: admission) ?? ()
-                        async let terminals: Void = self.delegate?.lifecycleReattachTerminals(admission: admission) ?? ()
-                        _ = await (refresh, restore, terminals)
+                        await self.delegate?.lifecycleRestoreMountedPresentation(admission: admission)
+                        await self.delegate?.lifecycleReattachTerminals(admission: admission)
+                        _ = await refresh
                         try self.requireReconnect(
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration

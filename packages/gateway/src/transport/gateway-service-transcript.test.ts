@@ -39,4 +39,29 @@ describe("session transcript paging", () => {
     expect(acquire).toHaveBeenCalledWith("session");
     expect(transcriptPage).toHaveBeenCalledWith(1, "next");
   });
+
+  it("rejects terminal creation before the client opens the session", async () => {
+    const acquire = vi.fn();
+    const open = vi.fn();
+    const execute = vi.fn(async (
+      _identity: string,
+      _method: string,
+      _commandId: string,
+      operation: () => Promise<unknown>,
+    ) => operation());
+    const service = new GatewayService({
+      sessions: { isSubscribed: () => false, acquire },
+      terminals: { open },
+      receipts: { execute },
+    } as unknown as GatewayServiceDependencies);
+
+    await expect(service.invoke(client, "terminal.open", {
+      sessionId: "session",
+      columns: 80,
+      rows: 24,
+      commandId: "command-1",
+    })).rejects.toMatchObject({ code: "invalid_request" });
+    expect(acquire).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+  });
 });

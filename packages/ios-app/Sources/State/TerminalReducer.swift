@@ -28,7 +28,7 @@ struct TerminalAttachmentLease: Equatable, Sendable {
     let quarantineGeneration: Int
 }
 
-struct TerminalDetachClaim: Equatable, Sendable {
+struct TerminalDetachClaim: Hashable, Sendable {
     let terminalID: String
     let connectionID: Int
 }
@@ -56,7 +56,7 @@ struct TerminalReplayInstallation: Equatable, Sendable {
     let requiresReconciliation: Bool
 }
 
-struct TerminalCoordinator {
+struct TerminalReducer {
     static func openResponseDisposition(
         requestLifecycleGeneration: Int,
         requestConnectionID: Int,

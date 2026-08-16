@@ -453,7 +453,7 @@ export class GatewayService {
       }
       case "terminal.open":
         return this.mutation(client, method, params, async () => {
-          const slot = await this.slot(params);
+          const slot = await this.openedSlot(client, params);
           const terminal = this.dependencies.terminals.open(
             slot.id,
             slot.cwd,
