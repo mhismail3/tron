@@ -20,6 +20,25 @@ struct StructuredJSONPathTests {
         #expect(StructuredJSONPath.display(path) == "$.result.items[1].status")
     }
 
+    @Test("arbitrary keys have unambiguous escaped display paths")
+    func escapedDisplayPaths() {
+        #expect(StructuredJSONPath.display([.key("a.b")]) == #"$["a.b"]"#)
+        #expect(StructuredJSONPath.display([.key("a"), .key("b")]) == "$.a.b")
+        #expect(StructuredJSONPath.display([.key("items[0]")]) == #"$["items[0]"]"#)
+        #expect(StructuredJSONPath.display([.key("")]) == #"$[""]"#)
+        #expect(StructuredJSONPath.display([.key("quote\"slash\\line\n")]) == #"$["quote\"slash\\line\n"]"#)
+        #expect(StructuredJSONPath.display([.key("café")]) == "$.café")
+        #expect(StructuredJSONPath.display([.key("1st")]) == #"$["1st"]"#)
+    }
+
+    @Test("structural paths remain distinct when display punctuation appears in keys")
+    func structuralIdentityDoesNotCollide() {
+        let dotted: [StructuredJSONPathComponent] = [.key("a.b")]
+        let nested: [StructuredJSONPathComponent] = [.key("a"), .key("b")]
+        #expect(dotted != nested)
+        #expect(StructuredJSONPath.display(dotted) != StructuredJSONPath.display(nested))
+    }
+
     @Test("the same selection path resolves the newest live root value")
     func newestRootWins() {
         let path: [StructuredJSONPathComponent] = [.key("result"), .key("status")]

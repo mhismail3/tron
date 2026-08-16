@@ -791,6 +791,7 @@ struct PresentationStyleGuardTests {
         #expect(timing.contains("private static let wholeSecondTimestamp = Date.ISO8601FormatStyle"))
         #expect(!timing.contains("ISO8601DateFormatter"))
         #expect(structured.contains("showsRawDisclosure: showsRawDisclosure"))
+        #expect(structured.contains("var id: [StructuredJSONPathComponent] { components }"))
         #expect(structured.contains("StructuredJSONPath.resolve(rootValue, components: selection.components)"))
         #expect(!transcript.contains(".prettyPrinted"))
         for tool in ["read", "write", "edit", "bash", "grep", "find", "ls"] {

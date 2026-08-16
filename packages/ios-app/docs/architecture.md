@@ -376,8 +376,10 @@ and boolean metadata remains unchanged. The final Technical details sub-sheet st
 execution metadata, then exposes bounded constant-depth Request JSON and Result JSON summary rows in that order.
 Primary semantic content, faithful diff expansion, technical payload traversal, and navigation chrome remain
 separate presentation owners while preserving one established sheet hierarchy and detent behavior.
-Selecting one row opens the untouched payload through progressive structured-field traversal; full raw formatting
-requires that component's separate explicit disclosure and no second readable-output projection is introduced. Result JSON uses
+Selecting one row opens the untouched payload through progressive structured-field traversal; structural path
+components own sheet identity, while arbitrary object keys use escaped bracket notation so punctuation cannot
+collide with nested paths. Full raw formatting requires that component's separate explicit disclosure and no
+second readable-output projection is introduced. Result JSON uses
 the authoritative response first, otherwise the complete readable content string, then only a fallback distinct
 from the request; request-only projections cannot duplicate themselves as results. Shared nested
 structured field sheets remain available to unrelated arbitrary-data surfaces and resolve semantic paths

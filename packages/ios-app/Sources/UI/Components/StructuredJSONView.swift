@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 enum StructuredJSONPathComponent: Hashable, Sendable {
@@ -21,10 +22,36 @@ enum StructuredJSONPath {
     static func display(_ components: [StructuredJSONPathComponent]) -> String {
         components.reduce("$") { path, component in
             switch component {
-            case .key(let key): "\(path).\(key)"
+            case .key(let key) where isIdentifier(key): "\(path).\(key)"
+            case .key(let key): "\(path)[\"\(escapedKey(key))\"]"
             case .index(let index): "\(path)[\(index)]"
             }
         }
+    }
+
+    private static func isIdentifier(_ value: String) -> Bool {
+        guard let first = value.unicodeScalars.first,
+              first == "_" || CharacterSet.letters.contains(first)
+        else { return false }
+        return value.unicodeScalars.dropFirst().allSatisfy {
+            $0 == "_" || CharacterSet.alphanumerics.contains($0)
+        }
+    }
+
+    private static func escapedKey(_ value: String) -> String {
+        value.unicodeScalars.map { scalar in
+            switch scalar.value {
+            case 0x08: "\\b"
+            case 0x09: "\\t"
+            case 0x0A: "\\n"
+            case 0x0C: "\\f"
+            case 0x0D: "\\r"
+            case 0x22: "\\\""
+            case 0x5C: "\\\\"
+            case 0x00 ... 0x1F: String(format: "\\u%04X", scalar.value)
+            default: String(scalar)
+            }
+        }.joined()
     }
 }
 
@@ -32,8 +59,8 @@ private struct JSONFieldSelection: Identifiable {
     let title: String
     let components: [StructuredJSONPathComponent]
 
-    var id: String { StructuredJSONPath.display(components) }
-    var path: String { id }
+    var id: [StructuredJSONPathComponent] { components }
+    var path: String { StructuredJSONPath.display(components) }
 }
 
 /// Progressive, bounded presentation for arbitrary Pi extension/tool JSON.
