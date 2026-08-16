@@ -9,7 +9,8 @@ enum ChatAttachmentDestination: Hashable {
 
 enum ChatAttachmentImportPolicy {
     static let maximumPhotoSelection = 5
-    static let maximumFileSelection = 10
+    static let maximumFileSelection = ComposerAttachmentPolicy.maximumCount
+    static let maximumFileBytes = ComposerAttachmentPolicy.maximumTotalBytes
 }
 
 struct ComposerAttachmentMenuButton: UIViewRepresentable {

@@ -1395,17 +1395,46 @@ struct ChatView: View {
             return
         }
         for url in urls.prefix(ChatAttachmentImportPolicy.maximumFileSelection) {
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
-                let data = try Data(contentsOf: url, options: .mappedIfSafe)
+                let attachment = try prepareFileAttachment(url)
                 try await model.upload(
-                    name: url.lastPathComponent,
-                    mimeType: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream",
-                    data: data,
+                    name: attachment.name,
+                    mimeType: attachment.mimeType,
+                    data: attachment.data,
                     target: target
                 )
             } catch { model.presentComposerActionError(error, target: target) }
         }
+    }
+
+    private func prepareFileAttachment(_ url: URL) throws -> (name: String, mimeType: String, data: Data) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        guard values.isRegularFile == true,
+              let size = values.fileSize,
+              size > 0,
+              size <= ChatAttachmentImportPolicy.maximumFileBytes else {
+            throw GatewayFailure(
+                code: "upload_failed",
+                message: "Attachments must be regular files containing 1 byte through 25 MiB.",
+                retryable: false,
+                details: nil
+            )
+        }
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        guard data.count == size else {
+            throw GatewayFailure(
+                code: "upload_failed",
+                message: "The attachment changed size while it was being read.",
+                retryable: false,
+                details: nil
+            )
+        }
+        return (
+            url.lastPathComponent,
+            UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream",
+            data
+        )
     }
 }

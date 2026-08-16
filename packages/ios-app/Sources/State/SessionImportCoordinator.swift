@@ -1,13 +1,25 @@
 import Foundation
 
+enum SessionImportPolicy {
+    static let maximumBytes = 25 * 1_048_576
+}
+
 @MainActor
 struct SessionImportFileAccess {
     let startAccessing: (URL) -> Bool
+    let size: (URL) throws -> Int
     let read: (URL) throws -> Data
     let stopAccessing: (URL) -> Void
 
     static let live = SessionImportFileAccess(
         startAccessing: { $0.startAccessingSecurityScopedResource() },
+        size: { url in
+            let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+            guard values.isRegularFile == true, let size = values.fileSize, size >= 0 else {
+                throw CocoaError(.fileReadInvalidFileName)
+            }
+            return size
+        },
         read: { try Data(contentsOf: $0, options: .mappedIfSafe) },
         stopAccessing: { $0.stopAccessingSecurityScopedResource() }
     )
@@ -63,12 +75,7 @@ final class SessionImportCoordinator {
         )
         try require(admission)
 
-        let isSecurityScoped = fileAccess.startAccessing(url)
-        defer {
-            if isSecurityScoped { fileAccess.stopAccessing(url) }
-        }
-
-        let data = try fileAccess.read(url)
+        let data = try readImportData(from: url)
         try require(admission)
 
         let uploadID = try await upload(
@@ -85,6 +92,32 @@ final class SessionImportCoordinator {
             profileID: admission.profileID,
             lifecycleAdmission: admission.lifecycle
         )
+    }
+
+    private func readImportData(from url: URL) throws -> Data {
+        let isSecurityScoped = fileAccess.startAccessing(url)
+        defer {
+            if isSecurityScoped { fileAccess.stopAccessing(url) }
+        }
+        let size = try fileAccess.size(url)
+        guard size > 0, size <= SessionImportPolicy.maximumBytes else {
+            throw GatewayFailure(
+                code: "invalid_request",
+                message: "Session imports must contain 1 byte through 25 MiB.",
+                retryable: false,
+                details: nil
+            )
+        }
+        let data = try fileAccess.read(url)
+        guard data.count == size, data.count <= SessionImportPolicy.maximumBytes else {
+            throw GatewayFailure(
+                code: "invalid_request",
+                message: "The session import changed size while it was being read.",
+                retryable: false,
+                details: nil
+            )
+        }
+        return data
     }
 
     func requireCurrent(_ imported: ImportedSession) throws {

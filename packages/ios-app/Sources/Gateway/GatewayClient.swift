@@ -8,6 +8,11 @@ enum GatewayRequestTransmissionState: Equatable {
     var mayHaveBeenSent: Bool { self != .queued }
 }
 
+enum GatewayUploadPolicy {
+    static let maximumRequestBytes = 25 * 1_048_576
+    static let maximumResponseBytes = 64 * 1_024
+}
+
 actor GatewayClient {
     private struct PendingRequest {
         let continuation: CheckedContinuation<JSONValue, Error>
@@ -321,7 +326,15 @@ actor GatewayClient {
     }
 
     func upload(name: String, mimeType: String, data: Data) async throws -> String {
-        guard let profile, let token else {
+        guard !data.isEmpty, data.count <= GatewayUploadPolicy.maximumRequestBytes else {
+            throw GatewayFailure(
+                code: "upload_failed",
+                message: "Attachments may contain 1 byte through 25 MiB.",
+                retryable: false,
+                details: nil
+            )
+        }
+        guard let profile, let token, let connectionID = connection?.id else {
             throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
         }
         guard let url = profile.httpURL(
@@ -333,8 +346,12 @@ actor GatewayClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
         request.httpBody = data
-        let (responseData, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 201 else {
+        let (responseData, http) = try await boundedHTTPDataTransport.data(
+            for: request,
+            maximumBytes: GatewayUploadPolicy.maximumResponseBytes
+        )
+        try requireEpoch(connectionID)
+        guard self.profile?.id == profile.id, http.statusCode == 201 else {
             throw GatewayFailure(code: "upload_failed", message: "The attachment could not be uploaded.", retryable: true, details: nil)
         }
         struct Envelope: Decodable { struct Upload: Decodable { let id: String }; let upload: Upload }

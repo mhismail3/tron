@@ -7,6 +7,26 @@ import Testing
 @MainActor
 @Suite("Composer draft coordinator")
 struct ComposerDraftCoordinatorTests {
+    @Test("attachment admission is count and aggregate-byte bounded")
+    func attachmentAdmissionPolicy() {
+        #expect(ComposerAttachmentPolicy.admits(
+            existing: [], active: [], candidate: ComposerAttachmentPolicy.maximumTotalBytes
+        ))
+        #expect(!ComposerAttachmentPolicy.admits(
+            existing: [], active: [], candidate: ComposerAttachmentPolicy.maximumTotalBytes + 1
+        ))
+        #expect(!ComposerAttachmentPolicy.admits(
+            existing: Array(repeating: 1, count: ComposerAttachmentPolicy.maximumCount),
+            active: [],
+            candidate: 1
+        ))
+        #expect(!ComposerAttachmentPolicy.admits(
+            existing: [ComposerAttachmentPolicy.maximumTotalBytes - 1],
+            active: [1],
+            candidate: 1
+        ))
+    }
+
     @Test("drafts are profile/session isolated, reopen exactly, delete exactly, and evict inactive LRU")
     func draftScopesAndEviction() async throws {
         try await withTestWatchdog { @MainActor in
@@ -143,7 +163,7 @@ struct ComposerDraftCoordinatorTests {
 
             let failure = Task {
                 try await harness.coordinator.upload(
-                    name: "late.txt", mimeType: "text/plain", data: Data(), target: currentTarget
+                    name: "late.txt", mimeType: "text/plain", data: Data("late".utf8), target: currentTarget
                 )
             }
             try await harness.waitForUploads(2)

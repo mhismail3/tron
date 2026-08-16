@@ -311,8 +311,10 @@ Text is keyed by explicit profile/session scope with monotonic revisions and a d
 LRU; text is never truncated and survives route close/reopen until exact session/profile deletion or bounded
 eviction. The active lease is the immutable session/presentation generation plus lifecycle generation.
 Attachments, previews, concurrent upload admissions, editor requests, and submission snapshots live only for
-that lease and are synchronously discarded on revocation, close, or profile retirement. Uploads are independent,
-so completion order—not newest-request arbitration—orders staged IDs. A confirmed prompt removes only the IDs
+that lease and are synchronously discarded on revocation, close, or profile retirement. Completed plus active
+uploads are admitted against one 10-item/25 MiB presentation budget before network work; HTTP response bodies
+have a separate 64 KiB ceiling and must return on the captured connection epoch. Uploads are independent, so
+completion order—not newest-request arbitration—orders staged IDs. A confirmed prompt removes only the IDs
 captured by its submission and never clears newer text or attachments; failure or uncertain receipt resolution
 retains those IDs and restores outgoing text before newer input. Retired completions publish neither restoration
 nor errors. Extension editor requests auto-apply only to an empty exact draft; nonempty drafts require the
@@ -320,8 +322,11 @@ existing explicit Use/Keep disposition. Route-provided initial editor text seeds
 profile/session draft; reopen and repeated preparation cannot overwrite retained edits. `SessionShellView`
 observes explicit selected-profile identity through `SessionShellProfileRouteOwner`; an A → B → A change
 synchronously revokes the current presentation and clears its navigation route before another profile can
-reuse the screen's prior draft scope. Staged attachment retention beyond a presentation and remote upload cleanup remain a
-Phase 8D product/contract decision; this owner does not preserve or clean remote IDs speculatively. Guided and advanced editor changes share one monotonic
+reuse the screen's prior draft scope. File and session imports require a regular file no larger than 25 MiB,
+check size before mapped reading, reject a changed size before upload, and release security-scoped access before
+the first network suspension. Staged attachment retention beyond a
+presentation remains a Phase 8D product decision; abandoned unclaimed remote IDs expire under the bounded Gateway
+store rather than being transferred speculatively. Guided and advanced editor changes share one monotonic
 revision owner; automatic invalidation loads cannot replace either form of unsaved input, and only
 the exact submitted revision can become clean after a suspended save. Model/default
 settings keep separate global/project drafts with baselines and monotonic revisions. Runtime,

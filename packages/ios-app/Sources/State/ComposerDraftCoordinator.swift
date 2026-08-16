@@ -41,6 +41,22 @@ enum ComposerEditorRequestPolicy {
     }
 }
 
+enum ComposerAttachmentPolicy {
+    static let maximumCount = 10
+    static let maximumTotalBytes = 25 * 1_048_576
+
+    static func admits(existing: [Int], active: [Int], candidate: Int) -> Bool {
+        guard candidate > 0, existing.count + active.count < maximumCount else { return false }
+        var total = candidate
+        for size in existing + active {
+            let (next, overflow) = total.addingReportingOverflow(size)
+            guard !overflow else { return false }
+            total = next
+        }
+        return total <= maximumTotalBytes
+    }
+}
+
 struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let target: SessionPresentationIdentity
     let textRevision: Int
@@ -100,6 +116,7 @@ final class ComposerDraftCoordinator {
         let id: UInt64
         let target: SessionPresentationIdentity
         let lifecycleGeneration: Int
+        let bytes: Int
     }
 
     private struct SubmissionAdmission: Equatable {
@@ -270,7 +287,7 @@ final class ComposerDraftCoordinator {
         data: Data,
         target: SessionPresentationIdentity
     ) async throws {
-        let admission = try beginUpload(target: target)
+        let admission = try beginUpload(target: target, bytes: data.count)
         defer { uploadAdmissions.remove(admission) }
         let id: String
         do {
@@ -376,13 +393,24 @@ final class ComposerDraftCoordinator {
         evictInactiveDraftsIfNeeded()
     }
 
-    private func beginUpload(target: SessionPresentationIdentity) throws -> UploadAdmission {
+    private func beginUpload(target: SessionPresentationIdentity, bytes: Int) throws -> UploadAdmission {
         guard let lease, admits(target) else { throw CancellationError() }
+        let existing = (attachmentsByTarget[target] ?? []).map(\.size)
+        let active = uploadAdmissions.filter { $0.target == target }.map(\.bytes)
+        guard ComposerAttachmentPolicy.admits(existing: existing, active: active, candidate: bytes) else {
+            throw GatewayFailure(
+                code: "upload_failed",
+                message: "Attach at most 10 files totaling 25 MiB.",
+                retryable: false,
+                details: nil
+            )
+        }
         sequence &+= 1
         let admission = UploadAdmission(
             id: sequence,
             target: target,
-            lifecycleGeneration: lease.lifecycleGeneration
+            lifecycleGeneration: lease.lifecycleGeneration,
+            bytes: bytes
         )
         uploadAdmissions.insert(admission)
         return admission

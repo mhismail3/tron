@@ -43,6 +43,60 @@ struct SessionImportCoordinatorTests {
         }
     }
 
+    @Test("oversized imports fail before file materialization or upload")
+    func oversizedImportPreflight() async throws {
+        try await withTestWatchdog { @MainActor in
+            let access = FileAccessRecorder(
+                data: Data("small".utf8),
+                declaredSize: SessionImportPolicy.maximumBytes + 1
+            )
+            let harness = try await makeHarness(
+                fileAccess: access.seam,
+                upload: { _, _, _ in
+                    Issue.record("oversized import unexpectedly uploaded")
+                    return "unused"
+                }
+            )
+
+            await #expect(throws: GatewayFailure.self) {
+                try await harness.coordinator.importSession(
+                    from: URL(fileURLWithPath: "/tmp/oversized.jsonl"),
+                    cwd: "/workspace"
+                )
+            }
+            #expect(access.sizeCount == 1)
+            #expect(access.readCount == 0)
+            #expect(access.stopCount == 1)
+            #expect(await harness.socket.sentFrames().count == 1)
+            await harness.client.close()
+        }
+    }
+
+    @Test("empty imports fail during preflight")
+    func emptyImportPreflight() async throws {
+        try await withTestWatchdog { @MainActor in
+            let access = FileAccessRecorder(data: Data())
+            let harness = try await makeHarness(
+                fileAccess: access.seam,
+                upload: { _, _, _ in
+                    Issue.record("empty import unexpectedly uploaded")
+                    return "unused"
+                }
+            )
+
+            await #expect(throws: GatewayFailure.self) {
+                try await harness.coordinator.importSession(
+                    from: URL(fileURLWithPath: "/tmp/empty.jsonl"),
+                    cwd: "/workspace"
+                )
+            }
+            #expect(access.sizeCount == 1)
+            #expect(access.readCount == 0)
+            #expect(access.stopCount == 1)
+            await harness.client.close()
+        }
+    }
+
     @Test("replacement profile during suspended upload cannot emit session import")
     func replacementDuringUpload() async throws {
         try await withTestWatchdog { @MainActor in
@@ -62,6 +116,7 @@ struct SessionImportCoordinatorTests {
             }
             defer { importing.cancel() }
             try await gate.waitUntilStarted()
+            #expect(access.stopCount == 1)
 
             harness.profiles.select(harness.replacementProfile)
             await gate.succeed(with: "old-upload")
@@ -319,6 +374,7 @@ struct SessionImportCoordinatorTests {
         try await withTestWatchdog { @MainActor in
             let readAccess = FileAccessRecorder(
                 data: Data(),
+                declaredSize: 1,
                 readError: ImportTestFailure.read
             )
             let readHarness = try await makeHarness(
@@ -712,18 +768,22 @@ struct SessionImportCoordinatorTests {
 @MainActor
 private final class FileAccessRecorder {
     private let data: Data
+    private let declaredSize: Int
     private let readError: Error?
     private let onRead: (() -> Void)?
     private(set) var startCount = 0
+    private(set) var sizeCount = 0
     private(set) var readCount = 0
     private(set) var stopCount = 0
 
     init(
         data: Data,
+        declaredSize: Int? = nil,
         readError: Error? = nil,
         onRead: (() -> Void)? = nil
     ) {
         self.data = data
+        self.declaredSize = declaredSize ?? data.count
         self.readError = readError
         self.onRead = onRead
     }
@@ -733,6 +793,11 @@ private final class FileAccessRecorder {
             startAccessing: { [weak self] _ in
                 self?.startCount += 1
                 return true
+            },
+            size: { [weak self] _ in
+                guard let self else { throw CancellationError() }
+                self.sizeCount += 1
+                return self.declaredSize
             },
             read: { [weak self] _ in
                 guard let self else { throw CancellationError() }

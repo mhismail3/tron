@@ -40,6 +40,41 @@ struct BoundedHTTPDataTransportTests {
         #expect(accumulator.data == Data([1, 2, 3, 4]))
     }
 
+    @Test("uploads bound response accumulation and retain request bytes")
+    func gatewayUploadBoundary() async throws {
+        try await withTestWatchdog {
+            let profile = GatewayProfile(
+                id: "machine", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            let socket = ScriptedGatewaySocket()
+            let recorder = BoundedTransportRecorder()
+            let transport = BoundedHTTPDataTransport { request, maximumBytes in
+                await recorder.record(request: request, maximumBytes: maximumBytes)
+                let response = HTTPURLResponse(
+                    url: request.url!, statusCode: 201, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (Data(#"{"upload":{"id":"upload-id"}}"#.utf8), response)
+            }
+            let factory = ScriptedGatewaySocketFactory(socket: socket)
+            let client = GatewayClient(
+                socketFactory: factory.factory,
+                boundedHTTPDataTransport: transport
+            )
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await client.connectForLifecycle(profile: profile, token: "secret")
+
+            #expect(try await client.upload(name: "notes.txt", mimeType: "text/plain", data: Data("body".utf8)) == "upload-id")
+            let recorded = try #require(await recorder.value)
+            #expect(recorded.maximumBytes == GatewayUploadPolicy.maximumResponseBytes)
+            #expect(recorded.request.httpBody == Data("body".utf8))
+            #expect(recorded.request.url?.path == "/v1/uploads")
+            #expect(recorded.request.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
+            await client.close()
+        }
+    }
+
     @Test("epoch-bound blob reads pass the limit into the streaming transport")
     func gatewayBlobBoundary() async throws {
         try await withTestWatchdog {
