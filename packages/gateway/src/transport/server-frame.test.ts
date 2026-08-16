@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clearRequestSynchronizations, encodeOutboundFrame, releaseOwnedSubscription } from "./server.js";
+import { canAttachTerminal, clearRequestSynchronizations, encodeOutboundFrame, releaseOwnedSubscription, releaseSessionTerminals } from "./server.js";
 
 describe("bounded outbound gateway frames", () => {
   it("returns a correlated error instead of closing the socket for an oversized response", () => {
@@ -45,6 +45,27 @@ describe("bounded outbound gateway frames", () => {
     expect(releaseOwnedSubscription(tokens, "session", "current", () => { releases += 1; })).toBe(true);
     expect(tokens.has("session")).toBe(false);
     expect(releases).toBe(1);
+  });
+
+  it("closing one session revokes only its terminal attachments", () => {
+    const terminals = new Set(["first", "second"]);
+    releaseSessionTerminals(
+      terminals,
+      "session-1",
+      (terminalId, sessionId) => terminalId === "first" && sessionId === "session-1",
+    );
+    expect([...terminals]).toEqual(["second"]);
+  });
+
+  it("terminal attachment follows current subscription ownership", () => {
+    const subscriptions = new Set(["session"]);
+    const belongs = (terminalId: string, sessionId: string) => terminalId === "terminal" && sessionId === "session";
+    expect(canAttachTerminal(subscriptions, "terminal", belongs)).toBe(true);
+
+    subscriptions.delete("session");
+    expect(canAttachTerminal(subscriptions, "terminal", belongs)).toBe(false);
+    subscriptions.add("replacement");
+    expect(canAttachTerminal(subscriptions, "terminal", belongs)).toBe(false);
   });
 
   it("turns an oversized snapshot event into a bounded resync hint", () => {

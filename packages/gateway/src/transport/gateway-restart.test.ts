@@ -11,6 +11,7 @@ const client: ClientContext = {
   unsubscribe: () => true,
   attachTerminal: () => {},
   detachTerminal: () => {},
+  ownsTerminal: () => false,
 };
 
 function service(options: { activeSessions?: string[]; activeTerminals?: string[]; requestRestart?: () => void } = {}) {

@@ -27,6 +27,7 @@ const client = (id: string): ClientContext => ({
   unsubscribe: () => true,
   attachTerminal: () => {},
   detachTerminal: () => {},
+  ownsTerminal: () => false,
 });
 
 describe("SessionListPaginationStore", () => {

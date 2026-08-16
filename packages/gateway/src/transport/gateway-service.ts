@@ -41,6 +41,7 @@ export interface ClientContext {
   unsubscribe(sessionId: string, subscriptionToken?: string): boolean;
   attachTerminal(terminalId: string): void;
   detachTerminal(terminalId: string): void;
+  ownsTerminal(terminalId: string): boolean;
 }
 
 export interface GatewayServiceDependencies {
@@ -192,7 +193,7 @@ export class GatewayService {
           ? undefined
           : integer(params.before, "before", 0, Number.MAX_SAFE_INTEGER);
         const expectedNextEntryId = optionalString(params.expectedNextEntryId, "expectedNextEntryId", 200);
-        const slot = await this.dependencies.sessions.acquire(sessionId);
+        const slot = await this.openedSlot(client, params);
         // Paging is a bounded read for an already-open presentation. It must
         // never create or revive event-subscription ownership after a close.
         return safeJson(slot.transcriptPage(before, expectedNextEntryId));
@@ -211,7 +212,7 @@ export class GatewayService {
         });
       case "session.prompt":
         return this.mutation(client, method, params, async () => {
-          const slot = await this.slot(params);
+          const slot = await this.openedSlot(client, params);
           const text = typeof params.text === "string" ? params.text.trim() : "";
           const uploadIds = params.uploadIds === undefined ? [] : arrayOfStrings(params.uploadIds, "uploadIds", 10);
           if (!text && uploadIds.length === 0) throw new GatewayError("invalid_request", "Prompt text or attachments are required");
@@ -226,7 +227,7 @@ export class GatewayService {
         });
       case "session.abort":
         return this.mutation(client, method, params, async () => {
-          await (await this.slot(params)).abort(
+          await (await this.openedSlot(client, params)).abort(
             params.kind === undefined
               ? "agent"
               : oneOf(params.kind, "kind", ["agent", "compaction", "retry", "branchSummary", "bash"] as const),
@@ -234,7 +235,7 @@ export class GatewayService {
           return { aborted: true };
         });
       case "session.clearQueue":
-        return this.mutation(client, method, params, async () => safeJson(await (await this.slot(params)).clearQueue()));
+        return this.mutation(client, method, params, async () => safeJson(await (await this.openedSlot(client, params)).clearQueue()));
       case "session.queue.replace":
         return this.mutation(client, method, params, async () => {
           if (!Array.isArray(params.items)) throw new GatewayError("invalid_request", "items must be an array");
@@ -246,34 +247,34 @@ export class GatewayService {
               text: string(item.text, `items[${index}].text`, { max: 64 * 1_024 }),
             };
           });
-          return safeJson(await (await this.slot(params)).replaceQueue(
+          return safeJson(await (await this.openedSlot(client, params)).replaceQueue(
             integer(params.expectedRevision, "expectedRevision", 0, Number.MAX_SAFE_INTEGER),
             items,
           ));
         });
       case "session.bash":
-        return this.mutation(client, method, params, async () => (await this.slot(params)).executeBash(
+        return this.mutation(client, method, params, async () => (await this.openedSlot(client, params)).executeBash(
           string(params.command, "command", { max: 100_000 }),
           params.excludeFromContext === undefined ? false : boolean(params.excludeFromContext, "excludeFromContext"),
         ));
       case "session.setModel":
         return this.mutation(client, method, params, async () => {
-          await (await this.slot(params)).setModel(string(params.provider, "provider", { max: 120 }), string(params.modelId, "modelId", { max: 300 }));
+          await (await this.openedSlot(client, params)).setModel(string(params.provider, "provider", { max: 120 }), string(params.modelId, "modelId", { max: 300 }));
           return { updated: true };
         });
       case "session.setThinking":
         return this.mutation(client, method, params, async () => {
-          await (await this.slot(params)).setThinking(oneOf(params.level, "level", thinkingLevels));
+          await (await this.openedSlot(client, params)).setThinking(oneOf(params.level, "level", thinkingLevels));
           return { updated: true };
         });
       case "session.setTools":
         return this.mutation(client, method, params, async () => {
-          await (await this.slot(params)).setTools(arrayOfStrings(params.tools, "tools", 256));
+          await (await this.openedSlot(client, params)).setTools(arrayOfStrings(params.tools, "tools", 256));
           return { updated: true };
         });
       case "session.compact":
         return this.mutation(client, method, params, async () => {
-          await (await this.slot(params)).compact(optionalString(params.instructions, "instructions", 20_000));
+          await (await this.openedSlot(client, params)).compact(optionalString(params.instructions, "instructions", 20_000));
           return { compacted: true };
         });
       case "session.rename":
@@ -282,12 +283,12 @@ export class GatewayService {
           return { updated: true };
         });
       case "session.fork":
-        return this.mutation(client, method, params, async () => safeJson(await (await this.slot(params)).fork(
+        return this.mutation(client, method, params, async () => safeJson(await (await this.openedSlot(client, params)).fork(
           string(params.entryId, "entryId", { max: 200 }),
           params.position === undefined ? "at" : oneOf(params.position, "position", ["before", "at"] as const),
         )));
       case "session.navigate":
-        return this.mutation(client, method, params, async () => safeJson(await (await this.slot(params)).navigate(
+        return this.mutation(client, method, params, async () => safeJson(await (await this.openedSlot(client, params)).navigate(
           string(params.entryId, "entryId", { max: 200 }),
           {
             summarize: params.summarize === undefined ? false : boolean(params.summarize, "summarize"),
@@ -298,7 +299,7 @@ export class GatewayService {
         )));
       case "session.label":
         return this.mutation(client, method, params, async () => {
-          await (await this.slot(params)).setLabel(
+          await (await this.openedSlot(client, params)).setLabel(
             string(params.entryId, "entryId", { max: 200 }),
             optionalString(params.label, "label", 200),
           );
@@ -322,12 +323,12 @@ export class GatewayService {
         return (await this.openedSlot(client, params)).resources();
       case "session.reloadResources":
         return this.mutation(client, method, params, async () => {
-          await (await this.slot(params)).reload();
+          await (await this.openedSlot(client, params)).reload();
           return { reloaded: true };
         });
       case "extension.respond":
         return this.mutation(client, method, params, async () => {
-          (await this.slot(params)).respondToInteraction(
+          (await this.openedSlot(client, params)).respondToInteraction(
             string(params.interactionId, "interactionId", { max: 100 }),
             params.value,
             params.cancelled === undefined ? false : boolean(params.cancelled, "cancelled"),
@@ -477,8 +478,10 @@ export class GatewayService {
       }
       case "terminal.write":
         return this.mutation(client, method, params, async () => {
+          const terminalId = string(params.terminalId, "terminalId", { max: 100 });
+          this.requireOwnedTerminal(client, terminalId);
           this.dependencies.terminals.write(
-            string(params.terminalId, "terminalId", { max: 100 }),
+            terminalId,
             string(params.writeId, "writeId", { max: 100 }),
             typeof params.data === "string" && params.data.length <= 65_536 ? params.data : (() => { throw new GatewayError("invalid_request", "Terminal data is too large"); })(),
           );
@@ -486,12 +489,16 @@ export class GatewayService {
         });
       case "terminal.resize":
         return this.mutation(client, method, params, async () => {
-          this.dependencies.terminals.resize(string(params.terminalId, "terminalId", { max: 100 }), integer(params.columns, "columns", 20, 500), integer(params.rows, "rows", 5, 300));
+          const terminalId = string(params.terminalId, "terminalId", { max: 100 });
+          this.requireOwnedTerminal(client, terminalId);
+          this.dependencies.terminals.resize(terminalId, integer(params.columns, "columns", 20, 500), integer(params.rows, "rows", 5, 300));
           return { resized: true };
         });
       case "terminal.terminate":
         return this.mutation(client, method, params, async () => {
-          this.dependencies.terminals.terminate(string(params.terminalId, "terminalId", { max: 100 }));
+          const terminalId = string(params.terminalId, "terminalId", { max: 100 });
+          this.requireOwnedTerminal(client, terminalId);
+          this.dependencies.terminals.terminate(terminalId);
           return { terminated: true };
         });
       default:
@@ -501,6 +508,12 @@ export class GatewayService {
 
   terminalBelongsToSession(terminalId: string, sessionId: string): boolean {
     return this.dependencies.terminals.belongsToSession(terminalId, sessionId);
+  }
+
+  private requireOwnedTerminal(client: ClientContext, terminalId: string): void {
+    if (!client.ownsTerminal(terminalId)) {
+      throw new GatewayError("invalid_request", "Attach the terminal before controlling it");
+    }
   }
 
   private async openedSlot(client: ClientContext, params: Record<string, unknown>) {

@@ -32,6 +32,24 @@ export function releaseOwnedSubscription(
   return true;
 }
 
+export function releaseSessionTerminals(
+  terminals: Set<string>,
+  sessionId: string,
+  belongsToSession: (terminalId: string, sessionId: string) => boolean,
+): void {
+  for (const terminalId of terminals) {
+    if (belongsToSession(terminalId, sessionId)) terminals.delete(terminalId);
+  }
+}
+
+export function canAttachTerminal(
+  subscriptions: ReadonlySet<string>,
+  terminalId: string,
+  belongsToSession: (terminalId: string, sessionId: string) => boolean,
+): boolean {
+  return [...subscriptions].some((sessionId) => belongsToSession(terminalId, sessionId));
+}
+
 export function clearRequestSynchronizations(
   synchronizations: Map<string, ActiveSessionSynchronization>,
   requestId: string,
@@ -51,7 +69,6 @@ interface Connection {
   alive: boolean;
   ready: boolean;
   subscriptions: Set<string>;
-  openedSessions: Set<string>;
   terminals: Set<string>;
   inFlight: Set<string>;
   synchronizations: Map<string, ActiveSessionSynchronization>;
@@ -286,7 +303,6 @@ export class GatewayServer {
       alive: true,
       ready: false,
       subscriptions: new Set(),
-      openedSessions: new Set(),
       terminals: new Set(),
       inFlight: new Set(),
       synchronizations: new Map(),
@@ -350,7 +366,6 @@ export class GatewayServer {
             connection.synchronizations.delete(sessionId);
           }
           connection.subscriptions.add(sessionId);
-          connection.openedSessions.add(sessionId);
           this.options.sessions.subscribe(connection.id, sessionId);
           const syncToken = randomUUID();
           connection.subscriptionTokens.set(sessionId, syncToken);
@@ -386,6 +401,11 @@ export class GatewayServer {
           if (subscriptionToken !== undefined) {
             return releaseOwnedSubscription(connection.subscriptionTokens, sessionId, subscriptionToken, () => {
               connection.subscriptions.delete(sessionId);
+              releaseSessionTerminals(
+                connection.terminals,
+                sessionId,
+                (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
+              );
               const synchronization = connection.synchronizations.get(sessionId);
               if (synchronization) clearTimeout(synchronization.timeout);
               connection.synchronizations.delete(sessionId);
@@ -394,6 +414,11 @@ export class GatewayServer {
           }
           connection.subscriptionTokens.delete(sessionId);
           connection.subscriptions.delete(sessionId);
+          releaseSessionTerminals(
+            connection.terminals,
+            sessionId,
+            (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
+          );
           const synchronization = connection.synchronizations.get(sessionId);
           if (synchronization) clearTimeout(synchronization.timeout);
           connection.synchronizations.delete(sessionId);
@@ -401,12 +426,17 @@ export class GatewayServer {
           return true;
         },
         attachTerminal: (terminalId) => {
-          if (![...connection.openedSessions].some((sessionId) => this.options.service.terminalBelongsToSession(terminalId, sessionId))) {
+          if (!canAttachTerminal(
+            connection.subscriptions,
+            terminalId,
+            (id, sessionId) => this.options.service.terminalBelongsToSession(id, sessionId),
+          )) {
             throw new GatewayError("invalid_request", "Open the terminal's session before attaching", false);
           }
           connection.terminals.add(terminalId);
         },
         detachTerminal: (terminalId) => connection.terminals.delete(terminalId),
+        ownsTerminal: (terminalId) => connection.terminals.has(terminalId),
       };
       const result = await this.options.service.invoke(context, frame.method, frame.params ?? {});
       const responseSentIntact = this.send(connection, { type: "response", id: frame.id, ok: true, result });

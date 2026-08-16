@@ -107,10 +107,13 @@ canonical value. Trust changes reload
 idle live runtimes before acknowledgement; project resources therefore cannot stay
 loaded from an obsolete decision. PTY output has an independent monotonic
 sequence and bounded attach replay for gap/reconnect convergence. Context, tree,
-resources, commands, exports, terminal inventory, and terminal creation require an established
-open subscription for that exact session. The Gateway validates that ownership before creating a
-PTY, preventing stale client selection or reconnect races from reading a different runtime or leaving
-an orphan terminal process.
+resources, commands, exports, transcript paging, terminal inventory, and all live-runtime mutations
+require an established open subscription for that exact session. Dashboard rename and delete remain
+explicit catalog-scoped exceptions. Terminal creation and attachment require the terminal's current
+session subscription; input, resize, and termination additionally require attachment ownership on the
+requesting connection. Closing a session immediately revokes attachment admission. These checks
+prevent stale client selection or reconnect races from reading or mutating a different runtime,
+controlling another connection's PTY, or leaving an orphan terminal process.
 
 Primary operation groups are `system`, `device`, `legacy`, `session`,
 `extension`, `provider`, `model`, `auth`, `settings`, `trust`, `packages`,
