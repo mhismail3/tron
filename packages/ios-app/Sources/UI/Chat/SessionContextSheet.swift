@@ -66,8 +66,6 @@ struct SessionContextSheet: View {
             }
             .task {
                 await model.refreshSessions()
-                await model.loadContext(sessionID: sessionID)
-                await model.loadResources(sessionID: sessionID)
                 await loadGit(snapshot: model.authoritativeSnapshot(for: sessionID))
             }
             .task(id: model.sessionContextRevision(for: sessionID)) {

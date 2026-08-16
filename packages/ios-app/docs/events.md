@@ -65,7 +65,9 @@ admits and reduces mounted-session topics:
   when available; older canonical history derives only an observed call-to-result
   interval because Pi JSONL does not persist tool execution timing;
 - structure/context/resource invalidations reload an already-presented History,
-  Fork, Manage Session, or Project Resources surface from the runtime;
+  Fork, Manage Session, or Project Resources surface from the runtime. Manage Session's
+  revision-keyed context/resource tasks are also the sole initial-load owners; its general
+  appearance task refreshes the catalog/git projection without duplicating Gateway reads;
 - terminal output/exit payloads decode into typed `Sendable` preparations from the original
   event frame before MainActor routing; malformed known payloads remain inert rather than failing
   the transport. Terminal output is admitted only for a current presentation lease, sequence-checked,
