@@ -1,30 +1,5 @@
 import SwiftUI
 
-private struct CustomModelProviderDraft: Identifiable, Hashable {
-    let id: UUID
-    var identifier: String
-    var baseURL: String
-    var api: String
-    var models: String
-    var original: [String: JSONValue]
-
-    init(
-        id: UUID = UUID(),
-        identifier: String = "",
-        baseURL: String = "",
-        api: String = "openai-completions",
-        models: String = "",
-        original: [String: JSONValue] = [:]
-    ) {
-        self.id = id
-        self.identifier = identifier
-        self.baseURL = baseURL
-        self.api = api
-        self.models = models
-        self.original = original
-    }
-}
-
 struct CustomModelsSettingsView: View {
     @Environment(AppModel.self) private var model
     private let target = CustomModelTarget.global
@@ -37,6 +12,9 @@ struct CustomModelsSettingsView: View {
     @State private var draftOwner = CustomModelDraftOwner()
     @State private var saving = false
     @State private var providerToRemove: CustomModelProviderDraft?
+    @State private var rebuildGeneration = 0
+    @State private var rebuildTask: Task<Void, Never>?
+    @State private var localTransformationTask: Task<Void, Never>?
     @FocusState private var advancedEditorFocused: Bool
 
     var body: some View {
@@ -75,7 +53,13 @@ struct CustomModelsSettingsView: View {
                         .foregroundStyle(Color.tronTextPrimary)
                         .padding(14)
                         .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.09)
-                    Button("Load JSON into Guided Editor") { loadDraftsFromDocument() }
+                    Button("Load JSON into Guided Editor") {
+                        localTransformationTask?.cancel()
+                        localTransformationTask = Task {
+                            await loadDraftsFromDocument()
+                            if !Task.isCancelled { localTransformationTask = nil }
+                        }
+                    }
                         .buttonStyle(TronActionButtonStyle())
                 }
 
@@ -123,6 +107,12 @@ struct CustomModelsSettingsView: View {
             target: target,
             invalidationGeneration: model.customModelInvalidationGeneration
         )) { await load() }
+        .onDisappear {
+            rebuildTask?.cancel()
+            rebuildTask = nil
+            localTransformationTask?.cancel()
+            localTransformationTask = nil
+        }
         .alert(
             "Remove \(providerRemovalName)?",
             isPresented: Binding(get: { providerToRemove != nil }, set: { if !$0 { providerToRemove = nil } })
@@ -195,59 +185,122 @@ struct CustomModelsSettingsView: View {
 
     private func load() async {
         guard await model.loadCustomModels(target: target) else { return }
-        loadFromProjection()
+        await loadFromProjection()
     }
 
-    private func loadFromProjection() {
+    private func loadFromProjection() async {
         guard !saving, draftOwner.admitsPublication,
               let root = model.customModels(for: target)?.objectValue else { return }
         let value = root["document"] ?? .object(["providers": .object([:])])
-        documentRoot = value.objectValue ?? [:]
-        document = value.prettyPrinted
-        redacted = root["redacted"]?.boolValue ?? false
-        loadDrafts(from: value)
-        draftOwner.markInstalled()
+        do {
+            let prepared = try await prepareOffMain(value)
+            guard !saving, draftOwner.admitsPublication,
+                  model.customModels(for: target)?.objectValue == root else { return }
+            install(prepared)
+            redacted = root["redacted"]?.boolValue ?? false
+            draftOwner.markInstalled()
+        } catch is CancellationError {
+        } catch {
+            model.presentConfigurationActionError(error)
+        }
     }
 
     private func rebuildDocument() {
         guard !advancedDocumentEdited else { return }
-        var values: [String: JSONValue] = [:]
-        for provider in providers {
-            let identifier = provider.identifier.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !identifier.isEmpty else { continue }
-            var object = provider.original
-            if provider.api.isEmpty { object.removeValue(forKey: "api") }
-            else { object["api"] = .string(provider.api) }
-            if provider.baseURL.isEmpty { object.removeValue(forKey: "baseUrl") }
-            else { object["baseUrl"] = .string(provider.baseURL) }
-            let ids = provider.models.split(whereSeparator: \.isNewline).map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-            let existingModels = (object["models"]?.arrayValue ?? []).reduce(into: [String: JSONValue]()) { result, value in
-                if let id = value.objectValue?["id"]?.stringValue { result[id] = value }
+        rebuildGeneration &+= 1
+        let generation = rebuildGeneration
+        let root = documentRoot
+        let providerSnapshot = providers
+        rebuildTask?.cancel()
+        rebuildTask = Task {
+            do {
+                let rendered = try await renderOffMain(root: root, providers: providerSnapshot)
+                try Task.checkCancellation()
+                guard generation == rebuildGeneration, !advancedDocumentEdited else { return }
+                documentRoot = rendered.root
+                document = rendered.document
+                rebuildTask = nil
+            } catch is CancellationError {
+            } catch {
+                guard generation == rebuildGeneration else { return }
+                rebuildTask = nil
             }
-            if ids.isEmpty { object.removeValue(forKey: "models") }
-            else {
-                object["models"] = .array(ids.map { id in
-                    existingModels[id] ?? .object(["id": .string(id), "name": .string(id)])
-                })
-            }
-            values[identifier] = .object(object)
         }
-        documentRoot["providers"] = .object(values)
-        document = JSONValue.object(documentRoot).prettyPrinted
     }
 
-    private func loadDraftsFromDocument() {
-        guard let data = document.data(using: .utf8),
-              let value = try? JSONDecoder.gateway.decode(JSONValue.self, from: data) else {
-            model.lastError = "Advanced JSON is not valid JSON."
-            return
+    private func loadDraftsFromDocument() async {
+        let source = document
+        do {
+            let prepared = try await decodeOffMain(source)
+            guard document == source, advancedDocumentEdited else { return }
+            install(prepared)
+            advancedDocumentEdited = false
+            draftOwner.markEdited()
+            showingAdvanced = false
+        } catch is CancellationError {
+        } catch {
+            guard document == source else { return }
+            model.presentConfigurationActionError(error)
         }
-        documentRoot = value.objectValue ?? [:]
-        document = value.prettyPrinted
-        loadDrafts(from: value)
-        advancedDocumentEdited = false
-        draftOwner.markEdited()
-        showingAdvanced = false
+    }
+
+    private func install(_ prepared: PreparedCustomModelDraft) {
+        rebuildGeneration &+= 1
+        rebuildTask?.cancel()
+        rebuildTask = nil
+        documentRoot = prepared.root
+        providers = prepared.providers
+        document = prepared.document
+    }
+
+    private func prepareOffMain(_ value: JSONValue) async throws -> PreparedCustomModelDraft {
+        let task = Task.detached(priority: .userInitiated) {
+            try CustomModelDraftTransformation.prepare(value)
+        }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func decodeOffMain(_ source: String) async throws -> PreparedCustomModelDraft {
+        let task = Task.detached(priority: .userInitiated) {
+            try CustomModelDraftTransformation.decodeAdvanced(source)
+        }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func decodeValueOffMain(_ source: String) async throws -> JSONValue {
+        let task = Task.detached(priority: .userInitiated) {
+            guard let data = source.data(using: .utf8) else {
+                throw CustomModelDraftTransformationError.invalidRoot
+            }
+            return try JSONDecoder.gateway.decode(JSONValue.self, from: data)
+        }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func renderOffMain(
+        root: [String: JSONValue],
+        providers: [CustomModelProviderDraft]
+    ) async throws -> RenderedCustomModelDraft {
+        let task = Task.detached(priority: .userInitiated) {
+            try CustomModelDraftTransformation.rebuild(root: root, providers: providers)
+        }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     private var providerRemovalName: String {
@@ -255,28 +308,27 @@ struct CustomModelsSettingsView: View {
         return providerToRemove.identifier.isEmpty ? "this provider" : providerToRemove.identifier
     }
 
-    private func loadDrafts(from value: JSONValue) {
-        providers = value.objectValue?["providers"]?.objectValue?.sorted(by: { $0.key < $1.key }).map { identifier, value in
-            let object = value.objectValue ?? [:]
-            let modelIDs = object["models"]?.arrayValue?.compactMap { $0.objectValue?["id"]?.stringValue }.joined(separator: "\n") ?? ""
-            return CustomModelProviderDraft(
-                identifier: identifier,
-                baseURL: object["baseUrl"]?.stringValue ?? "",
-                api: object["api"]?.stringValue ?? "",
-                models: modelIDs,
-                original: object
-            )
-        } ?? []
-    }
-
     private func save() async {
         saving = true
         defer { saving = false }
         do {
-            if !advancedDocumentEdited { rebuildDocument() }
-            guard let data = document.data(using: .utf8) else { return }
-            let value = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
             let submittedRevision = draftOwner.beginSave()
+            let value: JSONValue
+            if advancedDocumentEdited {
+                value = try await decodeValueOffMain(document)
+            } else {
+                let root = documentRoot
+                let providerSnapshot = providers
+                let rendered = try await renderOffMain(root: root, providers: providerSnapshot)
+                value = rendered.value
+                if root == documentRoot, providerSnapshot == providers {
+                    rebuildGeneration &+= 1
+                    rebuildTask?.cancel()
+                    rebuildTask = nil
+                    documentRoot = rendered.root
+                    document = rendered.document
+                }
+            }
             try await model.replaceCustomModelsAndRestart(value, target: target)
             if draftOwner.completeSave(revision: submittedRevision) {
                 advancedDocumentEdited = false

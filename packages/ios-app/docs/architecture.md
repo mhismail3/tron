@@ -887,7 +887,9 @@ Gateway log records into level-filtered rows and copyable details rather than
 showing raw JSON. Gateway/session/tree/tool/interaction timestamps share immutable ISO-8601
 format styles, while relative dashboard labels use one lock-serialized formatter instead of
 allocating Foundation formatters per visible row. Custom models have a guided provider/model editor while the
-complete JSON remains an explicit advanced path and is validated before mutation.
+complete JSON remains an explicit advanced path and is validated before mutation. One pure transformation owns
+lossless JSON↔guided conversion, preserves unknown/redacted fields, rejects ambiguous normalized identities, and
+runs parsing, traversal, rebuild, and formatting off MainActor before generation-checked view publication.
 System alerts, confirmation dialogs,
 menus, document/photo pickers, and terminal emulation remain platform-owned, as
 they did before the gateway migration. New features must compose these
