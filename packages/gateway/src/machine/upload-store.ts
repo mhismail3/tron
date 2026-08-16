@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { copyFile, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
+import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { basename, dirname, extname, join } from "node:path";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
 import { atomicWriteJson, readJson } from "../util/json.js";
@@ -15,6 +15,13 @@ interface UploadMetadata {
   path: string;
   createdAt: string;
   sessionId?: string;
+}
+
+interface StagedUpload {
+  id: string;
+  folder: string;
+  path: string;
+  reservedBytes: number;
 }
 
 interface UploadStoreOptions {
@@ -56,6 +63,7 @@ function isUploadMetadata(value: unknown, expectedID: string, maximumBytes: numb
 
 export class UploadStore {
   private readonly directory: string;
+  private readonly bodyDirectory: string;
   private readonly maximumEntries: number;
   private readonly maximumAggregateBytes: number;
   private readonly maximumUnclaimedAgeMs: number;
@@ -64,6 +72,7 @@ export class UploadStore {
   private readonly pendingSessionRemovals = new Set<string>();
   private readonly maximumConcurrentBodies: number;
   private activeBodyAdmissions = 0;
+  private readonly stagedUploads = new Map<string, number>();
   private mutationTail = Promise.resolve();
 
   constructor(
@@ -72,6 +81,7 @@ export class UploadStore {
     options: UploadStoreOptions = {},
   ) {
     this.directory = join(tronHome, "gateway", "uploads");
+    this.bodyDirectory = join(tronHome, "gateway", "upload-bodies");
     this.maximumEntries = options.maximumEntries ?? 128;
     this.maximumAggregateBytes = options.maximumAggregateBytes ?? maximumBytes * 8;
     this.maximumUnclaimedAgeMs = options.maximumUnclaimedAgeMs ?? 24 * 60 * 60_000;
@@ -107,54 +117,175 @@ export class UploadStore {
   }
 
   async save(nameInput: string, mimeType: string, body: Buffer): Promise<UploadMetadata> {
-    if (body.length === 0 || body.length > this.maximumBytes) {
-      throw new GatewayError("invalid_request", `Upload must contain 1 through ${this.maximumBytes} bytes`);
+    return this.saveStream(nameInput, mimeType, [body], body.length);
+  }
+
+  async saveStream(
+    nameInput: string,
+    mimeTypeInput: string,
+    body: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+    declaredBytes?: number,
+  ): Promise<UploadMetadata> {
+    if (declaredBytes !== undefined
+      && (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0 || declaredBytes > this.maximumBytes)) {
+      throw new GatewayError("invalid_request", "Request body is too large");
     }
+    const staged = await this.reserveStagedUpload(declaredBytes ?? this.maximumBytes);
+    let committed = false;
+    let size = 0;
+    try {
+      const handle = await open(staged.path, "wx", 0o600);
+      try {
+        for await (const value of body) {
+          const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+          size += chunk.length;
+          if (size > this.maximumBytes || (declaredBytes !== undefined && size > declaredBytes)) {
+            throw new GatewayError("invalid_request", "Request body is too large");
+          }
+          let offset = 0;
+          while (offset < chunk.length) {
+            const { bytesWritten } = await handle.write(chunk, offset);
+            if (bytesWritten < 1) throw new GatewayError("internal", "Upload body could not be written");
+            offset += bytesWritten;
+          }
+        }
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      if (size === 0 || (declaredBytes !== undefined && size !== declaredBytes)) {
+        throw new GatewayError("invalid_request", declaredBytes === undefined
+          ? `Upload must contain 1 through ${this.maximumBytes} bytes`
+          : "Request body size did not match Content-Length");
+      }
+
+      const metadata = await this.commitStagedUpload(staged, nameInput, mimeTypeInput, size);
+      committed = true;
+      return metadata;
+    } finally {
+      if (!committed) await this.releaseStagedUpload(staged);
+    }
+  }
+
+  private async reserveStagedUpload(reservedBytes: number): Promise<StagedUpload> {
     return this.serialize(async () => {
       const inventory = await this.inventory();
-      const aggregateBytes = inventory.reduce((total, item) => total + item.size, 0);
-      if (inventory.length >= this.maximumEntries || body.length > this.maximumAggregateBytes - aggregateBytes) {
+      const uploadDirectory = await this.ensureUploadDirectory();
+      const bodyDirectory = await this.ensureBodyDirectory();
+      await this.cleanupStagedUploads(bodyDirectory);
+      const aggregateBytes = inventory.reduce((total, item) => total + item.size, 0)
+        + [...this.stagedUploads.values()].reduce((total, size) => total + size, 0);
+      if (inventory.length + this.stagedUploads.size >= this.maximumEntries
+        || reservedBytes > this.maximumAggregateBytes - aggregateBytes) {
         throw new GatewayError("busy", "Stored uploads reached their bounded capacity; remove an imported session or try again later", true);
       }
 
-      const name = safeName(nameInput);
-      const extension = extname(name).slice(0, 20);
-      let id: string | undefined;
-      let folder: string | undefined;
       for (let attempt = 0; attempt < 4; attempt += 1) {
-        const candidate = this.uuid();
-        this.validateID(candidate);
-        const candidateFolder = join(this.directory, candidate);
+        const id = this.uuid();
+        this.validateID(id);
         try {
-          await mkdir(candidateFolder, { recursive: false, mode: 0o700 });
-          id = candidate;
-          folder = candidateFolder;
-          break;
+          await stat(join(uploadDirectory, id));
+          continue;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        const folder = join(bodyDirectory, id);
+        try {
+          await mkdir(folder, { recursive: false, mode: 0o700 });
+          const staged = { id, folder, path: join(folder, "content"), reservedBytes };
+          this.stagedUploads.set(id, reservedBytes);
+          return staged;
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
         }
       }
-      if (!id || !folder) throw new GatewayError("busy", "Could not allocate an upload identity", true);
+      throw new GatewayError("busy", "Could not allocate an upload identity", true);
+    });
+  }
 
+  private async commitStagedUpload(
+    staged: StagedUpload,
+    nameInput: string,
+    mimeTypeInput: string,
+    size: number,
+  ): Promise<UploadMetadata> {
+    return this.serialize(async () => {
+      if (this.stagedUploads.get(staged.id) !== staged.reservedBytes || size > staged.reservedBytes) {
+        throw new GatewayError("conflict", "Upload staging reservation was lost");
+      }
+      const stagedInfo = await stat(staged.path);
+      if (!stagedInfo.isFile() || stagedInfo.size !== size) {
+        throw new GatewayError("conflict", "Upload body changed before it could be committed");
+      }
+
+      const name = safeName(nameInput);
+      const mimeType = mimeTypeInput.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200)
+        || "application/octet-stream";
+      const uploadDirectory = await this.ensureUploadDirectory();
+      const folder = join(uploadDirectory, staged.id);
+      await mkdir(folder, { recursive: false, mode: 0o700 });
       try {
-        const path = join(folder, `content${extension}`);
-        await writeFile(path, body, { mode: 0o600, flag: "wx" });
+        const path = join(folder, `content${extname(name).slice(0, 20)}`);
+        await rename(staged.path, path);
+        const actual = await realpath(path);
+        const ownedDirectory = await realpath(folder);
+        const info = await stat(actual);
+        if (!actual.startsWith(`${ownedDirectory}/`) || !info.isFile() || info.size !== size) {
+          throw new GatewayError("conflict", "Upload content escaped its owned directory or changed size");
+        }
         const metadata: UploadMetadata = {
           version: 1,
-          id,
+          id: staged.id,
           name,
-          mimeType: mimeType.slice(0, 200) || "application/octet-stream",
-          size: body.length,
-          path: await realpath(path),
+          mimeType,
+          size,
+          path: actual,
           createdAt: new Date(this.now()).toISOString(),
         };
         await atomicWriteJson(join(folder, "metadata.json"), metadata);
+        this.stagedUploads.delete(staged.id);
+        await rm(staged.folder, { recursive: true, force: true });
         return metadata;
       } catch (error) {
         await rm(folder, { recursive: true, force: true });
         throw error;
       }
     });
+  }
+
+  private async releaseStagedUpload(staged: StagedUpload): Promise<void> {
+    await this.serialize(async () => {
+      this.stagedUploads.delete(staged.id);
+      await rm(staged.folder, { recursive: true, force: true });
+    });
+  }
+
+  private ensureBodyDirectory(): Promise<string> {
+    return this.ensureOwnedDirectory(this.bodyDirectory, "Upload staging directory is not owned by the Gateway");
+  }
+
+  private ensureUploadDirectory(): Promise<string> {
+    return this.ensureOwnedDirectory(this.directory, "Upload directory is not owned by the Gateway");
+  }
+
+  private async ensureOwnedDirectory(path: string, message: string): Promise<string> {
+    await mkdir(path, { recursive: true, mode: 0o700 });
+    const info = await lstat(path);
+    const actual = await realpath(path);
+    const expected = join(await realpath(dirname(path)), basename(path));
+    if (!info.isDirectory() || info.isSymbolicLink() || actual !== expected) {
+      throw new GatewayError("conflict", message);
+    }
+    return actual;
+  }
+
+  private async cleanupStagedUploads(bodyDirectory: string): Promise<void> {
+    const entries = await readdir(bodyDirectory, { withFileTypes: true });
+    await Promise.all(entries.map(async (entry) => {
+      if (!this.stagedUploads.has(entry.name)) {
+        await rm(join(bodyDirectory, entry.name), { recursive: true, force: true });
+      }
+    }));
   }
 
   async prepareSessionImport(id: string): Promise<string> {
@@ -177,7 +308,8 @@ export class UploadStore {
   async remove(id: string): Promise<void> {
     this.validateID(id);
     await this.serialize(async () => {
-      await rm(join(this.directory, id), { recursive: true, force: true });
+      const uploadDirectory = await this.ensureUploadDirectory();
+      await rm(join(uploadDirectory, id), { recursive: true, force: true });
     }).catch(() => {});
   }
 
@@ -210,8 +342,8 @@ export class UploadStore {
           envelopes.push(`<attachment name="${xml(value.name)}" mime-type="${xml(value.mimeType)}" size="${value.size}" path="${xml(actual)}" />`);
         }
       }
-      await Promise.all(metadata.map((value) => atomicWriteJson(
-        join(this.directory, value.id, "metadata.json"),
+      await Promise.all(metadata.map((value, index) => atomicWriteJson(
+        join(owned[index]!.ownedDirectory, "metadata.json"),
         { ...value, sessionId },
       )));
       return { images, envelope: envelopes.join("\n") };
@@ -219,14 +351,14 @@ export class UploadStore {
   }
 
   private async inventory(): Promise<UploadMetadata[]> {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    const entries = await readdir(this.directory, { withFileTypes: true });
+    const uploadDirectory = await this.ensureUploadDirectory();
+    const entries = await readdir(uploadDirectory, { withFileTypes: true });
     const result: UploadMetadata[] = [];
     const pendingRemovals = new Set(this.pendingSessionRemovals);
     const failedRemovals = new Set<string>();
     const cutoff = this.now() - this.maximumUnclaimedAgeMs;
     for (const entry of entries) {
-      const folder = join(this.directory, entry.name);
+      const folder = join(uploadDirectory, entry.name);
       if (!entry.isDirectory()) {
         await rm(folder, { recursive: true, force: true });
         continue;
@@ -262,17 +394,18 @@ export class UploadStore {
 
   private async metadata(id: string): Promise<UploadMetadata> {
     this.validateID(id);
-    const metadata = await this.readMetadata(join(this.directory, id, "metadata.json"));
+    const uploadDirectory = await this.ensureUploadDirectory();
+    const metadata = await this.readMetadata(join(uploadDirectory, id, "metadata.json"));
     if (!isUploadMetadata(metadata, id, this.maximumBytes)
       || (metadata.sessionId === undefined && Date.parse(metadata.createdAt) <= this.now() - this.maximumUnclaimedAgeMs)) {
-      await rm(join(this.directory, id), { recursive: true, force: true });
+      await rm(join(uploadDirectory, id), { recursive: true, force: true });
       throw new GatewayError("not_found", "Upload was not found");
     }
     try {
       await this.ownedPath(metadata);
     } catch (error) {
       if (!isConfirmedUploadCorruption(error)) throw error;
-      await rm(join(this.directory, id), { recursive: true, force: true });
+      await rm(join(uploadDirectory, id), { recursive: true, force: true });
       throw new GatewayError("not_found", "Upload content is missing or invalid");
     }
     return metadata;
@@ -288,8 +421,9 @@ export class UploadStore {
   }
 
   private async ownedPath(metadata: UploadMetadata): Promise<{ actual: string; ownedDirectory: string }> {
+    const uploadDirectory = await this.ensureUploadDirectory();
     const actual = await realpath(metadata.path);
-    const ownedDirectory = await realpath(join(this.directory, metadata.id));
+    const ownedDirectory = await realpath(join(uploadDirectory, metadata.id));
     const info = await stat(actual);
     if (!actual.startsWith(`${ownedDirectory}/`) || !info.isFile() || info.size !== metadata.size) {
       throw new GatewayError("conflict", "Upload content escaped its owned directory or changed size");

@@ -48,10 +48,11 @@ least-recently-used address keys and periodically deleting expired windows; addr
 create append-only process state. Paired-device storage admits at most 256 unique device IDs and
 token hashes with bounded names/timestamps; capacity rejection leaves the one-time invitation valid
 so an old device can be revoked before retrying. Uploads retain the 25 MiB per-request limit and additionally
-serialize admission against 128-entry and eight-times-per-upload (200 MiB by default) aggregate ceilings. Before body
-accumulation, a separate admission permits at most half that ratio concurrently (four default 25 MiB bodies), accounting
-for chunk storage plus final contiguous-buffer assembly; every success, rejection, overflow, or disconnect releases its slot.
-Unclaimed uploads
+serialize reservation and commit against 128-entry and eight-times-per-upload (200 MiB by default) aggregate ceilings.
+A separate admission permits at most half that ratio concurrently (four default 25 MiB bodies). Authenticated request
+chunks stream directly into protected store-owned files; exact declared and observed sizes are checked before atomic
+metadata publication, and every success, rejection, overflow, truncation, or disconnect removes uncommitted staging
+and releases its slot. Unclaimed uploads
 expire after 24 hours, malformed/partial folders self-clean, prompt attachment IDs are unique, and
 one prompt cannot materialize more than the per-request byte ceiling. Successful imports remove
 their staging folder; deleting a canonical session removes its claimed attachment folders. Cleanup

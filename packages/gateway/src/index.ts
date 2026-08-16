@@ -140,7 +140,6 @@ transport = new GatewayServer({
   host: config.host,
   port: config.port,
   maxFrameBytes: config.maxFrameBytes,
-  maxUploadBytes: config.maxUploadBytes,
   devices,
   uploads,
   sessions,

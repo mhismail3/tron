@@ -120,7 +120,16 @@ export function encodeOutboundFrame(value: unknown, maximum: number): string | u
   return Buffer.byteLength(fallback) <= maximum ? fallback : undefined;
 }
 
-async function readBody(request: IncomingMessage, maximum: number): Promise<Buffer> {
+async function* completeRequestBody(request: IncomingMessage): AsyncGenerator<Buffer> {
+  for await (const value of request) {
+    yield Buffer.isBuffer(value) ? value : Buffer.from(value);
+  }
+  if (request.aborted || !request.complete) {
+    throw new GatewayError("invalid_request", "Request body ended before it was complete");
+  }
+}
+
+async function readBoundedBody(request: IncomingMessage, maximum: number): Promise<Buffer> {
   const rawDeclared = request.headers["content-length"];
   const declared = rawDeclared === undefined ? undefined : Number(rawDeclared);
   if (declared !== undefined
@@ -129,11 +138,13 @@ async function readBody(request: IncomingMessage, maximum: number): Promise<Buff
   }
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const value of request) {
-    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  for await (const chunk of completeRequestBody(request)) {
     size += chunk.length;
     if (size > maximum) throw new GatewayError("invalid_request", "Request body is too large");
     chunks.push(chunk);
+  }
+  if (declared !== undefined && size !== declared) {
+    throw new GatewayError("invalid_request", "Request body size did not match Content-Length");
   }
   return Buffer.concat(chunks);
 }
@@ -151,7 +162,6 @@ export class GatewayServer {
       host: string;
       port: number;
       maxFrameBytes: number;
-      maxUploadBytes: number;
       devices: DeviceStore;
       uploads: UploadStore;
       sessions: RuntimeRegistry;
@@ -242,7 +252,7 @@ export class GatewayServer {
       if (request.method === "POST" && url.pathname === "/v1/pair") {
         const key = request.socket.remoteAddress ?? "unknown";
         if (!this.pairingLimiter.admit(key)) throw new GatewayError("unauthenticated", "Too many pairing attempts; wait before retrying");
-        const body = JSON.parse((await readBody(request, 16_384)).toString("utf8")) as Record<string, unknown>;
+        const body = JSON.parse((await readBoundedBody(request, 16_384)).toString("utf8")) as Record<string, unknown>;
         if (typeof body.code !== "string" || typeof body.deviceName !== "string") throw new GatewayError("invalid_request", "Pairing requires code and deviceName");
         const result = await this.options.devices.pair(body.code.trim(), body.deviceName);
         return sendJson(response, 200, { ...result, ...this.options.service.info() as Record<string, JsonValue> });
@@ -252,13 +262,20 @@ export class GatewayServer {
       if (!authenticated) return sendJson(response, 401, { error: { code: "unauthenticated", message: "Pairing token is invalid" } });
 
       if (request.method === "POST" && url.pathname === "/v1/uploads") {
-        return this.options.uploads.withBodyAdmission(async () => {
+        await this.options.uploads.withBodyAdmission(async () => {
           const name = url.searchParams.get("name") ?? "attachment";
           const mimeType = request.headers["content-type"] ?? "application/octet-stream";
-          const body = await readBody(request, this.options.maxUploadBytes);
-          const upload = await this.options.uploads.save(name, mimeType, body);
-          return sendJson(response, 201, { upload: { id: upload.id, name: upload.name, mimeType: upload.mimeType, size: upload.size } });
+          const rawDeclared = request.headers["content-length"];
+          const declaredBytes = rawDeclared === undefined ? undefined : Number(rawDeclared);
+          const upload = await this.options.uploads.saveStream(
+            name,
+            mimeType,
+            completeRequestBody(request),
+            declaredBytes,
+          );
+          sendJson(response, 201, { upload: { id: upload.id, name: upload.name, mimeType: upload.mimeType, size: upload.size } });
         });
+        return;
       }
       if (request.method === "GET" && url.pathname.startsWith("/v1/blobs/")) {
         const id = decodeURIComponent(url.pathname.slice("/v1/blobs/".length));
@@ -275,7 +292,15 @@ export class GatewayServer {
       sendJson(response, 404, { error: { code: "not_found", message: "Route not found" } });
     } catch (error) {
       const failure = publicError(error);
-      const status = failure.code === "unauthenticated" ? 401 : failure.code === "not_found" ? 404 : failure.code === "invalid_request" ? 400 : 500;
+      const status = failure.code === "unauthenticated" ? 401
+        : failure.code === "not_found" ? 404
+          : failure.code === "invalid_request" ? 400
+            : failure.code === "busy" ? 503
+              : 500;
+      if (!request.complete) {
+        response.setHeader("connection", "close");
+        response.once("finish", () => request.destroy());
+      }
       sendJson(response, status, { error: failure });
     }
   }

@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,6 +29,88 @@ describe("UploadStore", () => {
 
     await store.removeSession("session");
     await expect(store.materialize([image.id], "session")).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("streams request chunks into atomic owned files without retaining a body buffer", async () => {
+    const home = await root();
+    const store = new UploadStore(home, 8, { maximumAggregateBytes: 16 });
+    async function* chunks(): AsyncGenerator<Buffer> {
+      yield Buffer.from("1234");
+      yield Buffer.from("5678");
+    }
+
+    const upload = await store.saveStream("stream.txt", "text/plain", chunks(), 8);
+    expect(upload.size).toBe(8);
+    expect(await readFile(upload.path, "utf8")).toBe("12345678");
+    expect(await readdir(join(home, "gateway", "upload-bodies"))).toEqual([]);
+  });
+
+  it("cleans interrupted, oversized, and declared-size-mismatched staged bodies", async () => {
+    const home = await root();
+    const store = new UploadStore(home, 8, { maximumAggregateBytes: 8 });
+    await expect(store.saveStream("large", "text/plain", [Buffer.from("12345"), Buffer.from("6789")]))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    await expect(store.saveStream("short", "text/plain", [Buffer.from("1234")], 8))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    await expect(store.saveStream("interrupted", "text/plain", (async function* () {
+      yield Buffer.from("1234");
+      throw new Error("connection closed");
+    })(), 8)).rejects.toThrow("connection closed");
+    expect(await readdir(join(home, "gateway", "upload-bodies"))).toEqual([]);
+    await expect(store.save("replacement", "text/plain", Buffer.from("12345678")))
+      .resolves.toMatchObject({ size: 8 });
+  });
+
+  it("fails closed without traversing a symlinked staging root", async () => {
+    const home = await root();
+    const outside = join(home, "outside-staging");
+    await mkdir(outside);
+    await writeFile(join(outside, "keep"), "keep");
+    await mkdir(join(home, "gateway"));
+    await symlink(outside, join(home, "gateway", "upload-bodies"));
+    const store = new UploadStore(home, 8);
+
+    await expect(store.save("value", "text/plain", Buffer.from("value")))
+      .rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(join(outside, "keep"), "utf8")).toBe("keep");
+  });
+
+  it("fails closed without traversing a symlinked final upload root", async () => {
+    const home = await root();
+    const outside = join(home, "outside-uploads");
+    await mkdir(outside);
+    await writeFile(join(outside, "keep"), "keep");
+    await mkdir(join(home, "gateway"));
+    await symlink(outside, join(home, "gateway", "uploads"));
+    const store = new UploadStore(home, 8);
+
+    await expect(store.save("value", "text/plain", Buffer.from("value")))
+      .rejects.toMatchObject({ code: "conflict" });
+    expect(await readFile(join(outside, "keep"), "utf8")).toBe("keep");
+  });
+
+  it("reserves aggregate quota before consuming concurrent upload streams", async () => {
+    const store = new UploadStore(await root(), 8, { maximumAggregateBytes: 8 });
+    let releaseFirst!: () => void;
+    const holdFirst = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let firstStarted!: () => void;
+    const started = new Promise<void>((resolve) => { firstStarted = resolve; });
+    const first = store.saveStream("first", "text/plain", (async function* () {
+      firstStarted();
+      yield Buffer.from("1234");
+      await holdFirst;
+      yield Buffer.from("5678");
+    })(), 8);
+    await started;
+    let secondConsumed = false;
+    const second = store.saveStream("second", "text/plain", (async function* () {
+      secondConsumed = true;
+      yield Buffer.from("12345678");
+    })(), 8);
+    await expect(second).rejects.toMatchObject({ code: "busy", retryable: true });
+    expect(secondConsumed).toBe(false);
+    releaseFirst();
+    await expect(first).resolves.toMatchObject({ size: 8 });
   });
 
   it("bounds concurrent body accumulation and releases admission exactly once", async () => {
