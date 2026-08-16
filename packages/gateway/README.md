@@ -91,7 +91,7 @@ a completed result, retry only a confirmed-missing command with the same ID, and
 never blindly replay a pending command. An observed application rejection removes
 its pending receipt so the definitive error remains definitive; process loss or failure
 to persist a successful completion leaves pending state and therefore cannot enable a
-blind duplicate. Receipt execution serializes identical command keys only; unrelated commands and sessions remain concurrent.
+blind duplicate. Each receipt is capped at one response frame plus 4 KiB of identity/envelope overhead before decode and persistence. Malformed or oversized evidence remains an explicit outcome-unknown conflict, is never deleted by pruning, and can never authorize mutation replay. Receipt execution serializes identical command keys only; unrelated commands and sessions remain concurrent.
 The gateway sends WebSocket ping control frames every 25 seconds and terminates
 connections that fail the next heartbeat, so half-open Tailscale/iOS paths are
 observable. Reconnect and foreground activation converge through an authoritative
