@@ -802,12 +802,20 @@ final class AppModel {
         return lifecycle.admits(.init(generation: generation, connectionID: nil))
     }
 
-    func createSession(cwd: String) async throws -> String {
+    func createSession(cwd: String) async throws -> SessionNavigationRoute {
+        guard let admission = lifecycle.generationAdmission,
+              let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
         let sessionID = try await sessionMutations.createSession(cwd: cwd)
+        try requireLifecycle(admission)
+        guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
         defaultWorkspace = cwd
         UserDefaults.standard.set(cwd, forKey: "defaultWorkspace.v1")
-        await refreshSessions()
-        return sessionID
+        return SessionNavigationRoute(
+            sessionID: sessionID,
+            editorText: nil,
+            gatewayProfileID: profileID,
+            gatewayLifecycleGeneration: admission.generation
+        )
     }
 
     /// Starts a new mounted chat presentation. Unlike reconnect synchronization,

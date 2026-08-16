@@ -29,6 +29,11 @@ describe("shared protocol-v2 fixtures", () => {
     expect(snapshot.transcript.find((item) => item.kind === "message" && item.role === "toolResult"))
       .toMatchObject({ durationMs: 1_000, progressSequence: 3 });
     expect(snapshot.extensionUI.pendingInteractions[0]).toMatchObject({ method: "select" });
+    expect(snapshot.queueRevision).toBe(3);
+    expect(snapshot.queuedItems).toEqual([
+      { id: "queued-steer", behavior: "steer", text: "correct course", attachmentCount: 0 },
+      { id: "queued-follow-up", behavior: "followUp", text: "then verify", attachmentCount: 0 },
+    ]);
     expect(snapshot.eventSequence).toBeGreaterThan(snapshot.revision);
   });
 });

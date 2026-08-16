@@ -176,6 +176,8 @@ struct WorkspaceBrowser: View {
                                 }
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .tronGlassSurface(accent: .tronSlate, cornerRadius: 14, tintOpacity: 0.07, interactive: true)

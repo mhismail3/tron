@@ -536,7 +536,7 @@ struct AppModelPerformanceSignpostTests {
         }
     }
 
-    @Test("create returns navigation identity without opening it implicitly")
+    @Test("create returns its owned route without waiting for a catalog projection or opening implicitly")
     func createRouteIdentity() async throws {
         try await withTestWatchdog {
             let harness = try await makeHarness()
@@ -549,17 +549,42 @@ struct AppModelPerformanceSignpostTests {
                 id: mutation.id,
                 result: .object(["sessionId": .string("created-route")])
             ))
-            let refresh = try await request(in: harness.socket, frameIndex: 2)
-            #expect(refresh.method == "session.list")
-            await harness.socket.enqueue(errorResponse(
-                id: refresh.id,
-                code: "synthetic_refresh_failure",
-                retryable: false
-            ))
 
-            #expect(try await valueOfOwnedTask(creating) == "created-route")
+            let route = try await valueOfOwnedTask(creating)
+            #expect(route.sessionID == "created-route")
+            #expect(await MainActor.run { harness.model.ownsNavigationRoute(route) })
+            #expect(await harness.socket.sentFrames().count == 2)
             let selectedAfterCreate = await MainActor.run { harness.model.selectedSessionID }
             #expect(selectedAfterCreate == nil)
+
+            await harness.model.handle(GatewayEvent(
+                type: "event",
+                topic: "session.listChanged",
+                sessionId: nil,
+                payload: .object([:])
+            ))
+            let convergence = Task { await harness.model.refreshSessions() }
+            let refresh = try await request(in: harness.socket, frameIndex: 2)
+            #expect(refresh.method == "session.list")
+            await harness.socket.enqueue(successResponse(
+                id: refresh.id,
+                result: .object([
+                    "sessions": .array([.object([
+                        "id": .string("created-route"),
+                        "cwd": .string("/workspace"),
+                        "kind": .string("user"),
+                        "createdAt": .string("2026-01-01T00:00:00Z"),
+                        "updatedAt": .string("2026-01-01T00:00:00Z"),
+                        "messageCount": .number(0),
+                        "firstMessage": .string(""),
+                        "phase": .string("idle"),
+                    ])]),
+                    "nextCursor": .null,
+                    "listRevision": .number(1),
+                ])
+            ))
+            #expect(await convergence.value == .published)
+            #expect(await MainActor.run { harness.model.visibleSessions.map(\.id) } == ["created-route"])
             await harness.client.close()
         }
     }

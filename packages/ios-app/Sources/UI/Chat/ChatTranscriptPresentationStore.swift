@@ -98,6 +98,9 @@ struct InstalledChatTranscript: Hashable, Sendable {
     let tag: ChatTranscriptProjectionTag
     let timeline: ChatTranscriptTimeline
     let runtimeItems: [ChatTranscriptRenderItem]
+    let queuedMessages: [SessionSnapshot.QueuedMessage]
+    let queueRevision: Int?
+    let supportsQueueManagement: Bool
     let sourceWindow: SourceWindow
     private let runtimeIDSet: Set<String>
 
@@ -105,11 +108,17 @@ struct InstalledChatTranscript: Hashable, Sendable {
         tag: ChatTranscriptProjectionTag,
         timeline: ChatTranscriptTimeline,
         runtimeItems: [ChatTranscriptRenderItem],
+        queuedMessages: [SessionSnapshot.QueuedMessage] = [],
+        queueRevision: Int? = nil,
+        supportsQueueManagement: Bool = false,
         sourceWindow: SourceWindow
     ) {
         self.tag = tag
         self.timeline = timeline
         self.runtimeItems = runtimeItems
+        self.queuedMessages = queuedMessages
+        self.queueRevision = queueRevision
+        self.supportsQueueManagement = supportsQueueManagement
         self.sourceWindow = sourceWindow
         runtimeIDSet = Set(runtimeItems.map(\.id))
     }
@@ -647,6 +656,9 @@ final class ChatTranscriptPresentationStore {
                     tag: next.tag,
                     timeline: built.timeline,
                     runtimeItems: runtimeItems,
+                    queuedMessages: next.snapshot.displayedQueuedMessages,
+                    queueRevision: next.snapshot.queueRevision,
+                    supportsQueueManagement: next.snapshot.queuedItems != nil,
                     sourceWindow: .init(snapshot: next.snapshot)
                 )
                 guard built.isInternallyConsistent,

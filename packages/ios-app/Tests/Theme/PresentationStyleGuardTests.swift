@@ -136,6 +136,21 @@ struct PresentationStyleGuardTests {
         }
     }
 
+    @Test("workspace folder rows own their complete glass hit region")
+    func workspaceFolderHitRegion() throws {
+        let browser = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Onboarding/WorkspaceBrowser.swift"),
+            encoding: .utf8
+        )
+        let folderRows = try #require(
+            browser.components(separatedBy: "ForEach(directories)").dropFirst().first?
+                .components(separatedBy: "private func browserGroup").first
+        )
+        #expect(folderRows.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
+        #expect(folderRows.contains(".contentShape(Rectangle())"))
+        #expect(folderRows.contains(".tronGlassSurface(accent: .tronSlate"))
+    }
+
     @Test("onboarding chrome retains the established control geometry")
     func onboardingChromeGeometry() throws {
         let onboarding = try String(
@@ -700,6 +715,32 @@ struct PresentationStyleGuardTests {
         #expect(!earlierMessagesChip.contains("TronActionButtonStyle(expands: false)"))
     }
 
+    @Test("send-to-chat motion stays role-aware, authoritative, and accessible")
+    func sendToChatMotion() throws {
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let motion = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatContentTransition.swift"),
+            encoding: .utf8
+        )
+        let composer = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
+            encoding: .utf8
+        )
+        #expect(chat.contains("kind: .classify(item)"))
+        #expect(chat.contains("ChatQueuedMessageEntranceRow"))
+        #expect(chat.contains("composerViewportTransitionBegan()"))
+        #expect(motion.contains("case userPrompt"))
+        #expect(motion.contains("case queuedPrompt"))
+        #expect(motion.contains("guard !reduceMotion else { return .identity }"))
+        #expect(composer.contains("ComposerTrailingButtonPressStyle"))
+        #expect(composer.contains("isSending ? \"Sending message\" : \"Send message\""))
+        #expect(!motion.contains("Task.sleep"))
+        #expect(!motion.contains("DispatchQueue"))
+    }
+
     @Test("queued messages remain visible and individually manageable in chat")
     func queuedMessagePresentation() throws {
         let chat = try String(
@@ -714,10 +755,19 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
             encoding: .utf8
         )
-        #expect(chat.contains("queuedMessageRows(snapshot)"))
+        #expect(chat.contains("queuedMessageRows(installed)"))
+        #expect(chat.contains("let messages = installed.queuedMessages"))
+        #expect(chat.contains("QueuedMessageManagementPolicy.availability("))
         #expect(chat.contains("model.replaceQueue("))
         #expect(queue.contains("struct QueuedMessageRow"))
         #expect(queue.contains("struct QueuedMessageEditorSheet"))
+        #expect(queue.contains("ViewThatFits(in: .horizontal)"))
+        #expect(queue.contains("card.fixedSize(horizontal: true, vertical: false)"))
+        #expect(queue.contains(".frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)"))
+        #expect(queue.contains("label: \"Edit queued message\""))
+        #expect(queue.contains("label: \"Remove from queue\""))
+        #expect(queue.contains(".frame(width: 44, height: 44)"))
+        #expect(queue.contains("Update Tron on Mac to edit or remove queued messages"))
         #expect(queue.contains("Move earlier"))
         #expect(queue.contains("Move later"))
         #expect(queue.contains("Remove from Queue"))

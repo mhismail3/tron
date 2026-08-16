@@ -81,8 +81,11 @@ updates without losing the newest state. Clients join calls, progress, and resul
 by canonical call ID rather than arrival order.
 
 Active message queues are projected with stable per-entry IDs, delivery behavior,
-display text, attachment count, and a monotonic queue revision. The legacy steering
-and follow-up string arrays remain a compatibility projection. `session.queue.replace`
+display text, attachment count, and a monotonic queue revision. A Gateway advertising
+`queue-management.v1` includes both `queueRevision` and `queuedItems` in every authoritative
+session snapshot. The legacy steering and follow-up string arrays remain a compatibility
+projection for older clients and Gateways; they never authorize entry-level mutation.
+`session.queue.replace`
 serializes with prompt admission and clear operations, validates bounded replacement
 state, rejects stale revisions, and rebuilds the pinned runtime queue atomically.
 Steering entries always precede follow-ups because that is the runtime's delivery

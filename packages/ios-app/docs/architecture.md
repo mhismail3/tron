@@ -238,9 +238,16 @@ reload tasks are keyed by that exact target. Global reads and writes never inher
 currently selected session's project path, different targets cannot overwrite each other,
 and a newer same-target read rejects an older completion. New-session defaults are loaded
 for the workspace being created rather than the previously selected session. Changing that
-workspace clears the prior trust/model projection and closes creation admission until matching
-settings and trust reads complete; stale workspace completions cannot reopen it. Provider and
-model catalogs likewise use typed `.global` or `.session(id:)` targets and publish each fully
+workspace or gateway profile clears the prior trust/model projection and closes creation admission
+until matching settings and trust reads complete; stale workspace/profile completions cannot reopen
+it. The toolbar identifies that preparation instead of presenting a silently inert Create action.
+One synchronous creation owner admits only one command per gesture. A confirmed create returns its
+profile/lifecycle-bound navigation route immediately; the `session.listChanged`-driven dashboard
+projection converges independently and never blocks opening canonical state. A known configured
+model default avoids a redundant follow-up mutation. If an explicit model override fails after
+canonical creation, the error remains visible but the existing route opens, so retry cannot create a
+duplicate session. Provider and model catalogs likewise use typed `.global` or `.session(id:)`
+targets and publish each fully
 paged provider/model pair atomically. Auth operations retain that target through completion or
 confirmed cancellation; unknown completions never guess from dashboard selection. Package
 inventory and update projections use typed `.global` or `.workspace(cwd:)` targets; the global
@@ -458,13 +465,21 @@ never changes the composer's structure. A non-empty active draft replaces the tr
 action with Send and is admitted as a steering message, while an empty active
 composer retains Stop. The keyboard remains focused after steering so multiple messages can
 be queued without waiting for the current turn to settle. The send control's native context
-menu can explicitly choose steering after the current turn or follow-up after current work.
+menu can explicitly choose steering after the current turn or follow-up after current work. A press
+has immediate scale/opacity feedback, admitted sends replace the arrow with a compact progress
+indicator, and the composer surface subtly acknowledges the in-flight admission without creating a
+provisional transcript row. Pending attachment chips enter and leave with bounded composer-owned
+motion; their height changes explicitly arm the sole scroll coordinator's viewport transition.
 Authoritative queued entries render after active runtime state as right-anchored compact cards
-with stable identity, delivery stage, position, text, and attachment count. Their app-native
-menu and editor support edit, same-stage reorder, individual removal, behavior changes, and
-clear-all against an optimistic queue revision; conflicts wait for the next authoritative
-snapshot rather than fabricating a local queue. Steering is always presented before follow-up
-to match runtime delivery order. Older Gateways retain a visible read-only string projection.
+that hug their content and wrap at the same 364-point maximum as a user prompt. They retain stable
+identity, delivery stage, position, text, and attachment count. Queue cards and the transcript
+timeline are installed from the same exact tagged source, so consuming a queued entry cannot remove
+its card one frame before the corresponding canonical prompt installs. Direct 44-point Edit and
+Remove controls own the primary actions; the secondary menu retains same-stage reorder and clear-all,
+and the editor supports text and behavior changes against an optimistic queue revision. Conflicts
+wait for the next authoritative snapshot rather than fabricating a local queue. Steering is always
+presented before follow-up to match runtime delivery order. Older Gateways retain a visibly locked
+read-only string projection that directs the user to update Tron on Mac.
 Camera, photo, and file actions also remain enabled during an active turn: uploads stage locally
 and the eventual prompt carries the same steering behavior as text. The native attachment menu derives enablement
 from the immutable viewed session and an explicit authoritative phase; a missing phase remains
@@ -634,7 +649,13 @@ Chat has one spatial role model: user prompts are right anchored, agent prose an
 anchored, and presentation-only system events are centered. A width-aware TextKit owner lets short
 prompts hug their measured content at the trailing edge, bounds longer prompts to 364 points, and
 uses logical-leading line alignment inside that block with a 10% smaller Dynamic Type font. An
-external 28-point logical-leading separation preserves the right-side silhouette. Canonical
+external 28-point logical-leading separation preserves the right-side silhouette. Newly installed
+canonical content uses that same role geometry for presentation-only motion: user prompts and
+queued intents rise from the trailing composer edge, tool activity enters from the leading edge,
+system capsules settle from center, and assistant prose uses only a shallow vertical reveal. The
+exact installed-row geometry gate still owns admission, so projection preparation cannot animate a
+row that was never displayed, detached readers gain no follow authority, and same-ID tool/status
+morphs never replay an entrance. Reduce Motion retains only a brief opacity reveal. Canonical
 compaction/branch/configuration entries, embedded assistant failures, and exact admitted runtime
 working/status state share one semantic notification projection and capsule primitive. Only a pill
 with real detail content is an interactive Liquid Glass button; no-detail events use a flat tinted

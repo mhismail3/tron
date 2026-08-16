@@ -315,6 +315,7 @@ struct ChatView: View {
                             ) {
                                 ChatTranscriptEntranceRow(
                                     state: entranceState,
+                                    kind: .classify(item),
                                     reduceMotion: reduceMotion
                                 ) {
                                     ChatTranscriptRenderRow(
@@ -325,8 +326,8 @@ struct ChatView: View {
                                 }
                             }
                         }
+                        queuedMessageRows(installed)
                     }
-                    queuedMessageRows(snapshot)
                 }
                 Color.clear
                     .frame(height: 12)
@@ -411,29 +412,39 @@ struct ChatView: View {
     }
 
     @ViewBuilder
-    private func queuedMessageRows(_ snapshot: SessionSnapshot) -> some View {
-        let messages = snapshot.displayedQueuedMessages
+    private func queuedMessageRows(_ installed: InstalledChatTranscript) -> some View {
+        let messages = installed.queuedMessages
+        let managementAvailability = QueuedMessageManagementPolicy.availability(
+            capabilities: model.gatewayInfo?.capabilities ?? [],
+            queueRevision: installed.queueRevision,
+            hasAuthoritativeItems: installed.supportsQueueManagement
+        )
         ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
             stableTranscriptRow(
                 id: "queued-message-\(message.id)",
                 installedTag: nil,
                 entranceState: .none
             ) {
-                QueuedMessageRow(
-                    message: message,
-                    position: index + 1,
-                    total: messages.count,
-                    isManageable: snapshot.queueRevision != nil && snapshot.queuedItems != nil,
-                    isMutating: !mutatingQueuedMessageIDs.isEmpty,
-                    onEdit: { queuedMessageEditor = .init(id: message.id) },
-                    onDelete: { Task { await removeQueuedMessage(message.id) } },
-                    onClear: { Task { await clearQueuedMessages() } },
-                    canMoveEarlier: index > 0 && messages[index - 1].behavior == message.behavior,
-                    canMoveLater: index + 1 < messages.count && messages[index + 1].behavior == message.behavior,
-                    onMove: { offset in
-                        Task { await moveQueuedMessage(message.id, offset: offset) }
-                    }
-                )
+                ChatQueuedMessageEntranceRow(
+                    animatesEntrance: isTranscriptReady,
+                    reduceMotion: reduceMotion
+                ) {
+                    QueuedMessageRow(
+                        message: message,
+                        position: index + 1,
+                        total: messages.count,
+                        managementAvailability: managementAvailability,
+                        isMutating: !mutatingQueuedMessageIDs.isEmpty,
+                        onEdit: { queuedMessageEditor = .init(id: message.id) },
+                        onDelete: { Task { await removeQueuedMessage(message.id) } },
+                        onClear: { Task { await clearQueuedMessages() } },
+                        canMoveEarlier: index > 0 && messages[index - 1].behavior == message.behavior,
+                        canMoveLater: index + 1 < messages.count && messages[index + 1].behavior == message.behavior,
+                        onMove: { offset in
+                            Task { await moveQueuedMessage(message.id, offset: offset) }
+                        }
+                    )
+                }
             }
         }
     }
@@ -981,13 +992,36 @@ struct ChatView: View {
                                     model.composerDrafts.removeAttachment(attachment.id, target: target)
                                 }
                             }
+                            .transition(
+                                reduceMotion
+                                    ? .opacity
+                                    : .asymmetric(
+                                        insertion: .move(edge: .bottom)
+                                            .combined(with: .scale(scale: 0.92, anchor: .bottom))
+                                            .combined(with: .opacity),
+                                        removal: .move(edge: .top)
+                                            .combined(with: .scale(scale: 0.94, anchor: .top))
+                                            .combined(with: .opacity)
+                                    )
+                            )
                         }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 2)
                 }
                 .scrollClipDisabled()
-                .transition(.opacity)
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)
+                        )
+                )
+                .animation(
+                    ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion),
+                    value: pendingAttachments.map(\.id)
+                )
             }
 
             GlassEffectContainer(spacing: 8) {
@@ -1015,6 +1049,9 @@ struct ChatView: View {
                     ExtensionWidgetView(widget: widget)
                 }
             }
+        }
+        .onChange(of: pendingAttachments.map(\.id)) { _, _ in
+            scrollCoordinator.composerViewportTransitionBegan()
         }
     }
 
@@ -1060,6 +1097,7 @@ struct ChatView: View {
                 ComposerTrailingButton(
                     mode: composerTrailingMode,
                     isDisabled: sending || !isTranscriptReady,
+                    isSending: sending,
                     offersQueueChoices: selectedAuthoritativeSnapshot?.phase.isActive == true,
                     onSend: { behavior in Task { await send(behavior: behavior) } },
                     onAbort: { Task { await model.abort(sessionID: sessionID) } }
@@ -1080,6 +1118,17 @@ struct ChatView: View {
         )
         .frame(maxWidth: .infinity, minHeight: 40)
         .padding(.horizontal, 4)
+        .scaleEffect(sending && !reduceMotion ? 0.992 : 1, anchor: .bottom)
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.tronEmerald.opacity(sending ? 0.30 : 0), lineWidth: 0.75)
+        }
+        .animation(
+            reduceMotion
+                ? .easeOut(duration: 0.12)
+                : .spring(response: 0.30, dampingFraction: 0.86),
+            value: sending
+        )
         .glassEffect(
             .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
             in: RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -1144,7 +1193,8 @@ struct ChatView: View {
         ChatComposerPolicy.trailingMode(
             phase: selectedAuthoritativeSnapshot?.phase,
             hasContent: !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !pendingAttachments.isEmpty
+                || !pendingAttachments.isEmpty,
+            isSending: sending
         )
     }
 
@@ -1582,37 +1632,98 @@ private struct PendingAttachmentChip: View {
 
 private struct ChatTranscriptEntranceRow<Content: View>: View {
     let state: ChatTranscriptEntranceState
+    let kind: ChatContentEntranceKind
     let reduceMotion: Bool
     @ViewBuilder let content: Content
     @State private var revealed: Bool
 
     init(
         state: ChatTranscriptEntranceState,
+        kind: ChatContentEntranceKind,
         reduceMotion: Bool,
         @ViewBuilder content: () -> Content
     ) {
         self.state = state
+        self.kind = kind
         self.reduceMotion = reduceMotion
         self.content = content()
-        _revealed = State(initialValue: state != .pending || reduceMotion)
+        _revealed = State(initialValue: state != .pending)
     }
 
     var body: some View {
+        let hidden = ChatContentTransitionPolicy.hiddenTransform(
+            for: kind,
+            reduceMotion: reduceMotion
+        )
         content
             .opacity(revealed ? 1 : 0)
-            .scaleEffect(revealed || reduceMotion ? 1 : 0.985)
-            .offset(y: revealed || reduceMotion ? 0 : 3)
+            .scaleEffect(
+                revealed ? 1 : hidden.scale,
+                anchor: hidden.anchor.unitPoint
+            )
+            .offset(
+                x: revealed ? 0 : hidden.offsetX,
+                y: revealed ? 0 : hidden.offsetY
+            )
             .onChange(of: state, initial: true) { _, state in
                 switch state {
                 case .pending:
                     break
                 case .admitted:
-                    if reduceMotion { revealed = true }
-                    else { withAnimation(.smooth(duration: 0.24)) { revealed = true } }
+                    withAnimation(ChatContentTransitionPolicy.revealAnimation(
+                        for: kind,
+                        reduceMotion: reduceMotion
+                    )) {
+                        revealed = true
+                    }
                 case .none:
                     var transaction = Transaction()
                     transaction.disablesAnimations = true
                     withTransaction(transaction) { revealed = true }
+                }
+            }
+    }
+}
+
+private struct ChatQueuedMessageEntranceRow<Content: View>: View {
+    let animatesEntrance: Bool
+    let reduceMotion: Bool
+    @ViewBuilder let content: Content
+    @State private var revealed: Bool
+
+    init(
+        animatesEntrance: Bool,
+        reduceMotion: Bool,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.animatesEntrance = animatesEntrance
+        self.reduceMotion = reduceMotion
+        self.content = content()
+        _revealed = State(initialValue: !animatesEntrance)
+    }
+
+    var body: some View {
+        let hidden = ChatContentTransitionPolicy.hiddenTransform(
+            for: .queuedPrompt,
+            reduceMotion: reduceMotion
+        )
+        content
+            .opacity(revealed ? 1 : 0)
+            .scaleEffect(
+                revealed ? 1 : hidden.scale,
+                anchor: hidden.anchor.unitPoint
+            )
+            .offset(
+                x: revealed ? 0 : hidden.offsetX,
+                y: revealed ? 0 : hidden.offsetY
+            )
+            .onAppear {
+                guard animatesEntrance, !revealed else { return }
+                withAnimation(ChatContentTransitionPolicy.revealAnimation(
+                    for: .queuedPrompt,
+                    reduceMotion: reduceMotion
+                )) {
+                    revealed = true
                 }
             }
     }

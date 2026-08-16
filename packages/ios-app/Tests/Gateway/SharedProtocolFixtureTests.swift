@@ -28,6 +28,21 @@ struct SharedProtocolFixtureTests {
         #expect(snapshot.toolExecutions.first?.progressSequence == 2)
         #expect(snapshot.transcript.first(where: { $0.toolCallId == "tool-call" })?.durationMs == 1_000)
         #expect(snapshot.extensionUI.pendingInteractions.first?.method == .select)
+        #expect(snapshot.queueRevision == 3)
+        #expect(snapshot.queuedItems == [
+            SessionSnapshot.QueuedMessage(
+                id: "queued-steer",
+                behavior: .steer,
+                text: "correct course",
+                attachmentCount: 0
+            ),
+            SessionSnapshot.QueuedMessage(
+                id: "queued-follow-up",
+                behavior: .followUp,
+                text: "then verify",
+                attachmentCount: 0
+            ),
+        ])
 
         let encoded = try JSONEncoder.gateway.encode(snapshot)
         let roundTrip = try JSONDecoder.gateway.decode(SessionSnapshot.self, from: encoded)

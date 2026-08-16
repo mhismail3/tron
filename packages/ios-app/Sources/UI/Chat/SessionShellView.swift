@@ -45,9 +45,7 @@ struct SessionShellView: View {
     var body: some View {
         dashboardNavigation
         .sheet(isPresented: $showNewSession) {
-            NewSessionSheet {
-                present(AppModel.SessionNavigationRoute(sessionID: $0, editorText: nil))
-            }
+            NewSessionSheet(onCreated: present)
                 .tronTopBlur(.sheet)
                 .presentationDetents([.medium, .large], selection: $newSessionDetent)
                 .presentationDragIndicator(.hidden)
@@ -428,12 +426,13 @@ private struct NewSessionSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var workspace = ""
     @State private var selectedModel: ModelRef?
+    @State private var configuredModel: ModelRef?
     @State private var showBrowser = false
     @State private var showModels = false
-    @State private var creating = false
     @State private var trustInspection: JSONValue?
     @State private var configurationOwner = NewSessionConfigurationOwner()
-    let onCreated: (String) -> Void
+    @State private var creationOwner = NewSessionCreationOwner()
+    let onCreated: (AppModel.SessionNavigationRoute) -> Void
 
     var body: some View {
         NavigationStack {
@@ -513,18 +512,19 @@ private struct NewSessionSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) { TronSheetTitle(title: "New Session") }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task { await create() }
-                    } label: {
+                    Button { beginCreation() } label: {
                         HStack(spacing: 6) {
-                            if creating { ProgressView().controlSize(.mini) }
-                            else { Image(systemName: "checkmark") }
-                            Text(creating ? "Creating" : "Create")
+                            if creating || configurationLoading {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: "checkmark")
+                            }
+                            Text(creationActionTitle)
                         }
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(Color.tronEmerald)
                     }
-                    .disabled(creating || !configurationOwner.permitsCreation(workspace: workspace, requiresTrust: needsTrust))
+                    .disabled(creating || !configurationReady)
                 }
             }
             .sheet(isPresented: $showBrowser) {
@@ -557,12 +557,15 @@ private struct NewSessionSheet: View {
                 .presentationDragIndicator(.hidden)
             }
             .task(id: NewSessionConfigurationLoadID(
+                profileID: model.profiles.selected?.id,
                 workspace: workspace,
                 trustInvalidationGeneration: model.trustRevision
             )) {
-                configurationOwner.begin(workspace: workspace)
+                let profileID = model.profiles.selected?.id
+                configurationOwner.begin(profileID: profileID, workspace: workspace)
                 trustInspection = nil
                 selectedModel = nil
+                configuredModel = nil
                 if workspace.isEmpty, let defaultWorkspace = model.defaultWorkspace, !defaultWorkspace.isEmpty {
                     workspace = defaultWorkspace
                     return
@@ -579,14 +582,16 @@ private struct NewSessionSheet: View {
                     trustReady = await inspectTrust(cwd: requestedWorkspace)
                 }
                 let loadedSettings = await settingsReady
-                guard workspace == requestedWorkspace,
+                guard model.profiles.selected?.id == profileID,
+                      workspace == requestedWorkspace,
                       configurationOwner.admit(
+                        profileID: profileID,
                         workspace: requestedWorkspace,
                         settingsReady: loadedSettings,
                         trustReady: trustReady
                       ) else { return }
-                selectedModel = model.configuredDefaultModel(for: settingsTarget)
-                    ?? model.preferredAvailableModel(for: .global)
+                configuredModel = model.configuredDefaultModel(for: settingsTarget)
+                selectedModel = configuredModel ?? model.preferredAvailableModel(for: .global)
             }
         }
         .interactiveDismissDisabled(creating)
@@ -673,16 +678,69 @@ private struct NewSessionSheet: View {
         }
     }
 
-    private func create() async {
-        guard configurationOwner.permitsCreation(workspace: workspace, requiresTrust: needsTrust) else { return }
-        creating = true
-        defer { creating = false }
+    private var configurationReady: Bool {
+        configurationOwner.permitsCreation(
+            profileID: model.profiles.selected?.id,
+            workspace: workspace,
+            requiresTrust: needsTrust
+        )
+    }
+
+    private var configurationLoading: Bool {
+        configurationOwner.isLoading(
+            profileID: model.profiles.selected?.id,
+            workspace: workspace
+        )
+    }
+
+    private var creating: Bool { creationOwner.isCreating }
+
+    private var creationActionTitle: String {
+        if creating { return "Creating" }
+        if configurationLoading { return "Preparing" }
+        return "Create"
+    }
+
+    private func beginCreation() {
+        guard creationOwner.begin(configurationReady: configurationReady) else { return }
+        let cwd = workspace
+        let modelOverride = creationOwner.modelOverride(
+            selected: selectedModel,
+            configured: configuredModel
+        )
+        Task { await create(cwd: cwd, modelOverride: modelOverride) }
+    }
+
+    private func create(cwd: String, modelOverride: ModelRef?) async {
+        defer { creationOwner.finish() }
         do {
-            let sessionID = try await model.createSession(cwd: workspace)
-            if let selectedModel { try await model.setModel(selectedModel, sessionID: sessionID) }
-            onCreated(sessionID)
+            let route = try await model.createSession(cwd: cwd)
+            let overrideResolution = await applyModelOverride(modelOverride, to: route)
+            guard overrideResolution.presentsCreatedRoute,
+                  model.ownsNavigationRoute(route) else { return }
+            onCreated(route)
             dismiss()
-        } catch { model.lastError = error.localizedDescription }
+        } catch is CancellationError {
+            return
+        } catch {
+            model.lastError = error.localizedDescription
+        }
+    }
+
+    private func applyModelOverride(
+        _ modelOverride: ModelRef?,
+        to route: AppModel.SessionNavigationRoute
+    ) async -> NewSessionModelOverrideResolution {
+        guard let modelOverride else { return .notRequested }
+        do {
+            try await model.setModel(modelOverride, sessionID: route.sessionID)
+            return .applied
+        } catch is CancellationError {
+            return .cancelled
+        } catch {
+            model.lastError = "Session created, but the selected model could not be applied: \(error.localizedDescription)"
+            return .failed
+        }
     }
 
     private func abbreviated(_ path: String) -> String {

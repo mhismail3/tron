@@ -238,9 +238,10 @@ enum ChatComposerPolicy {
 
     static func trailingMode(
         phase: SessionPhase?,
-        hasContent: Bool
+        hasContent: Bool,
+        isSending: Bool = false
     ) -> ComposerTrailingMode? {
-        if hasContent { return .send }
+        if isSending || hasContent { return .send }
         if phase?.isActive == true { return .stopAgent }
         return nil
     }
@@ -261,9 +262,26 @@ enum ChatComposerPolicy {
     }
 }
 
+struct ComposerTrailingButtonPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.88 : 1)
+            .opacity(configuration.isPressed ? 0.78 : 1)
+            .animation(
+                reduceMotion
+                    ? .easeOut(duration: 0.08)
+                    : .spring(response: 0.22, dampingFraction: 0.72),
+                value: configuration.isPressed
+            )
+    }
+}
+
 struct ComposerTrailingButton: View {
     let mode: ComposerTrailingMode
     let isDisabled: Bool
+    let isSending: Bool
     let offersQueueChoices: Bool
     let onSend: (String?) -> Void
     let onAbort: () -> Void
@@ -277,15 +295,26 @@ struct ComposerTrailingButton: View {
                         .font(TronTypography.buttonSM)
                         .foregroundStyle(Color.tronError)
                 case .send:
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(TronTypography.button)
-                        .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
+                    ZStack {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(TronTypography.button)
+                            .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
+                            .opacity(isSending ? 0 : 1)
+                            .scaleEffect(isSending ? 0.72 : 1)
+                        if isSending {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(Color.tronEmerald)
+                                .transition(.scale(scale: 0.72).combined(with: .opacity))
+                        }
+                    }
+                    .animation(.smooth(duration: 0.18), value: isSending)
                 }
             }
             .frame(width: 40, height: 40)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ComposerTrailingButtonPressStyle())
         .disabled(isDisabled && mode == .send)
         .contentTransition(.symbolEffect(.replace))
         .animation(.easeInOut(duration: 0.2), value: mode)
@@ -293,7 +322,7 @@ struct ComposerTrailingButton: View {
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(accessibilityHint)
         .contextMenu {
-            if mode == .send, offersQueueChoices {
+            if mode == .send, offersQueueChoices, !isSending {
                 Button("Steer after current turn", systemImage: "arrow.turn.up.right") {
                     onSend("steer")
                 }
@@ -307,11 +336,12 @@ struct ComposerTrailingButton: View {
     private var accessibilityLabel: String {
         switch mode {
         case .stopAgent: "Stop Tron"
-        case .send: "Send message"
+        case .send: isSending ? "Sending message" : "Send message"
         }
     }
 
     private var accessibilityHint: String {
+        if isSending { return "Waiting for the message to be admitted." }
         if mode == .send, offersQueueChoices {
             return "Sends steering after the current turn. Touch and hold to choose follow-up delivery."
         }

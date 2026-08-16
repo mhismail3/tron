@@ -4,11 +4,32 @@ struct QueuedMessageEditorRoute: Identifiable, Hashable {
     let id: String
 }
 
+enum QueuedMessageManagementAvailability: Equatable, Sendable {
+    case available
+    case requiresGatewayUpdate
+    case invalidProjection
+
+    var isManageable: Bool { self == .available }
+}
+
+enum QueuedMessageManagementPolicy {
+    static let capability = "queue-management.v1"
+
+    static func availability(
+        capabilities: [String],
+        queueRevision: Int?,
+        hasAuthoritativeItems: Bool
+    ) -> QueuedMessageManagementAvailability {
+        if queueRevision != nil, hasAuthoritativeItems { return .available }
+        return capabilities.contains(capability) ? .invalidProjection : .requiresGatewayUpdate
+    }
+}
+
 struct QueuedMessageRow: View {
     let message: SessionSnapshot.QueuedMessage
     let position: Int
     let total: Int
-    let isManageable: Bool
+    let managementAvailability: QueuedMessageManagementAvailability
     let isMutating: Bool
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -16,6 +37,8 @@ struct QueuedMessageRow: View {
     let canMoveEarlier: Bool
     let canMoveLater: Bool
     let onMove: (Int) -> Void
+
+    private var isManageable: Bool { managementAvailability.isManageable }
 
     private var accent: Color {
         message.behavior == .steer ? .tronEmerald : .tronPurple
@@ -30,8 +53,33 @@ struct QueuedMessageRow: View {
     }
 
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            card.fixedSize(horizontal: true, vertical: false)
+            card
+        }
+        .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
+        .contextMenu {
+            if isManageable && !isMutating {
+                Button("Edit message", systemImage: "pencil", action: onEdit)
+                if canMoveEarlier {
+                    Button("Move earlier", systemImage: "arrow.up") { onMove(-1) }
+                }
+                if canMoveLater {
+                    Button("Move later", systemImage: "arrow.down") { onMove(1) }
+                }
+                Button("Remove from queue", systemImage: "trash", role: .destructive, action: onDelete)
+                if total > 1 {
+                    Button("Clear entire queue", systemImage: "trash.slash", role: .destructive, action: onClear)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .accessibilityElement(children: .contain)
+    }
+
+    private var card: some View {
         let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
-        VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Image(systemName: message.behavior == .steer
                     ? "arrow.turn.up.right"
@@ -51,36 +99,7 @@ struct QueuedMessageRow: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
 
-                Spacer(minLength: 8)
-
-                if isMutating {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(accent)
-                        .frame(width: 32, height: 32)
-                } else if isManageable {
-                    Menu {
-                        Button("Edit message", systemImage: "pencil", action: onEdit)
-                        if canMoveEarlier {
-                            Button("Move earlier", systemImage: "arrow.up") { onMove(-1) }
-                        }
-                        if canMoveLater {
-                            Button("Move later", systemImage: "arrow.down") { onMove(1) }
-                        }
-                        Button("Remove from queue", systemImage: "trash", role: .destructive, action: onDelete)
-                        if total > 1 {
-                            Button("Clear entire queue", systemImage: "trash.slash", role: .destructive, action: onClear)
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .frame(width: 32, height: 32)
-                            .background(Color.tronSlate.opacity(0.12), in: Circle())
-                            .contentShape(Circle())
-                    }
-                    .accessibilityLabel("Manage queued message")
-                }
+                managementControls
             }
 
             if !message.text.isEmpty {
@@ -99,26 +118,94 @@ struct QueuedMessageRow: View {
             }
         }
         .padding(12)
-        .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .topLeading)
         .background(accent.opacity(0.07), in: shape)
         .overlay(shape.stroke(accent.opacity(0.28), lineWidth: 0.75))
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .contextMenu {
-            if isManageable && !isMutating {
-                Button("Edit message", systemImage: "pencil", action: onEdit)
-                if canMoveEarlier {
-                    Button("Move earlier", systemImage: "arrow.up") { onMove(-1) }
-                }
-                if canMoveLater {
-                    Button("Move later", systemImage: "arrow.down") { onMove(1) }
-                }
-                Button("Remove from queue", systemImage: "trash", role: .destructive, action: onDelete)
-                if total > 1 {
-                    Button("Clear entire queue", systemImage: "trash.slash", role: .destructive, action: onClear)
+    }
+
+    @ViewBuilder
+    private var managementControls: some View {
+        if isMutating {
+            ProgressView()
+                .controlSize(.mini)
+                .tint(accent)
+                .frame(width: 44, height: 44)
+        } else if isManageable {
+            HStack(spacing: 2) {
+                queueActionButton(
+                    icon: "pencil",
+                    label: "Edit queued message",
+                    color: Color.tronTextSecondary,
+                    action: onEdit
+                )
+                queueActionButton(
+                    icon: "trash",
+                    label: "Remove from queue",
+                    color: Color.tronError,
+                    action: onDelete
+                )
+                if canMoveEarlier || canMoveLater || total > 1 {
+                    Menu {
+                        if canMoveEarlier {
+                            Button("Move earlier", systemImage: "arrow.up") { onMove(-1) }
+                        }
+                        if canMoveLater {
+                            Button("Move later", systemImage: "arrow.down") { onMove(1) }
+                        }
+                        if total > 1 {
+                            Button("Clear entire queue", systemImage: "trash.slash", role: .destructive, action: onClear)
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                    }
+                    .accessibilityLabel("More queued message actions")
                 }
             }
+        } else {
+            Menu {
+                Button(readOnlyExplanation, systemImage: "lock") {}
+                    .disabled(true)
+            } label: {
+                Image(systemName: "lock")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(Color.tronTextMuted)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+            }
+            .accessibilityLabel("Queued message is read only")
+            .accessibilityHint(readOnlyExplanation)
         }
-        .accessibilityElement(children: .contain)
+    }
+
+    private var readOnlyExplanation: String {
+        switch managementAvailability {
+        case .available:
+            ""
+        case .requiresGatewayUpdate:
+            "Update Tron on Mac to edit or remove queued messages"
+        case .invalidProjection:
+            "Reconnect to Tron on Mac to restore queue editing"
+        }
+    }
+
+    private func queueActionButton(
+        icon: String,
+        label: String,
+        color: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                .foregroundStyle(color)
+                .frame(width: 44, height: 44)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
 

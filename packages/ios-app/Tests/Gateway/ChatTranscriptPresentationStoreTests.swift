@@ -26,6 +26,48 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("queue cards install atomically with their exact transcript source")
+    func queueInstallsWithTranscript() async throws {
+        try await withTestWatchdog { @MainActor in
+            var queued = try SessionScenarioBuilder(seed: 1_211)
+                .openingTail(targetEncodedBytes: 8_000)
+            queued.queueRevision = 4
+            queued.queuedItems = [
+                .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 1),
+            ]
+            queued.queued = .init(steering: ["next"], followUp: [])
+            let queuedTag = ChatTranscriptProjectionTag(snapshot: queued, presentationGeneration: 7)
+            let store = ChatTranscriptPresentationStore()
+
+            store.submit(snapshot: queued, tag: queuedTag)
+            let first = try await store.waitForInstall(of: queuedTag)
+            #expect(first.queuedMessages == queued.queuedItems)
+            #expect(first.queueRevision == 4)
+            #expect(first.supportsQueueManagement)
+
+            var consumed = queued
+            consumed.revision += 1
+            consumed.eventSequence += 1
+            consumed.queueRevision = 5
+            consumed.queuedItems = []
+            consumed.queued = .init(steering: [], followUp: [])
+            consumed.transcript.append(contentsOf: SessionScenarioBuilder(seed: 1_212)
+                .historyPage(count: 1, longRowBytes: 16))
+            consumed.transcriptTotal = consumed.transcript.count
+            let consumedTag = ChatTranscriptProjectionTag(
+                snapshot: consumed,
+                presentationGeneration: 7
+            )
+
+            store.submit(snapshot: consumed, tag: consumedTag)
+            let second = try await store.waitForInstall(of: consumedTag)
+            #expect(second.queuedMessages == [])
+            #expect(second.queueRevision == 5)
+            #expect(second.timeline.items.count >= first.timeline.items.count)
+            #expect(store.installed == second)
+        }
+    }
+
     @Test("newest exact source wins while detached work stays serial")
     func newestWinsSerially() async throws {
         try await withTestWatchdog { @MainActor in

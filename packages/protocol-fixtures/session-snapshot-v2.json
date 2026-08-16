@@ -18,6 +18,11 @@
     "cost": 0.0125
   },
   "queued": { "steering": ["correct course"], "followUp": ["then verify"] },
+  "queueRevision": 3,
+  "queuedItems": [
+    { "id": "queued-steer", "behavior": "steer", "text": "correct course", "attachmentCount": 0 },
+    { "id": "queued-follow-up", "behavior": "followUp", "text": "then verify", "attachmentCount": 0 }
+  ],
   "transcript": [
     {
       "id": "user-entry",

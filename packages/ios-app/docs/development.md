@@ -160,7 +160,9 @@ publication, while the AppModel suites prove snapshots/tokens remain provisional
 acknowledgement, unmounted or synchronously revoked hints cannot create/advance state, and stale routes close their exact provisional token. The same suite proves a mounted route wins over divergent
 dashboard selection, dashboard refresh cannot open an inferred transcript, mounted reconnect restores
 the exact route, secondary reads cannot create hidden subscriptions, and create/fork return navigation
-identity without opening it implicitly. `DashboardStateOwnerTests` prove typed latest-load and
+identity without opening it implicitly. Create additionally returns before any dashboard catalog read;
+its route remains bound to the admitting gateway profile/lifecycle while `session.listChanged` owns
+projection convergence. `DashboardStateOwnerTests` prove typed latest-load and
 navigation admission, monotonic live-summary overlays, unknown-row discovery, safe cache/disconnect
 projection, and removal, while `GlobalNoticeStoreTests` enforce the eight-entry, 4 KiB-message, and 16 KiB-total
 budgets plus keyed progress coalescing. `ComposerDraftCoordinatorTests` prove profile/session draft
@@ -228,8 +230,10 @@ separately prove one generation advance per canonical invalidation. Settings req
 typed target: global requests omit CWD, while project requests carry their exact project CWD.
 The focused suite deliberately completes global/project settings and global/session provider
 catalogs out of order, then reverses two same-target reads; installed values must remain under
-their request key and the newest same-target request must win. It also proves auth completion
-retains its catalog target after failed cancellation and unknown operations trigger no guessed reload.
+their request key and the newest same-target request must win. New-session owner coverage binds
+configuration readiness to both workspace and gateway profile, exposes unresolved preparation, and
+single-admits creation until terminal completion. It also proves auth completion retains its catalog
+target after failed cancellation and unknown operations trigger no guessed reload.
 Package and custom-model ordering and mutation cases now live with their extracted owners rather
 than in `AppModelInvalidationTests`. `SettingsDraftStoreTests` prove target isolation,
 pre-response editing, invalidation rejection,
@@ -352,9 +356,15 @@ counts, prove a visible insertion admits once, and prove detached insertion emit
 Hosted streaming bursts must install only their newest exact source while detached composer/viewport work
 remains writable and creates no projection work. `ChatCompactPillTests` own intrinsic-width trailing placement for short prompts, the 364-point
 long-prompt bound, logical-leading line alignment, the 10% type reduction, the 28-point external
-user-side separation, and flat/detail material policy. `GatewayProtocolContractTests` and
-`SessionMutationServiceTests` cover revisioned queue projection and replacement commands;
-presentation guards keep queue cards and their editor on Tron surfaces instead of stock forms.
+user-side separation, and flat/detail material policy. `ChatContentTransitionTests` own role
+classification, trailing composer-edge prompt/queue motion, aligned activity motion, and the
+identity transform required by Reduce Motion. Hosted scroll tests remain the authority that these
+visual transforms do not grant detached readers automatic writes or replay same-ID entrances.
+`GatewayProtocolContractTests`, `SharedProtocolFixtureTests`, and
+`SessionMutationServiceTests` cover revisioned queue projection and replacement commands.
+`QueuedMessagePresentationTests` own capability/field admission for editing; presentation guards
+retain intrinsic cards capped at the user-prompt bound, direct 44-point Edit/Remove targets, an
+explicit legacy lock, and Tron surfaces instead of stock forms.
 Native bottom evidence comes from `ScrollGeometry.visibleRect.maxY`
 plus the bottom inset; the harness no longer substitutes a hard-coded settled distance.
 The obsolete visibility modifier is removed; the native SwiftUI geometry modifier still

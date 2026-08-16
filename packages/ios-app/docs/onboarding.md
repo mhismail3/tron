@@ -19,9 +19,10 @@ hidden while the native upward sheet gesture remains available.
    a newer invitation supersedes the older attempt, and forgetting or switching
    Macs invalidates pending enrollment before profile metadata, Keychain, or a
    Gateway connection can be started from its late HTTP result.
-5. **Workspace** chooses a Mac directory. If executable project resources
-   require a decision, onboarding presents explicit trust controls and states
-   that trust is not a sandbox.
+5. **Workspace** chooses a Mac directory. Every visible folder row uses its full
+   glass container as the selection target, not only the icon or label. If
+   executable project resources require a decision, onboarding presents explicit
+   trust controls and states that trust is not a sandbox.
 6. **Anthropic** presents its runtime-reported authentication methods when the
    current runtime enables it.
 7. **OpenAI** does the same without assuming one credential type.

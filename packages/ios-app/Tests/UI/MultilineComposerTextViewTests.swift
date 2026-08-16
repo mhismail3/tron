@@ -66,6 +66,20 @@ struct MultilineComposerTextViewTests {
         ) == "attachment follow-up")
     }
 
+    @Test("an admitted send retains its progress control after the draft clears")
+    func sendingRetainsTrailingControl() {
+        #expect(ChatComposerPolicy.trailingMode(
+            phase: .idle,
+            hasContent: false,
+            isSending: true
+        ) == .send)
+        #expect(ChatComposerPolicy.trailingMode(
+            phase: .running,
+            hasContent: false,
+            isSending: true
+        ) == .send)
+    }
+
     @Test("an empty active composer keeps the stop action")
     func emptyActiveComposerStopsAgent() {
         #expect(ChatComposerPolicy.trailingMode(
