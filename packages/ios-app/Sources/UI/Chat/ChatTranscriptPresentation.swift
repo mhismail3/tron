@@ -280,8 +280,8 @@ enum ToolTiming {
 
     static func date(_ value: String?) -> Date? {
         guard let value else { return nil }
-        return try? fractionalTimestamp.parse(value)
-            ?? wholeSecondTimestamp.parse(value)
+        if let date = try? fractionalTimestamp.parse(value) { return date }
+        return try? wholeSecondTimestamp.parse(value)
     }
 
     static func intervalMilliseconds(start: String?, end: String?) -> Int? {

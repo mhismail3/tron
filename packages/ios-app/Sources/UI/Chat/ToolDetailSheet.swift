@@ -94,8 +94,9 @@ struct ToolDetailSheet: View {
 
     private func pathText(_ path: ToolPathPresentation) -> some View {
         let text = path.directory.map {
-            Text($0).foregroundColor(Color.tronTextSecondary)
-                + Text(path.basename).foregroundColor(accent)
+            let directory = Text($0).foregroundColor(Color.tronTextSecondary)
+            let basename = Text(path.basename).foregroundColor(accent)
+            return Text("\(directory)\(basename)")
         } ?? Text(path.basename).foregroundColor(accent)
         return text
             .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .semibold))

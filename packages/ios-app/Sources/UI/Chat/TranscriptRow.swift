@@ -401,8 +401,9 @@ private struct ThinkingBlock: View {
         segments.enumerated().reduce(Text("")) { paragraph, element in
             let (index, segment) = element
             let separator = index == 0 ? Text("") : Text(" ")
-            return paragraph + separator + rendered(segment)
+            let renderedSegment = rendered(segment)
                 .foregroundColor(Color.tronTextSecondary.opacity(segmentOpacity(segment.id)))
+            return Text("\(paragraph)\(separator)\(renderedSegment)")
         }
     }
 
