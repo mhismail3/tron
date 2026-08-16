@@ -272,6 +272,34 @@ struct PresentationStyleGuardTests {
         }
     }
 
+    @Test("terminal sheet, presentation lifecycle, and native renderer stay separated")
+    func terminalSourceOwnership() throws {
+        let sheet = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Terminal/TerminalSheet.swift"),
+            encoding: .utf8
+        )
+        let presentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Terminal/TerminalPresentationController.swift"),
+            encoding: .utf8
+        )
+        let renderer = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Terminal/TerminalRenderer.swift"),
+            encoding: .utf8
+        )
+        #expect(sheet.contains("struct TerminalSheet: View"))
+        #expect(sheet.contains("NativeTerminal("))
+        #expect(!sheet.contains("final class TerminalController"))
+        #expect(!sheet.contains("UIViewRepresentable"))
+        #expect(presentation.contains("final class TerminalController"))
+        #expect(presentation.contains("func start(sessionID: String, model: AppModel) async"))
+        #expect(!presentation.contains("import SwiftTerm"))
+        #expect(!presentation.contains("UIViewRepresentable"))
+        #expect(renderer.contains("struct NativeTerminal: UIViewRepresentable"))
+        #expect(renderer.contains("final class TerminalKeyboardController"))
+        #expect(renderer.contains("final class TronNativeTerminalView"))
+        #expect(!renderer.contains("AppModel"))
+    }
+
     @Test("dashboard header and row share the historical icon anchor")
     func dashboardAlignment() throws {
         let shell = try String(

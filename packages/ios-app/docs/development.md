@@ -128,6 +128,8 @@ receipt-aware commands, attach/replay intervals, compensating detach cleanup, re
 reattachment; `AppModel` only routes admitted events/lifecycle work and preserves its UI façade. The
 same lifecycle suite drives an injected monotonic clock to prove the 120 ms resize boundary, same-intent
 coalescing, established dimension clamps, independent presentation slots, and revocation with no late wire send.
+Terminal sheet composition, presentation lifecycle/error state, and native SwiftTerm/keyboard rendering live
+in separate source files; the style guard pins that boundary so renderer code cannot regain Gateway/AppModel work.
 `SessionPresentationStoreTests` own observation forwarding, cold-cache non-authority,
 disconnect/profile-reset semantics, all-topic revocation, old-close/new-open arbitration, stale and
 revoked secondary-response rejection, exact subscription-token admission, and suspended paging

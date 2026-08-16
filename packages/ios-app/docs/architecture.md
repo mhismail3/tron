@@ -16,7 +16,7 @@ implementation detail; all user-facing language calls the agent Tron.
 | `Sources/UI/Chat` | session shell, transcript, composer, context, forks |
 | `Sources/UI/Onboarding` | pairing, workspace, provider, and default setup |
 | `Sources/UI/Settings` | agent, trust, packages, devices, migration, diagnostics |
-| `Sources/UI/Terminal` | SwiftTerm adapter |
+| `Sources/UI/Terminal` | sheet composition, presentation lifecycle, and SwiftTerm renderer |
 | `Sources/UI/Theme` | historical Tron colors and descriptor-based bundled typography |
 | `ShareExtension` | app-group share handoff |
 
