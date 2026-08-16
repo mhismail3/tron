@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -162,14 +162,71 @@ describe("UploadStore", () => {
     });
     const expired = await store.save("expired", "text/plain", Buffer.from("12345678"));
     const malformed = join(home, "gateway", "uploads", "malformed");
-    await mkdir(malformed, { recursive: true });
+    const oversized = join(home, "gateway", "uploads", "oversized");
+    await Promise.all([mkdir(malformed, { recursive: true }), mkdir(oversized, { recursive: true })]);
     await writeFile(join(malformed, "metadata.json"), "not-json");
+    await writeFile(join(oversized, "metadata.json"), "x".repeat(64 * 1_024 + 1));
     now = 1_101;
 
     await expect(store.materialize([expired.id], "session")).rejects.toMatchObject({ code: "not_found" });
     await expect(store.save("replacement", "text/plain", Buffer.from("12345678"))).resolves.toMatchObject({
       name: "replacement",
       size: 8,
+    });
+    expect(await readdir(join(home, "gateway", "uploads"))).not.toEqual(expect.arrayContaining(["malformed", "oversized"]));
+  });
+
+  it("removes oversized metadata on direct lookup and returns not found", async () => {
+    const home = await root();
+    const store = new UploadStore(home, 16);
+    const upload = await store.save("value", "text/plain", Buffer.from("value"));
+    const folder = join(home, "gateway", "uploads", upload.id);
+    await writeFile(join(folder, "metadata.json"), "x".repeat(64 * 1_024 + 1));
+
+    await expect(store.materialize([upload.id], "session")).rejects.toMatchObject({ code: "not_found" });
+    expect(await readdir(join(home, "gateway", "uploads"))).not.toContain(upload.id);
+  });
+
+  it("rejects a symlinked upload child on direct lookup without touching its target", async () => {
+    const home = await root();
+    const store = new UploadStore(home, 16);
+    const upload = await store.save("value", "text/plain", Buffer.from("value"));
+    const folder = join(home, "gateway", "uploads", upload.id);
+    const outside = join(home, "outside-upload");
+    await rename(folder, outside);
+    await symlink(outside, folder);
+
+    await expect(store.materialize([upload.id], "session")).rejects.toMatchObject({ code: "not_found" });
+    expect(await readFile(join(outside, "content"), "utf8")).toBe("value");
+    expect(await readdir(join(home, "gateway", "uploads"))).not.toContain(upload.id);
+  });
+
+  it("removes upload metadata with a noncanonical timestamp", async () => {
+    const home = await root();
+    const store = new UploadStore(home, 16);
+    const upload = await store.save("value", "text/plain", Buffer.from("value"));
+    const folder = join(home, "gateway", "uploads", upload.id);
+    const metadataPath = join(folder, "metadata.json");
+    const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    metadata.createdAt = metadata.createdAt.replace(/\.\d{3}Z$/, "Z");
+    await writeFile(metadataPath, JSON.stringify(metadata));
+
+    await expect(store.materialize([upload.id], "session")).rejects.toMatchObject({ code: "not_found" });
+    expect(await readdir(join(home, "gateway", "uploads"))).not.toContain(upload.id);
+  });
+
+  it("admits upload metadata at the exact encoded byte ceiling", async () => {
+    const home = await root();
+    const store = new UploadStore(home, 16);
+    const upload = await store.save("value", "text/plain", Buffer.from("value"));
+    const metadataPath = join(home, "gateway", "uploads", upload.id, "metadata.json");
+    const compact = JSON.stringify(JSON.parse(await readFile(metadataPath, "utf8")));
+    const exact = `${compact}${" ".repeat(64 * 1_024 - Buffer.byteLength(compact))}`;
+    expect(Buffer.byteLength(exact)).toBe(64 * 1_024);
+    await writeFile(metadataPath, exact);
+
+    await expect(store.materialize([upload.id], "session")).resolves.toMatchObject({
+      envelope: expect.stringContaining("value"),
     });
   });
 

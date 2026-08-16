@@ -59,7 +59,7 @@ invitations also require exact versions, purposes, bounded identities/codes, and
 serialize reservation and commit against 128-entry and eight-times-per-upload (200 MiB by default) aggregate ceilings.
 A separate admission permits at most half that ratio concurrently (four default 25 MiB bodies). Authenticated request
 chunks stream directly into protected store-owned files; exact declared and observed sizes are checked before atomic
-metadata publication, and every success, rejection, overflow, truncation, or disconnect removes uncommitted staging
+metadata publication. Persisted upload metadata is limited to an exact 64 KiB document with canonical timestamps and fields; malformed or oversized entries self-clean before quota admission or direct materialization. Every success, rejection, overflow, truncation, or disconnect removes uncommitted staging
 and releases its slot. Unclaimed uploads
 expire after 24 hours, malformed/partial folders self-clean, prompt attachment IDs are unique, and
 one prompt cannot materialize more than the per-request byte ceiling. Successful imports remove

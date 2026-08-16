@@ -5,6 +5,9 @@ import { basename, dirname, extname, join } from "node:path";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
 import { atomicWriteJson, readJson } from "../util/json.js";
+import { isGatewayTimestamp } from "../util/timestamp.js";
+
+const UPLOAD_METADATA_MAX_BYTES = 64 * 1_024;
 
 interface UploadMetadata {
   version: 1;
@@ -50,13 +53,19 @@ function isConfirmedUploadCorruption(error: unknown): boolean {
 function isUploadMetadata(value: unknown, expectedID: string, maximumBytes: number): value is UploadMetadata {
   if (typeof value !== "object" || value === null) return false;
   const metadata = value as Partial<UploadMetadata>;
-  return metadata.version === 1
+  const keys = Object.keys(metadata);
+  const expectedKeys = metadata.sessionId === undefined
+    ? ["version", "id", "name", "mimeType", "size", "path", "createdAt"]
+    : ["version", "id", "name", "mimeType", "size", "path", "createdAt", "sessionId"];
+  return keys.length === expectedKeys.length && keys.every((key) => expectedKeys.includes(key))
+    && metadata.version === 1
     && metadata.id === expectedID
     && typeof metadata.name === "string" && metadata.name === safeName(metadata.name)
     && typeof metadata.mimeType === "string" && metadata.mimeType.length > 0 && metadata.mimeType.length <= 200
     && !/[\u0000-\u001f\u007f]/.test(metadata.mimeType)
     && typeof metadata.path === "string" && metadata.path.length > 0 && metadata.path.length <= 8_192
-    && typeof metadata.createdAt === "string" && Number.isFinite(Date.parse(metadata.createdAt))
+    && typeof metadata.createdAt === "string" && isGatewayTimestamp(metadata.createdAt)
+    && new Date(metadata.createdAt).toISOString() === metadata.createdAt
     && Number.isSafeInteger(metadata.size) && (metadata.size ?? 0) > 0 && (metadata.size ?? 0) <= maximumBytes
     && (metadata.sessionId === undefined || (typeof metadata.sessionId === "string" && metadata.sessionId.length > 0 && metadata.sessionId.length <= 200));
 }
@@ -395,10 +404,16 @@ export class UploadStore {
   private async metadata(id: string): Promise<UploadMetadata> {
     this.validateID(id);
     const uploadDirectory = await this.ensureUploadDirectory();
-    const metadata = await this.readMetadata(join(uploadDirectory, id, "metadata.json"));
+    const folder = join(uploadDirectory, id);
+    try { await this.ownedUploadDirectory(id, uploadDirectory); }
+    catch {
+      await rm(folder, { recursive: true, force: true });
+      throw new GatewayError("not_found", "Upload was not found");
+    }
+    const metadata = await this.readMetadata(join(folder, "metadata.json"));
     if (!isUploadMetadata(metadata, id, this.maximumBytes)
       || (metadata.sessionId === undefined && Date.parse(metadata.createdAt) <= this.now() - this.maximumUnclaimedAgeMs)) {
-      await rm(join(uploadDirectory, id), { recursive: true, force: true });
+      await rm(folder, { recursive: true, force: true });
       throw new GatewayError("not_found", "Upload was not found");
     }
     try {
@@ -413,17 +428,27 @@ export class UploadStore {
 
   private async readMetadata(path: string): Promise<unknown> {
     try {
-      return await readJson<unknown>(path, null);
+      return await readJson<unknown>(path, null, UPLOAD_METADATA_MAX_BYTES);
     } catch (error) {
-      if (error instanceof SyntaxError) return null;
+      if (error instanceof SyntaxError || error instanceof RangeError) return null;
       throw error;
     }
   }
 
+  private async ownedUploadDirectory(id: string, knownUploadDirectory?: string): Promise<string> {
+    const uploadDirectory = knownUploadDirectory ?? await this.ensureUploadDirectory();
+    const candidate = join(uploadDirectory, id);
+    const info = await lstat(candidate);
+    const actual = await realpath(candidate);
+    if (!info.isDirectory() || info.isSymbolicLink() || dirname(actual) !== uploadDirectory) {
+      throw new GatewayError("conflict", "Upload directory escaped Gateway ownership");
+    }
+    return actual;
+  }
+
   private async ownedPath(metadata: UploadMetadata): Promise<{ actual: string; ownedDirectory: string }> {
-    const uploadDirectory = await this.ensureUploadDirectory();
     const actual = await realpath(metadata.path);
-    const ownedDirectory = await realpath(join(uploadDirectory, metadata.id));
+    const ownedDirectory = await this.ownedUploadDirectory(metadata.id);
     const info = await stat(actual);
     if (!actual.startsWith(`${ownedDirectory}/`) || !info.isFile() || info.size !== metadata.size) {
       throw new GatewayError("conflict", "Upload content escaped its owned directory or changed size");
