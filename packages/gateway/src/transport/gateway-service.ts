@@ -168,8 +168,10 @@ export class GatewayService {
       }
       case "session.import": {
         const imported = await this.mutation(client, method, params, async () => {
-          const path = await this.dependencies.uploads.prepareSessionImport(string(params.uploadId, "uploadId", { max: 100 }));
+          const uploadId = string(params.uploadId, "uploadId", { max: 100 });
+          const path = await this.dependencies.uploads.prepareSessionImport(uploadId);
           const slot = await this.dependencies.sessions.importFromJsonl(path, string(params.cwd, "cwd", { max: 4_096 }));
+          await this.dependencies.uploads.remove(uploadId).catch(() => {});
           return safeJson({ sessionId: slot.id });
         }) as { sessionId: string };
         return safeJson(imported);
@@ -208,6 +210,7 @@ export class GatewayService {
           const sessionId = string(params.sessionId, "sessionId", { max: 200 });
           client.unsubscribe(sessionId);
           await this.dependencies.sessions.delete(sessionId);
+          await this.dependencies.uploads.removeSession(sessionId).catch(() => {});
           return { deleted: true };
         });
       case "session.prompt":

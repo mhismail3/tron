@@ -30,7 +30,7 @@ does not maintain a session database or event journal.
 - Hashed mobile devices: `gateway/devices.json`
 - Current invitation: `gateway/enrollment.json` (`0600`, ten minutes, one use)
 - Run markers and command receipts: gateway-owned bounded operational state
-- Uploads: transient, bounded, and removed after materialization/expiry
+- Uploads: transient and bounded; unclaimed staging expires, while prompt attachments remain session-owned until canonical deletion
 
 Legacy `~/.tron/auth.json` is not gateway auth and is never overwritten. It is
 read only by the explicit legacy importer.
@@ -45,7 +45,14 @@ read only by the explicit legacy importer.
 
 The pairing limiter keeps the exact rolling per-address window while retaining at most 4,096
 least-recently-used address keys and periodically deleting expired windows; address churn cannot
-create append-only process state. The retired `/engine` protocol is not exposed.
+create append-only process state. Uploads retain the 25 MiB per-request limit and additionally
+serialize admission against 128-entry and eight-times-per-upload (200 MiB by default) aggregate ceilings. Unclaimed uploads
+expire after 24 hours, malformed/partial folders self-clean, prompt attachment IDs are unique, and
+one prompt cannot materialize more than the per-request byte ceiling. Successful imports remove
+their staging folder; deleting a canonical session removes its claimed attachment folders. Cleanup
+failure is best effort after canonical import/deletion success and cannot turn that success into an
+ambiguous command receipt; failed session-folder cleanup remains pending in the live store and retries
+on later inventory work. The retired `/engine` protocol is not exposed.
 
 Every WebSocket starts with:
 

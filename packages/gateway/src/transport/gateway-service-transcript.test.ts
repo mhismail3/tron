@@ -114,6 +114,41 @@ describe("session transcript paging", () => {
     expect(write).toHaveBeenCalledWith("terminal", "write", "echo");
   });
 
+  it("post-success upload cleanup cannot make import or deletion ambiguous", async () => {
+    const execute = vi.fn(async (
+      _identity: string,
+      _method: string,
+      _commandId: string,
+      operation: () => Promise<unknown>,
+    ) => operation());
+    const remove = vi.fn(async () => { throw new Error("cleanup failed"); });
+    const removeSession = vi.fn(async () => { throw new Error("cleanup failed"); });
+    const service = new GatewayService({
+      sessions: {
+        importFromJsonl: async () => ({ id: "imported" }),
+        delete: async () => {},
+      },
+      uploads: {
+        prepareSessionImport: async () => "/owned/import.jsonl",
+        remove,
+        removeSession,
+      },
+      receipts: { execute },
+    } as unknown as GatewayServiceDependencies);
+
+    await expect(service.invoke(client, "session.import", {
+      uploadId: "00000000-0000-0000-0000-000000000001",
+      cwd: "/workspace",
+      commandId: "command-1",
+    })).resolves.toEqual({ sessionId: "imported" });
+    await expect(service.invoke(client, "session.delete", {
+      sessionId: "deleted",
+      commandId: "command-2",
+    })).resolves.toEqual({ deleted: true });
+    expect(remove).toHaveBeenCalled();
+    expect(removeSession).toHaveBeenCalledWith("deleted");
+  });
+
   it("rejects terminal creation before the client opens the session", async () => {
     const acquire = vi.fn();
     const open = vi.fn();
