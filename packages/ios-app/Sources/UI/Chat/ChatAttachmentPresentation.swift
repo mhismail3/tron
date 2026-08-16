@@ -77,6 +77,7 @@ enum PendingPhotoRemoveLayoutPolicy {
 struct PendingAttachmentChip: View {
     let attachment: PendingAttachment
     let onRemove: () -> Void
+    @Environment(AppModel.self) private var model
     @State private var showPreview = false
 
     var body: some View {
@@ -124,8 +125,13 @@ struct PendingAttachmentChip: View {
                 )
             }
             .sheet(isPresented: $showPreview) {
-                if let image = decodedPreviewImage {
-                    AttachmentImagePreviewSheet(image: image)
+                if let thumbnail = decodedPreviewImage,
+                   let fullPreviewData = attachment.fullPreviewData {
+                    PendingAttachmentImagePreviewSheet(
+                        thumbnail: thumbnail,
+                        fullPreviewData: fullPreviewData,
+                        prepareFullPreview: model.chatMedia.prepareLocalFullPreview
+                    )
                 }
             }
     }
@@ -192,5 +198,30 @@ struct PendingAttachmentChip: View {
         .padding(.trailing, 4)
         .padding(.vertical, 5)
         .glassEffect(.regular.tint(Color.tronBlue.opacity(0.22)).interactive(), in: Capsule())
+    }
+}
+
+private struct PendingAttachmentImagePreviewSheet: View {
+    let fullPreviewData: Data
+    let prepareFullPreview: @MainActor (Data) async throws -> UIImage
+    @State private var image: UIImage
+
+    init(
+        thumbnail: UIImage,
+        fullPreviewData: Data,
+        prepareFullPreview: @escaping @MainActor (Data) async throws -> UIImage
+    ) {
+        self.fullPreviewData = fullPreviewData
+        self.prepareFullPreview = prepareFullPreview
+        _image = State(initialValue: thumbnail)
+    }
+
+    var body: some View {
+        AttachmentImagePreviewSheet(image: image)
+            .task {
+                guard let prepared = try? await prepareFullPreview(fullPreviewData),
+                      !Task.isCancelled else { return }
+                image = prepared
+            }
     }
 }

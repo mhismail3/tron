@@ -250,6 +250,18 @@ final class ChatMediaLoader {
         }
     }
 
+    /// Locally staged composer images share the same single preparation slot as
+    /// transcript media without entering the transcript cache or flight state.
+    func prepareLocalFullPreview(_ data: Data) async throws -> UIImage {
+        guard ChatMediaPolicy.admitsEncodedByteCount(data.count) else {
+            throw ChatMediaLoadError.encodedPayloadTooLarge
+        }
+        let fullPreviewDecode = self.fullPreviewDecode
+        return try await workLimiter.run(priority: true) {
+            try await fullPreviewDecode(data)
+        }
+    }
+
     /// Full previews are never inserted into the thumbnail LRU. Only one exact
     /// profile/lifecycle/connection/blob preview flight may exist at a time.
     func fullPreview(

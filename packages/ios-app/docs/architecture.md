@@ -312,7 +312,11 @@ LRU; text is never truncated and survives route close/reopen until exact session
 eviction. The active lease is the immutable session/presentation generation plus lifecycle generation.
 Attachments, previews, concurrent upload admissions, editor requests, and submission snapshots live only for
 that lease and are synchronously discarded on revocation, close, or profile retirement. Completed plus active
-uploads are admitted against one 10-item/25 MiB presentation budget before network work; HTTP response bodies
+uploads are admitted against one 10-item/25 MiB presentation budget before network work; each image chip uses
+an orientation-correct 192-pixel PNG preview with 1 MiB decoded/encoded ceilings, so normal composer rendering
+never decodes the full attachment. The original bounded payload remains presentation-scoped solely for the existing
+explicit preview sheet, which installs the thumbnail immediately and prepares at most one 4,096-pixel/64 MiB image
+off-main through the same cancellation-aware media preparation slot before publication. HTTP response bodies
 have a separate 64 KiB ceiling and must return on the captured connection epoch. Uploads are independent, so
 completion order—not newest-request arbitration—orders staged IDs. A confirmed prompt removes only the IDs
 captured by its submission and never clears newer text or attachments; failure or uncertain receipt resolution

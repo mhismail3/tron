@@ -608,7 +608,10 @@ struct PresentationStyleGuardTests {
         let imageBase = (pendingChip.components(separatedBy: "private var imageBase").dropFirst().first ?? "")
             .components(separatedBy: "private var decodedPreviewImage").first ?? ""
         let fileChip = (pendingChip.components(separatedBy: "private var fileChip").dropFirst().first ?? "")
-        #expect(imagePreview.contains("AttachmentImagePreviewSheet(image: image)"))
+        #expect(imagePreview.contains("PendingAttachmentImagePreviewSheet("))
+        #expect(pendingChip.contains("AttachmentImagePreviewSheet(image: image)"))
+        #expect(pendingChip.contains("model.chatMedia.prepareLocalFullPreview"))
+        #expect(pendingChip.contains("await prepareFullPreview(fullPreviewData)"))
         #expect(imagePreview.contains(".overlay(alignment: .topTrailing)"))
         #expect(imagePreview.contains("PendingPhotoRemoveLayoutPolicy.visibleDiameter"))
         #expect(imagePreview.contains("PendingPhotoRemoveLayoutPolicy.touchTarget"))

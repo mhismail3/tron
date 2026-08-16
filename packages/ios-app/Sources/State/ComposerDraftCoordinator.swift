@@ -12,6 +12,23 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
     let mimeType: String
     let size: Int
     let previewData: Data?
+    let fullPreviewData: Data?
+
+    init(
+        id: String,
+        name: String,
+        mimeType: String,
+        size: Int,
+        previewData: Data?,
+        fullPreviewData: Data? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.mimeType = mimeType
+        self.size = size
+        self.previewData = previewData
+        self.fullPreviewData = fullPreviewData
+    }
 }
 
 struct ComposerEditorRequest: Identifiable, Hashable, Sendable {
@@ -296,13 +313,17 @@ final class ComposerDraftCoordinator {
             try require(admission)
             throw error
         }
+        let previewData = mimeType.hasPrefix("image/")
+            ? await ComposerAttachmentPreviewPolicy.prepare(data)
+            : nil
         try require(admission)
         attachmentsByTarget[target, default: []].append(PendingAttachment(
             id: id,
             name: name,
             mimeType: mimeType,
             size: data.count,
-            previewData: mimeType.hasPrefix("image/") ? data : nil
+            previewData: previewData,
+            fullPreviewData: previewData == nil ? nil : data
         ))
     }
 

@@ -254,6 +254,38 @@ struct ChatMediaLoaderTests {
         #expect(loader.metrics().thumbnailCount == 0)
     }
 
+    @Test("local composer previews share the bounded media preparation slot")
+    func localPreviewPreparation() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_314).generatedImageFixture(
+            format: .jpeg,
+            pixelWidth: 80,
+            pixelHeight: 60,
+            orientation: .up
+        )
+        let image = try #require(UIImage(data: fixture.encodedData))
+        let decodeGate = MediaDecodeGate(image: image)
+        let fetchGate = MediaFetchGate(payload: .init(data: fixture.encodedData, mimeType: "image/jpeg"))
+        let loader = ChatMediaLoader(
+            fetch: { identity in try await fetchGate.fetch(identity) },
+            fullPreviewDecode: { data in try await decodeGate.decodeFull(data) },
+            admits: { _ in true }
+        )
+        let local = Task { try await loader.prepareLocalFullPreview(fixture.encodedData) }
+        await decodeGate.waitForStarts(1)
+        let thumbnail = Task { try await loader.thumbnail(for: mediaIdentity(blobID: "after-local")) }
+        await loader.hostedWaitForThumbnailFlightCount(1)
+        #expect(await fetchGate.startCount == 0)
+
+        local.cancel()
+        #expect(await fetchGate.startCount == 0)
+        await decodeGate.release()
+        await #expect(throws: CancellationError.self) { try await local.value }
+        await fetchGate.waitForStarts(1)
+        await fetchGate.release()
+        _ = try await thumbnail.value
+        #expect(loader.metrics().thumbnailCount == 1)
+    }
+
     @Test("one preview lease cannot cancel another owner of the shared flight")
     func previewLeaseCancellation() async throws {
         let fixture = try SessionScenarioBuilder(seed: 6_311).generatedImageFixture(

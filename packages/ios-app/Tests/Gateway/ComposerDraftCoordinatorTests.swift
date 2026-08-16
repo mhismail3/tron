@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import Observation
 import Synchronization
 import Testing
@@ -124,8 +125,42 @@ struct ComposerDraftCoordinatorTests {
             let attachments = harness.coordinator.pendingAttachments(for: target)
             #expect(attachments.map(\.id) == ["upload-second", "upload-first"])
             #expect(attachments.map(\.name) == ["second.jpg", "first.bin"])
-            #expect(attachments[0].previewData == secondData)
+            #expect(attachments[0].previewData == nil)
+            #expect(attachments[0].fullPreviewData == nil)
             #expect(attachments[1].previewData == nil)
+        }
+    }
+
+    @Test("successful image upload retains only its bounded preview")
+    func boundedImagePreview() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 8)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1
+            )
+            let fixture = try SessionScenarioBuilder(seed: 91).generatedImageFixture(
+                format: .jpeg,
+                pixelWidth: 1_200,
+                pixelHeight: 800,
+                orientation: .right
+            )
+            let upload = Task {
+                try await harness.coordinator.upload(
+                    name: "large.jpg", mimeType: "image/jpeg",
+                    data: fixture.encodedData, target: target
+                )
+            }
+            try await harness.waitForUploads(1)
+            harness.completeUpload(index: 0, result: .success("upload-image"))
+            try await valueOfOwnedTask(upload)
+
+            let attachment = try #require(harness.coordinator.pendingAttachments(for: target).first)
+            let preview = try #require(attachment.previewData)
+            #expect(attachment.size == fixture.encodedData.count)
+            #expect(preview != fixture.encodedData)
+            #expect(preview.count <= ComposerAttachmentPreviewPolicy.maximumEncodedBytes)
+            #expect(attachment.fullPreviewData == fixture.encodedData)
         }
     }
 
