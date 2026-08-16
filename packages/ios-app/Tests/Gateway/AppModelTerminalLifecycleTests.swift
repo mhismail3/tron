@@ -910,6 +910,56 @@ struct AppModelTerminalLifecycleTests {
         }
     }
 
+    @Test("malformed terminal inventory cannot partially replace prior reducer state")
+    func malformedInventoryPublicationIsAtomic() async throws {
+        try await withHarness { harness in
+            try installHostedTerminalSession(on: harness.model)
+            let target = harness.model.beginTerminalPresentation(sessionID: "session")
+            let intent = try #require(harness.model.beginTerminalIntent(for: target))
+            let exited = TerminalSummary(
+                id: "terminal",
+                sessionId: "session",
+                cwd: "/workspace",
+                createdAt: "2026-01-01T00:00:00Z",
+                exitedAt: "2026-01-01T00:01:00Z",
+                exitCode: 0,
+                sequence: 4
+            )
+
+            let firstListing = Task { try await harness.model.listTerminals(intent: intent) }
+            let first = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.enqueue(successResponse(
+                id: first.id,
+                result: .object(["terminals": try JSONValue.encode([exited])])
+            ))
+            #expect(try await firstListing.value == [exited])
+            #expect(harness.model.terminalHasExited("terminal"))
+
+            let malformed = TerminalSummary(
+                id: "terminal",
+                sessionId: "session",
+                cwd: "/workspace",
+                createdAt: "not-a-date",
+                exitedAt: nil,
+                exitCode: nil,
+                sequence: 0
+            )
+            let secondListing = Task { try await harness.model.listTerminals(intent: intent) }
+            let second = try await request(in: harness.socket, frameIndex: 2)
+            await harness.socket.enqueue(successResponse(
+                id: second.id,
+                result: .object(["terminals": try JSONValue.encode([malformed])])
+            ))
+            do {
+                _ = try await secondListing.value
+                Issue.record("malformed terminal inventory unexpectedly installed")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "invalid_response")
+            }
+            #expect(harness.model.terminalHasExited("terminal"))
+        }
+    }
+
     @Test("terminal list and command façades preserve exact wire contracts")
     func terminalWireContracts() async throws {
         try await withHarness { harness in

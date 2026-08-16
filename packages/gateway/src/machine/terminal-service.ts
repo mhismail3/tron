@@ -5,10 +5,15 @@ import { spawn, type IPty } from "node-pty";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 
+export const MAX_RETAINED_TERMINALS = 128;
+export const MAX_ACTIVE_TERMINALS = 16;
+export const MAX_TERMINAL_OUTPUT_CHUNK_BYTES = 64 * 1_024;
+export const MAX_TERMINAL_REPLAY_ENCODED_BYTES = 768 * 1_024;
+
 interface OutputChunk {
   sequence: number;
   data: string;
-  bytes: number;
+  encodedBytes: number;
 }
 
 interface TerminalRecord {
@@ -38,12 +43,21 @@ export interface TerminalSummary {
 export class TerminalService {
   private readonly terminals = new Map<string, TerminalRecord>();
 
+  private readonly replayBytes: number;
+  private disposed = false;
+
   constructor(
-    private readonly replayBytes: number,
+    replayBytes: number,
     private readonly broadcast: (terminalId: string, topic: string, payload: JsonValue) => void,
-  ) {}
+  ) {
+    this.replayBytes = Math.max(0, Math.min(replayBytes, MAX_TERMINAL_REPLAY_ENCODED_BYTES));
+  }
 
   open(sessionId: string, cwd: string, columns = 100, rows = 30, sessionEnvironment: Record<string, string> = {}): TerminalSummary {
+    if (this.disposed) throw new GatewayError("conflict", "Terminal service is not available", true);
+    if (this.activeTerminalIds().length >= MAX_ACTIVE_TERMINALS) {
+      throw new GatewayError("busy", "Active terminals reached their bounded capacity", true);
+    }
     const id = randomUUID();
     const shell = process.env.SHELL && existsSync(process.env.SHELL) ? process.env.SHELL : "/bin/zsh";
     const pty = spawn(shell, ["-l"], {
@@ -53,6 +67,7 @@ export class TerminalService {
       cwd,
       env: { ...process.env, ...sessionEnvironment, TERM: "xterm-256color", COLORTERM: "truecolor", HOME: homedir() } as Record<string, string>,
     });
+    this.evictExitedForOpen();
     const record: TerminalRecord = {
       id,
       sessionId,
@@ -67,6 +82,7 @@ export class TerminalService {
     this.terminals.set(id, record);
     pty.onData((data) => this.append(record, data));
     pty.onExit(({ exitCode }) => {
+      if (this.disposed || this.terminals.get(record.id) !== record) return;
       record.pty = undefined;
       record.exitCode = exitCode;
       record.exitedAt = new Date().toISOString();
@@ -118,18 +134,37 @@ export class TerminalService {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     for (const terminal of this.terminals.values()) terminal.pty?.kill("SIGHUP");
     this.terminals.clear();
   }
 
   private append(terminal: TerminalRecord, data: string): void {
-    const chunk: OutputChunk = { sequence: ++terminal.sequence, data, bytes: Buffer.byteLength(data) };
-    terminal.output.push(chunk);
-    terminal.outputBytes += chunk.bytes;
-    while (terminal.outputBytes > this.replayBytes && terminal.output.length > 1) {
-      terminal.outputBytes -= terminal.output.shift()!.bytes;
+    if (this.disposed || this.terminals.get(terminal.id) !== terminal) return;
+    for (const piece of splitUtf8(data, MAX_TERMINAL_OUTPUT_CHUNK_BYTES)) {
+      const sequence = ++terminal.sequence;
+      const chunk: OutputChunk = {
+        sequence,
+        data: piece,
+        encodedBytes: Buffer.byteLength(JSON.stringify({ sequence, data: piece })) + 1,
+      };
+      terminal.output.push(chunk);
+      terminal.outputBytes += chunk.encodedBytes;
+      while (terminal.outputBytes > this.replayBytes && terminal.output.length > 0) {
+        terminal.outputBytes -= terminal.output.shift()!.encodedBytes;
+      }
+      this.broadcast(terminal.id, "terminal.output", { terminalId: terminal.id, sequence, data: piece });
     }
-    this.broadcast(terminal.id, "terminal.output", { terminalId: terminal.id, sequence: chunk.sequence, data });
+  }
+
+  private evictExitedForOpen(): void {
+    if (this.terminals.size < MAX_RETAINED_TERMINALS) return;
+    for (const [id, terminal] of this.terminals) {
+      if (terminal.pty !== undefined) continue;
+      this.terminals.delete(id);
+      if (this.terminals.size < MAX_RETAINED_TERMINALS) return;
+    }
   }
 
   private get(id: string): TerminalRecord {
@@ -149,4 +184,26 @@ export class TerminalService {
       sequence: terminal.sequence,
     };
   }
+}
+
+function splitUtf8(data: string, maximumBytes: number): string[] {
+  if (Buffer.byteLength(data) <= maximumBytes) return [data];
+  const chunks: string[] = [];
+  let start = 0;
+  let bytes = 0;
+  for (let index = 0; index < data.length;) {
+    const codePoint = data.codePointAt(index)!;
+    const width = codePoint > 0xffff ? 2 : 1;
+    const next = index + width;
+    const characterBytes = Buffer.byteLength(data.slice(index, next));
+    if (bytes + characterBytes > maximumBytes) {
+      chunks.push(data.slice(start, index));
+      start = index;
+      bytes = 0;
+    }
+    bytes += characterBytes;
+    index = next;
+  }
+  chunks.push(data.slice(start));
+  return chunks;
 }

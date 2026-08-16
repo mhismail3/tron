@@ -137,7 +137,11 @@ from both; clients receive only `httpProxyConfigured` and can set or explicitly 
 canonical value. Trust changes reload
 idle live runtimes before acknowledgement; project resources therefore cannot stay
 loaded from an obsolete decision. PTY output has an independent monotonic
-sequence and bounded attach replay for gap/reconnect convergence. Context, tree,
+sequence and wire-safe attach replay for gap/reconnect convergence. The global
+terminal catalog retains at most 128 records in insertion order, evicting only
+the oldest exited records before creation, while at most 16 PTYs may remain
+active. Output is split at UTF-8 boundaries into at most 64 KiB events, and
+replay uses encoded JSON byte accounting below the 1 MiB frame ceiling. Context, tree,
 resources, commands, exports, transcript paging, terminal inventory, and all live-runtime mutations
 require an established open subscription for that exact session. Dashboard rename and delete remain
 explicit catalog-scoped exceptions. Terminal creation and attachment require the terminal's current

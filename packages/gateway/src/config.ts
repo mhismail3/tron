@@ -94,7 +94,7 @@ export async function loadConfig(args = process.argv.slice(2)): Promise<GatewayC
     machineName: next.machineName,
     maxFrameBytes: 1_048_576,
     maxUploadBytes: 25 * 1_048_576,
-    terminalReplayBytes: 2 * 1_048_576,
+    terminalReplayBytes: 768 * 1_024,
     idleRuntimeMs: 10 * 60_000,
   };
 }

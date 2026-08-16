@@ -83,6 +83,8 @@ struct TerminalReducer {
     private static let maximumPendingTerminalCount = 16
     private static let maximumPendingOutputCount = 256
     private static let maximumPendingOutputBytes = 1_048_576
+    private static let maximumReplayOutputCount = 2_048
+    private static let maximumReplayOutputBytes = 768 * 1_024
     private static let maximumImmediateRecoveryAttempts = 3
 
     private var nextPresentationGeneration = 0
@@ -261,7 +263,7 @@ struct TerminalReducer {
             (reset || $0.sequence > latest) && admittedSequences.insert($0.sequence).inserted
         }
         replayByID[terminal.id] = TerminalReplayProjection(
-            chunks: reset ? admitted : current.chunks + admitted,
+            chunks: Self.boundedReplay(reset ? admitted : current.chunks + admitted),
             revision: current.revision &+ (reset ? 1 : 0)
         )
         summariesByID[terminal.id] = terminal
@@ -604,14 +606,28 @@ struct TerminalReducer {
 
     private mutating func appendOutput(terminalID: String, sequence: Int, data: String) {
         let current = replayByID[terminalID] ?? .empty
-        var chunks = current.chunks
-        chunks.append(TerminalChunk(sequence: sequence, data: data))
-        if chunks.count > 2_048 { chunks.removeFirst(chunks.count - 2_048) }
         replayByID[terminalID] = TerminalReplayProjection(
-            chunks: chunks,
+            chunks: Self.boundedReplay(
+                current.chunks + [TerminalChunk(sequence: sequence, data: data)]
+            ),
             revision: current.revision
         )
         updateSequence(terminalID, sequence: sequence)
+    }
+
+    private static func boundedReplay(_ chunks: [TerminalChunk]) -> [TerminalChunk] {
+        var firstRetainedIndex = chunks.count
+        var retainedCount = 0
+        var retainedBytes = 0
+        for index in chunks.indices.reversed() {
+            let bytes = chunks[index].data.utf8.count
+            guard retainedCount < maximumReplayOutputCount,
+                  bytes <= maximumReplayOutputBytes - retainedBytes else { break }
+            firstRetainedIndex = index
+            retainedCount += 1
+            retainedBytes += bytes
+        }
+        return firstRetainedIndex == chunks.count ? [] : Array(chunks[firstRetainedIndex...])
     }
 
     private mutating func applyExit(

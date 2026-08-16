@@ -145,12 +145,15 @@ final class TerminalCoordinator {
         }
         try lifecycle.requireConnection(admission)
         guard reducer.owns(intent),
-              installedSubscriptionToken(sessionID) == subscriptionToken,
-              response.terminals.allSatisfy({ $0.sessionId == sessionID }) else {
+              installedSubscriptionToken(sessionID) == subscriptionToken else {
             throw CancellationError()
         }
-        reducer.installInventory(response.terminals, sessionID: sessionID)
-        return response.terminals
+        let terminals = try TerminalInventoryPolicy.admit(
+            response.terminals,
+            requestedSessionID: sessionID
+        )
+        reducer.installInventory(terminals, sessionID: sessionID)
+        return terminals
     }
 
     func open(

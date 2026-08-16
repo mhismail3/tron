@@ -106,6 +106,37 @@ struct TerminalReducerTests {
         #expect(coordinator.owns(intent))
     }
 
+    @Test("installed and live replay retain only the newest bounded bytes")
+    func replayByteBound() throws {
+        var coordinator = TerminalReducer()
+        let target = coordinator.beginPresentation(sessionID: "session")
+        let transition = coordinator.beginIntent(for: target)
+        let intent = try #require(transition?.intent)
+        let pendingLease = coordinator.beginAttachment(
+            terminalID: "terminal",
+            intent: intent,
+            connectionID: 10
+        )
+        let lease = try #require(pendingLease)
+        let large = String(repeating: "x", count: 400_000)
+        _ = coordinator.installReplay(
+            (1...3).map { TerminalChunk(sequence: $0, data: large) },
+            terminal: terminal(sequence: 3),
+            reset: true,
+            after: 0,
+            lease: lease
+        )
+        #expect(coordinator.replay(for: "terminal").chunks.map(\.sequence) == [3])
+
+        #expect(coordinator.admitOutput(
+            terminalID: "terminal",
+            sequence: 4,
+            data: large,
+            connectionID: 10
+        ) == .appended)
+        #expect(coordinator.replay(for: "terminal").chunks.map(\.sequence) == [4])
+    }
+
     @Test("pending terminal identities are bounded during open")
     func pendingTerminalIdentityBound() throws {
         var coordinator = TerminalReducer()
