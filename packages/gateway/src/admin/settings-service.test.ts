@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -38,6 +38,44 @@ describe("SettingsService", () => {
       extensions: ["/tmp/extension.ts"],
       packages: [{ source: "npm:test", autoload: false, skills: ["**"] }],
     });
+  });
+
+  it("rejects settings that generic JSON projection would silently alter", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "tron-bounded-settings-"));
+    const cwd = join(agentDir, "project");
+    await mkdir(cwd);
+    const settingsPath = join(agentDir, "settings.json");
+    const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    const service = new SettingsService(agentDir, models);
+
+    const oversizedMembers = Object.fromEntries(Array.from({ length: 1_001 }, (_, index) => [`unknown-${index}`, index]));
+    const original = `${JSON.stringify(oversizedMembers)}\n`;
+    await writeFile(settingsPath, original);
+    expect(() => service.get(cwd, false)).toThrow(/collection limit/);
+    await expect(service.update(
+      { hideThinkingBlock: true },
+      { cwd, scope: "global", projectTrusted: false },
+    )).rejects.toThrow(/collection limit/);
+    expect(await readFile(settingsPath, "utf8")).toBe(original);
+
+    const exactMembers = Object.fromEntries(Array.from({ length: 999 }, (_, index) => [`unknown-${index}`, index]));
+    await writeFile(settingsPath, JSON.stringify(exactMembers));
+    await expect(service.update(
+      { hideThinkingBlock: true },
+      { cwd, scope: "global", projectTrusted: false },
+    )).resolves.toBeDefined();
+    const admitted = JSON.parse(await readFile(settingsPath, "utf8")) as Record<string, unknown>;
+    expect(Object.keys(admitted)).toHaveLength(1_000);
+    expect(admitted["unknown-998"]).toBe(998);
+    expect(admitted.hideThinkingBlock).toBe(true);
+
+    let nested: Record<string, unknown> = { value: true };
+    for (let depth = 0; depth < 12; depth += 1) nested = { nested };
+    await writeFile(settingsPath, JSON.stringify({ unknown: nested }));
+    expect(() => service.get(cwd, false)).toThrow(/depth limit/);
+
+    await writeFile(settingsPath, JSON.stringify({ unknown: "x".repeat(100_001) }));
+    expect(() => service.get(cwd, false)).toThrow(/string limit/);
   });
 
   it("never returns write-only proxy credentials in settings projections", async () => {

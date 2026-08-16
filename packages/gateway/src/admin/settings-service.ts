@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { SettingsManager, type ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
+import { AsyncMutex } from "../util/async-mutex.js";
 import { updateJsonLocked } from "../util/json.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, string } from "../util/validation.js";
 
@@ -8,6 +9,55 @@ interface SettingsDocument extends Record<string, unknown> {}
 type SettingsScope = "global" | "project";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+const SETTINGS_DOCUMENT_BYTES = 256 * 1_024;
+const SETTINGS_DOCUMENT_NODES = 15_000;
+const SETTINGS_DOCUMENT_OBJECT_DEPTH = 11;
+export const SETTINGS_PROJECTION_BYTES = 800 * 1_024;
+const SETTINGS_MAX_NODES = 32_768;
+const SETTINGS_MAX_COLLECTION_MEMBERS = 1_000;
+const SETTINGS_MAX_STRING_CHARACTERS = 100_000;
+const SETTINGS_MAX_OBJECT_DEPTH = 12;
+
+function assertUntruncatedSettingsJson(
+  value: unknown,
+  label: string,
+  maximumBytes: number,
+  maximumNodes = SETTINGS_MAX_NODES,
+  maximumObjectDepth = SETTINGS_MAX_OBJECT_DEPTH,
+): void {
+  const pending: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  const seen = new WeakSet<object>();
+  let nodes = 0;
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    nodes += 1;
+    if (nodes > maximumNodes) throw new GatewayError("conflict", `${label} exceeds its node limit`);
+    if (current.value === null || current.value === undefined || typeof current.value === "boolean") continue;
+    if (typeof current.value === "string") {
+      if (current.value.length > SETTINGS_MAX_STRING_CHARACTERS) {
+        throw new GatewayError("conflict", `${label} exceeds its string limit`);
+      }
+      continue;
+    }
+    if (typeof current.value === "number") {
+      if (!Number.isFinite(current.value)) throw new GatewayError("conflict", `${label} contains a non-finite number`);
+      continue;
+    }
+    if (typeof current.value !== "object") throw new GatewayError("conflict", `${label} contains non-JSON data`);
+    if (current.depth >= maximumObjectDepth) throw new GatewayError("conflict", `${label} exceeds its depth limit`);
+    if (seen.has(current.value)) throw new GatewayError("conflict", `${label} contains repeated object ownership`);
+    seen.add(current.value);
+    const values = Array.isArray(current.value) ? current.value : Object.values(current.value);
+    if (values.length > SETTINGS_MAX_COLLECTION_MEMBERS) {
+      throw new GatewayError("conflict", `${label} exceeds its collection limit`);
+    }
+    for (const child of values) pending.push({ value: child, depth: current.depth + 1 });
+  }
+  const encoded = JSON.stringify(value, (_key, item) => item === undefined ? null : item);
+  if (encoded === undefined || Buffer.byteLength(encoded) > maximumBytes) {
+    throw new GatewayError("conflict", `${label} exceeds its encoded byte limit`);
+  }
+}
 
 function merge(base: Record<string, unknown>, override: Record<string, unknown>): Record<string, unknown> {
   const result = structuredClone(base);
@@ -56,6 +106,8 @@ function validatePackageSource(value: unknown, name: string): unknown {
 
 /** Canonical Pi settings projection with explicit global/project ownership. */
 export class SettingsService {
+  private readonly mutation = new AsyncMutex();
+
   constructor(
     private readonly agentDir: string,
     private readonly modelRuntime: ModelRuntime,
@@ -72,7 +124,7 @@ export class SettingsService {
     const defaultProvider = manager.getDefaultProvider();
     const defaultModel = manager.getDefaultModel();
     const rawRetry = manager.getRetrySettings();
-    return {
+    const result = {
       scope: { cwd, projectTrusted },
       documents: {
         global: redactSettingsDocument(global),
@@ -135,9 +187,15 @@ export class SettingsService {
         },
       },
     };
+    assertUntruncatedSettingsJson(result, "Settings projection", SETTINGS_PROJECTION_BYTES);
+    return result;
   }
 
   async update(raw: unknown, options: { cwd: string; scope: SettingsScope; projectTrusted: boolean }): Promise<Record<string, unknown>> {
+    return this.mutation.run(() => this.updateLocked(raw, options));
+  }
+
+  private async updateLocked(raw: unknown, options: { cwd: string; scope: SettingsScope; projectTrusted: boolean }): Promise<Record<string, unknown>> {
     if (options.scope === "project" && !options.projectTrusted) {
       throw new GatewayError("trust_required", "Trust this project before changing its project settings");
     }
@@ -145,8 +203,24 @@ export class SettingsService {
     const path = options.scope === "global"
       ? join(this.agentDir, "settings.json")
       : join(options.cwd, ".pi", "settings.json");
-    await updateJsonLocked<SettingsDocument>(path, {}, (current) => this.applyPatch(current, patch));
-    return this.get(options.cwd, options.projectTrusted);
+    const global = options.scope === "project"
+      ? SettingsManager.create(options.cwd, this.agentDir, { projectTrusted: true }).getGlobalSettings() as Record<string, unknown>
+      : undefined;
+    await updateJsonLocked<SettingsDocument>(path, {}, (current) => {
+      const next = this.applyPatch(current, patch);
+      // The response retains these documents once and derives at most another
+      // document's worth of effective values. This conservative admission leaves
+      // response byte/node/depth headroom before the canonical write commits.
+      assertUntruncatedSettingsJson(
+        global === undefined ? { global: next } : { global, project: next },
+        "Settings documents",
+        SETTINGS_DOCUMENT_BYTES,
+        SETTINGS_DOCUMENT_NODES,
+        SETTINGS_DOCUMENT_OBJECT_DEPTH,
+      );
+      return next;
+    });
+    return this.get(options.cwd, options.scope === "project" && options.projectTrusted);
   }
 
   private applyPatch(current: SettingsDocument, patch: Record<string, unknown>): SettingsDocument {

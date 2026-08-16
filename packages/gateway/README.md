@@ -134,7 +134,9 @@ custom-model mutations publish bounded global invalidations so another connected
 client refreshes its explicitly scoped canonical projection. Settings projections include
 scope-owned documents and effective values, but write-only proxy credentials are removed
 from both; clients receive only `httpProxyConfigured` and can set or explicitly clear the
-canonical value. Trust changes reload
+canonical value. Persisted settings documents and their responses fail closed before generic JSON
+projection if their depth, members, nodes, strings, or encoded size would be truncated or exceed
+the mobile frame; rejected updates leave the prior document intact. Trust changes reload
 idle live runtimes before acknowledgement; project resources therefore cannot stay
 loaded from an obsolete decision. PTY output has an independent monotonic
 sequence and wire-safe attach replay for gap/reconnect convergence. The global
