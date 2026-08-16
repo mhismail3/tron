@@ -69,12 +69,7 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     }
 
     func relativeActivityDescription(relativeTo now: Date = .now) -> String {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = fractional.date(from: updatedAt) ?? ISO8601DateFormatter().date(from: updatedAt) else { return "" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: now)
+        GatewayTimestamp.relativeDescription(updatedAt, relativeTo: now)
     }
 
     static func dashboardSessions(_ sessions: [SessionSummary]) -> [SessionSummary] {

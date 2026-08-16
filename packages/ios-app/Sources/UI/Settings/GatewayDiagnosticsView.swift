@@ -1,11 +1,7 @@
 import SwiftUI
 
 private extension GatewayLogRecord {
-    var date: Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: timestamp) ?? ISO8601DateFormatter().date(from: timestamp)
-    }
+    var date: Date? { GatewayTimestamp.parse(timestamp) }
     var levelTitle: String { level.capitalized }
     var icon: String {
         switch level { case "error": "exclamationmark.octagon.fill"; case "warning": "exclamationmark.triangle.fill"; default: "info.circle.fill" }

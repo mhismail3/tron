@@ -275,13 +275,8 @@ private extension JSONValue {
 /// does not yet persist execution timing, so older canonical calls use their call
 /// and result entry timestamps as a conservative observed interval.
 enum ToolTiming {
-    private static let fractionalTimestamp = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
-    private static let wholeSecondTimestamp = Date.ISO8601FormatStyle(includingFractionalSeconds: false)
-
     static func date(_ value: String?) -> Date? {
-        guard let value else { return nil }
-        if let date = try? fractionalTimestamp.parse(value) { return date }
-        return try? wholeSecondTimestamp.parse(value)
+        value.flatMap(GatewayTimestamp.parse)
     }
 
     static func intervalMilliseconds(start: String?, end: String?) -> Int? {

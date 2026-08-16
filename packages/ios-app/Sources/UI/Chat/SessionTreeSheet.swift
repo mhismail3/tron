@@ -263,7 +263,7 @@ private struct TreeNodeRow: View {
         return node.kind.humanized
     }
     private var relativeTimestamp: String {
-        guard let date = ISO8601DateFormatter().date(from: node.timestamp) else { return node.timestamp }
+        guard let date = GatewayTimestamp.parse(node.timestamp) else { return node.timestamp }
         return date.formatted(.relative(presentation: .named))
     }
     private var icon: String {

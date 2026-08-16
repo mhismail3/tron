@@ -1575,7 +1575,7 @@ final class AppModel {
             terminal.admit(
                 terminalEvent,
                 connectionID: connectionID,
-                exitedAt: ISO8601DateFormatter().string(from: .now)
+                exitedAt: GatewayTimestamp.string(from: .now)
             )
         default:
             break

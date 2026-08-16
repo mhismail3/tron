@@ -21,7 +21,7 @@ struct ExtensionInteractionSheet: View {
                                 .padding(14)
                         }
                     }
-                    if let expiresAt = interaction.expiresAt, let expiration = ISO8601DateFormatter().date(from: expiresAt) {
+                    if let expiresAt = interaction.expiresAt, let expiration = GatewayTimestamp.parse(expiresAt) {
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             let remaining = max(0, Int(expiration.timeIntervalSince(context.date)))
                             TronValueRow(icon: "timer", title: remaining > 0 ? "Expires in \(remaining)s" : "Expired", accent: remaining > 0 ? .tronAmber : .tronError)

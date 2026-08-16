@@ -732,6 +732,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Components/StructuredJSONView.swift"),
             encoding: .utf8
         )
+        let timestamps = try String(
+            contentsOf: packageRoot.appending(path: "Sources/Support/GatewayTimestamp.swift"),
+            encoding: .utf8
+        )
         #expect(transcript.contains("content.sheet(item: $route)"))
         #expect(transcript.contains("ToolDetailSheet("))
         #expect(transcript.contains("tool: tool"))
@@ -823,8 +827,9 @@ struct PresentationStyleGuardTests {
             transcriptPresentation.components(separatedBy: "enum ToolTiming {").dropFirst().first?
                 .components(separatedBy: "enum ChatTokenCountPresentation {").first
         )
-        #expect(timing.contains("private static let fractionalTimestamp = Date.ISO8601FormatStyle"))
-        #expect(timing.contains("private static let wholeSecondTimestamp = Date.ISO8601FormatStyle"))
+        #expect(timing.contains("value.flatMap(GatewayTimestamp.parse)"))
+        #expect(timestamps.contains("Date.ISO8601FormatStyle(includingFractionalSeconds: true)"))
+        #expect(timestamps.contains("Date.ISO8601FormatStyle(includingFractionalSeconds: false)"))
         #expect(!timing.contains("ISO8601DateFormatter"))
         #expect(structured.contains("showsRawDisclosure: showsRawDisclosure"))
         #expect(structured.contains("var id: [StructuredJSONPathComponent] { components }"))

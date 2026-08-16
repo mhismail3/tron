@@ -871,7 +871,9 @@ scrolling. The composer itself is the transcript ScrollView's bottom safe-area i
 no height preference or synthetic transcript spacer mirrors its geometry.
 Diagnostics parses the bounded
 Gateway log records into level-filtered rows and copyable details rather than
-showing raw JSON. Custom models have a guided provider/model editor while the
+showing raw JSON. Gateway/session/tree/tool/interaction timestamps share immutable ISO-8601
+format styles, while relative dashboard labels use one lock-serialized formatter instead of
+allocating Foundation formatters per visible row. Custom models have a guided provider/model editor while the
 complete JSON remains an explicit advanced path and is validated before mutation.
 System alerts, confirmation dialogs,
 menus, document/photo pickers, and terminal emulation remain platform-owned, as
