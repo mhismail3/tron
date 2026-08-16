@@ -306,7 +306,9 @@ clear only the matching cached update markers before refreshing that target's in
 Settings captures its session/CWD when presented rather than consulting later dashboard selection.
 Trust reads and mutations require a typed nonempty project target; onboarding, project Settings,
 and new-session admission discard stale workspace results, and trust invalidations reopen the
-new-session readiness gate until the matching workspace is inspected again. Custom-model
+new-session readiness gate until the matching workspace is inspected again. Successful first-run
+pairing inspects an already selected workspace before enabling onward navigation; the initial
+pre-pair view task is never treated as evidence for that post-pair target. Custom-model
 documents have one explicit typed global target and generation-owned publication, so a slower
 older read cannot replace a newer document. Validation and put revalidate the same profile and
 mutation generation before every mutating boundary; retirement after validation never sends put.

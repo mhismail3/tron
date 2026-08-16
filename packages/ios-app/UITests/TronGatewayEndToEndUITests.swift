@@ -46,13 +46,13 @@ final class TronGatewayEndToEndUITests: XCTestCase {
 
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
         XCTAssertTrue(app.staticTexts["Default workspace"].waitForExistence(timeout: 10))
-        app.buttons["Next"].tap()
+        tapWhenEnabled(app.buttons["Next"], timeout: 15)
         XCTAssertTrue(app.staticTexts["Anthropic"].waitForExistence(timeout: 5))
-        app.buttons["Next"].tap()
+        tapWhenEnabled(app.buttons["Next"])
         XCTAssertTrue(app.staticTexts["OpenAI"].waitForExistence(timeout: 5))
-        app.buttons["Next"].tap()
+        tapWhenEnabled(app.buttons["Next"])
         XCTAssertTrue(app.staticTexts["Other providers"].waitForExistence(timeout: 5))
-        app.buttons["Next"].tap()
+        tapWhenEnabled(app.buttons["Next"])
         XCTAssertTrue(app.staticTexts["Default model"].waitForExistence(timeout: 8))
         let modelRow = app.staticTexts["Tron E2E Model"]
         XCTAssertTrue(modelRow.waitForExistence(timeout: 5))
@@ -89,7 +89,7 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         app.launch()
         let reconnectedInput = reopenSessionAfterColdLaunch(
             app,
-            sessionTitle: "continue while disconnected"
+            sessionTitle: "New session"
         )
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Detached response complete")).firstMatch.waitForExistence(timeout: 20))
 
@@ -112,11 +112,13 @@ final class TronGatewayEndToEndUITests: XCTestCase {
 
         settledGroup.tap()
         XCTAssertTrue(app.staticTexts["Used 3 tools"].waitForExistence(timeout: 4))
-        let completedCommand = app.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] %@", "Run command")).firstMatch
+        let completedCommand = app.staticTexts["Run command"].firstMatch
         XCTAssertTrue(completedCommand.waitForExistence(timeout: 4))
         completedCommand.tap()
         XCTAssertTrue(app.staticTexts["Run command"].waitForExistence(timeout: 4))
-        let technicalDetails = app.buttons["Technical details"]
+        let technicalDetails = app.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH[c] %@", "Technical details")
+        ).firstMatch
         XCTAssertTrue(technicalDetails.waitForExistence(timeout: 4))
         technicalDetails.tap()
         XCTAssertTrue(app.staticTexts["Technical details"].waitForExistence(timeout: 4))
@@ -331,7 +333,11 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         // not transient NavigationStack intent. Re-enter through the authoritative
         // dashboard row before asserting transcript convergence.
         let session = app.buttons.matching(
-            NSPredicate(format: "label BEGINSWITH[c] %@", sessionTitle)
+            NSPredicate(
+                format: "label BEGINSWITH[c] %@ AND label !=[c] %@",
+                sessionTitle,
+                sessionTitle
+            )
         ).firstMatch
         XCTAssertTrue(
             session.waitForExistence(timeout: 20),
@@ -347,6 +353,22 @@ final class TronGatewayEndToEndUITests: XCTestCase {
             line: line
         )
         return input
+    }
+
+    @MainActor
+    private func tapWhenEnabled(
+        _ element: XCUIElement,
+        timeout: TimeInterval = 8,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let ready = expectation(
+            for: NSPredicate { _, _ in element.exists && element.isEnabled && element.isHittable },
+            evaluatedWith: element
+        )
+        let result = XCTWaiter.wait(for: [ready], timeout: timeout)
+        XCTAssertEqual(result, .completed, "Control did not become enabled and hittable", file: file, line: line)
+        if result == .completed { element.tap() }
     }
 
     @MainActor

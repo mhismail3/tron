@@ -421,7 +421,10 @@ struct OnboardingView: View {
         defer { pairing = false }
         do {
             try await model.pair(invitation)
-            if !model.setupComplete { withAnimation(.snappy(duration: 0.28)) { step = .workspace } }
+            if !model.setupComplete {
+                withAnimation(.snappy(duration: 0.28)) { step = .workspace }
+                if !selectedWorkspace.isEmpty { await inspectTrust() }
+            }
         } catch is CancellationError {
             return
         } catch {
