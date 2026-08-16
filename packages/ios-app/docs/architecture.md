@@ -13,7 +13,7 @@ implementation detail; all user-facing language calls the agent Tron.
 | `Sources/Models` | provider-qualified model and snapshot DTOs |
 | `Sources/State` | authoritative UI projection and reconnect orchestration |
 | `Sources/Support` | bounded cache and share intake |
-| `Sources/UI/Chat` | session shell, transcript, composer, context, forks |
+| `Sources/UI/Chat` | session shell, chat composition, attachment presentation, entrance rows, transcript, composer, context, and forks |
 | `Sources/UI/Onboarding` | pairing, workspace, provider, and default setup |
 | `Sources/UI/Settings` | settings shell plus appearance, connection, provider, agent-default, resource, and diagnostic presentations |
 | `Sources/UI/Terminal` | sheet composition, presentation lifecycle, and SwiftTerm renderer |

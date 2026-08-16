@@ -472,6 +472,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
             encoding: .utf8
         )
+        let attachmentPresentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatAttachmentPresentation.swift"),
+            encoding: .utf8
+        )
         let preview = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/AttachmentImagePreviewSheet.swift"),
             encoding: .utf8
@@ -488,8 +492,8 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains("MultilineComposerTextView("))
         #expect(!chat.contains("TextField(\"\", text: $text, axis: .vertical)"))
         let attachmentButton = try #require(
-            chat.components(separatedBy: "private struct ComposerAttachmentMenuButton").dropFirst().first?
-                .components(separatedBy: "private struct PendingAttachmentChip").first
+            attachmentPresentation.components(separatedBy: "struct ComposerAttachmentMenuButton").dropFirst().first?
+                .components(separatedBy: "struct PendingAttachmentChip").first
         )
         #expect(attachmentButton.contains("UIButton(type: .custom)"))
         #expect(attachmentButton.contains("button.backgroundColor = .clear"))
@@ -528,8 +532,7 @@ struct PresentationStyleGuardTests {
             .components(separatedBy: "GlassEffectContainer(spacing: 8)").first ?? ""
         #expect(pendingStrip.contains("ScrollView(.horizontal, showsIndicators: false)"))
         #expect(pendingStrip.contains(".scrollClipDisabled()"))
-        let pendingChip = (chat.components(separatedBy: "private struct PendingAttachmentChip").dropFirst().first ?? "")
-            .components(separatedBy: "private struct ChatTranscriptRenderRow").first ?? ""
+        let pendingChip = attachmentPresentation.components(separatedBy: "struct PendingAttachmentChip").dropFirst().first ?? ""
         let imagePreview = (pendingChip.components(separatedBy: "private var imagePreview").dropFirst().first ?? "")
             .components(separatedBy: "private var imageBase").first ?? ""
         let imageBase = (pendingChip.components(separatedBy: "private var imageBase").dropFirst().first ?? "")
@@ -854,6 +857,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
             encoding: .utf8
         )
+        let entranceRows = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatEntranceRows.swift"),
+            encoding: .utf8
+        )
         let motion = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatContentTransition.swift"),
             encoding: .utf8
@@ -864,6 +871,9 @@ struct PresentationStyleGuardTests {
         )
         #expect(chat.contains("kind: .classify(item)"))
         #expect(chat.contains("ChatQueuedMessageEntranceRow"))
+        #expect(!chat.contains("struct ChatTranscriptEntranceRow"))
+        #expect(entranceRows.contains("struct ChatTranscriptEntranceRow"))
+        #expect(entranceRows.contains("struct ChatTranscriptRenderRow"))
         #expect(chat.contains("composerViewportTransitionBegan()"))
         #expect(motion.contains("case userPrompt"))
         #expect(motion.contains("case queuedPrompt"))
@@ -975,6 +985,10 @@ struct PresentationStyleGuardTests {
         )
         let chat = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let entranceRows = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatEntranceRows.swift"),
             encoding: .utf8
         )
         let scrollCoordinator = try String(
@@ -1107,8 +1121,8 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("failPositioning(sessionID:"))
         #expect(chat.contains(".equatable()"))
         #expect(!chat.contains("model.selectedSnapshot?.transcript.map(\\.id)"))
-        #expect(chat.contains("case .notification(let notification)"))
-        #expect(chat.contains("ChatNotificationView(presentation: notification)"))
+        #expect(entranceRows.contains("case .notification(let notification)"))
+        #expect(entranceRows.contains("ChatNotificationView(presentation: notification)"))
     }
 
     @Test("sheets use explicit reload toolbar actions instead of pull to refresh")
