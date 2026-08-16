@@ -300,6 +300,16 @@ tiny live suffix. A global assembly resets overrides; repeated runtime payload u
 and replace only affected tool-run rows rather than chaining overlays or copying 10,000 descriptors.
 Rendered identity spines and sets are cached/split so ordinary text/thinking/image streaming updates
 share the canonical rows and identities while the kernel constructs only the isolated live suffix.
+Markdown has one pure `Sendable` cold presentation model. It classifies the existing block dialect,
+constructs each inline `AttributedString` once with the established plain-`Text` fallback, and supplies
+the exact immutable document to `TronMarkdownView`; tables intentionally remain raw cell `Text`.
+Block and list identities combine exact content with UTF-8 source ranges, so equal duplicates remain
+distinct. An unchanged exact block retains identity and its subtree-local interaction state; changed
+content or block type resets identity, intentionally clearing `CodeBlock` copy confirmation and any
+other stale subtree state rather than transferring it to different source. This checkpoint adds no
+cache or prefix parser. A future incremental path must prove exact cold equality and fall back to a
+full parse for open or closed fences, table promotion, lists, quotes, and incomplete inline syntax
+because appended text can reclassify prior source across each of those boundaries.
 Any streaming fragment carrying a tool-call ID—including malformed text or extension content—is
 returned to global assembly so canonical result suppression and placement remain exact.
 Assembler-emitted unique tool sites retain canonical presentation bases, call classification, group

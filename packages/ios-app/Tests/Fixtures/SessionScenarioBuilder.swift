@@ -1,8 +1,11 @@
+import CoreGraphics
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 @testable import TronMobile
 
 struct SessionScenarioBuilder: Sendable {
-    enum ScenarioError: Error { case targetTooSmall }
+    enum ScenarioError: Error { case targetTooSmall, imageEncodingFailed }
 
     struct PagedSession: Sendable {
         let seed: Int
@@ -27,6 +30,24 @@ struct SessionScenarioBuilder: Sendable {
         let pixelHeight: Int
         let encodedData: Data
         let content: ContentPart
+    }
+
+    struct GeneratedImageFixture: Hashable, Sendable {
+        enum Format: String, CaseIterable, Sendable { case jpeg, png }
+        enum Orientation: UInt32, Sendable { case up = 1, right = 6 }
+
+        let seed: Int
+        let format: Format
+        let pixelWidth: Int
+        let pixelHeight: Int
+        let orientation: Orientation
+        let encodedData: Data
+        let content: ContentPart
+
+        func rgbaPixel(x: Int, y: Int) -> (UInt8, UInt8, UInt8, UInt8) {
+            precondition((0..<pixelWidth).contains(x) && (0..<pixelHeight).contains(y))
+            return SessionScenarioBuilder.rgbaPixel(seed: seed, x: x, y: y)
+        }
     }
 
     let seed: Int
@@ -85,13 +106,118 @@ struct SessionScenarioBuilder: Sendable {
 
     func markdownStream(updateCount: Int, rate: Int) -> [MarkdownUpdate] {
         precondition(updateCount >= 0 && (rate == 30 || rate == 60))
+        let adversarialChunks = [
+            "# Heading-\(seed)",
+            " 🧑🏽‍💻e\u{301}",
+            "\n\n---",
+            "\n\nInline *",
+            "open",
+            "* and [link",
+            "](https://example.invalid)",
+            "\n\n```swift",
+            "\nlet value = \"🙂\"",
+            "\n```",
+            "\n\nname | value",
+            "\n--- | :---:",
+            "\nrow | one",
+            "\n\n- first",
+            "\n  2. nested",
+            "\n\n> quoted",
+            "\n> continuation",
+            "\n\n## Tail heading",
+            "\n\n___",
+        ]
+        var cumulative = ""
         return (0..<updateCount).map { index in
-            MarkdownUpdate(
+            if index < adversarialChunks.count {
+                cumulative += adversarialChunks[index]
+            } else {
+                cumulative += " tail-\(seed)-\(index)"
+            }
+            return MarkdownUpdate(
                 index: index,
-                text: String(repeating: "#", count: index + 1) + " update-\(seed)-\(index)",
+                text: cumulative,
                 elapsed: .nanoseconds(Int64(index) * 1_000_000_000 / Int64(rate))
             )
         }
+    }
+
+    func generatedImageFixture(
+        format: GeneratedImageFixture.Format,
+        pixelWidth: Int,
+        pixelHeight: Int,
+        orientation: GeneratedImageFixture.Orientation
+    ) throws -> GeneratedImageFixture {
+        precondition(pixelWidth > 0 && pixelHeight > 0)
+        var pixels = [UInt8]()
+        pixels.reserveCapacity(pixelWidth * pixelHeight * 4)
+        for y in 0..<pixelHeight {
+            for x in 0..<pixelWidth {
+                let pixel = Self.rgbaPixel(seed: seed, x: x, y: y)
+                pixels.append(contentsOf: [pixel.0, pixel.1, pixel.2, pixel.3])
+            }
+        }
+        let pixelData = Data(pixels)
+        guard let provider = CGDataProvider(data: pixelData as CFData),
+              let image = CGImage(
+                width: pixelWidth,
+                height: pixelHeight,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: pixelWidth * 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: false,
+                intent: .defaultIntent
+              ) else {
+            throw ScenarioError.imageEncodingFailed
+        }
+
+        let data = NSMutableData()
+        let type = format == .jpeg ? UTType.jpeg.identifier : UTType.png.identifier
+        guard let destination = CGImageDestinationCreateWithData(data, type as CFString, 1, nil) else {
+            throw ScenarioError.imageEncodingFailed
+        }
+        var properties: [CFString: Any] = [
+            kCGImagePropertyOrientation: orientation.rawValue,
+        ]
+        if format == .jpeg {
+            properties[kCGImageDestinationLossyCompressionQuality] = 1.0
+        }
+        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else {
+            throw ScenarioError.imageEncodingFailed
+        }
+
+        let mimeType = format == .jpeg ? "image/jpeg" : "image/png"
+        let fileExtension = format == .jpeg ? "jpg" : "png"
+        let encodedData = data as Data
+        return GeneratedImageFixture(
+            seed: seed,
+            format: format,
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight,
+            orientation: orientation,
+            encodedData: encodedData,
+            content: ContentPart(
+                id: "generated-image-\(seed)-\(format.rawValue)",
+                type: .image,
+                text: nil,
+                attachment: .init(
+                    name: "generated-\(seed).\(fileExtension)",
+                    mimeType: mimeType,
+                    size: encodedData.count
+                ),
+                redacted: nil,
+                mimeType: mimeType,
+                blobId: "generated-image-blob-\(seed)-\(format.rawValue)",
+                toolCallId: nil,
+                name: nil,
+                arguments: nil
+            )
+        )
     }
 
     func highResolutionAttachment(pixelWidth: Int, pixelHeight: Int, encodedBytes: Int) -> SyntheticAttachment {
@@ -117,6 +243,15 @@ struct SessionScenarioBuilder: Sendable {
     }
 
     private static let timestamp = "2026-01-01T00:00:00Z"
+
+    private static func rgbaPixel(seed: Int, x: Int, y: Int) -> (UInt8, UInt8, UInt8, UInt8) {
+        (
+            UInt8(truncatingIfNeeded: seed &* 17 &+ x &* 31 &+ y &* 7),
+            UInt8(truncatingIfNeeded: seed &* 29 &+ x &* 11 &+ y &* 37),
+            UInt8(truncatingIfNeeded: seed &* 43 &+ x &* 19 &+ y &* 13),
+            255
+        )
+    }
 
     private static func snapshot(seed: Int) -> SessionSnapshot {
         SessionSnapshot(

@@ -27,6 +27,22 @@ struct PresentationStyleGuardTests {
             .compactMap { url in String(data: (try? Data(contentsOf: url)) ?? Data(), encoding: .utf8).map { (url, $0) } }
     }
 
+    @Test("Markdown rendering has one cold inline-attribution construction and no view parser")
+    func markdownParserOwnership() throws {
+        let renderer = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TronMarkdownView.swift"),
+            encoding: .utf8
+        )
+        let presentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/MarkdownPresentation.swift"),
+            encoding: .utf8
+        )
+
+        #expect(!renderer.contains("AttributedString("))
+        #expect(presentation.matches(#"\bAttributedString\s*\("#) == 1)
+        #expect(presentation.contains("blocks = ColdParser.parse(source)"))
+    }
+
     @Test("app-owned UI never falls back to system fonts or stock bordered controls")
     func noRetiredDefaults() {
         let forbidden: [(String, String)] = [

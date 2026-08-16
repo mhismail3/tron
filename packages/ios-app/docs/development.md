@@ -268,16 +268,37 @@ done
 ```
 
 `SessionScenarioBuilder` is test-only and generates deterministic synthetic
-opening tails, on-demand history pages, tool bursts, Markdown streams, and image
-metadata. It never stores a second transcript or uses personal files. Record the
-seed and the requested byte/count/rate/dimension inputs with performance results.
-Validate the fixture contracts with:
+opening tails, on-demand history pages, tool bursts, true prefix-cumulative
+Markdown streams, and attachment inputs. The 30/60 Hz stream crosses Unicode,
+unmatched and completed inline syntax, open/closed fences, table promotion,
+lists, quotes, headings, and rules. JPEG and PNG fixtures are generated from a
+seeded pixel function at test time with explicit dimensions and orientation; no
+opaque image binary or personal file is stored. The separate arbitrary-byte
+high-resolution attachment remains an encoded-admission stress input, not a
+decodable image. Record the seed and requested byte/count/rate/dimension inputs
+with performance results. Validate the fixture contracts with:
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
-  -only-testing:TronMobileTests/SessionScenarioBuilderTests
+  -only-testing:TronMobileTests/SessionScenarioBuilderTests \
+  -only-testing:TronMobileTests/MarkdownPresentationTests \
+  -only-testing:TronMobileTests/PresentationStyleGuardTests
 ```
+
+Phase 6.0 source characterization and the provisional budget decision are
+complete, as is the Phase 6.1 source implementation. Physical pixel, text
+selection, VoiceOver, Dynamic Type, frame, and memory acceptance remains pending;
+the Phase 6 exit gate is not met. Phase 6.1 keeps exactly one cold Markdown parser
+in `MarkdownPresentation.swift`. The renderer consumes its immutable document,
+including preconstructed inline attribution and source-based accessibility text;
+it does not parse again. Exact unchanged block content and UTF-8 range preserve
+subtree identity, while changed content or type resets it so copy confirmation and
+other local interaction state cannot transfer to a different block. Do not add
+prefix reuse until differential tests prove cold equivalence. Fence closure,
+table promotion, list/quote continuation, and incomplete inline syntax can
+reclassify an earlier prefix, so every uncertain state must retain a full-parse
+fallback. The Phase 6.2 cache and Phase 6.3 media loader remain pending.
 
 `ChatViewScrollHarnessTests` mount the actual `ChatView`, `LazyVStack`, composer
 inset, and native `UIScrollView` in a fixed hosted window. Test-only authority
