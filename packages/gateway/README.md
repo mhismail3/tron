@@ -104,7 +104,13 @@ an extension completion immediately triggers a continuation, so phase, operation
 and Stop controls cannot become idle while a newer turn is executing. Extension-
 owned detached work remains distinct from that foreground phase: its portable
 widget projection stays visible after the parent turn settles, while aborting a
-wait does not falsely claim to stop the detached worker.
+wait does not falsely claim to stop the detached worker. Extension UI producer
+state is bounded before retention or broadcast: 32 statuses, 24 portable widgets,
+eight pending interactions, 64 select options, 192 KiB interaction/editor budgets,
+a 640 KiB aggregate state ceiling, and bounded keys, titles, messages, labels,
+notifications, widget input/lines, and timeouts. Malformed runtime values and
+new-key/capacity overflow reject atomically; updates and removals remain
+available, and emitted editor payloads stay beneath the socket envelope.
 Parallel tool events carry a monotonic per-run ordinal; each call additionally has
 a monotonic progress sequence, bounded display-safe live-output tail, runtime start,
 last-progress/completion timestamps, and duration. The Gateway coalesces high-rate
