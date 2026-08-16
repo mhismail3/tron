@@ -187,7 +187,9 @@ waits for accepted agent runs to settle in canonical JSONL, then replaces the Ga
 process; active PTYs must be closed first because their process state is not restartable.
 iOS keeps the chat mounted, follows `system.stopping` into its ordinary bounded reconnect
 loop, and installs a fresh authoritative session baseline from the replacement runtime.
-A restart response may be immediate or scheduled behind active runs. Unexpected process
+A restart response may be immediate or scheduled behind active runs. Diagnostics routes current
+unsupported, busy, receipt, and transport action failures through the existing global error surface;
+lifecycle-retired cancellation remains silent. Unexpected process
 death is different: a surviving run marker projects the session as interrupted and Tron
 never replays the accepted prompt automatically.
 

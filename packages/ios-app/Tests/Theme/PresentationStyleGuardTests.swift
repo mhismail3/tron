@@ -446,6 +446,8 @@ struct PresentationStyleGuardTests {
         )
         #expect(settings.contains("private extension GatewayLogRecord"))
         #expect(settings.contains("Newest entries first"))
+        #expect(settings.contains("await model.requestGatewayRestart()"))
+        #expect(!settings.contains("try? await model.restartGateway()"))
         #expect(context.contains("model.gatewayDiagnostics.inspectGit"))
         let initialContextTask = (context.components(separatedBy: ".task {").dropFirst().first ?? "")
             .components(separatedBy: ".task(id: model.sessionContextRevision").first ?? ""

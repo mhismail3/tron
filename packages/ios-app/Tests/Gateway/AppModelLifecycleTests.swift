@@ -304,6 +304,14 @@ struct AppModelLifecycleTests {
         }
     }
 
+    @Test("settings restart surfaces current actionable failures")
+    func settingsRestartSurfacesFailure() async throws {
+        try await withFixture(socketCount: 1) { fixture in
+            await fixture.model.requestGatewayRestart()
+            #expect(fixture.model.lastError == "Update the Mac Gateway before restarting it from iPhone; this version cannot preserve accepted runs during restart.")
+        }
+    }
+
     private func withFixture(
         socketCount: Int,
         suspendsClose: Bool = false,

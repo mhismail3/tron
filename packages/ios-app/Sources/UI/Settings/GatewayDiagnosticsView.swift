@@ -128,7 +128,7 @@ struct GatewayDiagnosticsView: View {
             .presentationDragIndicator(.hidden)
         }
         .confirmationDialog("Restart Tron Gateway?", isPresented: $confirmingRestart) {
-            Button("Restart", role: .destructive) { Task { try? await model.restartGateway() } }
+            Button("Restart", role: .destructive) { Task { await model.requestGatewayRestart() } }
         } message: { Text("Accepted agent runs finish before Tron restarts. Active terminal sessions must be closed first; the app reconnects automatically.") }
     }
 

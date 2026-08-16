@@ -1355,6 +1355,11 @@ final class AppModel {
         }
     }
 
+    func requestGatewayRestart() async {
+        do { try await restartGateway() }
+        catch { surface(error) }
+    }
+
     private func restartGateway(
         admission: GatewayLifecycleCoordinator.Admission
     ) async throws {
