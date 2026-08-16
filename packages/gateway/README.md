@@ -25,7 +25,7 @@ does not maintain a session database or event journal.
 ## Runtime and state
 
 - Agent state: `PI_CODING_AGENT_DIR`, default `~/.pi/agent`
-- Gateway state: `<TRON_DATA_DIR|~/$TRON_HOME_NAME|~/.tron>/gateway/`
+- Gateway state: `<TRON_DATA_DIR|~/$TRON_HOME_NAME|~/.tron>/gateway/`; `gateway.json` is an exact-shape, 16 KiB maximum document with a 256-byte machine ID, 1 KiB machine name, and optional 8 KiB default workspace; malformed/oversized existing files fail startup without rekeying
 - Local wrapper credential: `gateway/local-auth.json` (`0600`)
 - Hashed mobile devices: `gateway/devices.json`
 - Current invitation: `gateway/enrollment.json` (`0600`, ten minutes, one use)

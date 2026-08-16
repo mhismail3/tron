@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { canAttachTerminal, clearRequestSynchronizations, encodeOutboundFrame, releaseOwnedSubscription, releaseSessionTerminals } from "./server.js";
 
 describe("bounded outbound gateway frames", () => {
+  it("delivers maximum admitted machine identity fields in the hello frame", () => {
+    const hello = {
+      type: "hello",
+      gatewayVersion: "1.0.0",
+      piVersion: "1.0.0",
+      protocolVersion: 2,
+      minProtocolVersion: 2,
+      machineId: "i".repeat(256),
+      machineName: "n".repeat(1_024),
+      capabilities: ["sessions.v1"],
+    };
+    const encoded = encodeOutboundFrame(hello, 1_048_576);
+
+    expect(encoded).toBeDefined();
+    expect(JSON.parse(encoded!)).toEqual(hello);
+  });
+
   it("returns a correlated error instead of closing the socket for an oversized response", () => {
     const encoded = encodeOutboundFrame({
       type: "response",
