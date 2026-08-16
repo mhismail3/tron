@@ -269,6 +269,46 @@ export default function (pi) {
     expect(snapshots.some((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
   });
 
+  it("clears branch-summary operation state when tree navigation rejects or is cancelled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-navigation-cleanup-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    const snapshots: Array<{ phase: string; operation?: { kind: string }; retry?: unknown }> = [];
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime,
+      trust: new TrustService(agentDir),
+      broadcast: (_sessionId, topic, payload) => {
+        if (topic === "session.snapshot") snapshots.push(payload as { phase: string; operation?: { kind: string }; retry?: unknown });
+      },
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const session = (slot as unknown as {
+      runtime: { session: { navigateTree: (targetId: string, options: unknown) => Promise<{ cancelled: boolean }> } };
+    }).runtime.session;
+    const navigate = vi.spyOn(session, "navigateTree");
+
+    navigate.mockRejectedValueOnce(new Error("navigation failed"));
+    await expect(slot.navigate("target", { summarize: true })).rejects.toThrow("navigation failed");
+    expect(slot.snapshot()).toMatchObject({ phase: "idle" });
+    expect(slot.snapshot().operation).toBeUndefined();
+    expect(slot.snapshot().retry).toBeUndefined();
+
+    navigate.mockResolvedValueOnce({ cancelled: true });
+    await expect(slot.navigate("target", { summarize: true })).rejects.toMatchObject({ code: "cancelled" });
+    expect(slot.snapshot().operation).toBeUndefined();
+    expect(slot.snapshot().retry).toBeUndefined();
+    expect(snapshots.at(-1)?.operation).toBeUndefined();
+  });
+
   it("projects and atomically manages multiple queued messages by stable identity", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-queue-management-"));
     const agentDir = join(root, "agent");

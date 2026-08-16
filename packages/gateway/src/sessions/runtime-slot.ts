@@ -1123,20 +1123,31 @@ export class RuntimeSlot {
   ): Promise<{ editorText?: string }> {
     return this.lane.run(async () => {
       this.assertIdle();
-      this.operation = options.summarize ? { kind: "branchSummary", startedAt: new Date().toISOString() } : undefined;
-      const result = await this.runtime.session.navigateTree(targetId, {
-        summarize: options.summarize,
-        ...(options.instructions ? { customInstructions: options.instructions } : {}),
-        ...(options.replaceInstructions === undefined ? {} : { replaceInstructions: options.replaceInstructions }),
-        ...(options.label ? { label: options.label } : {}),
-      });
-      this.operation = undefined;
-      if (result.cancelled) throw new GatewayError("cancelled", "Tree navigation was cancelled by an extension");
-      this.summaryContentDirty = true;
-      this.revision += 1;
-      this.emit("session.structureChanged", { branchChanged: true });
-      this.publishSnapshot();
-      return result.editorText ? { editorText: result.editorText } : {};
+      const ownsBranchSummary = options.summarize;
+      this.operation = ownsBranchSummary ? { kind: "branchSummary", startedAt: new Date().toISOString() } : undefined;
+      let completed = false;
+      try {
+        const result = await this.runtime.session.navigateTree(targetId, {
+          summarize: options.summarize,
+          ...(options.instructions ? { customInstructions: options.instructions } : {}),
+          ...(options.replaceInstructions === undefined ? {} : { replaceInstructions: options.replaceInstructions }),
+          ...(options.label ? { label: options.label } : {}),
+        });
+        if (result.cancelled) throw new GatewayError("cancelled", "Tree navigation was cancelled by an extension");
+        this.summaryContentDirty = true;
+        completed = true;
+        this.revision += 1;
+        this.emit("session.structureChanged", { branchChanged: true });
+        return result.editorText ? { editorText: result.editorText } : {};
+      } finally {
+        if (this.operation?.kind === "branchSummary") this.operation = undefined;
+        if (this.retry?.source === "branchSummary") {
+          this.retry = undefined;
+          if (this.phase === "retrying") this.phase = "idle";
+        }
+        if (!completed && ownsBranchSummary) this.revision += 1;
+        if (completed || ownsBranchSummary) this.publishSnapshot();
+      }
     });
   }
 

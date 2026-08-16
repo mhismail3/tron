@@ -162,6 +162,9 @@ projection includes display-safe extension, prompt, skill, context-file, and too
 metadata while canonical resource files and runtime loaders remain authoritative.
 `session.tree` returns a bounded flat outline with depth, child-count, role, and
 current-path metadata; it never recursively serializes an unbounded canonical tree.
+Summarizing tree navigation owns foreground branch-summary state only for the exact
+awaited call; success, extension cancellation, and provider failure all retire that
+state and publish the settled snapshot before the serialized mutation lane advances.
 Session statistics include the runtime-calculated latest cache-hit rate used by the
 terminal footer, so mobile clients do not invent a different ratio.
 Custom model documents are validated by a temporary instance of the pinned runtime
