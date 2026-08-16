@@ -100,6 +100,17 @@ struct MultilineComposerTextViewTests {
         #expect(ChatAttachmentImportPolicy.maximumFileSelection == 10)
     }
 
+    @Test("pending photo remove control centers a compact target on the preview corner")
+    func pendingPhotoRemoveGeometry() {
+        #expect(PendingPhotoRemoveLayoutPolicy.previewSide == 64)
+        #expect(PendingPhotoRemoveLayoutPolicy.visibleDiameter == 22)
+        #expect(PendingPhotoRemoveLayoutPolicy.touchTarget == 30)
+        #expect(PendingPhotoRemoveLayoutPolicy.centerOnTopTrailingCornerOffset == CGSize(
+            width: 15,
+            height: -15
+        ))
+    }
+
     @Test("editor confirmation policy preserves wording and empty-draft admission")
     func editorConfirmationPolicy() {
         #expect(ComposerEditorRequestPolicy.confirmationTitle == "Replace the current draft?")

@@ -794,7 +794,7 @@ struct ChatTranscriptPresentationTests {
         #expect(settled.ids == ["user", "assistant-tools", "tool-run-call-1", "assistant-final"])
     }
 
-    @Test("isolated text streaming tail is identical to cold whole-timeline projection")
+    @Test("isolated text streaming tail is identical when no runtime tool is unanchored")
     func isolatedStreamingParity() throws {
         var snapshot = try fixture(transcript: """
         [
@@ -802,14 +802,7 @@ struct ChatTranscriptPresentationTests {
         ]
         """)
         snapshot.phase = .running
-        snapshot.toolExecutions = [
-            tool(
-                "completed-live",
-                "read",
-                status: .completed,
-                startedAt: "2026-01-01T00:00:01Z"
-            ),
-        ]
+        snapshot.toolExecutions = []
         snapshot.streaming = try message("""
         {"id":"streaming","parentId":"user","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"thinking","type":"thinking","text":"Preparing"},{"id":"answer","type":"text","text":"Current answer"}]}
         """)
@@ -967,6 +960,90 @@ struct ChatTranscriptPresentationTests {
         #expect(run.title == "Used 1 tool")
         #expect(!run.isRunning)
         #expect(run.tools.first?.subtitle == "Interrupted")
+    }
+
+    @Test("entrance geometry follows exact displayed install across desired and identity replacements")
+    func entranceGeometryAdmissionPolicy() throws {
+        var displayed = try fixture(transcript: "[]")
+        let displayedTag = ChatTranscriptProjectionTag(
+            snapshot: displayed,
+            presentationGeneration: 41,
+            canonicalGeneration: 10,
+            timelineGeneration: 20
+        )
+        var desired = displayed
+        desired.eventSequence += 1
+        let desiredTag = ChatTranscriptProjectionTag(
+            snapshot: desired,
+            presentationGeneration: 41,
+            canonicalGeneration: 10,
+            timelineGeneration: 21
+        )
+        let observation = ChatSemanticFrameObservation(
+            layoutEpoch: 7,
+            frame: CGRect(x: 0, y: 10, width: 100, height: 30),
+            entranceAdmissionTag: displayedTag
+        )
+
+        // Model-ahead desired source is intentionally absent from the policy:
+        // the displayed A installation remains sufficient admission authority.
+        #expect(desiredTag != displayedTag)
+        #expect(ChatEntranceGeometryAdmissionPolicy.admits(
+            observation: observation,
+            installedTag: displayedTag,
+            installedContainsRenderedID: true,
+            currentLayoutEpoch: 7,
+            entranceState: .pending
+        ))
+        #expect(!ChatEntranceGeometryAdmissionPolicy.admits(
+            observation: observation,
+            installedTag: desiredTag,
+            installedContainsRenderedID: true,
+            currentLayoutEpoch: 7,
+            entranceState: .pending
+        ))
+
+        displayed.runtimeGeneration = "replacement-runtime"
+        let runtimeReplacement = ChatTranscriptProjectionTag(
+            snapshot: displayed,
+            presentationGeneration: 41,
+            canonicalGeneration: 10,
+            timelineGeneration: 20
+        )
+        #expect(!ChatEntranceGeometryAdmissionPolicy.admits(
+            observation: observation,
+            installedTag: runtimeReplacement,
+            installedContainsRenderedID: true,
+            currentLayoutEpoch: 7,
+            entranceState: .pending
+        ))
+        let presentationReplacement = ChatTranscriptProjectionTag(
+            snapshot: desired,
+            presentationGeneration: 42,
+            canonicalGeneration: 10,
+            timelineGeneration: 21
+        )
+        #expect(!ChatEntranceGeometryAdmissionPolicy.admits(
+            observation: observation,
+            installedTag: presentationReplacement,
+            installedContainsRenderedID: true,
+            currentLayoutEpoch: 7,
+            entranceState: .pending
+        ))
+        #expect(!ChatEntranceGeometryAdmissionPolicy.admits(
+            observation: observation,
+            installedTag: displayedTag,
+            installedContainsRenderedID: true,
+            currentLayoutEpoch: 8,
+            entranceState: .pending
+        ))
+        #expect(!ChatEntranceGeometryAdmissionPolicy.admits(
+            observation: observation,
+            installedTag: displayedTag,
+            installedContainsRenderedID: true,
+            currentLayoutEpoch: 7,
+            entranceState: .admitted
+        ))
     }
 
     @Test("timeline projection closes one aggregate-only performance interval")

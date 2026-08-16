@@ -38,6 +38,13 @@ struct ChatCompactPillTests {
         #expect(UserPromptTextLayoutPolicy.leadingInset == 28)
     }
 
+    @Test("compact transcript pills retain pre-shared vertical rhythm")
+    func compactPillGeometry() {
+        #expect(ChatCompactPillLayoutPolicy.horizontalPadding == 11)
+        #expect(ChatCompactPillLayoutPolicy.verticalPadding == 6)
+        #expect(ChatCompactPillLayoutPolicy.itemSpacing == 7)
+    }
+
     @Test("small warning and neutral text keeps accessible contrast")
     @MainActor func compactToneContrast() {
         let lightTraits = UITraitCollection(userInterfaceStyle: .light)

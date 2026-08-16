@@ -583,11 +583,19 @@ final class ChatTranscriptPresentationStore {
         return .none
     }
 
-    /// Row geometry is the admission evidence. Visible inserted rows reveal once;
-    /// realized offscreen rows become immediately visible and never replay later.
+    /// Row geometry is the admission evidence. The exact displayed installation
+    /// captured by that row must still own both its identity and pending state;
+    /// a newer desired source is deliberately not part of this decision.
     @discardableResult
-    func resolveEntrance(id: String, isVisible: Bool) -> Bool {
-        guard pendingEntranceIDs.remove(id) != nil else { return false }
+    func resolveEntrance(
+        id: String,
+        installationTag: ChatTranscriptProjectionTag,
+        isVisible: Bool
+    ) -> Bool {
+        guard let installed,
+              installed.tag == installationTag,
+              installed.containsDisplayedID(id),
+              pendingEntranceIDs.remove(id) != nil else { return false }
         pendingEntranceOrder.removeAll { $0 == id }
         if isVisible { appendAdmittedEntrance(id) }
         return isVisible

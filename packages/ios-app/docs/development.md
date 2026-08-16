@@ -448,8 +448,15 @@ between the simulator and physical hardware. Chat checkpoints must also verify
 trailing alignment for user turns, historical transcript/tool insertion motion,
 the Settings gear in the chat toolbar, the context ring at the trailing edge of
 an empty idle composer, the compact runtime working row without any composer-structure
-change, and emerald toolbar/sheet actions. Tool-detail checkpoints open read, edit,
-bash, and one unknown/extension call at the medium detent: verify the compact status/metadata chips,
+change, and emerald toolbar/sheet actions. Physical chat spacing acceptance additionally checks that
+a one-visual-line prompt has intrinsic height, tool pills retain six-point vertical insets without a
+44-point label minimum, elapsed timing hugs its intrinsic width, and a pending photo's 22-point remove
+circle sits half outside the 64-point preview within a 30-point target centered on its top-trailing corner.
+Active-chat reliability checks must advance a desired completion before the displayed running tool receives
+geometry and verify that the running chip still reveals exactly once. The same rendered tool/group row stays
+after non-tool streaming across running-to-completed updates, retains at most one installed-identity-owned
+smooth follow while pinned, emits none while detached, and emits no automatic write when content shrinks.
+Tool-detail checkpoints open read, edit, bash, and one unknown/extension call at the medium detent: verify the compact status/metadata chips,
 secondary-plus-accent path, faithful single-change diff glance, word-preserving wrapped bash commands in
 the smaller code size, high-signal generic summary, and larger live result are visible before
 protocol fields. A bounded command must not add an amber completeness row to the primary sheet. Pull one single-change sheet to large

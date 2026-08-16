@@ -78,7 +78,7 @@ struct TranscriptRow: View, Equatable {
                             } else if item.role == .user {
                                 JustifiedUserPromptText(text: part.text ?? "")
                                     .padding(.leading, UserPromptTextLayoutPolicy.leadingInset)
-                                    .frame(maxWidth: 520, minHeight: 44, alignment: .topTrailing)
+                                    .frame(maxWidth: 520, alignment: .topTrailing)
                             } else {
                                 MarkdownText(text: part.text ?? "", streaming: streaming)
                             }
@@ -509,7 +509,6 @@ struct ToolCard: View {
                     }
                 }
             }
-            .frame(minWidth: 44, minHeight: 44)
             .accessibilityHidden(true)
         }
         .buttonStyle(.plain)
@@ -629,7 +628,6 @@ private struct ToolRunChip: View {
                     ToolRunElapsedText(run: run, color: tone.secondaryColor)
                 }
             }
-            .frame(minWidth: 44, minHeight: 44)
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
@@ -720,7 +718,6 @@ private struct ToolElapsedText: View {
                 .monospacedDigit()
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .frame(minWidth: 48, alignment: .trailing)
         }
     }
 }
@@ -745,7 +742,6 @@ private struct ToolRunElapsedText: View {
                 .monospacedDigit()
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
-                .frame(minWidth: 48, alignment: .trailing)
         }
     }
 }

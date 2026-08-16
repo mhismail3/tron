@@ -77,14 +77,8 @@ fileprivate struct ChatToolPatchSite: Hashable, Sendable {
     let classification: ChatToolPatchClassification
 }
 
-fileprivate struct ChatToolPlacementSignature: Hashable, Sendable {
-    let unanchoredBeforeStreaming: Bool
-    let runCallIDs: [[String]]
-}
-
 fileprivate struct ChatToolPatchMetadata: Hashable, Sendable {
     let sitesByCallID: [String: [ChatToolPatchSite]]
-    let placement: ChatToolPlacementSignature
 }
 
 fileprivate struct ChatTranscriptProjectionSourceWindow: Hashable, Sendable {
@@ -255,6 +249,7 @@ enum ChatTranscriptProjectionKernel {
            snapshot.phase == previous.phase,
            snapshot.toolExecutions == previous.toolExecutions,
            snapshot.toolExecutions.allSatisfy({ $0.status != .running }),
+           !hasUnanchoredRuntimeTool(metadata: previous.patchMetadata),
            let streaming = snapshot.streaming,
            previous.streamingFragment == nil || previous.usesIsolatedStreamingSuffix {
             let streamingFragment = previous.streamingFragment?.source == streaming
@@ -494,22 +489,17 @@ enum ChatTranscriptProjectionKernel {
                 fragments: fragments,
                 streamingFragment: nil
             )
-            let placement = ChatToolPlacementSignature(
-                unanchoredBeforeStreaming: specialBeforeStreaming(
-                    snapshot: snapshot,
-                    metadata: base.patchMetadata
-                ),
-                runCallIDs: base.patchMetadata.placement.runCallIDs
-            )
-            return AssembledProjection(
-                timeline: base.timeline.appendingLive(live),
-                toolsInspected: base.toolsInspected,
-                patchMetadata: ChatToolPatchMetadata(
-                    sitesByCallID: base.patchMetadata.sitesByCallID,
-                    placement: placement
-                ),
-                usesIsolatedStreamingSuffix: true
-            )
+            // A live tool without a canonical call anchor belongs after the
+            // streaming message. It must use the common assembler so status
+            // changes cannot move that row across the streaming boundary.
+            if !hasUnanchoredRuntimeTool(metadata: base.patchMetadata) {
+                return AssembledProjection(
+                    timeline: base.timeline.appendingLive(live),
+                    toolsInspected: base.toolsInspected,
+                    patchMetadata: base.patchMetadata,
+                    usesIsolatedStreamingSuffix: true
+                )
+            }
         }
         let assembly = assemble(
             snapshot: snapshot,
@@ -597,9 +587,6 @@ enum ChatTranscriptProjectionKernel {
         for callID in changed {
             guard previous.patchMetadata.sitesByCallID[callID]?.count == 1 else { return nil }
         }
-        guard specialBeforeStreaming(snapshot: snapshot, metadata: previous.patchMetadata)
-                == previous.patchMetadata.placement.unanchoredBeforeStreaming else { return nil }
-
         return measured(performanceSignposts: performanceSignposts, workRecorder: workRecorder) {
             var runsByIndex: [Int: ChatToolRunPresentation] = [:]
             for callID in changed {
@@ -679,23 +666,10 @@ enum ChatTranscriptProjectionKernel {
         return result
     }
 
-    private static func specialBeforeStreaming(
-        snapshot: SessionSnapshot,
-        metadata: ChatToolPatchMetadata
-    ) -> Bool {
-        guard let streaming = snapshot.streaming,
-              hasNonToolPresentation(streaming),
-              !metadata.sitesByCallID.values.joined().contains(where: {
-                  $0.classification == .streaming
-              }) else { return false }
-        let unanchoredIDs = metadata.sitesByCallID.compactMap { callID, sites -> String? in
-            sites.contains(where: { $0.classification == .unanchoredRuntime }) ? callID : nil
+    private static func hasUnanchoredRuntimeTool(metadata: ChatToolPatchMetadata) -> Bool {
+        metadata.sitesByCallID.values.joined().contains {
+            $0.classification == .unanchoredRuntime
         }
-        guard !unanchoredIDs.isEmpty else { return false }
-        let states = uniqueRuntimeStates(snapshot.toolExecutions)
-        return states.map { states in
-            unanchoredIDs.allSatisfy { states[$0]?.status != .running }
-        } ?? false
     }
 
     private struct Assembly {
@@ -748,7 +722,6 @@ enum ChatTranscriptProjectionKernel {
         var pendingToolIndexByCallID: [String: Int] = [:]
         var anchoredCallIDs = Set<String>()
         var sitesByCallID: [String: [ChatToolPatchSite]] = [:]
-        var runCallIDs: [[String]] = []
 
         func appendTools(_ tools: [PreparedTool]) {
             for prepared in tools {
@@ -772,7 +745,6 @@ enum ChatTranscriptProjectionKernel {
             let renderedIndex = rendered.count
             let presentations = pendingTools.map(\.presentation)
             rendered.append(.toolRun(ChatToolRunPresentation(tools: presentations)))
-            runCallIDs.append(presentations.map(\.id))
             for (toolIndex, prepared) in pendingTools.enumerated() {
                 sitesByCallID[prepared.presentation.id, default: []].append(ChatToolPatchSite(
                     renderedIndex: renderedIndex,
@@ -922,22 +894,10 @@ enum ChatTranscriptProjectionKernel {
                 )
             }
 
-        let beforeStreaming: Bool
         if let streamingFragment {
-            if streamingTools.isEmpty, !unanchoredLive.isEmpty,
-               unanchoredLive.allSatisfy({ $0.presentation.subtitle != "Running" }),
-               hasNonToolPresentation(streamingFragment.source) {
-                beforeStreaming = true
-                appendTools(unanchoredLive)
-                flushTools()
-                appendFragment(streamingFragment, tools: [], streaming: true)
-            } else {
-                beforeStreaming = false
-                appendFragment(streamingFragment, tools: streamingTools, streaming: true)
-                appendTools(unanchoredLive)
-            }
+            appendFragment(streamingFragment, tools: streamingTools, streaming: true)
+            appendTools(unanchoredLive)
         } else {
-            beforeStreaming = false
             appendTools(streamingTools)
             appendTools(unanchoredLive)
         }
@@ -972,13 +932,7 @@ enum ChatTranscriptProjectionKernel {
                 renderedIDBySemanticID: ChatSemanticIndex(canonical: renderedIDBySemanticID)
             ),
             toolsInspected: toolsInspected,
-            patchMetadata: ChatToolPatchMetadata(
-                sitesByCallID: sitesByCallID,
-                placement: ChatToolPlacementSignature(
-                    unanchoredBeforeStreaming: beforeStreaming,
-                    runCallIDs: runCallIDs
-                )
-            )
+            patchMetadata: ChatToolPatchMetadata(sitesByCallID: sitesByCallID)
         )
     }
 
@@ -1050,20 +1004,6 @@ enum ChatTranscriptProjectionKernel {
             durationMs: tool.durationMs, lastProgressAt: tool.lastProgressAt,
             progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated
         )
-    }
-
-    private static func hasNonToolPresentation(_ item: TranscriptItem) -> Bool {
-        guard item.kind == .message else {
-            return item.kind != .bash && item.kind != .customMessage && item.kind != .customEntry
-        }
-        guard item.role != .toolResult else { return false }
-        return item.content?.contains { part in
-            switch part.type {
-            case .toolCall: false
-            case .text: !(part.text ?? "").isEmpty
-            case .thinking, .image: true
-            }
-        } == true || !(item.errorMessage ?? "").isEmpty
     }
 
     private static func toolPresentations(in item: TranscriptItem, results: [String: TranscriptItem]) -> [ChatToolPresentation] {

@@ -91,7 +91,9 @@ final class ChatScrollCoordinator {
     private var directTailReturnArmed = false
     private var boundaryCameFromViewportWithoutTailMovement = false
     private var pendingGrowthFollow = false
-    private var pendingDiscreteFollow = false
+    private var pendingContinuousGrowthFollow = false
+    private var discreteFollowRenderedIDs: Set<String> = []
+    private var discreteFollowRenderedIDOrder: [String] = []
     private var pendingUnattributedOlderMovement = false
     private var userInteractionStartOffsetY: CGFloat?
     private var userInteractionStartDistanceFromBottom: CGFloat?
@@ -177,6 +179,7 @@ final class ChatScrollCoordinator {
         directTailReturnArmed = false
         boundaryCameFromViewportWithoutTailMovement = false
         pendingGrowthFollow = false
+        pendingContinuousGrowthFollow = false
         pendingUnattributedOlderMovement = false
         userInteractionStartOffsetY = nil
         userInteractionStartDistanceFromBottom = nil
@@ -297,6 +300,7 @@ final class ChatScrollCoordinator {
             isUserDrivenSettling = false
         }
         pendingGrowthFollow = true
+        pendingContinuousGrowthFollow = true
         scheduleTailFollow()
     }
 
@@ -398,6 +402,7 @@ final class ChatScrollCoordinator {
         guard grew, previous.isValid, !userScrolledAway,
               catchUpPhase == .none, !isPrependingHistory else { return }
         pendingGrowthFollow = true
+        pendingContinuousGrowthFollow = true
         scheduleTailFollow()
     }
 
@@ -443,6 +448,7 @@ final class ChatScrollCoordinator {
         isAtBottom = false
         guard catchUpPhase == .none else { return }
         pendingGrowthFollow = true
+        pendingContinuousGrowthFollow = true
         scheduleTailFollow()
     }
 
@@ -488,17 +494,38 @@ final class ChatScrollCoordinator {
         catchUpCommandToken = command?.token
     }
 
-    /// A geometry-admitted visible row insertion may use one smooth follow.
-    /// Continuous streaming growth never arms this flag and stays nonanimated.
-    func discreteContentInserted() {
-        guard canAutomaticallyFollow else { return }
-        pendingDiscreteFollow = true
-        pendingGrowthFollow = true
-        scheduleTailFollow()
+    /// An actual installed transition retains a pending smooth-follow entitlement
+    /// only while that exact rendered row remains displayed. Desired model source
+    /// changes do not participate in this ownership decision.
+    func installedTranscriptChanged(_ installed: InstalledChatTranscript?) {
+        guard !discreteFollowRenderedIDs.isEmpty else { return }
+        guard let installed else {
+            cancelDiscreteFollowOwnership()
+            return
+        }
+        discreteFollowRenderedIDOrder.removeAll {
+            !discreteFollowRenderedIDs.contains($0) || !installed.containsDisplayedID($0)
+        }
+        discreteFollowRenderedIDs = Set(discreteFollowRenderedIDOrder)
+        if discreteFollowRenderedIDs.isEmpty { cancelDiscreteFollowOwnership() }
     }
 
-    func discreteContentSuperseded() {
-        pendingDiscreteFollow = false
+    /// A geometry-admitted visible row insertion may use one smooth follow.
+    /// Continuous streaming growth never creates this identity entitlement.
+    func discreteContentInserted(renderedID: String) {
+        guard canAutomaticallyFollow else { return }
+        if discreteFollowRenderedIDs.insert(renderedID).inserted {
+            discreteFollowRenderedIDOrder.append(renderedID)
+            let maximum = ChatTranscriptPageRequest.maximumItemCount
+            if discreteFollowRenderedIDOrder.count > maximum {
+                let excess = discreteFollowRenderedIDOrder.count - maximum
+                let retired = Array(discreteFollowRenderedIDOrder.prefix(excess))
+                discreteFollowRenderedIDOrder.removeFirst(excess)
+                discreteFollowRenderedIDs.subtract(retired)
+            }
+        }
+        pendingGrowthFollow = true
+        scheduleTailFollow()
     }
 
     func semanticResponseArrived() {
@@ -712,7 +739,7 @@ final class ChatScrollCoordinator {
 
     private func scheduleTailFollow() {
         guard pendingGrowthFollow, canAutomaticallyFollow,
-              (pendingDiscreteFollow
+              (!discreteFollowRenderedIDs.isEmpty
                 || geometry.distanceFromBottom > ChatTranscriptGeometry.catchUpDistance),
               followFrameTask == nil else { return }
         let admittedPresentation = presentation
@@ -729,13 +756,13 @@ final class ChatScrollCoordinator {
             guard self.presentation == admittedPresentation,
                   self.pendingGrowthFollow, self.canAutomaticallyFollow else { return }
             self.pendingGrowthFollow = false
+            self.pendingContinuousGrowthFollow = false
+            let ownsDiscreteFollow = !self.discreteFollowRenderedIDs.isEmpty
+            self.clearDiscreteFollowIDs()
             if self.geometry.distanceFromBottom > ChatTranscriptGeometry.catchUpDistance {
-                let animation: ChatScrollAnimation = self.pendingDiscreteFollow
+                let animation: ChatScrollAnimation = ownsDiscreteFollow
                     ? .smooth(duration: 0.24) : .disabled
-                self.pendingDiscreteFollow = false
                 self.publish(.tail, animation: animation, origin: .automaticFollow)
-            } else {
-                self.pendingDiscreteFollow = false
             }
         }
     }
@@ -790,7 +817,21 @@ final class ChatScrollCoordinator {
         followFrameTask?.cancel()
         followFrameTask = nil
         pendingGrowthFollow = false
-        pendingDiscreteFollow = false
+        pendingContinuousGrowthFollow = false
+        clearDiscreteFollowIDs()
+    }
+
+    private func cancelDiscreteFollowOwnership() {
+        clearDiscreteFollowIDs()
+        guard !pendingContinuousGrowthFollow else { return }
+        followFrameTask?.cancel()
+        followFrameTask = nil
+        pendingGrowthFollow = false
+    }
+
+    private func clearDiscreteFollowIDs() {
+        discreteFollowRenderedIDs.removeAll(keepingCapacity: true)
+        discreteFollowRenderedIDOrder.removeAll(keepingCapacity: true)
     }
 
     private func cancelAllOwnedWork(result: PerformanceResult) {
@@ -883,6 +924,7 @@ final class ChatScrollCoordinator {
 
     #if HOSTED_TEST
     var hostedSemanticFrameCount: Int { semanticFrames.count }
+    var hostedDiscreteFollowRenderedIDs: Set<String> { discreteFollowRenderedIDs }
 
     func hostedWaitForFollowDecision(after revision: Int) async {
         guard hostedFollowDecisionRevision <= revision else { return }

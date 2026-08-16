@@ -416,12 +416,32 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("@State private var showCamera"))
         #expect(!chat.contains("@State private var showPhotos"))
         #expect(!chat.contains("@State private var showFiles"))
+        let pendingStrip = (chat.components(separatedBy: "if !pendingAttachments.isEmpty").dropFirst().first ?? "")
+            .components(separatedBy: "GlassEffectContainer(spacing: 8)").first ?? ""
+        #expect(pendingStrip.contains("ScrollView(.horizontal, showsIndicators: false)"))
+        #expect(pendingStrip.contains(".scrollClipDisabled()"))
         let pendingChip = (chat.components(separatedBy: "private struct PendingAttachmentChip").dropFirst().first ?? "")
             .components(separatedBy: "private struct ChatTranscriptRenderRow").first ?? ""
-        #expect(pendingChip.contains("AttachmentImagePreviewSheet(image: image)"))
-        #expect(pendingChip.contains(".frame(width: 44, height: 44, alignment: .topTrailing)"))
-        #expect(pendingChip.contains(".regular.tint(Color.tronBlue.opacity(0.18)),"))
-        #expect(!pendingChip.contains("Color.tronBlue.opacity(0.18)).interactive()"))
+        let imagePreview = (pendingChip.components(separatedBy: "private var imagePreview").dropFirst().first ?? "")
+            .components(separatedBy: "private var imageBase").first ?? ""
+        let imageBase = (pendingChip.components(separatedBy: "private var imageBase").dropFirst().first ?? "")
+            .components(separatedBy: "private var decodedPreviewImage").first ?? ""
+        let fileChip = (pendingChip.components(separatedBy: "private var fileChip").dropFirst().first ?? "")
+        #expect(imagePreview.contains("AttachmentImagePreviewSheet(image: image)"))
+        #expect(imagePreview.contains(".overlay(alignment: .topTrailing)"))
+        #expect(imagePreview.contains("PendingPhotoRemoveLayoutPolicy.visibleDiameter"))
+        #expect(imagePreview.contains("PendingPhotoRemoveLayoutPolicy.touchTarget"))
+        #expect(imagePreview.contains("PendingPhotoRemoveLayoutPolicy.centerOnTopTrailingCornerOffset"))
+        #expect(imagePreview.contains("size: TronTypography.sizeCaption"))
+        #expect(imagePreview.contains("weight: .bold"))
+        #expect(!imagePreview.contains(".glassEffect("))
+        #expect(!imagePreview.contains(".clipShape("))
+        #expect(imageBase.contains("PendingPhotoRemoveLayoutPolicy.previewSide"))
+        #expect(imageBase.contains(".regular.tint(Color.tronBlue.opacity(0.18)),"))
+        #expect(imageBase.contains(".clipShape(RoundedRectangle(cornerRadius: 14"))
+        #expect(!imageBase.contains("Color.tronBlue.opacity(0.18)).interactive()"))
+        #expect(fileChip.contains(".frame(width: 28, height: 28)"))
+        #expect(fileChip.contains(".padding(.vertical, 5)"))
         #expect(preview.contains(".presentationDetents([.medium])"))
         #expect(preview.contains("ConcentricRectangle("))
         #expect(preview.contains("maximumZoomScale = 5"))
@@ -647,7 +667,8 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("ChatTranscriptPresentation.timeline("))
         #expect(transcript.contains("struct ChatTranscriptPillModifier: ViewModifier"))
         #expect(transcript.contains("TronTypography.sizeBodySM"))
-        #expect(compactPill.contains(".padding(.vertical, 6)"))
+        #expect(compactPill.contains("static let verticalPadding: CGFloat = 6"))
+        #expect(compactPill.occurrences(of: ".padding(.vertical, ChatCompactPillLayoutPolicy.verticalPadding)") == 2)
         #expect(transcript.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(transcript.contains(".frame(minWidth: 44, minHeight: 44)"))
         #expect(transcript.contains(".contentShape(Rectangle())"))
@@ -664,6 +685,12 @@ struct PresentationStyleGuardTests {
         #expect(!compactPill.contains("tone.color.opacity"))
         #expect(!transcript.contains("tone.color.opacity"))
         #expect(compactPill.contains("paragraph.baseWritingDirection = .natural"))
+        #expect(compactPill.contains("func sizeThatFits("))
+        let userPrompt = (transcript.components(separatedBy: "JustifiedUserPromptText(text:").dropFirst().first ?? "")
+            .components(separatedBy: "} else {").first ?? ""
+        #expect(userPrompt.contains(".padding(.leading, UserPromptTextLayoutPolicy.leadingInset)"))
+        #expect(userPrompt.contains(".frame(maxWidth: 520, alignment: .topTrailing)"))
+        #expect(!userPrompt.contains("minHeight: 44"))
         #expect(transcript.components(separatedBy: ".chatTranscriptPill()").count - 1 == 0)
         let earlierMessagesChip = (chat.components(separatedBy: "private func earlierMessagesChip").dropFirst().first ?? "")
             .components(separatedBy: "private var composer").first ?? ""
@@ -739,24 +766,56 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatCompactPill.swift"),
             encoding: .utf8
         )
+        let projectionKernel = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptProjectionKernel.swift"),
+            encoding: .utf8
+        )
+        let notification = (transcript.components(separatedBy: "struct ChatNotificationView").dropFirst().first ?? "")
+            .components(separatedBy: "struct TranscriptNotice").first ?? ""
+        let toolCard = (transcript.components(separatedBy: "struct ToolCard").dropFirst().first ?? "")
+            .components(separatedBy: "struct ToolRunView").first ?? ""
+        let toolCardLabel = (toolCard.components(separatedBy: "var body: some View").dropFirst().first ?? "")
+            .components(separatedBy: ".buttonStyle(.plain)").first ?? ""
+        let toolRunChip = (transcript.components(separatedBy: "private struct ToolRunChip").dropFirst().first ?? "")
+            .components(separatedBy: "private struct ToolElapsedText").first ?? ""
+        let toolRunLabel = (toolRunChip.components(separatedBy: "var body: some View").dropFirst().first ?? "")
+            .components(separatedBy: ".buttonStyle(.plain)").first ?? ""
+        let toolElapsed = (transcript.components(separatedBy: "private struct ToolElapsedText").dropFirst().first ?? "")
+            .components(separatedBy: "private struct ToolRunElapsedText").first ?? ""
+        let toolRunElapsed = (transcript.components(separatedBy: "private struct ToolRunElapsedText").dropFirst().first ?? "")
+            .components(separatedBy: "struct ToolDetailRoute").first ?? ""
         #expect(transcript.contains("struct TranscriptNotice: View"))
         #expect(transcript.contains("struct ChatNotificationView: View"))
         #expect(transcript.contains("struct ToolRunView: View"))
         #expect(transcript.components(separatedBy: "ChatCompactPillSurface(tone: tone, material: .glass").count - 1 >= 2)
-        #expect(transcript.components(separatedBy: ".frame(minWidth: 44, minHeight: 44)").count - 1 >= 3)
+        #expect(notification.contains("pill.frame(minWidth: 44, minHeight: 44)"))
+        #expect(notification.contains(".frame(maxWidth: .infinity, minHeight: 44, alignment: .center)"))
+        #expect(chat.contains("LazyVStack(alignment: .leading, spacing: 8)"))
+        for label in [toolCardLabel, toolRunLabel] {
+            #expect(label.contains("ChatCompactPillSurface"))
+            #expect(!label.contains("minHeight"))
+            #expect(!label.contains("Spacer("))
+            #expect(!label.contains("maxWidth"))
+        }
         #expect(transcript.contains("value: visualState"))
         #expect(!transcript.contains("value: detailTool"))
         #expect(!transcript.contains("value: presentation)"))
         #expect(!transcript.contains("value: run)"))
         #expect(compactPill.contains("struct ChatCompactPillVisualState: Hashable"))
-        #expect(compactPill.contains(".padding(.vertical, 6)"))
+        #expect(compactPill.contains("static let verticalPadding: CGFloat = 6"))
+        #expect(compactPill.contains("static let itemSpacing: CGFloat = 7"))
+        #expect(compactPill.contains("HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing)"))
         #expect(compactPill.contains("ProgressView().controlSize(.small)"))
         #expect(transcript.contains(".font(TronFont.body(12))"))
         #expect(transcript.contains(".foregroundStyle(Color.tronTextSecondary)"))
         #expect(transcript.contains(".italic()"))
-        #expect(transcript.contains(".frame(minWidth: 48, alignment: .trailing)"))
-        #expect(transcript.contains(".fixedSize(horizontal: true, vertical: false)"))
-        #expect(!transcript.contains(".frame(width: 48, alignment: .trailing)"))
+        for elapsed in [toolElapsed, toolRunElapsed] {
+            #expect(elapsed.contains(".monospacedDigit()"))
+            #expect(elapsed.contains(".lineLimit(1)"))
+            #expect(elapsed.contains(".fixedSize(horizontal: true, vertical: false)"))
+            #expect(!elapsed.contains("minWidth: 48"))
+            #expect(!elapsed.contains("Spacer("))
+        }
         #expect(chat.contains("SessionContextSheet(sessionID: sessionID, onForkCreated: onForkCreated)"))
         #expect(!chat.contains("ChatTranscriptPresentation.liveToolRun"))
         #expect(chat.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
@@ -780,6 +839,18 @@ struct PresentationStyleGuardTests {
         let stableRow = (chat.components(separatedBy: "private func stableTranscriptRow").dropFirst().first ?? "")
             .components(separatedBy: "private var selectedAuthoritativeSnapshot").first ?? ""
         #expect(stableRow.contains(".padding(.horizontal, 16)"))
+        #expect(stableRow.contains("entranceState == .pending ? installedTag : nil"))
+        #expect(stableRow.contains("ChatEntranceGeometryAdmissionPolicy.admits"))
+        #expect(stableRow.contains("installationTag: entranceTag"))
+        #expect(!stableRow.contains("transcriptProjectionSource"))
+        #expect(chat.contains("scrollCoordinator.installedTranscriptChanged(installed)"))
+        #expect(!chat.contains("discreteContentSuperseded"))
+        #expect(scrollCoordinator.contains("discreteFollowRenderedIDs"))
+        #expect(scrollCoordinator.contains("installed.containsDisplayedID"))
+        #expect(!projectionKernel.contains("specialBeforeStreaming"))
+        #expect(!projectionKernel.contains("unanchoredBeforeStreaming"))
+        #expect(projectionKernel.contains("appendFragment(streamingFragment, tools: streamingTools, streaming: true)"))
+        #expect(projectionKernel.contains("appendTools(unanchoredLive)"))
         #expect(chat.contains("scrollCoordinator.geometryChanged"))
         #expect(chat.contains("geometry.hasViewportChange(from: previous)"))
         #expect(chat.contains("scrollCoordinator.viewportChanged"))

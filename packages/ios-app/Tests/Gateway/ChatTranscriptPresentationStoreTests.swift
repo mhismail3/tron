@@ -392,8 +392,135 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(signposts.events().filter { $0 == .begin(.chatProjection) }.count == 1)
             #expect(store.pendingEntranceIDs == ["runtime-status-sync"])
             #expect(store.entranceState(for: "runtime-status-sync") == .pending)
-            #expect(!store.resolveEntrance(id: "runtime-status-sync", isVisible: false))
+            #expect(!store.resolveEntrance(
+                id: "runtime-status-sync",
+                installationTag: tag,
+                isVisible: false
+            ))
             #expect(store.entranceState(for: "runtime-status-sync") == .none)
+        }
+    }
+
+    @Test("model-ahead completion cannot suppress displayed running-tool entrance")
+    func desiredCompletionDoesNotSuppressDisplayedEntrance() async throws {
+        try await withTestWatchdog { @MainActor in
+            var baseline = try SessionScenarioBuilder(seed: 1_232)
+                .openingTail(targetEncodedBytes: 8_000)
+            baseline.phase = .idle
+            baseline.streaming = nil
+            baseline.toolExecutions = []
+            let store = ChatTranscriptPresentationStore()
+            let baselineTag = ChatTranscriptProjectionTag(
+                snapshot: baseline,
+                presentationGeneration: 31
+            )
+            store.submit(snapshot: baseline, tag: baselineTag)
+            _ = try await store.waitForInstall(of: baselineTag)
+
+            var running = baseline
+            running.phase = .running
+            running.toolExecutions = [storeRuntimeTool(
+                id: "model-ahead",
+                output: "running",
+                progressSequence: 1
+            )]
+            running.eventSequence += 1
+            let runningTag = ChatTranscriptProjectionTag(
+                snapshot: running,
+                presentationGeneration: 31
+            )
+            store.submit(snapshot: running, tag: runningTag)
+            let runningInstall = try await store.waitForInstall(of: runningTag)
+            let rowID = try #require(runningInstall.timeline.renderedIDBySemanticID["model-ahead"])
+            #expect(store.entranceState(for: rowID) == .pending)
+
+            var completed = running
+            completed.toolExecutions = [storeRuntimeTool(
+                id: "model-ahead",
+                output: "done",
+                progressSequence: 2,
+                status: .completed
+            )]
+            completed.eventSequence += 1
+            let completedTag = ChatTranscriptProjectionTag(
+                snapshot: completed,
+                presentationGeneration: 31
+            )
+            store.submit(snapshot: completed, tag: completedTag)
+
+            // B is desired, but displayed A remains exact geometry authority.
+            #expect(store.installed?.tag == runningTag)
+            #expect(store.resolveEntrance(
+                id: rowID,
+                installationTag: runningTag,
+                isVisible: true
+            ))
+            #expect(store.entranceState(for: rowID) == .admitted)
+
+            let completedInstall = try await store.waitForInstall(of: completedTag)
+            #expect(completedInstall.containsDisplayedID(rowID))
+            #expect(store.entranceState(for: rowID) == .admitted)
+        }
+    }
+
+    @Test("installed completion rejects stale running tag and reissues pending ownership")
+    func installedReplacementRejectsStaleEntranceTag() async throws {
+        try await withTestWatchdog { @MainActor in
+            var baseline = try SessionScenarioBuilder(seed: 1_233)
+                .openingTail(targetEncodedBytes: 8_000)
+            baseline.phase = .idle
+            baseline.streaming = nil
+            baseline.toolExecutions = []
+            let store = ChatTranscriptPresentationStore()
+            let baselineTag = ChatTranscriptProjectionTag(
+                snapshot: baseline,
+                presentationGeneration: 32
+            )
+            store.submit(snapshot: baseline, tag: baselineTag)
+            _ = try await store.waitForInstall(of: baselineTag)
+
+            var running = baseline
+            running.phase = .running
+            running.toolExecutions = [storeRuntimeTool(
+                id: "replacement",
+                output: "running",
+                progressSequence: 1
+            )]
+            running.eventSequence += 1
+            let runningTag = ChatTranscriptProjectionTag(
+                snapshot: running,
+                presentationGeneration: 32
+            )
+            store.submit(snapshot: running, tag: runningTag)
+            let runningInstall = try await store.waitForInstall(of: runningTag)
+            let rowID = try #require(runningInstall.timeline.renderedIDBySemanticID["replacement"])
+
+            var completed = running
+            completed.toolExecutions = [storeRuntimeTool(
+                id: "replacement",
+                output: "done",
+                progressSequence: 2,
+                status: .completed
+            )]
+            completed.eventSequence += 1
+            let completedTag = ChatTranscriptProjectionTag(
+                snapshot: completed,
+                presentationGeneration: 32
+            )
+            store.submit(snapshot: completed, tag: completedTag)
+            _ = try await store.waitForInstall(of: completedTag)
+
+            #expect(!store.resolveEntrance(
+                id: rowID,
+                installationTag: runningTag,
+                isVisible: true
+            ))
+            #expect(store.resolveEntrance(
+                id: rowID,
+                installationTag: completedTag,
+                isVisible: true
+            ))
+            #expect(store.entranceState(for: rowID) == .admitted)
         }
     }
 
@@ -451,7 +578,11 @@ struct ChatTranscriptPresentationStoreTests {
             store.submit(snapshot: snapshot, tag: tag)
             _ = try await store.waitForInstall(of: tag)
             #expect(store.pendingEntranceIDs.contains(appended.id))
-            #expect(store.resolveEntrance(id: appended.id, isVisible: true))
+            #expect(store.resolveEntrance(
+                id: appended.id,
+                installationTag: tag,
+                isVisible: true
+            ))
             #expect(store.entranceState(for: appended.id) == .admitted)
 
             let older = SessionScenarioBuilder(seed: 1_215)
@@ -498,7 +629,11 @@ struct ChatTranscriptPresentationStoreTests {
             _ = try await store.waitForInstall(of: tag)
 
             #expect(store.pendingEntranceIDs == [appended.id])
-            #expect(store.resolveEntrance(id: appended.id, isVisible: true))
+            #expect(store.resolveEntrance(
+                id: appended.id,
+                installationTag: tag,
+                isVisible: true
+            ))
 
             var rewritten = snapshot
             rewritten.transcript[10] = try #require(
@@ -688,7 +823,11 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(store.entranceState(for: first[287].id) == .none)
             #expect(store.entranceState(for: first[288].id) == .pending)
             for item in first + second where store.entranceState(for: item.id) == .pending {
-                #expect(store.resolveEntrance(id: item.id, isVisible: true))
+                #expect(store.resolveEntrance(
+                    id: item.id,
+                    installationTag: tag,
+                    isVisible: true
+                ))
             }
             #expect(store.pendingEntranceIDs.isEmpty)
             #expect(store.admittedEntranceIDs.count == maximum)
@@ -707,7 +846,11 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(store.pendingEntranceIDs.count == 400)
             #expect(store.admittedEntranceIDs.count == maximum)
             for item in third {
-                #expect(store.resolveEntrance(id: item.id, isVisible: true))
+                #expect(store.resolveEntrance(
+                    id: item.id,
+                    installationTag: tag,
+                    isVisible: true
+                ))
             }
 
             #expect(store.pendingEntranceIDs.isEmpty)
@@ -886,19 +1029,27 @@ private final class CompletionWaiterRegistration: @unchecked Sendable {
     }
 }
 
-private func storeRuntimeTool(output: String, progressSequence: Int) -> ToolExecutionState {
+private func storeRuntimeTool(
+    id: String = "runtime-tool",
+    output: String,
+    progressSequence: Int,
+    status: ToolExecutionState.Status = .running
+) -> ToolExecutionState {
     ToolExecutionState(
-        toolCallId: "runtime-tool",
+        toolCallId: id,
         toolName: "read",
         order: 0,
-        status: .running,
+        status: status,
         arguments: .object([:]),
         partialResult: nil,
-        result: nil,
+        result: status == .completed ? .object(["ok": .bool(true)]) : nil,
         output: output,
         isError: false,
         startedAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:0\(progressSequence)Z",
+        lastProgressAt: "2026-01-01T00:00:0\(progressSequence)Z",
+        completedAt: status == .completed ? "2026-01-01T00:00:02Z" : nil,
+        durationMs: status == .completed ? 2_000 : nil,
         progressSequence: progressSequence
     )
 }

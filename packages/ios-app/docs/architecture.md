@@ -399,7 +399,8 @@ settlement; prior and newly arriving unread state remains admitted throughout st
 final, and settling phases. Interruption away from the tail restores detached/unread
 ownership, while successful physical settlement clears unread only at completion.
 Every later measured height increase coalesces into
-the next display-frame command until another upward gesture.
+the next display-frame command until another upward gesture. Content shrink is characterized as inert for
+both pinned and detached readers and never creates an automatic position write.
 Progress-only tool mutations cannot request a tail position. Keyboard and composer layout keep
 a logically pinned reader at the latest tail, while a detached reader receives no position write
 and retains the same semantic reading position. These layout changes cannot change the durable
@@ -638,10 +639,16 @@ Runtime pills install atomically beside the exact tagged timeline. Working/statu
 the unchanged expensive transcript projection. Pending and admitted entrance ownership each retain
 at most the 512-item page bound in deterministic FIFO order. Retired pending rows become visible
 without replay, while retired admitted rows preserve their local revealed state. Candidates are
-admitted by current row geometry: visible/pinned discrete rows fade with a small non-layout transform
+admitted by current row geometry: each pending row carries the exact displayed installation tag, so a
+newer desired model source cannot suppress its reveal. Admission requires that captured tag, current
+installed tag, row membership, layout epoch, and pending state to agree; only pending rows include the tag
+in their geometry observation, allowing an installed replacement to re-emit exact evidence without
+invalidating every realized row. Visible/pinned discrete rows fade with a small non-layout transform
 exactly once, realized offscreen rows become visible without replay, and direct interaction discards
 unresolved candidates. `ChatScrollCoordinator` alone may consume one smooth follow for an admitted discrete
-insertion; continuous Markdown growth remains coalesced and nonanimated, while detached readers
+insertion. Its bounded rendered-ID entitlement is intersected only on actual installed transitions, so a
+surviving tool/group row retains the same one-shot follow through completion while replacement removes it.
+Continuous Markdown growth remains coalesced and nonanimated, while detached readers
 receive no writes and Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
 the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.
 
@@ -650,7 +657,9 @@ read/write/edit and filesystem search tools. The immersive camera retains the
 pre-gateway flashlight, morphing shutter/confirmation, and flip/retake controls
 over a full-sheet preview. A tool call and its canonical result are presented as
 one progressively updated chip when both are in the bounded transcript page; an
-unmatched result remains visible when its call is outside that page. Consecutive
+unmatched result remains visible when its call is outside that page. Unanchored runtime tools always follow
+non-tool streaming content regardless of running/completed status; isolated streaming-suffix projection is
+permitted only when every runtime tool has a canonical call anchor. Consecutive
 tool-only entries collapse into a single compact run chip whose sub-sheet keeps
 every tool and its individual detail available. The run, individual tool, Changes, and
 Technical details sheets share one inline navigation-chrome policy; principal toolbar titles
@@ -688,9 +697,9 @@ preview records its completeness fact there, followed by direct Request JSON and
 `null` for a truly missing side. Content-only results remain JSON strings, response data wins, and a fallback
 identical to Request is rejected. Running sheets consume the newest immutable tool presentation, update status, timing,
 partial output, and bounded-output disclosure in place, and never move
-the reader's scroll position. Tool chips use compact row spacing
-and minimal visual insets while their semantic buttons retain a 44-point interaction
-region. Thinking traces are noninteractive and never hide canonical text behind a
+the reader's scroll position. Tool chips retain six-point vertical capsule insets and
+intrinsic label/timing geometry without a layout-inflating minimum interaction frame.
+Thinking traces are noninteractive and never hide canonical text behind a
 disclosure: adjacent thinking parts and their nonempty lines form one compact inline
 paragraph, each presentation segment ends in an ellipsis, and newly appended segments
 fade in unless Reduce Motion is enabled. Tool chips and system events share compact
@@ -732,8 +741,10 @@ historical connection indicator, options menu, native keyboard integration,
 floating shortcut bar, command-key keyboard, soft edges, and selected bundled
 code font over the gateway's retained PTY. Pending and transcript images use
 square previews with dedicated image sheets. A pending photo is a stable,
-non-morphing preview target; its separate remove control owns a 44-point hit
-region. Pending and sent photo chips share the historical medium-detent,
+non-morphing preview target; its separate remove control has a 22-point visible circle
+inside a 30-point target centered on the 64-point preview's top-trailing corner. The
+preview alone owns rounded glass clipping, leaving the half-offset remove control visible.
+Pending and sent photo chips share the historical medium-detent,
 concentrically rounded preview with native pinch and double-tap zoom. Earlier-history loading, context summaries, and unread-response navigation share one
 content-sized compact pill treatment while preserving 44-point semantic targets. A
 history request captures the visually first measured semantic frame intersecting the

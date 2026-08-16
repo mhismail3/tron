@@ -17,6 +17,7 @@ struct ChatHostedObservation: Sendable {
     let automaticScrollCommandCount: Int
     let smoothAutomaticScrollCommandCount: Int
     let animatedEntranceCount: Int
+    let lastAnimatedEntranceSourceOrdinal: Int?
     let offscreenEntranceResolutionCount: Int
     let geometryCallbackCount: Int
     let semanticFrameCallbackCount: Int
@@ -46,6 +47,7 @@ final class ChatHostedProbe {
     private var automaticScrollCommandCount = 0
     private var smoothAutomaticScrollCommandCount = 0
     private var animatedEntranceCount = 0
+    private var lastAnimatedEntranceSourceOrdinal: Int?
     private var offscreenEntranceResolutionCount = 0
     private var geometryCallbackCount = 0
     private var semanticFrameCallbackCount = 0
@@ -72,6 +74,7 @@ final class ChatHostedProbe {
     private var stateControl: (() -> ChatHostedScrollState)?
     private var prependControl: (() -> Bool)?
     private var invalidatePresentationControl: (() -> Void)?
+    private var nextProjectionInstallControl: (@MainActor (Int) -> Void)?
     private var prependPageContinuation: CheckedContinuation<Void, Error>?
     private var isReady = false
     private(set) var revision = 0
@@ -95,6 +98,7 @@ final class ChatHostedProbe {
             automaticScrollCommandCount: automaticScrollCommandCount,
             smoothAutomaticScrollCommandCount: smoothAutomaticScrollCommandCount,
             animatedEntranceCount: animatedEntranceCount,
+            lastAnimatedEntranceSourceOrdinal: lastAnimatedEntranceSourceOrdinal,
             offscreenEntranceResolutionCount: offscreenEntranceResolutionCount,
             geometryCallbackCount: geometryCallbackCount,
             semanticFrameCallbackCount: semanticFrameCallbackCount,
@@ -151,9 +155,13 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
-    func recordEntranceResolution(animated: Bool) {
-        if animated { animatedEntranceCount &+= 1 }
-        else { offscreenEntranceResolutionCount &+= 1 }
+    func recordEntranceResolution(animated: Bool, sourceOrdinal: Int) {
+        if animated {
+            animatedEntranceCount &+= 1
+            lastAnimatedEntranceSourceOrdinal = sourceOrdinal
+        } else {
+            offscreenEntranceResolutionCount &+= 1
+        }
         revision &+= 1
     }
 
@@ -168,6 +176,13 @@ final class ChatHostedProbe {
         installedProjectionRowCount = max(0, rowCount)
         installedProjectionSourceOrdinal = max(0, sourceOrdinal)
         revision &+= 1
+        let control = nextProjectionInstallControl
+        nextProjectionInstallControl = nil
+        control?(sourceOrdinal)
+    }
+
+    func onNextProjectionInstall(_ control: @escaping @MainActor (Int) -> Void) {
+        nextProjectionInstallControl = control
     }
 
     func recordMaximumSemanticExcursion(_ value: CGFloat) {

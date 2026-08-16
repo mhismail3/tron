@@ -196,6 +196,50 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("actual ChatView pinned and detached shrink emits zero scroll writes")
+    func shrinkDoesNotFollow() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 1_193) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                }
+                let pinnedBefore = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_200, containerHeight: 400
+                )
+                let pinnedAfter = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_150, containerHeight: 400
+                )
+                let pinnedBaseline = harness.probeObservation.scrollCommandCount
+                harness.driveGeometry(previous: pinnedBefore, current: pinnedAfter)
+                try await harness.driveFrameBoundary()
+                #expect(harness.probeObservation.scrollCommandCount == pinnedBaseline)
+
+                let bottom = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_000, containerHeight: 400
+                )
+                let away = ChatTranscriptGeometry(
+                    offsetY: 300, contentHeight: 1_000, containerHeight: 400
+                )
+                harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
+                harness.driveNativeOwnership(true)
+                harness.driveGeometry(previous: bottom, current: away)
+                harness.drivePhase(from: .interacting, to: .idle, geometry: away)
+                harness.driveNativeOwnership(false)
+                #expect(harness.probeObservation.isDetached)
+
+                let detachedBaseline = harness.probeObservation.scrollCommandCount
+                harness.driveGeometry(
+                    previous: away,
+                    current: ChatTranscriptGeometry(
+                        offsetY: 300, contentHeight: 950, containerHeight: 400
+                    )
+                )
+                try await harness.driveFrameBoundary()
+                #expect(harness.probeObservation.scrollCommandCount == detachedBaseline)
+            }
+        }
+    }
+
     @Test("visible discrete insertion reveals once and owns one smooth follow")
     func discreteInsertionEntrance() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -227,6 +271,50 @@ struct ChatViewScrollHarnessTests {
                     harness.probe.updateRowFrame(id: "discrete-tail", frame: frame)
                 }
                 #expect(harness.probeObservation.animatedEntranceCount == entranceBaseline + 1)
+            }
+        }
+    }
+
+    @Test("running tool entrance uses displayed install when desired completion advances first")
+    func displayedInstallOwnsRunningToolEntrance() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 1_192) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                        && $0.observation.projectionInstallCount >= 1
+                }
+                let entranceBaseline = ready.observation.animatedEntranceCount
+                let smoothBaseline = ready.observation.smoothAutomaticScrollCommandCount
+                let installBaseline = ready.observation.projectionInstallCount
+
+                var running = harness.snapshot
+                running.phase = .running
+                running.toolExecutions = [harnessRuntimeTool(status: .running)]
+                running.eventSequence += 1
+                let runningOrdinal = running.eventSequence
+
+                var completed = running
+                completed.toolExecutions = [harnessRuntimeTool(status: .completed)]
+                completed.eventSequence += 1
+                let completedOrdinal = completed.eventSequence
+
+                harness.replaceOnNextProjectionInstall(
+                    expectedSourceOrdinal: runningOrdinal,
+                    with: completed
+                )
+                harness.replaceAuthoritativeSnapshot(running)
+
+                let settled = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount >= installBaseline + 2
+                        && $0.observation.installedProjectionSourceOrdinal == completedOrdinal
+                        && $0.observation.lastAnimatedEntranceSourceOrdinal == runningOrdinal
+                }
+                #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
+                #expect(
+                    settled.observation.smoothAutomaticScrollCommandCount
+                        <= smoothBaseline + 1
+                )
+                #expect(settled.observation.rowFrames["tool-run-active-race"] != nil)
             }
         }
     }
@@ -471,6 +559,25 @@ struct ChatViewScrollHarnessTests {
     }
 }
 
+private func harnessRuntimeTool(status: ToolExecutionState.Status) -> ToolExecutionState {
+    ToolExecutionState(
+        toolCallId: "active-race",
+        toolName: "read",
+        order: 0,
+        status: status,
+        arguments: .object(["path": .string("README.md")]),
+        partialResult: nil,
+        result: status == .completed ? .object(["ok": .bool(true)]) : nil,
+        output: status == .completed ? "done" : nil,
+        isError: false,
+        startedAt: "2026-01-01T00:00:00Z",
+        updatedAt: status == .completed ? "2026-01-01T00:00:01Z" : "2026-01-01T00:00:00Z",
+        completedAt: status == .completed ? "2026-01-01T00:00:01Z" : nil,
+        durationMs: status == .completed ? 1_000 : nil,
+        progressSequence: status == .completed ? 2 : 1
+    )
+}
+
 private func harnessMessage(id: String) throws -> TranscriptItem {
     try JSONDecoder.gateway.decode(
         TranscriptItem.self,
@@ -571,6 +678,17 @@ final class ChatViewScrollHarness {
 
     func replaceAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
         model.replaceHostedAuthoritativeSnapshot(snapshot)
+    }
+
+    func replaceOnNextProjectionInstall(
+        expectedSourceOrdinal: Int,
+        with snapshot: SessionSnapshot
+    ) {
+        probe.onNextProjectionInstall { [model] sourceOrdinal in
+            #expect(sourceOrdinal == expectedSourceOrdinal)
+            guard sourceOrdinal == expectedSourceOrdinal else { return }
+            model.replaceHostedAuthoritativeSnapshot(snapshot)
+        }
     }
 
     func driveGeometry(

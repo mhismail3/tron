@@ -527,7 +527,7 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(incremental.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
     }
 
-    @Test("tool patch falls back for phase membership order start duplicate and streaming placement changes")
+    @Test("tool patch falls back for phase membership order start and duplicate changes")
     func structuralToolFallbacks() throws {
         var baseSnapshot = try fixture(transcript: """
         [{"id":"user","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"prompt"}]}]
@@ -585,13 +585,70 @@ struct ChatTranscriptProjectionKernelTests {
             status: .running,
             output: "running"
         )]
+        let completedIDs = completed.timeline.ids
+        #expect(completedIDs == ["user", "streaming", "tool-run-one"])
         let flipped = ChatTranscriptProjectionKernel.incremental(
             snapshot: placement,
             previous: completed,
             canonicalSourceUnchanged: true
         )
-        #expect(flipped.workReport.mode != .toolPayloadPatch)
+        #expect(flipped.workReport.mode == .toolPayloadPatch)
+        #expect(flipped.timeline.ids == completedIDs)
         #expect(flipped.timeline == ChatTranscriptProjectionKernel.cold(snapshot: placement).timeline)
+    }
+
+    @Test("unanchored tools stay after streaming through status and group transitions")
+    func stableUnanchoredStreamingPlacement() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.streaming = try transcriptItem(id: "stream", text: "answer", role: "assistant")
+        snapshot.toolExecutions = [runtimeTool(id: "one", order: 0)]
+        let running = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(running.timeline.ids == ["streaming", "tool-run-one"])
+
+        snapshot.toolExecutions.append(runtimeTool(id: "two", order: 1))
+        let grouped = ChatTranscriptProjectionKernel.incremental(
+            snapshot: snapshot,
+            previous: running,
+            canonicalSourceUnchanged: true
+        )
+        #expect(grouped.timeline.ids == ["streaming", "tool-run-one"])
+        guard case .toolRun(let groupedRun) = grouped.timeline.items.last else {
+            Issue.record("Expected grouped unanchored tools after streaming")
+            return
+        }
+        #expect(groupedRun.tools.map(\.id) == ["one", "two"])
+
+        snapshot.toolExecutions = snapshot.toolExecutions.map {
+            updatedTool($0, status: .completed, output: "done-\($0.toolCallId)")
+        }
+        let completed = ChatTranscriptProjectionKernel.incremental(
+            snapshot: snapshot,
+            previous: grouped,
+            canonicalSourceUnchanged: true
+        )
+        #expect(completed.workReport.mode == .toolPayloadPatch)
+        #expect(completed.timeline.ids == grouped.timeline.ids)
+        #expect(completed.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
+
+        snapshot.streaming = try transcriptItem(id: "stream", text: "answer updated", role: "assistant")
+        let streamingUpdate = ChatTranscriptProjectionKernel.incremental(
+            snapshot: snapshot,
+            previous: completed,
+            canonicalSourceUnchanged: true
+        )
+        #expect(streamingUpdate.workReport.mode != .isolatedStreamingSuffix)
+        #expect(streamingUpdate.timeline.ids == ["streaming", "tool-run-one"])
+        #expect(streamingUpdate.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
+
+        snapshot.toolExecutions.removeFirst()
+        let regrouped = ChatTranscriptProjectionKernel.incremental(
+            snapshot: snapshot,
+            previous: streamingUpdate,
+            canonicalSourceUnchanged: true
+        )
+        #expect(regrouped.timeline.ids == ["streaming", "tool-run-two"])
+        #expect(regrouped.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
     }
 
     @Test("repeated tool patches keep a bounded flat overlay and isolated suffixes preserve parity")

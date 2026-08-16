@@ -16,6 +16,33 @@ enum ChatAttachmentImportPolicy {
 struct ChatSemanticFrameObservation: Equatable {
     let layoutEpoch: Int
     let frame: CGRect
+    let entranceAdmissionTag: ChatTranscriptProjectionTag?
+
+    init(
+        layoutEpoch: Int,
+        frame: CGRect,
+        entranceAdmissionTag: ChatTranscriptProjectionTag? = nil
+    ) {
+        self.layoutEpoch = layoutEpoch
+        self.frame = frame
+        self.entranceAdmissionTag = entranceAdmissionTag
+    }
+}
+
+enum ChatEntranceGeometryAdmissionPolicy {
+    static func admits(
+        observation: ChatSemanticFrameObservation,
+        installedTag: ChatTranscriptProjectionTag?,
+        installedContainsRenderedID: Bool,
+        currentLayoutEpoch: Int,
+        entranceState: ChatTranscriptEntranceState
+    ) -> Bool {
+        observation.entranceAdmissionTag != nil
+            && observation.entranceAdmissionTag == installedTag
+            && installedContainsRenderedID
+            && observation.layoutEpoch == currentLayoutEpoch
+            && entranceState == .pending
+    }
 }
 
 struct ChatView: View {
@@ -187,8 +214,7 @@ struct ChatView: View {
             Text(ComposerEditorRequestPolicy.confirmationMessage)
         }
         .task(id: sessionID) { await beginOpeningPresentation() }
-        .onChange(of: transcriptProjectionSource, initial: true) { previous, source in
-            if previous != source { scrollCoordinator.discreteContentSuperseded() }
+        .onChange(of: transcriptProjectionSource, initial: true) { _, source in
             guard let currentSource = transcriptProjectionSource else {
                 transcriptPresentation.reset()
                 return
@@ -212,15 +238,18 @@ struct ChatView: View {
                 presentationGeneration: generation
             )
         }
-        #if HOSTED_TEST
-        .onChange(of: transcriptPresentation.installed?.tag) { _, tag in
-            guard let tag, let installed = transcriptPresentation.installed else { return }
-            hostedProbe?.recordProjectionInstall(
-                rowCount: installed.timeline.items.count,
-                sourceOrdinal: tag.timelineGeneration
-            )
+        .onChange(of: transcriptPresentation.installed?.tag) { _, _ in
+            let installed = transcriptPresentation.installed
+            scrollCoordinator.installedTranscriptChanged(installed)
+            #if HOSTED_TEST
+            if let installed {
+                hostedProbe?.recordProjectionInstall(
+                    rowCount: installed.timeline.items.count,
+                    sourceOrdinal: installed.tag.timelineGeneration
+                )
+            }
+            #endif
         }
-        #endif
         .onDisappear {
             if let target = presentationTarget { model.revokePresentationIntake(target) }
             openingTask?.cancel()
@@ -244,15 +273,24 @@ struct ChatView: View {
             LazyVStack(alignment: .leading, spacing: 8) {
                 if let snapshot = selectedAuthoritativeSnapshot {
                     if (snapshot.transcriptStart ?? 0) > 0 {
-                        stableTranscriptRow(id: "earlier-messages") {
+                        stableTranscriptRow(
+                            id: "earlier-messages",
+                            installedTag: nil,
+                            entranceState: .none
+                        ) {
                             earlierMessagesChip(snapshot: snapshot)
                         }
                     }
                     if let installed = transcriptPresentation.installed {
                         ForEach(installed.displayedItems) { item in
-                            stableTranscriptRow(id: item.id) {
+                            let entranceState = transcriptPresentation.entranceState(for: item.id)
+                            stableTranscriptRow(
+                                id: item.id,
+                                installedTag: installed.tag,
+                                entranceState: entranceState
+                            ) {
                                 ChatTranscriptEntranceRow(
-                                    state: transcriptPresentation.entranceState(for: item.id),
+                                    state: entranceState,
                                     reduceMotion: reduceMotion
                                 ) {
                                     ChatTranscriptRenderRow(
@@ -350,9 +388,12 @@ struct ChatView: View {
     @ViewBuilder
     private func stableTranscriptRow<Content: View>(
         id: String,
+        installedTag: ChatTranscriptProjectionTag?,
+        entranceState: ChatTranscriptEntranceState,
         @ViewBuilder content: () -> Content
     ) -> some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
+        let entranceAdmissionTag = entranceState == .pending ? installedTag : nil
         let row = content()
             .padding(.horizontal, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -360,7 +401,8 @@ struct ChatView: View {
         row.onGeometryChange(for: ChatSemanticFrameObservation.self) { geometry in
             ChatSemanticFrameObservation(
                 layoutEpoch: rowLayoutEpoch,
-                frame: geometry.frame(in: .scrollView(axis: .vertical))
+                frame: geometry.frame(in: .scrollView(axis: .vertical)),
+                entranceAdmissionTag: entranceAdmissionTag
             )
         } action: { sample in
             scrollCoordinator.semanticFrameChanged(
@@ -368,9 +410,15 @@ struct ChatView: View {
                 layoutEpoch: sample.layoutEpoch,
                 frame: sample.frame
             )
-            if sample.layoutEpoch == scrollCoordinator.layoutEpoch,
-               transcriptPresentation.installed?.tag == transcriptProjectionSource,
-               transcriptPresentation.installed?.containsDisplayedID(id) == true {
+            let installed = transcriptPresentation.installed
+            let currentEntranceState = transcriptPresentation.entranceState(for: id)
+            if ChatEntranceGeometryAdmissionPolicy.admits(
+                observation: sample,
+                installedTag: installed?.tag,
+                installedContainsRenderedID: installed?.containsDisplayedID(id) == true,
+                currentLayoutEpoch: scrollCoordinator.layoutEpoch,
+                entranceState: currentEntranceState
+            ), let entranceTag = sample.entranceAdmissionTag {
                 let intersectsViewport = transcriptGeometry.isValid
                     && sample.frame.maxY > 0
                     && sample.frame.minY < transcriptGeometry.containerHeight
@@ -379,16 +427,18 @@ struct ChatView: View {
                 // just below the current edge. Detached readers require actual
                 // intersection and never gain automatic authority here.
                 let isVisible = intersectsViewport || scrollCoordinator.canAutomaticallyFollow
-                if transcriptPresentation.entranceState(for: id) == .pending {
-                    let animated = transcriptPresentation.resolveEntrance(
-                        id: id,
-                        isVisible: isVisible
-                    )
-                    #if HOSTED_TEST
-                    hostedProbe?.recordEntranceResolution(animated: animated)
-                    #endif
-                    if animated { scrollCoordinator.discreteContentInserted() }
-                }
+                let animated = transcriptPresentation.resolveEntrance(
+                    id: id,
+                    installationTag: entranceTag,
+                    isVisible: isVisible
+                )
+                #if HOSTED_TEST
+                hostedProbe?.recordEntranceResolution(
+                    animated: animated,
+                    sourceOrdinal: entranceTag.timelineGeneration
+                )
+                #endif
+                if animated { scrollCoordinator.discreteContentInserted(renderedID: id) }
             }
             #if HOSTED_TEST
             hostedProbe?.updateRowFrame(id: id, frame: sample.frame)
@@ -1275,6 +1325,18 @@ private struct ComposerAttachmentMenuButton: UIViewRepresentable {
     }
 }
 
+enum PendingPhotoRemoveLayoutPolicy {
+    static let previewSide: CGFloat = 64
+    static let visibleDiameter: CGFloat = 22
+    static let touchTarget: CGFloat = 30
+
+    /// A top-trailing overlay aligns by its frame edge. Moving it by half its
+    /// target size places the control's center exactly on the preview corner.
+    static var centerOnTopTrailingCornerOffset: CGSize {
+        CGSize(width: touchTarget / 2, height: -touchTarget / 2)
+    }
+}
+
 private struct PendingAttachmentChip: View {
     let attachment: PendingAttachment
     let onRemove: () -> Void
@@ -1292,13 +1354,56 @@ private struct PendingAttachmentChip: View {
     }
 
     private var imagePreview: some View {
-        ZStack(alignment: .topTrailing) {
+        imageBase
+            .overlay(alignment: .topTrailing) {
+                Button(action: onRemove) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.tronBackground.opacity(0.92))
+                        Circle()
+                            .stroke(Color.tronTextMuted.opacity(0.35), lineWidth: 0.5)
+                        Image(systemName: "xmark")
+                            .font(TronTypography.sans(
+                                size: TronTypography.sizeCaption,
+                                weight: .bold
+                            ))
+                            .foregroundStyle(Color.tronTextPrimary)
+                    }
+                    .frame(
+                        width: PendingPhotoRemoveLayoutPolicy.visibleDiameter,
+                        height: PendingPhotoRemoveLayoutPolicy.visibleDiameter
+                    )
+                    .frame(
+                        width: PendingPhotoRemoveLayoutPolicy.touchTarget,
+                        height: PendingPhotoRemoveLayoutPolicy.touchTarget
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Remove \(attachment.name)")
+                .offset(
+                    x: PendingPhotoRemoveLayoutPolicy.centerOnTopTrailingCornerOffset.width,
+                    y: PendingPhotoRemoveLayoutPolicy.centerOnTopTrailingCornerOffset.height
+                )
+            }
+            .sheet(isPresented: $showPreview) {
+                if let image = decodedPreviewImage {
+                    AttachmentImagePreviewSheet(image: image)
+                }
+            }
+    }
+
+    private var imageBase: some View {
+        ZStack {
             if let image = decodedPreviewImage {
                 Button { showPreview = true } label: {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 64, height: 64)
+                        .frame(
+                            width: PendingPhotoRemoveLayoutPolicy.previewSide,
+                            height: PendingPhotoRemoveLayoutPolicy.previewSide
+                        )
                         .clipped()
                         .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
@@ -1311,38 +1416,18 @@ private struct PendingAttachmentChip: View {
                 Image(systemName: "photo.fill")
                     .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
                     .foregroundStyle(Color.tronBlue)
-                    .frame(width: 64, height: 64)
                     .accessibilityLabel("Attached \(attachment.name)")
             }
-
-            Button(action: onRemove) {
-                ZStack {
-                    Circle()
-                        .fill(Color.tronBackground.opacity(0.92))
-                    Circle()
-                        .stroke(Color.tronTextMuted.opacity(0.35), lineWidth: 0.5)
-                    Image(systemName: "xmark")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .bold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                }
-                .frame(width: 28, height: 28)
-                .frame(width: 44, height: 44, alignment: .topTrailing)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Remove \(attachment.name)")
         }
-        .frame(width: 64, height: 64)
+        .frame(
+            width: PendingPhotoRemoveLayoutPolicy.previewSide,
+            height: PendingPhotoRemoveLayoutPolicy.previewSide
+        )
         .glassEffect(
             .regular.tint(Color.tronBlue.opacity(0.18)),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .sheet(isPresented: $showPreview) {
-            if let image = decodedPreviewImage {
-                AttachmentImagePreviewSheet(image: image)
-            }
-        }
     }
 
     private var decodedPreviewImage: UIImage? {

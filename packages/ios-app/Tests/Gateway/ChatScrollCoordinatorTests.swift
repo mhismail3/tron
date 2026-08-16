@@ -31,7 +31,7 @@ struct ChatScrollCoordinatorTests {
         try await withTestWatchdog { @MainActor in
             let frames = ManualScrollFrameScheduler()
             let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
-            coordinator.discreteContentInserted()
+            coordinator.discreteContentInserted(renderedID: "inserted-row")
             let inserted = ChatTranscriptGeometry(
                 offsetY: 600, contentHeight: 1_100, containerHeight: 400
             )
@@ -60,7 +60,7 @@ struct ChatScrollCoordinatorTests {
             let frames = ManualScrollFrameScheduler()
             let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
             let decision = coordinator.hostedFollowDecisionRevision
-            coordinator.discreteContentInserted()
+            coordinator.discreteContentInserted(renderedID: "near-boundary-row")
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
             await coordinator.hostedWaitForFollowDecision(after: decision)
@@ -77,19 +77,79 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("superseded discrete insertion falls back to nonanimated streaming follow")
-    func supersededDiscreteInsertion() async throws {
+    @Test("installed same-row completion retains one smooth discrete follow")
+    func installedSameRowRetainsDiscreteFollow() async throws {
         try await withTestWatchdog { @MainActor in
             let frames = ManualScrollFrameScheduler()
             let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
-            coordinator.discreteContentInserted()
-            coordinator.discreteContentSuperseded()
+            coordinator.discreteContentInserted(renderedID: "tool-run-one")
+            #expect(coordinator.hostedDiscreteFollowRenderedIDs == ["tool-run-one"])
+            coordinator.installedTranscriptChanged(try installedToolTranscript(
+                ids: ["one"],
+                statuses: [.completed],
+                timelineGeneration: 2
+            ))
+            #expect(coordinator.hostedDiscreteFollowRenderedIDs == ["tool-run-one"])
             coordinator.geometryChanged(
                 previous: bottom,
                 current: ChatTranscriptGeometry(
                     offsetY: 600, contentHeight: 1_100, containerHeight: 400
                 )
             )
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(command.animation == .smooth(duration: 0.24))
+            #expect(coordinator.hostedDiscreteFollowRenderedIDs.isEmpty)
+        }
+    }
+
+    @Test("installed removal clears discrete follow while stable multi-tool group retains it")
+    func installedIdentityFiltersDiscreteFollow() throws {
+        let frames = ManualScrollFrameScheduler()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+        coordinator.discreteContentInserted(renderedID: "tool-run-one")
+        coordinator.installedTranscriptChanged(try installedToolTranscript(
+            ids: ["one", "two"],
+            statuses: [.running, .running],
+            timelineGeneration: 2
+        ))
+        #expect(coordinator.hostedDiscreteFollowRenderedIDs == ["tool-run-one"])
+        coordinator.installedTranscriptChanged(try installedToolTranscript(
+            ids: ["one", "two"],
+            statuses: [.completed, .completed],
+            timelineGeneration: 3
+        ))
+        #expect(coordinator.hostedDiscreteFollowRenderedIDs == ["tool-run-one"])
+
+        coordinator.installedTranscriptChanged(try installedToolTranscript(
+            ids: ["two"],
+            statuses: [.completed],
+            timelineGeneration: 4
+        ))
+        #expect(coordinator.hostedDiscreteFollowRenderedIDs.isEmpty)
+        #expect(coordinator.command == nil)
+    }
+
+    @Test("installed removal clears only discrete motion when continuous growth is pending")
+    func installedRemovalPreservesContinuousFollow() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.discreteContentInserted(renderedID: "tool-run-one")
+            coordinator.geometryChanged(
+                previous: bottom,
+                current: ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_100, containerHeight: 400
+                )
+            )
+            coordinator.installedTranscriptChanged(try installedToolTranscript(
+                ids: ["two"],
+                statuses: [.completed],
+                timelineGeneration: 2
+            ))
+            #expect(coordinator.hostedDiscreteFollowRenderedIDs.isEmpty)
+
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
             let command = try await coordinator.hostedNextCommand()
@@ -101,7 +161,7 @@ struct ChatScrollCoordinatorTests {
     func detachedDiscreteInsertionIsInert() {
         let frames = ManualScrollFrameScheduler()
         let coordinator = detachedCoordinator(at: away, withUnread: false, frames: frames)
-        coordinator.discreteContentInserted()
+        coordinator.discreteContentInserted(renderedID: "detached-row")
         coordinator.geometryChanged(
             previous: away,
             current: ChatTranscriptGeometry(offsetY: 300, contentHeight: 1_100, containerHeight: 400)
@@ -140,6 +200,31 @@ struct ChatScrollCoordinatorTests {
         coordinator.geometryChanged(previous: bottom, current: near)
         #expect(frames.requestCount == 0)
         #expect(coordinator.command?.destination == .releaseBinding)
+    }
+
+    @Test("pinned and detached shrink geometry emits no automatic write")
+    func shrinkIsInert() {
+        let pinnedFrames = ManualScrollFrameScheduler()
+        let pinned = ChatScrollCoordinator(frameScheduler: pinnedFrames.scheduler)
+        let pinnedBefore = ChatTranscriptGeometry(
+            offsetY: 600, contentHeight: 1_200, containerHeight: 400
+        )
+        let pinnedAfter = ChatTranscriptGeometry(
+            offsetY: 600, contentHeight: 1_150, containerHeight: 400
+        )
+        pinned.geometryChanged(previous: pinnedBefore, current: pinnedAfter)
+        #expect(pinnedFrames.requestCount == 0)
+        #expect(pinned.command == nil)
+
+        let detachedFrames = ManualScrollFrameScheduler()
+        let detached = detachedCoordinator(at: away, frames: detachedFrames)
+        let detachedAfter = ChatTranscriptGeometry(
+            offsetY: 300, contentHeight: 950, containerHeight: 400
+        )
+        detached.geometryChanged(previous: away, current: detachedAfter)
+        #expect(detachedFrames.requestCount == 0)
+        #expect(detached.command == nil)
+        #expect(detached.userScrolledAway)
     }
 
     @Test("geometry and native ownership callback permutations both detach")
@@ -428,8 +513,11 @@ struct ChatScrollCoordinatorTests {
             let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
             let grown = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_100, containerHeight: 400)
             coordinator.geometryChanged(previous: bottom, current: grown)
+            coordinator.discreteContentInserted(renderedID: "interaction-row")
+            #expect(coordinator.hostedDiscreteFollowRenderedIDs == ["interaction-row"])
             await frames.waitForRequest(count: 1)
             coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: grown)
+            #expect(coordinator.hostedDiscreteFollowRenderedIDs.isEmpty)
             frames.releaseNext()
             #expect(coordinator.command == nil)
             #expect(coordinator.isUserInteracting)
@@ -524,7 +612,10 @@ struct ChatScrollCoordinatorTests {
         coordinator.requestOpeningTail(targetRenderedID: "old-tail")
         let stale = coordinator.command
         #expect(stale?.presentation == 1)
+        coordinator.discreteContentInserted(renderedID: "old-entrance")
+        #expect(coordinator.hostedDiscreteFollowRenderedIDs == ["old-entrance"])
         coordinator.resetForPresentation(2)
+        #expect(coordinator.hostedDiscreteFollowRenderedIDs.isEmpty)
         let current = coordinator.command
         if let stale { coordinator.commandApplied(stale) }
         #expect(current?.destination == .resetToBottom)
@@ -726,6 +817,8 @@ struct ChatScrollCoordinatorTests {
                 semanticID: "anchor", renderedID: "anchor",
                 layoutEpoch: coordinator.layoutEpoch, viewportOffsetY: 40
             )
+            coordinator.discreteContentInserted(renderedID: "prepend-row")
+            #expect(coordinator.hostedDiscreteFollowRenderedIDs == ["prepend-row"])
             let results = ScrollResultRecorder()
             let began = coordinator.beginPrepend(
                 anchor: anchor,
@@ -736,6 +829,7 @@ struct ChatScrollCoordinatorTests {
                 completion: { results.record($0) }
             )
             #expect(began)
+            #expect(coordinator.hostedDiscreteFollowRenderedIDs.isEmpty)
             try await coordinator.hostedWaitForPrependSemanticSample()
 
             let overflow = ChatTranscriptGeometry(
@@ -748,7 +842,7 @@ struct ChatScrollCoordinatorTests {
                 frame: CGRect(x: 0, y: 40, width: 100, height: 40)
             )
             #expect(results.values == [.success])
-            #expect(frames.requestCount == 0)
+            #expect(frames.requestCount == 1)
             #expect(coordinator.command == nil)
         }
     }
@@ -956,6 +1050,55 @@ struct ChatScrollCoordinatorTests {
         if withUnread { coordinator.semanticResponseArrived() }
         return coordinator
     }
+}
+
+private func installedToolTranscript(
+    ids: [String],
+    statuses: [ToolExecutionState.Status],
+    timelineGeneration: Int
+) throws -> InstalledChatTranscript {
+    var snapshot = try JSONDecoder.gateway.decode(SessionSnapshot.self, from: Data("""
+    {
+      "sessionId":"scroll-session","runtimeGeneration":"runtime","revision":1,"eventSequence":1,"phase":"running","cwd":"/workspace",
+      "model":{"provider":"test","id":"model"},"thinkingLevel":"high","availableThinkingLevels":["off","high"],
+      "stats":{"userMessages":0,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":0,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cost":0},
+      "queued":{"steering":[],"followUp":[]},"transcript":[],"transcriptStart":0,"transcriptTotal":0,
+      "toolExecutions":[],"extensionUI":{"statuses":{},"working":{"visible":false},"widgets":[],"editorRevision":0,"editorText":"","pendingInteractions":[]},"diagnostics":[]
+    }
+    """.utf8))
+    snapshot.eventSequence = timelineGeneration
+    snapshot.toolExecutions = zip(ids, statuses).enumerated().map { index, pair in
+        ToolExecutionState(
+            toolCallId: pair.0,
+            toolName: "read",
+            order: index,
+            status: pair.1,
+            arguments: .object([:]),
+            partialResult: nil,
+            result: pair.1 == .completed ? .object(["ok": .bool(true)]) : nil,
+            output: pair.1 == .completed ? "done" : nil,
+            isError: false,
+            startedAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:01Z",
+            lastProgressAt: "2026-01-01T00:00:01Z",
+            completedAt: pair.1 == .completed ? "2026-01-01T00:00:01Z" : nil,
+            durationMs: pair.1 == .completed ? 1_000 : nil,
+            progressSequence: pair.1 == .completed ? 2 : 1
+        )
+    }
+    let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+    let tag = ChatTranscriptProjectionTag(
+        snapshot: snapshot,
+        presentationGeneration: 1,
+        canonicalGeneration: 1,
+        timelineGeneration: timelineGeneration
+    )
+    return InstalledChatTranscript(
+        tag: tag,
+        timeline: candidate.timeline,
+        runtimeItems: candidate.runtimeItems,
+        sourceWindow: .init(snapshot: snapshot)
+    )
 }
 
 @MainActor

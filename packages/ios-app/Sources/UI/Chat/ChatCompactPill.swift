@@ -36,6 +36,12 @@ extension ChatNotificationTone {
     }
 }
 
+enum ChatCompactPillLayoutPolicy {
+    static let horizontalPadding: CGFloat = 11
+    static let verticalPadding: CGFloat = 6
+    static let itemSpacing: CGFloat = 7
+}
+
 /// Shared visual primitive for compact transcript activity. Alignment and
 /// interaction remain with the role-specific owner; this type owns only shape,
 /// spacing, material, and state crossfades.
@@ -62,8 +68,8 @@ struct ChatCompactPillSurface<Content: View>: View {
         switch material {
         case .glass:
             content
-                .padding(.horizontal, 11)
-                .padding(.vertical, 6)
+                .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
+                .padding(.vertical, ChatCompactPillLayoutPolicy.verticalPadding)
                 .contentShape(capsule)
                 .glassEffect(
                     .regular.tint(tone.surfaceColor.opacity(0.18)).interactive(interactive),
@@ -71,8 +77,8 @@ struct ChatCompactPillSurface<Content: View>: View {
                 )
         case .flat:
             content
-                .padding(.horizontal, 11)
-                .padding(.vertical, 6)
+                .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
+                .padding(.vertical, ChatCompactPillLayoutPolicy.verticalPadding)
                 .contentShape(capsule)
                 .background(tone.surfaceColor.opacity(0.10), in: capsule)
                 .overlay(capsule.stroke(tone.surfaceColor.opacity(0.30), lineWidth: 0.5))
@@ -152,7 +158,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
     }
 
     var body: some View {
-        HStack(spacing: 7) {
+        HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing) {
             ZStack {
                 if showsProgress {
                     ProgressView().controlSize(.small).tint(tone.primaryColor)
