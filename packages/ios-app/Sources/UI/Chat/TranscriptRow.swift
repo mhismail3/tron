@@ -76,9 +76,8 @@ struct TranscriptRow: View, Equatable {
                             if part.attachment != nil {
                                 EmptyView() // Presented together above the prompt text.
                             } else if item.role == .user {
-                                JustifiedUserPromptText(text: part.text ?? "")
+                                UserPromptText(text: part.text ?? "")
                                     .padding(.leading, UserPromptTextLayoutPolicy.leadingInset)
-                                    .frame(maxWidth: 520, alignment: .topTrailing)
                             } else {
                                 MarkdownText(text: part.text ?? "", streaming: streaming)
                             }
@@ -134,7 +133,9 @@ struct TranscriptRow: View, Equatable {
             }
             .padding(.horizontal, item.role == .user ? 0 : 2)
             .frame(
-                maxWidth: item.role == .user ? 520 : .infinity,
+                maxWidth: item.role == .user
+                    ? UserPromptTextLayoutPolicy.maximumWidth
+                    : .infinity,
                 alignment: item.role == .user ? .topTrailing : .topLeading
             )
         }

@@ -62,6 +62,43 @@ struct SessionMutationServiceTests {
             #expect(queue.steering == ["queued"])
             #expect(queue.followUp == ["later"])
 
+            let replacing = Task {
+                try await harness.service.replaceQueue(
+                    sessionID: "session-b",
+                    expectedRevision: 7,
+                    items: [SessionSnapshot.QueuedMessage(
+                        id: "queued-id",
+                        behavior: .followUp,
+                        text: "edited",
+                        attachmentCount: 3
+                    )]
+                )
+            }
+            let replace = try await request(in: harness.socket, frameIndex: frameIndex)
+            frameIndex += 1
+            #expect(replace.method == "session.queue.replace")
+            #expect(replace.params?["sessionId"] == .string("session-b"))
+            #expect(replace.params?["expectedRevision"] == .number(7))
+            #expect(replace.params?["items"] == .array([.object([
+                "id": .string("queued-id"),
+                "behavior": .string("followUp"),
+                "text": .string("edited"),
+            ])]))
+            try expectCommandID(replace)
+            await harness.socket.enqueue(successResponse(
+                id: replace.id,
+                result: .object([
+                    "queueRevision": .number(8),
+                    "items": .array([.object([
+                        "id": .string("queued-id"),
+                        "behavior": .string("followUp"),
+                        "text": .string("edited"),
+                        "attachmentCount": .number(3),
+                    ])]),
+                ])
+            ))
+            try await valueOfOwnedTask(replacing)
+
             let forking = Task {
                 try await harness.service.fork(
                     sessionID: "session-c",

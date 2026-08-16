@@ -18,6 +18,7 @@ import { GatewayError } from "../errors.js";
 import type {
   CommandInfo,
   JsonValue,
+  QueuedMessageState,
   RetryState,
   SessionOperationState,
   SessionPhase,
@@ -45,6 +46,21 @@ import {
 import type { RunMarkerStore } from "./run-markers.js";
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
+
+type QueueBehavior = QueuedMessageState["behavior"];
+
+type RuntimeQueuedMessage = QueuedMessageState & {
+  runtimeText: string;
+  attachmentEnvelope: string;
+  images: ImageContent[];
+  ordinal: number;
+};
+
+type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal">;
+
+const MAXIMUM_QUEUED_MESSAGES = 32;
+const MAXIMUM_QUEUED_MESSAGE_BYTES = 64 * 1_024;
+const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
 
 function boundedSummaryText(value: string, maximumBytes = 1_024): string {
   const encoded = Buffer.from(value);
@@ -107,6 +123,11 @@ export class RuntimeSlot {
     firstMessage: string;
   } | undefined;
   private lastTouchedAt = Date.now();
+  private queueRevision = 0;
+  private nextQueueOrdinal = 0;
+  private queuedMessages: RuntimeQueuedMessage[] = [];
+  private pendingQueueAdmission: PendingQueueAdmission | undefined;
+  private suppressQueueEvents = false;
 
   private constructor(
     private sessionManager: SessionManager,
@@ -520,7 +541,10 @@ export class RuntimeSlot {
         this.scheduleSnapshot();
         break;
       case "message_end":
+        this.scheduleSnapshot();
+        break;
       case "queue_update":
+        if (!this.suppressQueueEvents) this.reconcileQueuedMessages();
         this.scheduleSnapshot();
         break;
       case "thinking_level_changed":
@@ -611,6 +635,101 @@ export class RuntimeSlot {
     }, 20);
   }
 
+  private reconcileQueuedMessages(): void {
+    const session = this.runtime.session;
+    const actual: Record<QueueBehavior, readonly string[]> = {
+      steer: session.getSteeringMessages(),
+      followUp: session.getFollowUpMessages(),
+    };
+    const previous = this.queuedMessages;
+    const reconciled: RuntimeQueuedMessage[] = [];
+
+    for (const behavior of ["steer", "followUp"] as const) {
+      const old = previous.filter((item) => item.behavior === behavior);
+      const nextTexts = actual[behavior];
+      let overlap = Math.min(old.length, nextTexts.length);
+      while (overlap > 0) {
+        const oldStart = old.length - overlap;
+        let matches = true;
+        for (let index = 0; index < overlap; index += 1) {
+          if (old[oldStart + index]?.runtimeText !== nextTexts[index]) {
+            matches = false;
+            break;
+          }
+        }
+        if (matches) break;
+        overlap -= 1;
+      }
+
+      reconciled.push(...old.slice(old.length - overlap));
+      for (const runtimeText of nextTexts.slice(overlap)) {
+        const admission = this.pendingQueueAdmission?.behavior === behavior
+          ? this.pendingQueueAdmission
+          : undefined;
+        if (admission) this.pendingQueueAdmission = undefined;
+        reconciled.push({
+          id: admission?.id ?? randomUUID(),
+          behavior,
+          text: admission?.text ?? runtimeText,
+          attachmentCount: admission?.attachmentCount ?? 0,
+          runtimeText,
+          attachmentEnvelope: admission?.attachmentEnvelope ?? "",
+          images: admission?.images ?? [],
+          ordinal: this.nextQueueOrdinal++,
+        });
+      }
+    }
+
+    reconciled.sort((left, right) => left.behavior === right.behavior
+      ? left.ordinal - right.ordinal
+      : left.behavior === "steer" ? -1 : 1);
+    const changed = previous.length !== reconciled.length || previous.some((item, index) => {
+      const next = reconciled[index];
+      return next === undefined
+        || item.id !== next.id
+        || item.behavior !== next.behavior
+        || item.text !== next.text
+        || item.runtimeText !== next.runtimeText
+        || item.attachmentCount !== next.attachmentCount;
+    });
+    this.queuedMessages = reconciled;
+    if (changed) this.queueRevision += 1;
+  }
+
+  private projectedQueue(): QueuedMessageState[] {
+    this.reconcileQueuedMessages();
+    return this.queuedMessages.map(({ id, behavior, text, attachmentCount }) => ({
+      id,
+      behavior,
+      text,
+      attachmentCount,
+    }));
+  }
+
+  private static queueText(text: string, attachmentEnvelope: string): string {
+    return [text.trim(), attachmentEnvelope].filter(Boolean).join("\n\n");
+  }
+
+  private static validateQueue(items: Array<Pick<QueuedMessageState, "text" | "attachmentCount">>): void {
+    if (items.length > MAXIMUM_QUEUED_MESSAGES) {
+      throw new GatewayError("invalid_request", `At most ${MAXIMUM_QUEUED_MESSAGES} messages may be queued`);
+    }
+    let totalBytes = 0;
+    for (const item of items) {
+      const bytes = Buffer.byteLength(item.text);
+      if (bytes > MAXIMUM_QUEUED_MESSAGE_BYTES) {
+        throw new GatewayError("invalid_request", "A queued message is too large to manage safely");
+      }
+      if (item.text.trim().length === 0 && item.attachmentCount === 0) {
+        throw new GatewayError("invalid_request", "Queued messages cannot be empty");
+      }
+      totalBytes += bytes;
+    }
+    if (totalBytes > MAXIMUM_QUEUED_TOTAL_BYTES) {
+      throw new GatewayError("invalid_request", "The queued message total is too large to manage safely");
+    }
+  }
+
   snapshot(sequence = this.eventSequence): SessionSnapshot {
     const session = this.runtime.session;
     this.ensureAgentProjection();
@@ -621,6 +740,7 @@ export class RuntimeSlot {
       ? projectMessage("streaming", null, new Date().toISOString(), session.state.streamingMessage, this.dependencies.blobs)
       : undefined;
     const transcriptPage = this.transcriptPage();
+    const queuedItems = this.projectedQueue();
     return fitSessionSnapshot({
       sessionId: session.sessionId,
       runtimeGeneration: this.runtimeGeneration,
@@ -645,6 +765,8 @@ export class RuntimeSlot {
         cost: stats.cost,
       },
       queued: { steering: [...session.getSteeringMessages()], followUp: [...session.getFollowUpMessages()] },
+      queueRevision: this.queueRevision,
+      queuedItems,
       transcript: transcriptPage.items,
       transcriptStart: transcriptPage.start,
       transcriptTotal: transcriptPage.total,
@@ -695,11 +817,32 @@ export class RuntimeSlot {
     }
   }
 
-  async prompt(text: string, images: ImageContent[] = [], behavior?: "steer" | "followUp"): Promise<{ operationId: string }> {
+  async prompt(
+    text: string,
+    images: ImageContent[] = [],
+    behavior?: QueueBehavior,
+    queueDisplay?: { text: string; attachmentEnvelope: string; attachmentCount: number },
+  ): Promise<{ operationId: string }> {
     return this.lane.run(async () => {
       this.assertUsable();
       const session = this.runtime.session;
       if (session.isStreaming && !behavior) throw new GatewayError("busy", "Session is running; choose steer or follow-up");
+      if (session.isStreaming && behavior) {
+        this.reconcileQueuedMessages();
+        const display = queueDisplay ?? { text, attachmentEnvelope: "", attachmentCount: images.length };
+        RuntimeSlot.validateQueue([
+          ...this.queuedMessages,
+          { text: display.text, attachmentCount: display.attachmentCount },
+        ]);
+        this.pendingQueueAdmission = {
+          id: randomUUID(),
+          behavior,
+          text: display.text,
+          attachmentCount: display.attachmentCount,
+          attachmentEnvelope: display.attachmentEnvelope,
+          images,
+        };
+      }
       const operationId = randomUUID();
       this.activeOperationId = operationId;
       this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString() };
@@ -722,10 +865,15 @@ export class RuntimeSlot {
           this.publishSnapshot();
         }
       });
-      const admitted = await Promise.race([
-        accepted,
-        new Promise<boolean>((_, reject) => setTimeout(() => reject(new GatewayError("internal", "The agent runtime did not complete prompt preflight")), 5_000)),
-      ]);
+      let admitted: boolean;
+      try {
+        admitted = await Promise.race([
+          accepted,
+          new Promise<boolean>((_, reject) => setTimeout(() => reject(new GatewayError("internal", "The agent runtime did not complete prompt preflight")), 5_000)),
+        ]);
+      } finally {
+        this.pendingQueueAdmission = undefined;
+      }
       if (!admitted) {
         this.operation = undefined;
         throw new GatewayError("invalid_request", "The agent runtime rejected the prompt before admission");
@@ -751,12 +899,112 @@ export class RuntimeSlot {
     this.publishSnapshot();
   }
 
-  clearQueue(): { steering: string[]; followUp: string[] } {
-    this.assertUsable();
-    const cleared = this.runtime.session.clearQueue();
-    this.revision += 1;
-    this.publishSnapshot();
-    return { steering: [...cleared.steering], followUp: [...cleared.followUp] };
+  async clearQueue(): Promise<{ steering: string[]; followUp: string[] }> {
+    return this.lane.run(() => {
+      this.assertUsable();
+      this.suppressQueueEvents = true;
+      let cleared: { steering: string[]; followUp: string[] };
+      try {
+        cleared = this.runtime.session.clearQueue();
+      } finally {
+        this.suppressQueueEvents = false;
+      }
+      this.queuedMessages = [];
+      this.queueRevision += 1;
+      this.revision += 1;
+      this.publishSnapshot();
+      return { steering: [...cleared.steering], followUp: [...cleared.followUp] };
+    });
+  }
+
+  async replaceQueue(
+    expectedRevision: number,
+    items: Array<Pick<QueuedMessageState, "id" | "behavior" | "text">>,
+  ): Promise<{ queueRevision: number; items: QueuedMessageState[] }> {
+    return this.lane.run(async () => {
+      this.assertUsable();
+      const session = this.runtime.session;
+      this.reconcileQueuedMessages();
+      if (expectedRevision !== this.queueRevision) {
+        throw new GatewayError("conflict", "The message queue changed. Review the latest queue and try again.", true);
+      }
+      if (!session.isStreaming && items.length > 0) {
+        throw new GatewayError("conflict", "The active run finished before the queue could be updated.", true);
+      }
+
+      const previousByID = new Map(this.queuedMessages.map((item) => [item.id, item]));
+      const seen = new Set<string>();
+      const next = items.map((item) => {
+        const previous = previousByID.get(item.id);
+        if (!previous || !seen.add(item.id)) {
+          throw new GatewayError("conflict", "The message queue changed. Review the latest queue and try again.", true);
+        }
+        const text = item.text.trim();
+        return {
+          ...previous,
+          behavior: item.behavior,
+          text,
+          runtimeText: text === previous.text
+            ? previous.runtimeText
+            : RuntimeSlot.queueText(text, previous.attachmentEnvelope),
+          ordinal: this.nextQueueOrdinal++,
+        };
+      });
+      RuntimeSlot.validateQueue(next);
+
+      const extensionCommands = new Set(
+        this.commands().filter((command) => command.source === "extension").map((command) => command.name),
+      );
+      for (const item of next) {
+        if (!item.runtimeText.startsWith("/")) continue;
+        const command = item.runtimeText.slice(1).split(/\s/u, 1)[0] ?? "";
+        if (extensionCommands.has(command)) {
+          throw new GatewayError("invalid_request", `Extension command "/${command}" cannot be queued`);
+        }
+      }
+
+      let rebuildError: unknown;
+      this.suppressQueueEvents = true;
+      try {
+        session.clearQueue();
+        const queued = next.map((item) => item.behavior === "steer"
+          ? session.steer(item.runtimeText, item.images)
+          : session.followUp(item.runtimeText, item.images));
+        await Promise.all(queued);
+      } catch (error) {
+        rebuildError = error;
+      } finally {
+        this.suppressQueueEvents = false;
+      }
+      if (rebuildError !== undefined) {
+        this.reconcileQueuedMessages();
+        this.revision += 1;
+        this.publishSnapshot();
+        throw rebuildError;
+      }
+
+      const actual: Record<QueueBehavior, readonly string[]> = {
+        steer: session.getSteeringMessages(),
+        followUp: session.getFollowUpMessages(),
+      };
+      const survivors: RuntimeQueuedMessage[] = [];
+      for (const behavior of ["steer", "followUp"] as const) {
+        const desired = next.filter((item) => item.behavior === behavior);
+        const texts = actual[behavior];
+        const retained = desired.slice(Math.max(0, desired.length - texts.length));
+        const aligned = retained.slice(Math.max(0, retained.length - texts.length));
+        for (let index = 0; index < aligned.length; index += 1) {
+          survivors.push({ ...aligned[index]!, runtimeText: texts[texts.length - aligned.length + index]! });
+        }
+      }
+      this.queuedMessages = survivors.sort((left, right) => left.behavior === right.behavior
+        ? left.ordinal - right.ordinal
+        : left.behavior === "steer" ? -1 : 1);
+      this.queueRevision += 1;
+      this.revision += 1;
+      this.publishSnapshot();
+      return { queueRevision: this.queueRevision, items: this.projectedQueue() };
+    });
   }
 
   async setModel(provider: string, modelId: string): Promise<void> {

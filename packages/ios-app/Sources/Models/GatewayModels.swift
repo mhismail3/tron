@@ -514,6 +514,8 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     var contextUsage: ContextUsage?
     var stats: SessionStats
     var queued: QueuedMessages
+    var queueRevision: Int? = nil
+    var queuedItems: [QueuedMessage]? = nil
     var transcript: [TranscriptItem]
     var transcriptStart: Int?
     var transcriptTotal: Int?
@@ -528,6 +530,36 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     struct QueuedMessages: Codable, Hashable, Sendable {
         let steering: [String]
         let followUp: [String]
+    }
+
+    struct QueuedMessage: Codable, Hashable, Identifiable, Sendable {
+        enum Behavior: String, Codable, Hashable, Sendable {
+            case steer, followUp
+        }
+
+        let id: String
+        var behavior: Behavior
+        var text: String
+        let attachmentCount: Int
+    }
+
+    var displayedQueuedMessages: [QueuedMessage] {
+        if let queuedItems { return queuedItems }
+        return queued.steering.enumerated().map { index, text in
+            QueuedMessage(
+                id: "legacy-steer-\(index)",
+                behavior: .steer,
+                text: text,
+                attachmentCount: 0
+            )
+        } + queued.followUp.enumerated().map { index, text in
+            QueuedMessage(
+                id: "legacy-follow-up-\(index)",
+                behavior: .followUp,
+                text: text,
+                attachmentCount: 0
+            )
+        }
     }
 }
 

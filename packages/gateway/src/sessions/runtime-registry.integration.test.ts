@@ -269,6 +269,94 @@ export default function (pi) {
     expect(snapshots.some((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
   });
 
+  it("projects and atomically manages multiple queued messages by stable identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-queue-management-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+
+    let releaseResponse!: () => void;
+    const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    const faux = fauxProvider({ provider: "tron-queue-management", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => {
+        await responseBarrier;
+        return fauxAssistantMessage("initial complete");
+      },
+      fauxAssistantMessage("queued complete"),
+      fauxAssistantMessage("follow-up complete"),
+    ]);
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: createModels,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("start");
+    await waitUntil(() => slot.isBusy);
+
+    await slot.prompt("first steer", [], "steer", {
+      text: "first steer",
+      attachmentEnvelope: "",
+      attachmentCount: 0,
+    });
+    await slot.prompt("first steer", [], "steer", {
+      text: "first steer",
+      attachmentEnvelope: "",
+      attachmentCount: 0,
+    });
+    await slot.prompt("later follow-up", [], "followUp", {
+      text: "later follow-up",
+      attachmentEnvelope: "",
+      attachmentCount: 0,
+    });
+    const queued = slot.snapshot();
+    expect(queued.queuedItems).toHaveLength(3);
+    expect(queued.queuedItems?.map((item) => item.behavior)).toEqual(["steer", "steer", "followUp"]);
+    expect(queued.queuedItems?.map((item) => item.text)).toEqual(["first steer", "first steer", "later follow-up"]);
+    expect(new Set(queued.queuedItems?.map((item) => item.id)).size).toBe(3);
+
+    const [first, duplicate, followUp] = queued.queuedItems!;
+    const replaced = await slot.replaceQueue(queued.queueRevision!, [
+      { id: duplicate!.id, behavior: "steer", text: duplicate!.text },
+      { id: followUp!.id, behavior: "steer", text: "edited and earlier" },
+      { id: first!.id, behavior: "followUp", text: first!.text },
+    ]);
+    expect(replaced.items.map(({ id, behavior, text }) => ({ id, behavior, text }))).toEqual([
+      { id: duplicate!.id, behavior: "steer", text: "first steer" },
+      { id: followUp!.id, behavior: "steer", text: "edited and earlier" },
+      { id: first!.id, behavior: "followUp", text: "first steer" },
+    ]);
+    await expect(slot.replaceQueue(queued.queueRevision!, [])).rejects.toMatchObject({ code: "conflict" });
+
+    const removed = await slot.replaceQueue(replaced.queueRevision, [replaced.items[1]!]);
+    expect(removed.items).toHaveLength(1);
+    expect(removed.items[0]?.id).toBe(followUp!.id);
+
+    const cleared = await slot.clearQueue();
+    expect(cleared.steering).toEqual(["edited and earlier"]);
+    expect(slot.snapshot().queuedItems).toEqual([]);
+    await expect(slot.replaceQueue(removed.queueRevision, removed.items))
+      .rejects.toMatchObject({ code: "conflict" });
+
+    releaseResponse();
+    await waitUntil(() => !slot.isBusy);
+  });
+
   it("projects stable ordinals for parallel tools from start through completion", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-tool-order-integration-"));
     const agentDir = join(root, "agent");

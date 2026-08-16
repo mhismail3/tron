@@ -686,15 +686,45 @@ struct PresentationStyleGuardTests {
         #expect(!transcript.contains("tone.color.opacity"))
         #expect(compactPill.contains("paragraph.baseWritingDirection = .natural"))
         #expect(compactPill.contains("func sizeThatFits("))
-        let userPrompt = (transcript.components(separatedBy: "JustifiedUserPromptText(text:").dropFirst().first ?? "")
+        let userPrompt = (transcript.components(separatedBy: "UserPromptText(text:").dropFirst().first ?? "")
             .components(separatedBy: "} else {").first ?? ""
         #expect(userPrompt.contains(".padding(.leading, UserPromptTextLayoutPolicy.leadingInset)"))
-        #expect(userPrompt.contains(".frame(maxWidth: 520, alignment: .topTrailing)"))
+        #expect(!userPrompt.contains(".frame(maxWidth: .infinity"))
+        #expect(transcript.contains("UserPromptTextLayoutPolicy.maximumWidth"))
+        #expect(compactPill.contains("static let fontScale: CGFloat = 0.9"))
+        #expect(!compactPill.contains(".justified"))
         #expect(!userPrompt.contains("minHeight: 44"))
         #expect(transcript.components(separatedBy: ".chatTranscriptPill()").count - 1 == 0)
         let earlierMessagesChip = (chat.components(separatedBy: "private func earlierMessagesChip").dropFirst().first ?? "")
             .components(separatedBy: "private var composer").first ?? ""
         #expect(!earlierMessagesChip.contains("TronActionButtonStyle(expands: false)"))
+    }
+
+    @Test("queued messages remain visible and individually manageable in chat")
+    func queuedMessagePresentation() throws {
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let queue = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/QueuedMessagePresentation.swift"),
+            encoding: .utf8
+        )
+        let composer = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
+            encoding: .utf8
+        )
+        #expect(chat.contains("queuedMessageRows(snapshot)"))
+        #expect(chat.contains("model.replaceQueue("))
+        #expect(queue.contains("struct QueuedMessageRow"))
+        #expect(queue.contains("struct QueuedMessageEditorSheet"))
+        #expect(queue.contains("Move earlier"))
+        #expect(queue.contains("Move later"))
+        #expect(queue.contains("Remove from Queue"))
+        #expect(queue.contains("Clear entire queue"))
+        #expect(queue.contains("Attachments stay with this queued message."))
+        #expect(composer.contains("Steer after current turn"))
+        #expect(composer.contains("Follow up after current work"))
     }
 
     @Test("chat navigation remains emerald with soft scroll edges")

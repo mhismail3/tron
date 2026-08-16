@@ -27,7 +27,7 @@ const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "gateway.restart",
   "session.list", "session.open", "session.sync", "session.close", "session.transcript",
-  "session.abort", "session.queue.clear", "extension.respond",
+  "session.abort", "session.clearQueue", "session.queue.replace", "extension.respond",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
 ]);
 
@@ -93,6 +93,7 @@ export class GatewayService {
         "uploads.v1",
         "terminal.v1",
         "extension-ui.v1",
+        "queue-management.v1",
         "restart-drain.v1",
       ],
     };
@@ -217,7 +218,11 @@ export class GatewayService {
           const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
           const prompt = [text, attachments.envelope].filter(Boolean).join("\n\n");
           const behavior = params.behavior === undefined ? undefined : oneOf(params.behavior, "behavior", ["steer", "followUp"] as const);
-          return safeJson(await slot.prompt(prompt, attachments.images, behavior));
+          return safeJson(await slot.prompt(prompt, attachments.images, behavior, {
+            text,
+            attachmentEnvelope: attachments.envelope,
+            attachmentCount: uploadIds.length,
+          }));
         });
       case "session.abort":
         return this.mutation(client, method, params, async () => {
@@ -229,7 +234,23 @@ export class GatewayService {
           return { aborted: true };
         });
       case "session.clearQueue":
-        return this.mutation(client, method, params, async () => safeJson((await this.slot(params)).clearQueue()));
+        return this.mutation(client, method, params, async () => safeJson(await (await this.slot(params)).clearQueue()));
+      case "session.queue.replace":
+        return this.mutation(client, method, params, async () => {
+          if (!Array.isArray(params.items)) throw new GatewayError("invalid_request", "items must be an array");
+          const items = params.items.map((value, index) => {
+            const item = object(value, `items[${index}]`);
+            return {
+              id: string(item.id, `items[${index}].id`, { max: 100 }),
+              behavior: oneOf(item.behavior, `items[${index}].behavior`, ["steer", "followUp"] as const),
+              text: string(item.text, `items[${index}].text`, { max: 64 * 1_024 }),
+            };
+          });
+          return safeJson(await (await this.slot(params)).replaceQueue(
+            integer(params.expectedRevision, "expectedRevision", 0, Number.MAX_SAFE_INTEGER),
+            items,
+          ));
+        });
       case "session.bash":
         return this.mutation(client, method, params, async () => (await this.slot(params)).executeBash(
           string(params.command, "command", { max: 100_000 }),

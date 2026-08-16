@@ -65,6 +65,8 @@ struct ChatView: View {
     @State private var attachmentPresentationTask: Task<Void, Never>?
     @State private var showContext = false
     @State private var showSettings = false
+    @State private var queuedMessageEditor: QueuedMessageEditorRoute?
+    @State private var mutatingQueuedMessageIDs: Set<String> = []
     @State private var openPresentation: ChatOpenPresentationState
     @State private var openingTask: Task<Void, Never>?
     @State private var modelPresentationGeneration: Int?
@@ -163,6 +165,28 @@ struct ChatView: View {
                 projectCWD: model.authoritativeSnapshot(for: sessionID)?.cwd
             )
             .presentationDragIndicator(.hidden)
+        }
+        .sheet(item: $queuedMessageEditor) { route in
+            if let message = selectedAuthoritativeSnapshot?.displayedQueuedMessages.first(
+                where: { $0.id == route.id }
+            ) {
+                QueuedMessageEditorSheet(
+                    message: message,
+                    isSaving: mutatingQueuedMessageIDs.contains(message.id),
+                    onSave: { text, behavior in
+                        Task { await updateQueuedMessage(message.id, text: text, behavior: behavior) }
+                    },
+                    onDelete: {
+                        Task { await removeQueuedMessage(message.id) }
+                    }
+                )
+            } else {
+                ContentUnavailableView(
+                    "Message No Longer Queued",
+                    systemImage: "text.badge.xmark",
+                    description: Text("It was delivered or removed before the editor opened.")
+                )
+            }
         }
         .sheet(isPresented: attachmentPresentationBinding(for: .camera)) {
             CameraCaptureSheet { image in Task { await importCameraImage(image) } }
@@ -302,6 +326,7 @@ struct ChatView: View {
                             }
                         }
                     }
+                    queuedMessageRows(snapshot)
                 }
                 Color.clear
                     .frame(height: 12)
@@ -383,6 +408,34 @@ struct ChatView: View {
             scrollCoordinator.composerViewportTransitionBegan()
         }
         .overlay { openingSurface }
+    }
+
+    @ViewBuilder
+    private func queuedMessageRows(_ snapshot: SessionSnapshot) -> some View {
+        let messages = snapshot.displayedQueuedMessages
+        ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+            stableTranscriptRow(
+                id: "queued-message-\(message.id)",
+                installedTag: nil,
+                entranceState: .none
+            ) {
+                QueuedMessageRow(
+                    message: message,
+                    position: index + 1,
+                    total: messages.count,
+                    isManageable: snapshot.queueRevision != nil && snapshot.queuedItems != nil,
+                    isMutating: !mutatingQueuedMessageIDs.isEmpty,
+                    onEdit: { queuedMessageEditor = .init(id: message.id) },
+                    onDelete: { Task { await removeQueuedMessage(message.id) } },
+                    onClear: { Task { await clearQueuedMessages() } },
+                    canMoveEarlier: index > 0 && messages[index - 1].behavior == message.behavior,
+                    canMoveLater: index + 1 < messages.count && messages[index + 1].behavior == message.behavior,
+                    onMove: { offset in
+                        Task { await moveQueuedMessage(message.id, offset: offset) }
+                    }
+                )
+            }
+        }
     }
 
     @ViewBuilder
@@ -1007,7 +1060,8 @@ struct ChatView: View {
                 ComposerTrailingButton(
                     mode: composerTrailingMode,
                     isDisabled: sending || !isTranscriptReady,
-                    onSend: { Task { await send() } },
+                    offersQueueChoices: selectedAuthoritativeSnapshot?.phase.isActive == true,
+                    onSend: { behavior in Task { await send(behavior: behavior) } },
                     onAbort: { Task { await model.abort(sessionID: sessionID) } }
                 )
                 .transition(
@@ -1198,9 +1252,77 @@ struct ChatView: View {
         )
     }
 
-    private func send() async {
+    @MainActor
+    private func updateQueuedMessage(
+        _ id: String,
+        text: String,
+        behavior: SessionSnapshot.QueuedMessage.Behavior
+    ) async {
+        await mutateQueue(affectedID: id) { items in
+            guard let index = items.firstIndex(where: { $0.id == id }) else {
+                throw CancellationError()
+            }
+            items[index].text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            items[index].behavior = behavior
+        }
+    }
+
+    @MainActor
+    private func removeQueuedMessage(_ id: String) async {
+        await mutateQueue(affectedID: id) { items in
+            guard items.contains(where: { $0.id == id }) else { throw CancellationError() }
+            items.removeAll { $0.id == id }
+        }
+    }
+
+    @MainActor
+    private func clearQueuedMessages() async {
+        await mutateQueue(affectedID: "queue-clear-all") { items in
+            items.removeAll(keepingCapacity: false)
+        }
+    }
+
+    @MainActor
+    private func moveQueuedMessage(_ id: String, offset: Int) async {
+        await mutateQueue(affectedID: id) { items in
+            guard let index = items.firstIndex(where: { $0.id == id }) else {
+                throw CancellationError()
+            }
+            let destination = index + offset
+            guard items.indices.contains(destination) else { return }
+            items.swapAt(index, destination)
+        }
+    }
+
+    @MainActor
+    private func mutateQueue(
+        affectedID: String,
+        mutation: (inout [SessionSnapshot.QueuedMessage]) throws -> Void
+    ) async {
+        guard mutatingQueuedMessageIDs.isEmpty,
+              let target = presentationTarget,
+              let snapshot = selectedAuthoritativeSnapshot,
+              let expectedRevision = snapshot.queueRevision,
+              var items = snapshot.queuedItems else { return }
+        do { try mutation(&items) }
+        catch { return }
+        mutatingQueuedMessageIDs.insert(affectedID)
+        defer { mutatingQueuedMessageIDs.remove(affectedID) }
+        do {
+            try await model.replaceQueue(
+                sessionID: sessionID,
+                expectedRevision: expectedRevision,
+                items: items
+            )
+        } catch {
+            model.presentComposerActionError(error, target: target)
+        }
+    }
+
+    private func send(behavior explicitBehavior: String? = nil) async {
         guard let target = presentationTarget else { return }
-        let behavior = ChatComposerPolicy.submissionBehavior(phase: selectedAuthoritativeSnapshot?.phase)
+        let behavior = explicitBehavior
+            ?? ChatComposerPolicy.submissionBehavior(phase: selectedAuthoritativeSnapshot?.phase)
         if !ChatComposerPolicy.preservesFocus(submissionBehavior: behavior) {
             composerFocused = false
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)

@@ -457,9 +457,16 @@ compact runtime row after the canonical transcript, including provider retry att
 never changes the composer's structure. A non-empty active draft replaces the trailing Stop
 action with Send and is admitted as a steering message, while an empty active
 composer retains Stop. The keyboard remains focused after steering so multiple messages can
-be queued without waiting for the current turn to settle. Camera, photo, and file actions
-also remain enabled during an active turn: uploads stage locally and the eventual prompt
-carries the same steering behavior as text. The native attachment menu derives enablement
+be queued without waiting for the current turn to settle. The send control's native context
+menu can explicitly choose steering after the current turn or follow-up after current work.
+Authoritative queued entries render after active runtime state as right-anchored compact cards
+with stable identity, delivery stage, position, text, and attachment count. Their app-native
+menu and editor support edit, same-stage reorder, individual removal, behavior changes, and
+clear-all against an optimistic queue revision; conflicts wait for the next authoritative
+snapshot rather than fabricating a local queue. Steering is always presented before follow-up
+to match runtime delivery order. Older Gateways retain a visible read-only string projection.
+Camera, photo, and file actions also remain enabled during an active turn: uploads stage locally
+and the eventual prompt carries the same steering behavior as text. The native attachment menu derives enablement
 from the immutable viewed session and an explicit authoritative phase; a missing phase remains
 unavailable. Its identity changes only when the session or effective availability changes. A transparent
 UIKit button preserves the native `UIMenu`, icon, and 40-point hit target as a single UIKit interaction
@@ -624,9 +631,10 @@ session history, packages, and providers expose reload as an explicit toolbar
 action while non-sheet dashboard refresh remains available.
 
 Chat has one spatial role model: user prompts are right anchored, agent prose and tools are left
-anchored, and presentation-only system events are centered. A width-aware TextKit owner keeps a
-single-line user prompt trailing and fully justifies multiline prompts within a 520-point maximum,
-with an external 28-point leading separation that preserves the right-side silhouette. Canonical
+anchored, and presentation-only system events are centered. A width-aware TextKit owner lets short
+prompts hug their measured content at the trailing edge, bounds longer prompts to 364 points, and
+uses logical-leading line alignment inside that block with a 10% smaller Dynamic Type font. An
+external 28-point logical-leading separation preserves the right-side silhouette. Canonical
 compaction/branch/configuration entries, embedded assistant failures, and exact admitted runtime
 working/status state share one semantic notification projection and capsule primitive. Only a pill
 with real detail content is an interactive Liquid Glass button; no-detail events use a flat tinted

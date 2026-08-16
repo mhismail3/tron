@@ -34,7 +34,11 @@ admits and reduces mounted-session topics:
   baselines request authoritative synchronization, and missing authority or route/payload
   mismatch is discarded without creating or caching state. Synchronous intake revocation rejects all
   later sequenced topics before cursor reduction or cross-domain effects. Explicit acknowledged open/sync remains the only
-  path allowed to replace a cursor or runtime baseline;
+  path allowed to replace a cursor or runtime baseline. The same snapshot carries the full
+  bounded queue projection and queue revision; queue updates therefore replace the visible
+  queued-message cards atomically rather than applying per-row mobile deltas. Confirmed clear
+  may remove both rich and legacy projections immediately, while edit/reorder/remove waits for
+  the authoritative revisioned snapshot;
 - provider, package, settings, trust, and custom-model mutation invalidations
   advance owner revisions across connected clients; each visible surface reloads
   its explicit global or project scope instead of sharing a wrong-scope payload;

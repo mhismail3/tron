@@ -100,6 +100,41 @@ final class SessionMutationService {
         }
     }
 
+    func replaceQueue(
+        sessionID: String,
+        expectedRevision: Int,
+        items: [SessionSnapshot.QueuedMessage]
+    ) async throws {
+        struct Item: Codable {
+            let id: String
+            let behavior: SessionSnapshot.QueuedMessage.Behavior
+            let text: String
+        }
+        struct Params: Codable {
+            let sessionId: String
+            let expectedRevision: Int
+            let items: [Item]
+            let commandId: String
+        }
+        struct Response: Codable {
+            let queueRevision: Int
+            let items: [SessionSnapshot.QueuedMessage]
+        }
+        let commandID = uuidSource.next().uuidString
+        let params = Params(
+            sessionId: sessionID,
+            expectedRevision: expectedRevision,
+            items: items.map { Item(id: $0.id, behavior: $0.behavior, text: $0.text) },
+            commandId: commandID
+        )
+        let _: Response = try await executor.perform(
+            method: "session.queue.replace",
+            commandID: commandID
+        ) {
+            try await client.request("session.queue.replace", params)
+        }
+    }
+
     func executeBash(
         _ command: String,
         sessionID: String,

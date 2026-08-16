@@ -214,23 +214,24 @@ extension ChatCompactPillLabel where Trailing == EmptyView {
 
 enum UserPromptTextLayoutPolicy {
     static let leadingInset: CGFloat = 28
+    static let maximumWidth: CGFloat = 364 // 30% narrower than the prior 520-point bound.
+    static let fontScale: CGFloat = 0.9
 
-    static func alignment(
-        text: String,
-        measuredSingleLineWidth: CGFloat,
-        availableWidth: CGFloat,
-        layoutDirection: LayoutDirection
-    ) -> NSTextAlignment {
-        guard !text.contains(where: \.isNewline),
-              measuredSingleLineWidth <= availableWidth + 0.5 else { return .justified }
-        return layoutDirection == .rightToLeft ? .left : .right
+    static func fittedWidth(measured: CGFloat, proposed: CGFloat) -> CGFloat {
+        min(max(0, measured), max(0, proposed))
+    }
+
+    /// The prompt block remains right-anchored by SwiftUI. Lines read from the
+    /// logical leading edge inside that narrower block instead of stretching
+    /// inter-word spacing to full justification.
+    static func alignment(layoutDirection: LayoutDirection) -> NSTextAlignment {
+        layoutDirection == .rightToLeft ? .right : .left
     }
 }
 
-/// UIKit/TextKit owns typographic justification because SwiftUI Text has no
-/// full-justification mode. One visual line remains trailing; multiline text is
-/// justified. SwiftUI supplies the right-side layout inset outside this owner.
-struct JustifiedUserPromptText: View {
+/// UIKit/TextKit retains deterministic wrapping and Dynamic Type while SwiftUI
+/// owns the narrower right-anchored prompt block.
+struct UserPromptText: View {
     let text: String
     @State private var fontSettings = FontSettings.shared
 
@@ -240,7 +241,7 @@ struct JustifiedUserPromptText: View {
         let family = fontSettings.selectedFamily
         let weight = fontSettings.axisValue(for: family, axis: .weight)
         let casual = fontSettings.axisValue(for: family, axis: .casual)
-        JustifiedUserPromptLabel(
+        UserPromptLabel(
             text: text,
             fontRevision: "\(family.rawValue):\(weight):\(casual)"
         )
@@ -248,7 +249,7 @@ struct JustifiedUserPromptText: View {
     }
 }
 
-private struct JustifiedUserPromptLabel: UIViewRepresentable {
+private struct UserPromptLabel: UIViewRepresentable {
     let text: String
     let fontRevision: String
     @Environment(\.sizeCategory) private var sizeCategory
@@ -260,7 +261,7 @@ private struct JustifiedUserPromptLabel: UIViewRepresentable {
         label.lineBreakMode = .byWordWrapping
         label.adjustsFontForContentSizeCategory = true
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        label.setContentHuggingPriority(.required, for: .horizontal)
         label.isAccessibilityElement = true
         return label
     }
@@ -276,14 +277,29 @@ private struct JustifiedUserPromptLabel: UIViewRepresentable {
     ) -> CGSize? {
         guard let proposedWidth = proposal.width, proposedWidth > 0 else { return nil }
         configure(uiView, width: proposedWidth)
-        let size = uiView.sizeThatFits(CGSize(width: proposedWidth, height: .greatestFiniteMagnitude))
-        return CGSize(width: proposedWidth, height: ceil(size.height))
+        guard let attributedText = uiView.attributedText else { return .zero }
+        let measured = attributedText.boundingRect(
+            with: CGSize(width: proposedWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            context: nil
+        )
+        let fittedWidth = UserPromptTextLayoutPolicy.fittedWidth(
+            measured: ceil(measured.width),
+            proposed: proposedWidth
+        )
+        configure(uiView, width: fittedWidth)
+        let size = uiView.sizeThatFits(
+            CGSize(width: fittedWidth, height: .greatestFiniteMagnitude)
+        )
+        return CGSize(width: fittedWidth, height: ceil(size.height))
     }
 
     private func configure(_ label: UILabel, width: CGFloat?) {
         _ = fontRevision
         _ = sizeCategory
-        let base = TronFontLoader.createUIFont(size: TronTypography.sizeBody)
+        let base = TronFontLoader.createUIFont(
+            size: TronTypography.sizeBody * UserPromptTextLayoutPolicy.fontScale
+        )
         let font = UIFontMetrics(forTextStyle: .body).scaledFont(
             for: base,
             compatibleWith: label.traitCollection
@@ -293,9 +309,6 @@ private struct JustifiedUserPromptLabel: UIViewRepresentable {
         paragraph.lineSpacing = 4
         paragraph.baseWritingDirection = .natural
         paragraph.alignment = UserPromptTextLayoutPolicy.alignment(
-            text: text,
-            measuredSingleLineWidth: (text as NSString).size(withAttributes: [.font: font]).width,
-            availableWidth: width ?? 0,
             layoutDirection: layoutDirection
         )
         label.attributedText = NSAttributedString(

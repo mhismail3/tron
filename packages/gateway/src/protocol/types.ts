@@ -191,6 +191,13 @@ export interface SessionStats {
   cost: number;
 }
 
+export interface QueuedMessageState {
+  id: string;
+  behavior: "steer" | "followUp";
+  text: string;
+  attachmentCount: number;
+}
+
 export interface SessionSnapshot {
   sessionId: string;
   runtimeGeneration: string;
@@ -205,7 +212,10 @@ export interface SessionSnapshot {
   availableThinkingLevels: string[];
   contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
   stats: SessionStats;
+  /** Legacy Pi queue projection retained for rolling protocol compatibility. */
   queued: { steering: string[]; followUp: string[] };
+  queueRevision?: number;
+  queuedItems?: QueuedMessageState[];
   transcript: TranscriptItem[];
   transcriptStart: number;
   transcriptTotal: number;

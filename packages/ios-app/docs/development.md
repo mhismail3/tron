@@ -350,8 +350,11 @@ coordinator/executor; new evidence is bounded aggregate callback/command/frame a
 maximum-excursion data only. Hosted discrete-insertion cases record aggregate entrance and smooth-follow
 counts, prove a visible insertion admits once, and prove detached insertion emits no automatic write.
 Hosted streaming bursts must install only their newest exact source while detached composer/viewport work
-remains writable and creates no projection work. `ChatCompactPillTests` own single-line trailing versus
-multiline justification, the 28-point external user-side separation, and flat/detail material policy.
+remains writable and creates no projection work. `ChatCompactPillTests` own intrinsic-width trailing placement for short prompts, the 364-point
+long-prompt bound, logical-leading line alignment, the 10% type reduction, the 28-point external
+user-side separation, and flat/detail material policy. `GatewayProtocolContractTests` and
+`SessionMutationServiceTests` cover revisioned queue projection and replacement commands;
+presentation guards keep queue cards and their editor on Tron surfaces instead of stock forms.
 Native bottom evidence comes from `ScrollGeometry.visibleRect.maxY`
 plus the bottom inset; the harness no longer substitutes a hard-coded settled distance.
 The obsolete visibility modifier is removed; the native SwiftUI geometry modifier still

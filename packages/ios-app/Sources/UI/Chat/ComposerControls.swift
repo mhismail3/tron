@@ -264,7 +264,8 @@ enum ChatComposerPolicy {
 struct ComposerTrailingButton: View {
     let mode: ComposerTrailingMode
     let isDisabled: Bool
-    let onSend: () -> Void
+    let offersQueueChoices: Bool
+    let onSend: (String?) -> Void
     let onAbort: () -> Void
 
     var body: some View {
@@ -290,6 +291,17 @@ struct ComposerTrailingButton: View {
         .animation(.easeInOut(duration: 0.2), value: mode)
         .animation(.easeInOut(duration: 0.2), value: isDisabled)
         .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(accessibilityHint)
+        .contextMenu {
+            if mode == .send, offersQueueChoices {
+                Button("Steer after current turn", systemImage: "arrow.turn.up.right") {
+                    onSend("steer")
+                }
+                Button("Follow up after current work", systemImage: "text.line.last.and.arrowtriangle.forward") {
+                    onSend("followUp")
+                }
+            }
+        }
     }
 
     private var accessibilityLabel: String {
@@ -299,10 +311,17 @@ struct ComposerTrailingButton: View {
         }
     }
 
+    private var accessibilityHint: String {
+        if mode == .send, offersQueueChoices {
+            return "Sends steering after the current turn. Touch and hold to choose follow-up delivery."
+        }
+        return ""
+    }
+
     private func performAction() {
         switch mode {
         case .stopAgent: onAbort()
-        case .send: onSend()
+        case .send: onSend(nil)
         }
     }
 }

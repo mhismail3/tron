@@ -51,6 +51,30 @@ struct SessionPresentationStoreTests {
         #expect(store.authoritativeSnapshot(for: snapshot.sessionId) == nil)
     }
 
+    @Test("confirmed queue clear removes both rich and legacy projections")
+    func confirmedQueueClear() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 84).openingTail(targetEncodedBytes: 4_096)
+        snapshot.queued = .init(steering: ["duplicate", "duplicate"], followUp: ["later"])
+        snapshot.queueRevision = 7
+        snapshot.queuedItems = [
+            .init(id: "first", behavior: .steer, text: "duplicate", attachmentCount: 0),
+            .init(id: "second", behavior: .steer, text: "duplicate", attachmentCount: 1),
+            .init(id: "third", behavior: .followUp, text: "later", attachmentCount: 0),
+        ]
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedAuthoritativeSnapshot(snapshot)
+
+        store.clearConfirmedQueue(sessionID: snapshot.sessionId)
+
+        #expect(store.snapshot?.queued.steering == [])
+        #expect(store.snapshot?.queued.followUp == [])
+        #expect(store.snapshot?.queuedItems == [])
+        #expect(store.snapshot?.displayedQueuedMessages == [])
+    }
+
     @Test("revocation rejects every sequenced event before cursor reduction")
     func revokedSequencedEvent() async throws {
         let snapshot = try SessionScenarioBuilder(seed: 85).openingTail(targetEncodedBytes: 4_096)

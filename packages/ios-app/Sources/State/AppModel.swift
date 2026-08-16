@@ -951,6 +951,18 @@ final class AppModel {
         return cleared
     }
 
+    func replaceQueue(
+        sessionID: String,
+        expectedRevision: Int,
+        items: [SessionSnapshot.QueuedMessage]
+    ) async throws {
+        try await sessionMutations.replaceQueue(
+            sessionID: sessionID,
+            expectedRevision: expectedRevision,
+            items: items
+        )
+    }
+
     func executeBash(_ command: String, sessionID: String, excludeFromContext: Bool = false) async throws {
         try await sessionMutations.executeBash(
             command,

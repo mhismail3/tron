@@ -5,37 +5,23 @@ import UIKit
 
 @Suite("Chat compact pill and prompt typography")
 struct ChatCompactPillTests {
-    @Test("single visual line stays trailing while multiline text justifies")
+    @Test("prompt lines use logical leading alignment inside a right-anchored bound")
     func promptAlignment() {
-        #expect(UserPromptTextLayoutPolicy.alignment(
-            text: "Short prompt",
-            measuredSingleLineWidth: 80,
-            availableWidth: 220,
-            layoutDirection: .leftToRight
-        ) == .right)
-        #expect(UserPromptTextLayoutPolicy.alignment(
-            text: "Short prompt",
-            measuredSingleLineWidth: 80,
-            availableWidth: 220,
-            layoutDirection: .rightToLeft
-        ) == .left)
-        #expect(UserPromptTextLayoutPolicy.alignment(
-            text: "A long prompt that wraps",
-            measuredSingleLineWidth: 360,
-            availableWidth: 220,
-            layoutDirection: .leftToRight
-        ) == .justified)
-        #expect(UserPromptTextLayoutPolicy.alignment(
-            text: "Explicit\nline",
-            measuredSingleLineWidth: 50,
-            availableWidth: 220,
-            layoutDirection: .rightToLeft
-        ) == .justified)
+        #expect(UserPromptTextLayoutPolicy.alignment(layoutDirection: .leftToRight) == .left)
+        #expect(UserPromptTextLayoutPolicy.alignment(layoutDirection: .rightToLeft) == .right)
     }
 
-    @Test("right-side prompt separation remains explicit")
-    func promptInset() {
+    @Test("prompt bound, type scale, and leading separation are explicit")
+    func promptGeometry() {
         #expect(UserPromptTextLayoutPolicy.leadingInset == 28)
+        #expect(UserPromptTextLayoutPolicy.maximumWidth == 364)
+        #expect(UserPromptTextLayoutPolicy.fontScale == 0.9)
+    }
+
+    @Test("short prompts keep their intrinsic width while long prompts stop at the bound")
+    func promptFittedWidth() {
+        #expect(UserPromptTextLayoutPolicy.fittedWidth(measured: 96, proposed: 364) == 96)
+        #expect(UserPromptTextLayoutPolicy.fittedWidth(measured: 520, proposed: 364) == 364)
     }
 
     @Test("compact transcript pills retain pre-shared vertical rhythm")

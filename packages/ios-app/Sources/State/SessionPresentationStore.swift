@@ -361,6 +361,7 @@ final class SessionPresentationStore {
     func clearConfirmedQueue(sessionID: String) {
         guard ownsSession(sessionID), var snapshot else { return }
         snapshot.queued = .init(steering: [], followUp: [])
+        snapshot.queuedItems = []
         self.snapshot = snapshot
     }
 

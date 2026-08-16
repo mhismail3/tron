@@ -79,6 +79,18 @@ a monotonic progress sequence, bounded display-safe live-output tail, runtime st
 last-progress/completion timestamps, and duration. The Gateway coalesces high-rate
 updates without losing the newest state. Clients join calls, progress, and results
 by canonical call ID rather than arrival order.
+
+Active message queues are projected with stable per-entry IDs, delivery behavior,
+display text, attachment count, and a monotonic queue revision. The legacy steering
+and follow-up string arrays remain a compatibility projection. `session.queue.replace`
+serializes with prompt admission and clear operations, validates bounded replacement
+state, rejects stale revisions, and rebuilds the pinned runtime queue atomically.
+Steering entries always precede follow-ups because that is the runtime's delivery
+order; reordering is authoritative within either behavior, and changing behavior
+moves an entry into the corresponding delivery stage. Attachments remain bound to
+their original queued identity and cannot be fabricated by clients. Queue snapshots
+are bounded to 32 entries, 64 KiB per display message, and 256 KiB total.
+
 Session structure/context/resource invalidations refresh
 already-presented secondary surfaces. Provider, settings, trust, package, and
 custom-model mutations publish bounded global invalidations so another connected
