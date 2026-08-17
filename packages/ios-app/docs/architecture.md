@@ -903,7 +903,8 @@ project session. Manage Session has two primary groups: Configuration owns the
 model, thinking level, peer-presented Project Resources sheet, and final Rename action;
 Session owns Agent Context, recent history/audit actions, terminal, Git evidence, and
 exports. The compact top summary owns automatic-compaction status plus one reflowing
-context/cache/input/output/cost statistics row, while History owns the concise runtime
+context/cache-hit/read-write/input/output/cost statistics row, with every value kept to
+one visual line, while History owns the concise runtime
 phase/message/tool summary. Its compact toolbar action invokes Pi's
 canonical compaction through Gateway and can leave one authoritative request queued
 behind an active turn. Project Resources presents resolved extensions, prompts, skills,

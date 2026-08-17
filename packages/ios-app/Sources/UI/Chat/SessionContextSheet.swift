@@ -315,7 +315,8 @@ struct SessionContextSheet: View {
         }
         let statistics = [
             (contextValue, "Context"),
-            ("\(cacheValue)\nR \(snapshot.stats.tokens.cacheRead.formatted(.number.notation(.compactName))) · W \(snapshot.stats.tokens.cacheWrite.formatted(.number.notation(.compactName)))", "Cache"),
+            (cacheValue, "Cache Hit"),
+            ("\(snapshot.stats.tokens.cacheRead.formatted(.number.notation(.compactName))) / \(snapshot.stats.tokens.cacheWrite.formatted(.number.notation(.compactName)))", "Read / Write"),
             (snapshot.stats.tokens.input.formatted(.number.notation(.compactName)), "Input"),
             (snapshot.stats.tokens.output.formatted(.number.notation(.compactName)), "Output"),
             (snapshot.stats.cost.formatted(.currency(code: "USD")), "Cost"),
@@ -383,7 +384,7 @@ struct SessionContextSheet: View {
             Text(value)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
                 .foregroundStyle(Color.tronTextPrimary)
-                .lineLimit(2)
+                .lineLimit(1)
                 .multilineTextAlignment(.center)
                 .minimumScaleFactor(0.75)
             Text(label)
