@@ -396,6 +396,9 @@ struct SessionContextSheet: View {
         .accessibilityLabel("\(label): \(value)")
     }
 
+    private var configurationRowAccent: Color { .tronPurple }
+    private var sessionRowAccent: Color { .tronBlue }
+
     private func configurationSection(_ snapshot: SessionSnapshot) -> some View {
         TronSettingsGroup("Configuration", accent: .tronPurple) {
             VStack(spacing: 0) {
@@ -419,7 +422,7 @@ struct SessionContextSheet: View {
                         icon: "cpu",
                         title: "Model",
                         subtitle: snapshot.model.map { "\($0.provider) / \($0.id)" } ?? "Not selected",
-                        accent: .tronPurple
+                        accent: configurationRowAccent
                     )
                     .accessibilityHidden(true)
                 }
@@ -442,7 +445,7 @@ struct SessionContextSheet: View {
                         icon: "brain",
                         title: "Thinking",
                         subtitle: "Reasoning effort for this session",
-                        accent: .tronPurple
+                        accent: configurationRowAccent
                     ) {
                         Text(snapshot.thinkingLevel.capitalized)
                             .font(TronTypography.bodySM)
@@ -456,10 +459,10 @@ struct SessionContextSheet: View {
                     icon: "shippingbox",
                     title: "Project Resources",
                     subtitle: "Extensions, prompts, skills, context files, and tools",
-                    accent: .tronTeal
+                    accent: configurationRowAccent
                 ) { destination = .projectResources }
                 TronSettingsDivider(accent: .tronPurple)
-                manageRow(icon: "pencil", title: "Rename Session", accent: .tronPurple) {
+                manageRow(icon: "pencil", title: "Rename Session", accent: configurationRowAccent) {
                     name = snapshot.name ?? ""
                     showRename = true
                 }
@@ -474,21 +477,21 @@ struct SessionContextSheet: View {
                     icon: "doc.text.magnifyingglass",
                     title: "Agent Context",
                     subtitle: "Instructions, current context, and active capabilities",
-                    accent: .tronPurple
+                    accent: sessionRowAccent
                 ) { destination = .agentContext }
                 divider()
                 manageRow(
                     icon: "point.3.connected.trianglepath.dotted",
                     title: "Session History",
                     subtitle: "Review recent history, audit changes, continue, or create a fork",
-                    accent: .tronCyan
+                    accent: sessionRowAccent
                 ) { destination = .history }
                 divider()
                 manageRow(
                     icon: "terminal",
                     title: "Terminal",
                     subtitle: "Open or reattach the retained Mac terminal",
-                    accent: .tronEmerald
+                    accent: sessionRowAccent
                 ) { destination = .terminal }
                 divider()
                 gitRow
@@ -507,7 +510,7 @@ struct SessionContextSheet: View {
                 if let exportedURL {
                     divider()
                     ShareLink(item: exportedURL) {
-                        TronSettingsRow(icon: "square.and.arrow.up", title: "Share \(exportedURL.lastPathComponent)", accent: .tronBlue)
+                        TronSettingsRow(icon: "square.and.arrow.up", title: "Share \(exportedURL.lastPathComponent)", accent: sessionRowAccent)
                     }
                 }
                 ForEach(Array(snapshot.diagnostics.enumerated()), id: \.offset) { _, diagnostic in
@@ -516,7 +519,7 @@ struct SessionContextSheet: View {
                         icon: "exclamationmark.triangle",
                         title: diagnostic.message,
                         subtitle: diagnostic.type,
-                        accent: .tronAmber
+                        accent: sessionRowAccent
                     )
                 }
             }
@@ -527,11 +530,11 @@ struct SessionContextSheet: View {
         Group {
             switch gitPresentation {
             case .loading:
-                TronSettingsRow(icon: "arrow.triangle.branch", title: "Current Branch", subtitle: "Checking workspace…", accent: .tronTeal) {
+                TronSettingsRow(icon: "arrow.triangle.branch", title: "Current Branch", subtitle: "Checking workspace…", accent: sessionRowAccent) {
                     ProgressView().controlSize(.small)
                 }
             case .notRepository:
-                TronSettingsRow(icon: "folder", title: "Current Branch", subtitle: "Workspace is not a Git repository", accent: .tronSlate) {
+                TronSettingsRow(icon: "folder", title: "Current Branch", subtitle: "Workspace is not a Git repository", accent: sessionRowAccent) {
                     Text("None").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
                 }
             case .loaded(let branch, let dirty):
@@ -539,7 +542,7 @@ struct SessionContextSheet: View {
                     icon: "arrow.triangle.branch",
                     title: "Current Branch",
                     subtitle: dirty ? "Uncommitted changes" : "Working tree clean",
-                    accent: .tronTeal
+                    accent: sessionRowAccent
                 ) {
                     Text(branch)
                         .font(TronTypography.codeContent)
@@ -547,7 +550,7 @@ struct SessionContextSheet: View {
                         .lineLimit(1)
                 }
             case .failed:
-                TronSettingsRow(icon: "exclamationmark.triangle", title: "Current Branch", subtitle: "Unable to inspect this workspace", accent: .tronAmber) {
+                TronSettingsRow(icon: "exclamationmark.triangle", title: "Current Branch", subtitle: "Unable to inspect this workspace", accent: sessionRowAccent) {
                     Text("Unavailable").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
                 }
             }
@@ -582,7 +585,7 @@ struct SessionContextSheet: View {
                 icon: icon,
                 title: SessionExportPresentationPolicy.title(for: format),
                 subtitle: subtitle,
-                accent: .tronBlue
+                accent: sessionRowAccent
             ) {
                 if SessionExportPresentationPolicy.showsProgress(
                     rowFormat: format,

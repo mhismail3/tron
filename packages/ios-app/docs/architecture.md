@@ -904,7 +904,9 @@ trust, and project package actions appear only when Settings is opened from a
 project session. Manage Session has two primary groups: Configuration owns the
 model, thinking level, peer-presented Project Resources sheet, and final Rename action;
 Session owns Agent Context, recent history/audit actions, terminal, Git evidence, and
-exports. The compact top summary owns automatic-compaction status plus one reflowing
+exports. Configuration row icons use the section's purple palette, while every Session row
+icon—including Git states, exports, sharing, and diagnostics—uses the section's blue palette.
+The compact top summary owns automatic-compaction status plus one reflowing
 context/cache-hit/read-write/input/output/cost statistics row, with every value kept to
 one visual line, while History owns the concise runtime
 phase/message/tool summary. Its compact toolbar action invokes Pi's

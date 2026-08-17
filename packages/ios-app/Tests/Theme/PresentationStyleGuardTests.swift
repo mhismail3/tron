@@ -494,6 +494,16 @@ struct PresentationStyleGuardTests {
         #expect(!context.contains("@State private var showFork"))
         #expect(!context.contains("NavigationLink"))
         #expect(!context.contains("struct ForkSheet"))
+        #expect(context.contains("private var configurationRowAccent: Color { .tronPurple }"))
+        #expect(context.contains("private var sessionRowAccent: Color { .tronBlue }"))
+        #expect(configurationSection.components(separatedBy: "accent: configurationRowAccent").count - 1 == 4)
+        #expect(sessionSection.components(separatedBy: "accent: sessionRowAccent").count - 1 == 5)
+        let gitSection = (context.components(separatedBy: "private var gitRow").dropFirst().first ?? "")
+            .components(separatedBy: "private func divider").first ?? ""
+        #expect(gitSection.components(separatedBy: "accent: sessionRowAccent").count - 1 == 4)
+        let exportSection = (context.components(separatedBy: "private func exportRow").dropFirst().first ?? "")
+            .components(separatedBy: "private func loadGit").first ?? ""
+        #expect(exportSection.contains("accent: sessionRowAccent"))
         #expect(history.contains("let onNavigated: () -> Void"))
         #expect(history.contains("onNavigated()"))
         #expect(history.contains("case timeline = \"Timeline\""))
