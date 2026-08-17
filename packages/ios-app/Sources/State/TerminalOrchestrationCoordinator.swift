@@ -349,6 +349,8 @@ final class TerminalCoordinator {
         ) {
             try await client.request("terminal.terminate", params)
         }
+        guard reducer.owns(intent) else { return }
+        reducer.confirmTermination(terminalID)
     }
 
     func admit(

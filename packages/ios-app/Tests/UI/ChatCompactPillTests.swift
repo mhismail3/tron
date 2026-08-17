@@ -68,6 +68,16 @@ struct ChatCompactPillTests {
         #expect(SessionContextUsagePresentation(nil).accessibilityLabel.hasPrefix("Context usage:"))
     }
 
+    @Test("Manage Session export rows keep stable identities and one progress owner")
+    func sessionExportPresentation() {
+        #expect(SessionExportPresentationPolicy.canStart(activeFormat: nil))
+        #expect(!SessionExportPresentationPolicy.canStart(activeFormat: "html"))
+        #expect(SessionExportPresentationPolicy.showsProgress(rowFormat: "html", activeFormat: "html"))
+        #expect(!SessionExportPresentationPolicy.showsProgress(rowFormat: "jsonl", activeFormat: "html"))
+        #expect(SessionExportPresentationPolicy.title(for: "html") == "HTML Export")
+        #expect(SessionExportPresentationPolicy.title(for: "jsonl") == "JSONL Export")
+    }
+
     @Test("Manage Session Git loading preserves branch evidence and exact request ownership")
     func sessionGitPresentation() {
         #expect(SessionGitPresentation.resolve(.init(isRepository: false, branch: nil, isDirty: false)) == .notRepository)
@@ -97,6 +107,49 @@ struct ChatCompactPillTests {
         #expect(summary.contextTokens == 120)
         #expect(summary.contextWindow == 1_000)
         #expect(summary.instructionPreview.count == AgentContextSummary.maximumInstructionPreviewCharacters + 1)
+    }
+
+    @Test("Project resource details foreground kind-specific user guidance")
+    func projectResourceDetails() {
+        let extensionDetail = ProjectResourceDetailPresentation(kind: .extensions, value: .object([
+            "name": .string("index.ts"),
+            "scope": .string("user"),
+            "source": .string("npm:example@1.0.0"),
+            "path": .string("/extensions/index.ts"),
+            "tools": .array([.string("read"), .string("edit")]),
+            "commands": .array([.string("review")]),
+        ]))
+        #expect(extensionDetail.purpose.contains("loaded extension"))
+        #expect(extensionDetail.capabilities == ["Tools: read, edit", "Commands: /review"])
+        #expect(extensionDetail.scopeAndSource == "User · npm:example@1.0.0")
+        #expect(extensionDetail.path == "/extensions/index.ts")
+
+        let prompt = ProjectResourceDetailPresentation(kind: .prompts, value: .object([
+            "name": .string("gather-context"),
+            "description": .string("Gather context before deciding."),
+            "argumentHint": .string("<topic>"),
+        ]))
+        #expect(prompt.purpose == "Gather context before deciding.")
+        #expect(prompt.invocation == "/gather-context <topic>")
+
+        let skill = ProjectResourceDetailPresentation(kind: .skills, value: .object([
+            "description": .string("Delegate work to focused subagents without wrapping the summary unnaturally."),
+            "disableModelInvocation": .bool(false),
+        ]))
+        #expect(skill.purpose.hasSuffix("unnaturally."))
+        #expect(skill.availability == "Available to the agent on demand")
+
+        let tool = ProjectResourceDetailPresentation(kind: .tools, value: .object([
+            "name": .string("write"),
+            "description": .string("Write a file."),
+            "parameters": .object([
+                "properties": .object(["path": .object([:]), "content": .object([:])]),
+                "required": .array([.string("path")]),
+            ]),
+            "promptGuidelines": .string("Use exact paths."),
+        ]))
+        #expect(tool.schemaSummary == "2 inputs · 1 required")
+        #expect(tool.guidance == "Use exact paths.")
     }
 
     @Test("Session History modes, fork points, and continuation impact are explicit")

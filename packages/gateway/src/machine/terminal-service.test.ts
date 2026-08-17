@@ -22,7 +22,9 @@ describe("TerminalService", () => {
     }
     const replay = service.attach(terminal.id, 0);
     expect(replay.chunks.map((chunk) => chunk.data).join("")).toContain("TRON_TERMINAL_OK");
-    service.terminate(terminal.id);
+    await service.terminate(terminal.id);
+    expect(service.activeTerminalIds()).not.toContain(terminal.id);
+    expect(events.some(({ topic }) => topic === "terminal.exit")).toBe(true);
     service.dispose();
   });
 

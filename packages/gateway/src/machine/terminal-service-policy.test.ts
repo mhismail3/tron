@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { GatewayError } from "../errors.js";
 
-const spawnState = vi.hoisted(() => ({ failNext: false }));
+const spawnState = vi.hoisted(() => ({ failNext: false, nextPid: 40_000 }));
 const ptys = vi.hoisted(() => [] as Array<{
   emitData(data: string): void;
   emitExit(exitCode?: number): void;
@@ -16,6 +16,7 @@ vi.mock("node-pty", () => ({
     let dataHandler: (data: string) => void = () => {};
     let exitHandler: (event: { exitCode: number; signal?: number }) => void = () => {};
     const pty = {
+      pid: spawnState.nextPid++,
       onData(handler: (data: string) => void) { dataHandler = handler; return { dispose() {} }; },
       onExit(handler: (event: { exitCode: number; signal?: number }) => void) { exitHandler = handler; return { dispose() {} }; },
       write() {},
@@ -87,13 +88,47 @@ describe("TerminalService hardening policy", () => {
     service.dispose();
   });
 
-  it("suppresses PTY callbacks after disposal", () => {
+  it("does not complete termination before the process group exits", async () => {
+    const terminatedPids: number[] = [];
     const events: string[] = [];
-    const service = new TerminalService(64_000, (_id, topic) => events.push(topic));
+    const service = new TerminalService(
+      64_000,
+      (_id, topic) => events.push(topic),
+      (pty) => { terminatedPids.push(pty.pid); },
+    );
+    const terminal = service.open("session", "/tmp");
+    const pty = ptys.at(-1)!;
+
+    let settled = false;
+    const terminating = service.terminate(terminal.id).then(() => { settled = true; });
+    expect(terminatedPids).toEqual([expect.any(Number)]);
+    expect(service.activeTerminalIds()).toContain(terminal.id);
+    expect(events).not.toContain("terminal.exit");
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    pty.emitExit(137);
+    await terminating;
+    expect(settled).toBe(true);
+    expect(service.activeTerminalIds()).not.toContain(terminal.id);
+    expect(events).toContain("terminal.exit");
+    service.dispose();
+  });
+
+  it("terminates active process groups and suppresses PTY callbacks after disposal", () => {
+    const events: string[] = [];
+    const terminatedPids: number[] = [];
+    const service = new TerminalService(
+      64_000,
+      (_id, topic) => events.push(topic),
+      (pty) => { terminatedPids.push(pty.pid); },
+    );
     service.open("session", "/tmp");
     const pty = ptys.at(-1)!;
     service.dispose();
 
+    expect(terminatedPids).toEqual([pty.pid]);
+    expect(service.activeTerminalIds()).toEqual([]);
     pty.emitData("late");
     pty.emitExit();
     expect(events).toEqual([]);

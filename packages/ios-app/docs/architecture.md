@@ -716,7 +716,7 @@ is explicitly bounded from the mounted chat viewport and clipped after tail trun
 so a cancelled interactive-pop transition cannot temporarily restore intrinsic-width text
 across the back or Settings controls. App-owned workspace
 rows, session cards, setup cards, composer surfaces, attachment chips, tool
-chips and details, structured-data disclosures, Manage Session content, and
+chips and details, structured-data rows, Manage Session content, and
 settings groups use Tron's tinted Liquid Glass surfaces. The dashboard keeps
 search as an explicit toolbar action, aligns workspace headers to the session
 status column, uses compact separated session cards, and keeps relative activity
@@ -900,12 +900,16 @@ alive. Canonical settings determine the default model; catalog order is never a
 default-selection policy. Dashboard Settings explicitly exposes only global configuration; project scope,
 trust, and project package actions appear only when Settings is opened from a
 project session. Manage Session has two primary groups: Configuration owns the
-model, thinking level, and the peer-presented Project Resources sheet; Session owns
-identity, automatic-compaction status, Agent Context, recent history/audit actions,
-terminal, Git/runtime evidence, and exports. Its compact toolbar action invokes Pi's
+model, thinking level, peer-presented Project Resources sheet, and final Rename action;
+Session owns Agent Context, recent history/audit actions, terminal, Git evidence, and
+exports. The compact top summary owns automatic-compaction status plus one reflowing
+context/cache/input/output/cost statistics row, while History owns the concise runtime
+phase/message/tool summary. Its compact toolbar action invokes Pi's
 canonical compaction through Gateway and can leave one authoritative request queued
 behind an active turn. Project Resources presents resolved extensions, prompts, skills,
-context files, and tools as named, summarized rows over the canonical projection;
+context files, and tools as named rows over the canonical projection; each detail sheet
+foregrounds kind-specific purpose, invocation, availability, capabilities, schema/guidance,
+and source evidence instead of a generic field table.
 arbitrary arrays derive labels from stable name/path/source fields instead of exposing
 positional “Item” labels. Reload is owned by that sheet and publishes visible progress; the canonical
 `session.resourcesChanged` revision is the sole post-mutation read owner, so mutation and projection loads cannot race one shared busy flag.
@@ -919,24 +923,29 @@ gateway stack nor exceed the mobile frame. The single History sheet explains Tim
 Branches, Bookmarks, and Recent Log modes, owns fork-point selection and entry actions,
 and identifies JSONL export as the complete canonical audit. Gateway produces that audit by copying the
 canonical append-only JSONL under the existing idle/file/concurrency bounds rather than linearizing only the active branch.
-Agent Context summarizes
-assembled instructions, context accounting, and capability counts without duplicating
-the detailed Project Resources inventory; raw JSON remains a secondary disclosure. A same-session reconnect that
+Agent Context summarizes assembled instructions, context accounting, and capability
+counts without duplicating the detailed Project Resources inventory; full instructions
+open from a separate matching row. Every raw technical JSON affordance is the same
+non-disclosing row and opens selectable, scrollable protocol evidence in a medium/large
+sheet. A same-session reconnect that
 installs a replacement Gateway runtime clears every secondary projection, advances its reload revisions, and rejects both
 stale completions and stale failures by exact subscription token plus request generation.
 Manage Session displays the runtime-projected latest cache-hit rate—the
 same canonical formula used by the terminal footer—and never derives a ratio
-from cumulative iOS fields. Its user actions surface current failures instead of silently changing
-local presentation. Extension interaction sheets serialize one response/cancellation, retain the sheet
+from cumulative iOS fields. Export rows keep stable format identities and surface bounded
+failures locally without dismissing Manage Session. Other user actions surface current
+failures instead of silently changing local presentation. Extension interaction sheets serialize one response/cancellation, retain the sheet
 on rejection, and dismiss only after authoritative acknowledgement. Terminal presentation retains the
 historical connection indicator, options menu, native keyboard integration,
 floating shortcut bar, command-key keyboard, soft edges, and selected bundled
-code font over the gateway's retained PTY. Pending and transcript images use
+code font over the gateway's retained PTY. Destructive Quit waits for Gateway-observed
+process-group exit; Done continues to detach only. Pending and transcript images use
 square previews with dedicated image sheets. A pending photo is a stable,
 non-morphing preview target; its separate remove control has a 22-point visible circle
 inside a 30-point target centered on the 64-point preview's top-trailing corner. The
 preview alone owns rounded glass clipping, leaving the half-offset remove control visible.
-Pending and sent photo chips share the historical medium-detent,
+Sent prompt attachment strips add three points of vertical breathing room without
+changing the 64-point image/file chip geometry. Pending and sent photo chips share the historical medium-detent,
 concentrically rounded preview with native pinch and double-tap zoom. Earlier-history loading, context summaries, and unread-response navigation share one
 content-sized compact pill treatment while preserving 44-point semantic targets; tool-chip symbols use the
 next one-point type step for slightly stronger visual weight without changing pill geometry. A

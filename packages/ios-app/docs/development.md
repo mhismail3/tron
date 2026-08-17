@@ -120,7 +120,7 @@ frames through visible open, synchronization/resynchronization, uncertain receip
 and terminal replay boundaries. `AppModelTerminalLifecycleTests` retain cross-owner façade coverage for
 presentation revocation, stale-attach compensation, out-of-order reset rejection, pending-event quarantine,
 gap coalescing/follow-up, shared multi-presentation leases, post-detach rejection, final teardown, exact
-list/write/resize/terminate wire contracts, phase-aware sheet navigation cancellation/coalescing, and nested replay observation. `TerminalReducerTests` pin the
+list/write/resize/terminate wire contracts, canonical terminate-receipt retirement even when an exit event is lost, phase-aware sheet navigation cancellation/coalescing, and nested replay observation. `TerminalReducerTests` pin the
 global 16-terminal, 256-chunk, and 1 MiB pending-event bounds, the three-attempt immediate recovery ceiling,
 typed event reduction, and the install/reattach/discard decision for terminal-open responses that resolve on
 the same, a replacement, or no current connection. `TerminalCoordinator` owns all terminal requests,
@@ -500,8 +500,10 @@ populated real-gateway chat, session management, settings, and appearance. The
 real-gateway test retains named screenshot checkpoints for the completed chat,
 Manage Session, root settings, and appearance in its result bundle. Manage Session
 acceptance additionally verifies the compact context bar, exactly two primary groups,
-textual Compact action, peer Project Resources sheet with textual Reload progress,
-user-oriented Agent Context, and History-owned fork workflow. It also
+textual Compact action, peer Project Resources details, the shared Technical JSON sheet,
+user-oriented Agent Context, and the History-owned runtime summary. Focused presentation
+policy tests separately pin stable export-row identity, single-row progress ownership, and
+presentation-local failures without requiring a large live export. The end-to-end path also
 relaunches at accessibility XXXL to verify standard SwiftUI controls that
 XCTest's simulated Dynamic Type audit misclassifies. Any audit suppression must
 name one exact element, have a retained rendered checkpoint, and have a separate

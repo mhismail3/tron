@@ -164,7 +164,6 @@ struct TronStructuredJSONView: View {
     var rootValue: JSONValue? = nil
     var pathComponents: [StructuredJSONPathComponent] = []
     @State private var selectedField: JSONFieldSelection?
-    @State private var showRaw = false
 
     private var authoritativeRoot: JSONValue { rootValue ?? value }
 
@@ -182,32 +181,7 @@ struct TronStructuredJSONView: View {
             }
 
             if showsRawDisclosure {
-                Button { showRaw.toggle() } label: {
-                    TronSettingsRow(
-                        icon: "curlybraces",
-                        title: showRaw ? "Hide raw JSON" : "View raw JSON",
-                        subtitle: "Copyable protocol representation",
-                        accent: .tronSlate
-                    ) {
-                        Image(systemName: showRaw ? "chevron.up" : "chevron.down")
-                            .font(TronTypography.caption)
-                            .foregroundStyle(Color.tronTextMuted)
-                    }
-                }
-                .buttonStyle(.plain)
-                .tronGlassSurface(accent: .tronSlate, tintOpacity: 0.08, interactive: true)
-
-                if showRaw {
-                    ScrollView(.horizontal, showsIndicators: true) {
-                        Text(value.prettyPrinted)
-                            .font(TronTypography.codeContent)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .textSelection(.enabled)
-                            .padding(12)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
-                    .tronGlassSurface(accent: .tronSlate, tintOpacity: 0.08)
-                }
+                TronTechnicalJSONRow(value: value)
             }
         }
         .sheet(item: $selectedField) { selection in
@@ -283,6 +257,86 @@ struct TronStructuredJSONView: View {
             .tronGlassSurface(accent: accent, tintOpacity: 0.10)
     }
 
+}
+
+/// Shared raw protocol evidence affordance. Raw JSON never expands inline: the
+/// row owns one selectable, scrollable sheet that begins at the medium detent.
+struct TronTechnicalJSONRow: View {
+    let value: JSONValue
+    var title = "Technical JSON"
+    var sheetTitle = "Technical JSON"
+    var accent: Color = .tronSlate
+    @State private var isPresented = false
+    @State private var detent: PresentationDetent = .medium
+
+    var body: some View {
+        Button {
+            detent = .medium
+            isPresented = true
+        } label: {
+            TronSettingsRow(
+                icon: "curlybraces",
+                title: title,
+                subtitle: "View full protocol representation",
+                accent: accent
+            )
+        }
+        .buttonStyle(.plain)
+        .tronGlassSurface(accent: accent, tintOpacity: 0.08, interactive: true)
+        .accessibilityIdentifier("technical-json-row")
+        .accessibilityHint("Opens scrollable JSON details")
+        .sheet(isPresented: $isPresented) {
+            TechnicalJSONSheet(
+                value: value,
+                title: sheetTitle,
+                accent: accent,
+                detent: $detent
+            )
+        }
+    }
+}
+
+private struct TechnicalJSONSheet: View {
+    let value: JSONValue
+    let title: String
+    let accent: Color
+    @Binding var detent: PresentationDetent
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                Text(value.prettyPrinted)
+                    .font(TronTypography.codeContent)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .textSelection(.enabled)
+                    .padding(18)
+                    .fixedSize(horizontal: true, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .defaultScrollAnchor(.topLeading)
+            .tronScrollEdgeChrome()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: title, accent: accent)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
+        }
+        .accessibilityIdentifier("technical-json-sheet")
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large], selection: $detent)
+        .presentationDragIndicator(.hidden)
+        .tint(Color.tronEmerald)
+    }
 }
 
 private struct JSONFieldSheet: View {

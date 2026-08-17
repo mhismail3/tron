@@ -446,6 +446,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionTreeSheet.swift"),
             encoding: .utf8
         )
+        let structuredJSON = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Components/StructuredJSONView.swift"),
+            encoding: .utf8
+        )
         let interactions = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ExtensionInteractionSheet.swift"),
             encoding: .utf8
@@ -467,6 +471,14 @@ struct PresentationStyleGuardTests {
         #expect(context.contains("destination = .projectResources"))
         #expect(context.contains("TronSettingsGroup(\"Configuration\""))
         #expect(context.contains("TronSettingsGroup(\"Session\""))
+        let configurationSection = (context.components(separatedBy: "private func configurationSection").dropFirst().first ?? "")
+            .components(separatedBy: "private func sessionSection").first ?? ""
+        let sessionSection = (context.components(separatedBy: "private func sessionSection").dropFirst().first ?? "")
+            .components(separatedBy: "private var gitRow").first ?? ""
+        let resourcesPosition = try #require(configurationSection.firstRange(of: "title: \"Project Resources\"")?.lowerBound)
+        let renamePosition = try #require(configurationSection.firstRange(of: "title: \"Rename Session\"")?.lowerBound)
+        #expect(resourcesPosition < renamePosition)
+        #expect(!sessionSection.contains("title: \"Rename Session\""))
         #expect(!context.contains("TronSettingsGroup(\"Runtime\""))
         #expect(!context.contains("TronSettingsGroup(\"Export and Share\""))
         #expect(!context.contains("title: \"Reload Resources\""))
@@ -494,8 +506,24 @@ struct PresentationStyleGuardTests {
         #expect(context.contains("Context usage: "))
         #expect(context.contains("Text(\"Compact\")"))
         #expect(context.contains("SessionCompactionControlPolicy.automaticStatus"))
-        #expect(context.contains("guard !exporting else { return }"))
-        #expect(context.components(separatedBy: ".disabled(exporting)").count == 3)
+        #expect(!context.contains("title: \"Automatic Compaction\""))
+        #expect(!context.contains("title: \"Runtime\""))
+        #expect(history.contains("private func runtimeSummary(_ snapshot: SessionSnapshot)"))
+        #expect(context.contains("title: \"Read Full Instructions\""))
+        #expect(context.contains("TronTechnicalJSONRow("))
+        #expect(!context.contains("DisclosureGroup(isExpanded: $showRaw)"))
+        #expect(structuredJSON.contains("struct TronTechnicalJSONRow: View"))
+        #expect(structuredJSON.contains("ScrollView([.horizontal, .vertical]"))
+        #expect(structuredJSON.contains(".presentationDetents([.medium, .large], selection: $detent)"))
+        #expect(structuredJSON.contains("detent = .medium"))
+        #expect(!structuredJSON.contains("showRaw.toggle()"))
+        #expect(!structuredJSON.contains("Hide raw JSON"))
+        #expect(context.contains("guard SessionExportPresentationPolicy.canStart(activeFormat: exportingFormat) else { return }"))
+        #expect(context.contains("SessionExportPresentationPolicy.showsProgress"))
+        #expect(context.contains(".disabled(!SessionExportPresentationPolicy.canStart"))
+        #expect(context.contains("format == \"jsonl\" ? \"JSONL Export\" : \"HTML Export\""))
+        #expect(context.contains("exportError = error.localizedDescription"))
+        #expect(!context.contains("title: exporting"))
         #expect(context.contains("await model.discardExportArtifact(exportedURL)"))
         for action in ["renameSession", "compact", "setModel", "setThinking", "reloadResources"] {
             #expect(!context.contains("try? await model.\(action)"))
@@ -507,6 +535,10 @@ struct PresentationStyleGuardTests {
         for title in ["Extensions", "Prompts", "Skills", "Context Files", "Tools"] {
             #expect(resources.contains("\(title)"))
         }
+        #expect(resources.contains("struct ProjectResourceDetailPresentation: Equatable"))
+        #expect(resources.contains("TronSettingsGroup(\"At a Glance\""))
+        #expect(resources.contains("TronTechnicalJSONRow("))
+        #expect(resources.contains(".fixedSize(horizontal: false, vertical: true)"))
         let diagnostics = try String(
             contentsOf: packageRoot.appending(path: "Sources/State/GatewayDiagnosticsService.swift"),
             encoding: .utf8
@@ -707,6 +739,11 @@ struct PresentationStyleGuardTests {
         #expect(sentImageChip.contains("AttachmentImagePreviewSheet(image: previewImage ?? request.initialImage)"))
         #expect(sentImageChip.contains("model.chatMedia.thumbnail(for: identity)"))
         #expect(sentImageChip.contains("model.chatMedia.fullPreview("))
+        let sentAttachmentStrip = try #require(
+            transcript.components(separatedBy: "private var attachmentStrip: some View").dropFirst().first?
+                .components(separatedBy: "private struct UserPromptGlassModifier").first
+        )
+        #expect(sentAttachmentStrip.contains(".padding(.vertical, item.role == .user ? 3 : 0)"))
         #expect(sentImageChip.contains("leaseID: request.leaseID"))
         #expect(!sentImageChip.contains(".sheet(isPresented:"))
         #expect(!sentImageChip.contains("model.client.blob"))

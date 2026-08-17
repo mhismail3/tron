@@ -513,7 +513,7 @@ export class GatewayService {
         return this.mutation(client, method, params, async () => {
           const terminalId = string(params.terminalId, "terminalId", { max: 100 });
           this.requireOwnedTerminal(client, terminalId);
-          this.dependencies.terminals.terminate(terminalId);
+          await this.dependencies.terminals.terminate(terminalId);
           return { terminated: true };
         });
       default:

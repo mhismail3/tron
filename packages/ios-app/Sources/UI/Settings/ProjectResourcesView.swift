@@ -1,6 +1,6 @@
 import SwiftUI
 
-private enum ProjectResourceKind: String, CaseIterable, Identifiable {
+enum ProjectResourceKind: String, CaseIterable, Identifiable {
     case extensions = "Extensions"
     case prompts = "Prompts"
     case skills = "Skills"
@@ -54,11 +54,90 @@ private enum ProjectResourceKind: String, CaseIterable, Identifiable {
     }
 }
 
-private struct ProjectResourceSelection: Identifiable {
+struct ProjectResourceSelection: Identifiable {
     let id = UUID()
     let kind: ProjectResourceKind
     let title: String
     let value: JSONValue
+}
+
+struct ProjectResourceDetailPresentation: Equatable {
+    let purpose: String
+    let invocation: String?
+    let availability: String?
+    let scopeAndSource: String?
+    let path: String?
+    let capabilities: [String]
+    let schemaSummary: String?
+    let guidance: String?
+
+    init(kind: ProjectResourceKind, value: JSONValue) {
+        let object = value.objectValue ?? [:]
+        let name = object["name"]?.stringValue ?? "Resource"
+        let rawDescription = object["description"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let description = rawDescription.flatMap { $0.isEmpty ? nil : $0 }
+        path = object["path"]?.stringValue ?? object["resolvedPath"]?.stringValue
+        let scope = object["scope"]?.stringValue?.capitalized
+        let source = object["source"]?.stringValue
+        if let scope, let source { scopeAndSource = "\(scope) · \(source)" }
+        else { scopeAndSource = scope ?? source }
+
+        switch kind {
+        case .extensions:
+            purpose = description ?? "A loaded extension that can add commands, tools, and session behavior."
+            let tools = Self.strings(object["tools"])
+            let commands = Self.strings(object["commands"])
+            capabilities = [
+                tools.isEmpty ? nil : "Tools: \(tools.joined(separator: ", "))",
+                commands.isEmpty ? nil : "Commands: \(commands.map { "/" + $0 }.joined(separator: ", "))",
+            ].compactMap { $0 }
+            invocation = nil
+            availability = "Loaded for this session"
+            schemaSummary = nil
+            guidance = nil
+        case .prompts:
+            purpose = description ?? "A reusable prompt template."
+            let rawHint = object["argumentHint"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let hint = rawHint.flatMap { $0.isEmpty ? nil : $0 }
+            invocation = "/\(name)" + (hint.map { " \($0)" } ?? "")
+            availability = "Available as a slash command"
+            capabilities = []
+            schemaSummary = nil
+            guidance = nil
+        case .skills:
+            purpose = description ?? "Guidance the agent can load for matching work."
+            invocation = nil
+            availability = object["disableModelInvocation"]?.boolValue == true
+                ? "Manual invocation only"
+                : "Available to the agent on demand"
+            capabilities = []
+            schemaSummary = nil
+            guidance = nil
+        case .contextFiles:
+            purpose = "Project instructions included when assembling the agent's context."
+            invocation = nil
+            availability = "Loaded into agent guidance"
+            capabilities = []
+            schemaSummary = nil
+            guidance = nil
+        case .tools:
+            purpose = description ?? "An action available to the active model."
+            invocation = name
+            availability = "Available for model tool calls"
+            capabilities = []
+            let parameters = object["parameters"]?.objectValue
+            let propertyCount = parameters?["properties"]?.objectValue?.count ?? 0
+            let requiredCount = parameters?["required"]?.arrayValue?.count ?? 0
+            schemaSummary = propertyCount == 0
+                ? "No declared inputs"
+                : "\(propertyCount) input\(propertyCount == 1 ? "" : "s") · \(requiredCount) required"
+            guidance = object["promptGuidelines"]?.stringValue
+        }
+    }
+
+    private static func strings(_ value: JSONValue?) -> [String] {
+        value?.arrayValue?.compactMap(\.stringValue) ?? []
+    }
 }
 
 struct ProjectResourcesView: View {
@@ -138,39 +217,9 @@ struct ProjectResourcesView: View {
             }
             .task(id: model.sessionResourceRevision(for: sessionID)) { await load() }
             .sheet(item: $selected) { selection in
-                NavigationStack {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
-                            resourceSummary(selection.value, kind: selection.kind)
-                            TronStructuredJSONView(
-                                value: selection.value,
-                                title: selection.title,
-                                accent: selection.kind.accent
-                            )
-                        }
-                        .padding(18)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                    }
-                    .defaultScrollAnchor(.top)
-                    .tronScrollEdgeChrome()
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .principal) {
-                            TronSheetTitle(title: selection.title, accent: selection.kind.accent)
-                        }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button { selected = nil } label: {
-                                Image(systemName: "checkmark")
-                                    .font(TronTypography.buttonSM)
-                                    .foregroundStyle(Color.tronEmerald)
-                            }
-                            .accessibilityLabel("Done")
-                        }
-                    }
+                ProjectResourceDetailSheet(selection: selection) {
+                    selected = nil
                 }
-                .tronTopBlur(.sheet)
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
             }
         }
         .tronTopBlur(.sheet)
@@ -207,29 +256,9 @@ struct ProjectResourcesView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("project-resource-\(kind.key)-\(index)")
                     }
                 }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func resourceSummary(_ value: JSONValue, kind: ProjectResourceKind) -> some View {
-        if let object = value.objectValue {
-            if let description = object["description"]?.stringValue, !description.isEmpty {
-                Text(description)
-                    .font(TronTypography.body)
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .tronGlassSurface(accent: kind.accent, tintOpacity: 0.10)
-            }
-            if let path = object["path"]?.stringValue {
-                Label(path, systemImage: "folder")
-                    .font(TronTypography.codeContent)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .textSelection(.enabled)
             }
         }
     }
@@ -286,5 +315,133 @@ struct ProjectResourcesView: View {
         await model.loadResources(sessionID: sessionID)
         guard generation == loadGeneration else { return }
         loading = false
+    }
+}
+
+private struct ProjectResourceDetailSheet: View {
+    let selection: ProjectResourceSelection
+    let onDone: () -> Void
+
+    private var presentation: ProjectResourceDetailPresentation {
+        ProjectResourceDetailPresentation(kind: selection.kind, value: selection.value)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    Text(presentation.purpose)
+                        .font(TronTypography.body)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .tronGlassSurface(accent: selection.kind.accent, tintOpacity: 0.10)
+
+                    if presentation.invocation != nil
+                        || presentation.availability != nil
+                        || presentation.scopeAndSource != nil
+                        || presentation.schemaSummary != nil {
+                        TronSettingsGroup("At a Glance", accent: selection.kind.accent) {
+                            VStack(spacing: 0) {
+                                detailRows
+                            }
+                        }
+                    }
+
+                    if !presentation.capabilities.isEmpty {
+                        TronSettingsGroup("Capabilities", accent: selection.kind.accent) {
+                            VStack(alignment: .leading, spacing: 9) {
+                                ForEach(presentation.capabilities, id: \.self) { capability in
+                                    Label(capability, systemImage: "checkmark.circle")
+                                        .font(TronTypography.bodySM)
+                                        .foregroundStyle(Color.tronTextPrimary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    if let guidance = presentation.guidance, !guidance.isEmpty {
+                        TronSettingsGroup("Usage Guidance", accent: selection.kind.accent) {
+                            Text(guidance)
+                                .font(TronTypography.bodySM)
+                                .foregroundStyle(Color.tronTextPrimary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    if let path = presentation.path {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("SOURCE FILE")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                                .foregroundStyle(Color.tronTextMuted)
+                            Label(path, systemImage: "folder")
+                                .font(TronTypography.codeContent)
+                                .foregroundStyle(Color.tronTextSecondary)
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .tronGlassSurface(accent: selection.kind.accent, tintOpacity: 0.06)
+                    }
+
+                    TronTechnicalJSONRow(
+                        value: selection.value,
+                        sheetTitle: "\(selection.title) JSON",
+                        accent: selection.kind.accent
+                    )
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .defaultScrollAnchor(.top)
+            .tronScrollEdgeChrome()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: selection.title, accent: selection.kind.accent)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(action: onDone) {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
+        }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+    }
+
+    private var detailRows: some View {
+        let rows: [(icon: String, title: String, value: String)] = [
+            presentation.invocation.map { ("command", "Invocation", $0) },
+            presentation.availability.map { ("checkmark.seal", "Availability", $0) },
+            presentation.scopeAndSource.map { ("scope", "Scope & Source", $0) },
+            presentation.schemaSummary.map { ("list.bullet.rectangle", "Inputs", $0) },
+        ].compactMap { $0 }
+        return ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+            if index > 0 { TronSettingsDivider(accent: selection.kind.accent) }
+            detailRow(icon: row.icon, title: row.title, value: row.value)
+        }
+    }
+
+    private func detailRow(icon: String, title: String, value: String) -> some View {
+        TronSettingsRow(icon: icon, title: title, accent: selection.kind.accent) {
+            Text(value)
+                .font(TronTypography.bodySM)
+                .foregroundStyle(Color.tronTextSecondary)
+                .multilineTextAlignment(.trailing)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

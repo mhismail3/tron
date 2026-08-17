@@ -28,6 +28,19 @@ interface TerminalRecord {
   outputBytes: number;
   writes: Set<string>;
   pty: IPty | undefined;
+  exitPromise: Promise<void>;
+  resolveExit: () => void;
+}
+
+function terminatePtyProcessGroup(pty: IPty): void {
+  if (process.platform === "win32") {
+    pty.kill();
+    return;
+  }
+  // node-pty creates the shell as the leader of its own process group. Quit is
+  // destructive by contract, so retire the whole group rather than signalling
+  // only the login shell and leaving foreground children behind.
+  process.kill(-pty.pid, "SIGKILL");
 }
 
 export interface TerminalSummary {
@@ -49,6 +62,7 @@ export class TerminalService {
   constructor(
     replayBytes: number,
     private readonly broadcast: (terminalId: string, topic: string, payload: JsonValue) => void,
+    private readonly terminateProcessGroup: (pty: IPty) => void = terminatePtyProcessGroup,
   ) {
     this.replayBytes = Math.max(0, Math.min(replayBytes, MAX_TERMINAL_REPLAY_ENCODED_BYTES));
   }
@@ -68,6 +82,8 @@ export class TerminalService {
       env: { ...process.env, ...sessionEnvironment, TERM: "xterm-256color", COLORTERM: "truecolor", HOME: homedir() } as Record<string, string>,
     });
     this.evictExitedForOpen();
+    let resolveExit = () => {};
+    const exitPromise = new Promise<void>((resolve) => { resolveExit = resolve; });
     const record: TerminalRecord = {
       id,
       sessionId,
@@ -78,14 +94,20 @@ export class TerminalService {
       outputBytes: 0,
       writes: new Set(),
       pty,
+      exitPromise,
+      resolveExit,
     };
     this.terminals.set(id, record);
     pty.onData((data) => this.append(record, data));
     pty.onExit(({ exitCode }) => {
-      if (this.disposed || this.terminals.get(record.id) !== record) return;
+      if (this.disposed || this.terminals.get(record.id) !== record) {
+        record.resolveExit();
+        return;
+      }
       record.pty = undefined;
       record.exitCode = exitCode;
       record.exitedAt = new Date().toISOString();
+      record.resolveExit();
       this.broadcast(id, "terminal.exit", { terminalId: id, exitCode, sequence: record.sequence });
     });
     return this.summary(record);
@@ -128,15 +150,37 @@ export class TerminalService {
     terminal.pty?.resize(columns, rows);
   }
 
-  terminate(id: string): void {
+  async terminate(id: string): Promise<void> {
     const terminal = this.get(id);
-    terminal.pty?.kill("SIGTERM");
+    const pty = terminal.pty;
+    if (!pty) return;
+    try {
+      this.terminateProcessGroup(pty);
+    } catch (error) {
+      // Process exit can win the race before node-pty delivers its callback.
+      // ESRCH therefore still waits for the canonical callback; other failures
+      // remain visible instead of reporting a false successful quit.
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH" && terminal.pty !== undefined) throw error;
+    }
+    await terminal.exitPromise;
   }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    for (const terminal of this.terminals.values()) terminal.pty?.kill("SIGHUP");
+    for (const terminal of this.terminals.values()) {
+      const pty = terminal.pty;
+      if (pty) {
+        try {
+          this.terminateProcessGroup(pty);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+            try { pty.kill("SIGKILL"); } catch {}
+          }
+        }
+      }
+      terminal.resolveExit();
+    }
     this.terminals.clear();
   }
 

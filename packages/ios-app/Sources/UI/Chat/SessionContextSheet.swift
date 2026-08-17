@@ -49,6 +49,17 @@ enum SessionCompactionControlPolicy {
     }
 }
 
+enum SessionExportPresentationPolicy {
+    static func canStart(activeFormat: String?) -> Bool { activeFormat == nil }
+    static func showsProgress(rowFormat: String, activeFormat: String?) -> Bool {
+        rowFormat == activeFormat
+    }
+
+    static func title(for format: String) -> String {
+        format == "jsonl" ? "JSONL Export" : "HTML Export"
+    }
+}
+
 enum SessionContextUsagePresentation: Equatable {
     case available(used: Int, window: Int, percent: Double)
     case unavailable
@@ -150,7 +161,8 @@ struct SessionContextSheet: View {
     @State private var name = ""
     @State private var compacting = false
     @State private var exportedURL: URL?
-    @State private var exporting = false
+    @State private var exportingFormat: String?
+    @State private var exportError: String?
     @State private var exportTask: Task<Void, Never>?
     @State private var gitPresentation: SessionGitPresentation = .loading
     @State private var gitLoadGeneration = 0
@@ -226,6 +238,14 @@ struct SessionContextSheet: View {
                 }
                 Button("Cancel", role: .cancel) {}
             }
+            .alert("Export Failed", isPresented: Binding(
+                get: { exportError != nil },
+                set: { if !$0 { exportError = nil } }
+            )) {
+                Button("OK") { exportError = nil }
+            } message: {
+                Text(exportError ?? "The session could not be exported.")
+            }
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
@@ -246,7 +266,7 @@ struct SessionContextSheet: View {
             guard SessionCompactionControlPolicy.canRequest(
                 snapshot: snapshot,
                 submitting: compacting,
-                exporting: exporting
+                exporting: exportingFormat != nil
             ) else { return }
             compacting = true
             Task {
@@ -275,7 +295,7 @@ struct SessionContextSheet: View {
         .disabled(!SessionCompactionControlPolicy.canRequest(
             snapshot: snapshot,
             submitting: compacting,
-            exporting: exporting
+            exporting: exportingFormat != nil
         ))
         .accessibilityValue(snapshot.compactionQueued == true
             ? "Queued after current work"
@@ -284,9 +304,22 @@ struct SessionContextSheet: View {
 
     private func contextUsageCard(_ snapshot: SessionSnapshot) -> some View {
         let usage = SessionContextUsagePresentation(snapshot.contextUsage)
-        let cacheRate = snapshot.stats.latestCacheHitRate.map {
-            "\($0.formatted(.number.precision(.fractionLength(1))))% hit"
-        } ?? "hit rate unavailable"
+        let cacheValue = snapshot.stats.latestCacheHitRate.map {
+            "\($0.formatted(.number.precision(.fractionLength(1))))%"
+        } ?? "—"
+        let contextValue: String = switch usage {
+        case .available(let used, let window, _):
+            "\(used.formatted(.number.notation(.compactName)))/\(window.formatted(.number.notation(.compactName)))"
+        case .unavailable:
+            "—"
+        }
+        let statistics = [
+            (contextValue, "Context"),
+            ("\(cacheValue)\nR \(snapshot.stats.tokens.cacheRead.formatted(.number.notation(.compactName))) · W \(snapshot.stats.tokens.cacheWrite.formatted(.number.notation(.compactName)))", "Cache"),
+            (snapshot.stats.tokens.input.formatted(.number.notation(.compactName)), "Input"),
+            (snapshot.stats.tokens.output.formatted(.number.notation(.compactName)), "Output"),
+            (snapshot.stats.cost.formatted(.currency(code: "USD")), "Cost"),
+        ]
 
         return VStack(alignment: .leading, spacing: 9) {
             switch usage {
@@ -306,37 +339,35 @@ struct SessionContextSheet: View {
                     .tint(Color.tronEmerald)
                     .accessibilityLabel("Context used")
                     .accessibilityValue("\(Int(percent.rounded())) percent")
-                Text("\(used.formatted(.number.notation(.compactName))) of \(contextWindow.formatted(.number.notation(.compactName))) · Cache \(cacheRate) · \(snapshot.stats.tokens.cacheRead.formatted(.number.notation(.compactName))) read · \(snapshot.stats.tokens.cacheWrite.formatted(.number.notation(.compactName))) write")
-                    .font(TronTypography.caption)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
             case .unavailable:
                 Text("Context usage unavailable")
                     .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(Color.tronTextPrimary)
-                Text("A fresh assistant response will provide the current token-window estimate. Cache \(cacheRate) · \(snapshot.stats.tokens.cacheRead.formatted(.number.notation(.compactName))) read · \(snapshot.stats.tokens.cacheWrite.formatted(.number.notation(.compactName))) write")
+                Text("A fresh assistant response will provide the current token-window estimate.")
                     .font(TronTypography.caption)
                     .foregroundStyle(Color.tronTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            Label(
+                "Automatic Compaction: \(SessionCompactionControlPolicy.automaticStatus(snapshot.automaticCompactionEnabled))",
+                systemImage: "arrow.triangle.2.circlepath"
+            )
+            .font(TronTypography.caption)
+            .foregroundStyle(Color.tronTextSecondary)
+
             Divider().overlay(Color.tronEmerald.opacity(0.14))
 
-            let primary = [
-                (snapshot.stats.tokens.input.formatted(.number.notation(.compactName)), "Input"),
-                (snapshot.stats.tokens.output.formatted(.number.notation(.compactName)), "Output"),
-                (snapshot.stats.cost.formatted(.currency(code: "USD")), "Cost"),
-            ]
             if dynamicTypeSize.isAccessibilitySize {
                 VStack(spacing: 6) {
-                    ForEach(0..<primary.count, id: \.self) { index in
-                        metric(primary[index].0, primary[index].1)
+                    ForEach(0..<statistics.count, id: \.self) { index in
+                        metric(statistics[index].0, statistics[index].1)
                     }
                 }
             } else {
                 HStack(spacing: 0) {
-                    ForEach(0..<primary.count, id: \.self) { index in
-                        metric(primary[index].0, primary[index].1)
+                    ForEach(0..<statistics.count, id: \.self) { index in
+                        metric(statistics[index].0, statistics[index].1)
                     }
                 }
             }
@@ -352,7 +383,8 @@ struct SessionContextSheet: View {
             Text(value)
                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
                 .foregroundStyle(Color.tronTextPrimary)
-                .lineLimit(1)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
                 .minimumScaleFactor(0.75)
             Text(label)
                 .font(TronTypography.caption)
@@ -425,6 +457,11 @@ struct SessionContextSheet: View {
                     subtitle: "Extensions, prompts, skills, context files, and tools",
                     accent: .tronTeal
                 ) { destination = .projectResources }
+                TronSettingsDivider(accent: .tronPurple)
+                manageRow(icon: "pencil", title: "Rename Session", accent: .tronPurple) {
+                    name = snapshot.name ?? ""
+                    showRename = true
+                }
             }
         }
     }
@@ -432,22 +469,6 @@ struct SessionContextSheet: View {
     private func sessionSection(_ snapshot: SessionSnapshot) -> some View {
         TronSettingsGroup("Session", detail: snapshot.cwd, accent: .tronCyan) {
             VStack(spacing: 0) {
-                manageRow(icon: "pencil", title: "Rename Session", accent: .tronPurple) {
-                    name = snapshot.name ?? ""
-                    showRename = true
-                }
-                divider()
-                TronSettingsRow(
-                    icon: "arrow.triangle.2.circlepath",
-                    title: "Automatic Compaction",
-                    subtitle: "Reduces context when the configured threshold is reached",
-                    accent: .tronTeal
-                ) {
-                    Text(SessionCompactionControlPolicy.automaticStatus(snapshot.automaticCompactionEnabled))
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextPrimary)
-                }
-                divider()
                 manageRow(
                     icon: "doc.text.magnifyingglass",
                     title: "Agent Context",
@@ -471,26 +492,17 @@ struct SessionContextSheet: View {
                 divider()
                 gitRow
                 divider()
-                TronSettingsRow(
-                    icon: "waveform.path.ecg",
-                    title: "Runtime",
-                    subtitle: "\(snapshot.stats.totalMessages) messages · \(snapshot.stats.toolCalls) tool calls",
-                    accent: .tronAmber
-                ) {
-                    Text(snapshot.phase.rawValue.capitalized)
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextSecondary)
-                }
+                exportRow(
+                    format: "html",
+                    icon: "doc.richtext",
+                    subtitle: "Readable session archive"
+                )
                 divider()
-                manageRow(icon: "doc.richtext", title: exporting ? "Exporting…" : "HTML Export", subtitle: "Readable session archive", accent: .tronBlue) {
-                    prepareExport("html")
-                }
-                .disabled(exporting)
-                divider()
-                manageRow(icon: "doc.text", title: exporting ? "Exporting…" : "JSONL Export", subtitle: "Complete canonical audit", accent: .tronBlue) {
-                    prepareExport("jsonl")
-                }
-                .disabled(exporting)
+                exportRow(
+                    format: "jsonl",
+                    icon: "doc.text",
+                    subtitle: "Complete canonical audit"
+                )
                 if let exportedURL {
                     divider()
                     ShareLink(item: exportedURL) {
@@ -559,6 +571,35 @@ struct SessionContextSheet: View {
         .accessibilityLabel(title)
     }
 
+    private func exportRow(
+        format: String,
+        icon: String,
+        subtitle: String
+    ) -> some View {
+        Button { prepareExport(format) } label: {
+            TronSettingsRow(
+                icon: icon,
+                title: SessionExportPresentationPolicy.title(for: format),
+                subtitle: subtitle,
+                accent: .tronBlue
+            ) {
+                if SessionExportPresentationPolicy.showsProgress(
+                    rowFormat: format,
+                    activeFormat: exportingFormat
+                ) {
+                    ProgressView().controlSize(.small)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(!SessionExportPresentationPolicy.canStart(activeFormat: exportingFormat))
+        .accessibilityIdentifier("session-export-\(format)")
+        .accessibilityValue(SessionExportPresentationPolicy.showsProgress(
+            rowFormat: format,
+            activeFormat: exportingFormat
+        ) ? "Exporting" : "")
+    }
+
     private func loadGit(snapshot: SessionSnapshot?, generation: Int) async {
         guard let snapshot else { return }
         do {
@@ -599,11 +640,12 @@ struct SessionContextSheet: View {
     }
 
     private func prepareExport(_ format: String) {
-        guard !exporting else { return }
-        exporting = true
+        guard SessionExportPresentationPolicy.canStart(activeFormat: exportingFormat) else { return }
+        exportingFormat = format
+        exportError = nil
         exportTask = Task {
             defer {
-                exporting = false
+                exportingFormat = nil
                 exportTask = nil
             }
             do {
@@ -621,7 +663,7 @@ struct SessionContextSheet: View {
             } catch is CancellationError {
                 return
             } catch {
-                model.lastError = error.localizedDescription
+                exportError = error.localizedDescription
             }
         }
     }
@@ -632,7 +674,6 @@ private struct AgentContextSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var showInstructions = false
-    @State private var showRaw = false
 
     private var summary: AgentContextSummary { AgentContextSummary(context: model.context) }
 
@@ -646,19 +687,27 @@ private struct AgentContextSheet: View {
                         .padding(14)
                         .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.08)
 
-                    TronSettingsGroup("Instructions", detail: "Assembled runtime guidance", accent: .tronPurple) {
-                        VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        TronSettingsGroup("Instructions", detail: "Assembled runtime guidance", accent: .tronPurple) {
                             Text(summary.instructionPreview)
                                 .font(TronTypography.bodySM)
                                 .foregroundStyle(Color.tronTextPrimary)
                                 .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
-                            if summary.instructions.count > AgentContextSummary.maximumInstructionPreviewCharacters {
-                                Button("Read Full Instructions") { showInstructions = true }
-                                    .buttonStyle(TronActionButtonStyle(expands: false))
-                            }
+                                .padding(14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .padding(14)
+                        Button { showInstructions = true } label: {
+                            TronSettingsRow(
+                                icon: "doc.plaintext",
+                                title: "Read Full Instructions",
+                                subtitle: "Open the complete assembled guidance",
+                                accent: .tronPurple
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.10, interactive: true)
+                        .accessibilityIdentifier("agent-context-full-instructions")
                     }
 
                     TronSettingsGroup("Current Context", accent: .tronCyan) {
@@ -694,16 +743,10 @@ private struct AgentContextSheet: View {
                         }
                     }
 
-                    DisclosureGroup(isExpanded: $showRaw) {
-                        TronStructuredJSONView(value: model.context ?? .null, title: "Technical Context", accent: .tronSlate)
-                            .padding(.top, 12)
-                    } label: {
-                        Label("Technical JSON", systemImage: "curlybraces")
-                            .font(TronTypography.headline)
-                            .foregroundStyle(Color.tronTextPrimary)
-                    }
-                    .padding(14)
-                    .tronGlassSurface(accent: .tronSlate, tintOpacity: 0.06)
+                    TronTechnicalJSONRow(
+                        value: model.context ?? .null,
+                        sheetTitle: "Agent Context JSON"
+                    )
                 }
                 .padding(18)
             }

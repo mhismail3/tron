@@ -334,6 +334,13 @@ struct TerminalReducer {
         exitedTerminalIDs.contains(terminalID)
     }
 
+    mutating func confirmTermination(_ terminalID: String) {
+        // terminal.terminate now resolves only after the Gateway has observed
+        // canonical PTY exit. This receipt safely closes the UI race even when
+        // the preceding terminal.exit event was lost during reconnect.
+        exitedTerminalIDs.insert(terminalID)
+    }
+
     func requiresReconciliation(_ terminalID: String) -> Bool {
         pendingEventsByTerminalID[terminalID]?.outputBySequence.isEmpty == false
             && attachmentOwnersByTerminalID[terminalID]?.keys.contains(where: owns) == true

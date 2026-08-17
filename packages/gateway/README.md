@@ -171,7 +171,9 @@ loaded from an obsolete decision. PTY output has an independent monotonic
 sequence and wire-safe attach replay for gap/reconnect convergence. The global
 terminal catalog retains at most 128 records in insertion order, evicting only
 the oldest exited records before creation, while at most 16 PTYs may remain
-active. Output is split at UTF-8 boundaries into at most 64 KiB events, and
+active. Destructive termination signals the complete PTY process group and its RPC
+resolves only after the node-pty exit callback has retired canonical active-terminal
+state and published `terminal.exit`. Output is split at UTF-8 boundaries into at most 64 KiB events, and
 replay uses encoded JSON byte accounting below the 1 MiB frame ceiling. Context, tree,
 resources, commands, exports, transcript paging, terminal inventory, and all live-runtime mutations
 require an established open subscription for that exact session. Dashboard rename and delete remain

@@ -118,6 +118,7 @@ struct SessionTreeSheet: View {
     let onNavigated: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var mode: SessionHistoryMode = .timeline
     @State private var choosingFork = false
     @State private var selection: SessionHistorySelection?
@@ -135,6 +136,9 @@ struct SessionTreeSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 12) {
+                    if let snapshot = model.authoritativeSnapshot(for: sessionID) {
+                        runtimeSummary(snapshot)
+                    }
                     historyOverview
                     if choosingFork {
                         forkModeHeader
@@ -229,6 +233,60 @@ struct SessionTreeSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+    }
+
+    private func runtimeSummary(_ snapshot: SessionSnapshot) -> some View {
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 10) {
+                        runtimeIcon
+                        Text("Runtime")
+                            .font(TronTypography.headline)
+                            .foregroundStyle(Color.tronTextPrimary)
+                        Spacer(minLength: 8)
+                        runtimePhase(snapshot)
+                    }
+                    runtimeStatistics(snapshot)
+                }
+            } else {
+                HStack(alignment: .center, spacing: 12) {
+                    runtimeIcon
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Runtime")
+                            .font(TronTypography.headline)
+                            .foregroundStyle(Color.tronTextPrimary)
+                        runtimeStatistics(snapshot)
+                    }
+                    Spacer(minLength: 8)
+                    runtimePhase(snapshot)
+                }
+            }
+        }
+        .padding(14)
+        .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.09)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("session-history-runtime-summary")
+    }
+
+    private var runtimeIcon: some View {
+        Image(systemName: "waveform.path.ecg")
+            .font(TronTypography.headline)
+            .foregroundStyle(Color.tronAmber)
+            .frame(width: 28)
+    }
+
+    private func runtimeStatistics(_ snapshot: SessionSnapshot) -> some View {
+        Text("\(snapshot.stats.totalMessages.formatted()) messages · \(snapshot.stats.toolCalls.formatted()) tool calls")
+            .font(TronTypography.caption)
+            .foregroundStyle(Color.tronTextSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func runtimePhase(_ snapshot: SessionSnapshot) -> some View {
+        Text(snapshot.phase.rawValue.capitalized)
+            .font(TronTypography.bodySM)
+            .foregroundStyle(Color.tronTextSecondary)
     }
 
     private var historyOverview: some View {

@@ -90,6 +90,7 @@ final class TerminalController {
     func send(_ bytes: ArraySlice<UInt8>, model: AppModel) {
         guard let id = terminal?.id,
               terminal?.exitedAt == nil,
+              !model.terminalHasExited(id),
               let intent,
               model.ownsTerminalIntent(intent) else { return }
         let data = String(decoding: bytes, as: UTF8.self)
@@ -107,6 +108,7 @@ final class TerminalController {
     func resize(columns: Int, rows: Int, model: AppModel) {
         guard let id = terminal?.id,
               terminal?.exitedAt == nil,
+              !model.terminalHasExited(id),
               let intent,
               model.ownsTerminalIntent(intent) else { return }
         actionError = nil
@@ -134,8 +136,11 @@ final class TerminalController {
               model.ownsTerminalIntent(intent) else { return }
         actionError = nil
         Task {
-            do { try await model.terminateTerminal(id, intent: intent) }
-            catch {
+            do {
+                try await model.terminateTerminal(id, intent: intent)
+                guard owns(intent, model: model) else { return }
+                connectionPhase = .unavailable
+            } catch {
                 guard owns(intent, model: model) else { return }
                 self.actionError = error.localizedDescription
             }

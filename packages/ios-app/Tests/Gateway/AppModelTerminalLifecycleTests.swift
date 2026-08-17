@@ -692,6 +692,47 @@ struct AppModelTerminalLifecycleTests {
         }
     }
 
+    @Test("successful terminal quit retires running state from the canonical receipt")
+    func terminalQuitRetiresRunningState() async throws {
+        try await withHarness { harness in
+            try installHostedTerminalSession(on: harness.model)
+            let controller = TerminalController()
+            let existing = terminalSummary(id: "terminal")
+            controller.start(sessionID: "session", model: harness.model)
+            let list = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.enqueue(successResponse(
+                id: list.id,
+                result: .object(["terminals": try JSONValue.encode([existing])])
+            ))
+            let attach = try await request(in: harness.socket, frameIndex: 2)
+            await harness.socket.enqueue(successResponse(
+                id: attach.id,
+                result: terminalReplayResult(chunks: [], terminalID: existing.id)
+            ))
+            try await eventually { controller.terminal?.id == existing.id }
+            #expect(controller.isRunning(model: harness.model))
+
+            controller.terminate(model: harness.model)
+            let terminate = try await request(in: harness.socket, frameIndex: 3)
+            #expect(terminate.method == "terminal.terminate")
+            await harness.socket.enqueue(successResponse(
+                id: terminate.id,
+                result: .object(["terminated": .bool(true)])
+            ))
+
+            try await eventually { !controller.isRunning(model: harness.model) }
+            #expect(controller.connectionPhase == .unavailable)
+            #expect(controller.actionError == nil)
+
+            let requestCount = await harness.socket.sentFrames().count
+            let input = Array("ignored".utf8)
+            controller.send(input[...], model: harness.model)
+            controller.resize(columns: 120, rows: 40, model: harness.model)
+            #expect(await harness.socket.sentFrames().count == requestCount)
+            controller.stop(model: harness.model)
+        }
+    }
+
     @Test("resize debounce is intent-keyed, bounded, coalesced, and revoked with presentation")
     func resizeDebounceOwnership() async throws {
         try await withHarness { harness in

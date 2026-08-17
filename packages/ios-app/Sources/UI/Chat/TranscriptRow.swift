@@ -182,6 +182,7 @@ struct TranscriptRow: View, Equatable {
         .scrollClipDisabled()
         .defaultScrollAnchor(item.role == .user ? .trailing : .leading)
         .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
+        .padding(.vertical, item.role == .user ? 3 : 0)
         .accessibilityLabel("Prompt attachments")
     }
 

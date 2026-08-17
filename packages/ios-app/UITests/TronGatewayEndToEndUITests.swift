@@ -168,9 +168,46 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Project Resources"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Reload"].exists)
         assertAccessibilityAuditPasses(app, screen: "project resources")
-        app.buttons["Done"].tap()
+        let resourceDetail = app.buttons.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@", "project-resource-")
+        ).firstMatch
+        XCTAssertTrue(resourceDetail.waitForExistence(timeout: 4))
+        resourceDetail.tap()
+        let resourceTechnicalJSON = app.buttons["technical-json-row"]
+        for _ in 0..<5 where !resourceTechnicalJSON.exists { app.swipeUp() }
+        XCTAssertTrue(resourceTechnicalJSON.waitForExistence(timeout: 4))
+        resourceTechnicalJSON.tap()
+        XCTAssertTrue(app.otherElements["technical-json-sheet"].waitForExistence(timeout: 4))
+        tapHittableDone(app)
+        XCTAssertTrue(resourceTechnicalJSON.waitForExistence(timeout: 4))
+        tapHittableDone(app)
+        XCTAssertTrue(app.staticTexts["Project Resources"].waitForExistence(timeout: 3))
+        tapHittableDone(app)
         XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 3))
-        app.buttons["Done"].tap()
+
+        let agentContext = app.buttons["Agent Context"]
+        for _ in 0..<5 where !agentContext.exists { app.swipeUp() }
+        XCTAssertTrue(agentContext.waitForExistence(timeout: 4))
+        agentContext.tap()
+        let fullInstructions = app.buttons["agent-context-full-instructions"]
+        XCTAssertTrue(fullInstructions.waitForExistence(timeout: 4))
+        let contextTechnicalJSON = app.buttons["technical-json-row"]
+        for _ in 0..<6 where !contextTechnicalJSON.exists { app.swipeUp() }
+        XCTAssertTrue(contextTechnicalJSON.waitForExistence(timeout: 4))
+        contextTechnicalJSON.tap()
+        XCTAssertTrue(app.otherElements["technical-json-sheet"].waitForExistence(timeout: 4))
+        tapHittableDone(app)
+        tapHittableDone(app)
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 3))
+
+        let history = app.buttons["Session History"]
+        for _ in 0..<5 where !history.exists { app.swipeUp() }
+        XCTAssertTrue(history.waitForExistence(timeout: 4))
+        history.tap()
+        XCTAssertTrue(app.otherElements["session-history-runtime-summary"].waitForExistence(timeout: 4))
+        tapHittableDone(app)
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 3))
+        tapHittableDone(app)
 
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
@@ -231,7 +268,16 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         for _ in 0..<4 where !contextRow.exists { app.swipeUp() }
         XCTAssertTrue(contextRow.waitForExistence(timeout: 3))
         XCTAssertGreaterThan(contextRow.frame.height, 44)
-        app.buttons["Done"].tap()
+        let historyRow = app.buttons["Session History"]
+        for _ in 0..<4 where !historyRow.exists { app.swipeUp() }
+        XCTAssertTrue(historyRow.waitForExistence(timeout: 3))
+        historyRow.tap()
+        let runtimeSummary = app.otherElements["session-history-runtime-summary"]
+        XCTAssertTrue(runtimeSummary.waitForExistence(timeout: 4))
+        XCTAssertGreaterThan(runtimeSummary.frame.height, 60, "History runtime summary must reflow at accessibility XXXL")
+        tapHittableDone(app)
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 3))
+        tapHittableDone(app)
         app.buttons["Settings"].tap()
         let projectTrust = app.buttons["Project Trust"]
         for _ in 0..<6 where !projectTrust.exists { app.swipeUp() }
