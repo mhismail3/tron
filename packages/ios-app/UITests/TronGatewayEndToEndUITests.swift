@@ -161,6 +161,15 @@ final class TronGatewayEndToEndUITests: XCTestCase {
             for _ in 0..<4 where !row.exists { app.swipeUp() }
             XCTAssertTrue(row.waitForExistence(timeout: 3), "\(label) must remain reachable in Manage Session")
         }
+        let projectResources = app.buttons["Project Resources"]
+        for _ in 0..<6 where !projectResources.exists { app.swipeDown() }
+        XCTAssertTrue(projectResources.waitForExistence(timeout: 3))
+        projectResources.tap()
+        XCTAssertTrue(app.staticTexts["Project Resources"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Reload"].exists)
+        assertAccessibilityAuditPasses(app, screen: "project resources")
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.staticTexts["Manage Session"].waitForExistence(timeout: 3))
         app.buttons["Done"].tap()
 
         app.buttons["Settings"].tap()

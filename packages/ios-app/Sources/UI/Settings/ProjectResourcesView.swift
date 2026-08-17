@@ -64,88 +64,119 @@ private struct ProjectResourceSelection: Identifiable {
 struct ProjectResourcesView: View {
     let sessionID: String
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
     @State private var loading = false
+    @State private var reloading = false
+    @State private var loadGeneration = 0
     @State private var selected: ProjectResourceSelection?
 
     var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 18) {
-                if let root = model.resources?.objectValue {
-                    Label("These are resolved resources actually available to this session. Open a row to inspect its source, path, capabilities, or schema.", systemImage: "info.circle")
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .padding(14)
-                        .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
-                    ForEach(ProjectResourceKind.allCases) { kind in
-                        resourceGroup(kind, values: values(for: kind, root: root))
-                    }
-                    let diagnostics = resourceDiagnostics(root)
-                    if diagnostics != .array([]) {
-                        TronSettingsGroup("Diagnostics", accent: .tronError) {
-                            TronStructuredJSONView(value: diagnostics, title: "Resource Diagnostics", accent: .tronError)
-                                .padding(12)
+        NavigationStack {
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    if let root = model.resources?.objectValue {
+                        Label("These are resolved resources actually available to this session. Open a row to inspect its source, path, capabilities, or schema.", systemImage: "info.circle")
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .padding(14)
+                            .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
+                        ForEach(ProjectResourceKind.allCases) { kind in
+                            resourceGroup(kind, values: values(for: kind, root: root))
                         }
-                    }
-                } else if loading {
-                    TronGlassCard(accent: .tronEmerald) {
-                        TronLoadingState(label: "Loading project resources…")
-                            .padding(18)
-                            .frame(maxWidth: .infinity)
-                    }
-                } else {
-                    ContentUnavailableView(
-                        "Resources Unavailable",
-                        systemImage: "shippingbox",
-                        description: Text("Reload the session resources and try again.")
-                    )
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
-        }
-        .tronScrollEdgeChrome()
-        .tronNavigationTitle("Project Resources")
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                TronReloadToolbarButton(isReloading: loading, action: reload)
-            }
-        }
-        .task(id: model.sessionResourceRevision(for: sessionID)) { await load() }
-        .sheet(item: $selected) { selection in
-            NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        resourceSummary(selection.value, kind: selection.kind)
-                        TronStructuredJSONView(
-                            value: selection.value,
-                            title: selection.title,
-                            accent: selection.kind.accent
+                        let diagnostics = resourceDiagnostics(root)
+                        if diagnostics != .array([]) {
+                            TronSettingsGroup("Diagnostics", accent: .tronError) {
+                                TronStructuredJSONView(value: diagnostics, title: "Resource Diagnostics", accent: .tronError)
+                                    .padding(12)
+                            }
+                        }
+                    } else if loading {
+                        TronGlassCard(accent: .tronEmerald) {
+                            TronLoadingState(label: "Loading project resources…")
+                                .padding(18)
+                                .frame(maxWidth: .infinity)
+                        }
+                    } else {
+                        ContentUnavailableView(
+                            "Resources Unavailable",
+                            systemImage: "shippingbox",
+                            description: Text("Reload the session resources and try again.")
                         )
                     }
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
-                .defaultScrollAnchor(.top)
-                .tronScrollEdgeChrome()
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .principal) {
-                        TronSheetTitle(title: selection.title, accent: selection.kind.accent)
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { selected = nil } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 18)
+            }
+            .tronScrollEdgeChrome()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: reload) {
+                        HStack(spacing: 6) {
+                            if loading || reloading {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text("Reload")
                         }
-                        .accessibilityLabel("Done")
+                        .tronToolbarAction()
                     }
+                    .disabled(loading || reloading)
+                    .accessibilityValue(loading || reloading ? "In progress" : "")
+                }
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: "Project Resources")
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .accessibilityLabel("Done")
                 }
             }
-            .tronTopBlur(.sheet)
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
+            .task(id: model.sessionResourceRevision(for: sessionID)) { await load() }
+            .sheet(item: $selected) { selection in
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 14) {
+                            resourceSummary(selection.value, kind: selection.kind)
+                            TronStructuredJSONView(
+                                value: selection.value,
+                                title: selection.title,
+                                accent: selection.kind.accent
+                            )
+                        }
+                        .padding(18)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    .defaultScrollAnchor(.top)
+                    .tronScrollEdgeChrome()
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .principal) {
+                            TronSheetTitle(title: selection.title, accent: selection.kind.accent)
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button { selected = nil } label: {
+                                Image(systemName: "checkmark")
+                                    .font(TronTypography.buttonSM)
+                                    .foregroundStyle(Color.tronEmerald)
+                            }
+                            .accessibilityLabel("Done")
+                        }
+                    }
+                }
+                .tronTopBlur(.sheet)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+            }
         }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
+        .tint(Color.tronEmerald)
     }
 
     private func resourceGroup(_ kind: ProjectResourceKind, values: [JSONValue]) -> some View {
@@ -238,19 +269,22 @@ struct ProjectResourcesView: View {
     }
 
     private func reload() {
-        guard !loading else { return }
-        loading = true
+        guard !loading, !reloading else { return }
+        reloading = true
         Task {
-            defer { loading = false }
+            defer { reloading = false }
             do { try await model.reloadResources(sessionID: sessionID) }
+            catch is CancellationError { return }
             catch { model.lastError = error.localizedDescription }
-            await model.loadResources(sessionID: sessionID)
         }
     }
 
     private func load() async {
+        loadGeneration &+= 1
+        let generation = loadGeneration
         loading = true
-        defer { loading = false }
         await model.loadResources(sessionID: sessionID)
+        guard generation == loadGeneration else { return }
+        loading = false
     }
 }

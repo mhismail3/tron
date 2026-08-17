@@ -213,6 +213,51 @@ struct SessionPresentationStoreTests {
         #expect(store.disposableCacheSnapshot == retained)
     }
 
+    @Test("runtime replacement clears secondary projections and advances their reload owners")
+    func runtimeReplacementClearsSecondaryProjection() throws {
+        var current = try SessionScenarioBuilder(seed: 8_504).openingTail(targetEncodedBytes: 4_096)
+        current.runtimeGeneration = "runtime-a"
+        var replacement = current
+        replacement.runtimeGeneration = "runtime-b"
+        replacement.revision += 1
+
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedSubscription(snapshot: current, token: "token")
+        store.installHostedSecondaryProjection(
+            context: .object(["runtime": .string("a")]),
+            tree: [SessionTreeNode(
+                id: "entry",
+                parentId: nil,
+                timestamp: "2026-08-17T00:00:00.000Z",
+                kind: "message",
+                label: nil,
+                preview: "Entry",
+                role: .user,
+                depth: 0,
+                childCount: 0,
+                isCurrentPath: true
+            )],
+            commands: [.init(name: "command", description: nil, argumentHint: nil, source: .extension, sourcePath: "/extension")],
+            resources: .object(["runtime": .string("a")])
+        )
+        let structureRevision = store.structureRevision(for: current.sessionId)
+        let contextRevision = store.contextRevision(for: current.sessionId)
+        let resourceRevision = store.resourceRevision(for: current.sessionId)
+
+        #expect(store.prepareSecondaryProjectionForRuntimeInstallation(replacement))
+        #expect(store.context == nil)
+        #expect(store.sessionTree.isEmpty)
+        #expect(store.commands.isEmpty)
+        #expect(store.resources == nil)
+        #expect(store.structureRevision(for: current.sessionId) == structureRevision + 1)
+        #expect(store.contextRevision(for: current.sessionId) == contextRevision + 1)
+        #expect(store.resourceRevision(for: current.sessionId) == resourceRevision + 1)
+        #expect(!store.prepareSecondaryProjectionForRuntimeInstallation(current))
+    }
+
     @Test("a secondary response cannot publish after exact token replacement")
     func staleSecondaryResponse() async throws {
         try await withTestWatchdog {
@@ -257,12 +302,36 @@ struct SessionPresentationStoreTests {
             await loading.value
             #expect(await MainActor.run { store.context } == nil)
 
+            let errorProbe = SecondaryErrorProbe()
+            await MainActor.run {
+                store.delegate = errorProbe
+                store.installHostedSubscription(snapshot: snapshot, token: "error-old")
+            }
+            let rejectedLoading = Task { await store.loadContext(sessionID: snapshot.sessionId) }
+            try await socket.waitUntilSent(count: 3)
+            let rejectedFrame = await socket.sentFrames()[2]
+            let rejectedRequest = try JSONDecoder.gateway.decode(JSONValue.self, from: rejectedFrame)
+            let rejectedRequestID = try #require(rejectedRequest.objectValue?["id"]?.stringValue)
+            await MainActor.run { store.replaceHostedSubscriptionToken("error-replacement") }
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(rejectedRequestID),
+                "ok": .bool(false),
+                "error": .object([
+                    "code": .string("busy"),
+                    "message": .string("obsolete failure"),
+                    "retryable": .bool(true),
+                ]),
+            ])))
+            await rejectedLoading.value
+            #expect(await MainActor.run { errorProbe.errors.isEmpty })
+
             await MainActor.run {
                 store.installHostedSubscription(snapshot: snapshot, token: "revoked")
             }
             let revokedLoading = Task { await store.loadContext(sessionID: snapshot.sessionId) }
-            try await socket.waitUntilSent(count: 3)
-            let revokedFrame = await socket.sentFrames()[2]
+            try await socket.waitUntilSent(count: 4)
+            let revokedFrame = await socket.sentFrames()[3]
             let revokedRequest = try JSONDecoder.gateway.decode(JSONValue.self, from: revokedFrame)
             let revokedRequestID = try #require(revokedRequest.objectValue?["id"]?.stringValue)
             await MainActor.run {
@@ -276,6 +345,90 @@ struct SessionPresentationStoreTests {
             ])))
             await revokedLoading.value
             #expect(await MainActor.run { store.context } == nil)
+
+            await MainActor.run {
+                store.installHostedSubscription(snapshot: snapshot, token: "command-old")
+            }
+            let rejectedCommands = Task { await store.loadCommands(sessionID: snapshot.sessionId) }
+            try await socket.waitUntilSent(count: 5)
+            let commandFrame = await socket.sentFrames()[4]
+            let commandRequest = try JSONDecoder.gateway.decode(JSONValue.self, from: commandFrame)
+            let commandRequestID = try #require(commandRequest.objectValue?["id"]?.stringValue)
+            await MainActor.run { store.replaceHostedSubscriptionToken("command-replacement") }
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(commandRequestID),
+                "ok": .bool(false),
+                "error": .object([
+                    "code": .string("busy"),
+                    "message": .string("obsolete command failure"),
+                    "retryable": .bool(true),
+                ]),
+            ])))
+            await rejectedCommands.value
+            #expect(await MainActor.run { errorProbe.errors.isEmpty })
+            await client.close()
+        }
+    }
+
+    @Test("newer same-subscription context load rejects an older completion")
+    func newestSecondaryLoadWins() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory
+            )
+            let profile = GatewayProfile(
+                id: "gateway",
+                label: "Mac",
+                host: "gateway.test",
+                port: 9_847,
+                machineId: "machine",
+                deviceId: "device"
+            )
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            let snapshot = try SessionScenarioBuilder(seed: 841).openingTail(targetEncodedBytes: 4_096)
+            let store = await MainActor.run {
+                let store = SessionPresentationStore(
+                    client: client,
+                    performanceSignposts: SystemPerformanceSignposts.shared
+                )
+                store.installHostedSubscription(snapshot: snapshot, token: "subscription")
+                return store
+            }
+
+            let older = Task { await store.loadContext(sessionID: snapshot.sessionId) }
+            try await socket.waitUntilSent(count: 2)
+            let olderFrame = await socket.sentFrames()[1]
+            let olderRequest = try JSONDecoder.gateway.decode(JSONValue.self, from: olderFrame)
+            let olderID = try #require(olderRequest.objectValue?["id"]?.stringValue)
+
+            let newer = Task { await store.loadContext(sessionID: snapshot.sessionId) }
+            try await socket.waitUntilSent(count: 3)
+            let newerFrame = await socket.sentFrames()[2]
+            let newerRequest = try JSONDecoder.gateway.decode(JSONValue.self, from: newerFrame)
+            let newerID = try #require(newerRequest.objectValue?["id"]?.stringValue)
+
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(newerID),
+                "ok": .bool(true),
+                "result": .object(["generation": .string("newer")]),
+            ])))
+            await newer.value
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(olderID),
+                "ok": .bool(true),
+                "result": .object(["generation": .string("older")]),
+            ])))
+            await older.value
+
+            #expect(await MainActor.run { store.context } == .object(["generation": .string("newer")]))
             await client.close()
         }
     }
@@ -758,4 +911,23 @@ struct SessionPresentationStoreTests {
             start: 12, end: 20, total: 29, itemCount: 8, visibleItemCount: 8
         ))
     }
+}
+
+@MainActor
+private final class SecondaryErrorProbe: SessionPresentationStoreDelegate {
+    var errors: [String] = []
+
+    func sessionPresentationStoreDidRequestCatalogRefresh() {}
+    func sessionPresentationStoreDidPublishEditorRequest(
+        target: SessionPresentationIdentity,
+        action: SessionEditorAction,
+        text: String,
+        fullText: String,
+        revision: Int
+    ) {}
+    func sessionPresentationStoreDidOpen(_ target: SessionPresentationIdentity) {}
+    func sessionPresentationStorePostNotice(_ message: String, replacing key: GlobalNoticeKey?) {}
+    func sessionPresentationStoreRemoveNotice(_ key: GlobalNoticeKey) {}
+    func sessionPresentationStoreSurface(_ error: Error) { errors.append(error.localizedDescription) }
+    func sessionPresentationStoreCheckpointCache() {}
 }

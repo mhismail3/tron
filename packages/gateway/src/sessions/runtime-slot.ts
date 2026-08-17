@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { copyFile, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
@@ -1476,9 +1476,16 @@ export class RuntimeSlot {
         const directory = await mkdtemp(join(tmpdir(), "tron-session-export-"));
         try {
           const output = join(directory, `session.${format}`);
-          const path = format === "html"
-            ? await this.runtime.session.exportToHtml(output)
-            : this.runtime.session.exportToJsonl(output);
+          let path: string;
+          if (format === "html") {
+            path = await this.runtime.session.exportToHtml(output);
+          } else {
+            // The SDK JSONL exporter linearizes only the active branch. A Tron
+            // audit export must retain the canonical append-only tree verbatim,
+            // including abandoned branches and their parent identities.
+            await copyFile(source, output);
+            path = output;
+          }
           const mimeType = format === "html" ? "text/html; charset=utf-8" : "application/x-ndjson";
           const name = `${basename(this.runtime.session.sessionName ?? this.id).replace(/[^A-Za-z0-9._-]+/g, "-")}.${format}`;
           const metadata = await stat(path);

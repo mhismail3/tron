@@ -498,7 +498,10 @@ menus, and pickers are deliberate exceptions.
 UI validation audits onboarding in light and dark modes and audits a
 populated real-gateway chat, session management, settings, and appearance. The
 real-gateway test retains named screenshot checkpoints for the completed chat,
-Manage Session, root settings, and appearance in its result bundle. It also
+Manage Session, root settings, and appearance in its result bundle. Manage Session
+acceptance additionally verifies the compact context bar, exactly two primary groups,
+textual Compact action, peer Project Resources sheet with textual Reload progress,
+user-oriented Agent Context, and History-owned fork workflow. It also
 relaunches at accessibility XXXL to verify standard SwiftUI controls that
 XCTest's simulated Dynamic Type audit misclassifies. Any audit suppression must
 name one exact element, have a retained rendered checkpoint, and have a separate

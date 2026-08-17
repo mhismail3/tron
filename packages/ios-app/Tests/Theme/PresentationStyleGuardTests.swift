@@ -442,6 +442,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ProjectResourcesView.swift"),
             encoding: .utf8
         )
+        let history = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionTreeSheet.swift"),
+            encoding: .utf8
+        )
         let interactions = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ExtensionInteractionSheet.swift"),
             encoding: .utf8
@@ -459,7 +463,37 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
         #expect(context.contains("ProjectResourcesView(sessionID: sessionID)"))
+        #expect(context.contains("case agentContext, projectResources, history, terminal"))
+        #expect(context.contains("destination = .projectResources"))
+        #expect(context.contains("TronSettingsGroup(\"Configuration\""))
+        #expect(context.contains("TronSettingsGroup(\"Session\""))
+        #expect(!context.contains("TronSettingsGroup(\"Runtime\""))
+        #expect(!context.contains("TronSettingsGroup(\"Export and Share\""))
+        #expect(!context.contains("title: \"Reload Resources\""))
+        #expect(!context.contains("@State private var showFork"))
+        #expect(!context.contains("NavigationLink"))
+        #expect(!context.contains("struct ForkSheet"))
+        #expect(history.contains("let onNavigated: () -> Void"))
+        #expect(history.contains("onNavigated()"))
+        #expect(history.contains("case timeline = \"Timeline\""))
+        #expect(history.contains("Label(\"New Fork\""))
+        #expect(resources.contains("Text(\"Reload\")"))
+        #expect(resources.contains("try await model.reloadResources(sessionID: sessionID)"))
+        let reloadOwner = (resources.components(separatedBy: "private func reload()").dropFirst().first ?? "")
+            .components(separatedBy: "private func load()").first ?? ""
+        #expect(!reloadOwner.contains("await model.loadResources("))
+        #expect(resources.contains("@State private var reloading = false"))
+        #expect(resources.contains("@State private var loadGeneration = 0"))
+        #expect(resources.contains("guard generation == loadGeneration else { return }"))
+        #expect(resources.contains("loading || reloading"))
+        #expect(resources.contains("ToolbarItem(placement: .topBarLeading)"))
+        #expect(resources.contains("TronSheetTitle(title: \"Project Resources\")"))
         #expect(context.contains("snapshot.stats.latestCacheHitRate"))
+        #expect(context.contains("ProgressView(value: percent, total: 100)"))
+        #expect(context.contains(".accessibilityLabel(usage.accessibilityLabel)"))
+        #expect(context.contains("Context usage: "))
+        #expect(context.contains("Text(\"Compact\")"))
+        #expect(context.contains("SessionCompactionControlPolicy.automaticStatus"))
         #expect(context.contains("guard !exporting else { return }"))
         #expect(context.components(separatedBy: ".disabled(exporting)").count == 3)
         #expect(context.contains("await model.discardExportArtifact(exportedURL)"))
@@ -483,14 +517,28 @@ struct PresentationStyleGuardTests {
         #expect(settings.contains("records = try await model.gatewayDiagnostics.logs(limit: 300)"))
         #expect(!settings.contains("try? await model."))
         #expect(context.contains("model.gatewayDiagnostics.inspectGit"))
-        let initialContextTask = (context.components(separatedBy: ".task {").dropFirst().first ?? "")
+        #expect(context.contains("SessionGitPresentation"))
+        #expect(context.contains("gitPresentation = .loading"))
+        #expect(context.contains("SessionGitLoadAdmission.admits"))
+        #expect(context.contains("gitLoadGeneration &+= 1"))
+        #expect(context.contains("case .failed"))
+        #expect(!context.contains("await model.refreshSessions()"))
+        let gitTask = (context.components(separatedBy: ".task(id: model.authoritativeSnapshot(for: sessionID)?.cwd)").dropFirst().first ?? "")
             .components(separatedBy: ".task(id: model.sessionContextRevision").first ?? ""
-        #expect(initialContextTask.contains("await model.refreshSessions()"))
-        #expect(initialContextTask.contains("await loadGit("))
-        #expect(!initialContextTask.contains("loadContext("))
-        #expect(!initialContextTask.contains("loadResources("))
+        #expect(gitTask.contains("await loadGit("))
+        #expect(!gitTask.contains("loadContext("))
+        #expect(!gitTask.contains("loadResources("))
         #expect(context.contains(".task(id: model.sessionContextRevision(for: sessionID))"))
-        #expect(context.contains(".task(id: model.sessionResourceRevision(for: sessionID))"))
+        #expect(resources.contains(".task(id: model.sessionResourceRevision(for: sessionID))"))
+        let presentationStore = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/SessionPresentationStore.swift"),
+            encoding: .utf8
+        )
+        for owner in ["contextLoadGeneration", "treeLoadGeneration", "resourceLoadGeneration"] {
+            #expect(presentationStore.contains(owner))
+        }
+        #expect(presentationStore.contains("prepareSecondaryProjectionForRuntimeInstallation(installed)"))
+        #expect(presentationStore.contains("ownsSubscription(sessionID: sessionID, requestedToken: token)"))
         #expect(settings.contains("model.gatewayDiagnostics.logs"))
         #expect(!context.contains("model.client"))
         #expect(!settings.contains("model.client"))
@@ -1332,13 +1380,16 @@ struct PresentationStyleGuardTests {
     func sheetReloadActions() throws {
         let sheetOwners = [
             "Sources/UI/Chat/SessionTreeSheet.swift",
+            "Sources/UI/Settings/ProjectResourcesView.swift",
             "Sources/UI/Settings/PackagesSettingsView.swift",
             "Sources/UI/Settings/ProviderSettingsView.swift",
         ]
         for path in sheetOwners {
             let source = try String(contentsOf: packageRoot.appending(path: path), encoding: .utf8)
             #expect(!source.contains(".refreshable"), "\(path) still enables pull to refresh")
-            #expect(source.contains("TronReloadToolbarButton"), "\(path) is missing an explicit reload action")
+            let hasReloadAction = source.contains("TronReloadToolbarButton")
+                || (source.contains("Text(\"Reload\")") && source.contains("Button(action: reload)"))
+            #expect(hasReloadAction, "\(path) is missing an explicit reload action")
         }
 
         let shell = try String(

@@ -73,6 +73,10 @@ final class SessionPresentationStore {
     private var structureRevision = 0
     private var contextRevision = 0
     private var resourceRevision = 0
+    private var contextLoadGeneration = 0
+    private var treeLoadGeneration = 0
+    private var commandLoadGeneration = 0
+    private var resourceLoadGeneration = 0
 
     init(
         client: GatewayClient,
@@ -397,45 +401,77 @@ final class SessionPresentationStore {
 
     func loadContext(sessionID: String) async {
         guard let token = installedSubscriptionToken(for: sessionID) else { return }
+        contextLoadGeneration &+= 1
+        let generation = contextLoadGeneration
         struct Params: Codable { let sessionId: String }
         do {
             let loaded = try await client.requestValue("session.context", Params(sessionId: sessionID), timeout: .seconds(60))
-            guard ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+            guard generation == contextLoadGeneration,
+                  ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
             context = loaded
-        } catch { delegate?.sessionPresentationStoreSurface(error) }
+        } catch {
+            guard !(error is CancellationError),
+                  generation == contextLoadGeneration,
+                  ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+            delegate?.sessionPresentationStoreSurface(error)
+        }
     }
 
     func loadTree(sessionID: String) async {
         guard let token = installedSubscriptionToken(for: sessionID) else { return }
+        treeLoadGeneration &+= 1
+        let generation = treeLoadGeneration
         struct Params: Codable { let sessionId: String }
         do {
             let loaded: [SessionTreeNode] = try await client.request("session.tree", Params(sessionId: sessionID))
-            guard ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+            guard generation == treeLoadGeneration,
+                  ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
             let admitted = try SessionTreePolicy.admit(loaded)
             sessionTree = admitted
-        } catch { delegate?.sessionPresentationStoreSurface(error) }
+        } catch {
+            guard !(error is CancellationError),
+                  generation == treeLoadGeneration,
+                  ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+            delegate?.sessionPresentationStoreSurface(error)
+        }
     }
 
     func loadCommands(sessionID: String) async {
         guard let token = installedSubscriptionToken(for: sessionID) else { return }
+        commandLoadGeneration &+= 1
+        let generation = commandLoadGeneration
         struct Params: Codable { let sessionId: String }
         struct Response: Decodable { let commands: [CommandInfo] }
         do {
             let response: Response = try await client.request("session.commands", Params(sessionId: sessionID))
-            guard ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+            guard generation == commandLoadGeneration,
+                  ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
             let admitted = try CommandCatalogPolicy.admit(response.commands)
             commands = admitted
-        } catch { delegate?.sessionPresentationStoreSurface(error) }
+        } catch {
+            guard !(error is CancellationError),
+                  generation == commandLoadGeneration,
+                  ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+            delegate?.sessionPresentationStoreSurface(error)
+        }
     }
 
     func loadResources(sessionID: String) async {
         guard let token = installedSubscriptionToken(for: sessionID) else { return }
+        resourceLoadGeneration &+= 1
+        let generation = resourceLoadGeneration
         struct Params: Codable { let sessionId: String }
         do {
             let loaded = try await client.requestValue("session.resources", Params(sessionId: sessionID), timeout: .seconds(60))
-            guard ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+            guard generation == resourceLoadGeneration,
+                  ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
             resources = loaded
-        } catch { delegate?.sessionPresentationStoreSurface(error) }
+        } catch {
+            guard !(error is CancellationError),
+                  generation == resourceLoadGeneration,
+                  ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+            delegate?.sessionPresentationStoreSurface(error)
+        }
     }
 
     private func admitsSequencedEvent(_ event: GatewayEvent) -> Bool {
@@ -465,7 +501,22 @@ final class SessionPresentationStore {
             && subscriptionToken == requestedToken
     }
 
+    @discardableResult
+    func prepareSecondaryProjectionForRuntimeInstallation(_ installed: SessionSnapshot) -> Bool {
+        guard snapshot?.sessionId == installed.sessionId,
+              snapshot?.runtimeGeneration != installed.runtimeGeneration else { return false }
+        clearSecondaryProjection()
+        structureRevision &+= 1
+        contextRevision &+= 1
+        resourceRevision &+= 1
+        return true
+    }
+
     private func clearSecondaryProjection() {
+        contextLoadGeneration &+= 1
+        treeLoadGeneration &+= 1
+        commandLoadGeneration &+= 1
+        resourceLoadGeneration &+= 1
         context = nil
         sessionTree = []
         commands = []
@@ -711,11 +762,15 @@ final class SessionPresentationStore {
                 result = .discarded
                 return .failed
             }
+            let replacedRuntime = prepareSecondaryProjectionForRuntimeInstallation(installed)
             subscribedSessionID = sessionID
             subscriptionToken = response.subscriptionToken
             subscriptionTarget = installedTarget
             snapshot = installed
             authoritativeTailSnapshot = installedTail
+            if replacedRuntime {
+                Task { [weak self] in await self?.loadCommands(sessionID: sessionID) }
+            }
             if case .freshPresentation = mode { hasLoadedTranscriptHistory = false }
             advanceChatProjection(canonical: true)
             switch lease.intent {

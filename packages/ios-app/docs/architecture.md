@@ -899,17 +899,32 @@ receivers, and uses gateway WebSocket heartbeats to keep Tailscale/iOS idle path
 alive. Canonical settings determine the default model; catalog order is never a
 default-selection policy. Dashboard Settings explicitly exposes only global configuration; project scope,
 trust, and project package actions appear only when Settings is opened from a
-project session. Manage Session presents resolved extensions, prompts, skills,
-context files, and tools as named, summarized resource rows over the canonical
-projection; arbitrary arrays derive labels from stable name/path/source fields
-instead of exposing positional “Item” labels. Resource Locations separates
+project session. Manage Session has two primary groups: Configuration owns the
+model, thinking level, and the peer-presented Project Resources sheet; Session owns
+identity, automatic-compaction status, Agent Context, recent history/audit actions,
+terminal, Git/runtime evidence, and exports. Its compact toolbar action invokes Pi's
+canonical compaction through Gateway and can leave one authoritative request queued
+behind an active turn. Project Resources presents resolved extensions, prompts, skills,
+context files, and tools as named, summarized rows over the canonical projection;
+arbitrary arrays derive labels from stable name/path/source fields instead of exposing
+positional “Item” labels. Reload is owned by that sheet and publishes visible progress; the canonical
+`session.resourcesChanged` revision is the sole post-mutation read owner, so mutation and projection loads cannot race one shared busy flag.
+Resource Locations separates
 optional discovery paths from advanced Mac runtime overrides and explains each
 setting before editing it. Session storage is gateway-owned and is not exposed as
 a backing-runtime location override.
 Deep session history is projected as a bounded flat outline with depth, branch,
 and current-path metadata so large canonical sessions neither overflow the
-gateway stack nor exceed the mobile frame while history/fork sheets remain
-usable. Manage Session displays the runtime-projected latest cache-hit rate—the
+gateway stack nor exceed the mobile frame. The single History sheet explains Timeline,
+Branches, Bookmarks, and Recent Log modes, owns fork-point selection and entry actions,
+and identifies JSONL export as the complete canonical audit. Gateway produces that audit by copying the
+canonical append-only JSONL under the existing idle/file/concurrency bounds rather than linearizing only the active branch.
+Agent Context summarizes
+assembled instructions, context accounting, and capability counts without duplicating
+the detailed Project Resources inventory; raw JSON remains a secondary disclosure. A same-session reconnect that
+installs a replacement Gateway runtime clears every secondary projection, advances its reload revisions, and rejects both
+stale completions and stale failures by exact subscription token plus request generation.
+Manage Session displays the runtime-projected latest cache-hit rate—the
 same canonical formula used by the terminal footer—and never derives a ratio
 from cumulative iOS fields. Its user actions surface current failures instead of silently changing
 local presentation. Extension interaction sheets serialize one response/cancellation, retain the sheet

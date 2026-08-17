@@ -71,9 +71,10 @@ admits and reduces mounted-session topics:
   when available; older canonical history derives only an observed call-to-result
   interval because Pi JSONL does not persist tool execution timing;
 - structure/context/resource invalidations reload an already-presented History,
-  Fork, Manage Session, or Project Resources surface from the runtime. Manage Session's
-  revision-keyed context/resource tasks are also the sole initial-load owners; its general
-  appearance task refreshes the catalog/git projection without duplicating Gateway reads;
+  Manage Session, Agent Context, or Project Resources surface from the runtime. Context,
+  tree, and resource reads each carry a subscription-scoped request generation, so an older
+  overlapping completion cannot overwrite newer evidence. Manage Session keys Git inspection
+  directly to the authoritative cwd instead of waiting behind a broad catalog refresh;
 - terminal output/exit payloads decode into typed `Sendable` preparations from the original
   event frame before MainActor routing; malformed known payloads remain inert rather than failing
   the transport. Terminal output is admitted only for a current presentation lease, sequence-checked,
@@ -111,7 +112,11 @@ attempt closes only its provisional token, so a stale close cannot unsubscribe a
 upgrade, iOS accepts an older protocol-v2 `session.open` without the explicit
 `subscriptionToken` and uses its `syncToken`, which is the same per-open identity;
 this keeps existing Gateway-owned runs available until the Gateway can be restarted
-safely. A reconnect while that same chat remains mounted instead receives
+safely. If a reconnect installs a new runtime generation for the same canonical session,
+iOS clears context/tree/resource/command projections, invalidates their in-flight request generations,
+and advances all three public reload revisions before publishing the replacement. Secondary read successes
+and failures both require the exact captured subscription token and latest request generation, so a retired
+runtime cannot repopulate data or surface a stale error. A reconnect while that same chat remains mounted instead receives
 complete current runtime state and preserves compatible explicitly paged history
 and the reader's follow/detached mode. If a pathological live
 tool run exceeds the ordinary projection budget, duplicate tool detail is

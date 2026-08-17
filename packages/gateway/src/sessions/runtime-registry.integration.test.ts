@@ -1100,6 +1100,37 @@ export default function (pi) {
     }
   });
 
+  it("exports the complete canonical JSONL tree including abandoned branches", async () => {
+    const fixture = await coldFixture("complete-jsonl-export");
+    await fixture.registry.initializeBlobStorage();
+    fixture.manager.appendMessage({ role: "user", content: "root prompt", timestamp: Date.now() });
+    const rootEntry = fixture.manager.getEntries().at(-1)!;
+    fixture.manager.appendMessage(fauxAssistantMessage("abandoned branch response"));
+    const abandonedEntry = fixture.manager.getEntries().at(-1)!;
+    fixture.manager.branch(rootEntry.id);
+    fixture.manager.appendMessage(fauxAssistantMessage("active branch response"));
+    const activeEntry = fixture.manager.getEntries().at(-1)!;
+
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const artifact = await slot.export("jsonl");
+    const lease = await fixture.registry.acquireBlob(artifact.blobId);
+    let exported = "";
+    try {
+      for await (const chunk of lease.stream) exported += Buffer.from(chunk).toString("utf8");
+    } finally {
+      await lease.release();
+    }
+
+    const lines = exported.trimEnd().split("\n").map((line) => JSON.parse(line) as {
+      id?: string;
+      parentId?: string | null;
+    });
+    expect(lines.some((entry) => entry.id === abandonedEntry.id && entry.parentId === rootEntry.id)).toBe(true);
+    expect(lines.some((entry) => entry.id === activeEntry.id && entry.parentId === rootEntry.id)).toBe(true);
+    expect(exported).toContain("abandoned branch response");
+    expect(exported).toContain("active branch response");
+  });
+
   it("clears branch-summary operation state when tree navigation rejects or is cancelled", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-navigation-cleanup-"));
     const agentDir = join(root, "agent");
