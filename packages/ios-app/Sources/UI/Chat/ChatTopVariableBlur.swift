@@ -52,6 +52,9 @@ enum ChatBottomActivityBlurLayout {
     static let restingTintOpacity = 0.02
     static let activeTintOpacity = 0.105
     static let reduceMotionTintOpacity = 0.06
+    static let lightRestingTintOpacity = 0.035
+    static let lightActiveTintOpacity = 0.15
+    static let lightReduceMotionTintOpacity = 0.085
 
     static func height(keyboardVisible: Bool) -> CGFloat {
         keyboardVisible ? keyboardHeight : bottomHeight
@@ -70,6 +73,7 @@ struct ChatBottomActivityBlur: View {
     let keyboardVisible: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @State private var emeraldPhase = false
 
     var body: some View {
@@ -101,7 +105,16 @@ struct ChatBottomActivityBlur: View {
 
     private var tintOpacity: Double {
         guard isActive else { return 0 }
-        if reduceMotion { return ChatBottomActivityBlurLayout.reduceMotionTintOpacity }
+        if reduceMotion {
+            return colorScheme == .light
+                ? ChatBottomActivityBlurLayout.lightReduceMotionTintOpacity
+                : ChatBottomActivityBlurLayout.reduceMotionTintOpacity
+        }
+        if colorScheme == .light {
+            return emeraldPhase
+                ? ChatBottomActivityBlurLayout.lightActiveTintOpacity
+                : ChatBottomActivityBlurLayout.lightRestingTintOpacity
+        }
         return emeraldPhase
             ? ChatBottomActivityBlurLayout.activeTintOpacity
             : ChatBottomActivityBlurLayout.restingTintOpacity

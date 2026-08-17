@@ -555,8 +555,10 @@ The composer supports text, system-keyboard dictation, images, and bounded file
 uploads. It does not expose an app-owned microphone control until a proper voice mode exists.
 Drafting remains available while authoritative opening finishes and throughout
 an active turn; only submission waits for readiness. Default visible running state consumes no transcript
-space: a nonstructural 68-point bottom-safe-area blur gently oscillates between its neutral state and a
-clearly readable but low-saturation emerald tint. At rest its fixed 44-point safe-area translation leaves 24
+space: a nonstructural 68-point bottom-safe-area blur gently oscillates between its neutral state and an
+emerald tint. Dark appearance keeps the restrained historical pulse; light appearance uses modestly higher
+resting, peak, and Reduce Motion opacity so the same pulse remains visibly saturated against pale surfaces.
+At rest its fixed 44-point safe-area translation leaves 24
 points of additional upward reach without increasing blur radius. The overlay belongs to the measured composer
 but remains nonstructural. It renders in the composer's background layer, keeping the Liquid Glass input and
 controls above the effect. While the editor owns keyboard focus, the blur grows from 68 to 80 points and its
