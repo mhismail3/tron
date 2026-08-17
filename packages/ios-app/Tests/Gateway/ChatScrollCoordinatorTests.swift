@@ -955,6 +955,68 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.command == current)
     }
 
+    @Test("opening timeout reveals after one exact-ID attempt when geometry disappears")
+    func openingTailTimeoutFallsBackToExactBinding() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(
+                frameScheduler: frames.scheduler,
+                clock: clock.clock,
+                openingTailTimeout: .seconds(1)
+            )
+            coordinator.resetForPresentation(1)
+            coordinator.commandApplied(coordinator.command!)
+            let positioning = Task {
+                await coordinator.positionOpeningTail(targetRenderedID: "missing-tail")
+            }
+
+            try await clock.waitUntilSleeping(count: 1)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let exactTail = try await coordinator.hostedNextCommand()
+            #expect(exactTail.destination == .openingTail("missing-tail"))
+            coordinator.commandApplied(exactTail)
+            clock.advance(by: .seconds(1))
+            #expect(await positioning.value)
+            coordinator.cancel()
+        }
+    }
+
+    @Test("physical positioning cancels the deadline before reveal settlement")
+    func openingTailDeadlineEndsAtPhysicalPositioning() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(
+                frameScheduler: frames.scheduler,
+                clock: clock.clock,
+                openingTailTimeout: .seconds(1)
+            )
+            coordinator.resetForPresentation(1)
+            coordinator.commandApplied(coordinator.command!)
+            let positioning = Task {
+                await coordinator.positionOpeningTail(targetRenderedID: "tail")
+            }
+            coordinator.semanticFrameChanged(
+                renderedID: "tail",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 350, width: 100, height: 40)
+            )
+            coordinator.geometryChanged(previous: .zero, current: bottom)
+
+            #expect(await positioning.value)
+            clock.advance(by: .seconds(2))
+            coordinator.openingRevealCompleted()
+            await frames.waitForRequest(count: 1)
+            frames.releaseAll()
+            await frames.waitForRequest(count: 2)
+            frames.releaseAll()
+            let release = try await coordinator.hostedNextCommand()
+            #expect(release.destination == .releaseBinding)
+        }
+    }
+
     @Test("unrealized opening tail receives one frame-gated correction and physical proof")
     func openingTailCorrectsUnrealizedTarget() async throws {
         try await withTestWatchdog { @MainActor in

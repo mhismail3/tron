@@ -85,6 +85,8 @@ final class ChatScrollCoordinator {
     private(set) var maximumPrependSemanticExcursion: CGFloat = 0
 
     private let frameScheduler: DisplayFrameScheduler
+    private let clock: MonotonicClock
+    private let openingTailTimeout: Duration
     private var presentation = 0
     private var sequence = 0
     private var geometry = ChatTranscriptGeometry.zero
@@ -130,6 +132,7 @@ final class ChatScrollCoordinator {
     @ObservationIgnored private var catchUpTask: Task<Void, Never>?
     @ObservationIgnored private var prependTask: Task<Void, Never>?
     @ObservationIgnored private var openingTailFrameTask: Task<Void, Never>?
+    @ObservationIgnored private var openingTailTimeoutTask: Task<Void, Never>?
 
     private var catchUpPhase: CatchUpPhase = .none
     private var catchUpCommandToken: Int?
@@ -179,8 +182,14 @@ final class ChatScrollCoordinator {
     private var prependAppliedOffset = false
     private var prependCompletion: (@MainActor (PerformanceResult) -> Void)?
 
-    init(frameScheduler: DisplayFrameScheduler = .displayLink) {
+    init(
+        frameScheduler: DisplayFrameScheduler = .displayLink,
+        clock: MonotonicClock = .continuous,
+        openingTailTimeout: Duration = .seconds(5)
+    ) {
         self.frameScheduler = frameScheduler
+        self.clock = clock
+        self.openingTailTimeout = openingTailTimeout
     }
 
     /// The catch-up affordance projects one fact only: the reader has
@@ -584,6 +593,7 @@ final class ChatScrollCoordinator {
         openingTailPresentation = presentation
         openingTailCommandAttemptCount = 0
         openingTailContinuation = continuation
+        scheduleOpeningTailTimeout(token: token)
         evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
         if openingTailSettlementPending, !openingTailPositioned {
             scheduleOpeningTailFrame()
@@ -1219,6 +1229,8 @@ final class ChatScrollCoordinator {
             openingTailCommandSemanticRevision = nil
             openingTailCommandGeometryRevision = nil
             if !openingTailPositioned {
+                openingTailTimeoutTask?.cancel()
+                openingTailTimeoutTask = nil
                 openingTailPositioned = true
                 let continuation = openingTailContinuation
                 openingTailContinuation = nil
@@ -1239,10 +1251,9 @@ final class ChatScrollCoordinator {
             return
         }
 
-        guard geometry.isValid,
-              canAutomaticallyFollow, command == nil,
-              hasCurrentTarget || allowsUnrealizedTailCommand else { return }
-        guard let targetRenderedID = openingTailTargetRenderedID else { return }
+        guard canAutomaticallyFollow, command == nil,
+              hasCurrentTarget || allowsUnrealizedTailCommand,
+              geometry.isValid || allowsUnrealizedTailCommand else { return }
         publish(.openingTail(targetRenderedID), animation: .disabled, origin: .presentation)
         openingTailCommandToken = command?.token
         openingTailCommandSemanticRevision = semanticFrameRevision
@@ -1339,6 +1350,8 @@ final class ChatScrollCoordinator {
 
     private func finishOpeningTailSettlement() {
         let token = openingTailToken
+        openingTailTimeoutTask?.cancel()
+        openingTailTimeoutTask = nil
         openingTailFrameTaskGeneration &+= 1
         openingTailFrameTask?.cancel()
         openingTailFrameTask = nil
@@ -1370,6 +1383,8 @@ final class ChatScrollCoordinator {
     ) {
         if let expectedToken, openingTailToken != expectedToken { return }
         let token = openingTailToken
+        openingTailTimeoutTask?.cancel()
+        openingTailTimeoutTask = nil
         openingTailFrameTaskGeneration &+= 1
         openingTailFrameTask?.cancel()
         openingTailFrameTask = nil
@@ -1393,6 +1408,29 @@ final class ChatScrollCoordinator {
         openingTailContinuation = nil
         continuation?.resume(returning: positioningSucceeded)
         if let token { resumeOpeningTailFinalWaiters(token: token) }
+    }
+
+    private func scheduleOpeningTailTimeout(token: Int) {
+        openingTailTimeoutTask?.cancel()
+        openingTailTimeoutTask = Task { [weak self, clock, openingTailTimeout] in
+            do {
+                try await clock.sleep(openingTailTimeout)
+                try Task.checkCancellation()
+            } catch {
+                return
+            }
+            guard let self,
+                  self.openingTailSettlementPending,
+                  self.openingTailToken == token else { return }
+            // Native proof is preferred, but presentation must not become
+            // unavailable solely because SwiftUI omits/coalesces geometry.
+            // The coordinator already made its bounded exact-ID attempts; keep
+            // that binding and reveal the authoritative transcript best-effort.
+            self.clearOpeningTailSettlement(
+                ifToken: token,
+                positioningSucceeded: true
+            )
+        }
     }
 
     private func resumeOpeningTailFinalWaiter(id: Int, token: Int) {

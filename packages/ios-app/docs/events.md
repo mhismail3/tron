@@ -90,7 +90,11 @@ After the authoritative two-phase handshake completes, the projection remains be
 the opaque opening surface until the exact physical marker after transcript and queue rows intersects
 a plausible native bottom viewport. An exact-ID command realizes a missing lazy tail; submitted commands,
 clamped negative bottom distance, auxiliary rows, transient boundary geometry, and overflow overshoot are
-not settlement evidence. The positioned transcript then fades/rises into view while the tail binding remains
+not settlement evidence. The native geometry observation identity includes the opening epoch and phase, so
+entering positioning replays current geometry even when SwiftUI would coalesce equal numeric fields. Exact-ID
+realization can proceed without a geometry sample. If physical proof still cannot settle within five seconds, the
+bounded exact-ID binding remains owned and the authoritative transcript is revealed best-effort instead of failing
+conversation availability. The positioned transcript then fades/rises into view while the tail binding remains
 owned through animation completion and two unchanged display frames. Direct user or accessibility interaction
 cancels that arm. The composer
 remains visible throughout opening, while sending stays disabled until readiness.

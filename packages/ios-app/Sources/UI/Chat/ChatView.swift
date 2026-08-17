@@ -7,6 +7,12 @@ enum ChatComposerLayoutSignalPolicy {
     }
 }
 
+private struct ChatScrollGeometryObservation: Equatable {
+    let geometry: ChatTranscriptGeometry
+    let presentationEpoch: Int
+    let phase: ChatOpenPresentationPhase
+}
+
 struct ChatView: View {
     let sessionID: String
     private let initialEditorText: String?
@@ -336,9 +342,17 @@ struct ChatView: View {
             }
             scrollCoordinator.scrollPositionChanged(isPositionedByUser: positionedByUser)
         }
-        .onScrollGeometryChange(for: ChatTranscriptGeometry.self) { geometry in
-            ChatTranscriptGeometry(geometry)
-        } action: { previous, geometry in
+        .onScrollGeometryChange(for: ChatScrollGeometryObservation.self) { geometry in
+            ChatScrollGeometryObservation(
+                geometry: ChatTranscriptGeometry(geometry),
+                presentationEpoch: openPresentation.epoch,
+                phase: openPresentation.phase
+            )
+        } action: { previous, observation in
+            guard observation.presentationEpoch == openPresentation.epoch,
+                  observation.phase == openPresentation.phase else { return }
+            let geometry = observation.geometry
+            let previousGeometry = previous.geometry
             transcriptGeometry = geometry
             #if HOSTED_TEST
             hostedProbe?.updateGeometry(geometry)
@@ -346,11 +360,16 @@ struct ChatView: View {
                 hostedProbe?.recordScrollSettle(distanceFromBottom: geometry.distanceFromBottom)
             }
             #endif
-            guard admitsScrollGeometryCallbacks, admitsNativeScrollCallbacks else { return }
-            if geometry.hasViewportChange(from: previous) {
-                scrollCoordinator.viewportChanged(previous: previous, current: geometry)
+            guard observation.phase == .positioning || observation.phase == .ready,
+                  admitsScrollGeometryCallbacks,
+                  admitsNativeScrollCallbacks else { return }
+            // Phase and epoch participate in the observed value so entering
+            // positioning replays current native geometry even when its numeric
+            // fields are unchanged and SwiftUI would otherwise coalesce it.
+            if geometry.hasViewportChange(from: previousGeometry) {
+                scrollCoordinator.viewportChanged(previous: previousGeometry, current: geometry)
             } else {
-                scrollCoordinator.geometryChanged(previous: previous, current: geometry)
+                scrollCoordinator.geometryChanged(previous: previousGeometry, current: geometry)
             }
         }
         .onScrollPhaseChange { oldPhase, newPhase, context in
@@ -704,8 +723,30 @@ struct ChatView: View {
                     epoch: epoch,
                     targetRenderedID: physicalOpeningTailID(for: installed)
                 )
-                guard positioned,
-                      !Task.isCancelled,
+                guard positioned else {
+                    let isCurrentTimeout = !Task.isCancelled
+                        && openPresentation.epoch == epoch
+                        && openPresentation.phase == .positioning
+                    performanceSignposts.end(
+                        interval,
+                        result: isCurrentTimeout ? .failure : .discarded,
+                        metrics: .none
+                    )
+                    if isCurrentTimeout {
+                        _ = openPresentation.fail(
+                            sessionID: sessionID,
+                            epoch: epoch,
+                            message: "The conversation layout did not settle. Please retry."
+                        )
+                    }
+                    await model.closeSessionPresentation(sessionID, generation: generation)
+                    if modelPresentationGeneration == generation {
+                        modelPresentationGeneration = nil
+                        transcriptPresentation.reset()
+                    }
+                    return
+                }
+                guard !Task.isCancelled,
                       revealPositionedTranscript(epoch: epoch) else {
                     performanceSignposts.end(interval, result: .discarded, metrics: .none)
                     await model.closeSessionPresentation(sessionID, generation: generation)

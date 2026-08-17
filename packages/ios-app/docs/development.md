@@ -396,9 +396,10 @@ following, one follow command per frame, a single smooth command only for an adm
 insertion, immediate continuous-stream following, no writes for detached layout/stream/keyboard
 settlement, viewport geometry-first expansion detachment, frame-separated catch-up with unread admission
 through every interruption stage, Reduce Motion, exact reset/release command admission,
-exact physical-tail opening settlement, frame-gated unrealized-target correction, overflow-overshoot rejection,
-both geometry/frame callback orders, empty/undersized top alignment, post-reveal stable-frame binding release,
-pre-settlement user cancellation, stale-presentation rejection, repeat-prepend ownership, post-install layout-epoch rejection, unchanged-frame epoch
+exact physical-tail opening settlement, phase-keyed native-geometry replay, bounded exact-binding fallback,
+frame-gated unrealized-target correction without geometry, overflow-overshoot rejection, both geometry/frame callback orders,
+empty/undersized top alignment, post-reveal stable-frame binding release, pre-settlement user cancellation,
+stale-presentation rejection, repeat-prepend ownership, post-install layout-epoch rejection, unchanged-frame epoch
 callbacks, and exact semantic remeasurement with at most one late correction and no
 frame retry or total-height polling. Hosted controls drive the production
 coordinator/executor; new evidence is bounded aggregate callback/command/frame and

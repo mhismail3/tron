@@ -456,8 +456,13 @@ with the exact physical marker after installed transcript and queue rows. Auxili
 it, transient boundary geometry cannot clear it, and native visible geometry beyond an overflowing content edge
 is treated as overshoot rather than a settled bottom. If the marker is unrealized, one frame-gated exact-ID command
 forces lazy realization; command submission remains owned until current-layout marker and correlated native
-geometry prove physical settlement. At most one bounded second exact-ID submission is allowed when SwiftUI
-consumes the first against provisional lazy layout; later writes require new layout evidence. Undersized content remains top aligned. The opening surface then fades away
+geometry prove physical settlement. The native geometry observation identity includes the opening epoch and
+phase, forcing a current geometry replay when the state advances to positioning even if every numeric field is
+unchanged; opening-time samples still never admit ordinary follow or detachment policy. At most one bounded
+second exact-ID submission is allowed when SwiftUI consumes the first against provisional lazy layout; later writes require new
+layout evidence. Exact-ID realization does not require a native geometry sample. If physical proof still disappears,
+a five-second deadline retains the bounded exact-ID binding and reveals the authoritative transcript best-effort
+rather than converting a presentation-only callback failure into an unavailable conversation. Undersized content remains top aligned. The opening surface then fades away
 while the binding remains owned through animation completion and two stable presented frames, preventing later
 lazy content-size correction from exposing empty space. An empty timeline takes an explicit no-transcript path,
 while any direct/native/accessibility interaction cancels the pending target permanently. Automatic streaming growth is
