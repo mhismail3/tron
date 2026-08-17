@@ -212,10 +212,17 @@ extension ChatCompactPillLabel where Trailing == EmptyView {
     }
 }
 
+enum ChatPromptContainerStyle {
+    static let cornerRadius: CGFloat = 18
+    static let horizontalPadding: CGFloat = 12
+    static let topPadding: CGFloat = 8
+    static let bottomPadding: CGFloat = 12
+    static let tintOpacity: Double = 0.16
+}
+
 enum UserPromptTextLayoutPolicy {
-    static let leadingInset: CGFloat = 28
     static let maximumWidth: CGFloat = 364 // 30% narrower than the prior 520-point bound.
-    static let fontScale: CGFloat = 0.9
+    static let fontScale: CGFloat = 1
 
     static func fittedWidth(measured: CGFloat, proposed: CGFloat) -> CGFloat {
         min(max(0, measured), max(0, proposed))

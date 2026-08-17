@@ -75,7 +75,10 @@ struct QueuedMessageRow: View {
     }
 
     private var card: some View {
-        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        let shape = RoundedRectangle(
+            cornerRadius: ChatPromptContainerStyle.cornerRadius,
+            style: .continuous
+        )
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Image(systemName: message.behavior == .steer
@@ -115,12 +118,13 @@ struct QueuedMessageRow: View {
                 .padding(.leading, 38)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
+        .padding(.top, ChatPromptContainerStyle.topPadding)
+        .padding(.bottom, ChatPromptContainerStyle.bottomPadding)
+        .contentShape(shape)
         .glassEffect(
             isManageable
-                ? .regular.tint(accent.opacity(0.16)).interactive()
+                ? .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)).interactive()
                 : .regular.tint(accent.opacity(0.12)),
             in: shape
         )

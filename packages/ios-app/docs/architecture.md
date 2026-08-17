@@ -570,8 +570,9 @@ that hug their content and wrap at the same 364-point maximum as a user prompt. 
 identity, delivery stage, position, text, and attachment count. Queue cards and the transcript
 timeline are installed from the same exact tagged source, so consuming a queued entry cannot remove
 its card one frame before the corresponding canonical prompt installs. Manageable cards use one
-interactive, accent-tinted Liquid Glass surface; tapping anywhere opens the editor without adding
-inline action chrome. The editor's leading toolbar owns removal, while a long-press menu retains
+interactive, accent-tinted Liquid Glass surface with an explicit full-shape hit region; tapping
+anywhere opens the editor without adding inline action chrome. The editor's leading toolbar owns
+removal, while a long-press menu retains
 same-stage reorder and clear-all. Text and behavior changes use an optimistic queue revision. Conflicts
 wait for the next authoritative snapshot rather than fabricating a local queue. Steering is always
 presented before follow-up to match runtime delivery order. Older Gateways retain a visibly locked
@@ -759,8 +760,9 @@ action while non-sheet dashboard refresh remains available.
 Chat has one spatial role model: user prompts are right anchored, agent prose and tools are left
 anchored, and presentation-only system events are centered. A width-aware TextKit owner lets short
 prompts hug their measured content at the trailing edge, bounds longer prompts to 364 points, and
-uses logical-leading line alignment inside that block with a 10% smaller Dynamic Type font. An
-external 28-point logical-leading separation preserves the right-side silhouette. Newly installed
+uses logical-leading line alignment inside that block at the same Dynamic Type body size as agent
+prose. User prompts use the same 18-point emerald-tinted Liquid Glass container geometry as steer-next
+cards, without header icons or action chrome. Newly installed
 canonical content uses that same role geometry for presentation-only motion: user prompts and
 queued intents rise from the trailing composer edge, tool activity enters from the leading edge,
 system capsules settle from center, and assistant prose uses only a shallow vertical reveal. The

@@ -11,11 +11,15 @@ struct ChatCompactPillTests {
         #expect(UserPromptTextLayoutPolicy.alignment(layoutDirection: .rightToLeft) == .right)
     }
 
-    @Test("prompt bound, type scale, and leading separation are explicit")
+    @Test("prompt bound, response-matched type scale, and glass geometry are explicit")
     func promptGeometry() {
-        #expect(UserPromptTextLayoutPolicy.leadingInset == 28)
         #expect(UserPromptTextLayoutPolicy.maximumWidth == 364)
-        #expect(UserPromptTextLayoutPolicy.fontScale == 0.9)
+        #expect(UserPromptTextLayoutPolicy.fontScale == 1)
+        #expect(ChatPromptContainerStyle.cornerRadius == 18)
+        #expect(ChatPromptContainerStyle.horizontalPadding == 12)
+        #expect(ChatPromptContainerStyle.topPadding == 8)
+        #expect(ChatPromptContainerStyle.bottomPadding == 12)
+        #expect(ChatPromptContainerStyle.tintOpacity == 0.16)
     }
 
     @Test("short prompts keep their intrinsic width while long prompts stop at the bound")

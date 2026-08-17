@@ -407,15 +407,15 @@ maximum-excursion data only. Hosted discrete-insertion cases record aggregate en
 counts, prove a visible insertion admits once, and prove detached insertion emits no automatic write.
 Hosted streaming bursts must install only their newest exact source while detached composer/viewport work
 remains writable and creates no projection work. `ChatCompactPillTests` own intrinsic-width trailing placement for short prompts, the 364-point
-long-prompt bound, logical-leading line alignment, the 10% type reduction, the 28-point external
-user-side separation, and flat/detail material policy. `ChatContentTransitionTests` own role
+long-prompt bound, logical-leading line alignment, agent-matched Dynamic Type body sizing, shared
+prompt/queue Liquid Glass geometry, and flat/detail material policy. `ChatContentTransitionTests` own role
 classification, trailing composer-edge prompt/queue motion, aligned activity motion, and the
 identity transform required by Reduce Motion. Hosted scroll tests remain the authority that these
 visual transforms do not grant detached readers automatic writes or replay same-ID entrances.
 `GatewayProtocolContractTests`, `SharedProtocolFixtureTests`, and
 `SessionMutationServiceTests` cover revisioned queue projection and replacement commands.
 `QueuedMessagePresentationTests` own capability/field admission for editing; presentation guards
-retain intrinsic cards capped at the user-prompt bound, whole-card interactive Liquid Glass,
+retain intrinsic cards capped at the user-prompt bound, full-shape whole-card interactive Liquid Glass,
 leading-toolbar removal, an explicit legacy lock, and Tron surfaces instead of stock forms.
 Native bottom evidence comes from `ScrollGeometry.visibleRect.maxY`
 plus the bottom inset; the harness no longer substitutes a hard-coded settled distance.

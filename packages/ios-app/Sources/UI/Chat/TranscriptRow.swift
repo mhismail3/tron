@@ -79,7 +79,6 @@ struct TranscriptRow: View, Equatable {
                                 EmptyView() // Presented together above the prompt text.
                             } else if item.role == .user {
                                 UserPromptText(text: part.text ?? "")
-                                    .padding(.leading, UserPromptTextLayoutPolicy.leadingInset)
                             } else {
                                 MarkdownText(
                                     text: part.text ?? "",
@@ -140,13 +139,19 @@ struct TranscriptRow: View, Equatable {
                     Text("\(provider) / \(modelName)").font(TronFont.mono(10)).foregroundStyle(Color.tronTextSecondary)
                 }
             }
-            .padding(.horizontal, item.role == .user ? 0 : 2)
+            .padding(
+                .horizontal,
+                item.role == .user ? ChatPromptContainerStyle.horizontalPadding : 2
+            )
+            .padding(.top, item.role == .user ? ChatPromptContainerStyle.topPadding : 0)
+            .padding(.bottom, item.role == .user ? ChatPromptContainerStyle.bottomPadding : 0)
             .frame(
                 maxWidth: item.role == .user
                     ? UserPromptTextLayoutPolicy.maximumWidth
                     : .infinity,
                 alignment: item.role == .user ? .topTrailing : .topLeading
             )
+            .modifier(UserPromptGlassModifier(enabled: item.role == .user))
         }
     }
 
@@ -184,6 +189,26 @@ struct TranscriptRow: View, Equatable {
         .accessibilityLabel("Prompt attachments")
     }
 
+}
+
+private struct UserPromptGlassModifier: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            let shape = RoundedRectangle(
+                cornerRadius: ChatPromptContainerStyle.cornerRadius,
+                style: .continuous
+            )
+            content.glassEffect(
+                .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
+                in: shape
+            )
+        } else {
+            content
+        }
+    }
 }
 
 private struct ThinkingBlock: View {
