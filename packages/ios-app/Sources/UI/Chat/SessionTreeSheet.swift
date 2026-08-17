@@ -409,7 +409,7 @@ private struct TreeNodeRow: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(title)
-                                .font(TronTypography.headline)
+                                .font(TronTypography.body)
                                 .foregroundStyle(Color.tronTextPrimary)
                                 .multilineTextAlignment(.leading)
                                 .lineLimit(3)

@@ -926,8 +926,9 @@ and current-path metadata so large canonical sessions neither overflow the
 gateway stack nor exceed the mobile frame. The single History sheet explains Timeline,
 Branches, Bookmarks, and Recent Log modes, and identifies JSONL export as the complete canonical audit.
 Runtime, canonical-history, history-mode, and event cards share one icon width, content spacing, padding,
-title scale, supporting-text scale, and vertically centered icon-to-text alignment. All text blocks use the
-same leading edge. The row opens details while its uncontained ellipsis control opens the native actions
+supporting-text scale, and vertically centered icon-to-text alignment. All text blocks use the same leading
+edge; event titles intentionally use the smaller regular body style while summary and mode titles use the
+headline style. The row opens details while its uncontained ellipsis control opens the native actions
 menu. Forking is available from that menu and as the final action in Entry Details instead of occupying the
 history summary.
 Gateway produces that audit by copying the

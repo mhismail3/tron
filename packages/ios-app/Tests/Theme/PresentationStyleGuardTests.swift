@@ -503,6 +503,10 @@ struct PresentationStyleGuardTests {
         #expect(history.contains("Button(\"Fork New Session\", systemImage: \"arrow.triangle.branch\", action: fork)"))
         #expect(history.contains("private enum SessionHistoryCardMetrics"))
         #expect(history.components(separatedBy: ".frame(width: SessionHistoryCardMetrics.iconWidth)").count - 1 == 4)
+        let eventRows = (history.components(separatedBy: "private struct TreeNodeRow").dropFirst().first ?? "")
+            .components(separatedBy: "private struct HistoryEntryDetailsSheet").first ?? ""
+        #expect(eventRows.contains("Text(title)\n                                .font(TronTypography.body)"))
+        #expect(!eventRows.contains("Text(title)\n                                .font(TronTypography.headline)"))
         #expect(!history.contains(".glassEffect(.regular.tint(accent.opacity(0.14)).interactive(), in: .circle)"))
         #expect(history.contains(".frame(width: 44, height: 44)\n                    .contentShape(Rectangle())"))
         let detailActions = (history.components(separatedBy: "TronSettingsGroup(\"Actions\"").dropFirst().first ?? "")
