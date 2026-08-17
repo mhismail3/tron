@@ -355,7 +355,9 @@ streaming, and live-tool arrays. Its cold oracle and detached worker use the sam
 assembler kernel; there is no output-producing test builder, suffix builder, or second cold projector.
 The worker retains one complete disposable basis scoped by cache epoch, session, mounted presentation,
 and runtime, plus an exact projection-key return. A newer epoch clears the older basis before reuse;
-reset sends monotonic retirement that cannot erase a newer epoch. Exact source windows reuse fragments
+reset cancels the façade worker, skips obsolete text preparation at cooperative boundaries, and sends
+monotonic cache retirement that cannot erase a newer epoch. Worker identity prevents a retiring task
+from clearing its replacement. Exact source windows reuse fragments
 only when the complete prior `TranscriptItem` equals the incoming item at the intersecting global
 ordinal. Inexact legacy windows require one unique contiguous ordered-spine proof and still require
 complete source equality; duplicates and ambiguity assemble cold. Streaming call IDs participate in
@@ -782,7 +784,9 @@ unmatched result remains visible when its call is outside that page. Unanchored 
 non-tool streaming content regardless of running/completed status; isolated streaming-suffix projection is
 permitted only when every runtime tool has a canonical call anchor. Consecutive
 tool-only entries collapse into a single compact run chip whose sub-sheet keeps
-every tool and its individual detail available. The run, individual tool, Changes, and
+every tool and its individual detail available. Each exact installed projection builds one
+unique call-ID descriptor index, so live detail refresh resolves from bounded installed state
+without rescanning the full timeline. The run, individual tool, Changes, and
 Technical details sheets share one inline navigation-chrome policy; principal toolbar titles
 therefore cannot reserve an empty large-title region above the scroll view. Each medium/large
 tool detail sheet explicitly top-anchors short scroll content and begins immediately below

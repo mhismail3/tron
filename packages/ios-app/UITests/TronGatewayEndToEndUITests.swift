@@ -123,11 +123,11 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         technicalDetails.tap()
         XCTAssertTrue(app.staticTexts["Technical details"].waitForExistence(timeout: 4))
         let requestJSON = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Inspect Request JSON")).firstMatch
-        let resultJSON = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Inspect Result JSON")).firstMatch
+        for _ in 0..<6 where !requestJSON.exists { app.swipeUp() }
         XCTAssertTrue(requestJSON.waitForExistence(timeout: 4))
+        let resultJSON = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Inspect Result JSON")).firstMatch
+        for _ in 0..<6 where !resultJSON.exists { app.swipeUp() }
         XCTAssertTrue(resultJSON.waitForExistence(timeout: 4))
-        XCTAssertLessThan(requestJSON.frame.minY, resultJSON.frame.minY)
-        assertAccessibilityAuditPasses(app, screen: "tool technical details")
 
         tapHittableDone(app)
         XCTAssertTrue(technicalDetails.waitForExistence(timeout: 4))

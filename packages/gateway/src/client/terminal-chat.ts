@@ -138,6 +138,13 @@ function usage(): never {
   process.exit(64);
 }
 
+export function operationNeedsSettlement(
+  operationId: string,
+  reconciledSettledOperation: string | undefined,
+): boolean {
+  return operationId !== reconciledSettledOperation;
+}
+
 export async function runTerminalChat(): Promise<void> {
   if (process.argv.includes("--help") || process.argv.includes("-h")) usage();
   const tronHome = resolveTronHome();
@@ -169,6 +176,7 @@ export async function runTerminalChat(): Promise<void> {
   let rendered = assistantText(snapshot);
   let cursor = { runtimeGeneration: snapshot.runtimeGeneration, eventSequence: snapshot.eventSequence };
   let awaitingOperation: string | undefined;
+  let reconciledSettledOperation: string | undefined;
   let pendingCommand: { method: string; commandId: string } | undefined;
   let settledResolve: (() => void) | undefined;
   process.stdout.write(`Attached to Tron session ${snapshot.sessionId} (${snapshot.cwd})\n`);
@@ -244,6 +252,7 @@ export async function runTerminalChat(): Promise<void> {
             pendingCommand = undefined;
           }
           if (awaitingOperation && snapshot.phase === "idle" && !snapshot.operation) {
+            reconciledSettledOperation = awaitingOperation;
             awaitingOperation = undefined;
             settledResolve?.();
             settledResolve = undefined;
@@ -303,6 +312,7 @@ export async function runTerminalChat(): Promise<void> {
         continue;
       }
       const commandId = randomUUID();
+      reconciledSettledOperation = undefined;
       pendingCommand = { method: "session.prompt", commandId };
       const result = await confirmedRequest("session.prompt", {
         sessionId,
@@ -312,6 +322,10 @@ export async function runTerminalChat(): Promise<void> {
         commandId,
       }, commandId) as unknown as { operationId: string };
       pendingCommand = undefined;
+      if (!operationNeedsSettlement(result.operationId, reconciledSettledOperation)) {
+        reconciledSettledOperation = undefined;
+        continue;
+      }
       awaitingOperation = result.operationId;
       await new Promise<void>((resolve) => { settledResolve = resolve; });
     }

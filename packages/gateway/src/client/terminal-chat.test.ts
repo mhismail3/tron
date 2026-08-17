@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayProtocolClient } from "./gateway-client.js";
-import { listSessions } from "./terminal-chat.js";
+import { listSessions, operationNeedsSettlement } from "./terminal-chat.js";
 
 function session(id: string, extra: Record<string, unknown> = {}) {
   return { id, cwd: "/workspace", firstMessage: id, ...extra };
@@ -14,6 +14,14 @@ function clientWithPages(pages: unknown[]): Pick<GatewayProtocolClient, "request
   });
   return { request } as unknown as Pick<GatewayProtocolClient, "request"> & { request: ReturnType<typeof vi.fn> };
 }
+
+describe("terminal chat operation settlement", () => {
+  it("does not reinstall a waiter after reconnect already observed settlement", () => {
+    expect(operationNeedsSettlement("operation-one", "operation-one")).toBe(false);
+    expect(operationNeedsSettlement("operation-two", "operation-one")).toBe(true);
+    expect(operationNeedsSettlement("operation-one", undefined)).toBe(true);
+  });
+});
 
 describe("terminal chat session catalog", () => {
   it("collects one immutable bounded traversal", async () => {

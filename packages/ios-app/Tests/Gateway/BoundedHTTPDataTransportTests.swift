@@ -40,6 +40,32 @@ struct BoundedHTTPDataTransportTests {
         #expect(accumulator.data == Data([1, 2, 3, 4]))
     }
 
+    @Test("oversized response headers finish without re-entering the delegate lock")
+    func oversizedHeaderFinishes() async throws {
+        try await assertLoaderRejects(OversizedContentLengthURLProtocol.self)
+    }
+
+    @Test("oversized streamed bodies finish without re-entering the delegate lock")
+    func oversizedStreamFinishes() async throws {
+        try await assertLoaderRejects(OversizedChunkURLProtocol.self)
+    }
+
+    private func assertLoaderRejects(_ protocolClass: AnyClass) async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [protocolClass]
+        let request = URLRequest(url: URL(string: "https://gateway.test/bounded")!)
+        do {
+            _ = try await BoundedURLSessionDataLoader.load(
+                request,
+                maximumBytes: 4,
+                configuration: configuration
+            )
+            Issue.record("Oversized response unexpectedly completed")
+        } catch let error as URLError {
+            #expect(error.code == .dataLengthExceedsMaximum)
+        }
+    }
+
     @Test("uploads bound response accumulation and retain request bytes")
     func gatewayUploadBoundary() async throws {
         try await withTestWatchdog {
@@ -361,3 +387,31 @@ private actor BoundedTransportRecorder {
         value = Value(request: request, maximumBytes: maximumBytes)
     }
 }
+
+private class BoundedResponseURLProtocol: URLProtocol {
+    class var responseHeaders: [String: String]? { nil }
+    class var responseData: Data { Data([1, 2, 3, 4, 5]) }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: Self.responseHeaders
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Self.responseData)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private final class OversizedContentLengthURLProtocol: BoundedResponseURLProtocol {
+    override class var responseHeaders: [String: String]? { ["Content-Length": "5"] }
+}
+
+private final class OversizedChunkURLProtocol: BoundedResponseURLProtocol {}

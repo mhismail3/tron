@@ -73,17 +73,23 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
     private var task: URLSessionDataTask?
     private var cancellationRequested = false
     private var terminalResult: Result<(Data, HTTPURLResponse), Error>?
+    private let configuration: URLSessionConfiguration
 
-    private init(maximumBytes: Int) {
+    private init(maximumBytes: Int, configuration: URLSessionConfiguration) {
         accumulator = BoundedHTTPBodyAccumulator(maximumBytes: maximumBytes)
+        self.configuration = configuration
     }
 
     static func load(
         _ request: URLRequest,
         uploadFileURL: URL? = nil,
-        maximumBytes: Int
+        maximumBytes: Int,
+        configuration: URLSessionConfiguration = .ephemeral
     ) async throws -> (Data, HTTPURLResponse) {
-        let loader = BoundedURLSessionDataLoader(maximumBytes: maximumBytes)
+        let loader = BoundedURLSessionDataLoader(
+            maximumBytes: maximumBytes,
+            configuration: configuration
+        )
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 loader.start(request, uploadFileURL: uploadFileURL, continuation: continuation)
@@ -107,7 +113,6 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
         self.continuation = continuation
         lock.unlock()
 
-        let configuration = URLSessionConfiguration.ephemeral
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         let task: URLSessionDataTask = if let uploadFileURL {
             session.uploadTask(with: request, fromFile: uploadFileURL)
@@ -150,26 +155,35 @@ final class BoundedURLSessionDataLoader: NSObject, URLSessionDataDelegate, @unch
             finish(.failure(URLError(.badServerResponse)))
             return
         }
-        do {
-            lock.lock()
-            defer { lock.unlock() }
-            try accumulator.admit(response: response)
-            self.response = response
-            completionHandler(.allow)
-        } catch {
+        let admissionError: Error? = lock.withLock {
+            do {
+                try accumulator.admit(response: response)
+                self.response = response
+                return nil
+            } catch {
+                return error
+            }
+        }
+        if let admissionError {
             completionHandler(.cancel)
-            finish(.failure(error))
+            finish(.failure(admissionError))
+        } else {
+            completionHandler(.allow)
         }
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        do {
-            lock.lock()
-            defer { lock.unlock() }
-            try accumulator.append(data)
-        } catch {
+        let admissionError: Error? = lock.withLock {
+            do {
+                try accumulator.append(data)
+                return nil
+            } catch {
+                return error
+            }
+        }
+        if let admissionError {
             dataTask.cancel()
-            finish(.failure(error))
+            finish(.failure(admissionError))
         }
     }
 

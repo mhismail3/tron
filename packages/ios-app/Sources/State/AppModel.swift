@@ -169,7 +169,6 @@ final class AppModel {
     private var cacheCheckpointTaskGeneration = 0
     private var cacheCheckpointGeneration = 0
     private var pendingCacheCheckpoint: CacheCheckpoint?
-    private var hiddenSessionIDs: Set<String> = []
     private var workspaceLoadGeneration = 0
 
     init(
@@ -546,7 +545,7 @@ final class AppModel {
     }
 
     var visibleSessions: [SessionSummary] {
-        SessionSummary.dashboardSessions(sessions).filter { !hiddenSessionIDs.contains($0.id) }
+        SessionSummary.dashboardSessions(sessions)
     }
 
     func dashboardActivity(for sessionID: String) -> DashboardSessionActivity {
@@ -618,7 +617,6 @@ final class AppModel {
         legacyImportAvailable = false
         legacyImportedCount = 0
         workspace = nil
-        hiddenSessionIDs.removeAll()
         providerAuth.clearProfile()
         settingsTrust.clearProfile()
         packageConfiguration.clearProfile()
@@ -1248,14 +1246,6 @@ final class AppModel {
         try await sessionMutations.reloadResources(sessionID: sessionID)
     }
 
-    func archive(_ id: String) {
-        // Kept only for migration of previous local-hidden state. New UI uses
-        // canonical session deletion and labels it accurately.
-        hiddenSessionIDs.insert(id)
-        persistHidden()
-        sessionPresentation.remove(sessionID: id)
-    }
-
     func upload(
         name: String,
         mimeType: String,
@@ -1654,12 +1644,7 @@ final class AppModel {
 
     private func reconcileSelection() {
         defaultWorkspace = UserDefaults.standard.string(forKey: "defaultWorkspace.v1")
-        loadHidden()
     }
-
-    private var hiddenKey: String { "hiddenSessions.\(profiles.selected?.id ?? "none")" }
-    private func loadHidden() { hiddenSessionIDs = Set(UserDefaults.standard.stringArray(forKey: hiddenKey) ?? []) }
-    private func persistHidden() { UserDefaults.standard.set(Array(hiddenSessionIDs), forKey: hiddenKey) }
 
     private func measure<Value>(
         _ operation: PerformanceOperation,

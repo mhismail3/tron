@@ -46,6 +46,39 @@ describe("CommandReceiptStore", () => {
     expect(operation).toHaveBeenCalledTimes(1);
   });
 
+  it("does not prune a completed receipt while its duplicate lane is active", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-receipts-active-lane-"));
+    const store = new CommandReceiptStore(root, atomicWriteJson, { maximumAgeMs: 0 });
+    let releaseOperation: (() => void) | undefined;
+    let signalStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+    const release = new Promise<void>((resolve) => { releaseOperation = resolve; });
+    const operation = vi.fn(async () => {
+      signalStarted?.();
+      await release;
+      return { accepted: true };
+    });
+
+    const first = store.execute("device", "session.prompt", "same-expiring-command", operation);
+    await started;
+    const duplicate = store.execute("device", "session.prompt", "same-expiring-command", operation);
+    releaseOperation?.();
+
+    await expect(Promise.all([first, duplicate])).resolves.toEqual([
+      { accepted: true },
+      { accepted: true },
+    ]);
+    expect(operation).toHaveBeenCalledTimes(1);
+
+    await expect(store.execute(
+      "device",
+      "session.prompt",
+      "same-expiring-command",
+      operation,
+    )).resolves.toEqual({ accepted: true });
+    expect(operation).toHaveBeenCalledTimes(2);
+  });
+
   it("removes pending state after a definitive application rejection", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-receipts-"));
     const store = new CommandReceiptStore(root);
@@ -62,6 +95,35 @@ describe("CommandReceiptStore", () => {
     await expect(store.execute("device", "session.prompt", "retryable-rejection", retry))
       .resolves.toEqual({ accepted: true });
     expect(retry).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects new mutations before execution when entry capacity is full", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-receipts-entry-capacity-"));
+    const store = new CommandReceiptStore(root, atomicWriteJson, {
+      maximumEntries: 1,
+      maximumAggregateBytes: 2 * 1_048_576,
+    });
+    await store.execute("device", "session.prompt", "first-command", async () => ({ accepted: true }));
+    const rejected = vi.fn(async () => ({ accepted: true }));
+
+    await expect(store.execute("device", "session.prompt", "second-command", rejected))
+      .rejects.toMatchObject({ code: "busy", retryable: true });
+    expect(rejected).not.toHaveBeenCalled();
+    expect(await receiptFiles(root)).toHaveLength(1);
+  });
+
+  it("reserves aggregate completion capacity before executing a mutation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-receipts-byte-capacity-"));
+    const store = new CommandReceiptStore(root, atomicWriteJson, {
+      maximumEntries: 10,
+      maximumAggregateBytes: 1_048_576 + 4 * 1_024 + 1,
+    });
+    await store.execute("device", "session.prompt", "first-command", async () => ({ accepted: true }));
+    const rejected = vi.fn(async () => ({ accepted: true }));
+
+    await expect(store.execute("device", "session.prompt", "second-command", rejected))
+      .rejects.toMatchObject({ code: "busy" });
+    expect(rejected).not.toHaveBeenCalled();
   });
 
   it("retains pending state when successful completion cannot be persisted", async () => {
@@ -179,6 +241,9 @@ describe("CommandReceiptStore", () => {
       code: "conflict",
       details: { outcomeUnknown: true },
     });
+    await expect(store.status("device", "session.prompt", "oversized-result"))
+      .resolves.toEqual({ status: "pending" });
+    await store.prune(0);
     await expect(store.status("device", "session.prompt", "oversized-result"))
       .resolves.toEqual({ status: "pending" });
     await expect(store.execute("device", "session.prompt", "oversized-result", operation)).rejects.toMatchObject({

@@ -105,6 +105,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
     let supportsQueueManagement: Bool
     let sourceWindow: SourceWindow
     private let runtimeIDSet: Set<String>
+    private let toolDescriptorByID: [String: ChatToolDescriptor]?
 
     init(
         tag: ChatTranscriptProjectionTag,
@@ -127,6 +128,15 @@ struct InstalledChatTranscript: Hashable, Sendable {
         self.supportsQueueManagement = supportsQueueManagement
         self.sourceWindow = sourceWindow
         runtimeIDSet = Set(runtimeItems.map(\.id))
+        let descriptors = timeline.items.flatMap { item -> [ChatToolDescriptor] in
+            guard case .toolRun(let run) = item else { return [] }
+            return run.tools
+        }
+        let descriptorByID = Dictionary(
+            descriptors.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        toolDescriptorByID = descriptorByID.count == descriptors.count ? descriptorByID : nil
     }
 
     var displayedItems: ChatDisplayedTranscriptItems {
@@ -134,6 +144,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
     }
     var hasUniqueDisplayedIDs: Bool {
         timeline.isInternallyConsistent
+            && toolDescriptorByID != nil
             && runtimeIDSet.count == runtimeItems.count
             && runtimeIDSet.allSatisfy { !timeline.containsID($0) }
     }
@@ -147,20 +158,12 @@ struct InstalledChatTranscript: Hashable, Sendable {
     ) -> [ChatToolPresentation]? {
         guard installationTag == tag,
               !callIDs.isEmpty,
-              Set(callIDs).count == callIDs.count else { return nil }
-        let descriptors = timeline.items.flatMap { item -> [ChatToolDescriptor] in
-            guard case .toolRun(let run) = item else { return [] }
-            return run.tools
-        }
-        let descriptorByID = Dictionary(
-            descriptors.map { ($0.id, $0) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        guard descriptorByID.count == descriptors.count else { return nil }
+              Set(callIDs).count == callIDs.count,
+              let toolDescriptorByID else { return nil }
         var resolved: [ChatToolPresentation] = []
         resolved.reserveCapacity(callIDs.count)
         for callID in callIDs {
-            guard let descriptor = descriptorByID[callID],
+            guard let descriptor = toolDescriptorByID[callID],
                   let detail = toolPayloads.resolving(descriptor) else { return nil }
             resolved.append(detail)
         }
@@ -409,7 +412,8 @@ private actor ChatTranscriptProjectionWorker {
         snapshot: SessionSnapshot,
         tag: ChatTranscriptProjectionTag,
         cacheEpoch: Int
-    ) async -> BuiltChatTranscript {
+    ) async -> BuiltChatTranscript? {
+        guard !Task.isCancelled else { return nil }
         newestCacheEpoch = max(newestCacheEpoch, cacheEpoch)
         let scope = Scope(tag: tag, cacheEpoch: cacheEpoch)
         if let basis, basis.scope.cacheEpoch < cacheEpoch {
@@ -437,6 +441,7 @@ private actor ChatTranscriptProjectionWorker {
         #if HOSTED_TEST
         workGate?(tag)
         #endif
+        guard !Task.isCancelled else { return nil }
         let candidate: ChatTranscriptProjectionCandidate
         if let basis, basis.scope == scope {
             candidate = ChatTranscriptProjectionKernel.incremental(
@@ -454,10 +459,12 @@ private actor ChatTranscriptProjectionWorker {
             )
         }
 
+        guard !Task.isCancelled else { return nil }
         let admittedTextPreparationGeneration = textPreparationGeneration
         let prepared = await textPreparationCache.prepare(
             ChatTextPreparationPolicy.sources(in: snapshot)
         )
+        guard !Task.isCancelled else { return nil }
         let preparedText: ChatTextPreparationSnapshot
         if admittedTextPreparationGeneration == textPreparationGeneration {
             preparedText = prepared
@@ -522,6 +529,7 @@ final class ChatTranscriptPresentationStore {
     @ObservationIgnored private var pending: PendingProjection?
     @ObservationIgnored private var buildingTag: ChatTranscriptProjectionTag?
     @ObservationIgnored private var worker: Task<Void, Never>?
+    @ObservationIgnored private var workerID: UInt64 = 0
     @ObservationIgnored private var readyToInstall: InstalledChatTranscript?
     @ObservationIgnored private var installFrameTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
@@ -734,6 +742,9 @@ final class ChatTranscriptPresentationStore {
         Task { await projectionWorker.retire(before: retiredEpoch) }
         desiredTag = nil
         pending = nil
+        worker?.cancel()
+        worker = nil
+        workerID &+= 1
         buildingTag = nil
         readyToInstall = nil
         installFrameTask?.cancel()
@@ -748,17 +759,18 @@ final class ChatTranscriptPresentationStore {
 
     private func startWorkerIfNeeded() {
         guard worker == nil else { return }
+        workerID &+= 1
+        let admittedWorkerID = workerID
         worker = Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled, let next = self.pending {
                 self.pending = nil
                 self.buildingTag = next.tag
-                let built = await self.projectionWorker.build(
+                guard let built = await self.projectionWorker.build(
                     snapshot: next.snapshot,
                     tag: next.tag,
                     cacheEpoch: next.generation
-                )
-                guard !Task.isCancelled else { break }
+                ), !Task.isCancelled else { break }
                 self.buildingTag = nil
                 guard self.generation == next.generation else { continue }
 
@@ -792,6 +804,7 @@ final class ChatTranscriptPresentationStore {
                     self.admitCompleted(output)
                 }
             }
+            guard self.workerID == admittedWorkerID else { return }
             self.buildingTag = nil
             self.worker = nil
             if self.pending != nil { self.startWorkerIfNeeded() }
