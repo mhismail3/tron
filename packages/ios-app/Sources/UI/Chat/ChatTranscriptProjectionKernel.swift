@@ -989,7 +989,7 @@ enum ChatTranscriptProjectionKernel {
         switch status { case .running: "Running"; case .completed: "Completed"; case .failed: "Failed" }
     }
 
-    /// Required compatibility normalization for older protocol-v2 snapshots.
+    /// Required compatibility normalization for older Gateway snapshots.
     private static func foregroundPresentation(_ tool: ChatToolPresentation, phase: SessionPhase) -> ChatToolPresentation {
         guard !phase.isActive, tool.isRunning else { return tool }
         return ChatToolPresentation(

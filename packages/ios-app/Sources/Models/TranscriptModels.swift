@@ -119,7 +119,7 @@ struct LabelTranscriptItem: TranscriptPayload {
     let label: String?
 }
 
-/// A discriminated protocol-v2 transcript value. Each Pi entry kind decodes into
+/// A discriminated Gateway transcript value. Each Pi entry kind decodes into
 /// a shape that cannot accidentally accept fields belonging to another kind.
 enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
     enum Kind: String, Codable, Sendable {

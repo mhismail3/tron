@@ -27,7 +27,7 @@ describe("stable gateway protocol client", () => {
       expect(request.headers.authorization).toBe("Bearer local-token");
       socket.on("message", (raw) => {
         const frame = JSON.parse(raw.toString()) as any;
-        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 2 }));
+        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 3, minProtocolVersion: 3 }));
         if (frame.type === "request") {
           socket.send(JSON.stringify({ type: "response", id: frame.id, ok: true, result: { value: 1 } }));
           socket.send(JSON.stringify({ type: "event", topic: "session.snapshot", sessionId: "session", payload: { revision: 1 } }));
@@ -44,12 +44,28 @@ describe("stable gateway protocol client", () => {
     client.close();
   });
 
+  it("rejects a v2 gateway before any session request is sent", async () => {
+    const { sockets, url } = await fixture();
+    let requestCount = 0;
+    sockets.on("connection", (socket) => {
+      socket.on("message", (raw) => {
+        const frame = JSON.parse(raw.toString()) as any;
+        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 2, minProtocolVersion: 2 }));
+        if (frame.type === "request") requestCount += 1;
+      });
+    });
+    const client = new GatewayProtocolClient(url, "local-token");
+    await expect(client.connect()).rejects.toMatchObject({ code: "protocol_mismatch" });
+    expect(requestCount).toBe(0);
+    client.close();
+  });
+
   it("rejects pending work when the connection drops", async () => {
     const { sockets, url } = await fixture();
     sockets.on("connection", (socket) => {
       socket.on("message", (raw) => {
         const frame = JSON.parse(raw.toString()) as any;
-        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 2 }));
+        if (frame.type === "hello") socket.send(JSON.stringify({ type: "hello", protocolVersion: 3, minProtocolVersion: 3 }));
         if (frame.type === "request") socket.terminate();
       });
     });

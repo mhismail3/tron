@@ -286,9 +286,10 @@ describe("transcript projection", () => {
         lastProgressAt: new Date(index).toISOString(),
         progressSequence: index + 1,
       })),
-      extensionUI: {
-        statuses: {}, working: { visible: true }, widgets: [], editorRevision: 0,
-        editorText: "", pendingInteractions: [],
+      extensionPresentation: {
+        version: 2, hostEpoch: "test-host", revision: 0, capabilities: [], diagnostics: [],
+        semanticState: { statuses: {}, working: { visible: true, indicator: { kind: "default", frames: [] } }, widgets: [], toolsExpanded: false, editorRevision: 0, editorText: "" },
+        surfaces: [], pendingInteractions: [],
       },
       diagnostics: [],
     };
@@ -335,13 +336,48 @@ describe("transcript projection", () => {
         content: [{ id: `idle-${index}:0`, type: "text" as const, text: "x".repeat(64_000) }],
       })),
       transcriptStart: 0, transcriptTotal: 10, toolExecutions: [],
-      extensionUI: { statuses: {}, working: { visible: false }, widgets: [], editorRevision: 0, editorText: "", pendingInteractions: [] },
+      extensionPresentation: { version: 2, hostEpoch: "test-host", revision: 0, capabilities: [], diagnostics: [], semanticState: { statuses: {}, working: { visible: false, indicator: { kind: "default", frames: [] } }, widgets: [], toolsExpanded: false, editorRevision: 0, editorText: "" }, surfaces: [], pendingInteractions: [] },
       diagnostics: [],
     };
 
     const fitted = fitSessionSnapshot(snapshot, 180_000);
     expect(fitted.transcriptStart).toBeGreaterThan(0);
     expect(fitted.transcriptStart + fitted.transcript.length).toBe(snapshot.transcriptTotal);
+  });
+
+  it("preserves actionable interaction identity before decorative surfaces under snapshot pressure", () => {
+    const snapshot: SessionSnapshot = {
+      sessionId: "pressure", runtimeGeneration: "generation", revision: 1, eventSequence: 1,
+      phase: "idle", cwd: "/tmp/project", thinkingLevel: "off", availableThinkingLevels: ["off"],
+      stats: { userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: 0 },
+      queued: { steering: [], followUp: [] }, transcript: [], transcriptStart: 0, transcriptTotal: 0,
+      toolExecutions: [], diagnostics: [],
+      extensionPresentation: {
+        version: 2, hostEpoch: "host", revision: 4, capabilities: [], diagnostics: [],
+        semanticState: { statuses: { decorative: "x".repeat(40_000) }, working: { visible: true, indicator: { kind: "default", frames: [] } }, widgets: [], toolsExpanded: false, editorRevision: 0, editorText: "" },
+        surfaces: [{
+          id: "decorative", kind: "widget", placement: "aboveEditor", lifecycle: "retained", revision: 5,
+          focused: false, inputMode: "none",
+          frame: { width: 160, height: 1, plainText: "x".repeat(60_000), lines: [{ plainText: "x".repeat(60_000), runs: [{ text: "x".repeat(60_000), style: {} }] }] },
+        }, {
+          id: "blocking", kind: "overlay", placement: "overlay", lifecycle: "blocking", revision: 3,
+          focused: true, inputMode: "keys",
+          frame: { width: 160, height: 1, plainText: "confirm", lines: [{ plainText: "confirm", runs: [{ text: "confirm", style: {} }] }] },
+        }],
+        inputLease: { id: "lease", connectionId: "connection", surfaceId: "blocking", surfaceRevision: 3, acquiredAt: new Date(0).toISOString() },
+        pendingInteractions: [{ id: "interaction", hostEpoch: "host", presentationRevision: 4, method: "confirm", title: "Confirm" }],
+      },
+    };
+    const fitted = fitSessionSnapshot(snapshot, 100_000);
+    expect(fitted.extensionPresentation.pendingInteractions).toHaveLength(1);
+    expect(fitted.extensionPresentation.surfaces.map((surface) => surface.id)).toEqual(["blocking"]);
+    expect(fitted.extensionPresentation.inputLease?.surfaceId).toBe("blocking");
+    expect(fitted.extensionPresentation.projection).toMatchObject({
+      complete: false,
+      omittedSurfaces: [{ id: "decorative", revision: 5 }],
+    });
+    expect(fitted.extensionPresentation.diagnostics.at(-1)?.code).toContain("projection.");
   });
 
   it("advances a page containing one projected item above the requested page target", () => {

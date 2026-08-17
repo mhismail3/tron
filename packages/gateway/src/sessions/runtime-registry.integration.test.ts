@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { copyFile, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
+import { getExamplesPath, ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
@@ -991,6 +991,114 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     );
   });
 
+  it("runs the unchanged official status and working-indicator examples with the baseline theme", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-official-semantic-examples-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    const examples = join(getExamplesPath(), "extensions");
+    await Promise.all([
+      copyFile(join(examples, "status-line.ts"), join(extensionDir, "status-line.ts")),
+      copyFile(join(examples, "working-indicator.ts"), join(extensionDir, "working-indicator.ts")),
+    ]);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-official-examples", tokensPerSecond: 10_000 });
+    faux.setResponses([fauxAssistantMessage("persisted")]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      modelRuntimeFactory: async () => runtime,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const presentation = slot.snapshot().extensionPresentation;
+    expect(presentation.semanticState.statuses["status-demo"]).toBe("Ready");
+    expect(presentation.semanticState.statuses["working-indicator"]).toBe("Indicator: custom spinner");
+    expect(presentation.semanticState.working.indicator).toMatchObject({ kind: "animated", intervalMs: 80 });
+    expect(presentation.semanticState.working.indicator.frames.every((frame) => !frame.includes("\u001b"))).toBe(true);
+    expect(slot.isBusy).toBe(false);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("persist session");
+    await waitUntil(() => !slot.isBusy);
+    await registry.reloadProject(cwd, true);
+    expect(slot.snapshot().extensionPresentation.hostEpoch).not.toBe(presentation.hostEpoch);
+    await slot.rename("decorative-state-delete-fixture");
+    const sessionID = slot.id;
+    await registry.delete(sessionID);
+    await expect(registry.acquire(sessionID)).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("keeps RPC factories semantic and does not start the dormant TUI host", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-rpc-factory-dormant-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await mkdir(extensionDir, { recursive: true });
+    await writeFile(join(extensionDir, "rpc-factory.ts"), `export default function (pi) {
+      pi.on("session_start", (_event, ctx) => ctx.ui.setWidget("factory", () => ({
+        render: () => ["must not mount"], invalidate: () => {}
+      })));
+    }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const internal = slot as unknown as { extensionHost: { isTuiStarted: boolean; mountedComponentCount: number } };
+    expect(internal.extensionHost.isTuiStarted).toBe(false);
+    expect(internal.extensionHost.mountedComponentCount).toBe(0);
+    expect(slot.snapshot().extensionPresentation.semanticState.widgets).toEqual([]);
+  });
+
+  it("rotates and retires semantic epochs on direct, command, and trust reload paths", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-semantic-epoch-reload-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "reload.ts"), `export default function (pi) {
+      pi.on("session_start", (_event, ctx) => ctx.ui.setStatus("epoch", "started"));
+      pi.registerCommand("reload-host", { handler: async (_args, ctx) => ctx.reload() });
+    }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const internal = slot as unknown as { ui: { context(): { confirm(title: string, message: string): Promise<boolean>; setStatus(key: string, text: string): void } } };
+    const oldContext = internal.ui.context();
+    const firstEpoch = slot.snapshot().extensionPresentation.hostEpoch;
+
+    await slot.reload();
+    const secondEpoch = slot.snapshot().extensionPresentation.hostEpoch;
+    expect(secondEpoch).not.toBe(firstEpoch);
+    expect(() => oldContext.setStatus("late", "old callback")).toThrow(expect.objectContaining({ code: "conflict" }));
+
+    const pending = internal.ui.context().confirm("Pending", "Retire me");
+    // Attach rejection observation before the command retires the epoch.
+    const retiredPending = expect(pending).rejects.toMatchObject({ code: "cancelled" });
+    await slot.prompt("/reload-host");
+    await retiredPending;
+    const thirdEpoch = slot.snapshot().extensionPresentation.hostEpoch;
+    expect(thirdEpoch).not.toBe(secondEpoch);
+    await registry.reloadProject(cwd, true);
+    expect(slot.snapshot().extensionPresentation.hostEpoch).not.toBe(thirdEpoch);
+  });
+
   it("does not let an older settlement hide an extension-triggered continuation", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-settlement-overlap-"));
     const agentDir = join(root, "agent");
@@ -1054,6 +1162,80 @@ export default function (pi) {
     await waitUntil(() => !slot.isBusy);
     expect(slot.snapshot()).toMatchObject({ phase: "idle" });
     expect(snapshots.some((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
+  });
+
+  it("keeps async input preflight alive and settles accepted handled input exactly once", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-input-handled-preflight-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "handled.ts"), `export default function (pi) {
+      pi.on("input", async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return { action: "handled" };
+      });
+    }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const prompting = slot.prompt("handled without agent");
+    await waitUntil(() => slot.isBusy);
+    await expect(slot.dispose()).rejects.toMatchObject({ code: "busy" });
+    await expect(prompting).resolves.toMatchObject({ operationId: expect.any(String) });
+    await waitUntil(() => !slot.isBusy);
+    expect(slot.snapshot()).toMatchObject({ phase: "idle" });
+    expect(slot.snapshot().operation).toBeUndefined();
+    const markerStore = (registry as unknown as { markers: { interruptedSessionIds(): Promise<Set<string>> } }).markers;
+    expect((await markerStore.interruptedSessionIds()).has(slot.id)).toBe(false);
+  });
+
+  it("cuts off extension auto-continuations during administrative drain", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-drain-continuation-cutoff-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "continue.ts"), `let sent = false;
+      export default function (pi) {
+        pi.on("agent_settled", () => {
+          if (sent) return;
+          sent = true;
+          pi.sendMessage({ customType: "after-cutoff", content: "continue", display: false }, { triggerTurn: true });
+        });
+      }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-drain-cutoff", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => { await new Promise((resolve) => setTimeout(resolve, 150)); return fauxAssistantMessage("first"); },
+      fauxAssistantMessage("must be aborted"),
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const failures: unknown[] = [];
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      modelRuntimeFactory: async () => runtime,
+      broadcast: (_id, topic, payload) => { if (topic === "session.operationFailed") failures.push(payload); },
+      sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("start");
+    await waitUntil(() => slot.catalogPhase === "running");
+    await registry.waitUntilIdle(5_000);
+    expect(slot.isDrainBusy).toBe(false);
+    expect(failures).not.toEqual([]);
   });
 
   it("uses runtime preflight as the sole prompt-admission outcome", async () => {
@@ -1748,6 +1930,35 @@ export default function (pi) {
     if (index >= 0) registries.splice(index, 1);
   });
 
+  it("preserves the admitted run marker when global shutdown forces interruption", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-forced-shutdown-marker-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const faux = fauxProvider({ provider: "tron-forced-marker", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => { await new Promise((resolve) => setTimeout(resolve, 250)); return fauxAssistantMessage("late"); },
+    ]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => runtime, trust: new TrustService(agentDir),
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("accepted work");
+    await waitUntil(() => slot.catalogPhase === "running");
+    const sessionID = slot.id;
+    await slot.shutdown();
+    const markerStore = (registry as unknown as { markers: { interruptedSessionIds(): Promise<Set<string>> } }).markers;
+    expect((await markerStore.interruptedSessionIds()).has(sessionID)).toBe(true);
+  });
+
   it("does not tear down blob ownership before every captured slot drains", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-registry-blob-drain-order-"));
     const agentDir = join(root, "agent");
@@ -1869,6 +2080,94 @@ export default function (pi) {
     expect(settled.transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "call-bash"))
       .toMatchObject({ durationMs: expect.any(Number), startedAt: expect.any(String), completedAt: expect.any(String) });
     expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);
+  });
+
+  it("admits exact extension commands while streaming without hiding the foreground run", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-streaming-extension-command-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+    await writeFile(join(extensionDir, "stream-command.ts"), `export default function (pi) {
+      pi.registerCommand("during-stream", {
+        description: "Wait for native confirmation",
+        handler: async (_args, ctx) => {
+          if (await ctx.ui.confirm("Streaming command", "Continue?")) ctx.ui.setStatus("stream-command", "accepted");
+        },
+      });
+    }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const faux = fauxProvider({ provider: "tron-stream-command", tokensPerSecond: 1 });
+    faux.setResponses([fauxAssistantMessage("streaming ".repeat(100))]);
+    const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    runtime.registerNativeProvider(faux.provider);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      modelRuntimeFactory: async () => runtime,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("start foreground streaming");
+    await waitUntil(() => slot.catalogPhase === "running");
+
+    const command = slot.prompt("/during-stream");
+    await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
+    const pending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
+    const during = slot.snapshot();
+    expect(during.phase).toBe("running");
+    expect(during.operation?.kind).toBe("prompt");
+    expect(during.extensionCommand?.kind).toBe("command");
+    const marker = JSON.parse(await readFile(join(root, "tron", "gateway", "runtime-markers", `${slot.id}.json`), "utf8")) as { operationId: string };
+    expect(marker.operationId).toBe(during.extensionCommand?.id);
+    await expect(registry.waitUntilIdle(25)).rejects.toMatchObject({ code: "busy", retryable: true });
+    slot.respondToInteraction(pending.id, pending.hostEpoch, pending.presentationRevision, true, false);
+    await expect(command).resolves.toEqual({ operationId: expect.any(String) });
+    await waitUntil(() => slot.snapshot().extensionCommand === undefined);
+    expect(slot.snapshot().extensionPresentation.semanticState.statuses["stream-command"]).toBe("accepted");
+    await slot.abort();
+    await waitUntil(() => slot.catalogPhase === "idle");
+  });
+
+  it("scopes extension shutdown to the owning runtime slot", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-extension-scoped-shutdown-"));
+    const agentDir = join(root, "agent");
+    const closingCwd = join(root, "closing");
+    const otherCwd = join(root, "other");
+    const extensionDir = join(closingCwd, ".pi", "extensions");
+    await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true }), mkdir(otherCwd)]);
+    await writeFile(join(extensionDir, "shutdown.ts"), `export default function (pi) {
+      pi.on("session_shutdown", async (_event, ctx) => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        ctx.ui.setStatus("shutdown", "complete");
+      });
+      pi.registerCommand("close-owning-session", { handler: async (_args, ctx) => ctx.shutdown() });
+    }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(closingCwd, true);
+    const shutdownTopics: string[] = [];
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      broadcast: (_sessionID, topic) => shutdownTopics.push(topic), sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const closing = await registry.create(closingCwd);
+    const other = await registry.create(otherCwd);
+    const closingID = closing.id;
+
+    await closing.prompt("/close-owning-session");
+    await waitUntil(() => !registry.activeSessionIds().includes(closingID));
+    expect(() => other.context()).not.toThrow();
+    await expect(registry.acquire(closingID)).rejects.toMatchObject({ code: "not_found" });
+    const shutdownStatusIndex = shutdownTopics.lastIndexOf("session.extensionPresentation");
+    const closedIndex = shutdownTopics.lastIndexOf("session.closed");
+    expect(shutdownStatusIndex).toBeGreaterThanOrEqual(0);
+    expect(closedIndex).toBeGreaterThan(shutdownStatusIndex);
   });
 
   it("isolates same-named providers registered by concurrent project extensions", async () => {
@@ -2000,7 +2299,7 @@ export default function (pi) {
     expect(() => slot.resources()).toThrow("Project trust is being reconfigured");
     expect(() => slot.modelRuntime).toThrow("Project trust is being reconfigured");
     expect(() => slot.sessionEnvironment()).toThrow("Project trust is being reconfigured");
-    expect(() => slot.respondToInteraction("pending", null, true)).toThrow("Project trust is being reconfigured");
+    expect(() => slot.respondToInteraction("pending", "host", 0, null, true)).toThrow("Project trust is being reconfigured");
     await expect(registry.create(cwd)).rejects.toMatchObject({ code: "busy", retryable: true });
     await expect(registry.create(cwdAlias)).rejects.toMatchObject({ code: "busy", retryable: true });
     await expect(trust.inspect(cwd)).resolves.toMatchObject({ savedDecision: true });

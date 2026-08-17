@@ -134,7 +134,7 @@ actor GatewayClient {
         do {
             let hello: JSONValue = .object([
                 "type": .string("hello"),
-                "protocolVersion": .number(2),
+                "protocolVersion": .number(3),
                 "clientId": .string(uuidSource.next().uuidString),
             ])
             try await socket.send(JSONEncoder.gateway.encode(hello))
@@ -144,7 +144,7 @@ actor GatewayClient {
             try GatewayFramePolicy.validateInboundBytes(data)
             let decoded = try JSONDecoder.gateway.decode(GatewayHello.self, from: data)
             try requireEpoch(epochID)
-            guard decoded.type == "hello", decoded.protocolVersion == 2, decoded.minProtocolVersion <= 2 else {
+            guard decoded.type == "hello", decoded.protocolVersion == 3, decoded.minProtocolVersion == 3 else {
                 throw GatewayFailure(code: "protocol_mismatch", message: "The Mac gateway protocol is not compatible with this app.", retryable: false, details: nil)
             }
             guard var epoch = connection, epoch.id == epochID else { throw CancellationError() }

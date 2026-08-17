@@ -44,7 +44,7 @@ or event-admission policy; `GatewayClient` remains the only decoder and client
 runtime. Each inbound response/event frame crosses one discriminated `JSONDecoder`
 entry point. Typed event views decode directly from that original decoder's payload
 container; network bytes are not serialized and parsed again. The client actor best-effort
-prepares large session snapshots, summaries, envelopes, streaming items, tool states, interactions, widgets, and terminal output/exit payloads before delivery, so
+prepares large session snapshots, summaries, envelopes, streaming items, tool states, unified extension-presentation mutations, and terminal output/exit payloads before delivery, so
 the MainActor reducer installs typed `Sendable` values instead of re-encoding and
 decoding dynamic payloads. Raw event payloads remain attached for global extension
 points and unknown topics. Every Gateway coder is fresh per operation; shared static Foundation
@@ -223,9 +223,7 @@ token are returned first. The snapshot and subscription token remain provisional
 unobservable until `session.sync` succeeds and the exact session/presentation intent is
 revalidated; stale or failed opens close only that provisional token. The same opaque token
 then becomes subscription ownership, and `session.close` only releases a subscription whose
-current token matches. Older protocol-v2 gateways omit the
-explicit ownership field; iOS safely treats their per-open `syncToken` as the same
-identity during rolling upgrades, avoiding interruption of Gateway-owned runs.
+current token matches. Active protocol-v3 peers always provide explicit ownership.
 One intent-keyed synchronization coordinator owns the shared outcome and event quarantine.
 Compatible reconnect callers await that outcome directly instead of polling tokens; a fresh
 presentation never inherits reconnect installation semantics and waits to retry after incompatible
@@ -432,8 +430,18 @@ the exact Pi content order without hiding or moving thinking traces.
 The immutable navigation session ID owns one opening task and one typed
 `ScrollPosition`; duplicate dashboard opens and competing proxy scroll commands are
 forbidden. The complete composer is the sole structural owner of the ScrollView's bottom
-safe-area inset, including wrapped text and staged attachments. Extension widget state remains
-canonical, but native widget presentation is temporarily disabled until restoration acceptance.
+safe-area inset, including wrapped text and staged attachments. Versioned extension presentation
+state is a disposable live projection scoped by runtime generation, host epoch, and one aggregate
+presentation revision. `ExtensionPresentationState` contains semantic state, authoritative pending
+interactions, bounded generic full-frame surfaces, capabilities/diagnostics, and an optional input-lease
+projection. Only `session.extensionPresentation` mutates it. Reducers accept the current epoch and exact
+next revision, ignore only equal-revision duplicates, and request an authoritative session resync for a gap,
+lower/reordered revision, malformed mutation, or epoch mismatch. Fitted snapshots retain bounded omitted
+surface ID/revision baselines and leased/actionable state so later exact-next full frames converge; a complete
+snapshot replaces the whole projection. Unknown surface kinds decode to a readable plain-text fallback; malformed upserts never erase an existing
+surface, and removal is an explicit ID list. Native surface rendering and widget/status chrome remain
+temporarily disabled; the gate never inspects extension-owned keys. Offline cache strips all surfaces,
+interactions, lease/focus, capabilities/diagnostics, and ephemeral semantic values.
 Native safe-area layout therefore pushes the transcript exactly once and reverses naturally when
 the keyboard or composer contracts. One geometry observation of the complete composer—not
 field-specific focus, text-height, attachment, or widget hooks—arms the scroll owner for the next
@@ -739,8 +747,10 @@ admitted only when exactly one presentation remains mounted. Create, import, and
 selection or claim subscription ownership before the destination mounts. Fork-restored editor
 text travels in that route result and installs into the exact profile/session composer draft rather
 than selection-backed global state. Uploaded attachments and extension editor requests are owned
-by `ComposerDraftCoordinator` under session plus presentation generation; late uploads, stale
-same-session editor events, removal, send completion, and errors cannot cross a reopen. Closing or
+by `ComposerDraftCoordinator` under session plus presentation generation; native editor debounce tasks
+capture that exact target and host epoch, locally originated operation-ID echoes are suppressed, and a stale
+base revision is never automatically forced through. Late uploads, stale same-session editor events,
+removal, send completion, and errors cannot cross a reopen. Closing or
 replacing a route synchronously revokes its intake lease and disposes presentation-transient state
 while retaining only the bounded profile/session text draft. Share intake captures the sole admitted presentation target, never consumes that target's
 staged uploads, and clears the shared payload only after confirmed prompt admission. Dashboard

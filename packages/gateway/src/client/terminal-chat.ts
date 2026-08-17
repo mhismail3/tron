@@ -48,13 +48,16 @@ function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-async function connectResilient(client: GatewayProtocolClient): Promise<void> {
+export async function connectResilient(client: GatewayProtocolClient): Promise<void> {
   let delay = 250;
   while (true) {
     try {
       await client.connect();
       return;
-    } catch {
+    } catch (error) {
+      // Protocol incompatibility is definitive; retrying it forever hides the
+      // operator action required to upgrade the peer.
+      if (error instanceof GatewayClientError && !error.retryable) throw error;
       client.close();
       await sleep(delay);
       delay = Math.min(Math.round(delay * 1.7), 5_000);
@@ -258,7 +261,8 @@ export async function runTerminalChat(): Promise<void> {
             settledResolve = undefined;
           }
           return;
-        } catch {
+        } catch (error) {
+          if (error instanceof GatewayClientError && !error.retryable) throw error;
           client.close();
           await sleep(500);
         }

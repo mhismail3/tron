@@ -190,18 +190,18 @@ struct ChatView: View {
                 guard !isPresented,
                       let request = routedEditorRequest,
                       let target = presentationTarget else { return }
-                model.composerDrafts.disposeEditorRequest(request, disposition: .keep, target: target)
+                model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
             }
         )) {
             Button(ComposerEditorRequestPolicy.useActionTitle) {
                 guard let request = routedEditorRequest,
                       let target = presentationTarget else { return }
-                model.composerDrafts.disposeEditorRequest(request, disposition: .use, target: target)
+                model.disposeExtensionEditorRequest(request, disposition: .use, target: target)
             }
             Button(ComposerEditorRequestPolicy.keepActionTitle, role: .cancel) {
                 guard let request = routedEditorRequest,
                       let target = presentationTarget else { return }
-                model.composerDrafts.disposeEditorRequest(request, disposition: .keep, target: target)
+                model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
             }
         } message: {
             Text(ComposerEditorRequestPolicy.confirmationMessage)
@@ -299,7 +299,7 @@ struct ChatView: View {
                                     ChatTranscriptRenderRow(
                                         item: item,
                                         preparedText: installed.preparedText.slice(for: item),
-                                        hiddenThinkingLabel: snapshot.extensionUI.hiddenThinkingLabel,
+                                        hiddenThinkingLabel: snapshot.extensionPresentation.semanticState.hiddenThinkingLabel,
                                         installationTag: installed.tag,
                                         resolveToolDetails: { callIDs, tag in
                                             transcriptPresentation.resolveToolDetails(
@@ -535,7 +535,7 @@ struct ChatView: View {
         guard let snapshot = selectedAuthoritativeSnapshot else { return false }
         return ChatRuntimeWorkingPresentation(
             phase: snapshot.phase,
-            working: snapshot.extensionUI.working,
+            working: snapshot.extensionPresentation.semanticState.working,
             retry: snapshot.retry
         )?.usesAmbientBottomIndicator == true
     }
@@ -604,6 +604,10 @@ struct ChatView: View {
             set: { value in
                 guard let composerScope else { return }
                 model.composerDrafts.setText(value, for: composerScope)
+                if selectedAuthoritativeSnapshot?.extensionPresentation.hostEpoch.isEmpty == false,
+                   let presentationTarget {
+                    model.scheduleExtensionEditorUpdate(target: presentationTarget, text: value)
+                }
             }
         )
     }
@@ -1091,7 +1095,7 @@ struct ChatView: View {
         VStack(spacing: 10) {
             if let snapshot = selectedAuthoritativeSnapshot {
                 ForEach(ChatExtensionWidgetPolicy.visibleWidgets(
-                    snapshot.extensionUI.widgets,
+                    snapshot.extensionPresentation.semanticState.widgets,
                     placement: .aboveEditor
                 )) { widget in
                     ExtensionWidgetView(widget: widget)
@@ -1158,7 +1162,7 @@ struct ChatView: View {
 
             if let snapshot = selectedAuthoritativeSnapshot {
                 ForEach(ChatExtensionWidgetPolicy.visibleWidgets(
-                    snapshot.extensionUI.widgets,
+                    snapshot.extensionPresentation.semanticState.widgets,
                     placement: .belowEditor
                 )) { widget in
                     ExtensionWidgetView(widget: widget)
@@ -1355,8 +1359,7 @@ struct ChatView: View {
     }
 
     private var chatTitle: String {
-        selectedAuthoritativeSnapshot?.extensionUI.title
-            ?? selectedAuthoritativeSnapshot?.name
+        selectedAuthoritativeSnapshot?.name
             ?? model.sessions.first { $0.id == sessionID }?.title
             ?? "Session"
     }
@@ -1392,7 +1395,7 @@ struct ChatView: View {
 
     private var interactionBinding: Binding<ExtensionInteraction?> {
         Binding(
-            get: { selectedAuthoritativeSnapshot?.extensionUI.pendingInteractions.first },
+            get: { selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions.first },
             set: { _ in }
         )
     }
@@ -1527,8 +1530,12 @@ struct ChatView: View {
             composerFocused = false
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
-        do { try await model.sendComposer(target: target, behavior: behavior) }
-        catch { model.presentComposerActionError(error, target: target) }
+        do {
+            try await model.sendComposer(target: target, behavior: behavior)
+            if selectedAuthoritativeSnapshot?.extensionPresentation.hostEpoch.isEmpty == false {
+                model.scheduleExtensionEditorUpdate(target: target, text: "")
+            }
+        } catch { model.presentComposerActionError(error, target: target) }
     }
 
     private func importCameraImage(_ image: UIImage) async {

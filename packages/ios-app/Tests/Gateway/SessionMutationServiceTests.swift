@@ -149,9 +149,37 @@ struct SessionMutationServiceTests {
             ))
             #expect(try await valueOfOwnedTask(navigating) == "restored")
 
+            let updatingEditor = Task {
+                try await harness.service.updateExtensionEditor(
+                    sessionID: "session-e",
+                    hostEpoch: "host-e",
+                    baseRevision: 3,
+                    operationID: "editor-operation",
+                    text: "native draft"
+                )
+            }
+            let editorUpdate = try await request(in: harness.socket, frameIndex: frameIndex)
+            frameIndex += 1
+            #expect(editorUpdate.method == "extension.editor.update")
+            #expect(editorUpdate.params?["sessionId"] == .string("session-e"))
+            #expect(editorUpdate.params?["hostEpoch"] == .string("host-e"))
+            #expect(editorUpdate.params?["baseRevision"] == .number(3))
+            #expect(editorUpdate.params?["operationId"] == .string("editor-operation"))
+            #expect(editorUpdate.params?["text"] == .string("native draft"))
+            try expectCommandID(editorUpdate)
+            await harness.socket.enqueue(successResponse(
+                id: editorUpdate.id,
+                result: .object(["revision": .number(4), "text": .string("native draft"), "applied": .bool(true)])
+            ))
+            #expect(try await valueOfOwnedTask(updatingEditor) == ExtensionEditorUpdateResult(
+                revision: 4, text: "native draft", applied: true, operationID: "editor-operation"
+            ))
+
             let answering = Task {
                 try await harness.service.answerInteraction(
                     interactionID: "interaction",
+                    hostEpoch: "host-e",
+                    presentationRevision: 7,
                     sessionID: "session-e",
                     value: .string("answer"),
                     cancelled: false
@@ -161,6 +189,8 @@ struct SessionMutationServiceTests {
             #expect(answer.method == "extension.respond")
             #expect(answer.params?["sessionId"] == .string("session-e"))
             #expect(answer.params?["interactionId"] == .string("interaction"))
+            #expect(answer.params?["hostEpoch"] == .string("host-e"))
+            #expect(answer.params?["presentationRevision"] == .number(7))
             #expect(answer.params?["value"] == .string("answer"))
             #expect(answer.params?["cancelled"] == .bool(false))
             try expectCommandID(answer)
@@ -556,7 +586,7 @@ struct SessionMutationServiceTests {
     }
 
     private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8)
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8)
     }
 
     private func successResponse(id: String, result: JSONValue) -> Data {

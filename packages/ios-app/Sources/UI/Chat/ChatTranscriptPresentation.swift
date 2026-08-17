@@ -10,19 +10,12 @@ enum ChatExtensionChromePolicy {
 }
 
 enum ChatExtensionWidgetPolicy {
-    private static let retiredSubagentChromeKeys: Set<String> = [
-        "subagent-async",
-        "subagent-fleet-status",
-    ]
-
     static func visibleWidgets(
         _ widgets: [ExtensionWidget],
         placement: ExtensionWidget.Placement
     ) -> [ExtensionWidget] {
         guard ChatExtensionChromePolicy.rendersWidgets else { return [] }
-        return widgets.filter {
-            $0.placement == placement && !retiredSubagentChromeKeys.contains($0.key)
-        }
+        return widgets.filter { $0.placement == placement }
     }
 }
 
@@ -34,7 +27,7 @@ struct ChatRuntimeWorkingPresentation: Equatable {
     let phase: SessionPhase
     let usesAmbientBottomIndicator: Bool
 
-    init?(phase: SessionPhase, working: ExtensionUIState.Working, retry: RetryState?) {
+    init?(phase: SessionPhase, working: ExtensionSemanticState.Working, retry: RetryState?) {
         guard phase.isActive, working.visible else { return nil }
         self.phase = phase
         message = working.message ?? Self.defaultMessage(for: phase)
@@ -573,7 +566,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
         }
         if let working = ChatRuntimeWorkingPresentation(
             phase: snapshot.phase,
-            working: snapshot.extensionUI.working,
+            working: snapshot.extensionPresentation.semanticState.working,
             retry: snapshot.retry
         ), !working.usesAmbientBottomIndicator {
             let exactNextOrdinal: Int? = {
@@ -599,7 +592,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
             ))
         }
         if ChatExtensionChromePolicy.rendersStatusPills {
-            values.append(contentsOf: snapshot.extensionUI.statuses
+            values.append(contentsOf: snapshot.extensionPresentation.semanticState.statuses
                 .sorted(by: { $0.key < $1.key })
                 .map { key, value in
                     ChatNotificationPresentation(

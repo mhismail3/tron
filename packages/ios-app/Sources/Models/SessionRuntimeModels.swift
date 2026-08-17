@@ -13,41 +13,6 @@ struct ContextUsage: Codable, Hashable, Sendable {
     let percent: Double?
 }
 
-struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
-    enum Method: String, Codable, Sendable { case select, confirm, input, editor }
-    let id: String
-    let method: Method
-    let title: String
-    let message: String?
-    let options: [String]?
-    let placeholder: String?
-    let prefill: String?
-    let expiresAt: String?
-}
-
-struct ExtensionWidget: Codable, Hashable, Identifiable, Sendable {
-    enum Placement: String, Codable, Sendable { case aboveEditor, belowEditor }
-    let key: String
-    let lines: [String]
-    let placement: Placement
-    var id: String { key }
-}
-
-struct ExtensionUIState: Codable, Hashable, Sendable {
-    struct Working: Codable, Hashable, Sendable {
-        var message: String?
-        var visible: Bool
-    }
-    var statuses: [String: String]
-    var working: Working
-    var hiddenThinkingLabel: String?
-    var widgets: [ExtensionWidget]
-    var title: String?
-    var editorRevision: Int
-    var editorText: String
-    var pendingInteractions: [ExtensionInteraction]
-}
-
 struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     enum Status: String, Codable, Sendable { case running, completed, failed }
     let toolCallId: String
@@ -105,7 +70,7 @@ struct RetryState: Codable, Hashable, Sendable {
 }
 
 struct SessionOperationState: Codable, Hashable, Sendable {
-    enum Kind: String, Codable, Sendable { case prompt, compaction, branchSummary, bash, retry }
+    enum Kind: String, Codable, Sendable { case prompt, command, compaction, branchSummary, bash, retry }
     let id: String?
     let kind: Kind
     let startedAt: String
@@ -160,9 +125,10 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     var streaming: TranscriptItem?
     var leafEntryId: String?
     var operation: SessionOperationState?
+    var extensionCommand: SessionOperationState? = nil
     var retry: RetryState?
     var toolExecutions: [ToolExecutionState]
-    var extensionUI: ExtensionUIState
+    var extensionPresentation: ExtensionPresentationState
     var diagnostics: [RuntimeDiagnostic]
 
     struct QueuedMessages: Codable, Hashable, Sendable {

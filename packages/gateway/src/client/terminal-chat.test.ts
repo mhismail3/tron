@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GatewayProtocolClient } from "./gateway-client.js";
-import { listSessions, operationNeedsSettlement } from "./terminal-chat.js";
+import { GatewayClientError } from "./gateway-client.js";
+import { connectResilient, listSessions, operationNeedsSettlement } from "./terminal-chat.js";
 
 function session(id: string, extra: Record<string, unknown> = {}) {
   return { id, cwd: "/workspace", firstMessage: id, ...extra };
@@ -14,6 +15,18 @@ function clientWithPages(pages: unknown[]): Pick<GatewayProtocolClient, "request
   });
   return { request } as unknown as Pick<GatewayProtocolClient, "request"> & { request: ReturnType<typeof vi.fn> };
 }
+
+describe("terminal chat connection", () => {
+  it("does not retry a non-retryable protocol mismatch", async () => {
+    const connect = vi.fn(async () => { throw new GatewayClientError("protocol_mismatch", "unsupported", false); });
+    const close = vi.fn();
+    const client = { connect, close } as unknown as import("./gateway-client.js").GatewayProtocolClient;
+
+    await expect(connectResilient(client)).rejects.toMatchObject({ code: "protocol_mismatch", retryable: false });
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+  });
+});
 
 describe("terminal chat operation settlement", () => {
   it("does not reinstall a waiter after reconnect already observed settlement", () => {

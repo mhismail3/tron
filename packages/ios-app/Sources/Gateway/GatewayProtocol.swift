@@ -35,8 +35,7 @@ struct GatewayFailure: Codable, Error, Hashable, Sendable, LocalizedError {
 enum PreparedSessionEventData: Sendable, Equatable {
     case progress(TranscriptItem)
     case toolProgress(ToolExecutionState)
-    case interactions([ExtensionInteraction])
-    case widget(key: String, value: ExtensionWidget?)
+    case extensionPresentation(ExtensionPresentationMutation)
     case raw
     case invalid
 }
@@ -141,20 +140,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             return sessionId != nil && sessionId == snapshot.sessionId
         case .sessionEvent(let event):
             if case .invalid = event.data { return false }
-            guard let object = event.envelope.data.objectValue else {
-                return !["session.status", "session.working", "session.editorText"].contains(topic)
-            }
-            switch topic {
-            case "session.status":
-                return object["key"]?.stringValue != nil
-            case "session.editorText":
-                return object["action"]?.stringValue.map { ["set", "paste"].contains($0) } == true
-                    && object["text"]?.stringValue != nil
-                    && object["fullText"]?.stringValue != nil
-                    && object["revision"]?.intValue != nil
-            default:
-                return true
-            }
+            return true
         case .none:
             return !topic.hasPrefix("session.")
         case .sessionSummary, .terminalEvent:
@@ -167,7 +153,9 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
         case "session.summary":
             return (try? SessionSummaryUpdate(from: decoder)).map(GatewayEventPreparation.sessionSummary) ?? .none
         case "session.snapshot":
-            return (try? SessionSnapshot(from: decoder)).map(GatewayEventPreparation.sessionSnapshot) ?? .none
+            guard let snapshot = try? SessionSnapshot(from: decoder),
+                  ExtensionPresentationPolicy.admit(snapshot.extensionPresentation) else { return .none }
+            return .sessionSnapshot(snapshot)
         case "terminal.output":
             return (try? PreparedTerminalOutputEvent(from: decoder))
                 .map { .terminalEvent(.output($0)) } ?? .none
@@ -198,18 +186,11 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             case "session.toolProgress":
                 preparedData = (try? container.decode(ToolExecutionState.self, forKey: .data))
                     .map(PreparedSessionEventData.toolProgress) ?? .invalid
-            case "session.interactions":
-                preparedData = (try? container.decode([ExtensionInteraction].self, forKey: .data))
-                    .map(PreparedSessionEventData.interactions) ?? .invalid
-            case "session.widget":
-                if let key = data.objectValue?["key"]?.stringValue {
-                    let widget = data.objectValue?["lines"] == .null
-                        ? nil
-                        : try? container.decode(ExtensionWidget.self, forKey: .data)
-                    preparedData = .widget(key: key, value: widget)
-                } else {
-                    preparedData = .invalid
-                }
+            case "session.extensionPresentation":
+                if let mutation = try? container.decode(ExtensionPresentationMutation.self, forKey: .data),
+                   ExtensionPresentationPolicy.admit(mutation) {
+                    preparedData = .extensionPresentation(mutation)
+                } else { preparedData = .invalid }
             default:
                 preparedData = .raw
             }
@@ -228,8 +209,9 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             return (try? payload.decode(SessionSummaryUpdate.self))
                 .map(GatewayEventPreparation.sessionSummary) ?? .none
         case "session.snapshot":
-            return (try? payload.decode(SessionSnapshot.self))
-                .map(GatewayEventPreparation.sessionSnapshot) ?? .none
+            guard let snapshot = try? payload.decode(SessionSnapshot.self),
+                  ExtensionPresentationPolicy.admit(snapshot.extensionPresentation) else { return .none }
+            return .sessionSnapshot(snapshot)
         case "terminal.output":
             return (try? payload.decode(PreparedTerminalOutputEvent.self))
                 .map { .terminalEvent(.output($0)) } ?? .none
@@ -250,18 +232,11 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             case "session.toolProgress":
                 preparedData = (try? envelope.data.decode(ToolExecutionState.self))
                     .map(PreparedSessionEventData.toolProgress) ?? .invalid
-            case "session.interactions":
-                preparedData = (try? envelope.data.decode([ExtensionInteraction].self))
-                    .map(PreparedSessionEventData.interactions) ?? .invalid
-            case "session.widget":
-                if let key = envelope.data.objectValue?["key"]?.stringValue {
-                    let widget = envelope.data.objectValue?["lines"] == .null
-                        ? nil
-                        : try? envelope.data.decode(ExtensionWidget.self)
-                    preparedData = .widget(key: key, value: widget)
-                } else {
-                    preparedData = .invalid
-                }
+            case "session.extensionPresentation":
+                if let mutation = try? envelope.data.decode(ExtensionPresentationMutation.self),
+                   ExtensionPresentationPolicy.admit(mutation) {
+                    preparedData = .extensionPresentation(mutation)
+                } else { preparedData = .invalid }
             default:
                 preparedData = .raw
             }

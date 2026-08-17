@@ -8,8 +8,8 @@ retired profile cannot mutate its replacement. `GatewayClient` decodes every inb
 response/event frame through one discriminator and prepares large session DTOs on its
 actor before crossing into `AppModel`. The raw event remains beside that typed preparation:
 unknown frame discriminators are ignored, valid unknown sequenced session topics still
-advance their cursor, and malformed known inner payloads retain their prior reducer-level
-no-op behavior instead of disconnecting the transport. A quarantined event that cannot
+advance their cursor, and malformed known session payloads fail closed to authoritative
+catch-up instead of disconnecting the transport or consuming their cursor. A quarantined event that cannot
 advance the reducer cursor rejects the suffix before baseline publication and triggers the
 bounded authoritative retry path.
 
@@ -51,7 +51,7 @@ admits and reduces mounted-session topics:
   advance owner revisions across connected clients; each visible surface reloads
   its explicit global or project scope instead of sharing a wrong-scope payload;
 - authentication prompts drive the generic secure prompt sheet;
-- extension interaction topics drive select, confirm, input, or editor sheets;
+- the single `session.extensionPresentation` stream drives semantic updates, select/confirm/input/editor sheets, dormant generic surfaces, lease projection, diagnostics, and non-replayed notices;
 - chat rendering joins canonical calls, live progress, and canonical results by
   `toolCallId` into one ordered timeline. Parallel calls carry a Gateway-issued
   monotonic ordinal, and each call carries a monotonic progress sequence so equal
@@ -108,11 +108,8 @@ remains visible throughout opening, while sending stays disabled until readiness
 Session subscription ownership is token-scoped end to end. The open response remains
 provisional until sync acknowledgement and exact route-intent revalidation; baseline plus its
 already-drained contiguous event suffix then publish in one MainActor turn. A stale or failed
-attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. During a rolling
-upgrade, iOS accepts an older protocol-v2 `session.open` without the explicit
-`subscriptionToken` and uses its `syncToken`, which is the same per-open identity;
-this keeps existing Gateway-owned runs available until the Gateway can be restarted
-safely. If a reconnect installs a new runtime generation for the same canonical session,
+attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Active
+protocol-v3 peers always provide explicit subscription ownership. If a reconnect installs a new runtime generation for the same canonical session,
 iOS clears context/tree/resource/command projections, invalidates their in-flight request generations,
 and advances all three public reload revisions before publishing the replacement. Secondary read successes
 and failures both require the exact captured subscription token and latest request generation, so a retired
@@ -128,12 +125,26 @@ bounded latest page; this cold-presentation rule is distinct from in-place recon
 Phase, operation, tool ordering, and canonical paging cursors remain authoritative. A rolling-upgrade
 client also normalizes the impossible legacy combination of an idle phase and retained running-tool
 overlay to an interrupted chip; it does not expose a fake Stop action for extension-owned detached
-work. Current Gateways project that background work separately through extension UI state. Tron
-continues to decode and retain bounded canonical widget/status state, but temporarily presents no
-extension widgets or extension status pills on iOS. The run continues on the Mac and the app catches
-up without presenting transport errors as modal alerts. Interaction sheets, working state (ambient bottom
-activity for the ordinary default and explicit rows for custom/retry detail), title/editor updates, global
-notices, and durable extension transcript entries remain active. Backgrounding gates and
+work. Current Gateways project that background work through `ExtensionPresentationState`. Tron
+decodes the versioned, bounded projection: one host epoch and aggregate revision cover semantic state,
+authoritative interactions, generic full-frame surfaces, capabilities/diagnostics, and the optional input
+lease. Presentation collections reject their DTO-specific limit during decoding before retaining another
+member. Only the exact next revision for the installed epoch mutates state; equal duplicates are inert, while
+gaps, lower/reordered revisions, malformed payloads, and epoch mismatch trigger authoritative catch-up.
+Fitted snapshots retain bounded omitted surface ID/revision baselines and lease continuity so exact-next
+full-frame deltas converge; complete session snapshots replace the projection. Surface clearing is explicit
+by ID, so malformed upserts cannot erase valid content;
+unknown kinds retain sanitized `plainText`. Notifications travel in a mutation but are never retained or
+replayed. Widget/status and rendered-surface chrome remains gated, with no package, command, or opaque-key
+special treatment. Actionable responses carry the interaction's admission epoch/revision, and offline cache
+strips all interactions, surfaces, focus/lease, capabilities/diagnostics, and ephemeral semantic state. Native
+composer synchronization is scoped to the exact mounted presentation, suppresses its operation-ID echo,
+and never retries a stale base revision as an unconditional overwrite. The run
+continues on the Mac and the app catches up without presenting transport errors as modal alerts.
+Interaction sheets, working state (ambient bottom
+activity for the ordinary default and explicit rows for custom/retry detail), editor updates, typed generic
+notices, and durable extension transcript entries remain active. The canonical session name remains the
+primary navigation identity; an extension title is retained only as a presentation hint and cannot replace it. Backgrounding gates and
 cancels only disposable catalog/foreground reconciliation, never the route, accepted work, or responsive
 socket. Foreground activation coalesces to one responsiveness pass, then runs catalog convergence,
 mounted-session restoration concurrently, then reattaches terminals only after the mounted session's exact

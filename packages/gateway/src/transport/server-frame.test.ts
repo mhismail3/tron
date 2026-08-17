@@ -1,14 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { canAttachTerminal, clearRequestSynchronizations, encodeOutboundFrame, releaseOwnedSubscription, releaseSessionTerminals } from "./server.js";
+import { canAttachTerminal, clearRequestSynchronizations, encodeOutboundFrame, existingSessionOpenOwner, releaseOwnedSubscription, releaseSessionTerminals } from "./server.js";
+import { SessionSyncBarrier } from "./session-sync.js";
 
 describe("bounded outbound gateway frames", () => {
+  it("rejects an overlapping open without replacing the current owner", () => {
+    const pending = new Map([["session", "open-1"]]);
+    const synchronizations = new Map<string, any>();
+    const tokens = new Map<string, string>();
+    expect(existingSessionOpenOwner(pending, synchronizations, tokens, "session")).toBe("open-1");
+    expect(existingSessionOpenOwner(pending, synchronizations, tokens, "other")).toBeUndefined();
+    pending.delete("session");
+    synchronizations.set("session", { requestId: "open-1", subscriptionToken: "token-1" });
+    tokens.set("session", "token-1");
+    expect(existingSessionOpenOwner(pending, synchronizations, tokens, "session")).toBe("open-1");
+  });
+
+  it("keeps completion ownership exact while independent sessions finish in either order", () => {
+    const first = new SessionSyncBarrier();
+    const second = new SessionSyncBarrier();
+    first.begin("token-1");
+    second.begin("token-2");
+    first.establish({ runtimeGeneration: "generation-1", eventSequence: 1 });
+    second.establish({ runtimeGeneration: "generation-2", eventSequence: 1 });
+    const secondCompletion = second.commit("token-2");
+    const firstCompletion = first.commit("token-1");
+    expect(secondCompletion.events).toEqual([]);
+    expect(firstCompletion.events).toEqual([]);
+    expect(() => first.commit("token-1")).toThrow();
+    expect(() => second.commit("wrong-token")).toThrow();
+  });
   it("delivers maximum admitted machine identity fields in the hello frame", () => {
     const hello = {
       type: "hello",
       gatewayVersion: "1.0.0",
       piVersion: "1.0.0",
-      protocolVersion: 2,
-      minProtocolVersion: 2,
+      protocolVersion: 3,
+      minProtocolVersion: 3,
       machineId: "i".repeat(256),
       machineName: "n".repeat(1_024),
       capabilities: ["sessions.v1"],
@@ -40,16 +67,47 @@ describe("bounded outbound gateway frames", () => {
     const firstTimeout = setTimeout(() => {}, 60_000);
     const otherTimeout = setTimeout(() => {}, 60_000);
     const synchronizations = new Map<string, any>([
-      ["session", { requestId: "failed-open", timeout: firstTimeout }],
-      ["other", { requestId: "other-open", timeout: otherTimeout }],
+      ["session", { requestId: "failed-open", timeout: firstTimeout, subscriptionToken: "failed-token" }],
+      ["other", { requestId: "other-open", timeout: otherTimeout, subscriptionToken: "other-token" }],
     ]);
+    const tokens = new Map([["session", "failed-token"], ["other", "other-token"]]);
+    const subscriptions = new Set(["session", "other"]);
+    const runtimeUnsubscribed: string[] = [];
     try {
-      clearRequestSynchronizations(synchronizations, "failed-open");
+      const revoked: string[] = [];
+      clearRequestSynchronizations(synchronizations, "failed-open", (sessionID, synchronization) => {
+        if (tokens.get(sessionID) !== synchronization.subscriptionToken) return;
+        tokens.delete(sessionID);
+        subscriptions.delete(sessionID);
+        runtimeUnsubscribed.push(sessionID);
+        revoked.push(`${sessionID}:${synchronization.subscriptionToken}`);
+      });
       expect(synchronizations.has("session")).toBe(false);
       expect(synchronizations.has("other")).toBe(true);
+      expect(tokens.has("session")).toBe(false);
+      expect(subscriptions.has("session")).toBe(false);
+      expect(runtimeUnsubscribed).toEqual(["session"]);
+      expect(revoked).toEqual(["session:failed-token"]);
     } finally {
       clearTimeout(firstTimeout);
       clearTimeout(otherTimeout);
+    }
+  });
+
+  it("does not revoke a newer synchronization owner during failed-open cleanup", () => {
+    const timeout = setTimeout(() => {}, 60_000);
+    const current = setTimeout(() => {}, 60_000);
+    const synchronizations = new Map<string, any>([
+      ["session", { requestId: "new-open", timeout: current, subscriptionToken: "new-token" }],
+    ]);
+    try {
+      clearRequestSynchronizations(synchronizations, "failed-open", () => {
+        throw new Error("stale cleanup must not be called for a replaced owner");
+      });
+      expect(synchronizations.get("session")?.subscriptionToken).toBe("new-token");
+    } finally {
+      clearTimeout(timeout);
+      clearTimeout(current);
     }
   });
 

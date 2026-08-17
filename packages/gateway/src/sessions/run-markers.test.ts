@@ -10,7 +10,9 @@ describe("RunMarkerStore", () => {
     const store = new RunMarkerStore(root);
     await store.mark("session", "operation");
     expect(await store.interruptedSessionIds()).toEqual(new Set(["session"]));
-    await store.clear("session");
+    await store.clear("session", "older-operation");
+    expect(await store.interruptedSessionIds()).toEqual(new Set(["session"]));
+    await store.clear("session", "operation");
     expect(await store.interruptedSessionIds()).toEqual(new Set());
   });
 });

@@ -64,6 +64,23 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("v2 hello is rejected before a session-open request")
+    func rejectsV2BeforeSessionOpen() async throws {
+        let socket = ScriptedGatewaySocket()
+        let factory = ScriptedGatewaySocketFactory(socket: socket)
+        let client = GatewayClient(socketFactory: factory.factory)
+        await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"0.84.1","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":[]}"#.utf8))
+
+        do {
+            _ = try await client.connect(profile: profile, token: "token")
+            Issue.record("v2 handshake unexpectedly succeeded")
+        } catch let error as GatewayFailure {
+            #expect(error.code == "protocol_mismatch")
+        }
+        #expect(await socket.sentFrames().count == 1)
+        await client.close()
+    }
+
     @Test("hello and request frames use injected IDs without changing their byte protocol")
     func deterministicHelloAndRequestIDs() async throws {
         try await withTestWatchdog {
@@ -91,7 +108,7 @@ struct GatewayClientTransportTests {
             let sentHello = try await decodedValue(in: socket, index: 0)
             #expect(sentHello == .object([
                 "type": .string("hello"),
-                "protocolVersion": .number(2),
+                "protocolVersion": .number(3),
                 "clientId": .string("00000000-0000-0000-0000-000000000001"),
             ]))
 
@@ -819,7 +836,7 @@ struct GatewayClientTransportTests {
     }
 
     private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8)
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8)
     }
 
     private func responseFrame(id: String, result: JSONValue) -> Data {

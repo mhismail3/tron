@@ -675,7 +675,7 @@ struct PresentationStyleGuardTests {
         #expect(productionSources.contains { $0.1.contains("let runtimeItems: [ChatTranscriptRenderItem]") })
 
         let chat = try #require(productionSources.first { $0.0.lastPathComponent == "ChatView.swift" }?.1)
-        #expect(!chat.contains("snapshot.extensionUI.widgets.filter"))
+        #expect(!chat.contains("snapshot.extensionPresentation.semanticState.widgets.filter"))
         #expect(chat.occurrences(of: "ChatExtensionWidgetPolicy.visibleWidgets") == 2)
     }
 

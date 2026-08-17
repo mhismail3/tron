@@ -679,7 +679,7 @@ final class ComposerDraftCoordinator {
     private func apply(_ request: ComposerEditorRequest, to scope: ComposerDraftScope) {
         let replacement: String
         switch request.action {
-        case .set:
+        case .set, .native:
             replacement = request.fullText
         case .paste:
             replacement = text(for: scope) + request.text

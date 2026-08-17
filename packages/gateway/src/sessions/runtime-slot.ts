@@ -30,7 +30,10 @@ import type {
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { TrustService } from "../admin/trust-service.js";
 import { BLOB_MAX_ITEM_BYTES, type BlobStore } from "./blob-store.js";
-import { ExtensionUIBroker } from "./extension-ui.js";
+import { SemanticUIBroker } from "./semantic-ui-broker.js";
+import { ExtensionPresentationStore } from "../extensions/host/extension-presentation-store.js";
+import { ExtensionLifecycleCoordinator } from "./extension-lifecycle-coordinator.js";
+import { RemotePiExtensionHost } from "../extensions/host/remote-pi-extension-host.js";
 import {
   admitCommandCatalog,
   fitSessionSnapshot,
@@ -83,6 +86,7 @@ export interface RuntimeSlotHooks {
   changed: (sessionId: string) => void;
   settled: (sessionId: string) => void;
   rekey: (previousId: string, nextId: string, slot: RuntimeSlot) => void;
+  closed?: (sessionId: string, slot: RuntimeSlot) => void;
 }
 
 export interface RuntimeSlotDependencies {
@@ -102,7 +106,10 @@ export class RuntimeSlot {
   private runtime!: AgentSessionRuntime;
   private unsubscribe: (() => void) | undefined;
   private readonly lane = new AsyncMutex();
-  private readonly ui: ExtensionUIBroker;
+  private ui: SemanticUIBroker;
+  private extensionHost: RemotePiExtensionHost;
+  private lifecycle: ExtensionLifecycleCoordinator;
+  private hasBoundSession = false;
   private readonly runtimeGeneration = randomUUID();
   private revision = 0;
   private eventSequence = 0;
@@ -115,6 +122,7 @@ export class RuntimeSlot {
   private activeOperationId: string | undefined;
   private activeExports = 0;
   private operation: SessionOperationState | undefined;
+  private pendingExtensionCommand: SessionOperationState | undefined;
   private retry: RetryState | undefined;
   private resourceReloadOptions: { resolveProjectTrust: () => Promise<boolean> } | undefined;
   private projectTrustReloadOverride: boolean | undefined;
@@ -151,10 +159,27 @@ export class RuntimeSlot {
     interrupted: boolean,
   ) {
     this.phase = interrupted ? "interrupted" : "idle";
-    this.ui = new ExtensionUIBroker((topic, payload) => {
+    this.ui = this.createSemanticBroker();
+    this.extensionHost = new RemotePiExtensionHost(this.ui);
+    this.lifecycle = new ExtensionLifecycleCoordinator(this.ui.presentation, () => this.hasRuntimeWork());
+  }
+
+  private createSemanticBroker(): SemanticUIBroker {
+    const presentation = new ExtensionPresentationStore((topic, payload) => {
       this.revision += 1;
       this.emit(topic, payload);
+    }, {
+      capabilities: [
+        "semantic.dialogs", "semantic.notifications", "semantic.status", "semantic.working",
+        "semantic.hidden-thinking-label", "semantic.string-widgets", "semantic.title",
+        "semantic.revisioned-editor", "semantic.tools-expanded", "surfaces.full-frame",
+      ],
+      diagnostics: [
+        { code: "remote-components.pending", message: "Pi component surfaces are not mounted while production remains in RPC mode." },
+        { code: "theme.baseline-only", message: "Per-session process-global Pi theme synchronization is unavailable through the pinned public API." },
+      ],
     });
+    return new SemanticUIBroker(presentation);
   }
 
   static async create(
@@ -181,11 +206,29 @@ export class RuntimeSlot {
     return this.runtime.session.modelRuntime;
   }
 
-  get isBusy(): boolean {
+  /** Actionable work only; decorative presentation must not block trust/delete. */
+  get isBusy(): boolean { return this.lifecycle.preventsOperationalQuiescence; }
+  /** Retained presentation protects only automatic idle eviction. */
+  get isEvictionProtected(): boolean { return this.lifecycle.preventsEviction; }
+  get isDrainBusy(): boolean { return this.lifecycle.preventsAdministrativeDrain; }
+
+  async prepareForAdministrativeDrain(): Promise<void> {
+    this.lifecycle.beginDrain();
+    if (this.queuedMessages.length > 0 || this.runtime.session.getSteeringMessages().length > 0 || this.runtime.session.getFollowUpMessages().length > 0) {
+      await this.clearQueue();
+    }
+  }
+
+  private hasRuntimeWork(): boolean {
     return this.activeExports > 0
+      || this.activeOperationId !== undefined
+      || this.operation !== undefined
+      || this.pendingExtensionCommand !== undefined
       || this.manualCompactionClaim !== undefined
       || this.pendingManualCompaction !== undefined
       || this.queuedManualCompactionInFlight
+      || this.pendingQueueAdmission !== undefined
+      || this.queuedMessages.length > 0
       || this.effectivePhase === "running"
       || this.effectivePhase === "compacting"
       || this.effectivePhase === "retrying"
@@ -297,16 +340,35 @@ export class RuntimeSlot {
       navigateTree: (targetId, options) => this.runtime.session.navigateTree(targetId, options),
       switchSession: (sessionPath, options) => this.runtime.switchSession(sessionPath, options),
       reload: async () => {
-        await this.runtime.session.resourceLoader.reload(this.effectiveResourceReloadOptions());
-        await this.runtime.session.reload();
+        await this.reloadBoundSession();
         if (this.projectTrustReloadOverride === undefined) this.commitReload();
       },
     };
   }
 
+  private rotateSemanticHost(reason = "Extension host reloaded or replaced"): void {
+    this.extensionHost.retire(reason);
+    this.ui.retire(reason);
+    this.ui = this.createSemanticBroker();
+    this.extensionHost = new RemotePiExtensionHost(this.ui);
+    this.lifecycle.replaceActivity(this.ui.presentation);
+    // reload() has already built its new public runner and invokes this hook
+    // before session_start. Updating it directly avoids bindExtensions(), which
+    // would emit a duplicate session_start.
+    this.runtime.session.extensionRunner.setUIContext(this.ui.context(), "rpc");
+  }
+
+  private async reloadBoundSession(): Promise<void> {
+    const session = this.runtime.session;
+    await session.resourceLoader.reload(this.effectiveResourceReloadOptions());
+    await session.reload({ beforeSessionStart: () => this.rotateSemanticHost() });
+  }
+
   private async bindSession(): Promise<void> {
     const previousId = this.runtime?.session.sessionId ?? this.sessionManager.getSessionId();
     this.unsubscribe?.();
+    if (this.hasBoundSession) this.rotateSemanticHost();
+    this.hasBoundSession = true;
     const session = this.runtime.session;
     this.sessionManager = session.sessionManager;
     await session.bindExtensions({
@@ -314,7 +376,7 @@ export class RuntimeSlot {
       mode: "rpc",
       commandContextActions: this.commandActions(),
       abortHandler: () => void this.abort(),
-      shutdownHandler: () => this.emit("session.notification", { type: "warning", message: "An extension requested shutdown; Tron kept running" }),
+      shutdownHandler: () => this.requestExtensionShutdown(),
       onError: (error) => this.emit("session.extensionError", safeJson(error)),
     });
     this.unsubscribe = session.subscribe((event) => this.onEvent(event));
@@ -322,6 +384,34 @@ export class RuntimeSlot {
     if (previousId !== nextId) this.hooks.rekey(previousId, nextId, this);
     this.revision += 1;
     this.publishSnapshot();
+  }
+
+  private requestExtensionShutdown(): void {
+    this.lifecycle.requestShutdown();
+    this.revision += 1;
+    this.ui.context().notify("Extension requested a graceful session close", "info");
+    this.maybePerformExtensionShutdown();
+  }
+
+  private maybePerformExtensionShutdown(): void {
+    if (!this.lifecycle.isShutdownRequested || this.lifecycle.hasPendingCommands || this.lifecycle.hasPendingPrompts || this.shuttingDown || this.disposed) return;
+    void this.runtime.session.waitForIdle().then(() => this.lane.run(async () => {
+      if (!this.lifecycle.isShutdownRequested || this.lifecycle.hasPendingCommands || this.lifecycle.hasPendingPrompts || this.disposed) return;
+      this.shuttingDown = true;
+      const closedID = this.id;
+      const hostEpoch = this.ui.hostEpoch;
+      // Pi owns session_shutdown; closure is truthful only after it completes.
+      await this.disposeRuntime();
+      await this.dependencies.markers.clear(closedID);
+      this.phase = "idle";
+      this.operation = undefined;
+      this.pendingExtensionCommand = undefined;
+      this.retry = undefined;
+      this.emit("session.closed", { reason: "extension_shutdown", hostEpoch });
+      this.hooks.closed?.(closedID, this);
+    })).catch((error) => {
+      this.emit("session.extensionError", safeJson({ message: error instanceof Error ? error.message : String(error) }));
+    });
   }
 
   private emit(topic: string, data: JsonValue): void {
@@ -375,6 +465,17 @@ export class RuntimeSlot {
     this.touch();
     switch (event.type) {
       case "agent_start":
+        if (!this.lifecycle.admitAgentStartDuringDrain()) {
+          this.phase = "interrupted";
+          this.operation = undefined;
+          this.activeOperationId = undefined;
+          this.emit("session.operationFailed", {
+            message: "Extension continuation was rejected after the administrative drain cutoff",
+          });
+          void this.runtime.session.abort();
+          this.publishSnapshot();
+          break;
+        }
         this.phase = "running";
         this.toolExecutions.clear();
         this.nextToolOrder = 0;
@@ -401,6 +502,7 @@ export class RuntimeSlot {
           break;
         }
         this.phase = "idle";
+        const settledOperationId = this.activeOperationId;
         this.activeOperationId = undefined;
         this.operation = undefined;
         this.retry = undefined;
@@ -417,8 +519,10 @@ export class RuntimeSlot {
           this.startPendingManualCompaction();
           break;
         }
-        void this.dependencies.markers.clear(this.id);
-        this.hooks.settled(this.id);
+        if (this.pendingExtensionCommand === undefined) {
+          void this.dependencies.markers.clear(this.id, settledOperationId);
+          this.hooks.settled(this.id);
+        }
         this.publishSnapshot();
         break;
       case "compaction_start":
@@ -587,6 +691,11 @@ export class RuntimeSlot {
         break;
       case "queue_update":
         if (!this.suppressQueueEvents) this.reconcileQueuedMessages();
+        if (this.lifecycle.isDraining && (this.runtime.session.getSteeringMessages().length > 0 || this.runtime.session.getFollowUpMessages().length > 0)) {
+          void this.clearQueue().catch((error) => this.emit("session.operationFailed", safeJson({
+            message: error instanceof Error ? error.message : String(error),
+          })));
+        }
         this.scheduleSnapshot();
         break;
       case "thinking_level_changed":
@@ -818,11 +927,12 @@ export class RuntimeSlot {
       ...(streaming ? { streaming } : {}),
       ...(session.sessionManager.getLeafId() ? { leafEntryId: session.sessionManager.getLeafId()! } : {}),
       ...(this.operation ? { operation: this.operation } : {}),
+      ...(this.pendingExtensionCommand ? { extensionCommand: this.pendingExtensionCommand } : {}),
       ...(this.retry ? { retry: this.retry } : {}),
       toolExecutions: [...this.toolExecutions.values()]
         .filter((tool) => this.effectivePhase === "running" || tool.status !== "running")
         .sort((left, right) => left.order - right.order),
-      extensionUI: this.ui.state(),
+      extensionPresentation: this.ui.state(),
       diagnostics: this.runtime.diagnostics.map((diagnostic) => ({ type: diagnostic.type, message: diagnostic.message })),
     });
   }
@@ -871,69 +981,134 @@ export class RuntimeSlot {
   ): Promise<{ operationId: string }> {
     return this.lane.run(async () => {
       this.assertUsable();
+      if (this.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
       const session = this.runtime.session;
-      if (session.isStreaming && !behavior) throw new GatewayError("busy", "Session is running; choose steer or follow-up");
-      if (session.isStreaming && behavior) {
+      const extensionCommandName = text.startsWith("/") ? text.slice(1).split(/\s/u, 1)[0] : undefined;
+      const isExactExtensionCommand = extensionCommandName !== undefined
+        && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
+      const queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
+      if (session.isStreaming && !behavior && !isExactExtensionCommand) throw new GatewayError("busy", "Session is running; choose steer or follow-up");
+      if (queuesIntoActiveRun) {
         this.reconcileQueuedMessages();
         const display = queueDisplay ?? { text, attachmentEnvelope: "", attachmentCount: images.length };
-        RuntimeSlot.validateQueue([
-          ...this.queuedMessages,
-          { text: display.text, attachmentCount: display.attachmentCount },
-        ]);
+        RuntimeSlot.validateQueue([...this.queuedMessages, { text: display.text, attachmentCount: display.attachmentCount }]);
         this.pendingQueueAdmission = {
-          id: randomUUID(),
-          behavior,
-          text: display.text,
-          attachmentCount: display.attachmentCount,
-          attachmentEnvelope: display.attachmentEnvelope,
-          images,
+          id: randomUUID(), behavior: behavior!, text: display.text,
+          attachmentCount: display.attachmentCount, attachmentEnvelope: display.attachmentEnvelope, images,
         };
       }
+
       const operationId = randomUUID();
-      this.activeOperationId = operationId;
-      this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString() };
+      if (isExactExtensionCommand) {
+        this.pendingExtensionCommand = { id: operationId, kind: "command", startedAt: new Date().toISOString() };
+        // Exact commands run before Pi's preflight callback and can wait on UI
+        // indefinitely. Persist the provisional admission before invoking Pi.
+        await this.dependencies.markers.mark(this.id, operationId);
+        this.revision += 1;
+        this.publishSnapshot();
+      } else if (!queuesIntoActiveRun) {
+        this.activeOperationId = operationId;
+        this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString() };
+      }
+
       let acceptedResolve!: (accepted: boolean) => void;
       const accepted = new Promise<boolean>((resolve) => { acceptedResolve = resolve; });
-      const run = session.prompt(text, {
+      this.lifecycle.beginPreflight();
+      const sdkRun = session.prompt(text, {
         images,
-        ...(behavior ? { streamingBehavior: behavior } : {}),
+        ...(queuesIntoActiveRun ? { streamingBehavior: behavior } : {}),
         source: "rpc",
         preflightResult: acceptedResolve,
       });
-      void run.catch((error) => {
-        this.emit("session.operationFailed", safeJson({ operationId, message: error instanceof Error ? error.message : String(error) }));
-        if (this.shuttingDown) return;
-        if (!session.isStreaming) {
-          if (this.queuedManualCompactionInFlight) return;
-          this.phase = "idle";
-          this.activeOperationId = undefined;
-          this.operation = undefined;
-          if (this.pendingManualCompaction) {
-            this.publishSnapshot();
-            this.startPendingManualCompaction();
-          } else {
-            void this.dependencies.markers.clear(this.id);
-            this.hooks.settled(this.id);
-            this.publishSnapshot();
-          }
-        }
+      let runSettled = false;
+      let commandSettled = false;
+      let admissionFinalized = false;
+      const promptRun = this.lifecycle.trackPrompt(sdkRun, () => {
+        runSettled = true;
+        this.maybePerformExtensionShutdown();
       });
+      const run = isExactExtensionCommand
+        ? this.lifecycle.trackCommand(promptRun, () => { commandSettled = true; this.maybePerformExtensionShutdown(); })
+        : promptRun;
+
+      const settleWithoutAgent = async () => {
+        if (this.shuttingDown || this.hasActiveAgentRun || queuesIntoActiveRun) return;
+        const owned = this.activeOperationId === operationId || this.operation?.id === operationId;
+        if (!owned || this.queuedManualCompactionInFlight) return;
+        if (!this.pendingManualCompaction) await this.dependencies.markers.clear(this.id, operationId);
+        // Marker I/O may suspend behind a newer run. Clear only this run's live
+        // projection; conditional marker deletion already protects its successor.
+        if (this.activeOperationId === operationId) this.activeOperationId = undefined;
+        if (this.operation?.id === operationId) this.operation = undefined;
+        if (this.activeOperationId !== undefined || this.hasActiveAgentRun) return;
+        this.phase = "idle";
+        if (this.pendingManualCompaction) {
+          this.publishSnapshot();
+          this.startPendingManualCompaction();
+        } else {
+          this.hooks.settled(this.id);
+          this.revision += 1;
+          this.publishSnapshot();
+        }
+      };
+
+      void run.then(
+        () => admissionFinalized ? settleWithoutAgent() : undefined,
+        async (error) => {
+          this.emit("session.operationFailed", safeJson({ operationId, message: error instanceof Error ? error.message : String(error) }));
+          if (admissionFinalized) await settleWithoutAgent();
+        },
+      );
+
       let admitted: boolean;
       try {
-        // Pi's preflight callback is the sole authority for whether canonical work
-        // was admitted. A gateway-local deadline cannot safely reject this RPC:
-        // the same uncancelled runtime call could still accept and start later.
+        // Pi's callback is authoritative. A local timeout could reject while the
+        // same uncancelled input handler later accepts canonical work.
         admitted = await accepted;
       } finally {
         this.pendingQueueAdmission = undefined;
+        this.lifecycle.endPreflight();
       }
+      admissionFinalized = true;
       if (!admitted) {
-        this.operation = undefined;
+        if (this.activeOperationId === operationId) this.activeOperationId = undefined;
+        if (this.operation?.id === operationId) this.operation = undefined;
+        if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
+        await this.dependencies.markers.clear(this.id, operationId);
         throw new GatewayError("invalid_request", "The agent runtime rejected the prompt before admission");
       }
-      await this.dependencies.markers.mark(this.id, operationId);
+
+      if (!queuesIntoActiveRun && !isExactExtensionCommand) await this.dependencies.markers.mark(this.id, operationId);
       this.revision += 1;
       this.publishSnapshot();
+
+      if (isExactExtensionCommand) {
+        const finishCommand = async () => {
+          if (this.pendingExtensionCommand?.id !== operationId) return;
+          if (this.hasActiveAgentRun && this.activeOperationId !== undefined) {
+            // Transfer marker ownership atomically back to the foreground/new
+            // agent run after the command's provisional marker.
+            await this.dependencies.markers.mark(this.id, this.activeOperationId);
+          } else if (this.activeOperationId === undefined) {
+            await this.dependencies.markers.clear(this.id, operationId);
+            this.hooks.settled(this.id);
+          }
+          if (this.pendingExtensionCommand?.id !== operationId) return;
+          this.pendingExtensionCommand = undefined;
+          this.revision += 1;
+          this.publishSnapshot();
+          this.maybePerformExtensionShutdown();
+        };
+        if (!commandSettled) {
+          try { await run; } finally { await finishCommand(); }
+        } else {
+          await finishCommand();
+        }
+      } else if (runSettled) {
+        // Handles input action:"handled" (and any other accepted no-agent path)
+        // after the marker exists, without touching a newer operation.
+        await settleWithoutAgent();
+      }
       return { operationId };
     });
   }
@@ -1409,9 +1584,14 @@ export class RuntimeSlot {
     };
   }
 
-  respondToInteraction(id: string, value: unknown, cancelled: boolean): void {
+  respondToInteraction(id: string, hostEpoch: string, presentationRevision: number, value: unknown, cancelled: boolean): void {
     this.assertNoTrustReload();
-    this.ui.respond(id, value, cancelled);
+    this.ui.respond(id, hostEpoch, presentationRevision, value, cancelled);
+  }
+
+  updateExtensionEditor(hostEpoch: string, baseRevision: number, operationId: string, text: string): JsonValue {
+    this.assertNoTrustReload();
+    return this.ui.updateEditor(hostEpoch, baseRevision, operationId, text) as unknown as JsonValue;
   }
 
   beginTrustReload(): void {
@@ -1426,8 +1606,7 @@ export class RuntimeSlot {
       const previousOverride = this.projectTrustReloadOverride;
       this.projectTrustReloadOverride = projectTrusted;
       try {
-        await this.runtime.session.resourceLoader.reload(this.effectiveResourceReloadOptions());
-        await this.runtime.session.reload();
+        await this.reloadBoundSession();
         if (publish) this.commitReload();
       } finally {
         this.projectTrustReloadOverride = previousOverride;
@@ -1504,7 +1683,7 @@ export class RuntimeSlot {
 
   async dispose(): Promise<void> {
     if (this.disposed) return;
-    if (this.isBusy || this.trustReloadPending) throw new GatewayError("busy", "Cannot evict a busy session runtime");
+    if (this.isBusy || this.trustReloadPending) throw new GatewayError("busy", "Cannot dispose a busy session runtime");
     await this.disposeRuntime();
   }
 
@@ -1522,6 +1701,8 @@ export class RuntimeSlot {
   }
 
   private async performShutdown(): Promise<void> {
+    const hadAdmittedWork = this.isBusy;
+    const sessionID = this.id;
     this.shuttingDown = true;
     const cancellation = new GatewayError("cancelled", "Gateway shutdown cancelled queued compaction");
     const pending = this.pendingManualCompaction;
@@ -1537,6 +1718,10 @@ export class RuntimeSlot {
     this.runtime.session.abortBranchSummary();
     this.runtime.session.abortBash();
     await this.runtime.session.abort();
+    // A command may hold the mutation lane while awaiting native UI. Cancel the
+    // epoch's imperative interactions before joining that lane so shutdown cannot
+    // deadlock behind a response that no client can deliver.
+    this.ui.cancelAll("Gateway shutdown interrupted extension interaction");
 
     await this.lane.run(async () => {
       const latePending = this.pendingManualCompaction;
@@ -1544,12 +1729,15 @@ export class RuntimeSlot {
         this.pendingManualCompaction = undefined;
         latePending.reject(cancellation);
       }
-      await this.dependencies.markers.clear(this.id);
       this.queuedManualCompactionInFlight = false;
-      this.phase = "idle";
-      this.operation = undefined;
-      this.retry = undefined;
       await this.disposeRuntime();
+      // Forced interruption intentionally leaves evidence for restart. Only a
+      // verified clean, idle Pi shutdown removes its marker.
+      if (!hadAdmittedWork) await this.dependencies.markers.clear(sessionID);
+      this.phase = hadAdmittedWork ? "interrupted" : "idle";
+      this.operation = undefined;
+      this.pendingExtensionCommand = undefined;
+      this.retry = undefined;
     });
   }
 
@@ -1559,7 +1747,10 @@ export class RuntimeSlot {
     this.clearToolProgressTimers();
     this.unsubscribe?.();
     this.ui.cancelAll();
+    this.extensionHost.retire("Session runtime disposed");
     await this.runtime.dispose();
+    this.lifecycle.retire();
+    this.ui.retire();
     this.disposed = true;
   }
 
@@ -1594,6 +1785,6 @@ export class RuntimeSlot {
 
   private assertIdle(allowTrustReload = false): void {
     this.assertUsable(allowTrustReload);
-    if (this.runtime.session.isStreaming || this.isBusy) throw new GatewayError("busy", "Session must be idle for this operation");
+    if (this.runtime.session.isStreaming || this.isDrainBusy) throw new GatewayError("busy", "Session must be idle for this operation");
   }
 }

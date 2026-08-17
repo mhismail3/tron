@@ -33,7 +33,7 @@ struct SnapshotCacheTests {
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         let signposts = RecordingPerformanceSignposts()
         let cache = SnapshotCache(root: root, performanceSignposts: signposts)
-        let snapshot = SessionSnapshot(
+        var snapshot = SessionSnapshot(
             sessionId: "session", runtimeGeneration: "generation", revision: 1, eventSequence: 3,
             phase: .running, name: nil, cwd: "/workspace", parentSessionId: nil,
             model: nil, thinkingLevel: "off", availableThinkingLevels: ["off"], contextUsage: nil,
@@ -42,11 +42,27 @@ struct SnapshotCacheTests {
             streaming: nil, leafEntryId: nil,
             operation: .init(id: "operation", kind: .prompt, startedAt: "2026-01-01T00:00:00Z", reason: nil),
             retry: nil, toolExecutions: [],
-            extensionUI: .init(
-                statuses: [:], working: .init(message: nil, visible: true), hiddenThinkingLabel: nil,
-                widgets: [], title: nil, editorRevision: 0, editorText: "", pendingInteractions: []
+            extensionPresentation: .init(
+                version: 2, hostEpoch: "host", revision: 0, capabilities: [], diagnostics: [],
+                semanticState: .init(statuses: [:], working: .init(message: nil, visible: true), hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
+                surfaces: [], pendingInteractions: [], inputLease: nil, projection: nil
             ),
             diagnostics: []
+        )
+        snapshot.extensionPresentation.semanticState.statuses = ["ephemeral": "value"]
+        snapshot.extensionPresentation.surfaces = [.init(
+            id: "surface", kind: .widget, placement: .aboveEditor, lifecycle: .retained,
+            targetId: nil, provenance: nil, revision: 1, focused: true, inputMode: .keys,
+            frame: .init(width: 20, height: 1, lines: [.init(plainText: "surface", runs: [.init(text: "surface", style: .init())])], plainText: "surface", cursor: nil)
+        )]
+        snapshot.extensionPresentation.pendingInteractions = [.init(
+            id: "interaction", hostEpoch: "host", presentationRevision: 1,
+            method: .confirm, title: "Confirm", message: nil, options: nil,
+            placeholder: nil, prefill: nil, expiresAt: nil
+        )]
+        snapshot.extensionPresentation.inputLease = .init(
+            id: "lease", connectionId: "connection", surfaceId: "surface",
+            surfaceRevision: 1, acquiredAt: "2026-01-01T00:00:00Z"
         )
         let summary = SessionSummary(
             id: "session", name: nil, cwd: "/workspace", parentSessionId: nil,
@@ -58,6 +74,10 @@ struct SnapshotCacheTests {
         #expect(loaded.snapshots.first?.phase == .interrupted)
         #expect(loaded.snapshots.first?.transcriptStart == 10)
         #expect(loaded.snapshots.first?.transcriptTotal == 12)
+        #expect(loaded.snapshots.first?.extensionPresentation.surfaces.isEmpty == true)
+        #expect(loaded.snapshots.first?.extensionPresentation.pendingInteractions.isEmpty == true)
+        #expect(loaded.snapshots.first?.extensionPresentation.inputLease == nil)
+        #expect(loaded.snapshots.first?.extensionPresentation.semanticState.statuses.isEmpty == true)
         let events = signposts.events()
         #expect(events.count == 4)
         #expect(events[0] == .begin(.cacheSave))
@@ -102,10 +122,10 @@ struct SnapshotCacheTests {
             transcriptStart: Int.max, transcriptTotal: Int.max,
             streaming: nil, leafEntryId: nil, operation: nil, retry: nil,
             toolExecutions: [],
-            extensionUI: .init(
-                statuses: [:], working: .init(message: nil, visible: false),
-                hiddenThinkingLabel: nil, widgets: [], title: nil,
-                editorRevision: 0, editorText: "", pendingInteractions: []
+            extensionPresentation: .init(
+                version: 2, hostEpoch: "host", revision: 0, capabilities: [], diagnostics: [],
+                semanticState: .init(statuses: [:], working: .init(message: nil, visible: false), hiddenThinkingLabel: nil, widgets: [], title: nil, toolsExpanded: false, editorRevision: 0, editorText: ""),
+                surfaces: [], pendingInteractions: [], inputLease: nil, projection: nil
             ),
             diagnostics: []
         )

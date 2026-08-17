@@ -1,4 +1,4 @@
-// Tron protocol v2 is an intentionally small, versioned mobile contract. Pi
+// Tron protocol v3 is an intentionally small, versioned mobile contract. Pi
 // objects must be projected into these bounded values rather than serialized
 // directly; Pi JSONL and configuration files remain canonical.
 export type JsonPrimitive = string | number | boolean | null;
@@ -147,13 +147,15 @@ export interface RetryState {
 
 export interface SessionOperationState {
   id?: string;
-  kind: "prompt" | "compaction" | "branchSummary" | "bash" | "retry";
+  kind: "prompt" | "command" | "compaction" | "branchSummary" | "bash" | "retry";
   startedAt: string;
   reason?: string;
 }
 
 export type ExtensionInteraction = {
   id: string;
+  hostEpoch: string;
+  presentationRevision: number;
   method: "select" | "confirm" | "input" | "editor";
   title: string;
   message?: string;
@@ -165,19 +167,123 @@ export type ExtensionInteraction = {
 
 export interface ExtensionWidget {
   key: string;
+  revision: number;
   lines: string[];
   placement: "aboveEditor" | "belowEditor";
 }
 
-export interface ExtensionUIState {
+export interface ExtensionPresentationDiagnostic {
+  code: string;
+  message: string;
+}
+
+export interface ExtensionFrameStyle {
+  bold?: true;
+  dim?: true;
+  italic?: true;
+  underline?: true;
+  inverse?: true;
+  strike?: true;
+  foreground?: string;
+  background?: string;
+  link?: string;
+}
+
+export interface ExtensionFrameRun { text: string; style: ExtensionFrameStyle }
+export interface ExtensionFrameLine { plainText: string; runs: ExtensionFrameRun[] }
+export interface ExtensionFrameCursor { row: number; column: number }
+export interface ExtensionFrame {
+  width: number;
+  height: number;
+  lines: ExtensionFrameLine[];
+  plainText: string;
+  cursor?: ExtensionFrameCursor;
+}
+
+export type ExtensionSurfaceKind = "header" | "footer" | "widget" | "custom" | "overlay"
+  | "editor" | "toolRenderer" | "messageRenderer" | "entryRenderer" | "markdown" | "unknown";
+export type ExtensionSurfacePlacement = "header" | "footer" | "aboveEditor" | "belowEditor"
+  | "transcript" | "overlay" | "fullscreen";
+export interface ExtensionSurface {
+  id: string;
+  kind: ExtensionSurfaceKind;
+  placement: ExtensionSurfacePlacement;
+  lifecycle: "retained" | "blocking" | "transient" | "restored";
+  targetId?: string;
+  provenance?: { source?: string; path?: string };
+  revision: number;
+  focused: boolean;
+  inputMode: "none" | "keys" | "textAndKeys";
+  frame: ExtensionFrame;
+}
+
+export interface ExtensionInputLease {
+  id: string;
+  connectionId: string;
+  surfaceId: string;
+  surfaceRevision: number;
+  acquiredAt: string;
+}
+
+export interface ExtensionSemanticState {
   statuses: Record<string, string>;
-  working: { message?: string; visible: boolean };
+  working: {
+    message?: string;
+    visible: boolean;
+    indicator: { kind: "default" | "hidden" | "static" | "animated"; frames: string[]; intervalMs?: number };
+  };
   hiddenThinkingLabel?: string;
   widgets: ExtensionWidget[];
   title?: string;
+  toolsExpanded: boolean;
   editorRevision: number;
   editorText: string;
+}
+
+/** Versioned, bounded, disposable projection of one live Pi extension-host epoch. */
+export interface ExtensionPresentationState {
+  version: 2;
+  hostEpoch: string;
+  revision: number;
+  capabilities: string[];
+  diagnostics: ExtensionPresentationDiagnostic[];
+  semanticState: ExtensionSemanticState;
+  surfaces: ExtensionSurface[];
   pendingInteractions: ExtensionInteraction[];
+  inputLease?: ExtensionInputLease;
+  projection?: {
+    complete: boolean;
+    omitted: string[];
+    omittedSurfaces?: Array<{ id: string; revision: number }>;
+  };
+}
+
+export interface ExtensionSemanticPatch {
+  statuses?: Record<string, string>;
+  working?: ExtensionSemanticState["working"];
+  hiddenThinkingLabel?: string | null;
+  widgets?: ExtensionWidget[];
+  title?: string | null;
+  toolsExpanded?: boolean;
+  editorRevision?: number;
+  editorText?: string;
+  editorAction?: "set" | "paste" | "native";
+  editorDelta?: string;
+  editorOperationId?: string;
+}
+
+export interface ExtensionPresentationMutation {
+  version: 2;
+  hostEpoch: string;
+  revision: number;
+  semantic?: ExtensionSemanticPatch;
+  interactionList?: ExtensionInteraction[];
+  surfaceUpserts?: ExtensionSurface[];
+  surfaceRemovals?: string[];
+  inputLease?: ExtensionInputLease | null;
+  capabilities?: string[];
+  diagnostics?: ExtensionPresentationDiagnostic[];
+  notification?: { message: string; type: "info" | "warning" | "error" };
 }
 
 export interface SessionStats {
@@ -226,9 +332,11 @@ export interface SessionSnapshot {
   streaming?: TranscriptItem;
   leafEntryId?: string;
   operation?: SessionOperationState;
+  /** Exact Pi extension command handler currently admitted, independent of foreground agent work. */
+  extensionCommand?: SessionOperationState;
   retry?: RetryState;
   toolExecutions: ToolExecutionState[];
-  extensionUI: ExtensionUIState;
+  extensionPresentation: ExtensionPresentationState;
   diagnostics: Array<{ type: string; message: string }>;
 }
 

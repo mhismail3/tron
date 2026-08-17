@@ -4,7 +4,7 @@ import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { BlobStore } from "./blob-store.js";
-import type { CommandInfo, ContentPart, JsonValue, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
+import type { CommandInfo, ContentPart, ExtensionSurface, JsonValue, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
 
 const MAX_TEXT = 64_000;
 const MAX_JSON_STRING = 100_000;
@@ -201,13 +201,58 @@ export function fitSessionSnapshot(
     if (frameBytes(projected) <= maximumBytes) return projected;
   }
 
+  // Retain actionable frames first. Omitted identities/revisions remain a
+  // bounded delta baseline, so an exact-next full-frame upsert can converge.
+  const surfacePriority = (surface: ExtensionSurface): number => {
+    const leased = projected.extensionPresentation.inputLease?.surfaceId === surface.id;
+    if (leased || surface.lifecycle === "blocking") return 100;
+    if (surface.focused) return 90;
+    if (surface.kind === "overlay" || surface.kind === "editor" || surface.inputMode !== "none") return 80;
+    if (surface.lifecycle === "transient") return 40;
+    return 0;
+  };
+  const completeSurfaces = [...projected.extensionPresentation.surfaces];
+  const removalOrder = [...completeSurfaces].sort((left, right) => surfacePriority(left) - surfacePriority(right));
+  const omittedSurfaceRevisions: Array<{ id: string; revision: number }> = [];
+  for (const removed of removalOrder) {
+    omittedSurfaceRevisions.push({ id: removed.id, revision: removed.revision });
+    const retained = completeSurfaces.filter((surface) => !omittedSurfaceRevisions.some((item) => item.id === surface.id));
+    projected = {
+      ...projected,
+      extensionPresentation: {
+        ...projected.extensionPresentation,
+        surfaces: retained,
+        diagnostics: [
+          ...projected.extensionPresentation.diagnostics.filter((item) => item.code !== "projection.surfaces-omitted").slice(0, 63),
+          { code: "projection.surfaces-omitted", message: "Decorative extension surfaces were omitted from this bounded snapshot." },
+        ],
+        projection: { complete: false, omitted: ["surfaces"], omittedSurfaces: [...omittedSurfaceRevisions] },
+      },
+    };
+    if (frameBytes(projected) <= maximumBytes) return projected;
+  }
+
   projected = {
     ...projected,
-    extensionUI: {
-      ...projected.extensionUI,
-      statuses: {},
-      widgets: [],
-      editorText: "",
+    extensionPresentation: {
+      ...projected.extensionPresentation,
+      semanticState: {
+        ...projected.extensionPresentation.semanticState,
+        statuses: {},
+        widgets: [],
+        editorText: "",
+      },
+      diagnostics: [
+        ...projected.extensionPresentation.diagnostics.filter((item) => item.code !== "projection.surfaces-omitted").slice(0, 63),
+        { code: "projection.presentation-omitted", message: "Decorative extension presentation was omitted from this bounded snapshot." },
+      ],
+      projection: {
+        complete: false,
+        omitted: ["surfaces", "statuses", "widgets", "editorText"],
+        ...(projected.extensionPresentation.projection?.omittedSurfaces
+          ? { omittedSurfaces: projected.extensionPresentation.projection.omittedSurfaces }
+          : {}),
+      },
     },
   };
   if (frameBytes(projected) <= maximumBytes) return projected;

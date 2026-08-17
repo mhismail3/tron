@@ -157,6 +157,9 @@ final class AppModel {
     }
 
     private var eventTask: Task<Void, Never>?
+    private var extensionEditorSyncTasks: [SessionPresentationIdentity: Task<Void, Never>] = [:]
+    private var extensionEditorSyncGenerations: [SessionPresentationIdentity: Int] = [:]
+    private var extensionEditorOperationReceipts: [SessionPresentationIdentity: [String]] = [:]
     private var deviceLoadGeneration = 0
     private var legacyImportLoadGeneration = 0
     private var catalogRefreshTask: Task<SessionCatalogRefreshOutcome, Never>?
@@ -487,6 +490,7 @@ final class AppModel {
     }
 
     func revokePresentationIntake(_ target: SessionPresentationTarget) {
+        cancelExtensionEditorSynchronization(for: target)
         composerDrafts.revoke(target)
         sessionPresentation.revokeIntake(target)
     }
@@ -621,6 +625,7 @@ final class AppModel {
         settingsTrust.clearProfile()
         packageConfiguration.clearProfile()
         customModelConfiguration.clearProfile()
+        cancelAllExtensionEditorSynchronization()
         composerDrafts.retireProfilePresentation()
         lastError = nil
         onboardingError = nil
@@ -970,6 +975,7 @@ final class AppModel {
 
     func closeSessionPresentation(_ id: String, generation: Int) async {
         let target = SessionPresentationTarget(sessionID: id, generation: generation)
+        cancelExtensionEditorSynchronization(for: target)
         composerDrafts.revoke(target)
         await sessionPresentation.close(target)
     }
@@ -992,6 +998,7 @@ final class AppModel {
     }
 
     private func invalidateSessionConnectionOwnership() {
+        cancelAllExtensionEditorSynchronization()
         chatMedia.removeAll()
         sessionPresentation.retireConnection()
     }
@@ -1451,6 +1458,78 @@ final class AppModel {
         defaultWorkspace = response.path
     }
 
+    private func cancelExtensionEditorSynchronization(for target: SessionPresentationIdentity) {
+        extensionEditorSyncTasks[target]?.cancel()
+        extensionEditorSyncTasks[target] = nil
+        extensionEditorSyncGenerations[target] = nil
+        extensionEditorOperationReceipts[target] = nil
+    }
+
+    private func cancelAllExtensionEditorSynchronization() {
+        for task in extensionEditorSyncTasks.values { task.cancel() }
+        extensionEditorSyncTasks.removeAll()
+        extensionEditorSyncGenerations.removeAll()
+        extensionEditorOperationReceipts.removeAll()
+    }
+
+    func scheduleExtensionEditorUpdate(target: SessionPresentationIdentity, text: String) {
+        guard ownsPresentation(target),
+              let scheduledPresentation = authoritativeSnapshot(for: target.sessionID)?.extensionPresentation,
+              !scheduledPresentation.hostEpoch.isEmpty else { return }
+        let scheduledHostEpoch = scheduledPresentation.hostEpoch
+        let scheduledBaseRevision = scheduledPresentation.semanticState.editorRevision
+        extensionEditorSyncTasks[target]?.cancel()
+        let generation = (extensionEditorSyncGenerations[target] ?? 0) + 1
+        extensionEditorSyncGenerations[target] = generation
+        extensionEditorSyncTasks[target] = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled, let self, self.ownsPresentation(target),
+                      self.authoritativeSnapshot(for: target.sessionID)?.extensionPresentation.hostEpoch == scheduledHostEpoch else { return }
+                let hostEpoch = scheduledHostEpoch
+                let operationID = self.uuidSource.next().uuidString
+                var receipts = self.extensionEditorOperationReceipts[target] ?? []
+                receipts.append(operationID)
+                if receipts.count > 128 { receipts.removeFirst(receipts.count - 128) }
+                self.extensionEditorOperationReceipts[target] = receipts
+                let result = try await self.sessionMutations.updateExtensionEditor(
+                    sessionID: target.sessionID,
+                    hostEpoch: hostEpoch,
+                    baseRevision: scheduledBaseRevision,
+                    operationID: operationID,
+                    text: text
+                )
+                guard !Task.isCancelled, self.ownsPresentation(target),
+                      self.authoritativeSnapshot(for: target.sessionID)?.extensionPresentation.hostEpoch == hostEpoch else { return }
+                // Never force a stale local edit through at a newer revision. A
+                // fresh user edit will use the newly authoritative base.
+                if !result.applied, self.extensionEditorSyncGenerations[target] == generation {
+                    self.lastError = "The extension editor changed before the composer update could be applied."
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled, let self, self.ownsPresentation(target) else { return }
+                self.lastError = error.localizedDescription
+            }
+            if self?.extensionEditorSyncGenerations[target] == generation {
+                self?.extensionEditorSyncTasks[target] = nil
+            }
+        }
+    }
+
+    func disposeExtensionEditorRequest(
+        _ request: ComposerEditorRequest,
+        disposition: ComposerEditorDisposition,
+        target: SessionPresentationIdentity
+    ) {
+        guard ownsPresentation(target) else { return }
+        composerDrafts.disposeEditorRequest(request, disposition: disposition, target: target)
+        if let scope = composerDrafts.scope(for: target) {
+            scheduleExtensionEditorUpdate(target: target, text: composerDrafts.text(for: scope))
+        }
+    }
+
     func answerInteraction(
         _ interaction: ExtensionInteraction,
         sessionID: String,
@@ -1459,6 +1538,8 @@ final class AppModel {
     ) async throws {
         try await sessionMutations.answerInteraction(
             interactionID: interaction.id,
+            hostEpoch: interaction.hostEpoch,
+            presentationRevision: interaction.presentationRevision,
             sessionID: sessionID,
             value: value,
             cancelled: cancelled
@@ -1748,9 +1829,20 @@ extension AppModel: SessionPresentationStoreDelegate {
         action: SessionEditorAction,
         text: String,
         fullText: String,
-        revision: Int
+        revision: Int,
+        operationID: String?
     ) {
         guard ownsPresentation(target) else { return }
+        if action == .native {
+            if let operationID,
+               extensionEditorOperationReceipts[target]?.contains(operationID) == true {
+                extensionEditorOperationReceipts[target]?.removeAll { $0 == operationID }
+                return
+            }
+            if let scope = composerDrafts.scope(for: target), composerDrafts.text(for: scope) == fullText {
+                return
+            }
+        }
         composerDrafts.publishEditorRequest(
             ComposerEditorRequest(
                 sessionID: target.sessionID,

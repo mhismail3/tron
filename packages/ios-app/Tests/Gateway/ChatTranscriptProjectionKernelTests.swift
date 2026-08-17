@@ -860,7 +860,7 @@ struct ChatTranscriptProjectionKernelTests {
         snapshot.transcriptStart = Int.max
         snapshot.transcriptTotal = Int.max
         snapshot.phase = .compacting
-        snapshot.extensionUI.working = .init(message: nil, visible: true)
+        snapshot.extensionPresentation.semanticState.working = .init(message: nil, visible: true)
 
         let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
         #expect(candidate.timeline.ids == ["notification-compaction-compact"])
@@ -975,7 +975,7 @@ struct ChatTranscriptProjectionKernelTests {
           "model":{"provider":"test","id":"model"},"thinkingLevel":"high","availableThinkingLevels":["off","high"],
           "stats":{"userMessages":0,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":0,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cost":0},
           "queued":{"steering":[],"followUp":[]},"transcript":\(transcript),"transcriptStart":0,"transcriptTotal":0,
-          "toolExecutions":[],"extensionUI":{"statuses":{},"working":{"visible":false},"widgets":[],"editorRevision":0,"editorText":"","pendingInteractions":[]},"diagnostics":[]
+          "toolExecutions":[],"extensionPresentation":{"version":2,"hostEpoch":"host","revision":0,"capabilities":[],"diagnostics":[],"semanticState":{"statuses":{},"working":{"visible":false},"widgets":[],"toolsExpanded":false,"editorRevision":0,"editorText":""},"surfaces":[],"pendingInteractions":[]},"diagnostics":[]
         }
         """.utf8))
     }

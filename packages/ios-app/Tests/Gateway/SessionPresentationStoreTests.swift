@@ -22,6 +22,58 @@ struct SessionPresentationStoreTests {
         #expect(model.authoritativeSnapshot(for: snapshot.sessionId) == snapshot)
     }
 
+    @Test("admission preserves allowed LF and CR while rejecting other controls")
+    func admissionBoundaryForMultilineValues() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_810).openingTail(targetEncodedBytes: 4_096)
+        snapshot.extensionPresentation.revision = 1
+        snapshot.extensionPresentation.semanticState.editorText = "line one\r\nline two"
+        snapshot.extensionPresentation.semanticState.statuses = ["multiline": "first\nsecond\rthird"]
+        snapshot.extensionPresentation.semanticState.title = "title\r\ncontinued"
+        snapshot.extensionPresentation.pendingInteractions = [
+            ExtensionInteraction(
+                id: "editor-boundary",
+                hostEpoch: snapshot.extensionPresentation.hostEpoch,
+                presentationRevision: 1,
+                method: .editor,
+                title: "Edit",
+                message: "message\r\ncontinued",
+                options: nil,
+                placeholder: nil,
+                prefill: "prefill\ncontinued\rfinal",
+                expiresAt: nil
+            )
+        ]
+        #expect(ExtensionPresentationPolicy.admit(snapshot.extensionPresentation))
+
+        snapshot.extensionPresentation.semanticState.editorText = "rejected\u{1}control"
+        #expect(!ExtensionPresentationPolicy.admit(snapshot.extensionPresentation))
+    }
+
+    @Test("multiline editor, paste, and interaction projections remain admitted")
+    func multilineExtensionPresentationValues() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_811).openingTail(targetEncodedBytes: 4_096)
+        snapshot.extensionPresentation.revision = 1
+        snapshot.extensionPresentation.semanticState.editorText = "first line\nsecond line"
+        snapshot.extensionPresentation.pendingInteractions = [
+            ExtensionInteraction(
+                id: "editor",
+                hostEpoch: snapshot.extensionPresentation.hostEpoch,
+                presentationRevision: 1,
+                method: .editor,
+                title: "Edit",
+                message: "line one\nline two",
+                options: nil,
+                placeholder: nil,
+                prefill: "prefill one\nprefill two",
+                expiresAt: nil
+            )
+        ]
+        let model = AppModel()
+        model.installHostedAuthoritativeSnapshot(snapshot)
+        #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.extensionPresentation.semanticState.editorText == "first line\nsecond line")
+        #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.extensionPresentation.pendingInteractions.first?.prefill == "prefill one\nprefill two")
+    }
+
     @Test("cold cached snapshots never acquire live authority")
     func coldSnapshotIsNotAuthoritative() throws {
         let model = AppModel()
@@ -49,6 +101,52 @@ struct SessionPresentationStoreTests {
         #expect(store.mountedTarget == nil)
         #expect(store.snapshot == nil)
         #expect(store.authoritativeSnapshot(for: snapshot.sessionId) == nil)
+    }
+
+    @Test("stale open response after connection retirement preserves the newer subscription")
+    func staleOpenResponseCannotClearNewConnectionSubscription() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let profile = GatewayProfile(
+                id: "gateway",
+                label: "Mac",
+                host: "gateway.test",
+                port: 9_847,
+                machineId: "machine",
+                deviceId: "device"
+            )
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            let staleSnapshot = try SessionScenarioBuilder(seed: 8_812).openingTail(targetEncodedBytes: 4_096)
+            let newerSnapshot = try SessionScenarioBuilder(seed: 8_813).openingTail(targetEncodedBytes: 4_096)
+            let store = SessionPresentationStore(client: client, performanceSignposts: SystemPerformanceSignposts.shared)
+            let opening = Task { try await store.open(staleSnapshot.sessionId) }
+            try await socket.waitUntilSent(count: 2)
+            let request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[1])
+            let requestID = try #require(request.objectValue?["id"]?.stringValue)
+
+            store.retireConnection()
+            store.installHostedSubscription(snapshot: newerSnapshot, token: "new-connection-token")
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(requestID),
+                "ok": .bool(true),
+                "result": .object([
+                    "session": try JSONValue.encode(staleSnapshot),
+                    "syncToken": .string("stale-sync"),
+                    "subscriptionToken": .string("stale-token"),
+                ]),
+            ])))
+            _ = try? await opening.value
+
+            #expect(store.installedSubscriptionToken(for: newerSnapshot.sessionId) == "new-connection-token")
+            #expect(store.authoritativeSnapshot(for: newerSnapshot.sessionId) == newerSnapshot)
+            await client.close()
+        }
     }
 
     @Test("confirmed queue clear removes both rich and legacy projections")
@@ -108,6 +206,8 @@ struct SessionPresentationStoreTests {
             .openingTail(targetEncodedBytes: 4_096)
         snapshot.eventSequence = 10
         snapshot.revision = 20
+        snapshot.extensionPresentation.hostEpoch = "presentation-host"
+        snapshot.extensionPresentation.revision = 0
         let store = SessionPresentationStore(
             client: GatewayClient(),
             performanceSignposts: SystemPerformanceSignposts.shared
@@ -115,56 +215,240 @@ struct SessionPresentationStoreTests {
         store.installHostedSubscription(snapshot: snapshot, token: "token")
         let baseline = store.chatTimelineGeneration
 
-        func event(topic: String, sequence: Int, data: JSONValue) -> GatewayEvent {
+        func event(sequence: Int, semantic: JSONValue) -> GatewayEvent {
             GatewayEvent(
-                type: "event", topic: topic, sessionId: snapshot.sessionId,
+                type: "event", topic: "session.extensionPresentation", sessionId: snapshot.sessionId,
                 payload: .object([
                     "runtimeGeneration": .string(snapshot.runtimeGeneration),
                     "eventSequence": .number(Double(sequence)),
                     "revision": .number(Double(snapshot.revision)),
-                    "data": data,
+                    "data": .object([
+                        "version": .number(2), "hostEpoch": .string("presentation-host"),
+                        "revision": .number(Double(sequence - 10)), "semantic": semantic,
+                    ]),
                 ])
             )
         }
 
         await store.admit(event(
-            topic: "session.status", sequence: 11,
-            data: .object(["key": .string("sync"), "text": .string("Synchronizing")])
+            sequence: 11, semantic: .object(["statuses": .object(["sync": .string("Synchronizing")])])
         ))
-        #expect(store.snapshot?.extensionUI.statuses["sync"] == "Synchronizing")
+        #expect(store.snapshot?.extensionPresentation.semanticState.statuses["sync"] == "Synchronizing")
         #expect(store.chatTimelineGeneration == baseline + 1)
 
         await store.admit(event(
-            topic: "session.status", sequence: 12,
-            data: .object(["key": .string("sync"), "text": .string("Synchronizing")])
+            sequence: 12, semantic: .object(["statuses": .object(["sync": .string("Synchronizing")])])
         ))
         #expect(store.chatTimelineGeneration == baseline + 1)
 
         await store.admit(event(
-            topic: "session.working", sequence: 13,
-            data: .object(["message": .string("Compacting context"), "visible": .bool(true)])
+            sequence: 13, semantic: .object(["working": .object(["message": .string("Compacting context"), "visible": .bool(true)])])
         ))
         #expect(store.chatTimelineGeneration == baseline + 2)
 
         await store.admit(event(
-            topic: "session.thinkingLabel", sequence: 14,
-            data: .object(["label": .string("Reasoning")])
+            sequence: 14, semantic: .object(["hiddenThinkingLabel": .string("Reasoning")])
         ))
-        #expect(store.snapshot?.extensionUI.hiddenThinkingLabel == "Reasoning")
+        #expect(store.snapshot?.extensionPresentation.semanticState.hiddenThinkingLabel == "Reasoning")
         #expect(store.chatTimelineGeneration == baseline + 3)
 
         await store.admit(event(
-            topic: "session.thinkingLabel", sequence: 15,
-            data: .object(["label": .string("Reasoning")])
+            sequence: 15, semantic: .object(["hiddenThinkingLabel": .string("Reasoning")])
         ))
         #expect(store.chatTimelineGeneration == baseline + 3)
 
         await store.admit(event(
-            topic: "session.thinkingLabel", sequence: 16,
-            data: .object(["label": .null])
+            sequence: 16, semantic: .object(["hiddenThinkingLabel": .null])
         ))
-        #expect(store.snapshot?.extensionUI.hiddenThinkingLabel == nil)
+        #expect(store.snapshot?.extensionPresentation.semanticState.hiddenThinkingLabel == nil)
         #expect(store.chatTimelineGeneration == baseline + 4)
+    }
+
+    @Test("extension presentation rejects stale host epochs and revisions")
+    func extensionPresentationScopeAdmission() async throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_502).openingTail(targetEncodedBytes: 4_096)
+        snapshot.eventSequence = 20
+        snapshot.extensionPresentation.hostEpoch = "current-host"
+        snapshot.extensionPresentation.revision = 4
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        store.installHostedSubscription(snapshot: snapshot, token: "token")
+
+        func status(sequence: Int, host: String, presentationRevision: Int, text: String) -> GatewayEvent {
+            GatewayEvent(type: "event", topic: "session.extensionPresentation", sessionId: snapshot.sessionId, payload: .object([
+                "runtimeGeneration": .string(snapshot.runtimeGeneration),
+                "eventSequence": .number(Double(sequence)),
+                "revision": .number(Double(snapshot.revision)),
+                "data": .object([
+                    "version": .number(2), "hostEpoch": .string(host),
+                    "revision": .number(Double(presentationRevision)),
+                    "semantic": .object(["statuses": .object(["scope": .string(text)])]),
+                ]),
+            ]))
+        }
+
+        // Duplicate presentation revisions are inert while still consuming the
+        // authoritative session event cursor.
+        await store.admit(status(sequence: 21, host: "current-host", presentationRevision: 4, text: "duplicate"))
+        #expect(store.snapshot?.extensionPresentation.semanticState.statuses["scope"] == nil)
+        await store.admit(status(sequence: 22, host: "current-host", presentationRevision: 5, text: "current"))
+        #expect(store.snapshot?.extensionPresentation.semanticState.statuses["scope"] == "current")
+        #expect(store.snapshot?.extensionPresentation.revision == 5)
+        await store.admit(status(sequence: 23, host: "current-host", presentationRevision: 3, text: "reordered"))
+        #expect(store.snapshot?.eventSequence == 22)
+        #expect(store.snapshot?.extensionPresentation.revision == 5)
+    }
+
+    @Test("surface mutations use full upserts, explicit removals, and exact aggregate revisions")
+    func extensionSurfaceMutationAdmission() async throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_503).openingTail(targetEncodedBytes: 4_096)
+        snapshot.eventSequence = 30
+        snapshot.extensionPresentation.hostEpoch = "surface-host"
+        snapshot.extensionPresentation.revision = 0
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        store.installHostedSubscription(snapshot: snapshot, token: "token")
+
+        func event(sequence: Int, revision: Int, fields: [String: JSONValue]) -> GatewayEvent {
+            var data = fields
+            data["version"] = .number(2)
+            data["hostEpoch"] = .string("surface-host")
+            data["revision"] = .number(Double(revision))
+            return GatewayEvent(type: "event", topic: "session.extensionPresentation", sessionId: snapshot.sessionId, payload: .object([
+                "runtimeGeneration": .string(snapshot.runtimeGeneration),
+                "eventSequence": .number(Double(sequence)), "revision": .number(Double(snapshot.revision)),
+                "data": .object(data),
+            ]))
+        }
+        let surface: JSONValue = .object([
+            "id": .string("surface"), "kind": .string("future-kind"), "placement": .string("transcript"),
+            "lifecycle": .string("restored"), "revision": .number(1), "focused": .bool(false), "inputMode": .string("none"),
+            "frame": .object([
+                "width": .number(20), "height": .number(1), "plainText": .string("Readable fallback"),
+                "lines": .array([.object([
+                    "plainText": .string("Readable fallback"),
+                    "runs": .array([.object(["text": .string("Readable fallback"), "style": .object([:])])]),
+                ])]),
+            ]),
+        ])
+        await store.admit(event(sequence: 31, revision: 1, fields: ["surfaceUpserts": .array([surface])]))
+        #expect(store.snapshot?.extensionPresentation.surfaces.first?.kind == .unknown)
+        #expect(store.snapshot?.extensionPresentation.surfaces.first?.frame.plainText == "Readable fallback")
+
+        await store.admit(event(sequence: 32, revision: 1, fields: ["surfaceRemovals": .array([.string("surface")])]))
+        #expect(store.snapshot?.extensionPresentation.surfaces.count == 1)
+        #expect(store.snapshot?.extensionPresentation.revision == 1)
+
+        await store.admit(event(sequence: 33, revision: 2, fields: ["surfaceRemovals": .array([.string("surface")])]))
+        #expect(store.snapshot?.extensionPresentation.surfaces.isEmpty == true)
+        #expect(store.snapshot?.extensionPresentation.revision == 2)
+
+        await store.admit(event(sequence: 34, revision: 4, fields: ["capabilities": .array([.string("gap")])]))
+        #expect(store.snapshot?.extensionPresentation.revision == 2)
+    }
+
+    @Test("exact-next malformed recognized events do not advance authority")
+    func exactNextMalformedEventResynchronizes() async throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_507).openingTail(targetEncodedBytes: 4_096)
+        snapshot.eventSequence = 34
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        store.installHostedSubscription(snapshot: snapshot, token: "token")
+        await store.admit(GatewayEvent(
+            type: "event", topic: "session.extensionPresentation", sessionId: snapshot.sessionId,
+            payload: .object([
+                "runtimeGeneration": .string(snapshot.runtimeGeneration), "eventSequence": .number(35),
+                "revision": .number(Double(snapshot.revision)), "data": .object(["version": .string("malformed")]),
+            ])
+        ))
+        #expect(store.snapshot?.eventSequence == 34)
+        #expect(store.snapshot?.extensionPresentation.revision == snapshot.extensionPresentation.revision)
+    }
+
+    @Test("malformed exact-next editor directives are atomic and do not advance")
+    func malformedEditorDirectiveResynchronizes() async throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_506).openingTail(targetEncodedBytes: 4_096)
+        snapshot.eventSequence = 35
+        snapshot.extensionPresentation.hostEpoch = "editor-host"
+        snapshot.extensionPresentation.revision = 2
+        snapshot.extensionPresentation.semanticState.editorRevision = 3
+        snapshot.extensionPresentation.semanticState.editorText = "A"
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        store.installHostedSubscription(snapshot: snapshot, token: "token")
+        await store.admit(GatewayEvent(
+            type: "event", topic: "session.extensionPresentation", sessionId: snapshot.sessionId,
+            payload: .object([
+                "runtimeGeneration": .string(snapshot.runtimeGeneration), "eventSequence": .number(36), "revision": .number(Double(snapshot.revision)),
+                "data": .object([
+                    "version": .number(2), "hostEpoch": .string("editor-host"), "revision": .number(3),
+                    "semantic": .object([
+                        "editorAction": .string("paste"), "editorDelta": .string("B"),
+                        "editorText": .string("AX"), "editorRevision": .number(4),
+                    ]),
+                ]),
+            ])
+        ))
+        #expect(store.snapshot?.eventSequence == 35)
+        #expect(store.snapshot?.extensionPresentation.revision == 2)
+        #expect(store.snapshot?.extensionPresentation.semanticState.editorText == "A")
+    }
+
+    @Test("incomplete surface baselines converge through exact-next full frames")
+    func incompleteSurfaceProjectionConverges() async throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_505).openingTail(targetEncodedBytes: 4_096)
+        snapshot.eventSequence = 40
+        snapshot.extensionPresentation.hostEpoch = "fitted-host"
+        snapshot.extensionPresentation.revision = 10
+        snapshot.extensionPresentation.projection = .init(
+            complete: false, omitted: ["surfaces"],
+            omittedSurfaces: [.init(id: "omitted", revision: 5)]
+        )
+        snapshot.extensionPresentation.inputLease = .init(
+            id: "lease", connectionId: "connection", surfaceId: "omitted",
+            surfaceRevision: 5, acquiredAt: "1970-01-01T00:00:00.000Z"
+        )
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        store.installHostedSubscription(snapshot: snapshot, token: "token")
+        let surface: JSONValue = .object([
+            "id": .string("omitted"), "kind": .string("overlay"), "placement": .string("overlay"),
+            "lifecycle": .string("blocking"), "revision": .number(6), "focused": .bool(true), "inputMode": .string("keys"),
+            "frame": .object([
+                "width": .number(20), "height": .number(1), "plainText": .string("Ready"),
+                "lines": .array([.object(["plainText": .string("Ready"), "runs": .array([.object(["text": .string("Ready"), "style": .object([:])])])])]),
+            ]),
+        ])
+        let lease: JSONValue = .object([
+            "id": .string("lease"), "connectionId": .string("connection"), "surfaceId": .string("omitted"),
+            "surfaceRevision": .number(6), "acquiredAt": .string("1970-01-01T00:00:00.000Z"),
+        ])
+        await store.admit(GatewayEvent(
+            type: "event", topic: "session.extensionPresentation", sessionId: snapshot.sessionId,
+            payload: .object([
+                "runtimeGeneration": .string(snapshot.runtimeGeneration), "eventSequence": .number(41), "revision": .number(Double(snapshot.revision)),
+                "data": .object(["version": .number(2), "hostEpoch": .string("fitted-host"), "revision": .number(11),
+                    "surfaceUpserts": .array([surface]), "inputLease": lease]),
+            ])
+        ))
+        #expect(store.snapshot?.extensionPresentation.surfaces.first?.revision == 6)
+        #expect(store.snapshot?.extensionPresentation.inputLease?.surfaceRevision == 6)
+        #expect(store.snapshot?.extensionPresentation.projection == nil)
+        #expect(store.snapshot?.eventSequence == 41)
+    }
+
+    @Test("authoritative snapshots replace the complete presentation epoch")
+    func extensionPresentationEpochReplacement() throws {
+        var first = try SessionScenarioBuilder(seed: 8_504).openingTail(targetEncodedBytes: 4_096)
+        first.extensionPresentation.hostEpoch = "old-host"
+        first.extensionPresentation.revision = 7
+        first.extensionPresentation.semanticState.statuses = ["old": "stale"]
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        store.installHostedSubscription(snapshot: first, token: "token")
+        var replacement = first
+        replacement.eventSequence += 1
+        replacement.revision += 1
+        replacement.extensionPresentation.hostEpoch = "new-host"
+        replacement.extensionPresentation.revision = 0
+        replacement.extensionPresentation.semanticState.statuses = [:]
+        store.installHostedSubscription(snapshot: replacement, token: "replacement")
+        #expect(store.snapshot?.extensionPresentation.hostEpoch == "new-host")
+        #expect(store.snapshot?.extensionPresentation.semanticState.statuses.isEmpty == true)
     }
 
     @Test("stale reconnect retains the newer authoritative tail for history discard")
@@ -275,7 +559,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let snapshot = try SessionScenarioBuilder(seed: 84).openingTail(targetEncodedBytes: 4_096)
@@ -388,7 +672,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let snapshot = try SessionScenarioBuilder(seed: 841).openingTail(targetEncodedBytes: 4_096)
@@ -450,7 +734,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             let oldSnapshot = try SessionScenarioBuilder(seed: 87).openingTail(targetEncodedBytes: 4_096)
@@ -519,7 +803,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             var baseline = try SessionScenarioBuilder(seed: 8_901)
@@ -576,6 +860,64 @@ struct SessionPresentationStoreTests {
         }
     }
 
+    @Test("semantic replay rejection retries before provisional publication")
+    func rejectedReplayRetriesSynchronization() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            var baseline = try SessionScenarioBuilder(seed: 8_908).openingTail(targetEncodedBytes: 4_096)
+            baseline.eventSequence = 10
+            baseline.extensionPresentation.hostEpoch = "replay-host"
+            baseline.extensionPresentation.revision = 0
+            let store = SessionPresentationStore(client: client, performanceSignposts: SystemPerformanceSignposts.shared)
+            let opening = Task { try await store.open(baseline.sessionId) }
+            try await socket.waitUntilSent(count: 2)
+            var frames = await socket.sentFrames()
+            var request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[1])
+            let openID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(openID), "ok": .bool(true),
+                "result": .object(["session": try JSONValue.encode(baseline), "syncToken": .string("sync"), "subscriptionToken": .string("provisional")]),
+            ])))
+            try await socket.waitUntilSent(count: 3)
+            await store.admit(GatewayEvent(
+                type: "event", topic: "session.extensionPresentation", sessionId: baseline.sessionId,
+                payload: .object([
+                    "runtimeGeneration": .string(baseline.runtimeGeneration), "eventSequence": .number(11), "revision": .number(Double(baseline.revision)),
+                    "data": .object(["version": .number(2), "hostEpoch": .string("replay-host"), "revision": .number(2), "capabilities": .array([.string("gap")])]),
+                ])
+            ))
+            frames = await socket.sentFrames()
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[2])
+            let syncID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(syncID), "ok": .bool(true), "result": .object(["synchronized": .bool(true)]),
+            ])))
+            try await socket.waitUntilSent(count: 4)
+            frames = await socket.sentFrames()
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[3])
+            #expect(request.objectValue?["method"]?.stringValue == "session.close")
+            let closeID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(closeID), "ok": .bool(true), "result": .object(["closed": .bool(true)]),
+            ])))
+            try await socket.waitUntilSent(count: 5)
+            frames = await socket.sentFrames()
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[4])
+            #expect(request.objectValue?["method"]?.stringValue == "session.open")
+            #expect(store.snapshot == nil)
+            opening.cancel()
+            _ = try? await opening.value
+            await client.close()
+        }
+    }
+
     @Test("fresh-open replay publishes editor effects against the installed target")
     func freshOpenReplayEditorTarget() async throws {
         try await withTestWatchdog { @MainActor in
@@ -599,10 +941,12 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await model.connectHostedGateway(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
-            let snapshot = try SessionScenarioBuilder(seed: 90).openingTail(targetEncodedBytes: 4_096)
+            var snapshot = try SessionScenarioBuilder(seed: 90).openingTail(targetEncodedBytes: 4_096)
+            snapshot.extensionPresentation.hostEpoch = "editor-host"
+            snapshot.extensionPresentation.revision = 0
             let opening = Task { try await model.openSessionPresentation(snapshot.sessionId) }
 
             try await socket.waitUntilSent(count: 2)
@@ -623,17 +967,18 @@ struct SessionPresentationStoreTests {
             try await socket.waitUntilSent(count: 3)
             await model.handle(GatewayEvent(
                 type: "event",
-                topic: "session.editorText",
+                topic: "session.extensionPresentation",
                 sessionId: snapshot.sessionId,
                 payload: .object([
                     "runtimeGeneration": .string(snapshot.runtimeGeneration),
                     "eventSequence": .number(Double(snapshot.eventSequence + 1)),
                     "revision": .number(Double(snapshot.revision + 1)),
                     "data": .object([
-                        "action": .string("set"),
-                        "text": .string("draft"),
-                        "fullText": .string("draft"),
-                        "revision": .number(7),
+                        "version": .number(2), "hostEpoch": .string("editor-host"), "revision": .number(1),
+                        "semantic": .object([
+                            "editorAction": .string("set"), "editorDelta": .string("draft"),
+                            "editorText": .string("draft"), "editorRevision": .number(1),
+                        ]),
                     ]),
                 ])
             ))
@@ -654,15 +999,74 @@ struct SessionPresentationStoreTests {
                 sessionID: snapshot.sessionId,
                 generation: generation
             )
-            let scope = model.composerDrafts.prepareDraft(
-                profileID: "gateway",
-                sessionID: snapshot.sessionId,
-                initialText: nil
-            )
+            let scope = try #require(model.composerDrafts.scope(for: target))
             #expect(model.composerDrafts.editorRequest(for: target) == nil)
             #expect(model.composerDrafts.text(for: scope) == "draft")
-            #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.extensionUI.editorText == "draft")
+            #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.extensionPresentation.semanticState.editorText == "draft")
             #expect(model.authoritativeSnapshot(for: snapshot.sessionId)?.eventSequence == snapshot.eventSequence + 1)
+            await model.teardown()
+            await client.close()
+        }
+    }
+
+    @Test("editor debounce retains the scheduling epoch and base revision")
+    func editorDebounceDoesNotRebase() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let profile = GatewayProfile(id: "gateway", label: "Mac", host: "gateway.test", port: 9_847, machineId: "machine", deviceId: "device")
+            let model = AppModel(client: client, cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)))
+            let connecting = Task { try await model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+            var snapshot = try SessionScenarioBuilder(seed: 8_909).openingTail(targetEncodedBytes: 4_096)
+            snapshot.extensionPresentation.hostEpoch = "debounce-host"
+            snapshot.extensionPresentation.semanticState.editorRevision = 3
+            snapshot.extensionPresentation.semanticState.editorText = "base"
+            let opening = Task { try await model.openSessionPresentation(snapshot.sessionId) }
+            try await socket.waitUntilSent(count: 2)
+            var frames = await socket.sentFrames()
+            var request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[1])
+            let openID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(openID), "ok": .bool(true),
+                "result": .object(["session": try JSONValue.encode(snapshot), "syncToken": .string("sync"), "subscriptionToken": .string("subscription")]),
+            ])))
+            try await socket.waitUntilSent(count: 3)
+            frames = await socket.sentFrames()
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[2])
+            let syncID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(syncID), "ok": .bool(true), "result": .object(["synchronized": .bool(true)]),
+            ])))
+            let generation = try await opening.value
+            let target = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: generation)
+            frames = await socket.sentFrames()
+            let sentBeforeEditorUpdate = frames.count
+            model.scheduleExtensionEditorUpdate(target: target, text: "local")
+            await model.handle(GatewayEvent(
+                type: "event", topic: "session.extensionPresentation", sessionId: snapshot.sessionId,
+                payload: .object([
+                    "runtimeGeneration": .string(snapshot.runtimeGeneration), "eventSequence": .number(Double(snapshot.eventSequence + 1)), "revision": .number(Double(snapshot.revision)),
+                    "data": .object(["version": .number(2), "hostEpoch": .string("debounce-host"), "revision": .number(1),
+                        "semantic": .object(["editorAction": .string("set"), "editorDelta": .string("remote"), "editorText": .string("remote"), "editorRevision": .number(4)])]),
+                ])
+            ))
+            try await Task.sleep(for: .milliseconds(250))
+            frames = await socket.sentFrames()
+            let updateFrame = try #require(frames.dropFirst(sentBeforeEditorUpdate).first { frame in
+                (try? JSONDecoder.gateway.decode(JSONValue.self, from: frame).objectValue?["method"]?.stringValue) == "extension.editor.update"
+            })
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: updateFrame)
+            #expect(request.objectValue?["method"]?.stringValue == "extension.editor.update")
+            #expect(request.objectValue?["params"]?.objectValue?["hostEpoch"]?.stringValue == "debounce-host")
+            #expect(request.objectValue?["params"]?.objectValue?["baseRevision"]?.intValue == 3)
+            let updateID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(updateID), "ok": .bool(true),
+                "result": .object(["applied": .bool(false), "revision": .number(4), "text": .string("remote")]),
+            ])))
             await model.teardown()
             await client.close()
         }
@@ -685,7 +1089,7 @@ struct SessionPresentationStoreTests {
             )
             let connecting = Task { try await client.connect(profile: profile, token: "token") }
             try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":2,"minProtocolVersion":2,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await connecting.value
 
             var snapshot = try SessionScenarioBuilder(seed: 86).openingTail(targetEncodedBytes: 4_096)
@@ -923,7 +1327,8 @@ private final class SecondaryErrorProbe: SessionPresentationStoreDelegate {
         action: SessionEditorAction,
         text: String,
         fullText: String,
-        revision: Int
+        revision: Int,
+        operationID: String?
     ) {}
     func sessionPresentationStoreDidOpen(_ target: SessionPresentationIdentity) {}
     func sessionPresentationStorePostNotice(_ message: String, replacing key: GlobalNoticeKey?) {}

@@ -82,34 +82,82 @@ struct AppModelEventTests {
             presentationGeneration: 1
         )?.timeline == completedProjection.timeline)
 
-        let interactions: JSONValue = .array([
-            .object(["id": .string("confirm"), "method": .string("confirm"), "title": .string("Proceed?"), "message": .string("Check")]),
+        let interactions: JSONValue = .object([
+            "version": .number(2), "hostEpoch": .string("fixture-host-epoch"),
+            "revision": .number(10),
+            "interactionList": .array([
+                .object([
+                    "id": .string("confirm"), "hostEpoch": .string("fixture-host-epoch"),
+                    "presentationRevision": .number(10), "method": .string("confirm"),
+                    "title": .string("Proceed?"), "message": .string("Check"),
+                ]),
+            ]),
         ])
         var afterStale = snapshot
         afterStale.eventSequence = 89
-        await model.handle(event(topic: "session.interactions", snapshot: afterStale, sequence: 90, data: interactions))
-        #expect(model.selectedSnapshot?.extensionUI.pendingInteractions.first?.method == .confirm)
+        await model.handle(event(topic: "session.extensionPresentation", snapshot: afterStale, sequence: 90, data: interactions))
+        #expect(model.selectedSnapshot?.extensionPresentation.pendingInteractions.first?.method == .confirm)
         #expect(model.chatProjectionGenerations(
             for: snapshot.sessionId,
             presentationGeneration: 1
         )?.timeline == completedProjection.timeline)
 
         let editor: JSONValue = .object([
-            "action": .string("set"), "text": .string("replacement"), "fullText": .string("replacement"), "revision": .number(4),
+            "version": .number(2), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(11),
+            "semantic": .object([
+                "editorAction": .string("set"), "editorDelta": .string("replacement"),
+                "editorText": .string("replacement"), "editorRevision": .number(4),
+            ]),
         ])
         var afterInteraction = snapshot
         afterInteraction.eventSequence = 90
-        await model.handle(event(topic: "session.editorText", snapshot: afterInteraction, sequence: 91, data: editor))
+        await model.handle(event(topic: "session.extensionPresentation", snapshot: afterInteraction, sequence: 91, data: editor))
         #expect(model.composerDrafts.editorRequest(for: mountedTarget) == nil)
         #expect(model.composerDrafts.text(for: composerScope) == "replacement")
-        #expect(model.selectedSnapshot?.extensionUI.editorText == "replacement")
+        #expect(model.selectedSnapshot?.extensionPresentation.semanticState.editorText == "replacement")
         #expect(model.selectedSnapshot?.eventSequence == 91)
+    }
+
+    @Test("editor debounce and native echoes remain presentation scoped")
+    func editorSynchronizationScope() async throws {
+        var snapshot = try loadSnapshot()
+        snapshot.extensionPresentation.hostEpoch = "fixture-host-epoch"
+        snapshot.extensionPresentation.revision = 9
+        let model = AppModel()
+        model.installHostedSubscribedSnapshot(snapshot)
+        let firstTarget = AppModel.SessionPresentationTarget(sessionID: snapshot.sessionId, generation: 1)
+        let firstScope = model.composerDrafts.installHostedPresentation(
+            profileID: "hosted", target: firstTarget, lifecycleGeneration: 0
+        )
+        model.composerDrafts.setText("local", for: firstScope)
+
+        await model.handle(event(topic: "session.extensionPresentation", snapshot: snapshot, sequence: snapshot.eventSequence + 1, data: .object([
+            "version": .number(2), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(10),
+            "semantic": .object([
+                "editorAction": .string("native"), "editorOperationId": .string("local-operation"),
+                "editorDelta": .string("local"), "editorText": .string("local"), "editorRevision": .number(4),
+            ]),
+        ])))
+        #expect(model.composerDrafts.editorRequest(for: firstTarget) == nil)
+
+        model.scheduleExtensionEditorUpdate(target: firstTarget, text: "old presentation")
+        model.revokePresentationIntake(firstTarget)
+        snapshot.eventSequence += 2
+        snapshot.extensionPresentation.revision = 10
+        model.installHostedSubscribedSnapshot(snapshot)
+        let secondTarget = AppModel.SessionPresentationTarget(sessionID: snapshot.sessionId, generation: 2)
+        let secondScope = model.composerDrafts.installHostedPresentation(
+            profileID: "hosted", target: secondTarget, lifecycleGeneration: 0
+        )
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(model.composerDrafts.text(for: secondScope) == "local")
+        #expect(model.lastError == nil)
     }
 
     @Test("prepared snapshots install while malformed inner DTOs keep reducer semantics")
     func preparedPayloadCompatibility() async throws {
         var snapshot = try loadSnapshot()
-        snapshot.extensionUI.widgets = [ExtensionWidget(
+        snapshot.extensionPresentation.semanticState.widgets = [ExtensionWidget(
             key: "existing",
             lines: ["old"],
             placement: .aboveEditor
@@ -118,16 +166,35 @@ struct AppModelEventTests {
         model.installHostedSubscribedSnapshot(snapshot)
 
         await model.handle(event(
-            topic: "session.widget",
+            topic: "session.extensionPresentation",
             snapshot: snapshot,
             sequence: snapshot.eventSequence + 1,
             data: .object([
-                "key": .string("existing"),
-                "lines": .array([.string("malformed without placement")]),
+                "version": .number(2), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(10),
+                "interactionList": .array([.object([
+                    "id": .string("unscoped"), "method": .string("confirm"), "title": .string("Invalid"),
+                ])]),
             ])
         ))
-        #expect(model.selectedSnapshot?.extensionUI.widgets.isEmpty == true)
-        #expect(model.selectedSnapshot?.eventSequence == snapshot.eventSequence + 1)
+        #expect(model.selectedSnapshot?.extensionPresentation.pendingInteractions.first?.id != "unscoped")
+        #expect(model.selectedSnapshot?.eventSequence == snapshot.eventSequence)
+
+        await model.handle(event(
+            topic: "session.extensionPresentation",
+            snapshot: snapshot,
+            sequence: snapshot.eventSequence + 1,
+            data: .object([
+                "version": .number(2), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(10),
+                "surfaceUpserts": .array([.object([
+                    "id": .string("existing"), "kind": .string("widget"),
+                    "lifecycle": .string("retained"), "revision": .number(1),
+                    "focused": .bool(false), "inputMode": .string("none"),
+                    "frame": .object(["width": .number(20), "height": .number(0), "lines": .array([]), "plainText": .string("fallback")]),
+                ])]),
+            ])
+        ))
+        #expect(model.selectedSnapshot?.extensionPresentation.semanticState.widgets.first?.lines == ["old"])
+        #expect(model.selectedSnapshot?.eventSequence == snapshot.eventSequence)
 
         var afterWidget = try #require(model.selectedSnapshot)
         await model.handle(event(
@@ -186,16 +253,15 @@ struct AppModelEventTests {
         #expect(model.selectedSnapshot?.sessionId != "other-session")
     }
 
-    @Test("older protocol-v2 opens reuse the sync token as subscription ownership")
-    func legacySessionOpenTokenFallback() throws {
+    @Test("v3 session.open requires explicit subscription ownership")
+    func missingSessionOpenTokenIsRejected() throws {
         let snapshot = try loadSnapshot()
-        let open = try JSONValue.object([
-            "session": try JSONValue.encode(snapshot),
-            "syncToken": .string("legacy-token"),
-        ]).decode(AppModel.SessionOpenResponse.self)
-
-        #expect(open.syncToken == "legacy-token")
-        #expect(open.subscriptionToken == "legacy-token")
+        #expect(throws: (any Error).self) {
+            try JSONValue.object([
+                "session": try JSONValue.encode(snapshot),
+                "syncToken": .string("sync-token"),
+            ]).decode(AppModel.SessionOpenResponse.self)
+        }
     }
 
     @Test("explicit subscription ownership wins when the gateway sends it")
@@ -516,8 +582,9 @@ struct AppModelEventTests {
         model.installHostedSubscribedSnapshot(snapshot)
 
         await model.handle(event(topic: "session.futureEvent", snapshot: snapshot, sequence: 88, data: .object([:])))
-        await model.handle(event(topic: "session.notification", snapshot: snapshot, sequence: 89, data: .object([
-            "type": .string("info"), "message": .string("Caught up")
+        await model.handle(event(topic: "session.extensionPresentation", snapshot: snapshot, sequence: 89, data: .object([
+            "version": .number(2), "hostEpoch": .string("fixture-host-epoch"), "revision": .number(10),
+            "notification": .object(["type": .string("info"), "message": .string("Caught up")]),
         ])))
 
         #expect(model.selectedSnapshot?.eventSequence == 89)
@@ -653,8 +720,8 @@ struct AppModelEventTests {
 
     private func loadSnapshot() throws -> SessionSnapshot {
         let bundle = Bundle(for: EventFixtureBundleMarker.self)
-        let url = bundle.url(forResource: "session-snapshot-v2", withExtension: "json")
-            ?? bundle.url(forResource: "session-snapshot-v2", withExtension: "json", subdirectory: "protocol-fixtures")
+        let url = bundle.url(forResource: "session-snapshot-v3", withExtension: "json")
+            ?? bundle.url(forResource: "session-snapshot-v3", withExtension: "json", subdirectory: "protocol-fixtures")
         return try JSONDecoder.gateway.decode(SessionSnapshot.self, from: Data(contentsOf: #require(url)))
     }
 }

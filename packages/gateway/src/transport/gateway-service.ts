@@ -30,7 +30,7 @@ const PROVIDER_CATALOG_MAX_FIELD_CHARACTERS = 100_000;
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "gateway.restart",
   "session.list", "session.open", "session.sync", "session.close", "session.transcript",
-  "session.abort", "session.clearQueue", "session.queue.replace", "extension.respond",
+  "session.abort", "session.clearQueue", "session.queue.replace", "extension.respond", "extension.editor.update",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
 ]);
 
@@ -97,7 +97,7 @@ export class GatewayService {
         "filesystem.v1",
         "uploads.v1",
         "terminal.v1",
-        "extension-ui.v1",
+        "extension-presentation.v1",
         "queue-management.v1",
         "restart-drain.v1",
       ],
@@ -337,11 +337,20 @@ export class GatewayService {
         return this.mutation(client, method, params, async () => {
           (await this.openedSlot(client, params)).respondToInteraction(
             string(params.interactionId, "interactionId", { max: 100 }),
+            string(params.hostEpoch, "hostEpoch", { max: 100 }),
+            integer(params.presentationRevision, "presentationRevision", 0, Number.MAX_SAFE_INTEGER),
             params.value,
             params.cancelled === undefined ? false : boolean(params.cancelled, "cancelled"),
           );
           return { answered: true };
         });
+      case "extension.editor.update":
+        return this.mutation(client, method, params, async () => (await this.openedSlot(client, params)).updateExtensionEditor(
+          string(params.hostEpoch, "hostEpoch", { max: 100 }),
+          integer(params.baseRevision, "baseRevision", 0, Number.MAX_SAFE_INTEGER),
+          string(params.operationId, "operationId", { max: 256 }),
+          string(params.text, "text", { max: 192 * 1_024 }),
+        ));
 
       case "provider.list":
         return this.providers(await this.modelRuntime(params));

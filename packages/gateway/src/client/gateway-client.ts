@@ -71,7 +71,7 @@ export class GatewayProtocolClient {
         try {
           const frame = JSON.parse(raw.toString()) as Record<string, unknown>;
           if (frame.type === "hello") {
-            if (frame.protocolVersion !== PROTOCOL_VERSION || typeof frame.minProtocolVersion === "number" && frame.minProtocolVersion > PROTOCOL_VERSION) {
+            if (frame.protocolVersion !== PROTOCOL_VERSION || frame.minProtocolVersion !== PROTOCOL_VERSION) {
               clearTimeout(timer);
               socket.terminate();
               reject(new GatewayClientError("protocol_mismatch", "Gateway protocol is not compatible", false));

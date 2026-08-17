@@ -82,7 +82,7 @@ The retired `/engine` protocol is not exposed.
 Every WebSocket starts with:
 
 ```json
-{"type":"hello","protocolVersion":2}
+{"type":"hello","protocolVersion":3}
 ```
 
 Requests use `{type,id,method,params}` and receive `{type,id,ok,result|error}`.
@@ -111,16 +111,67 @@ they actually open. Active operations also emit a bounded sequenced heartbeat, s
 a long tool with no output remains distinguishable from a broken mobile stream.
 The embedded runtime's active-run flag outranks an older settlement callback when
 an extension completion immediately triggers a continuation, so phase, operation,
-and Stop controls cannot become idle while a newer turn is executing. Extension-
-owned detached work remains distinct from that foreground phase: its portable
-widget projection stays visible after the parent turn settles, while aborting a
-wait does not falsely claim to stop the detached worker. Extension UI producer
-state is bounded before retention or broadcast: 32 statuses, 24 portable widgets,
-eight pending interactions, 64 select options, 192 KiB interaction/editor budgets,
-a 640 KiB aggregate state ceiling, and bounded keys, titles, messages, labels,
-notifications, widget input/lines, and timeouts. Malformed runtime values and
-new-key/capacity overflow reject atomically; updates and removals remain
-available, and emitted editor payloads stay beneath the socket envelope.
+and Stop controls cannot become idle while a newer turn is executing. Extension
+commands are resolved before ordinary streaming rejection and still execute through
+Pi's prompt path. A per-bind host epoch and monotonic presentation revision scope
+all retained semantic state and actionable responses; reload/replacement retires
+captured callbacks instead of letting them mutate the replacement host. The lifecycle coordinator counts prompt preflights, command handlers, interactions,
+foreground agent/retry/compaction/bash/queue work, and deferred session-scoped
+shutdown as operational work. Decorative retained presentation protects automatic
+eviction only; it cannot deadlock trust revocation or explicit deletion. Administrative
+drain establishes a cutoff, repeatedly clears newly added queues, and aborts
+extension continuations that begin after that cutoff. `ctx.shutdown()` waits for Pi's
+`session_shutdown` before reporting closure and closes only the owning runtime slot.
+
+`ExtensionPresentationStore` is the sole owner of an extension host epoch and its
+aggregate presentation revision. It atomically retains semantic state, actionable
+interactions, generic surfaces, the projected input lease, capabilities, and bounded
+diagnostics. Producer state is bounded before retention or broadcast: 32 statuses,
+24 string widgets, eight pending interactions, 64 select options, 192 KiB
+interaction/editor budgets, at most 64 surfaces, 160 columns by 120 lines, 4,096
+runs and 256 KiB per full frame, and a 700 KiB aggregate presentation ceiling. The
+lower aggregate ceiling leaves room inside the 1 MiB WebSocket frame for lifecycle
+identity and a bounded canonical transcript tail.
+
+Every committed change emits exactly one `session.extensionPresentation` v2 envelope
+with the current host epoch and exact next aggregate revision. Semantic patches,
+authoritative interaction lists, full-frame surface upserts, explicit removals,
+lease replacement/clear, capabilities, diagnostics, and transient notifications
+share this stream. Malformed upserts never mean removal. Responses retain the
+interaction's admission revision; native editor patches retain bounded operation IDs
+so the originating presentation can suppress its own echo. Under snapshot pressure,
+actionable interactions and epoch/revision identity outrank decorative frames;
+omission is explicit through projection diagnostics; omitted surface identity and
+revision remain as a bounded delta baseline, while blocking/focused/leased surfaces
+are retained ahead of decoration so exact-next full frames converge without loops.
+Pending interactions remain live across ordinary client disconnect and all imperative
+presentation is excluded from offline mobile cache. Exact extension commands persist a provisional run marker
+before their handler starts; forced shutdown preserves admitted-work markers while a
+verified clean idle shutdown removes them.
+
+The dormant Phase 4A feasibility harness uses only the public `@earendil-works/pi-tui`
+package root. A bounded in-memory terminal drives `TuiMainScreen` without stdin or
+stdout; recording proxies retain one result per mount/compositor pass without a
+second host render call, and
+a fail-closed parser converts logical lines into bounded plain text, concrete RGB
+style runs, safe HTTP(S)/mailto links, and cursor position. The parser strips terminal
+movement, device, clipboard, title, image/file, DCS/APC/PM, and other control
+sequences and never forwards ANSI. This proves the public composition seam only:
+production remains bound as `mode: "rpc"`, terminal images and Kitty key releases are
+unavailable, and existing status/widget visibility gates remain unchanged.
+
+Phase 4C is currently limited to a foundation checkpoint: one bounded,
+epoch-scoped host/store owner, generic full-frame protocol models, strict admission,
+atomic revisions, stale-callback protection, exact-once disposal/settlement, and
+reload/shutdown/drain/reconnect-safe ownership. The direct harness admits at most one
+non-overlay blocking custom call and uses a real public pi-tui 0.84.1 keybindings
+manager. Overlay custom calls fail closed before factory invocation with one bounded
+deferred diagnostic and publish no overlay surface. No custom/overlay conformance or
+UI fidelity is claimed. Production remains bound as `mode: "rpc"` to
+`SemanticUIBroker`; active input leases/routing, iOS surface rendering, status/widget
+chrome, footer/header/editor/autocomplete, theme UI, renderer hosting, package-specific
+integration, and truthful TUI activation are deferred to a later manual iteration.
+
 Parallel tool events carry a monotonic per-run ordinal; each call additionally has
 a monotonic progress sequence, bounded display-safe live-output tail, runtime start,
 last-progress/completion timestamps, and duration. The Gateway coalesces high-rate
@@ -254,9 +305,8 @@ large active runs therefore remain openable; no canonical Pi content is modified
 discarded. Canonical non-image upload
 envelopes retain their runtime-owned readable paths, but the mobile transcript
 projection replaces those tags with bounded name/type/size metadata on an
-ordinary text part and never sends the Mac path to clients. Older protocol-v2
-clients therefore degrade to the safe filename instead of failing on a new
-content discriminant. A page carries the next
+ordinary text part and never sends the Mac path to clients. Active protocol-v3 clients therefore receive the safe filename instead of the
+Mac path for a new content discriminant. A page carries the next
 visible entry as its branch anchor and fails retryably if tree navigation changed
 that boundary while the request was in flight. Oversized responses return
 a correlated protocol error instead of disconnecting the device. `session.context`
@@ -300,11 +350,14 @@ interruption represented by the durable run marker and is never automatically re
    concurrently.
 3. Prompt admission returns an operation ID; client disconnect does not abort it.
 4. Subscribe/open establishes a two-phase baseline barrier: the connection subscribes
-   and captures a snapshot cursor, returns that snapshot plus an ephemeral sync token,
-   then releases only later sequenced events after `session.sync` acknowledges the exact
-   baseline. A bounded barrier overflow requests another full sync. A failed open
-   transaction removes its barrier immediately, so retrying cannot produce a stale
-   “already synchronizing” conflict.
+   and captures a snapshot cursor, returns that snapshot plus an ephemeral `syncToken` and
+   explicit `subscriptionToken` ownership credential. The client acknowledges the exact
+   baseline with `session.sync`, after which only later sequenced events are released.
+   A bounded barrier overflow requests another full sync. A failed open transaction revokes
+   its barrier, timer, and subscription ownership immediately, so retrying cannot produce
+   a stale “already synchronizing” conflict. Concurrent opens for the same connection and
+   session are rejected before they can replace the owner; establishment and synchronization
+   commit are request-and-token exact. Distinct sessions and connections remain independent.
 5. Reconnect/open returns complete current runtime state plus a bounded canonical
    transcript tail, not durable missed-event replay; older transcript pages remain
    available through branch-stable anchors.

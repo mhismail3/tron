@@ -7,7 +7,7 @@ struct SessionPresentationIdentity: Hashable, Sendable {
 }
 
 enum SessionSnapshotInstallationMode { case freshPresentation, reconnect }
-enum SessionEditorAction: String, Hashable, Sendable { case set, paste }
+enum SessionEditorAction: String, Hashable, Sendable { case set, paste, native }
 
 struct GatewaySessionOpenResponse: Decodable {
     let session: SessionSnapshot
@@ -19,8 +19,11 @@ struct GatewaySessionOpenResponse: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         session = try container.decode(SessionSnapshot.self, forKey: .session)
+        guard ExtensionPresentationPolicy.admit(session.extensionPresentation) else {
+            throw DecodingError.dataCorruptedError(forKey: .session, in: container, debugDescription: "Invalid extension presentation snapshot")
+        }
         syncToken = try container.decode(String.self, forKey: .syncToken)
-        subscriptionToken = try container.decodeIfPresent(String.self, forKey: .subscriptionToken) ?? syncToken
+        subscriptionToken = try container.decode(String.self, forKey: .subscriptionToken)
     }
 }
 
@@ -32,7 +35,8 @@ protocol SessionPresentationStoreDelegate: AnyObject {
         action: SessionEditorAction,
         text: String,
         fullText: String,
-        revision: Int
+        revision: Int,
+        operationID: String?
     )
     func sessionPresentationStoreDidOpen(_ target: SessionPresentationIdentity)
     func sessionPresentationStorePostNotice(_ message: String, replacing key: GlobalNoticeKey?)
@@ -60,6 +64,9 @@ final class SessionPresentationStore {
     private(set) var loadingEarlierTranscript = false
     private var revokedTargets = Set<SessionPresentationIdentity>()
     private var nextPresentationGeneration = 0
+    // Every Gateway connection owns a distinct token namespace. Responses and
+    // close completions from an older connection must not mutate new ownership.
+    private var connectionGeneration = 0
     private var subscribedSessionID: String?
     private var subscriptionToken: String?
     private var subscriptionTarget: SessionPresentationIdentity?
@@ -321,6 +328,7 @@ final class SessionPresentationStore {
     }
 
     func retireConnection() {
+        connectionGeneration &+= 1
         deferredEffectsByTarget.removeAll()
         subscribedSessionID = nil
         subscriptionToken = nil
@@ -531,23 +539,35 @@ final class SessionPresentationStore {
     private func closeSubscription(_ sessionID: String, expectedTarget: SessionPresentationIdentity?) async {
         if let expectedTarget, subscriptionTarget != expectedTarget { return }
         guard subscribedSessionID == sessionID, let token = subscriptionToken else { return }
+        let expectedConnectionGeneration = connectionGeneration
+        let expectedSubscriptionTarget = subscriptionTarget
         struct Params: Codable { let sessionId, subscriptionToken: String }
         struct Response: Decodable { let closed: Bool }
         let response: Response? = try? await client.request(
             "session.close",
             Params(sessionId: sessionID, subscriptionToken: token)
         )
-        guard Self.shouldClearSubscription(
-            installedToken: subscriptionToken,
-            closingToken: token,
-            gatewayClosed: response?.closed == true
-        ) else { return }
+        guard connectionGeneration == expectedConnectionGeneration,
+              subscribedSessionID == sessionID,
+              subscriptionTarget == expectedSubscriptionTarget,
+              Self.shouldClearSubscription(
+                  installedToken: subscriptionToken,
+                  closingToken: token,
+                  gatewayClosed: response?.closed == true
+              ) else { return }
         subscriptionToken = nil
         subscribedSessionID = nil
         subscriptionTarget = nil
     }
 
-    private func closeProvisionalSubscription(_ sessionID: String, token: String) async {
+    private func closeProvisionalSubscription(
+        _ sessionID: String,
+        token: String,
+        expectedConnectionGeneration: Int
+    ) async {
+        // A retired connection's Gateway subscription is revoked with its
+        // socket. Never send that stale token through a newer connection.
+        guard connectionGeneration == expectedConnectionGeneration else { return }
         struct Params: Codable { let sessionId, subscriptionToken: String }
         struct Response: Decodable { let closed: Bool }
         let _: Response? = try? await client.request(
@@ -624,8 +644,8 @@ final class SessionPresentationStore {
 
     private enum ReducerEffect {
         case catalogRefresh
-        case editor(action: SessionEditorAction, text: String, fullText: String, revision: Int)
-        case notice(String)
+        case editor(action: SessionEditorAction, text: String, fullText: String, revision: Int, operationID: String?)
+        case notice(String, type: String)
         case failure(GatewayFailure)
     }
 
@@ -671,6 +691,7 @@ final class SessionPresentationStore {
         var result = PerformanceResult.failure
         var metrics = PerformanceMetrics.none
         defer { performanceSignposts.end(interval, result: result, metrics: metrics) }
+        let attemptConnectionGeneration = connectionGeneration
         var provisionalToken: String?
         do {
             try Task.checkCancellation()
@@ -681,20 +702,32 @@ final class SessionPresentationStore {
                 timeout: .seconds(60)
             )
             provisionalToken = response.subscriptionToken
-            if subscribedSessionID == sessionID {
-                subscribedSessionID = nil
-                subscriptionToken = nil
-            }
-            guard synchronization.owns(lease), ownsSynchronizationIntent(lease.intent, sessionID: sessionID) else {
-                await closeProvisionalSubscription(sessionID, token: response.subscriptionToken)
+            guard ownsSynchronizationAttempt(
+                lease,
+                sessionID: sessionID,
+                connectionGeneration: attemptConnectionGeneration
+            ) else {
+                await closeProvisionalSubscription(
+                    sessionID,
+                    token: response.subscriptionToken,
+                    expectedConnectionGeneration: attemptConnectionGeneration
+                )
                 result = .discarded
                 return .failed
             }
 
             try await acknowledgeSync(sessionID: sessionID, syncToken: response.syncToken)
             try Task.checkCancellation()
-            guard synchronization.owns(lease), ownsSynchronizationIntent(lease.intent, sessionID: sessionID) else {
-                await closeProvisionalSubscription(sessionID, token: response.subscriptionToken)
+            guard ownsSynchronizationAttempt(
+                lease,
+                sessionID: sessionID,
+                connectionGeneration: attemptConnectionGeneration
+            ) else {
+                await closeProvisionalSubscription(
+                    sessionID,
+                    token: response.subscriptionToken,
+                    expectedConnectionGeneration: attemptConnectionGeneration
+                )
                 result = .discarded
                 return .failed
             }
@@ -723,11 +756,19 @@ final class SessionPresentationStore {
                 runtimeGeneration: installed.runtimeGeneration,
                 eventSequence: installed.eventSequence
             )
-            guard synchronization.owns(lease),
+            guard ownsSynchronizationAttempt(
+                      lease,
+                      sessionID: sessionID,
+                      connectionGeneration: attemptConnectionGeneration
+                  ),
                   let replay = synchronization.drainBufferedEvents(for: lease, baseline: cursor),
                   SessionSynchronizationCoordinator.isContiguous(replay, after: cursor) else {
                 if case .freshPresentation = mode { synchronization.requireFreshInstall(sessionID: sessionID) }
-                await closeProvisionalSubscription(sessionID, token: response.subscriptionToken)
+                await closeProvisionalSubscription(
+                    sessionID,
+                    token: response.subscriptionToken,
+                    expectedConnectionGeneration: attemptConnectionGeneration
+                )
                 result = .discarded
                 return .retry
             }
@@ -736,29 +777,51 @@ final class SessionPresentationStore {
             // and route-keyed effects become observable only after acknowledgement
             // and contiguity establish the exact installed target.
             var replayChangedChatTimeline = false
+            var replayRequiresResynchronization = false
             for event in replay {
-                _ = reduce(
+                if reduce(
                     event,
                     snapshot: &installed,
                     effects: &replayEffects,
                     chatTimelineChanged: &replayChangedChatTimeline
-                )
+                ) != nil { replayRequiresResynchronization = true }
                 var ignoredEffects: [ReducerEffect] = []
                 var ignoredChatTimelineChange = false
-                _ = reduce(
+                if reduce(
                     event,
                     snapshot: &installedTail,
                     effects: &ignoredEffects,
                     chatTimelineChanged: &ignoredChatTimelineChange,
                     updatesSecondaryRevisions: false,
                     mergesVisibleTranscript: false
+                ) != nil { replayRequiresResynchronization = true }
+            }
+            let replayTailSequence = replay.last?.sessionCursor?.eventSequence ?? cursor.eventSequence
+            guard !replayRequiresResynchronization,
+                  installed.eventSequence == replayTailSequence,
+                  installedTail.eventSequence == replayTailSequence else {
+                if case .freshPresentation = mode { synchronization.requireFreshInstall(sessionID: sessionID) }
+                await closeProvisionalSubscription(
+                    sessionID,
+                    token: response.subscriptionToken,
+                    expectedConnectionGeneration: attemptConnectionGeneration
                 )
+                result = .discarded
+                return .retry
             }
             guard let installedTarget = synchronizationTarget(
                 for: lease.intent,
                 sessionID: sessionID
+            ), ownsSynchronizationAttempt(
+                lease,
+                sessionID: sessionID,
+                connectionGeneration: attemptConnectionGeneration
             ) else {
-                await closeProvisionalSubscription(sessionID, token: response.subscriptionToken)
+                await closeProvisionalSubscription(
+                    sessionID,
+                    token: response.subscriptionToken,
+                    expectedConnectionGeneration: attemptConnectionGeneration
+                )
                 result = .discarded
                 return .failed
             }
@@ -790,7 +853,13 @@ final class SessionPresentationStore {
             return .success
         } catch {
             if Task.isCancelled || error is CancellationError { result = .cancelled }
-            if let provisionalToken { await closeProvisionalSubscription(sessionID, token: provisionalToken) }
+            if let provisionalToken {
+                await closeProvisionalSubscription(
+                    sessionID,
+                    token: provisionalToken,
+                    expectedConnectionGeneration: attemptConnectionGeneration
+                )
+            }
             if let failure = error as? GatewayFailure,
                failure.retryable || failure.code == "response_too_large" {
                 delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
@@ -813,6 +882,16 @@ final class SessionPresentationStore {
             let requested = SessionPresentationIdentity(sessionID: sessionID, generation: generation)
             return owns(requested) ? requested : nil
         }
+    }
+
+    private func ownsSynchronizationAttempt(
+        _ lease: SessionSynchronizationCoordinator.Lease,
+        sessionID: String,
+        connectionGeneration: Int
+    ) -> Bool {
+        self.connectionGeneration == connectionGeneration
+            && synchronization.owns(lease)
+            && ownsSynchronizationIntent(lease.intent, sessionID: sessionID)
     }
 
     private func ownsSynchronizationIntent(
@@ -879,6 +958,102 @@ final class SessionPresentationStore {
         return resync
     }
 
+    private enum ExtensionPresentationAdmission { case applied, duplicate, resynchronize }
+
+    private func applyExtensionPresentation(
+        _ mutation: ExtensionPresentationMutation,
+        snapshot: inout SessionSnapshot,
+        effects: inout [ReducerEffect],
+        chatTimelineChanged: inout Bool
+    ) -> ExtensionPresentationAdmission {
+        guard mutation.hostEpoch == snapshot.extensionPresentation.hostEpoch else { return .resynchronize }
+        if mutation.revision == snapshot.extensionPresentation.revision { return .duplicate }
+        guard mutation.revision == snapshot.extensionPresentation.revision + 1 else { return .resynchronize }
+        var next = snapshot.extensionPresentation
+        let previousSemantic = next.semanticState
+        if let patch = mutation.semantic {
+            if let statuses = patch.statuses { next.semanticState.statuses = statuses }
+            if let working = patch.working { next.semanticState.working = working }
+            if let value = patch.hiddenThinkingLabel {
+                guard value == .null || value.stringValue != nil else { return .resynchronize }
+                next.semanticState.hiddenThinkingLabel = value.stringValue
+            }
+            if let widgets = patch.widgets { next.semanticState.widgets = widgets }
+            if let value = patch.title {
+                guard value == .null || value.stringValue != nil else { return .resynchronize }
+                next.semanticState.title = value.stringValue
+            }
+            if let expanded = patch.toolsExpanded { next.semanticState.toolsExpanded = expanded }
+            let hasEditorDirective = patch.editorAction != nil || patch.editorDelta != nil || patch.editorOperationId != nil
+            if patch.editorRevision != nil || patch.editorText != nil || hasEditorDirective {
+                guard let revision = patch.editorRevision, let text = patch.editorText,
+                      revision == next.semanticState.editorRevision + 1 else { return .resynchronize }
+                let action = SessionEditorAction(rawValue: patch.editorAction ?? "set")
+                guard let action else { return .resynchronize }
+                let delta: String
+                switch action {
+                case .paste:
+                    guard let supplied = patch.editorDelta,
+                          next.semanticState.editorText + supplied == text,
+                          patch.editorOperationId == nil else { return .resynchronize }
+                    delta = supplied
+                case .set:
+                    guard (patch.editorDelta ?? text) == text,
+                          patch.editorOperationId == nil else { return .resynchronize }
+                    delta = text
+                case .native:
+                    guard (patch.editorDelta ?? text) == text,
+                          patch.editorOperationId?.isEmpty == false else { return .resynchronize }
+                    delta = text
+                }
+                next.semanticState.editorRevision = revision
+                next.semanticState.editorText = text
+                effects.append(.editor(
+                    action: action, text: delta, fullText: text,
+                    revision: revision, operationID: patch.editorOperationId
+                ))
+            }
+        }
+        if let interactions = mutation.interactionList { next.pendingInteractions = interactions }
+        if let upserts = mutation.surfaceUpserts {
+            for surface in upserts {
+                if let index = next.surfaces.firstIndex(where: { $0.id == surface.id }) {
+                    guard surface.revision == next.surfaces[index].revision + 1 else { return .resynchronize }
+                    next.surfaces[index] = surface
+                } else {
+                    let omittedRevision = next.projection?.omittedSurfaces?.first(where: { $0.id == surface.id })?.revision
+                    guard surface.revision == (omittedRevision.map { $0 + 1 } ?? 1) else { return .resynchronize }
+                    next.surfaces.append(surface)
+                }
+                next.projection?.omittedSurfaces?.removeAll { $0.id == surface.id }
+            }
+        }
+        if let removals = mutation.surfaceRemovals {
+            let identities = Set(removals)
+            next.surfaces.removeAll { identities.contains($0.id) }
+            next.projection?.omittedSurfaces?.removeAll { identities.contains($0.id) }
+        }
+        if mutation.inputLeasePresent {
+            guard let lease = mutation.inputLease else { return .resynchronize }
+            if lease == .null { next.inputLease = nil }
+            else if let decoded = try? lease.decode(ExtensionInputLease.self) { next.inputLease = decoded }
+            else { return .resynchronize }
+        }
+        if let capabilities = mutation.capabilities { next.capabilities = capabilities }
+        if let diagnostics = mutation.diagnostics { next.diagnostics = diagnostics }
+        next.revision = mutation.revision
+        if next.projection?.omitted == ["surfaces"], next.projection?.omittedSurfaces?.isEmpty == true {
+            next.projection = nil
+        }
+        guard ExtensionPresentationPolicy.admit(next) else { return .resynchronize }
+        if previousSemantic.statuses != next.semanticState.statuses
+            || previousSemantic.working != next.semanticState.working
+            || previousSemantic.hiddenThinkingLabel != next.semanticState.hiddenThinkingLabel { chatTimelineChanged = true }
+        snapshot.extensionPresentation = next
+        if let notification = mutation.notification { effects.append(.notice(notification.message, type: notification.type.rawValue)) }
+        return .applied
+    }
+
     private func reduce(
         _ event: GatewayEvent,
         snapshot: inout SessionSnapshot,
@@ -931,65 +1106,26 @@ final class SessionPresentationStore {
             }
             if chatTimelineChanged { snapshot.toolExecutions.sort(by: ToolExecutionStatePolicy.orderedBefore) }
             advance(&snapshot, envelope)
-        case "session.interactions":
+        case "session.extensionPresentation":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
-                  case .interactions(let interactions)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
-            snapshot.extensionUI.pendingInteractions = interactions
-            advance(&snapshot, envelope)
-        case "session.status":
-            guard let envelope = admitEnvelope(event, snapshot: snapshot),
-                  let object = envelope.data.objectValue,
-                  let key = object["key"]?.stringValue else { return resyncIfNeeded(event, snapshot: snapshot) }
-            let previous = snapshot.extensionUI.statuses[key]
-            if let text = object["text"]?.stringValue { snapshot.extensionUI.statuses[key] = text }
-            else { snapshot.extensionUI.statuses.removeValue(forKey: key) }
-            if previous != snapshot.extensionUI.statuses[key] { chatTimelineChanged = true }
-            advance(&snapshot, envelope)
-        case "session.working":
-            guard let envelope = admitEnvelope(event, snapshot: snapshot), let object = envelope.data.objectValue else { return resyncIfNeeded(event, snapshot: snapshot) }
-            let previous = snapshot.extensionUI.working
-            if object.keys.contains("message") { snapshot.extensionUI.working.message = object["message"]?.stringValue }
-            if let visible = object["visible"]?.boolValue { snapshot.extensionUI.working.visible = visible }
-            if previous != snapshot.extensionUI.working { chatTimelineChanged = true }
-            advance(&snapshot, envelope)
-        case "session.thinkingLabel":
-            guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
-            let previous = snapshot.extensionUI.hiddenThinkingLabel
-            snapshot.extensionUI.hiddenThinkingLabel = envelope.data.objectValue?["label"]?.stringValue
-            if previous != snapshot.extensionUI.hiddenThinkingLabel { chatTimelineChanged = true }
-            advance(&snapshot, envelope)
-        case "session.widget":
-            guard let envelope = admitEnvelope(event, snapshot: snapshot),
-                  case .widget(let key, let widget)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
-            snapshot.extensionUI.widgets.removeAll { $0.key == key }
-            if let widget { snapshot.extensionUI.widgets.append(widget) }
-            advance(&snapshot, envelope)
-        case "session.title":
-            guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
-            snapshot.extensionUI.title = envelope.data.objectValue?["title"]?.stringValue
-            advance(&snapshot, envelope)
-        case "session.editorText":
-            guard let envelope = admitEnvelope(event, snapshot: snapshot),
-                  let object = envelope.data.objectValue,
-                  let rawAction = object["action"]?.stringValue,
-                  let action = SessionEditorAction(rawValue: rawAction),
-                  let text = object["text"]?.stringValue,
-                  let fullText = object["fullText"]?.stringValue,
-                  let revision = object["revision"]?.intValue else { return resyncIfNeeded(event, snapshot: snapshot) }
-            snapshot.extensionUI.editorRevision = revision
-            snapshot.extensionUI.editorText = fullText
-            effects.append(.editor(
-                action: action,
-                text: text,
-                fullText: fullText,
-                revision: revision
-            ))
-            advance(&snapshot, envelope)
-        case "session.notification":
-            guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
-            if let message = envelope.data.objectValue?["message"]?.stringValue {
-                effects.append(.notice(message))
+                  case .extensionPresentation(let mutation)? = event.preparedSessionEvent?.data else {
+                return resyncIfNeeded(event, snapshot: snapshot)
             }
+            switch applyExtensionPresentation(
+                mutation, snapshot: &snapshot, effects: &effects,
+                chatTimelineChanged: &chatTimelineChanged
+            ) {
+            case .applied, .duplicate:
+                advance(&snapshot, envelope)
+            case .resynchronize:
+                return snapshot.sessionId
+            }
+        case "session.closed":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
+            snapshot.phase = .interrupted
+            snapshot.operation = nil
+            snapshot.extensionCommand = nil
+            effects.append(.notice("An extension closed this session runtime.", type: "info"))
             advance(&snapshot, envelope)
         case "session.operationFailed", "session.extensionError":
             guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
@@ -1039,17 +1175,19 @@ final class SessionPresentationStore {
             switch effect {
             case .catalogRefresh:
                 delegate?.sessionPresentationStoreDidRequestCatalogRefresh()
-            case .editor(let action, let text, let fullText, let revision):
+            case .editor(let action, let text, let fullText, let revision, let operationID):
                 guard let target else { continue }
                 delegate?.sessionPresentationStoreDidPublishEditorRequest(
                     target: target,
                     action: action,
                     text: text,
                     fullText: fullText,
-                    revision: revision
+                    revision: revision,
+                    operationID: operationID
                 )
-            case .notice(let message):
-                delegate?.sessionPresentationStorePostNotice(message, replacing: nil)
+            case .notice(let message, let type):
+                let presented = type == "info" ? message : "\(type == "warning" ? "Warning" : "Error"): \(message)"
+                delegate?.sessionPresentationStorePostNotice(presented, replacing: nil)
             case .failure(let failure):
                 delegate?.sessionPresentationStoreSurface(failure)
             }
@@ -1105,9 +1243,14 @@ final class SessionPresentationStore {
     }
 
     private func resyncIfNeeded(_ event: GatewayEvent, snapshot: SessionSnapshot) -> String? {
-        guard let envelope = event.preparedSessionEvent?.envelope,
-              event.sessionId == snapshot.sessionId else { return nil }
-        if envelope.runtimeGeneration != snapshot.runtimeGeneration || envelope.eventSequence > snapshot.eventSequence + 1 {
+        guard event.sessionId == snapshot.sessionId else { return nil }
+        guard let envelope = event.preparedSessionEvent?.envelope else {
+            // A recognized owned session topic that could not produce an
+            // envelope is not safely ignorable: fail closed to authority.
+            return hasInstalledSubscription(for: snapshot.sessionId) ? snapshot.sessionId : nil
+        }
+        if envelope.runtimeGeneration != snapshot.runtimeGeneration
+            || envelope.eventSequence >= snapshot.eventSequence + 1 {
             if !synchronization.markRetryRequired(sessionID: snapshot.sessionId) { return snapshot.sessionId }
         }
         return nil

@@ -19,6 +19,25 @@ export interface ActiveSessionSynchronization {
   barrier: SessionSyncBarrier;
   timeout: NodeJS.Timeout;
   requestId: string;
+  subscriptionToken: string;
+}
+
+interface SynchronizationCompletion {
+  sessionId: string;
+  syncToken: string;
+  requestId: string;
+  subscriptionToken: string;
+}
+
+export function existingSessionOpenOwner(
+  pendingSessionOpens: ReadonlyMap<string, string>,
+  synchronizations: ReadonlyMap<string, ActiveSessionSynchronization>,
+  subscriptionTokens: ReadonlyMap<string, string>,
+  sessionId: string,
+): string | undefined {
+  return pendingSessionOpens.get(sessionId)
+    ?? synchronizations.get(sessionId)?.requestId
+    ?? (subscriptionTokens.has(sessionId) ? "installed" : undefined);
 }
 
 export function releaseOwnedSubscription(
@@ -54,10 +73,12 @@ export function canAttachTerminal(
 export function clearRequestSynchronizations(
   synchronizations: Map<string, ActiveSessionSynchronization>,
   requestId: string,
+  revoke?: (sessionId: string, synchronization: ActiveSessionSynchronization) => void,
 ): void {
   for (const [sessionId, synchronization] of synchronizations) {
     if (synchronization.requestId !== requestId) continue;
     clearTimeout(synchronization.timeout);
+    revoke?.(sessionId, synchronization);
     synchronizations.delete(sessionId);
   }
 }
@@ -74,6 +95,9 @@ interface Connection {
   inFlight: Set<string>;
   synchronizations: Map<string, ActiveSessionSynchronization>;
   subscriptionTokens: Map<string, string>;
+  // Reserved before asynchronous service invocation so overlapping opens for
+  // the same connection/session are rejected deterministically.
+  pendingSessionOpens: Map<string, string>;
   helloTimer: NodeJS.Timeout;
 }
 
@@ -368,6 +392,7 @@ export class GatewayServer {
       inFlight: new Set(),
       synchronizations: new Map(),
       subscriptionTokens: new Map(),
+      pendingSessionOpens: new Map(),
       helloTimer: setTimeout(() => socket.close(1008, "hello required"), 5_000),
     };
     this.clients.set(connection.id, connection);
@@ -412,9 +437,70 @@ export class GatewayServer {
       this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(new GatewayError("busy", "Too many concurrent requests", true)) });
       return;
     }
+    const sessionOpenID = frame.method === "session.open"
+      && typeof frame.params === "object"
+      && frame.params !== null
+      && !Array.isArray(frame.params)
+      && typeof (frame.params as Record<string, unknown>).sessionId === "string"
+      ? (frame.params as Record<string, unknown>).sessionId as string
+      : undefined;
+    if (sessionOpenID !== undefined) {
+      const owner = existingSessionOpenOwner(
+        connection.pendingSessionOpens,
+        connection.synchronizations,
+        connection.subscriptionTokens,
+        sessionOpenID,
+      );
+      if (owner !== undefined) {
+        this.send(connection, {
+          type: "response",
+          id: frame.id,
+          ok: false,
+          error: publicError(new GatewayError("conflict", "A session synchronization is already in progress or installed for this connection", true)),
+        });
+        return;
+      }
+      connection.pendingSessionOpens.set(sessionOpenID, frame.id);
+    }
     connection.inFlight.add(frame.id);
     const requestId = frame.id;
-    const synchronizationCompletions: Array<{ sessionId: string; syncToken: string }> = [];
+    const synchronizationCompletions: SynchronizationCompletion[] = [];
+    let responseAttempted = false;
+    const revokeSynchronization = (sessionId: string, synchronization: ActiveSessionSynchronization): boolean => {
+      // A later session.open may have replaced this request's owner. In that
+      // case, only the current token may revoke the runtime subscription.
+      if (connection.synchronizations.get(sessionId) !== synchronization
+          || connection.subscriptionTokens.get(sessionId) !== synchronization.subscriptionToken) return false;
+      synchronization.barrier.abort(synchronization.requestId);
+      connection.subscriptionTokens.delete(sessionId);
+      connection.subscriptions.delete(sessionId);
+      releaseSessionTerminals(
+        connection.terminals,
+        sessionId,
+        (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
+      );
+      this.options.sessions.unsubscribe(connection.id, sessionId);
+      return true;
+    };
+    const revokeSubscription = (sessionId: string, token: string): boolean => {
+      const synchronization = connection.synchronizations.get(sessionId);
+      if (synchronization && synchronization.subscriptionToken === token) {
+        clearTimeout(synchronization.timeout);
+        const revoked = revokeSynchronization(sessionId, synchronization);
+        if (revoked) connection.synchronizations.delete(sessionId);
+        return revoked;
+      }
+      if (connection.subscriptionTokens.get(sessionId) !== token) return false;
+      connection.subscriptionTokens.delete(sessionId);
+      connection.subscriptions.delete(sessionId);
+      releaseSessionTerminals(
+        connection.terminals,
+        sessionId,
+        (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
+      );
+      this.options.sessions.unsubscribe(connection.id, sessionId);
+      return true;
+    };
     try {
       const context: ClientContext = {
         id: connection.id,
@@ -422,9 +508,8 @@ export class GatewayServer {
         isLocal: connection.isLocal,
         beginSynchronization: (sessionId) => {
           const previous = connection.synchronizations.get(sessionId);
-          if (previous) {
-            clearTimeout(previous.timeout);
-            connection.synchronizations.delete(sessionId);
+          if (previous || connection.subscriptionTokens.has(sessionId)) {
+            throw new GatewayError("conflict", "A session synchronization is already in progress or installed for this connection", true);
           }
           connection.subscriptions.add(sessionId);
           this.options.sessions.subscribe(connection.id, sessionId);
@@ -435,6 +520,7 @@ export class GatewayServer {
           const timeout = setTimeout(() => {
             const active = connection.synchronizations.get(sessionId);
             if (active?.barrier !== barrier) return;
+            revokeSynchronization(sessionId, active);
             connection.synchronizations.delete(sessionId);
             this.send(connection, {
               type: "event",
@@ -444,45 +530,44 @@ export class GatewayServer {
             });
           }, 30_000);
           timeout.unref();
-          connection.synchronizations.set(sessionId, { barrier, timeout, requestId });
+          connection.synchronizations.set(sessionId, { barrier, timeout, requestId, subscriptionToken: syncToken });
           return syncToken;
         },
         establishSynchronization: (sessionId, snapshot) => {
           const active = connection.synchronizations.get(sessionId);
-          if (!active) throw new GatewayError("conflict", "Session synchronization was not established before snapshot capture");
+          if (!active || active.requestId !== requestId) {
+            throw new GatewayError("conflict", "Session synchronization is owned by another request", true);
+          }
           active.barrier.establish(snapshot);
         },
         completeSynchronization: (sessionId, syncToken) => {
-          if (!connection.synchronizations.has(sessionId)) {
-            throw new GatewayError("conflict", "Session synchronization is no longer active", true);
+          const active = connection.synchronizations.get(sessionId);
+          if (!active || active.subscriptionToken !== syncToken) {
+            throw new GatewayError("conflict", "Session synchronization is no longer owned by this token", true);
           }
-          synchronizationCompletions.push({ sessionId, syncToken });
+          synchronizationCompletions.push({
+            sessionId,
+            syncToken,
+            // The open request remains the synchronization owner until this
+            // acknowledgement commits. The sync request may have a different
+            // request ID, but can never commit without this exact owner token.
+            requestId: active.requestId,
+            subscriptionToken: active.subscriptionToken,
+          });
         },
         unsubscribe: (sessionId, subscriptionToken) => {
-          if (subscriptionToken !== undefined) {
-            return releaseOwnedSubscription(connection.subscriptionTokens, sessionId, subscriptionToken, () => {
-              connection.subscriptions.delete(sessionId);
-              releaseSessionTerminals(
-                connection.terminals,
-                sessionId,
-                (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
-              );
-              const synchronization = connection.synchronizations.get(sessionId);
-              if (synchronization) clearTimeout(synchronization.timeout);
-              connection.synchronizations.delete(sessionId);
-              this.options.sessions.unsubscribe(connection.id, sessionId);
-            });
-          }
-          connection.subscriptionTokens.delete(sessionId);
-          connection.subscriptions.delete(sessionId);
-          releaseSessionTerminals(
-            connection.terminals,
-            sessionId,
-            (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
-          );
+          if (subscriptionToken !== undefined) return revokeSubscription(sessionId, subscriptionToken);
           const synchronization = connection.synchronizations.get(sessionId);
-          if (synchronization) clearTimeout(synchronization.timeout);
-          connection.synchronizations.delete(sessionId);
+          if (synchronization) {
+            clearTimeout(synchronization.timeout);
+            if (revokeSynchronization(sessionId, synchronization)) {
+              connection.synchronizations.delete(sessionId);
+              return true;
+            }
+          }
+          const token = connection.subscriptionTokens.get(sessionId);
+          if (token !== undefined) return revokeSubscription(sessionId, token);
+          connection.subscriptions.delete(sessionId);
           this.options.sessions.unsubscribe(connection.id, sessionId);
           return true;
         },
@@ -500,14 +585,40 @@ export class GatewayServer {
         ownsTerminal: (terminalId) => connection.terminals.has(terminalId),
       };
       const result = await this.options.service.invoke(context, frame.method, frame.params ?? {});
-      const responseSentIntact = this.send(connection, { type: "response", id: frame.id, ok: true, result });
-      if (!responseSentIntact) clearRequestSynchronizations(connection.synchronizations, requestId);
-      // The acknowledgement is enqueued before the barrier is removed. Because
-      // this block is synchronous, no newer broadcast can overtake the buffered
-      // catch-up on the WebSocket.
+      // Validate every completion before writing the response. The checks are
+      // request+token exact; this prevents a stale request from ever sending a
+      // successful response which it can no longer commit.
       for (const completion of synchronizationCompletions) {
         const active = connection.synchronizations.get(completion.sessionId);
-        if (!active) continue;
+        if (!active
+            || active.requestId !== completion.requestId
+            || active.subscriptionToken !== completion.subscriptionToken
+            || completion.syncToken !== active.subscriptionToken) {
+          throw new GatewayError("conflict", "Session synchronization ownership changed before acknowledgement", true);
+        }
+      }
+      const responseSentIntact = this.send(connection, { type: "response", id: frame.id, ok: true, result });
+      responseAttempted = true;
+      if (!responseSentIntact) {
+        const ownerRequestIDs = new Set([
+          requestId,
+          ...synchronizationCompletions.map((completion) => completion.requestId),
+        ]);
+        for (const ownerRequestID of ownerRequestIDs) {
+          clearRequestSynchronizations(connection.synchronizations, ownerRequestID, (sessionId, synchronization) => {
+            revokeSynchronization(sessionId, synchronization);
+          });
+        }
+      }
+      // The acknowledgement is enqueued before the barrier is removed. Because
+      // this block is synchronous, no newer broadcast can overtake the buffered
+      // catch-up on the WebSocket. Re-check exact ownership before committing.
+      if (responseSentIntact) for (const completion of synchronizationCompletions) {
+        const active = connection.synchronizations.get(completion.sessionId);
+        if (!active
+            || active.requestId !== completion.requestId
+            || active.subscriptionToken !== completion.subscriptionToken
+            || completion.syncToken !== active.subscriptionToken) continue;
         const completed = active.barrier.commit(completion.syncToken);
         clearTimeout(active.timeout);
         connection.synchronizations.delete(completion.sessionId);
@@ -523,30 +634,54 @@ export class GatewayServer {
         }
       }
     } catch (error) {
-      clearRequestSynchronizations(connection.synchronizations, requestId);
-      this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(error) });
+      const ownerRequestIDs = new Set([
+        requestId,
+        ...synchronizationCompletions.map((completion) => completion.requestId),
+      ]);
+      for (const ownerRequestID of ownerRequestIDs) {
+        clearRequestSynchronizations(connection.synchronizations, ownerRequestID, (sessionId, synchronization) => {
+          revokeSynchronization(sessionId, synchronization);
+        });
+      }
+      if (!responseAttempted) {
+        responseAttempted = true;
+        this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(error) });
+      }
     } finally {
+      if (sessionOpenID !== undefined && connection.pendingSessionOpens.get(sessionOpenID) === frame.id) {
+        connection.pendingSessionOpens.delete(sessionOpenID);
+      }
       connection.inFlight.delete(frame.id);
     }
   }
 
   private send(connection: Connection, value: unknown): boolean {
     if (connection.socket.readyState !== WebSocket.OPEN) return false;
-    const direct = JSON.stringify(value);
-    if (Buffer.byteLength(direct) <= this.options.maxFrameBytes) {
-      connection.socket.send(direct);
-      return true;
+    try {
+      const direct = JSON.stringify(value);
+      if (direct === undefined) return false;
+      if (Buffer.byteLength(direct, "utf8") <= this.options.maxFrameBytes) {
+        connection.socket.send(direct);
+        return true;
+      }
+      const encoded = encodeOutboundFrame(value, this.options.maxFrameBytes);
+      if (!encoded) return false;
+      connection.socket.send(encoded);
+      return false;
+    } catch {
+      // Broadcast payloads are supplied by runtime projections. A malformed
+      // value must not escape the broadcast loop or take down the Gateway.
+      return false;
     }
-    const encoded = encodeOutboundFrame(value, this.options.maxFrameBytes);
-    if (!encoded) return false;
-    connection.socket.send(encoded);
-    return false;
   }
 
   private disconnect(connection: Connection): void {
     if (!this.clients.delete(connection.id)) return;
     clearTimeout(connection.helloTimer);
-    for (const synchronization of connection.synchronizations.values()) clearTimeout(synchronization.timeout);
+    for (const synchronization of connection.synchronizations.values()) {
+      clearTimeout(synchronization.timeout);
+      synchronization.barrier.abort(synchronization.requestId);
+    }
     connection.synchronizations.clear();
     this.options.sessions.unsubscribeClient(connection.id);
     this.options.service.releaseClient(connection.id);

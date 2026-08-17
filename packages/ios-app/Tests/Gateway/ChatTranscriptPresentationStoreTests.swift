@@ -440,8 +440,8 @@ struct ChatTranscriptPresentationStoreTests {
             store.submit(snapshot: snapshot, tag: tag)
             _ = try await store.waitForInstall(of: tag)
 
-            snapshot.extensionUI.statuses["sync"] = "Synchronizing"
-            snapshot.extensionUI.working = .init(message: "Still working", visible: true)
+            snapshot.extensionPresentation.semanticState.statuses["sync"] = "Synchronizing"
+            snapshot.extensionPresentation.semanticState.working = .init(message: "Still working", visible: true)
             snapshot.eventSequence += 1
             tag = ChatTranscriptProjectionTag(
                 snapshot: snapshot,
@@ -596,7 +596,7 @@ struct ChatTranscriptPresentationStoreTests {
             snapshot.transcriptStart = 0
             snapshot.transcriptTotal = snapshot.transcript.count
             snapshot.phase = .compacting
-            snapshot.extensionUI.working = .init(message: nil, visible: true)
+            snapshot.extensionPresentation.semanticState.working = .init(message: nil, visible: true)
             let store = ChatTranscriptPresentationStore()
             var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 19)
             store.submit(snapshot: snapshot, tag: tag)
@@ -606,7 +606,7 @@ struct ChatTranscriptPresentationStoreTests {
             snapshot.transcript.append(try compactionItem(id: "finished-compaction"))
             snapshot.transcriptTotal! += 1
             snapshot.phase = .idle
-            snapshot.extensionUI.working.visible = false
+            snapshot.extensionPresentation.semanticState.working.visible = false
             snapshot.revision += 1
             snapshot.eventSequence += 1
             tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 19)

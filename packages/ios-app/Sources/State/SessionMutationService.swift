@@ -5,6 +5,13 @@ struct SessionForkOutcome: Equatable {
     let selectedText: String?
 }
 
+struct ExtensionEditorUpdateResult: Codable, Equatable, Sendable {
+    let revision: Int
+    let text: String
+    let applied: Bool
+    var operationID: String? = nil
+}
+
 /// Owns explicit session command construction. Canonical session state remains
 /// Gateway-owned; projection and navigation effects stay with their domain owners.
 @MainActor
@@ -319,14 +326,48 @@ final class SessionMutationService {
         }
     }
 
+    func updateExtensionEditor(
+        sessionID: String,
+        hostEpoch: String,
+        baseRevision: Int,
+        operationID: String,
+        text: String
+    ) async throws -> ExtensionEditorUpdateResult {
+        struct Params: Codable {
+            let sessionId, hostEpoch, operationId, text, commandId: String
+            let baseRevision: Int
+        }
+        let commandID = uuidSource.next().uuidString
+        let params = Params(
+            sessionId: sessionID,
+            hostEpoch: hostEpoch,
+            operationId: operationID,
+            text: text,
+            commandId: commandID,
+            baseRevision: baseRevision
+        )
+        let response: ExtensionEditorUpdateResult = try await executor.perform(method: "extension.editor.update", commandID: commandID) {
+            try await client.request("extension.editor.update", params)
+        }
+        return ExtensionEditorUpdateResult(
+            revision: response.revision,
+            text: response.text,
+            applied: response.applied,
+            operationID: operationID
+        )
+    }
+
     func answerInteraction(
         interactionID: String,
+        hostEpoch: String,
+        presentationRevision: Int,
         sessionID: String,
         value: JSONValue?,
         cancelled: Bool
     ) async throws {
         struct Params: Codable {
-            let sessionId, interactionId: String
+            let sessionId, interactionId, hostEpoch: String
+            let presentationRevision: Int
             let value: JSONValue?
             let cancelled: Bool
             let commandId: String
@@ -336,6 +377,8 @@ final class SessionMutationService {
         let params = Params(
             sessionId: sessionID,
             interactionId: interactionID,
+            hostEpoch: hostEpoch,
+            presentationRevision: presentationRevision,
             value: value,
             cancelled: cancelled,
             commandId: commandID

@@ -313,15 +313,26 @@ actor SnapshotCache {
             operation: nil,
             retry: nil,
             toolExecutions: [],
-            extensionUI: ExtensionUIState(
-                statuses: [:],
-                working: .init(message: nil, visible: true),
-                hiddenThinkingLabel: nil,
-                widgets: [],
-                title: nil,
-                editorRevision: snapshot.extensionUI.editorRevision,
-                editorText: "",
-                pendingInteractions: []
+            extensionPresentation: ExtensionPresentationState(
+                version: 2,
+                hostEpoch: snapshot.extensionPresentation.hostEpoch,
+                revision: snapshot.extensionPresentation.revision,
+                capabilities: [],
+                diagnostics: [],
+                semanticState: .init(
+                    statuses: [:],
+                    working: .init(message: nil, visible: true),
+                    hiddenThinkingLabel: nil,
+                    widgets: [],
+                    title: nil,
+                    toolsExpanded: false,
+                    editorRevision: 0,
+                    editorText: ""
+                ),
+                surfaces: [],
+                pendingInteractions: [],
+                inputLease: nil,
+                projection: .init(complete: false, omitted: ["ephemeralPresentation"])
             ),
             diagnostics: []
         )

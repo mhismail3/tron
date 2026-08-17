@@ -286,15 +286,18 @@ struct SessionScenarioBuilder: Sendable {
             operation: nil,
             retry: nil,
             toolExecutions: [],
-            extensionUI: ExtensionUIState(
-                statuses: [:],
-                working: .init(message: nil, visible: false),
-                hiddenThinkingLabel: nil,
-                widgets: [],
-                title: nil,
-                editorRevision: 0,
-                editorText: "",
-                pendingInteractions: []
+            extensionPresentation: ExtensionPresentationState(
+                version: 2,
+                hostEpoch: "test-host",
+                revision: 0,
+                capabilities: [],
+                diagnostics: [],
+                semanticState: .init(
+                    statuses: [:], working: .init(message: nil, visible: false),
+                    hiddenThinkingLabel: nil, widgets: [], title: nil,
+                    toolsExpanded: false, editorRevision: 0, editorText: ""
+                ),
+                surfaces: [], pendingInteractions: [], inputLease: nil, projection: nil
             ),
             diagnostics: []
         )

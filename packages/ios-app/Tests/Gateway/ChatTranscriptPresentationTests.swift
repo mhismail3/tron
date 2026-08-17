@@ -58,10 +58,10 @@ struct ChatTranscriptPresentationTests {
     @Test("extension widgets remain canonical but are temporarily hidden")
     func extensionWidgetPresentationIsSuppressed() {
         let widgets = [
-            ExtensionWidget(key: "subagent-async", lines: ["1 active agent"], placement: .belowEditor),
-            ExtensionWidget(key: "subagent-fleet-status", lines: ["Fleet"], placement: .aboveEditor),
-            ExtensionWidget(key: "subagent-custom", lines: ["Keep"], placement: .belowEditor),
-            ExtensionWidget(key: "project-status", lines: ["Ready"], placement: .aboveEditor),
+            ExtensionWidget(key: "below-one", lines: ["One"], placement: .belowEditor),
+            ExtensionWidget(key: "above-one", lines: ["Two"], placement: .aboveEditor),
+            ExtensionWidget(key: "below-two", lines: ["Three"], placement: .belowEditor),
+            ExtensionWidget(key: "above-two", lines: ["Four"], placement: .aboveEditor),
         ]
 
         #expect(!ChatExtensionChromePolicy.rendersWidgets)
@@ -73,8 +73,8 @@ struct ChatTranscriptPresentationTests {
     func extensionStatusesAreSuppressed() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
-        snapshot.extensionUI.statuses = ["goal": "Pursuing goal"]
-        snapshot.extensionUI.working = .init(message: "Still working", visible: true)
+        snapshot.extensionPresentation.semanticState.statuses = ["goal": "Pursuing goal"]
+        snapshot.extensionPresentation.semanticState.working = .init(message: "Still working", visible: true)
 
         let runtime = ChatNotificationPresentation.runtime(in: snapshot)
         #expect(!ChatExtensionChromePolicy.rendersStatusPills)
@@ -87,7 +87,7 @@ struct ChatTranscriptPresentationTests {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
         snapshot.compactionQueued = true
-        snapshot.extensionUI.working = .init(message: nil, visible: true)
+        snapshot.extensionPresentation.semanticState.working = .init(message: nil, visible: true)
 
         let queued = ChatNotificationPresentation.runtime(in: snapshot)
         #expect(queued.map(\.id) == ["runtime-compaction-queued"])
@@ -108,22 +108,22 @@ struct ChatTranscriptPresentationTests {
     func ordinaryRunningUsesAmbientActivity() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
-        snapshot.extensionUI.working = .init(message: nil, visible: true)
+        snapshot.extensionPresentation.semanticState.working = .init(message: nil, visible: true)
         snapshot.retry = nil
 
         let presentation = try #require(ChatRuntimeWorkingPresentation(
             phase: snapshot.phase,
-            working: snapshot.extensionUI.working,
+            working: snapshot.extensionPresentation.semanticState.working,
             retry: snapshot.retry
         ))
         #expect(presentation.message == "Tron is working")
         #expect(presentation.usesAmbientBottomIndicator)
         #expect(ChatNotificationPresentation.runtime(in: snapshot).isEmpty)
 
-        snapshot.extensionUI.working.message = "Reading files"
+        snapshot.extensionPresentation.semanticState.working.message = "Reading files"
         let custom = try #require(ChatRuntimeWorkingPresentation(
             phase: snapshot.phase,
-            working: snapshot.extensionUI.working,
+            working: snapshot.extensionPresentation.semanticState.working,
             retry: snapshot.retry
         ))
         #expect(!custom.usesAmbientBottomIndicator)
@@ -452,7 +452,7 @@ struct ChatTranscriptPresentationTests {
 
         snapshot.phase = .running
         snapshot.toolExecutions = [tool("call", "read", startedAt: "2026-01-01T00:00:00Z")]
-        snapshot.extensionUI.statuses = ["provider": "Working"]
+        snapshot.extensionPresentation.semanticState.statuses = ["provider": "Working"]
         #expect(ChatResponseState(snapshot: snapshot) == baseline)
 
         snapshot.streaming = try message("""
@@ -566,7 +566,7 @@ struct ChatTranscriptPresentationTests {
     func pendingCompactionContinuity() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .compacting
-        snapshot.extensionUI.working = .init(message: nil, visible: true)
+        snapshot.extensionPresentation.semanticState.working = .init(message: nil, visible: true)
         snapshot.transcriptStart = 7
         snapshot.transcriptTotal = 7
         let exact = try #require(ChatNotificationPresentation.runtime(in: snapshot).first)
@@ -1291,7 +1291,7 @@ struct ChatTranscriptPresentationTests {
           "model":{"provider":"openai-codex","id":"gpt-5.6-sol"},"thinkingLevel":"high","availableThinkingLevels":["off","high"],
           "stats":{"userMessages":1,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":1,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cost":0},
           "queued":{"steering":[],"followUp":[]},"transcript":\(transcript),"transcriptStart":0,"transcriptTotal":3,
-          "toolExecutions":[],"extensionUI":{"statuses":{},"working":{"visible":false},"widgets":[],"editorRevision":0,"editorText":"","pendingInteractions":[]},"diagnostics":[]
+          "toolExecutions":[],"extensionPresentation":{"version":2,"hostEpoch":"host","revision":0,"capabilities":[],"diagnostics":[],"semanticState":{"statuses":{},"working":{"visible":false},"widgets":[],"toolsExpanded":false,"editorRevision":0,"editorText":""},"surfaces":[],"pendingInteractions":[]},"diagnostics":[]
         }
         """.utf8))
     }

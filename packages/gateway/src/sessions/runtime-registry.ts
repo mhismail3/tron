@@ -133,6 +133,15 @@ export class RuntimeRegistry {
         this.options.sessionListChanged();
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
+      closed: (sessionId: string, slot: RuntimeSlot) => {
+        if (this.slots.get(sessionId) === slot) this.slots.delete(sessionId);
+        this.interrupted.delete(sessionId);
+        this.subscribers.delete(sessionId);
+        this.latestSummaries.delete(sessionId);
+        this.invalidateCatalogAcquisition();
+        this.revision += 1;
+        this.options.sessionListChanged();
+      },
       rekey: (previousId: string, nextId: string, slot: RuntimeSlot) => {
         const existing = this.slots.get(nextId);
         if (existing && existing !== slot) throw new GatewayError("conflict", "Replacement session is already active");
@@ -1018,7 +1027,7 @@ export class RuntimeRegistry {
   private async evictIdle(): Promise<void> {
     const cutoff = Date.now() - this.options.idleRuntimeMs;
     for (const [id, slot] of this.slots) {
-      if (slot.isBusy || slot.touchedAt >= cutoff || (this.subscribers.get(id)?.size ?? 0) > 0) continue;
+      if (slot.isEvictionProtected || slot.touchedAt >= cutoff || (this.subscribers.get(id)?.size ?? 0) > 0) continue;
       try {
         await slot.dispose();
         this.slots.delete(id);
@@ -1033,10 +1042,22 @@ export class RuntimeRegistry {
     return [...this.slots.values()].filter((slot) => slot.isBusy).map((slot) => slot.id);
   }
 
-  async waitUntilIdle(): Promise<void> {
-    while (this.activeSessionIds().length > 0) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+  async waitUntilIdle(timeoutMs = 60_000): Promise<void> {
+    const slots = [...this.slots.values()];
+    let preparationSettled = false;
+    let preparationError: unknown;
+    void Promise.all(slots.map((slot) => slot.prepareForAdministrativeDrain())).then(
+      () => { preparationSettled = true; },
+      (error) => { preparationError = error; preparationSettled = true; },
+    );
+    const deadline = Date.now() + timeoutMs;
+    while (!preparationSettled || slots.some((slot) => slot.isDrainBusy)) {
+      if (Date.now() >= deadline) {
+        throw new GatewayError("busy", "Gateway restart drain timed out; remaining extension work will be interrupted", true);
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(1, deadline - Date.now()))));
     }
+    if (preparationError !== undefined) throw preparationError;
   }
 
   async dispose(): Promise<void> {
