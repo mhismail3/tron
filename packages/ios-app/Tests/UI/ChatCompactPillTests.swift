@@ -120,7 +120,8 @@ struct ChatCompactPillTests {
             "commands": .array([.string("review")]),
         ]))
         #expect(extensionDetail.purpose.contains("loaded extension"))
-        #expect(extensionDetail.capabilities == ["Tools: read, edit", "Commands: /review"])
+        #expect(extensionDetail.tools == ["read", "edit"])
+        #expect(extensionDetail.commands == ["review"])
         #expect(extensionDetail.scopeAndSource == "User · npm:example@1.0.0")
         #expect(extensionDetail.path == "/extensions/index.ts")
 
@@ -133,10 +134,12 @@ struct ChatCompactPillTests {
         #expect(prompt.invocation == "/gather-context <topic>")
 
         let skill = ProjectResourceDetailPresentation(kind: .skills, value: .object([
-            "description": .string("Delegate work to focused subagents without wrapping the summary unnaturally."),
+            "description": .string("Delegate single-agent work to focused subagents without wrapping the summary unnaturally."),
             "disableModelInvocation": .bool(false),
         ]))
         #expect(skill.purpose.hasSuffix("unnaturally."))
+        #expect(skill.purpose.contains("single‑agent"))
+        #expect(!skill.purpose.contains("single-agent"))
         #expect(skill.availability == "Available to the agent on demand")
 
         let tool = ProjectResourceDetailPresentation(kind: .tools, value: .object([

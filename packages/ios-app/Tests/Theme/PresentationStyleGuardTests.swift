@@ -446,6 +446,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionTreeSheet.swift"),
             encoding: .utf8
         )
+        let terminalSheet = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Terminal/TerminalSheet.swift"),
+            encoding: .utf8
+        )
         let structuredJSON = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Components/StructuredJSONView.swift"),
             encoding: .utf8
@@ -516,7 +520,9 @@ struct PresentationStyleGuardTests {
         #expect(context.contains("TronTechnicalJSONRow("))
         #expect(!context.contains("DisclosureGroup(isExpanded: $showRaw)"))
         #expect(structuredJSON.contains("struct TronTechnicalJSONRow: View"))
-        #expect(structuredJSON.contains("ScrollView([.horizontal, .vertical]"))
+        #expect(structuredJSON.contains("ScrollView(.vertical, showsIndicators: true)"))
+        #expect(!structuredJSON.contains("ScrollView([.horizontal, .vertical]"))
+        #expect(structuredJSON.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(structuredJSON.contains(".presentationDetents([.medium, .large], selection: $detent)"))
         #expect(structuredJSON.contains("detent = .medium"))
         #expect(!structuredJSON.contains("showRaw.toggle()"))
@@ -539,9 +545,16 @@ struct PresentationStyleGuardTests {
             #expect(resources.contains("\(title)"))
         }
         #expect(resources.contains("struct ProjectResourceDetailPresentation: Equatable"))
+        #expect(resources.contains("ProjectResourceTextPresentation.readableDescription"))
         #expect(resources.contains("TronSettingsGroup(\"At a Glance\""))
+        #expect(resources.contains("private func capabilityCollection("))
+        #expect(resources.contains("LazyVGrid("))
+        #expect(resources.contains("presentation.tools"))
+        #expect(resources.contains("presentation.commands"))
         #expect(resources.contains("TronTechnicalJSONRow("))
         #expect(resources.contains(".fixedSize(horizontal: false, vertical: true)"))
+        #expect(terminalSheet.contains(".alert(\"Quit Terminal?\""))
+        #expect(!terminalSheet.contains(".confirmationDialog(\"Quit this terminal?\""))
         let diagnostics = try String(
             contentsOf: packageRoot.appending(path: "Sources/State/GatewayDiagnosticsService.swift"),
             encoding: .utf8

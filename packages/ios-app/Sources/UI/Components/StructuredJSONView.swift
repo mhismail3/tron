@@ -305,16 +305,16 @@ private struct TechnicalJSONSheet: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView([.horizontal, .vertical], showsIndicators: true) {
+            ScrollView(.vertical, showsIndicators: true) {
                 Text(value.prettyPrinted)
                     .font(TronTypography.codeContent)
                     .foregroundStyle(Color.tronTextSecondary)
                     .textSelection(.enabled)
                     .padding(18)
-                    .fixedSize(horizontal: true, vertical: true)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .defaultScrollAnchor(.topLeading)
+            .defaultScrollAnchor(.top)
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

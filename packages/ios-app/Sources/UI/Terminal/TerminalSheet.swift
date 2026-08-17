@@ -70,9 +70,9 @@ struct TerminalSheet: View {
             controller.start(sessionID: sessionID, model: model)
         }
         .onDisappear { controller.stop(model: model) }
-        .confirmationDialog("Quit this terminal?", isPresented: $confirmQuit, titleVisibility: .visible) {
-            Button("Quit Terminal", role: .destructive) { controller.terminate(model: model) }
+        .alert("Quit Terminal?", isPresented: $confirmQuit) {
             Button("Cancel", role: .cancel) {}
+            Button("Quit Terminal", role: .destructive) { controller.terminate(model: model) }
         } message: {
             Text("The shell and its running process group will stop. Closing the sheet alone only detaches.")
         }

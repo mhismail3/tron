@@ -61,13 +61,30 @@ struct ProjectResourceSelection: Identifiable {
     let value: JSONValue
 }
 
+enum ProjectResourceTextPresentation {
+    static func readableDescription(_ value: String) -> String {
+        let characters = Array(value)
+        guard characters.count > 2 else { return value }
+        return characters.indices.map { index in
+            guard characters[index] == "-",
+                  index > characters.startIndex,
+                  index < characters.index(before: characters.endIndex),
+                  characters[characters.index(before: index)].isLetter || characters[characters.index(before: index)].isNumber,
+                  characters[characters.index(after: index)].isLetter || characters[characters.index(after: index)].isNumber
+            else { return String(characters[index]) }
+            return "‑"
+        }.joined()
+    }
+}
+
 struct ProjectResourceDetailPresentation: Equatable {
     let purpose: String
     let invocation: String?
     let availability: String?
     let scopeAndSource: String?
     let path: String?
-    let capabilities: [String]
+    let tools: [String]
+    let commands: [String]
     let schemaSummary: String?
     let guidance: String?
 
@@ -75,7 +92,9 @@ struct ProjectResourceDetailPresentation: Equatable {
         let object = value.objectValue ?? [:]
         let name = object["name"]?.stringValue ?? "Resource"
         let rawDescription = object["description"]?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let description = rawDescription.flatMap { $0.isEmpty ? nil : $0 }
+        let description = rawDescription.flatMap { value in
+            value.isEmpty ? nil : ProjectResourceTextPresentation.readableDescription(value)
+        }
         path = object["path"]?.stringValue ?? object["resolvedPath"]?.stringValue
         let scope = object["scope"]?.stringValue?.capitalized
         let source = object["source"]?.stringValue
@@ -85,12 +104,8 @@ struct ProjectResourceDetailPresentation: Equatable {
         switch kind {
         case .extensions:
             purpose = description ?? "A loaded extension that can add commands, tools, and session behavior."
-            let tools = Self.strings(object["tools"])
-            let commands = Self.strings(object["commands"])
-            capabilities = [
-                tools.isEmpty ? nil : "Tools: \(tools.joined(separator: ", "))",
-                commands.isEmpty ? nil : "Commands: \(commands.map { "/" + $0 }.joined(separator: ", "))",
-            ].compactMap { $0 }
+            tools = Self.strings(object["tools"])
+            commands = Self.strings(object["commands"])
             invocation = nil
             availability = "Loaded for this session"
             schemaSummary = nil
@@ -101,7 +116,8 @@ struct ProjectResourceDetailPresentation: Equatable {
             let hint = rawHint.flatMap { $0.isEmpty ? nil : $0 }
             invocation = "/\(name)" + (hint.map { " \($0)" } ?? "")
             availability = "Available as a slash command"
-            capabilities = []
+            tools = []
+            commands = []
             schemaSummary = nil
             guidance = nil
         case .skills:
@@ -110,21 +126,24 @@ struct ProjectResourceDetailPresentation: Equatable {
             availability = object["disableModelInvocation"]?.boolValue == true
                 ? "Manual invocation only"
                 : "Available to the agent on demand"
-            capabilities = []
+            tools = []
+            commands = []
             schemaSummary = nil
             guidance = nil
         case .contextFiles:
             purpose = "Project instructions included when assembling the agent's context."
             invocation = nil
             availability = "Loaded into agent guidance"
-            capabilities = []
+            tools = []
+            commands = []
             schemaSummary = nil
             guidance = nil
         case .tools:
             purpose = description ?? "An action available to the active model."
             invocation = name
             availability = "Available for model tool calls"
-            capabilities = []
+            tools = []
+            commands = []
             let parameters = object["parameters"]?.objectValue
             let propertyCount = parameters?["properties"]?.objectValue?.count ?? 0
             let requiredCount = parameters?["required"]?.arrayValue?.count ?? 0
@@ -290,7 +309,9 @@ struct ProjectResourcesView: View {
 
     private func resourceSubtitle(_ value: JSONValue) -> String? {
         guard let object = value.objectValue else { return nil }
-        if let description = object["description"]?.stringValue, !description.isEmpty { return description }
+        if let description = object["description"]?.stringValue, !description.isEmpty {
+            return ProjectResourceTextPresentation.readableDescription(description)
+        }
         let scope = object["scope"]?.stringValue?.capitalized
         let source = object["source"]?.stringValue
         if let scope, let source { return "\(scope) · \(source)" }
@@ -349,14 +370,25 @@ private struct ProjectResourceDetailSheet: View {
                         }
                     }
 
-                    if !presentation.capabilities.isEmpty {
+                    if !presentation.tools.isEmpty || !presentation.commands.isEmpty {
                         TronSettingsGroup("Capabilities", accent: selection.kind.accent) {
-                            VStack(alignment: .leading, spacing: 9) {
-                                ForEach(presentation.capabilities, id: \.self) { capability in
-                                    Label(capability, systemImage: "checkmark.circle")
-                                        .font(TronTypography.bodySM)
-                                        .foregroundStyle(Color.tronTextPrimary)
-                                        .fixedSize(horizontal: false, vertical: true)
+                            VStack(alignment: .leading, spacing: 14) {
+                                if !presentation.tools.isEmpty {
+                                    capabilityCollection(
+                                        title: "Tools",
+                                        icon: "wrench.and.screwdriver",
+                                        values: presentation.tools
+                                    )
+                                }
+                                if !presentation.tools.isEmpty && !presentation.commands.isEmpty {
+                                    TronSettingsDivider(accent: selection.kind.accent)
+                                }
+                                if !presentation.commands.isEmpty {
+                                    capabilityCollection(
+                                        title: "Commands",
+                                        icon: "command",
+                                        values: presentation.commands.map { "/" + $0 }
+                                    )
                                 }
                             }
                             .padding(14)
@@ -420,6 +452,39 @@ private struct ProjectResourceDetailSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+    }
+
+    private func capabilityCollection(
+        title: String,
+        icon: String,
+        values: [String]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Label("\(title) · \(values.count)", systemImage: icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(Color.tronTextPrimary)
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 150), spacing: 8)],
+                alignment: .leading,
+                spacing: 8
+            ) {
+                ForEach(values, id: \.self) { value in
+                    Text(value)
+                        .font(TronTypography.codeContent)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .textSelection(.enabled)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            selection.kind.accent.opacity(0.09),
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        )
+                }
+            }
+        }
     }
 
     private var detailRows: some View {

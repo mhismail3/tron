@@ -910,8 +910,9 @@ canonical compaction through Gateway and can leave one authoritative request que
 behind an active turn. Project Resources presents resolved extensions, prompts, skills,
 context files, and tools as named rows over the canonical projection; each detail sheet
 foregrounds kind-specific purpose, invocation, availability, capabilities, schema/guidance,
-and source evidence instead of a generic field table.
-arbitrary arrays derive labels from stable name/path/source fields instead of exposing
+and source evidence instead of a generic field table. Extension tools and commands use
+separate adaptive collections instead of comma-delimited prose, while resource descriptions
+keep compound words together for natural line wrapping. Arbitrary arrays derive labels from stable name/path/source fields instead of exposing
 positional “Item” labels. Reload is owned by that sheet and publishes visible progress; the canonical
 `session.resourcesChanged` revision is the sole post-mutation read owner, so mutation and projection loads cannot race one shared busy flag.
 Resource Locations separates
@@ -927,8 +928,9 @@ canonical append-only JSONL under the existing idle/file/concurrency bounds rath
 Agent Context summarizes assembled instructions, context accounting, and capability
 counts without duplicating the detailed Project Resources inventory; full instructions
 open from a separate matching row. Every raw technical JSON affordance is the same
-non-disclosing row and opens selectable, scrollable protocol evidence in a medium/large
-sheet. A same-session reconnect that
+non-disclosing row and opens selectable, vertically scrollable protocol evidence in a
+wrapping single-column medium/large sheet; technical JSON never creates a horizontal
+viewport. A same-session reconnect that
 installs a replacement Gateway runtime clears every secondary projection, advances its reload revisions, and rejects both
 stale completions and stale failures by exact subscription token plus request generation.
 Manage Session displays the runtime-projected latest cache-hit rate—the
@@ -939,8 +941,8 @@ failures instead of silently changing local presentation. Extension interaction 
 on rejection, and dismiss only after authoritative acknowledgement. Terminal presentation retains the
 historical connection indicator, options menu, native keyboard integration,
 floating shortcut bar, command-key keyboard, soft edges, and selected bundled
-code font over the gateway's retained PTY. Destructive Quit waits for Gateway-observed
-process-group exit; Done continues to detach only. Pending and transcript images use
+code font over the gateway's retained PTY. Destructive Quit uses the system alert style and
+waits for Gateway-observed process-group exit; Done continues to detach only. Pending and transcript images use
 square previews with dedicated image sheets. A pending photo is a stable,
 non-morphing preview target; its separate remove control has a 22-point visible circle
 inside a 30-point target centered on the 64-point preview's top-trailing corner. The
