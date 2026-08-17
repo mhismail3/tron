@@ -26,7 +26,7 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("one admitted discrete insertion smooths once while continuous growth stays immediate")
+    @Test("discrete and continuous automatic follows are coalesced and nonanimated")
     func discreteInsertionMotion() async throws {
         try await withTestWatchdog { @MainActor in
             let frames = ManualScrollFrameScheduler()
@@ -38,10 +38,10 @@ struct ChatScrollCoordinatorTests {
             coordinator.geometryChanged(previous: bottom, current: inserted)
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
-            let smooth = try await coordinator.hostedNextCommand()
-            #expect(smooth.origin == .automaticFollow)
-            #expect(smooth.animation == .smooth(duration: 0.24))
-            coordinator.commandApplied(smooth)
+            let discrete = try await coordinator.hostedNextCommand()
+            #expect(discrete.origin == .automaticFollow)
+            #expect(discrete.animation == .disabled)
+            coordinator.commandApplied(discrete)
 
             let streaming = ChatTranscriptGeometry(
                 offsetY: 700, contentHeight: 1_180, containerHeight: 400
@@ -54,7 +54,7 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("near-boundary insertion expires smooth entitlement before later streaming")
+    @Test("near-boundary insertion expires follow entitlement before later streaming")
     func nearBoundaryDiscreteInsertionExpires() async throws {
         try await withTestWatchdog { @MainActor in
             let frames = ManualScrollFrameScheduler()
@@ -77,7 +77,7 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
-    @Test("installed same-row completion retains one smooth discrete follow")
+    @Test("installed same-row completion retains one nonanimated discrete follow")
     func installedSameRowRetainsDiscreteFollow() async throws {
         try await withTestWatchdog { @MainActor in
             let frames = ManualScrollFrameScheduler()
@@ -99,7 +99,7 @@ struct ChatScrollCoordinatorTests {
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
             let command = try await coordinator.hostedNextCommand()
-            #expect(command.animation == .smooth(duration: 0.24))
+            #expect(command.animation == .disabled)
             #expect(coordinator.hostedDiscreteFollowRenderedIDs.isEmpty)
         }
     }
@@ -129,6 +129,298 @@ struct ChatScrollCoordinatorTests {
         ))
         #expect(coordinator.hostedDiscreteFollowRenderedIDs.isEmpty)
         #expect(coordinator.command == nil)
+    }
+
+    @Test("pinned projection topology change coalesces to one nonanimated tail settlement")
+    func pinnedProjectionMutationSettlesOnce() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let previous = try installedToolTranscript(
+                ids: ["one"], statuses: [.running], timelineGeneration: 1
+            )
+            let grouped = try installedToolTranscript(
+                ids: ["one", "two"], statuses: [.completed, .completed], timelineGeneration: 2
+            )
+
+            coordinator.transcriptProjectionWillChange(from: previous)
+            coordinator.installedTranscriptChanged(grouped)
+            coordinator.geometryChanged(
+                previous: bottom,
+                current: ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_120, containerHeight: 400
+                )
+            )
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(command.origin == .automaticFollow)
+            #expect(command.destination == .tail)
+            #expect(command.animation == .disabled)
+            #expect(frames.requestCount == 1)
+        }
+    }
+
+    @Test("detached projection topology change preserves a fresh surviving semantic anchor")
+    func detachedProjectionMutationPreservesAnchor() throws {
+        let coordinator = detachedCoordinator(at: away, withUnread: false)
+        #expect(coordinator.hostedIsNativeUserOwned)
+        let previous = try installedToolTranscript(
+            ids: ["one"], statuses: [.running], timelineGeneration: 1
+        )
+        let grouped = try installedToolTranscript(
+            ids: ["one", "two"], statuses: [.completed, .completed], timelineGeneration: 2
+        )
+        let latest = try installedToolTranscript(
+            ids: ["one", "two", "three"],
+            statuses: [.completed, .completed, .completed],
+            timelineGeneration: 3
+        )
+        let previousEpoch = coordinator.layoutEpoch
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: previousEpoch,
+            frame: CGRect(x: 0, y: 40, width: 300, height: 44)
+        )
+
+        coordinator.transcriptProjectionWillChange(from: previous)
+        // Identity-changing projection work temporarily clears the installed
+        // value before publishing its replacement; the captured locus survives.
+        coordinator.installedTranscriptChanged(nil)
+        coordinator.installedTranscriptChanged(grouped)
+        let supersededEpoch = coordinator.layoutEpoch
+        #expect(supersededEpoch == previousEpoch + 1)
+
+        // A newer desired/install pair coalesces around the original semantic
+        // locus and retires the first installed generation before it measures.
+        coordinator.transcriptProjectionWillChange(from: grouped)
+        coordinator.installedTranscriptChanged(latest)
+        let installedEpoch = coordinator.layoutEpoch
+        #expect(installedEpoch == supersededEpoch + 1)
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: supersededEpoch,
+            frame: CGRect(x: 0, y: 80, width: 300, height: 44)
+        )
+        #expect(coordinator.command == nil)
+
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: installedEpoch,
+            frame: CGRect(x: 0, y: 75, width: 300, height: 44)
+        )
+        #expect(coordinator.command == nil)
+        coordinator.geometryChanged(previous: away, current: away)
+        let correction = try #require(coordinator.command)
+        #expect(correction.origin == .layout)
+        #expect(correction.destination == .offsetY(335))
+        #expect(correction.animation == .disabled)
+        coordinator.commandApplied(correction)
+
+        // A post-correction semantic sample cannot release against stale geometry.
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: installedEpoch,
+            frame: CGRect(x: 0, y: 40.5, width: 300, height: 44)
+        )
+        #expect(coordinator.command == nil)
+        coordinator.geometryChanged(
+            previous: away,
+            current: ChatTranscriptGeometry(
+                offsetY: 335, contentHeight: 1_000, containerHeight: 400
+            )
+        )
+        let release = try #require(coordinator.command)
+        #expect(release.origin == .binding)
+        #expect(release.destination == .releaseBinding)
+        coordinator.commandApplied(release)
+        #expect(coordinator.command == nil)
+        #expect(coordinator.userScrolledAway)
+    }
+
+    @Test("ordinary correction waits for a newer semantic sample after geometry-first settlement")
+    func layoutCorrectionGeometryFirstSettlement() throws {
+        let coordinator = detachedCoordinator(at: away, withUnread: false)
+        let previous = try installedToolTranscript(
+            ids: ["one"], statuses: [.running], timelineGeneration: 1
+        )
+        let grouped = try installedToolTranscript(
+            ids: ["one", "two"], statuses: [.completed, .completed], timelineGeneration: 2
+        )
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 40, width: 300, height: 44)
+        )
+        coordinator.transcriptProjectionWillChange(from: previous)
+        // Geometry may settle after submission but before the installed-value
+        // observer starts the new semantic layout epoch.
+        coordinator.geometryChanged(previous: away, current: away)
+        coordinator.installedTranscriptChanged(grouped)
+        let installedEpoch = coordinator.layoutEpoch
+        #expect(coordinator.command == nil)
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: installedEpoch,
+            frame: CGRect(x: 0, y: 75, width: 300, height: 44)
+        )
+        let correction = try #require(coordinator.command)
+        coordinator.commandApplied(correction)
+
+        coordinator.geometryChanged(
+            previous: away,
+            current: ChatTranscriptGeometry(
+                offsetY: 335, contentHeight: 1_000, containerHeight: 400
+            )
+        )
+        #expect(coordinator.command == nil)
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: installedEpoch,
+            frame: CGRect(x: 0, y: 40.5, width: 300, height: 44)
+        )
+        let release = try #require(coordinator.command)
+        #expect(release.destination == .releaseBinding)
+        coordinator.commandApplied(release)
+        #expect(coordinator.userScrolledAway)
+    }
+
+    @Test("native ownership callback cancels an ordinary layout correction immediately")
+    func interactionCancelsProjectionMutation() throws {
+        let coordinator = detachedCoordinator(at: away, withUnread: false)
+        coordinator.scrollPositionChanged(isPositionedByUser: false)
+        let previous = try installedToolTranscript(
+            ids: ["one"], statuses: [.running], timelineGeneration: 1
+        )
+        let grouped = try installedToolTranscript(
+            ids: ["one", "two"], statuses: [.completed, .completed], timelineGeneration: 2
+        )
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 40, width: 300, height: 44)
+        )
+        coordinator.transcriptProjectionWillChange(from: previous)
+        coordinator.installedTranscriptChanged(grouped)
+        let installedEpoch = coordinator.layoutEpoch
+
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: installedEpoch,
+            frame: CGRect(x: 0, y: 90, width: 300, height: 44)
+        )
+        #expect(coordinator.command == nil)
+    }
+
+    @Test("superseding layout releases an applied point binding and stale release cannot survive native takeover")
+    func layoutSupersessionReleasesAppliedBinding() throws {
+        let coordinator = detachedCoordinator(at: away, withUnread: false)
+        let previous = try installedToolTranscript(
+            ids: ["one"], statuses: [.running], timelineGeneration: 1
+        )
+        let grouped = try installedToolTranscript(
+            ids: ["one", "two"], statuses: [.completed, .completed], timelineGeneration: 2
+        )
+        let latest = try installedToolTranscript(
+            ids: ["one", "two", "three"],
+            statuses: [.completed, .completed, .completed],
+            timelineGeneration: 3
+        )
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 40, width: 300, height: 44)
+        )
+        coordinator.transcriptProjectionWillChange(from: previous)
+        coordinator.installedTranscriptChanged(grouped)
+        let groupedEpoch = coordinator.layoutEpoch
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: groupedEpoch,
+            frame: CGRect(x: 0, y: 75, width: 300, height: 44)
+        )
+        coordinator.geometryChanged(previous: away, current: away)
+        let correction = try #require(coordinator.command)
+        #expect(correction.origin == .layout)
+        coordinator.commandApplied(correction)
+
+        coordinator.transcriptProjectionWillChange(from: grouped)
+        coordinator.installedTranscriptChanged(latest)
+        let release = try #require(coordinator.command)
+        #expect(release.origin == .binding)
+        #expect(release.destination == .releaseBinding)
+
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        #expect(coordinator.command == nil)
+        coordinator.commandApplied(release)
+        #expect(coordinator.command == nil)
+    }
+
+    @Test("ordinary anchor disappearance releases an applied point binding")
+    func layoutAnchorDisappearanceReleasesAppliedBinding() throws {
+        let coordinator = detachedCoordinator(at: away, withUnread: false)
+        let previous = try installedToolTranscript(
+            ids: ["one"], statuses: [.running], timelineGeneration: 1
+        )
+        let grouped = try installedToolTranscript(
+            ids: ["one", "two"], statuses: [.completed, .completed], timelineGeneration: 2
+        )
+        let withoutAnchor = try installedToolTranscript(
+            ids: ["two"], statuses: [.completed], timelineGeneration: 3
+        )
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 40, width: 300, height: 44)
+        )
+        coordinator.transcriptProjectionWillChange(from: previous)
+        coordinator.installedTranscriptChanged(grouped)
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 75, width: 300, height: 44)
+        )
+        coordinator.geometryChanged(previous: away, current: away)
+        let correction = try #require(coordinator.command)
+        coordinator.commandApplied(correction)
+
+        coordinator.transcriptProjectionWillChange(from: grouped)
+        coordinator.installedTranscriptChanged(withoutAnchor)
+        let release = try #require(coordinator.command)
+        #expect(release.origin == .binding)
+        #expect(release.destination == .releaseBinding)
+    }
+
+    @Test("catch-up cancellation replaces an applied layout binding without publishing release")
+    func catchUpCancelsAppliedLayoutBinding() throws {
+        let coordinator = detachedCoordinator(at: away, withUnread: false)
+        let previous = try installedToolTranscript(
+            ids: ["one"], statuses: [.running], timelineGeneration: 1
+        )
+        let grouped = try installedToolTranscript(
+            ids: ["one", "two"], statuses: [.completed, .completed], timelineGeneration: 2
+        )
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 40, width: 300, height: 44)
+        )
+        coordinator.transcriptProjectionWillChange(from: previous)
+        coordinator.installedTranscriptChanged(grouped)
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 75, width: 300, height: 44)
+        )
+        coordinator.geometryChanged(previous: away, current: away)
+        let correction = try #require(coordinator.command)
+        coordinator.commandApplied(correction)
+
+        coordinator.requestCatchUp(reduceMotion: true)
+        let catchUp = try #require(coordinator.command)
+        #expect(catchUp.origin == .catchUp)
+        #expect(catchUp.destination == .tail)
     }
 
     @Test("installed removal clears only discrete motion when continuous growth is pending")
@@ -225,6 +517,47 @@ struct ChatScrollCoordinatorTests {
         #expect(detachedFrames.requestCount == 0)
         #expect(detached.command == nil)
         #expect(detached.userScrolledAway)
+    }
+
+    @Test("composer measurement preserves fresh native authority through pending final geometry")
+    func composerPreservesFreshNativeAuthority() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        if let release = coordinator.command { coordinator.commandApplied(release) }
+
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        #expect(coordinator.hostedIsNativeUserOwned)
+        #expect(coordinator.hostedPendingNativeUserGeometry)
+        #expect(coordinator.hostedDirectTailReturnArmed)
+        coordinator.composerViewportTransitionBegan()
+        #expect(coordinator.hostedIsNativeUserOwned)
+        #expect(coordinator.hostedPendingNativeUserGeometry)
+        #expect(coordinator.hostedDirectTailReturnArmed)
+
+        // Native ownership may end before its final geometry callback. Composer
+        // measurement cannot consume the still-pending directional evidence.
+        coordinator.scrollPositionChanged(isPositionedByUser: false)
+        #expect(!coordinator.hostedIsNativeUserOwned)
+        #expect(coordinator.hostedPendingNativeUserGeometry)
+        #expect(coordinator.hostedDirectTailReturnArmed)
+        coordinator.composerViewportTransitionBegan()
+        #expect(coordinator.hostedPendingNativeUserGeometry)
+        #expect(coordinator.hostedDirectTailReturnArmed)
+        coordinator.geometryChanged(previous: bottom, current: away)
+        #expect(coordinator.userScrolledAway)
+    }
+
+    @Test("composer measurement preserves user-driven settling authority")
+    func composerPreservesUserSettlingAuthority() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        if let release = coordinator.command { coordinator.commandApplied(release) }
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .animating, finalGeometry: bottom)
+        #expect(coordinator.hostedIsUserDrivenSettling)
+        coordinator.composerViewportTransitionBegan()
+        #expect(coordinator.hostedIsUserDrivenSettling)
+        #expect(coordinator.hostedDirectTailReturnArmed)
     }
 
     @Test("geometry and native ownership callback permutations both detach")
@@ -823,7 +1156,7 @@ struct ChatScrollCoordinatorTests {
             let began = coordinator.beginPrepend(
                 anchor: anchor,
                 load: {
-                    let installed = coordinator.beginInstalledPageLayoutEpoch()
+                    let installed = coordinator.beginInstalledLayoutEpoch()
                     return ChatPrependPage(renderedAnchorID: "anchor", installedLayout: installed)
                 },
                 completion: { results.record($0) }
@@ -860,6 +1193,53 @@ struct ChatScrollCoordinatorTests {
         #expect(!began)
         #expect(loads.value == 0)
         #expect(results.values == [.discarded])
+    }
+
+    @Test("prepend cannot overwrite catch-up command ownership")
+    func prependRejectsCatchUpOverlap() throws {
+        let coordinator = detachedCoordinator(at: away)
+        coordinator.semanticFrameChanged(
+            renderedID: "row",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 20, width: 100, height: 40)
+        )
+        coordinator.requestCatchUp(reduceMotion: true)
+        let catchUp = try #require(coordinator.command)
+        let results = ScrollResultRecorder()
+        let began = coordinator.beginPrepend(
+            anchor: ChatSemanticAnchor(
+                semanticID: "semantic", renderedID: "row",
+                layoutEpoch: coordinator.layoutEpoch, viewportOffsetY: 20
+            ),
+            load: { nil },
+            completion: { results.record($0) }
+        )
+        #expect(!began)
+        #expect(results.values == [.discarded])
+        #expect(coordinator.command == catchUp)
+    }
+
+    @Test("prepend cannot overlap opening-tail settlement")
+    func prependRejectsOpeningOverlap() {
+        let coordinator = detachedCoordinator(at: away)
+        coordinator.semanticFrameChanged(
+            renderedID: "row",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 20, width: 100, height: 40)
+        )
+        coordinator.requestOpeningTail(targetRenderedID: "expected-tail")
+        let results = ScrollResultRecorder()
+        let began = coordinator.beginPrepend(
+            anchor: ChatSemanticAnchor(
+                semanticID: "semantic", renderedID: "row",
+                layoutEpoch: coordinator.layoutEpoch, viewportOffsetY: 20
+            ),
+            load: { nil },
+            completion: { results.record($0) }
+        )
+        #expect(!began)
+        #expect(results.values == [.discarded])
+        #expect(coordinator.command == nil)
     }
 
     @Test("repeat prepend cannot cancel useful work")
@@ -904,7 +1284,7 @@ struct ChatScrollCoordinatorTests {
             let results = ScrollResultRecorder()
             let oldEpoch = coordinator.layoutEpoch
             let began = coordinator.beginPrepend(anchor: anchor, load: {
-                let installedLayout = coordinator.beginInstalledPageLayoutEpoch()
+                let installedLayout = coordinator.beginInstalledLayoutEpoch()
                 return ChatPrependPage(
                     renderedAnchorID: "new-row",
                     installedLayout: installedLayout
@@ -930,26 +1310,31 @@ struct ChatScrollCoordinatorTests {
                 layoutEpoch: installedEpoch,
                 frame: unchangedFrame
             )
+            #expect(coordinator.command == nil)
+            coordinator.geometryChanged(previous: away, current: away)
             let first = try await coordinator.hostedNextCommand()
             #expect(first.destination == .offsetY(500))
             coordinator.commandApplied(first)
             #expect(coordinator.command == nil)
             #expect(coordinator.isWaitingForPrependSemanticFrame)
 
-            coordinator.geometryChanged(
-                previous: away,
-                current: ChatTranscriptGeometry(offsetY: 500, contentHeight: 1_000, containerHeight: 400)
-            )
             coordinator.semanticFrameChanged(
                 renderedID: "new-row",
                 layoutEpoch: oldEpoch,
                 frame: CGRect(x: 0, y: 20, width: 100, height: 40)
             )
             #expect(coordinator.command == nil)
+            // Semantic-first settlement must wait for geometry newer than the
+            // applied point correction before issuing its bounded late correction.
             coordinator.semanticFrameChanged(
                 renderedID: "new-row",
                 layoutEpoch: installedEpoch,
                 frame: CGRect(x: 0, y: 25, width: 100, height: 40)
+            )
+            #expect(coordinator.command == nil)
+            coordinator.geometryChanged(
+                previous: away,
+                current: ChatTranscriptGeometry(offsetY: 500, contentHeight: 1_000, containerHeight: 400)
             )
             let late = try await coordinator.hostedNextCommand()
             #expect(late.destination == .offsetY(505))
@@ -968,10 +1353,122 @@ struct ChatScrollCoordinatorTests {
             )
             try await results.waitForValue()
             #expect(results.values == [.success])
+            let release = try await coordinator.hostedNextCommand()
+            #expect(release.origin == .binding)
+            #expect(release.destination == .releaseBinding)
+            #expect(release.animation == .disabled)
+            coordinator.commandApplied(release)
         }
     }
 
-    @Test("prepend admits an exact sample that arrives before the page continuation returns")
+    @Test("prepend bounded failure releases its applied point binding")
+    func prependFailureReleasesAppliedBinding() async throws {
+        try await withTestWatchdog { @MainActor in
+            let coordinator = ChatScrollCoordinator()
+            coordinator.geometryChanged(previous: away, current: away)
+            coordinator.semanticFrameChanged(
+                renderedID: "old-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 40)
+            )
+            let results = ScrollResultRecorder()
+            let began = coordinator.beginPrepend(
+                anchor: ChatSemanticAnchor(
+                    semanticID: "semantic",
+                    renderedID: "old-row",
+                    layoutEpoch: coordinator.layoutEpoch,
+                    viewportOffsetY: 20
+                ),
+                load: {
+                    ChatPrependPage(
+                        renderedAnchorID: "new-row",
+                        installedLayout: coordinator.beginInstalledLayoutEpoch()
+                    )
+                },
+                completion: { results.record($0) }
+            )
+            #expect(began)
+            try await coordinator.hostedWaitForPrependSemanticSample()
+            let epoch = coordinator.layoutEpoch
+
+            coordinator.geometryChanged(previous: away, current: away)
+            coordinator.semanticFrameChanged(
+                renderedID: "new-row", layoutEpoch: epoch,
+                frame: CGRect(x: 0, y: 220, width: 100, height: 40)
+            )
+            let first = try #require(coordinator.command)
+            #expect(first.origin == .prepend)
+            coordinator.commandApplied(first)
+
+            let firstApplied = ChatTranscriptGeometry(
+                offsetY: 500, contentHeight: 1_000, containerHeight: 400
+            )
+            coordinator.geometryChanged(previous: away, current: firstApplied)
+            coordinator.semanticFrameChanged(
+                renderedID: "new-row", layoutEpoch: epoch,
+                frame: CGRect(x: 0, y: 30, width: 100, height: 40)
+            )
+            let second = try #require(coordinator.command)
+            #expect(second.origin == .prepend)
+            coordinator.commandApplied(second)
+
+            let secondApplied = ChatTranscriptGeometry(
+                offsetY: 510, contentHeight: 1_000, containerHeight: 400
+            )
+            coordinator.semanticFrameChanged(
+                renderedID: "new-row", layoutEpoch: epoch,
+                frame: CGRect(x: 0, y: 30, width: 100, height: 40)
+            )
+            #expect(coordinator.command == nil)
+            coordinator.geometryChanged(previous: firstApplied, current: secondApplied)
+            #expect(results.values == [.failure])
+            let release = try #require(coordinator.command)
+            #expect(release.origin == .binding)
+            #expect(release.destination == .releaseBinding)
+        }
+    }
+
+    @Test("native cancellation of applied prepend does not publish a stale release")
+    func nativeCancellationDoesNotReleasePrependBinding() async throws {
+        try await withTestWatchdog { @MainActor in
+            let coordinator = ChatScrollCoordinator()
+            coordinator.geometryChanged(previous: away, current: away)
+            coordinator.semanticFrameChanged(
+                renderedID: "old-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 40)
+            )
+            let results = ScrollResultRecorder()
+            let began = coordinator.beginPrepend(
+                anchor: ChatSemanticAnchor(
+                    semanticID: "semantic", renderedID: "old-row",
+                    layoutEpoch: coordinator.layoutEpoch, viewportOffsetY: 20
+                ),
+                load: {
+                    ChatPrependPage(
+                        renderedAnchorID: "new-row",
+                        installedLayout: coordinator.beginInstalledLayoutEpoch()
+                    )
+                },
+                completion: { results.record($0) }
+            )
+            #expect(began)
+            try await coordinator.hostedWaitForPrependSemanticSample()
+            coordinator.geometryChanged(previous: away, current: away)
+            coordinator.semanticFrameChanged(
+                renderedID: "new-row", layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 220, width: 100, height: 40)
+            )
+            let correction = try #require(coordinator.command)
+            coordinator.commandApplied(correction)
+
+            coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
+            #expect(results.values == [.discarded])
+            #expect(coordinator.command == nil)
+        }
+    }
+
+    @Test("prepend admits fresh paired callbacks that arrive before the page continuation returns")
     func prependSampleBeforePageReturn() async throws {
         try await withTestWatchdog { @MainActor in
             let coordinator = ChatScrollCoordinator()
@@ -988,7 +1485,8 @@ struct ChatScrollCoordinatorTests {
                 viewportOffsetY: 20
             )
             let began = coordinator.beginPrepend(anchor: anchor, load: {
-                let installedLayout = coordinator.beginInstalledPageLayoutEpoch()
+                let installedLayout = coordinator.beginInstalledLayoutEpoch()
+                coordinator.geometryChanged(previous: away, current: away)
                 coordinator.semanticFrameChanged(
                     renderedID: "new-row",
                     layoutEpoch: installedLayout.value,
@@ -1034,8 +1532,8 @@ struct ChatScrollCoordinatorTests {
         #expect(began)
         coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: away)
         #expect(coordinator.command == nil)
-        coordinator.cancel()
-        #expect(completed.values == [.cancelled])
+        #expect(!coordinator.isPrependingHistory)
+        #expect(completed.values == [.discarded])
     }
 
     private func detachedCoordinator(

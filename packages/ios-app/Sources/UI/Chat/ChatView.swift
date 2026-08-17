@@ -1,6 +1,12 @@
 import PhotosUI
 import SwiftUI
 
+enum ChatComposerLayoutSignalPolicy {
+    static func shouldSignal(previous: CGFloat, current: CGFloat) -> Bool {
+        previous > 0 && current > 0 && abs(current - previous) > 0.5
+    }
+}
+
 struct ChatView: View {
     let sessionID: String
     private let initialEditorText: String?
@@ -27,6 +33,7 @@ struct ChatView: View {
     @State private var openingTask: Task<Void, Never>?
     @State private var modelPresentationGeneration: Int?
     @State private var composerTextHeight: CGFloat = 20
+    @State private var composerLayoutHeight: CGFloat = 0
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
     @State private var scrollCoordinator: ChatScrollCoordinator
     @State private var transcriptPresentation: ChatTranscriptPresentationStore
@@ -204,9 +211,13 @@ struct ChatView: View {
             guard source == currentSource,
                   let snapshot = selectedAuthoritativeSnapshot,
                   snapshot.sessionId == currentSource.sessionID else { return }
-            // Prepend owns the exact page projection/layout-epoch transaction.
+            // Prepend owns its exact page projection/layout-epoch transaction.
             guard !scrollCoordinator.isPrependingHistory else { return }
+            let installedBeforeSubmission = transcriptPresentation.installed
             let startedWork = transcriptPresentation.submit(snapshot: snapshot, tag: currentSource)
+            if startedWork {
+                scrollCoordinator.transcriptProjectionWillChange(from: installedBeforeSubmission)
+            }
             #if HOSTED_TEST
             hostedProbe?.recordProjectionSubmit(startedWork: startedWork)
             #endif
@@ -370,12 +381,6 @@ struct ChatView: View {
             ) {
                 scrollCoordinator.semanticResponseArrived()
             }
-        }
-        .onChange(of: composerFocused) { _, _ in
-            scrollCoordinator.composerViewportTransitionBegan()
-        }
-        .onChange(of: composerTextHeight) { _, _ in
-            scrollCoordinator.composerViewportTransitionBegan()
         }
         .overlay { openingSurface }
     }
@@ -697,9 +702,9 @@ struct ChatView: View {
         performanceTracker.discardScroll()
         transcriptPresentation.reset()
         let epoch = openPresentation.begin()
-        scrollCoordinator.resetForPresentation(epoch)
         let interval = performanceSignposts.begin(.firstReadyFrame)
-        guard selectedAuthoritativeSnapshot != nil else {
+        guard selectedAuthoritativeSnapshot != nil,
+              let presentationGeneration = model.presentationGeneration(for: sessionID) else {
             performanceSignposts.end(interval, result: .failure, metrics: .none)
             _ = openPresentation.fail(
                 sessionID: sessionID,
@@ -708,10 +713,13 @@ struct ChatView: View {
             )
             return
         }
-        modelPresentationGeneration = epoch
+        modelPresentationGeneration = presentationGeneration
+        scrollCoordinator.resetForPresentation(presentationGeneration)
         let installed: InstalledChatTranscript
         do {
-            installed = try await installCurrentTranscriptProjection(presentationGeneration: epoch)
+            installed = try await installCurrentTranscriptProjection(
+                presentationGeneration: presentationGeneration
+            )
         } catch {
             performanceSignposts.end(interval, result: PerformanceResult.forFailure(error), metrics: .none)
             _ = openPresentation.fail(
@@ -775,7 +783,7 @@ struct ChatView: View {
                               let renderedID = current.timeline.renderedIDBySemanticID[anchor.semanticID] else {
                             return nil
                         }
-                        let installedLayout = scrollCoordinator.beginInstalledPageLayoutEpoch()
+                        let installedLayout = scrollCoordinator.beginInstalledLayoutEpoch()
                         return ChatPrependPage(
                             renderedAnchorID: renderedID,
                             installedLayout: installedLayout
@@ -908,7 +916,7 @@ struct ChatView: View {
                           let renderedID = installed.timeline.renderedIDBySemanticID[anchor.semanticID] else {
                         return nil
                     }
-                    let installedLayout = scrollCoordinator.beginInstalledPageLayoutEpoch()
+                    let installedLayout = scrollCoordinator.beginInstalledLayoutEpoch()
                     return ChatPrependPage(
                         renderedAnchorID: renderedID,
                         installedLayout: installedLayout
@@ -1018,8 +1026,14 @@ struct ChatView: View {
                 }
             }
         }
-        .onChange(of: pendingAttachments.map(\.id)) { _, _ in
-            scrollCoordinator.composerViewportTransitionBegan()
+        .onGeometryChange(for: CGFloat.self) { geometry in
+            geometry.size.height
+        } action: { height in
+            let previous = composerLayoutHeight
+            composerLayoutHeight = height
+            if ChatComposerLayoutSignalPolicy.shouldSignal(previous: previous, current: height) {
+                scrollCoordinator.composerViewportTransitionBegan()
+            }
         }
     }
 

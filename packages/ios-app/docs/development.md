@@ -137,7 +137,8 @@ its completion UI and an intervening path request prevents its parent refresh fr
 and new-session sheet are separate presentation owners; the sheet retains the same configuration/creation state
 owners, focus behavior, controls, detents, and mutation admission.
 `ChatView` retains route/composer/transcript composition while attachment controls and chips, entrance/render
-rows, and extension widgets live in separate presentation files with unchanged identities and transitions.
+rows, and extension-widget implementation live in separate presentation files with unchanged identities and
+transitions. Widget/status state remains canonical, but both native presentations are temporarily gated off.
 Conversation-turn rendering and lifecycle-safe media chips remain in `TranscriptRow.swift`; transcript event
 controls and tool-run/detail routing live in dedicated owners without widening their private helper state. The
 primary tool sheet, diff destination, technical-payload destination, and shared navigation chrome also have
@@ -518,7 +519,8 @@ circle sits half outside the 64-point preview within a 30-point target centered 
 Active-chat reliability checks must advance a desired completion before the displayed running tool receives
 geometry and verify that the running chip still reveals exactly once. The same rendered tool/group row stays
 after non-tool streaming across running-to-completed updates, retains at most one installed-identity-owned
-smooth follow while pinned, emits none while detached, and emits no automatic write when content shrinks.
+nonanimated tail settlement while pinned, preserves a surviving semantic anchor while detached, and emits no
+unowned automatic write when content shrinks. Verify row entrance animation never combines with viewport animation.
 Tool-detail checkpoints open read, edit, bash, and one unknown/extension call at the medium detent: verify the compact status/metadata chips,
 secondary-plus-accent path, faithful single-change diff glance, word-preserving wrapped bash commands in
 the smaller code size, high-signal generic summary, and larger live result are visible before

@@ -10,6 +10,7 @@ struct ChatScrollCommand: Equatable, Sendable {
         case presentation
         case automaticFollow
         case catchUp
+        case layout
         case prepend
         case binding
     }
@@ -129,6 +130,19 @@ final class ChatScrollCoordinator {
     private(set) var hostedFollowDecisionRevision = 0
     #endif
 
+    private var layoutMutationAnchor: ChatSemanticAnchor?
+    private var layoutMutationWasDetached = false
+    private var layoutMutationPendingInstall = false
+    private var layoutMutationRenderedAnchorID: String?
+    private var layoutMutationExpectedLayoutEpoch: Int?
+    private var layoutMutationRequiredSampleRevision = 0
+    private var layoutMutationRequiredGeometryRevision = 0
+    private var layoutMutationReadyForMeasurement = false
+    private var layoutMutationCorrectionCount = 0
+    private var layoutMutationCorrectionCommandToken: Int?
+    private var layoutMutationAppliedOffset = false
+    private var pendingInstalledTailSettlement = false
+
     private var prependToken: Int?
     private var prependWasScrolledAway = false
     private var prependInterrupted = false
@@ -137,8 +151,10 @@ final class ChatScrollCoordinator {
     private var prependExpectedLayoutEpoch: Int?
     private var prependReadyForMeasurement = false
     private var prependRequiredSampleRevision = 0
+    private var prependRequiredGeometryRevision = 0
     private var prependCorrectionCount = 0
     private var prependCorrectionCommandToken: Int?
+    private var prependAppliedOffset = false
     private var prependCompletion: (@MainActor (PerformanceResult) -> Void)?
 
     init(frameScheduler: DisplayFrameScheduler = .displayLink) {
@@ -192,7 +208,7 @@ final class ChatScrollCoordinator {
         publish(.resetToBottom, animation: .disabled, origin: .presentation)
     }
 
-    func beginInstalledPageLayoutEpoch() -> ChatInstalledLayoutEpoch {
+    func beginInstalledLayoutEpoch() -> ChatInstalledLayoutEpoch {
         advanceLayoutEpoch()
         return ChatInstalledLayoutEpoch(
             value: layoutEpoch,
@@ -217,6 +233,7 @@ final class ChatScrollCoordinator {
             for id in removed { semanticFrames[id] = nil }
         }
         recordPrependExcursionIfOwned(renderedID: renderedID, layoutEpoch: layoutEpoch, frame: frame)
+        evaluateLayoutMutationIfReady()
         evaluatePrependMeasurementIfReady()
         if openingTailSettlementPending,
            openingTailPresentation == presentation,
@@ -292,12 +309,12 @@ final class ChatScrollCoordinator {
     /// change. It emits no immediate write, and detached readers are inert.
     func composerViewportTransitionBegan() {
         guard !userScrolledAway, catchUpPhase == .none, !isPrependingHistory else { return }
-        if geometry.isAtCatchUpBoundary && !isUserInteracting {
-            // A native binding may remain transiently owned after manual return;
-            // at the measured tail it must not block keyboard following.
+        let hasFreshNativeAuthority = isUserInteracting || pendingNativeUserGeometry
+            || isUserDrivenSettling || directTailReturnArmed
+        if geometry.isAtCatchUpBoundary && !hasFreshNativeAuthority {
+            // Persistent native binding ownership is not fresh navigation intent.
+            // A live gesture/callback sequence must retain every directional fact.
             isNativeUserOwned = false
-            pendingNativeUserGeometry = false
-            isUserDrivenSettling = false
         }
         pendingGrowthFollow = true
         pendingContinuousGrowthFollow = true
@@ -364,6 +381,8 @@ final class ChatScrollCoordinator {
     func geometryChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
         geometry = current
         geometryRevision &+= 1
+        evaluateLayoutMutationIfReady()
+        evaluatePrependMeasurementIfReady()
         if settleOpeningTailIfPossible(allowsBoundarySettlement: true) { return }
         let grew = current.contentHeight > previous.contentHeight + 0.5
         let movedOlder = previous.isValid
@@ -409,6 +428,8 @@ final class ChatScrollCoordinator {
     func viewportChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
         geometry = current
         geometryRevision &+= 1
+        evaluateLayoutMutationIfReady()
+        evaluatePrependMeasurementIfReady()
         if settleOpeningTailIfPossible(allowsBoundarySettlement: true) { return }
         guard current.hasViewportChange(from: previous) else { return }
         pendingUnattributedOlderMovement = false
@@ -467,6 +488,7 @@ final class ChatScrollCoordinator {
     }
 
     func requestCatchUp(reduceMotion: Bool) {
+        cancelLayoutMutation()
         cancelCatchUp(restoringDetached: false)
         if isPrependingHistory {
             prependInterrupted = true
@@ -494,24 +516,82 @@ final class ChatScrollCoordinator {
         catchUpCommandToken = command?.token
     }
 
-    /// An actual installed transition retains a pending smooth-follow entitlement
-    /// only while that exact rendered row remains displayed. Desired model source
-    /// changes do not participate in this ownership decision.
-    func installedTranscriptChanged(_ installed: InstalledChatTranscript?) {
-        guard !discreteFollowRenderedIDs.isEmpty else { return }
-        guard let installed else {
-            cancelDiscreteFollowOwnership()
-            return
+    /// Captures the currently visible semantic locus before an ordinary projection
+    /// install. Repeated desired sources coalesce around the first captured locus;
+    /// the exact installed generation retargets it after publication.
+    func transcriptProjectionWillChange(from installed: InstalledChatTranscript?) {
+        guard !isPrependingHistory, let installed else { return }
+        if !layoutMutationPendingInstall,
+           layoutMutationExpectedLayoutEpoch == nil,
+           layoutMutationCorrectionCommandToken == nil {
+            layoutMutationWasDetached = userScrolledAway
+            layoutMutationAnchor = userScrolledAway ? semanticAnchor(in: installed.timeline) : nil
+            layoutMutationCorrectionCount = 0
         }
-        discreteFollowRenderedIDOrder.removeAll {
-            !discreteFollowRenderedIDs.contains($0) || !installed.containsDisplayedID($0)
-        }
-        discreteFollowRenderedIDs = Set(discreteFollowRenderedIDOrder)
-        if discreteFollowRenderedIDs.isEmpty { cancelDiscreteFollowOwnership() }
+        // Geometry may settle before the frame-gated projection waiter resumes.
+        // The pre-submission revision is therefore the mutation boundary; using
+        // the later installed-layout epoch could wait forever for another callback.
+        layoutMutationRequiredGeometryRevision = geometryRevision
+        layoutMutationPendingInstall = true
     }
 
-    /// A geometry-admitted visible row insertion may use one smooth follow.
-    /// Continuous streaming growth never creates this identity entitlement.
+    /// An actual installed transition retains a pending entrance entitlement only
+    /// while that exact rendered row remains displayed, then starts one owned
+    /// layout settlement for the installed generation.
+    func installedTranscriptChanged(_ installed: InstalledChatTranscript?) {
+        guard let installed else {
+            cancelDiscreteFollowOwnership()
+            // Identity-changing submissions synchronously clear the installed
+            // value before publishing their replacement. Preserve the anchor
+            // transaction already captured for that admitted work.
+            if !layoutMutationPendingInstall {
+                finishLayoutMutation(releasesCorrectedBinding: true)
+            }
+            return
+        }
+        if !discreteFollowRenderedIDs.isEmpty {
+            discreteFollowRenderedIDOrder.removeAll {
+                !discreteFollowRenderedIDs.contains($0) || !installed.containsDisplayedID($0)
+            }
+            discreteFollowRenderedIDs = Set(discreteFollowRenderedIDOrder)
+            if discreteFollowRenderedIDs.isEmpty { cancelDiscreteFollowOwnership() }
+        }
+
+        guard layoutMutationPendingInstall else { return }
+        layoutMutationPendingInstall = false
+        if layoutMutationWasDetached {
+            guard userScrolledAway, !isUserInteracting,
+                  !pendingNativeUserGeometry, !isUserDrivenSettling,
+                  let anchor = layoutMutationAnchor,
+                  let renderedID = installed.timeline.renderedIDBySemanticID[anchor.semanticID] else {
+                finishLayoutMutation(releasesCorrectedBinding: true)
+                return
+            }
+            retireLayoutMutationCorrectionCommand()
+            releaseLayoutMutationBindingIfNeeded()
+            let installedLayout = beginInstalledLayoutEpoch()
+            layoutMutationRenderedAnchorID = renderedID
+            layoutMutationExpectedLayoutEpoch = installedLayout.value
+            layoutMutationRequiredSampleRevision = installedLayout.firstValidSampleRevision
+            layoutMutationReadyForMeasurement = true
+            layoutMutationCorrectionCount = 0
+            evaluateLayoutMutationIfReady()
+        } else {
+            guard canAutomaticallyFollow else {
+                finishLayoutMutation()
+                return
+            }
+            pendingInstalledTailSettlement = true
+            pendingGrowthFollow = true
+            pendingContinuousGrowthFollow = true
+            finishLayoutMutation(keepingTailSettlement: true)
+            scheduleTailFollow()
+        }
+    }
+
+    /// A geometry-admitted visible row insertion requests one coalesced,
+    /// nonanimated tail settlement. Continuous streaming growth uses the same
+    /// viewport policy and never creates a competing animation.
     func discreteContentInserted(renderedID: String) {
         guard canAutomaticallyFollow else { return }
         if discreteFollowRenderedIDs.insert(renderedID).inserted {
@@ -538,8 +618,9 @@ final class ChatScrollCoordinator {
         load: @escaping @MainActor @Sendable () async -> ChatPrependPage?,
         completion: @escaping @MainActor (PerformanceResult) -> Void
     ) -> Bool {
-        guard !isPrependingHistory, let anchor,
-              anchor.layoutEpoch == layoutEpoch,
+        guard !isPrependingHistory, catchUpPhase == .none,
+              !openingTailSettlementPending, command == nil,
+              let anchor, anchor.layoutEpoch == layoutEpoch,
               let admittedSample = semanticFrames[anchor.renderedID],
               admittedSample.layoutEpoch == anchor.layoutEpoch,
               abs(admittedSample.frame.minY - anchor.viewportOffsetY) <= 0.5,
@@ -548,6 +629,7 @@ final class ChatScrollCoordinator {
             completion(.discarded)
             return false
         }
+        cancelLayoutMutation()
         sequence &+= 1
         let token = sequence
         let admittedPresentation = presentation
@@ -560,8 +642,10 @@ final class ChatScrollCoordinator {
         prependExpectedLayoutEpoch = nil
         prependReadyForMeasurement = false
         prependRequiredSampleRevision = semanticFrameRevision
+        prependRequiredGeometryRevision = geometryRevision
         prependCorrectionCount = 0
         prependCorrectionCommandToken = nil
+        prependAppliedOffset = false
         prependCompletion = completion
         maximumPrependSemanticExcursion = 0
         pendingGrowthFollow = false
@@ -586,6 +670,8 @@ final class ChatScrollCoordinator {
             // The epoch boundary, not load-continuation timing, is authority.
             // A valid sample may already have arrived after publication.
             self.prependRequiredSampleRevision = page.installedLayout.firstValidSampleRevision
+            // Keep the pre-load geometry boundary captured by beginPrepend.
+            // Installation can settle geometry before this continuation resumes.
             self.prependReadyForMeasurement = true
             self.evaluatePrependMeasurementIfReady()
             #if HOSTED_TEST
@@ -633,11 +719,24 @@ final class ChatScrollCoordinator {
             }
         }
 
+        if layoutMutationCorrectionCommandToken == applied.token {
+            layoutMutationCorrectionCommandToken = nil
+            layoutMutationAppliedOffset = true
+            layoutMutationRequiredSampleRevision = semanticFrameRevision
+            layoutMutationRequiredGeometryRevision = geometryRevision
+            layoutMutationReadyForMeasurement = true
+        }
+
         if prependCorrectionCommandToken == applied.token {
             prependCorrectionCommandToken = nil
+            prependAppliedOffset = true
             prependRequiredSampleRevision = semanticFrameRevision
+            prependRequiredGeometryRevision = geometryRevision
             prependReadyForMeasurement = true
         }
+
+        evaluateLayoutMutationIfReady()
+        evaluatePrependMeasurementIfReady()
     }
 
     func cancel() {
@@ -695,9 +794,44 @@ final class ChatScrollCoordinator {
         catchUpUnreadBeforeJump = false
     }
 
+    private func evaluateLayoutMutationIfReady() {
+        guard layoutMutationReadyForMeasurement,
+              command == nil, layoutMutationCorrectionCommandToken == nil,
+              layoutMutationWasDetached, userScrolledAway,
+              !isUserInteracting, !pendingNativeUserGeometry, !isUserDrivenSettling,
+              let anchor = layoutMutationAnchor,
+              let renderedID = layoutMutationRenderedAnchorID,
+              let expectedEpoch = layoutMutationExpectedLayoutEpoch,
+              expectedEpoch == layoutEpoch,
+              let sample = semanticFrames[renderedID],
+              sample.layoutEpoch == expectedEpoch,
+              sample.revision > layoutMutationRequiredSampleRevision,
+              geometryRevision > layoutMutationRequiredGeometryRevision else { return }
+        layoutMutationReadyForMeasurement = false
+        let residual = sample.frame.minY - anchor.viewportOffsetY
+        if abs(residual) <= 1 {
+            finishLayoutMutation(releasesCorrectedBinding: true)
+            return
+        }
+        guard layoutMutationCorrectionCount < 2 else {
+            // The bounded transaction failed to converge, but this decision is
+            // still paired with fresh semantic and geometry evidence.
+            finishLayoutMutation(releasesCorrectedBinding: true)
+            return
+        }
+        layoutMutationCorrectionCount &+= 1
+        let requested = Self.prependCorrectionOffset(
+            currentOffsetY: geometry.offsetY,
+            capturedViewportOffsetY: anchor.viewportOffsetY,
+            installedFrameMinY: sample.frame.minY
+        )
+        publish(.offsetY(requested), animation: .disabled, origin: .layout)
+        layoutMutationCorrectionCommandToken = command?.token
+    }
+
     private func evaluatePrependMeasurementIfReady() {
         guard prependReadyForMeasurement,
-              prependCorrectionCommandToken == nil,
+              command == nil, prependCorrectionCommandToken == nil,
               let token = prependToken, !prependInterrupted,
               let anchor = prependAnchor,
               let renderedID = prependRenderedAnchorID,
@@ -705,16 +839,25 @@ final class ChatScrollCoordinator {
               expectedEpoch == layoutEpoch,
               let sample = semanticFrames[renderedID],
               sample.layoutEpoch == expectedEpoch,
-              sample.revision > prependRequiredSampleRevision else { return }
+              sample.revision > prependRequiredSampleRevision,
+              geometryRevision > prependRequiredGeometryRevision else { return }
         prependReadyForMeasurement = false
         let residual = sample.frame.minY - anchor.viewportOffsetY
         maximumPrependSemanticExcursion = max(maximumPrependSemanticExcursion, abs(residual))
         if abs(residual) <= 1 {
-            finishPrepend(token: token, result: .success)
+            finishPrepend(
+                token: token,
+                result: .success,
+                releasesCorrectedBinding: prependCorrectionCount > 0
+            )
             return
         }
         guard prependCorrectionCount < 2 else {
-            finishPrepend(token: token, result: .failure)
+            finishPrepend(
+                token: token,
+                result: .failure,
+                releasesCorrectedBinding: true
+            )
             return
         }
         prependCorrectionCount &+= 1
@@ -739,7 +882,8 @@ final class ChatScrollCoordinator {
 
     private func scheduleTailFollow() {
         guard pendingGrowthFollow, canAutomaticallyFollow,
-              (!discreteFollowRenderedIDs.isEmpty
+              (pendingInstalledTailSettlement
+                || !discreteFollowRenderedIDs.isEmpty
                 || geometry.distanceFromBottom > ChatTranscriptGeometry.catchUpDistance),
               followFrameTask == nil else { return }
         let admittedPresentation = presentation
@@ -757,12 +901,10 @@ final class ChatScrollCoordinator {
                   self.pendingGrowthFollow, self.canAutomaticallyFollow else { return }
             self.pendingGrowthFollow = false
             self.pendingContinuousGrowthFollow = false
-            let ownsDiscreteFollow = !self.discreteFollowRenderedIDs.isEmpty
+            self.pendingInstalledTailSettlement = false
             self.clearDiscreteFollowIDs()
             if self.geometry.distanceFromBottom > ChatTranscriptGeometry.catchUpDistance {
-                let animation: ChatScrollAnimation = ownsDiscreteFollow
-                    ? .smooth(duration: 0.24) : .disabled
-                self.publish(.tail, animation: animation, origin: .automaticFollow)
+                self.publish(.tail, animation: .disabled, origin: .automaticFollow)
             }
         }
     }
@@ -805,10 +947,13 @@ final class ChatScrollCoordinator {
 
     private func cancelAutomaticWorkForUserInteraction() {
         clearOpeningTailSettlement()
+        cancelLayoutMutation()
         cancelAutomaticTasks()
         if isPrependingHistory {
             prependInterrupted = true
-            if prependRenderedAnchorID != nil { finishPrepend(token: prependToken, result: .discarded) }
+            let token = prependToken
+            prependTask?.cancel()
+            finishPrepend(token: token, result: .discarded)
         }
         clearCommand()
     }
@@ -818,6 +963,7 @@ final class ChatScrollCoordinator {
         followFrameTask = nil
         pendingGrowthFollow = false
         pendingContinuousGrowthFollow = false
+        pendingInstalledTailSettlement = false
         clearDiscreteFollowIDs()
     }
 
@@ -834,8 +980,53 @@ final class ChatScrollCoordinator {
         discreteFollowRenderedIDOrder.removeAll(keepingCapacity: true)
     }
 
+    private func retireLayoutMutationCorrectionCommand() {
+        guard let token = layoutMutationCorrectionCommandToken else { return }
+        if command?.token == token { clearCommand() }
+        layoutMutationCorrectionCommandToken = nil
+    }
+
+    private func releaseLayoutMutationBindingIfNeeded() {
+        guard layoutMutationAppliedOffset else { return }
+        layoutMutationAppliedOffset = false
+        if command == nil {
+            publish(.releaseBinding, animation: .disabled, origin: .binding)
+        }
+    }
+
+    private func finishLayoutMutation(
+        keepingTailSettlement: Bool = false,
+        releasesCorrectedBinding: Bool = false
+    ) {
+        let shouldReleaseBinding = releasesCorrectedBinding
+            && layoutMutationAppliedOffset
+            && layoutMutationCorrectionCommandToken == nil
+            && userScrolledAway && !isUserInteracting
+            && !pendingNativeUserGeometry && !isUserDrivenSettling
+        retireLayoutMutationCorrectionCommand()
+        layoutMutationAnchor = nil
+        layoutMutationWasDetached = false
+        layoutMutationPendingInstall = false
+        layoutMutationRenderedAnchorID = nil
+        layoutMutationExpectedLayoutEpoch = nil
+        layoutMutationRequiredSampleRevision = semanticFrameRevision
+        layoutMutationRequiredGeometryRevision = geometryRevision
+        layoutMutationReadyForMeasurement = false
+        layoutMutationCorrectionCount = 0
+        layoutMutationAppliedOffset = false
+        if !keepingTailSettlement { pendingInstalledTailSettlement = false }
+        if shouldReleaseBinding, command == nil {
+            publish(.releaseBinding, animation: .disabled, origin: .binding)
+        }
+    }
+
+    private func cancelLayoutMutation() {
+        finishLayoutMutation(releasesCorrectedBinding: false)
+    }
+
     private func cancelAllOwnedWork(result: PerformanceResult) {
         clearOpeningTailSettlement()
+        cancelLayoutMutation()
         cancelAutomaticTasks()
         cancelCatchUp(restoringDetached: false)
         prependTask?.cancel()
@@ -848,15 +1039,26 @@ final class ChatScrollCoordinator {
         prependExpectedLayoutEpoch = nil
         prependReadyForMeasurement = false
         prependRequiredSampleRevision = semanticFrameRevision
+        prependRequiredGeometryRevision = geometryRevision
         prependCorrectionCommandToken = nil
+        prependAppliedOffset = false
         isPrependingHistory = false
         #if HOSTED_TEST
         cancelHostedPrependSampleWaiters()
         #endif
     }
 
-    private func finishPrepend(token: Int?, result: PerformanceResult) {
+    private func finishPrepend(
+        token: Int?,
+        result: PerformanceResult,
+        releasesCorrectedBinding: Bool = false
+    ) {
         guard token == prependToken else { return }
+        let shouldReleaseBinding = releasesCorrectedBinding
+            && prependAppliedOffset
+            && prependCorrectionCommandToken == nil
+            && !prependInterrupted && !isUserInteracting
+            && !pendingNativeUserGeometry && !isUserDrivenSettling
         prependTask = nil
         prependToken = nil
         prependAnchor = nil
@@ -864,7 +1066,9 @@ final class ChatScrollCoordinator {
         prependExpectedLayoutEpoch = nil
         prependReadyForMeasurement = false
         prependRequiredSampleRevision = semanticFrameRevision
+        prependRequiredGeometryRevision = geometryRevision
         prependCorrectionCommandToken = nil
+        prependAppliedOffset = false
         isPrependingHistory = false
         #if HOSTED_TEST
         cancelHostedPrependSampleWaiters()
@@ -876,7 +1080,11 @@ final class ChatScrollCoordinator {
         let completion = prependCompletion
         prependCompletion = nil
         completion?(result)
-        if pendingGrowthFollow { scheduleTailFollow() }
+        if shouldReleaseBinding, command == nil {
+            publish(.releaseBinding, animation: .disabled, origin: .binding)
+        } else if pendingGrowthFollow {
+            scheduleTailFollow()
+        }
     }
 
     @discardableResult
@@ -925,6 +1133,10 @@ final class ChatScrollCoordinator {
     #if HOSTED_TEST
     var hostedSemanticFrameCount: Int { semanticFrames.count }
     var hostedDiscreteFollowRenderedIDs: Set<String> { discreteFollowRenderedIDs }
+    var hostedIsNativeUserOwned: Bool { isNativeUserOwned }
+    var hostedPendingNativeUserGeometry: Bool { pendingNativeUserGeometry }
+    var hostedDirectTailReturnArmed: Bool { directTailReturnArmed }
+    var hostedIsUserDrivenSettling: Bool { isUserDrivenSettling }
 
     func hostedWaitForFollowDecision(after revision: Int) async {
         guard hostedFollowDecisionRevision <= revision else { return }

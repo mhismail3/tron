@@ -18,8 +18,8 @@ struct ChatTranscriptPresentationTests {
         #expect(geometry.isAtCatchUpBoundary)
     }
 
-    @Test("retired subagent chrome is hidden while unrelated extension widgets remain")
-    func retiredSubagentWidgetPolicy() {
+    @Test("extension widgets remain canonical but are temporarily hidden")
+    func extensionWidgetPresentationIsSuppressed() {
         let widgets = [
             ExtensionWidget(key: "subagent-async", lines: ["1 active agent"], placement: .belowEditor),
             ExtensionWidget(key: "subagent-fleet-status", lines: ["Fleet"], placement: .aboveEditor),
@@ -27,12 +27,22 @@ struct ChatTranscriptPresentationTests {
             ExtensionWidget(key: "project-status", lines: ["Ready"], placement: .aboveEditor),
         ]
 
-        #expect(ChatExtensionWidgetPolicy.visibleWidgets(widgets, placement: .aboveEditor).map(\.key) == [
-            "project-status",
-        ])
-        #expect(ChatExtensionWidgetPolicy.visibleWidgets(widgets, placement: .belowEditor).map(\.key) == [
-            "subagent-custom",
-        ])
+        #expect(!ChatExtensionChromePolicy.rendersWidgets)
+        #expect(ChatExtensionWidgetPolicy.visibleWidgets(widgets, placement: .aboveEditor).isEmpty)
+        #expect(ChatExtensionWidgetPolicy.visibleWidgets(widgets, placement: .belowEditor).isEmpty)
+    }
+
+    @Test("extension statuses are hidden while working state remains visible")
+    func extensionStatusesAreSuppressed() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.extensionUI.statuses = ["goal": "Pursuing goal"]
+        snapshot.extensionUI.working = .init(message: "Still working", visible: true)
+
+        let runtime = ChatNotificationPresentation.runtime(in: snapshot)
+        #expect(!ChatExtensionChromePolicy.rendersStatusPills)
+        #expect(runtime.map(\.id) == ["runtime-working"])
+        #expect(runtime.first?.title == "Still working")
     }
 
     @Test("runtime working row follows phase, visibility, message, and retry policy")

@@ -363,6 +363,7 @@ final class SessionPresentationStore {
         snapshot.queued = .init(steering: [], followUp: [])
         snapshot.queuedItems = []
         self.snapshot = snapshot
+        advanceChatProjection(canonical: false)
     }
 
     func admit(_ event: GatewayEvent) async {
@@ -898,7 +899,9 @@ final class SessionPresentationStore {
             advance(&snapshot, envelope)
         case "session.thinkingLabel":
             guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
+            let previous = snapshot.extensionUI.hiddenThinkingLabel
             snapshot.extensionUI.hiddenThinkingLabel = envelope.data.objectValue?["label"]?.stringValue
+            if previous != snapshot.extensionUI.hiddenThinkingLabel { chatTimelineChanged = true }
             advance(&snapshot, envelope)
         case "session.widget":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),

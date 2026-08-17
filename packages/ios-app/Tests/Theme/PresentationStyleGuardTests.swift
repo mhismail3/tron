@@ -1001,7 +1001,11 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("struct ChatTranscriptEntranceRow"))
         #expect(entranceRows.contains("struct ChatTranscriptEntranceRow"))
         #expect(entranceRows.contains("struct ChatTranscriptRenderRow"))
-        #expect(chat.contains("composerViewportTransitionBegan()"))
+        // One production structural measurement plus the HOSTED_TEST driver seam.
+        #expect(chat.occurrences(of: "composerViewportTransitionBegan()") == 2)
+        #expect(chat.contains("ChatComposerLayoutSignalPolicy.shouldSignal"))
+        #expect(!chat.contains(".onChange(of: composerTextHeight)"))
+        #expect(!chat.contains(".onChange(of: pendingAttachments.map"))
         #expect(motion.contains("case userPrompt"))
         #expect(motion.contains("case queuedPrompt"))
         #expect(motion.contains("guard !reduceMotion else { return .identity }"))

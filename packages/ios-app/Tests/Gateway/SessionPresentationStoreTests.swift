@@ -66,9 +66,11 @@ struct SessionPresentationStoreTests {
             performanceSignposts: SystemPerformanceSignposts.shared
         )
         store.installHostedAuthoritativeSnapshot(snapshot)
+        let generation = store.chatTimelineGeneration
 
         store.clearConfirmedQueue(sessionID: snapshot.sessionId)
 
+        #expect(store.chatTimelineGeneration == generation + 1)
         #expect(store.snapshot?.queued.steering == [])
         #expect(store.snapshot?.queued.followUp == [])
         #expect(store.snapshot?.queuedItems == [])
@@ -100,7 +102,7 @@ struct SessionPresentationStoreTests {
         #expect(store.mountedTarget == nil)
     }
 
-    @Test("runtime status and working changes advance timeline generation only on value change")
+    @Test("status, working, and thinking-label value changes advance timeline generation")
     func runtimePresentationGeneration() async throws {
         var snapshot = try SessionScenarioBuilder(seed: 8_501)
             .openingTail(targetEncodedBytes: 4_096)
@@ -129,6 +131,7 @@ struct SessionPresentationStoreTests {
             topic: "session.status", sequence: 11,
             data: .object(["key": .string("sync"), "text": .string("Synchronizing")])
         ))
+        #expect(store.snapshot?.extensionUI.statuses["sync"] == "Synchronizing")
         #expect(store.chatTimelineGeneration == baseline + 1)
 
         await store.admit(event(
@@ -142,6 +145,26 @@ struct SessionPresentationStoreTests {
             data: .object(["message": .string("Compacting context"), "visible": .bool(true)])
         ))
         #expect(store.chatTimelineGeneration == baseline + 2)
+
+        await store.admit(event(
+            topic: "session.thinkingLabel", sequence: 14,
+            data: .object(["label": .string("Reasoning")])
+        ))
+        #expect(store.snapshot?.extensionUI.hiddenThinkingLabel == "Reasoning")
+        #expect(store.chatTimelineGeneration == baseline + 3)
+
+        await store.admit(event(
+            topic: "session.thinkingLabel", sequence: 15,
+            data: .object(["label": .string("Reasoning")])
+        ))
+        #expect(store.chatTimelineGeneration == baseline + 3)
+
+        await store.admit(event(
+            topic: "session.thinkingLabel", sequence: 16,
+            data: .object(["label": .null])
+        ))
+        #expect(store.snapshot?.extensionUI.hiddenThinkingLabel == nil)
+        #expect(store.chatTimelineGeneration == baseline + 4)
     }
 
     @Test("stale reconnect retains the newer authoritative tail for history discard")

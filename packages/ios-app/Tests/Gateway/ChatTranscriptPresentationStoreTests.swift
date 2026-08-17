@@ -423,11 +423,12 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
-    @Test("runtime-only updates reuse transcript projection and install exact pills")
+    @Test("runtime-only updates reuse projection while hiding statuses and preserving working")
     func runtimeUpdatesReuseProjection() async throws {
         try await withTestWatchdog { @MainActor in
             var snapshot = try SessionScenarioBuilder(seed: 1_213)
                 .openingTail(targetEncodedBytes: 8_000)
+            snapshot.phase = .running
             let signposts = RecordingPerformanceSignposts()
             let store = ChatTranscriptPresentationStore(performanceSignposts: signposts)
             var tag = ChatTranscriptProjectionTag(
@@ -440,6 +441,7 @@ struct ChatTranscriptPresentationStoreTests {
             _ = try await store.waitForInstall(of: tag)
 
             snapshot.extensionUI.statuses["sync"] = "Synchronizing"
+            snapshot.extensionUI.working = .init(message: "Still working", visible: true)
             snapshot.eventSequence += 1
             tag = ChatTranscriptProjectionTag(
                 snapshot: snapshot,
@@ -450,16 +452,16 @@ struct ChatTranscriptPresentationStoreTests {
             store.submit(snapshot: snapshot, tag: tag)
             let installed = try await store.waitForInstall(of: tag)
 
-            #expect(installed.runtimeItems.map(\.id) == ["runtime-status-sync"])
+            #expect(installed.runtimeItems.map(\.id) == ["runtime-working"])
             #expect(signposts.events().filter { $0 == .begin(.chatProjection) }.count == 1)
-            #expect(store.pendingEntranceIDs == ["runtime-status-sync"])
-            #expect(store.entranceState(for: "runtime-status-sync") == .pending)
+            #expect(store.pendingEntranceIDs == ["runtime-working"])
+            #expect(store.entranceState(for: "runtime-working") == .pending)
             #expect(!store.resolveEntrance(
-                id: "runtime-status-sync",
+                id: "runtime-working",
                 installationTag: tag,
                 isVisible: false
             ))
-            #expect(store.entranceState(for: "runtime-status-sync") == .none)
+            #expect(store.entranceState(for: "runtime-working") == .none)
         }
     }
 

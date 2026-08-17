@@ -430,12 +430,14 @@ the exact Pi content order without hiding or moving thinking traces.
 The immutable navigation session ID owns one opening task and one typed
 `ScrollPosition`; duplicate dashboard opens and competing proxy scroll commands are
 forbidden. The complete composer is the sole structural owner of the ScrollView's bottom
-safe-area inset, including wrapped text, staged attachments, and supported extension widgets.
-The retired `pi-subagents` async and fleet editor widgets are not mounted; unrelated extension
-widgets retain their declared placement. Native safe-area layout therefore pushes the transcript
-exactly once and reverses naturally when the
-keyboard or composer contracts. Focus/height changes only arm the scroll owner for the next
-measured viewport transition; they never issue an independent jump. Interactive transcripts use bottom initial positioning but top alignment
+safe-area inset, including wrapped text and staged attachments. Extension widget state remains
+canonical, but native widget presentation is temporarily disabled until restoration acceptance.
+Native safe-area layout therefore pushes the transcript exactly once and reverses naturally when
+the keyboard or composer contracts. One geometry observation of the complete composer—not
+field-specific focus, text-height, attachment, or widget hooks—arms the scroll owner for the next
+measured viewport transition; it never issues an independent jump. Fresh native geometry, direct-return,
+and user-settling authority survives composer measurement until its final callback is consumed.
+Interactive transcripts use bottom initial positioning but top alignment
 for undersized or lazily materializing content, preventing keyboard frames from repeatedly
 re-anchoring a partial stack. Once a bottom command or manual catch-up settles inside the
 practical tail boundary, its persistent `ScrollPosition` target is cleared without moving the viewport so later safe-area
@@ -445,7 +447,7 @@ position write. Native ownership arriving after geometry consumes preserved dire
 instead of losing an upward gesture. Direct interactive scrolling always wins. `ChatScrollCoordinator` is the sole owner of
 raw geometry and semantic-row frame intake; pinned/detached and unread
 state; presentation and command generations; display-frame follow and catch-up tasks;
-and the exact paging/semantic-anchor transaction. It publishes one exact-token typed
+and the exact ordinary-layout and paging semantic-anchor transactions. It publishes one exact-token typed
 command for `ChatView` to execute and acknowledge; presentation reset and settled
 binding release are command destinations rather than direct view policy. Opening arms final tail settlement
 with the exact rendered ID of the installed timeline tail. Auxiliary/runtime rows cannot admit it, and transient
@@ -482,9 +484,16 @@ settlement; prior and newly arriving unread state remains admitted throughout st
 final, and settling phases. Interruption away from the tail restores detached/unread
 ownership, while successful physical settlement clears unread only at completion.
 Every later measured height increase coalesces into
-the next display-frame command until another upward gesture. Content shrink is characterized as inert for
+the next display-frame command until another upward gesture. An ordinary installed projection
+change captures the current visible semantic locus before publication and either settles a pinned
+reader to the tail once without animation or advances an exact layout epoch after installation to
+restore a surviving detached semantic anchor within one point. Persistent idle native ownership does
+not disable preservation, but active interaction, pending native geometry, or user-driven settling does.
+After each point correction, both a newer semantic sample and a newer scroll-geometry revision are
+required in either callback order before another correction or binding release. Stale generations and
+direct interaction cannot correct. Content shrink outside such an installed mutation remains inert for
 both pinned and detached readers and never creates an automatic position write.
-Progress-only tool mutations cannot request a tail position. Keyboard and composer layout keep
+Progress-only tool mutations cannot request a tail position. Keyboard and complete-composer layout keep
 a logically pinned reader at the latest tail, while a detached reader receives no position write
 and retains the same semantic reading position. These layout changes cannot change the durable
 pinned/detached mode. Async editor
@@ -749,7 +758,8 @@ exact installed-row geometry gate still owns admission, so projection preparatio
 row that was never displayed, detached readers gain no follow authority, and same-ID tool/status
 morphs never replay an entrance. Reduce Motion retains only a brief opacity reveal. Canonical
 compaction/branch/configuration entries, embedded assistant failures, and exact admitted runtime
-working/status state share one semantic notification projection and capsule primitive. Only a pill
+working state share one semantic notification projection and capsule primitive. Extension status
+state remains canonical but its native pill presentation is temporarily disabled. Only a pill
 with real detail content is an interactive Liquid Glass button; no-detail events use a flat tinted
 fill and stroke with identical type and geometry. Tones are Sendable semantic values resolved to
 SwiftUI color only at the view boundary. Conversation turns retain one row owner for text, thinking, and
@@ -758,19 +768,23 @@ with unchanged SwiftUI identity and private state. Under exact tail bounds, a pe
 canonical entry share a presentation-only global-ordinal identity, so “Compacting context” becomes
 “Context compacted” in place without changing Gateway identity or semantic scroll maps.
 
-Runtime pills install atomically beside the exact tagged timeline. Working/status-only revisions reuse
-the unchanged expensive transcript projection. Pending and admitted entrance ownership each retain
+Runtime working pills install atomically beside the exact tagged timeline. Working/status-only revisions reuse
+the unchanged expensive transcript projection. Status events continue to advance chat timeline generation even
+while their output is hidden, so restoring status pills remains the single explicit presentation-policy change. Pending and admitted entrance ownership each retain
 at most the 512-item page bound in deterministic FIFO order. Retired pending rows become visible
 without replay, while retired admitted rows preserve their local revealed state. Candidates are
 admitted by current row geometry: each pending row carries the exact displayed installation tag, so a
 newer desired model source cannot suppress its reveal. Admission requires that captured tag, current
-installed tag, row membership, layout epoch, and pending state to agree; only pending rows include the tag
+installed tag, row membership, layout epoch, and pending state to agree; hidden-thinking label value
+changes also advance chat timeline generation because adding or removing that label can change mounted
+row height. Only pending rows include the tag
 in their geometry observation, allowing an installed replacement to re-emit exact evidence without
 invalidating every realized row. Visible/pinned discrete rows fade with a small non-layout transform
 exactly once, realized offscreen rows become visible without replay, and direct interaction discards
-unresolved candidates. `ChatScrollCoordinator` alone may consume one smooth follow for an admitted discrete
-insertion. Its bounded rendered-ID entitlement is intersected only on actual installed transitions, so a
-surviving tool/group row retains the same one-shot follow through completion while replacement removes it.
+unresolved candidates. `ChatScrollCoordinator` alone may consume one coalesced nonanimated tail
+settlement for an admitted discrete insertion. Its bounded rendered-ID entitlement is intersected only on
+actual installed transitions, so a surviving tool/group row retains the same one-shot settlement through
+completion while replacement removes it. Row entrance motion never combines with viewport animation.
 Continuous Markdown growth remains coalesced and nonanimated, while detached readers
 receive no writes and Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
 the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.
@@ -877,18 +891,24 @@ content-sized compact pill treatment while preserving 44-point semantic targets.
 history request captures the visually first measured semantic frame intersecting the
 viewport; threshold visibility cannot authorize loading. Canonical-to-rendered metadata
 maps every tool call to its single compact grouped transcript chip, so page-boundary
-regrouping cannot lose that visible semantic anchor. Exact page install advances a
-layout/projection epoch, and the row geometry transform includes that epoch so an exact
-post-install sample is emitted even when its numeric frame is unchanged. Settlement
+regrouping cannot lose that visible semantic anchor. Exact detached-reader ordinary installs and
+page installs advance a layout/projection epoch, and the row geometry transform includes that epoch
+so an exact post-install sample is emitted even when its numeric frame is unchanged. Ordinary
+installs reuse the same bounded semantic correction contract for detached readers; pinned readers receive one
+coalesced nonanimated tail settlement. Settlement
 waits passively for that exact sample; after each disabled-animation correction the
-owner requires a strictly newer sample of the same semantic frame, permits at most one
-late correction, and succeeds only within one point. There is no next-frame assumption,
+owner requires both a strictly newer sample of the same semantic frame and a newer scroll-geometry
+revision, accepts either callback order, permits at most one late correction, and succeeds only within
+one point. A corrected detached or prepend transaction then releases its programmatic point binding
+without moving the viewport. Prepend admission refuses active catch-up, opening-tail ownership, and any
+outstanding non-prepend command rather than overwriting position authority. There is no next-frame assumption,
 total content-height polling loop, unanchored success, or stale defer
 that can end a newer paging token. The
 multiline composer
 gives its capped UIKit text view sole ownership of caret visibility and internal
-scrolling. The composer itself is the transcript ScrollView's bottom safe-area inset;
-no height preference or synthetic transcript spacer mirrors its geometry.
+scrolling. The composer itself is the transcript ScrollView's bottom safe-area inset. One direct geometry
+observation of that complete owner signals viewport transitions; no height preference, field-specific
+hook, or synthetic transcript spacer mirrors its geometry.
 Diagnostics parses the bounded
 Gateway log records into level-filtered rows and copyable details rather than
 showing raw JSON. Gateway/session/tree/tool/interaction timestamps share immutable ISO-8601

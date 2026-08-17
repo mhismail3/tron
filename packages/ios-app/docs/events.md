@@ -112,8 +112,10 @@ Phase, operation, tool ordering, and canonical paging cursors remain authoritati
 client also normalizes the impossible legacy combination of an idle phase and retained running-tool
 overlay to an interrupted chip; it does not expose a fake Stop action for extension-owned detached
 work. Current Gateways project that background work separately through extension UI state. Tron
-does not mount the retired `pi-subagents` async/fleet editor widgets; the run continues on the Mac
-and the app catches up without presenting transport errors as modal alerts. Backgrounding gates and
+continues to decode and retain bounded canonical widget/status state, but temporarily presents no
+extension widgets or extension status pills on iOS. The run continues on the Mac and the app catches
+up without presenting transport errors as modal alerts. Interaction sheets, working state, title/editor
+updates, global notices, and durable extension transcript entries remain active. Backgrounding gates and
 cancels only disposable catalog/foreground reconciliation, never the route, accepted work, or responsive
 socket. Foreground activation coalesces to one responsiveness pass, then runs catalog convergence,
 mounted-session restoration concurrently, then reattaches terminals only after the mounted session's exact

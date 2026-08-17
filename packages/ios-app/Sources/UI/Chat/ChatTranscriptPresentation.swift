@@ -1,6 +1,14 @@
 import Foundation
 import SwiftUI
 
+enum ChatExtensionChromePolicy {
+    // Canonical extension state continues to flow. These presentation gates stay
+    // explicit so native widgets/statuses can be restored only after their layout
+    // mutations participate in the chat viewport transaction.
+    static let rendersWidgets = false
+    static let rendersStatusPills = false
+}
+
 enum ChatExtensionWidgetPolicy {
     private static let retiredSubagentChromeKeys: Set<String> = [
         "subagent-async",
@@ -11,7 +19,8 @@ enum ChatExtensionWidgetPolicy {
         _ widgets: [ExtensionWidget],
         placement: ExtensionWidget.Placement
     ) -> [ExtensionWidget] {
-        widgets.filter {
+        guard ChatExtensionChromePolicy.rendersWidgets else { return [] }
+        return widgets.filter {
             $0.placement == placement && !retiredSubagentChromeKeys.contains($0.key)
         }
     }
@@ -536,15 +545,17 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                 material: .flat
             ))
         }
-        values.append(contentsOf: snapshot.extensionUI.statuses
-            .sorted(by: { $0.key < $1.key })
-            .map { key, value in
-                ChatNotificationPresentation(
-                    id: "runtime-status-\(key)", semanticID: nil,
-                    icon: "info.circle.fill", title: value, detail: nil, body: nil,
-                    tone: .information, material: .flat
-                )
-            })
+        if ChatExtensionChromePolicy.rendersStatusPills {
+            values.append(contentsOf: snapshot.extensionUI.statuses
+                .sorted(by: { $0.key < $1.key })
+                .map { key, value in
+                    ChatNotificationPresentation(
+                        id: "runtime-status-\(key)", semanticID: nil,
+                        icon: "info.circle.fill", title: value, detail: nil, body: nil,
+                        tone: .information, material: .flat
+                    )
+                })
+        }
         return values
     }
 }

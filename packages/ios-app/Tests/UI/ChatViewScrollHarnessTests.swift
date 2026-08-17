@@ -6,6 +6,14 @@ import UIKit
 @MainActor
 @Suite("Hosted ChatView scroll harness", .serialized)
 struct ChatViewScrollHarnessTests {
+    @Test("complete composer measurement is the structural viewport signal")
+    func composerLayoutSignalPolicy() {
+        #expect(!ChatComposerLayoutSignalPolicy.shouldSignal(previous: 0, current: 60))
+        #expect(!ChatComposerLayoutSignalPolicy.shouldSignal(previous: 60, current: 60.5))
+        #expect(ChatComposerLayoutSignalPolicy.shouldSignal(previous: 60, current: 84))
+        #expect(ChatComposerLayoutSignalPolicy.shouldSignal(previous: 84, current: 60))
+    }
+
     @Test("hosted aggregate counters and retained row frames are bounded")
     func hostedEvidenceBounds() {
         let probe = ChatHostedProbe()
@@ -29,9 +37,11 @@ struct ChatViewScrollHarnessTests {
                         && sample.observation.geometry.contentHeight > sample.observation.geometry.containerHeight
                         && !sample.observation.visibleRowIDs.isEmpty
                         && !sample.observation.rowFrames.isEmpty
+                        && sample.nativeGeometryMatches
                 }
 
                 #expect(sample.observation.geometry.isValid)
+                #expect(sample.nativeGeometryMatches)
                 #expect(sample.observation.rowFrames.keys.allSatisfy(harness.transcriptIDs.contains))
                 #expect(Set(sample.observation.visibleRowIDs).isSubset(of: harness.transcriptIDs))
             }
@@ -240,7 +250,7 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("visible discrete insertion reveals once and owns one smooth follow")
+    @Test("visible discrete insertion reveals once without smooth viewport motion")
     func discreteInsertionEntrance() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_190) { harness in
@@ -264,7 +274,7 @@ struct ChatViewScrollHarnessTests {
                     $0.observation.projectionInstallCount > installBaseline
                         && $0.observation.animatedEntranceCount == entranceBaseline + 1
                 }
-                #expect(revealed.observation.smoothAutomaticScrollCommandCount <= smoothBaseline + 1)
+                #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
 
                 // Repeated geometry for the same row cannot replay admission.
                 if let frame = revealed.observation.rowFrames["discrete-tail"] {
@@ -312,9 +322,50 @@ struct ChatViewScrollHarnessTests {
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
                 #expect(
                     settled.observation.smoothAutomaticScrollCommandCount
-                        <= smoothBaseline + 1
+                        == smoothBaseline
                 )
                 #expect(settled.observation.rowFrames["tool-run-active-race"] != nil)
+            }
+        }
+    }
+
+    @Test("real tool group topology stays pinned without smooth viewport motion")
+    func toolGroupTopologySettlement() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 1_194) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                        && $0.observation.projectionInstallCount >= 1
+                }
+                let installBaseline = ready.observation.projectionInstallCount
+                let smoothBaseline = ready.observation.smoothAutomaticScrollCommandCount
+
+                var first = harness.snapshot
+                first.phase = .running
+                first.toolExecutions = [
+                    harnessRuntimeTool(id: "group-one", order: 0, status: .running),
+                ]
+                first.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(first)
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount >= installBaseline + 1
+                        && $0.observation.rowFrames["tool-run-group-one"] != nil
+                }
+
+                var grouped = first
+                grouped.toolExecutions = [
+                    harnessRuntimeTool(id: "group-one", order: 0, status: .completed),
+                    harnessRuntimeTool(id: "group-two", order: 1, status: .completed),
+                ]
+                grouped.eventSequence += 1
+                harness.replaceAuthoritativeSnapshot(grouped)
+                let settled = try await harness.recorder.waitUntil {
+                    $0.observation.projectionInstallCount >= installBaseline + 2
+                        && $0.observation.rowFrames["tool-run-group-one"] != nil
+                }
+
+                #expect(settled.observation.rowFrames["tool-run-group-two"] == nil)
+                #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
             }
         }
     }
@@ -494,6 +545,13 @@ struct ChatViewScrollHarnessTests {
                 let callbacksBeforeRelease = harness.probeObservation.semanticFrameCallbackCount
                 let automaticBeforeRelease = harness.probeObservation.automaticScrollCommandCount
                 harness.releasePrependPage()
+                let waiting = try await harness.recorder.waitUntil {
+                    $0.observation.prependSemanticFrameWaiting
+                }
+                harness.driveGeometry(
+                    previous: waiting.observation.geometry,
+                    current: waiting.observation.geometry
+                )
                 let completed = try await harness.recorder.waitUntil {
                     $0.observation.prependCompletionResult == .success
                 }
@@ -559,11 +617,15 @@ struct ChatViewScrollHarnessTests {
     }
 }
 
-private func harnessRuntimeTool(status: ToolExecutionState.Status) -> ToolExecutionState {
+private func harnessRuntimeTool(
+    id: String = "active-race",
+    order: Int = 0,
+    status: ToolExecutionState.Status
+) -> ToolExecutionState {
     ToolExecutionState(
-        toolCallId: "active-race",
+        toolCallId: id,
         toolName: "read",
-        order: 0,
+        order: order,
         status: status,
         arguments: .object(["path": .string("README.md")]),
         partialResult: nil,
@@ -636,6 +698,9 @@ final class ChatViewScrollHarness {
         guard model.authoritativeSnapshot(for: snapshot.sessionId) == nil else {
             throw HarnessError.invalidAuthorityBoundary
         }
+        // Hosted presentation generations are authoritative and need not match
+        // ChatOpenPresentationState's local opening epoch.
+        model.invalidateHostedPendingPresentation()
         model.installHostedAuthoritativeSnapshot(snapshot)
         guard model.authoritativeSnapshot(for: snapshot.sessionId) == snapshot else {
             throw HarnessError.invalidAuthorityBoundary
