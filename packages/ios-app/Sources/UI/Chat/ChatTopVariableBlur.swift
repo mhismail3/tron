@@ -43,12 +43,13 @@ struct TronTopBlurOverlay: View {
 }
 
 enum ChatBottomActivityBlurLayout {
-    static let height: CGFloat = 44
+    static let height: CGFloat = 56
+    static let safeAreaTranslation: CGFloat = 44
     static let radius: CGFloat = 10
     static let pulseDuration: TimeInterval = 2.2
-    static let restingTintOpacity = 0.018
-    static let activeTintOpacity = 0.075
-    static let reduceMotionTintOpacity = 0.05
+    static let restingTintOpacity = 0.02
+    static let activeTintOpacity = 0.105
+    static let reduceMotionTintOpacity = 0.06
 }
 
 /// A short, nonstructural safe-area treatment. Ordinary running state changes
