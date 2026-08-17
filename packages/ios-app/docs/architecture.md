@@ -556,7 +556,9 @@ uploads. It does not expose an app-owned microphone control until a proper voice
 Drafting remains available while authoritative opening finishes and throughout
 an active turn; only submission waits for readiness. Default visible running state consumes no transcript
 space: a nonstructural 44-point bottom-safe-area blur gently oscillates between its neutral state and a
-low-saturation emerald tint. Reduce Motion uses one static subtle emerald state, while VoiceOver retains a
+low-saturation emerald tint. The overlay translates beyond ChatView's native safe-area layout boundary so
+its strongest edge terminates off-screen rather than forming a clipped horizontal seam; it does not alter
+the composer's measured inset. Reduce Motion uses one static subtle emerald state, while VoiceOver retains a
 nonvisual “Tron is working” status on the active blur. Custom working messages,
 compaction, and provider retry attempts retain explicit compact rows so operational detail is never hidden.
 A non-empty active draft replaces the trailing Stop

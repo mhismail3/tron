@@ -284,6 +284,8 @@ struct PresentationStyleGuardTests {
         #expect(blur.contains(".accessibilityHidden(!isActive)"))
         #expect(chat.contains(".overlay(alignment: .bottom)"))
         #expect(chat.contains("ChatBottomActivityBlur(isActive: showsAmbientWorkingBlur)"))
+        #expect(chat.contains(".offset(y: ChatBottomActivityBlurLayout.height)"))
+        #expect(chat.contains(".ignoresSafeArea(edges: .bottom)"))
         #expect(app.contains(".tronTopBlur(.sheet)"))
         #expect(settings.matches(#"\.tronTopBlur\(\.sheet\)"#) >= 2)
         #expect(terminal.contains(".tronTopBlur(.sheet)"))

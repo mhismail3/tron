@@ -110,6 +110,10 @@ struct ChatView: View {
             }
             .overlay(alignment: .bottom) {
                 ChatBottomActivityBlur(isActive: showsAmbientWorkingBlur)
+                    // ChatView's layout ends at the native bottom safe-area edge.
+                    // Draw the nonstructural blur beyond that boundary so its
+                    // strongest edge terminates off-screen instead of clipping.
+                    .offset(y: ChatBottomActivityBlurLayout.height)
                     .ignoresSafeArea(edges: .bottom)
             }
             .overlay(alignment: .top) { topBlur }
