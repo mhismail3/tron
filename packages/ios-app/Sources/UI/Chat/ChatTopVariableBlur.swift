@@ -52,8 +52,8 @@ enum ChatBottomActivityBlurLayout {
     static let restingTintOpacity = 0.02
     static let activeTintOpacity = 0.105
     static let reduceMotionTintOpacity = 0.06
-    static let lightRestingTintOpacity = 0.035
-    static let lightActiveTintOpacity = 0.15
+    static let lightRestingTintOpacity = 0.045
+    static let lightActiveTintOpacity = 0.18
     static let lightReduceMotionTintOpacity = 0.085
 
     static func height(keyboardVisible: Bool) -> CGFloat {
