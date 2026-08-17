@@ -1293,6 +1293,12 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("proxy.scrollTo"))
         let composerStage = (chat.components(separatedBy: ".safeAreaInset(edge: .bottom, spacing: 0)").dropFirst().first ?? "")
             .components(separatedBy: ".overlay(alignment: .top) { topBlur }").first ?? ""
+        let composerOwner = (chat.components(separatedBy: "private var composer: some View").dropFirst().first ?? "")
+            .components(separatedBy: "private var composerInputBar").first ?? ""
+        #expect(!composerStage.contains("ChatBottomActivityBlur"))
+        #expect(composerOwner.contains(".overlay(alignment: .bottom)"))
+        #expect(composerOwner.contains("ChatBottomActivityBlur(isActive: showsAmbientWorkingBlur)"))
+        #expect(composerOwner.contains(".offset(y: ChatBottomActivityBlurLayout.safeAreaTranslation)"))
         #expect(!composerStage.contains(".accessibilityHidden(!isTranscriptReady)"))
         #expect(!composerStage.contains(".allowsHitTesting(isTranscriptReady)"))
         #expect(chat.contains("isEditable: ChatComposerPolicy.isTextEditable(isTranscriptReady: isTranscriptReady)"))

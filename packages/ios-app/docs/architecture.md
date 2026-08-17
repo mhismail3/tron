@@ -557,9 +557,11 @@ Drafting remains available while authoritative opening finishes and throughout
 an active turn; only submission waits for readiness. Default visible running state consumes no transcript
 space: a nonstructural 56-point bottom-safe-area blur gently oscillates between its neutral state and a
 clearly readable but low-saturation emerald tint. Its fixed 44-point safe-area translation leaves 12 points
-of additional upward reach without increasing blur radius. The overlay translates beyond ChatView's native safe-area layout boundary so
-its strongest edge terminates off-screen rather than forming a clipped horizontal seam; it does not alter
-the composer's measured inset. Reduce Motion uses one static subtle emerald state, while VoiceOver retains a
+of additional upward reach without increasing blur radius. The overlay belongs to the measured composer but
+remains nonstructural: it translates below that owner without contributing height. Native keyboard safe-area
+motion therefore carries the pulse into the thin composer/keyboard gap and returns it to the device-bottom
+inset on dismissal, while its strongest edge remains beyond the layout boundary instead of forming a clipped
+horizontal seam. Reduce Motion uses one static subtle emerald state, while VoiceOver retains a
 nonvisual “Tron is working” status on the active blur. Custom working messages,
 compaction, and provider retry attempts retain explicit compact rows so operational detail is never hidden.
 A non-empty active draft replaces the trailing Stop

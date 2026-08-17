@@ -108,14 +108,6 @@ struct ChatView: View {
                 // native transcript viewport exactly once and reverse naturally.
                 composer
             }
-            .overlay(alignment: .bottom) {
-                ChatBottomActivityBlur(isActive: showsAmbientWorkingBlur)
-                    // ChatView's layout ends at the native bottom safe-area edge.
-                    // Draw the nonstructural blur beyond that boundary so its
-                    // strongest edge terminates off-screen instead of clipping.
-                    .offset(y: ChatBottomActivityBlurLayout.safeAreaTranslation)
-                    .ignoresSafeArea(edges: .bottom)
-            }
             .overlay(alignment: .top) { topBlur }
         .onGeometryChange(for: CGFloat.self) { geometry in
             geometry.size.width
@@ -1181,6 +1173,14 @@ struct ChatView: View {
             if ChatComposerLayoutSignalPolicy.shouldSignal(previous: previous, current: height) {
                 scrollCoordinator.composerViewportTransitionBegan()
             }
+        }
+        .overlay(alignment: .bottom) {
+            ChatBottomActivityBlur(isActive: showsAmbientWorkingBlur)
+                // The native safe-area inset moves the composer with the
+                // keyboard. Extending this nonstructural overlay below that
+                // owner keeps the pulse in the keyboard gap and bottom inset.
+                .offset(y: ChatBottomActivityBlurLayout.safeAreaTranslation)
+                .ignoresSafeArea(edges: .bottom)
         }
     }
 
