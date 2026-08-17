@@ -29,6 +29,13 @@ struct ChatCompactPillTests {
         #expect(UserPromptTextLayoutPolicy.fittedWidth(measured: 520, proposed: 364) == 364)
     }
 
+    @Test("bottom activity blur follows keyboard focus without changing layout")
+    func bottomActivityBlurGeometry() {
+        #expect(ChatBottomActivityBlurLayout.height == 68)
+        #expect(ChatBottomActivityBlurLayout.translation(keyboardVisible: true) == 0)
+        #expect(ChatBottomActivityBlurLayout.translation(keyboardVisible: false) == 44)
+    }
+
     @Test("compact transcript pills retain pre-shared vertical rhythm")
     func compactPillGeometry() {
         #expect(ChatCompactPillLayoutPolicy.horizontalPadding == 11)

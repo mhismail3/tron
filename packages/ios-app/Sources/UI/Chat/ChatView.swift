@@ -1179,8 +1179,14 @@ struct ChatView: View {
                 // The native safe-area inset moves the composer with the
                 // keyboard. Extending this nonstructural overlay below that
                 // owner keeps the pulse in the keyboard gap and bottom inset.
-                .offset(y: ChatBottomActivityBlurLayout.safeAreaTranslation)
+                .offset(y: ChatBottomActivityBlurLayout.translation(
+                    keyboardVisible: composerFocused
+                ))
                 .ignoresSafeArea(edges: .bottom)
+                .animation(
+                    reduceMotion ? nil : .easeOut(duration: 0.22),
+                    value: composerFocused
+                )
         }
     }
 
