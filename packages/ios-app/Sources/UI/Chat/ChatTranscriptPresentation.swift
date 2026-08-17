@@ -32,6 +32,7 @@ struct ChatRuntimeWorkingPresentation: Equatable {
     let message: String
     let retryMessage: String?
     let phase: SessionPhase
+    let usesAmbientBottomIndicator: Bool
 
     init?(phase: SessionPhase, working: ExtensionUIState.Working, retry: RetryState?) {
         guard phase.isActive, working.visible else { return nil }
@@ -40,6 +41,9 @@ struct ChatRuntimeWorkingPresentation: Equatable {
         retryMessage = retry.map {
             "Attempt \($0.attempt)\($0.maxAttempts.map { " of \($0)" } ?? "")"
         }
+        usesAmbientBottomIndicator = phase == .running
+            && working.message == nil
+            && retry == nil
     }
 
     private static func defaultMessage(for phase: SessionPhase) -> String {
@@ -559,7 +563,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
             phase: snapshot.phase,
             working: snapshot.extensionUI.working,
             retry: snapshot.retry
-        ) {
+        ), !working.usesAmbientBottomIndicator {
             let exactNextOrdinal: Int? = {
                 guard snapshot.phase == .compacting,
                       let start = snapshot.transcriptStart,

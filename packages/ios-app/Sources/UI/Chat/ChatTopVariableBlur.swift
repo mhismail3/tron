@@ -42,6 +42,78 @@ struct TronTopBlurOverlay: View {
     }
 }
 
+enum ChatBottomActivityBlurLayout {
+    static let height: CGFloat = 44
+    static let radius: CGFloat = 10
+    static let pulseDuration: TimeInterval = 2.2
+    static let restingTintOpacity = 0.018
+    static let activeTintOpacity = 0.075
+    static let reduceMotionTintOpacity = 0.05
+}
+
+/// A short, nonstructural safe-area treatment. Ordinary running state changes
+/// only its tint; retry, compaction, and custom working detail retain explicit
+/// transcript presentation.
+struct ChatBottomActivityBlur: View {
+    let isActive: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var emeraldPhase = false
+
+    var body: some View {
+        ZStack {
+            ChatTopVariableBlur(maxBlurRadius: ChatBottomActivityBlurLayout.radius)
+                .rotationEffect(.degrees(180))
+            LinearGradient(
+                colors: [
+                    Color.clear,
+                    Color.tronEmerald.opacity(tintOpacity),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: ChatBottomActivityBlurLayout.height)
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Tron is working")
+        .accessibilityHidden(!isActive)
+        .onChange(of: isActive, initial: true) { _, active in
+            updatePulse(active: active)
+        }
+        .onChange(of: reduceMotion) { _, _ in
+            updatePulse(active: isActive)
+        }
+    }
+
+    private var tintOpacity: Double {
+        guard isActive else { return 0 }
+        if reduceMotion { return ChatBottomActivityBlurLayout.reduceMotionTintOpacity }
+        return emeraldPhase
+            ? ChatBottomActivityBlurLayout.activeTintOpacity
+            : ChatBottomActivityBlurLayout.restingTintOpacity
+    }
+
+    private func updatePulse(active: Bool) {
+        guard active else {
+            withAnimation(.easeOut(duration: 0.24)) { emeraldPhase = false }
+            return
+        }
+        guard !reduceMotion else {
+            emeraldPhase = true
+            return
+        }
+        emeraldPhase = false
+        withAnimation(
+            .easeInOut(duration: ChatBottomActivityBlurLayout.pulseDuration)
+                .repeatForever(autoreverses: true)
+        ) {
+            emeraldPhase = true
+        }
+    }
+}
+
 private struct TronTopBlurStyleKey: EnvironmentKey {
     static let defaultValue: TronTopBlurStyle? = nil
 }

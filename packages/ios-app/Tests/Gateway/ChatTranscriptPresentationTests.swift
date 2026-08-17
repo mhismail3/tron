@@ -82,7 +82,33 @@ struct ChatTranscriptPresentationTests {
         #expect(runtime.first?.title == "Still working")
     }
 
-    @Test("runtime working row follows phase, visibility, message, and retry policy")
+    @Test("ordinary running state uses ambient bottom activity without a transcript row")
+    func ordinaryRunningUsesAmbientActivity() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.extensionUI.working = .init(message: nil, visible: true)
+        snapshot.retry = nil
+
+        let presentation = try #require(ChatRuntimeWorkingPresentation(
+            phase: snapshot.phase,
+            working: snapshot.extensionUI.working,
+            retry: snapshot.retry
+        ))
+        #expect(presentation.message == "Tron is working")
+        #expect(presentation.usesAmbientBottomIndicator)
+        #expect(ChatNotificationPresentation.runtime(in: snapshot).isEmpty)
+
+        snapshot.extensionUI.working.message = "Reading files"
+        let custom = try #require(ChatRuntimeWorkingPresentation(
+            phase: snapshot.phase,
+            working: snapshot.extensionUI.working,
+            retry: snapshot.retry
+        ))
+        #expect(!custom.usesAmbientBottomIndicator)
+        #expect(ChatNotificationPresentation.runtime(in: snapshot).map(\.id) == ["runtime-working"])
+    }
+
+    @Test("runtime working row follows phase, visibility, message, retry, and ambient policy")
     func runtimeWorkingRowPolicy() {
         struct PolicyCase {
             let name: String
@@ -178,6 +204,14 @@ struct ChatTranscriptPresentationTests {
             #expect(
                 presentation?.retryMessage == policyCase.expectedRetryMessage,
                 "unexpected retry message for \(policyCase.name)"
+            )
+            let expectedAmbient = policyCase.phase == .running
+                && policyCase.visible
+                && policyCase.message == nil
+                && policyCase.retry == nil
+            #expect(
+                (presentation?.usesAmbientBottomIndicator ?? false) == expectedAmbient,
+                "unexpected ambient activity policy for \(policyCase.name)"
             )
         }
     }

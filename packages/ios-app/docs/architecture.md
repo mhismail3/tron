@@ -511,8 +511,8 @@ height measurements carry a latest-revision guard, so an older wrap measurement 
 a newer line count. Every stable row owns its horizontal inset instead of relying on
 transient ScrollView content margins, so prompt insertion cannot expose a flush-left frame.
 Existing rows never participate in stack-wide insertion or scale animations. Thinking,
-Markdown, tool, and working rows therefore remain stable above the composer while the user
-follows the tail. Terminal output has its own monotonic sequence and reconnect replay cursor.
+Markdown, tool, and explicit custom/retry rows therefore remain stable above the composer while the user
+follows the tail. Ordinary default running activity owns no transcript row. Terminal output has its own monotonic sequence and reconnect replay cursor.
 Output/exit frames delivered while attach or gap recovery is suspended remain in a bounded
 coordinator quarantine and join the admitted replay contiguously. A reset increments an
 explicit replay revision so SwiftTerm is recreated even when replacement sequences do not
@@ -554,9 +554,12 @@ assumed globally unique.
 The composer supports text, system-keyboard dictation, images, and bounded file
 uploads. It does not expose an app-owned microphone control until a proper voice mode exists.
 Drafting remains available while authoritative opening finishes and throughout
-an active turn; only submission waits for readiness. Active visible working state remains a
-compact runtime row after the canonical transcript, including provider retry attempts, and
-never changes the composer's structure. A non-empty active draft replaces the trailing Stop
+an active turn; only submission waits for readiness. Default visible running state consumes no transcript
+space: a nonstructural 44-point bottom-safe-area blur gently oscillates between its neutral state and a
+low-saturation emerald tint. Reduce Motion uses one static subtle emerald state, while VoiceOver retains a
+nonvisual “Tron is working” status on the active blur. Custom working messages,
+compaction, and provider retry attempts retain explicit compact rows so operational detail is never hidden.
+A non-empty active draft replaces the trailing Stop
 action with Send and is admitted as a steering message, while an empty active
 composer retains Stop. The keyboard remains focused after steering so multiple messages can
 be queued without waiting for the current turn to settle. The send control's native context
@@ -565,7 +568,7 @@ has immediate scale/opacity feedback, admitted sends replace the arrow with a co
 indicator, and the composer surface subtly acknowledges the in-flight admission without creating a
 provisional transcript row. Pending attachment chips enter and leave with bounded composer-owned
 motion; their height changes explicitly arm the sole scroll coordinator's viewport transition.
-Authoritative queued entries render after active runtime state as right-anchored compact cards
+Authoritative queued entries render after any explicit runtime detail as right-anchored compact cards
 that hug their content and wrap at the same 364-point maximum as a user prompt. They retain stable
 identity, delivery stage, position, text, and attachment count. Queue cards and the transcript
 timeline are installed from the same exact tagged source, so consuming a queued entry cannot remove
@@ -774,8 +777,9 @@ system capsules settle from center, and assistant prose uses only a shallow vert
 exact installed-row geometry gate still owns admission, so projection preparation cannot animate a
 row that was never displayed, detached readers gain no follow authority, and same-ID tool/status
 morphs never replay an entrance. Reduce Motion retains only a brief opacity reveal. Canonical
-compaction/branch/configuration entries, embedded assistant failures, and exact admitted runtime
-working state share one semantic notification projection and capsule primitive. Extension status
+compaction/branch/configuration entries, embedded assistant failures, and exact admitted custom/retry
+working detail share one semantic notification projection and capsule primitive. Ordinary default running
+state instead drives only the bottom-safe-area blur and never changes transcript geometry. Extension status
 state remains canonical but its native pill presentation is temporarily disabled. Only a pill
 with real detail content is an interactive Liquid Glass button; no-detail events use a flat tinted
 fill and stroke with identical type and geometry. Tones are Sendable semantic values resolved to

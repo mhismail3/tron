@@ -108,6 +108,10 @@ struct ChatView: View {
                 // native transcript viewport exactly once and reverse naturally.
                 composer
             }
+            .overlay(alignment: .bottom) {
+                ChatBottomActivityBlur(isActive: showsAmbientWorkingBlur)
+                    .ignoresSafeArea(edges: .bottom)
+            }
             .overlay(alignment: .top) { topBlur }
         .onGeometryChange(for: CGFloat.self) { geometry in
             geometry.size.width
@@ -529,6 +533,15 @@ struct ChatView: View {
 
     private var selectedAuthoritativeSnapshot: SessionSnapshot? {
         model.authoritativeSnapshot(for: sessionID)
+    }
+
+    private var showsAmbientWorkingBlur: Bool {
+        guard let snapshot = selectedAuthoritativeSnapshot else { return false }
+        return ChatRuntimeWorkingPresentation(
+            phase: snapshot.phase,
+            working: snapshot.extensionUI.working,
+            retry: snapshot.retry
+        )?.usesAmbientBottomIndicator == true
     }
 
     private var presentationTarget: AppModel.SessionPresentationTarget? {
