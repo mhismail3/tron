@@ -357,9 +357,12 @@ inset, and native `UIScrollView` in a fixed hosted window. Test-only authority
 admission bypasses network I/O without bypassing `AppModel`'s authoritative read
 gate. Raw geometry, visible semantic IDs, and row frames are reduced to one latest
 sample on each `CADisplayLink` tick; added evidence is aggregate command/frame/count
-data only. The production `DisplayFrameScheduler` is a one-shot,
-cancellation-aware display-link boundary used by first-ready, pinned follow, and
-long-distance catch-up staging. Semantic prepend settlement instead waits passively
+data only. A maximum-512-row opening case requires the very first ready sample to contain
+the exact physical tail marker and latest message in the same plausible native bottom
+viewport, so an eventual manual/lazy correction cannot make the test pass. The production
+`DisplayFrameScheduler` is a one-shot, cancellation-aware display-link boundary used by
+first-ready, frame-gated unrealized-tail correction, pinned follow, and long-distance
+catch-up staging. Semantic prepend settlement instead waits passively
 for exact epoch-qualified row callbacks and requires a strictly newer callback after
 each correction. First-ready timing cannot end before the exact initial transcript
 projection installs and its frame resumes. `ChatTranscriptPresentationStoreTests` use a
@@ -393,9 +396,9 @@ following, one follow command per frame, a single smooth command only for an adm
 insertion, immediate continuous-stream following, no writes for detached layout/stream/keyboard
 settlement, viewport geometry-first expansion detachment, frame-separated catch-up with unread admission
 through every interruption stage, Reduce Motion, exact reset/release command admission,
-exact-installed-tail opening settlement, transient-boundary rejection, auxiliary-row rejection, both
-geometry/frame callback orders, empty/undersized top alignment, pre-settlement user cancellation,
-stale-presentation rejection, repeat-prepend ownership, post-install layout-epoch rejection, unchanged-frame epoch
+exact physical-tail opening settlement, frame-gated unrealized-target correction, overflow-overshoot rejection,
+both geometry/frame callback orders, empty/undersized top alignment, post-reveal stable-frame binding release,
+pre-settlement user cancellation, stale-presentation rejection, repeat-prepend ownership, post-install layout-epoch rejection, unchanged-frame epoch
 callbacks, and exact semantic remeasurement with at most one late correction and no
 frame retry or total-height polling. Hosted controls drive the production
 coordinator/executor; new evidence is bounded aggregate callback/command/frame and

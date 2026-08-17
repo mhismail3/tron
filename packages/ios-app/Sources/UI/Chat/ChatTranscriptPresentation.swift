@@ -57,8 +57,9 @@ struct ChatTranscriptGeometry: Equatable {
     let contentHeight: CGFloat
     let containerHeight: CGFloat
     let bottomInset: CGFloat
-    /// Native visible content edge in the scroll content coordinate space.
-    /// Synthetic tests may omit it and use the legacy-field fallback.
+    /// Native visible content edges in the scroll content coordinate space.
+    /// Synthetic tests may omit them and use the legacy-field fallback.
+    let visibleTopY: CGFloat?
     let visibleBottomY: CGFloat?
 
     init(
@@ -66,12 +67,14 @@ struct ChatTranscriptGeometry: Equatable {
         contentHeight: CGFloat,
         containerHeight: CGFloat,
         bottomInset: CGFloat = 0,
+        visibleTopY: CGFloat? = nil,
         visibleBottomY: CGFloat? = nil
     ) {
         self.offsetY = offsetY
         self.contentHeight = contentHeight
         self.containerHeight = containerHeight
         self.bottomInset = bottomInset
+        self.visibleTopY = visibleTopY
         self.visibleBottomY = visibleBottomY
     }
 
@@ -81,6 +84,7 @@ struct ChatTranscriptGeometry: Equatable {
             contentHeight: geometry.contentSize.height,
             containerHeight: geometry.containerSize.height,
             bottomInset: geometry.contentInsets.bottom,
+            visibleTopY: geometry.visibleRect.minY,
             visibleBottomY: geometry.visibleRect.maxY
         )
     }
@@ -108,6 +112,31 @@ struct ChatTranscriptGeometry: Equatable {
     /// the tail and is used to dismiss catch-up without requiring a tap.
     var isAtCatchUpBoundary: Bool { isValid && distanceFromBottom <= Self.catchUpDistance }
 
+    /// Opening placement must reject a transient native offset beyond an
+    /// overflowing content edge. `distanceFromBottom` intentionally clamps
+    /// negative values for ordinary scrolling, so it cannot distinguish that
+    /// overshoot from a real tail boundary on its own.
+    var isPlausibleOpeningViewport: Bool {
+        guard isValid else { return false }
+        let contentBottom = contentHeight + bottomInset
+        guard contentBottom.isFinite, offsetY.isFinite else { return false }
+        if contentBottom <= containerHeight + 2 {
+            // Undersized transcripts must be top aligned; clamped bottom distance
+            // would otherwise accept a transient positive or negative overshoot.
+            if let visibleTopY {
+                return visibleTopY.isFinite && abs(visibleTopY) <= 2
+            }
+            return abs(offsetY) <= 2
+        }
+        if let visibleBottomY {
+            // Native visible geometry is atomically derived and already accounts
+            // for top/safe-area scroll insets that are absent from `offsetY`.
+            return visibleBottomY.isFinite && visibleBottomY <= contentBottom + 2
+        }
+        let maximumOffset = contentBottom - containerHeight
+        return offsetY <= maximumOffset + 2
+    }
+
     func hasViewportChange(from previous: Self) -> Bool {
         abs(containerHeight - previous.containerHeight) > 0.5
             || abs(bottomInset - previous.bottomInset) > 0.5
@@ -116,6 +145,7 @@ struct ChatTranscriptGeometry: Equatable {
 
 enum ChatOpenPresentationPhase: Equatable {
     case opening
+    case positioning
     case ready
     case failed(String)
 }
@@ -133,8 +163,15 @@ struct ChatOpenPresentationState: Equatable {
 
     mutating func installAuthoritativeBaseline(sessionID: String, epoch: Int) -> Bool {
         guard sessionID == self.sessionID, epoch == self.epoch, phase == .opening else { return false }
-        // The authoritative handshake is the readiness boundary. Physical
-        // SwiftUI geometry is best-effort and may legally coalesce callbacks.
+        // Keep the opaque opening surface mounted while the exact physical tail
+        // is positioned. Authoritative installation alone is not proof that a
+        // lazy transcript has a valid visible viewport.
+        phase = .positioning
+        return true
+    }
+
+    mutating func installPositionedViewport(sessionID: String, epoch: Int) -> Bool {
+        guard sessionID == self.sessionID, epoch == self.epoch, phase == .positioning else { return false }
         phase = .ready
         return true
     }

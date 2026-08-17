@@ -18,6 +18,7 @@ struct ChatScrollCommand: Equatable, Sendable {
     enum Destination: Equatable, Sendable {
         case resetToBottom
         case tail
+        case openingTail(String)
         case offsetY(CGFloat)
         case releaseBinding
     }
@@ -56,6 +57,12 @@ final class ChatScrollCoordinator {
         let layoutEpoch: Int
         let revision: Int
         let frame: CGRect
+    }
+
+    private struct OpeningTailFinalWaiter {
+        let id: Int
+        let token: Int
+        let continuation: CheckedContinuation<Void, Never>
     }
 
     private enum CatchUpPhase: Equatable {
@@ -100,14 +107,29 @@ final class ChatScrollCoordinator {
     private var userInteractionStartDistanceFromBottom: CGFloat?
     private var bindingIsReleased = false
     private var openingTailSettlementPending = false
+    private var openingTailToken: Int?
     private var openingTailTargetRenderedID: String?
+    private var openingTailTargetSample: SemanticFrameSample?
     private var openingTailPresentation: Int?
-    private var openingTailExpectedFrameGeometryRevision: Int?
+    private var openingTailCommandToken: Int?
+    private var openingTailCommandSemanticRevision: Int?
+    private var openingTailCommandGeometryRevision: Int?
+    private var openingTailCommandAttemptCount = 0
+    private var openingTailPositioned = false
+    private var openingTailRevealCompleted = false
+    private var openingTailStableFrameCount = 0
+    private var openingTailStableSemanticRevision: Int?
+    private var openingTailStableGeometryRevision: Int?
+    private var openingTailContinuation: CheckedContinuation<Bool, Never>?
+    private var openingTailFinalWaiters: [OpeningTailFinalWaiter] = []
+    private var nextOpeningTailFinalWaiterID = 0
+    private var openingTailFrameTaskGeneration = 0
     private var geometryRevision = 0
 
     @ObservationIgnored private var followFrameTask: Task<Void, Never>?
     @ObservationIgnored private var catchUpTask: Task<Void, Never>?
     @ObservationIgnored private var prependTask: Task<Void, Never>?
+    @ObservationIgnored private var openingTailFrameTask: Task<Void, Never>?
 
     private var catchUpPhase: CatchUpPhase = .none
     private var catchUpCommandToken: Int?
@@ -238,8 +260,8 @@ final class ChatScrollCoordinator {
         if openingTailSettlementPending,
            openingTailPresentation == presentation,
            openingTailTargetRenderedID == renderedID {
-            openingTailExpectedFrameGeometryRevision = geometryRevision
-            settleOpeningTailIfPossible(allowsBoundarySettlement: false)
+            openingTailTargetSample = semanticFrames[renderedID]
+            evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
         }
     }
 
@@ -383,7 +405,8 @@ final class ChatScrollCoordinator {
         geometryRevision &+= 1
         evaluateLayoutMutationIfReady()
         evaluatePrependMeasurementIfReady()
-        if settleOpeningTailIfPossible(allowsBoundarySettlement: true) { return }
+        evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
+        if openingTailSettlementPending { return }
         let grew = current.contentHeight > previous.contentHeight + 0.5
         let movedOlder = previous.isValid
             && current.offsetY < previous.offsetY - 1
@@ -430,7 +453,8 @@ final class ChatScrollCoordinator {
         geometryRevision &+= 1
         evaluateLayoutMutationIfReady()
         evaluatePrependMeasurementIfReady()
-        if settleOpeningTailIfPossible(allowsBoundarySettlement: true) { return }
+        evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
+        if openingTailSettlementPending { return }
         guard current.hasViewportChange(from: previous) else { return }
         pendingUnattributedOlderMovement = false
         if userScrolledAway {
@@ -473,18 +497,97 @@ final class ChatScrollCoordinator {
         scheduleTailFollow()
     }
 
-    /// Arms final opening placement for the exact installed timeline tail. The
-    /// nil target is the explicit no-transcript path and needs no position write.
-    func requestOpeningTail(targetRenderedID: String?) {
-        clearOpeningTailSettlement()
-        guard let targetRenderedID else { return }
-        openingTailSettlementPending = true
-        openingTailTargetRenderedID = targetRenderedID
-        openingTailPresentation = presentation
-        if semanticFrames[targetRenderedID]?.layoutEpoch == layoutEpoch {
-            openingTailExpectedFrameGeometryRevision = geometryRevision
+    /// Positions the exact installed physical tail before the transcript is
+    /// revealed. Submission of a `ScrollPosition` write is not completion: the
+    /// continuation resumes only after fresh semantic and native geometry prove
+    /// that the target intersects a plausible bottom viewport.
+    func positionOpeningTail(targetRenderedID: String?) async -> Bool {
+        guard let targetRenderedID else { return true }
+        clearOpeningTailSettlement(positioningSucceeded: false)
+        sequence &+= 1
+        let token = sequence
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                beginOpeningTailSettlement(
+                    token: token,
+                    targetRenderedID: targetRenderedID,
+                    continuation: continuation
+                )
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.clearOpeningTailSettlement(
+                    ifToken: token,
+                    positioningSucceeded: false
+                )
+            }
         }
-        settleOpeningTailIfPossible(allowsBoundarySettlement: false)
+    }
+
+    /// Test and preview seam for callback-order characterization.
+    func requestOpeningTail(targetRenderedID: String?) {
+        clearOpeningTailSettlement(positioningSucceeded: false)
+        guard let targetRenderedID else { return }
+        sequence &+= 1
+        beginOpeningTailSettlement(
+            token: sequence,
+            targetRenderedID: targetRenderedID,
+            continuation: nil
+        )
+    }
+
+    /// The first visible frame starts only after physical positioning succeeds.
+    /// Keep the edge binding through the fade/slide transaction, then release it
+    /// after animation completion and two unchanged display-frame barriers.
+    func openingRevealCompleted() {
+        guard openingTailSettlementPending, openingTailPositioned else { return }
+        openingTailRevealCompleted = true
+        scheduleOpeningTailFrame()
+    }
+
+    func waitForOpeningTailSettlement() async {
+        guard openingTailSettlementPending, let token = openingTailToken else { return }
+        let waiterID = nextOpeningTailFinalWaiterID
+        nextOpeningTailFinalWaiterID &+= 1
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if openingTailSettlementPending, openingTailToken == token {
+                    openingTailFinalWaiters.append(.init(
+                        id: waiterID,
+                        token: token,
+                        continuation: continuation
+                    ))
+                } else {
+                    continuation.resume()
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.resumeOpeningTailFinalWaiter(id: waiterID, token: token)
+            }
+        }
+    }
+
+    private func beginOpeningTailSettlement(
+        token: Int,
+        targetRenderedID: String,
+        continuation: CheckedContinuation<Bool, Never>?
+    ) {
+        openingTailSettlementPending = true
+        openingTailToken = token
+        openingTailTargetRenderedID = targetRenderedID
+        openingTailTargetSample = semanticFrames[targetRenderedID]
+        openingTailPresentation = presentation
+        openingTailCommandAttemptCount = 0
+        openingTailContinuation = continuation
+        evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
+        if openingTailSettlementPending, !openingTailPositioned {
+            scheduleOpeningTailFrame()
+        }
     }
 
     func requestCatchUp(reduceMotion: Bool) {
@@ -687,11 +790,17 @@ final class ChatScrollCoordinator {
         switch applied.destination {
         case .resetToBottom:
             bindingIsReleased = false
-            settleOpeningTailIfPossible(allowsBoundarySettlement: false)
         case .releaseBinding:
             bindingIsReleased = true
-        case .tail, .offsetY:
+        case .tail, .openingTail, .offsetY:
             bindingIsReleased = false
+        }
+
+        if openingTailCommandToken == applied.token {
+            // Submission is not physical completion. Retain the token until a
+            // later display-frame/evidence pair proves settlement, preventing
+            // multiple SwiftUI binding writes in one render transaction.
+            scheduleOpeningTailFrame()
         }
 
         if catchUpCommandToken == applied.token {
@@ -913,6 +1022,7 @@ final class ChatScrollCoordinator {
         guard !bindingIsReleased, command == nil,
               followFrameTask == nil, catchUpTask == nil,
               catchUpPhase == .none, !isPrependingHistory,
+              !openingTailSettlementPending,
               !isUserInteracting, !isScrollAnimating,
               geometry.isAtCatchUpBoundary else { return }
         publish(.releaseBinding, animation: .disabled, origin: .binding)
@@ -1087,41 +1197,215 @@ final class ChatScrollCoordinator {
         }
     }
 
-    @discardableResult
-    private func settleOpeningTailIfPossible(allowsBoundarySettlement: Bool) -> Bool {
+    private func evaluateOpeningTailIfPossible(
+        allowsUnrealizedTailCommand: Bool,
+        schedulesPositionedFrame: Bool = true
+    ) {
         guard openingTailSettlementPending,
               openingTailPresentation == presentation,
-              let targetRenderedID = openingTailTargetRenderedID,
-              let targetSample = semanticFrames[targetRenderedID],
-              targetSample.layoutEpoch == layoutEpoch,
-              let frameGeometryRevision = openingTailExpectedFrameGeometryRevision,
-              geometry.isValid else { return false }
+              let targetRenderedID = openingTailTargetRenderedID else { return }
 
-        if geometry.isAtCatchUpBoundary {
-            // A boundary sample that predates an offscreen expected tail may be
-            // transient pre-layout geometry. A later geometry callback or an
-            // expected tail visibly inside the current viewport proves final
-            // undersized/already-settled layout without arbitrary row evidence.
-            let expectedTailIsVisible = targetSample.frame.maxY > 0
-                && targetSample.frame.minY < geometry.containerHeight
-            guard expectedTailIsVisible || (
-                allowsBoundarySettlement && geometryRevision > frameGeometryRevision
-            ) else { return false }
-            clearOpeningTailSettlement()
-            return false
+        let targetSample = openingTailTargetSample
+        let hasCurrentTarget = targetSample?.layoutEpoch == layoutEpoch
+        let targetIsVisible = hasCurrentTarget
+            && targetSample!.frame.maxY > 0
+            && targetSample!.frame.minY < geometry.containerHeight
+        let physicallyPositioned = geometry.isPlausibleOpeningViewport
+            && geometry.isAtCatchUpBoundary
+            && targetIsVisible
+
+        if physicallyPositioned {
+            openingTailCommandToken = nil
+            openingTailCommandSemanticRevision = nil
+            openingTailCommandGeometryRevision = nil
+            if !openingTailPositioned {
+                openingTailPositioned = true
+                let continuation = openingTailContinuation
+                openingTailContinuation = nil
+                continuation?.resume(returning: true)
+            }
+            if openingTailRevealCompleted, schedulesPositionedFrame {
+                scheduleOpeningTailFrame()
+            }
+            return
         }
 
-        guard canAutomaticallyFollow, command == nil else { return false }
-        clearOpeningTailSettlement()
-        publish(.tail, animation: .disabled, origin: .presentation)
-        return true
+        if let openingCommandToken = openingTailCommandToken {
+            let hasFreshEvidence = semanticFrameRevision > (openingTailCommandSemanticRevision ?? semanticFrameRevision)
+                || geometryRevision > (openingTailCommandGeometryRevision ?? geometryRevision)
+            if hasFreshEvidence, command?.token != openingCommandToken {
+                scheduleOpeningTailFrame()
+            }
+            return
+        }
+
+        guard geometry.isValid,
+              canAutomaticallyFollow, command == nil,
+              hasCurrentTarget || allowsUnrealizedTailCommand else { return }
+        guard let targetRenderedID = openingTailTargetRenderedID else { return }
+        publish(.openingTail(targetRenderedID), animation: .disabled, origin: .presentation)
+        openingTailCommandToken = command?.token
+        openingTailCommandSemanticRevision = semanticFrameRevision
+        openingTailCommandGeometryRevision = geometryRevision
+        openingTailCommandAttemptCount &+= 1
     }
 
-    private func clearOpeningTailSettlement() {
+    private func scheduleOpeningTailFrame() {
+        guard openingTailSettlementPending,
+              openingTailPresentation == presentation else { return }
+        openingTailFrameTask?.cancel()
+        openingTailFrameTaskGeneration &+= 1
+        let taskGeneration = openingTailFrameTaskGeneration
+        let admittedPresentation = presentation
+        let admittedSemanticRevision = semanticFrameRevision
+        let admittedGeometryRevision = geometryRevision
+        openingTailFrameTask = Task { [weak self, frameScheduler] in
+            do {
+                try await frameScheduler.nextFrame()
+                try Task.checkCancellation()
+            } catch {
+                guard let self,
+                      self.presentation == admittedPresentation,
+                      self.openingTailFrameTaskGeneration == taskGeneration else { return }
+                // A display-frame helper can be cancelled independently of the
+                // owning presentation task. Physical semantic/geometry callbacks
+                // remain authoritative and may still complete positioning.
+                self.openingTailFrameTask = nil
+                return
+            }
+            guard let self,
+                  self.presentation == admittedPresentation,
+                  self.openingTailSettlementPending,
+                  self.openingTailFrameTaskGeneration == taskGeneration else { return }
+            self.openingTailFrameTask = nil
+            let revisionsAreStable = self.semanticFrameRevision == admittedSemanticRevision
+                && self.geometryRevision == admittedGeometryRevision
+            let hasFreshCommandEvidence = self.semanticFrameRevision
+                > (self.openingTailCommandSemanticRevision ?? self.semanticFrameRevision)
+                || self.geometryRevision
+                > (self.openingTailCommandGeometryRevision ?? self.geometryRevision)
+            if !self.openingTailPositioned,
+               let openingCommandToken = self.openingTailCommandToken,
+               self.command?.token != openingCommandToken,
+               hasFreshCommandEvidence || self.openingTailCommandAttemptCount < 2 {
+                // Permit one bounded second exact-ID submission if SwiftUI
+                // consumed the first against a provisional lazy layout. Further
+                // writes require new semantic or geometry evidence.
+                self.openingTailCommandToken = nil
+                self.openingTailCommandSemanticRevision = nil
+                self.openingTailCommandGeometryRevision = nil
+            }
+            self.evaluateOpeningTailIfPossible(
+                allowsUnrealizedTailCommand: true,
+                schedulesPositionedFrame: false
+            )
+            guard self.openingTailSettlementPending,
+                  self.openingTailFrameTaskGeneration == taskGeneration else { return }
+            if self.openingTailPositioned,
+               self.openingTailRevealCompleted,
+               revisionsAreStable,
+               self.openingTailViewportIsPhysicallySettled {
+                if self.openingTailStableSemanticRevision == admittedSemanticRevision,
+                   self.openingTailStableGeometryRevision == admittedGeometryRevision {
+                    self.openingTailStableFrameCount &+= 1
+                } else {
+                    self.openingTailStableSemanticRevision = admittedSemanticRevision
+                    self.openingTailStableGeometryRevision = admittedGeometryRevision
+                    self.openingTailStableFrameCount = 1
+                }
+                if self.openingTailStableFrameCount >= 2 {
+                    self.finishOpeningTailSettlement()
+                } else {
+                    self.scheduleOpeningTailFrame()
+                }
+            } else if self.openingTailPositioned && self.openingTailRevealCompleted {
+                self.openingTailStableFrameCount = 0
+                self.openingTailStableSemanticRevision = nil
+                self.openingTailStableGeometryRevision = nil
+                self.scheduleOpeningTailFrame()
+            }
+        }
+    }
+
+    private var openingTailViewportIsPhysicallySettled: Bool {
+        guard openingTailTargetRenderedID != nil,
+              let targetSample = openingTailTargetSample,
+              targetSample.layoutEpoch == layoutEpoch else { return false }
+        return geometry.isPlausibleOpeningViewport
+            && geometry.isAtCatchUpBoundary
+            && targetSample.frame.maxY > 0
+            && targetSample.frame.minY < geometry.containerHeight
+    }
+
+    private func finishOpeningTailSettlement() {
+        let token = openingTailToken
+        openingTailFrameTaskGeneration &+= 1
+        openingTailFrameTask?.cancel()
+        openingTailFrameTask = nil
         openingTailSettlementPending = false
+        openingTailToken = nil
         openingTailTargetRenderedID = nil
+        openingTailTargetSample = nil
         openingTailPresentation = nil
-        openingTailExpectedFrameGeometryRevision = nil
+        openingTailCommandToken = nil
+        openingTailCommandSemanticRevision = nil
+        openingTailCommandGeometryRevision = nil
+        openingTailCommandAttemptCount = 0
+        openingTailPositioned = false
+        openingTailRevealCompleted = false
+        openingTailStableFrameCount = 0
+        openingTailStableSemanticRevision = nil
+        openingTailStableGeometryRevision = nil
+        let continuation = openingTailContinuation
+        openingTailContinuation = nil
+        continuation?.resume(returning: true)
+        if let token { resumeOpeningTailFinalWaiters(token: token) }
+        releaseAtBottom()
+        requestBindingReleaseIfSettled()
+    }
+
+    private func clearOpeningTailSettlement(
+        ifToken expectedToken: Int? = nil,
+        positioningSucceeded: Bool = false
+    ) {
+        if let expectedToken, openingTailToken != expectedToken { return }
+        let token = openingTailToken
+        openingTailFrameTaskGeneration &+= 1
+        openingTailFrameTask?.cancel()
+        openingTailFrameTask = nil
+        if let commandToken = openingTailCommandToken,
+           command?.token == commandToken { clearCommand() }
+        openingTailSettlementPending = false
+        openingTailToken = nil
+        openingTailTargetRenderedID = nil
+        openingTailTargetSample = nil
+        openingTailPresentation = nil
+        openingTailCommandToken = nil
+        openingTailCommandSemanticRevision = nil
+        openingTailCommandGeometryRevision = nil
+        openingTailCommandAttemptCount = 0
+        openingTailPositioned = false
+        openingTailRevealCompleted = false
+        openingTailStableFrameCount = 0
+        openingTailStableSemanticRevision = nil
+        openingTailStableGeometryRevision = nil
+        let continuation = openingTailContinuation
+        openingTailContinuation = nil
+        continuation?.resume(returning: positioningSucceeded)
+        if let token { resumeOpeningTailFinalWaiters(token: token) }
+    }
+
+    private func resumeOpeningTailFinalWaiter(id: Int, token: Int) {
+        guard let index = openingTailFinalWaiters.firstIndex(where: {
+            $0.id == id && $0.token == token
+        }) else { return }
+        openingTailFinalWaiters.remove(at: index).continuation.resume()
+    }
+
+    private func resumeOpeningTailFinalWaiters(token: Int) {
+        let admitted = openingTailFinalWaiters.filter { $0.token == token }
+        openingTailFinalWaiters.removeAll { $0.token == token }
+        admitted.forEach { $0.continuation.resume() }
     }
 
     private func advanceLayoutEpoch() {

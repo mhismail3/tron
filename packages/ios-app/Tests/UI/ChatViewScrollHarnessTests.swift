@@ -102,6 +102,35 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("the first visible frame of a maximum-row transcript is the exact tail")
+    func maximumRowOpeningNeverPresentsBlankViewport() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            let builder = SessionScenarioBuilder(seed: 1_204)
+            var snapshot = try builder.openingTail(targetEncodedBytes: 10_000)
+            snapshot.transcript = try (0..<ChatTranscriptPageRequest.maximumItemCount).map {
+                try harnessMessage(id: "long-opening-\($0)")
+            }
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = snapshot.transcript.count
+            let expectedRowCount = snapshot.transcript.count
+
+            try await withHarness(snapshot: snapshot) { harness in
+                let firstReady = try await harness.recorder.waitUntil { $0.observation.isReady }
+                #expect(firstReady.observation.installedProjectionRowCount == expectedRowCount)
+                #expect(firstReady.observation.visibleRowIDs.contains(harness.lastTranscriptID))
+                #expect(firstReady.observation.visibleRowIDs.contains("transcript-bottom"))
+                #expect(firstReady.observation.geometry.isPlausibleOpeningViewport)
+                #expect(firstReady.observation.geometry.distanceFromBottom
+                    <= ChatTranscriptGeometry.catchUpDistance)
+                #expect(firstReady.nativeGeometryMatches)
+                #expect(!firstReady.observation.visibleRowIDs.isEmpty)
+                #expect(harness.recorder.samples.filter(\.observation.isReady).allSatisfy {
+                    !$0.observation.visibleRowIDs.isEmpty
+                })
+            }
+        }
+    }
+
     @Test("readiness is recorded only after a display-link frame")
     func firstReadyFrame() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -603,8 +632,20 @@ struct ChatViewScrollHarnessTests {
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         operation: @escaping @MainActor @Sendable (ChatViewScrollHarness) async throws -> Void
     ) async throws {
+        try await withHarness(
+            snapshot: SessionScenarioBuilder(seed: seed).openingTail(targetEncodedBytes: 10_000),
+            displayFrameScheduler: displayFrameScheduler,
+            operation: operation
+        )
+    }
+
+    private func withHarness(
+        snapshot: SessionSnapshot,
+        displayFrameScheduler: DisplayFrameScheduler = .displayLink,
+        operation: @escaping @MainActor @Sendable (ChatViewScrollHarness) async throws -> Void
+    ) async throws {
         let harness = try ChatViewScrollHarness(
-            seed: seed,
+            snapshot: snapshot,
             displayFrameScheduler: displayFrameScheduler
         )
         do {
@@ -679,7 +720,7 @@ final class ChatViewScrollHarness {
         performanceSignposts: (any PerformanceSignposting)? = nil
     ) throws {
         self.snapshot = snapshot
-        transcriptIDs = Set(snapshot.transcript.map(\.id))
+        transcriptIDs = Set(snapshot.transcript.map(\.id)).union(["transcript-bottom"])
         firstTranscriptID = try Self.require(snapshot.transcript.first?.id)
         lastTranscriptID = try Self.require(snapshot.transcript.last?.id)
         let signposts = RecordingPerformanceSignposts()
@@ -822,6 +863,7 @@ final class ChatViewScrollHarness {
     }
 
     func cleanup() {
+        probe.cancelPresentation()
         recorder.stop()
         window.isHidden = true
         window.rootViewController = nil

@@ -18,6 +18,43 @@ struct ChatTranscriptPresentationTests {
         #expect(geometry.isAtCatchUpBoundary)
     }
 
+    @Test("opening plausibility distinguishes a physical tail from overflow overshoot")
+    func openingViewportPlausibility() {
+        let bottom = ChatTranscriptGeometry(
+            offsetY: 600,
+            contentHeight: 1_000,
+            containerHeight: 400,
+            visibleBottomY: 1_000
+        )
+        let overshoot = ChatTranscriptGeometry(
+            offsetY: 1_200,
+            contentHeight: 1_000,
+            containerHeight: 400,
+            visibleBottomY: 1_600
+        )
+        let undersized = ChatTranscriptGeometry(
+            offsetY: 0,
+            contentHeight: 180,
+            containerHeight: 400,
+            visibleTopY: 0,
+            visibleBottomY: 400
+        )
+        let undersizedOvershoot = ChatTranscriptGeometry(
+            offsetY: 100,
+            contentHeight: 180,
+            containerHeight: 400,
+            visibleTopY: 100,
+            visibleBottomY: 500
+        )
+
+        #expect(bottom.isPlausibleOpeningViewport)
+        #expect(bottom.isAtCatchUpBoundary)
+        #expect(!overshoot.isPlausibleOpeningViewport)
+        #expect(overshoot.isAtCatchUpBoundary)
+        #expect(undersized.isPlausibleOpeningViewport)
+        #expect(!undersizedOvershoot.isPlausibleOpeningViewport)
+    }
+
     @Test("extension widgets remain canonical but are temporarily hidden")
     func extensionWidgetPresentationIsSuppressed() {
         let widgets = [
@@ -225,7 +262,7 @@ struct ChatTranscriptPresentationTests {
         #expect(idle.identity != anotherIdle.identity)
     }
 
-    @Test("authoritative sync reveals immediately without geometry callbacks")
+    @Test("authoritative sync remains covered until the physical viewport is positioned")
     func chatOpenPresentationState() {
         var state = ChatOpenPresentationState(sessionID: "session-a")
         let epoch = state.begin()
@@ -237,6 +274,17 @@ struct ChatTranscriptPresentationTests {
 
         let installed = state.installAuthoritativeBaseline(sessionID: "session-a", epoch: epoch)
         #expect(installed)
+        #expect(state.phase == .positioning)
+        let wrongPositionedSession = state.installPositionedViewport(
+            sessionID: "session-b", epoch: epoch
+        )
+        let stalePositionedEpoch = state.installPositionedViewport(
+            sessionID: "session-a", epoch: epoch - 1
+        )
+        let positioned = state.installPositionedViewport(sessionID: "session-a", epoch: epoch)
+        #expect(!wrongPositionedSession)
+        #expect(!stalePositionedEpoch)
+        #expect(positioned)
         #expect(state.phase == .ready)
     }
 

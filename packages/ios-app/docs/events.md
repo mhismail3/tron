@@ -86,11 +86,13 @@ admits and reduces mounted-session topics:
 
 A newly navigated chat opens exactly once and replaces any disposable cached or
 previously expanded projection with a fresh bounded authoritative latest tail.
-It enters the visible event-rendering state as soon as the authoritative two-phase
-handshake completes. Readiness does not wait on native scroll positioning, but final opening-tail
-placement is armed with the exact installed timeline-tail rendered ID. It ignores auxiliary rows and
-transient boundary geometry until that expected current-layout row and correlated viewport evidence prove
-the lazy transcript is materialized; direct user interaction cancels that arm. The composer
+After the authoritative two-phase handshake completes, the projection remains behind
+the opaque opening surface until the exact physical marker after transcript and queue rows intersects
+a plausible native bottom viewport. An exact-ID command realizes a missing lazy tail; submitted commands,
+clamped negative bottom distance, auxiliary rows, transient boundary geometry, and overflow overshoot are
+not settlement evidence. The positioned transcript then fades/rises into view while the tail binding remains
+owned through animation completion and two unchanged display frames. Direct user or accessibility interaction
+cancels that arm. The composer
 remains visible throughout opening, while sending stays disabled until readiness.
 Session subscription ownership is token-scoped end to end. The open response remains
 provisional until sync acknowledgement and exact route-intent revalidation; baseline plus its

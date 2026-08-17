@@ -162,14 +162,16 @@ counts every runtime membership state examined in `toolsInspected`, and reports 
 descriptors changed in `toolsPatched`. Opening
 a new chat presentation always synchronizes a fresh authoritative bounded latest page; disposable cached or previously paged prefixes are never revealed as
 its baseline. The transcript remains behind a nonblank opening surface until the
-two-phase `session.open`/`session.sync` handshake installs its authoritative tail and
-the exact initial transcript projection, then the whole stage fades and rises in (opacity
-only under Reduce Motion). The first-ready performance interval
-closes only after the next display-link frame proves that ready state was presented.
-Native `ScrollPosition` starts at the
-bottom and receives one same-turn best-effort positioning hint before interaction
-is enabled, but physical layout callbacks are never a correctness gate because
-SwiftUI may coalesce them. Test builds can admit one synthetic authoritative
+two-phase `session.open`/`session.sync` handshake installs its authoritative tail, the
+exact initial transcript projection, and a physically verified viewport at the marker
+after transcript and queue rows. Rows remain fully realizable beneath that opaque cover;
+an opacity-zero lazy stack is never used as a layout gate. Only then does the cover fade
+while the positioned transcript rises eight points (opacity only under Reduce Motion).
+The first-ready performance interval closes after the next display-link frame proves
+that ready state was presented. Opening uses an exact-ID `ScrollPosition` command when
+the marker is not yet realized, rejects native overflow overshoot as a bottom boundary,
+and retains the position binding through animation completion plus two unchanged
+presented frames before releasing it. Test builds can admit one synthetic authoritative
 snapshot through the same read gate and skip only the network opening handshake.
 The hosted harness still mounts the production chat, lazy transcript, composer
 inset, and native scroll view; a display-link recorder coalesces geometry and
@@ -450,12 +452,15 @@ state; presentation and command generations; display-frame follow and catch-up t
 and the exact ordinary-layout and paging semantic-anchor transactions. It publishes one exact-token typed
 command for `ChatView` to execute and acknowledge; presentation reset and settled
 binding release are command destinations rather than direct view policy. Opening arms final tail settlement
-with the exact rendered ID of the installed timeline tail. Auxiliary/runtime rows cannot admit it, and transient
-boundary geometry cannot clear it before that expected current-layout row exists and a later geometry sample
-proves final settlement. Exact tail evidence plus overflow emits one disabled presentation command; exact
-evidence plus a later undersized/already-settled viewport clears without defeating top alignment. An empty
-timeline takes an explicit no-transcript path, while any direct/native/accessibility interaction cancels the
-pending target permanently. Automatic streaming growth is
+with the exact physical marker after installed transcript and queue rows. Auxiliary/runtime rows cannot admit
+it, transient boundary geometry cannot clear it, and native visible geometry beyond an overflowing content edge
+is treated as overshoot rather than a settled bottom. If the marker is unrealized, one frame-gated exact-ID command
+forces lazy realization; command submission remains owned until current-layout marker and correlated native
+geometry prove physical settlement. At most one bounded second exact-ID submission is allowed when SwiftUI
+consumes the first against provisional lazy layout; later writes require new layout evidence. Undersized content remains top aligned. The opening surface then fades away
+while the binding remains owned through animation completion and two stable presented frames, preventing later
+lazy content-size correction from exposing empty space. An empty timeline takes an explicit no-transcript path,
+while any direct/native/accessibility interaction cancels the pending target permanently. Automatic streaming growth is
 latest-sample-wins behind one injected display-frame wait, emits at most one tail
 command per presented frame, and emits none inside the practical bottom boundary.
 Direct/native/accessibility interaction synchronously invalidates pending automatic

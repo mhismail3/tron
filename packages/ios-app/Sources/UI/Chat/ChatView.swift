@@ -309,16 +309,15 @@ struct ChatView: View {
                         queuedMessageRows(installed)
                     }
                 }
-                Color.clear
-                    .frame(height: 12)
-                    .id("transcript-bottom")
-                    .accessibilityHidden(true)
+                transcriptTailMarker
             }
             .padding(.vertical, 12)
             .scrollTargetLayout()
-            .opacity(isTranscriptReady ? 1 : 0)
+            // Keep rows physically realizable beneath the opaque opening surface.
+            // The cover fades away only after exact-tail positioning; opacity-zero
+            // lazy content can defer the very target needed to position it.
             .offset(y: isTranscriptReady || reduceMotion ? 0 : 8)
-            .animation(reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.26), value: isTranscriptReady)
+            .animation(transcriptRevealAnimation, value: isTranscriptReady)
             .accessibilityHidden(!isTranscriptReady)
             .allowsHitTesting(isTranscriptReady)
         }
@@ -347,7 +346,7 @@ struct ChatView: View {
                 hostedProbe?.recordScrollSettle(distanceFromBottom: geometry.distanceFromBottom)
             }
             #endif
-            guard isTranscriptReady, admitsNativeScrollCallbacks else { return }
+            guard admitsScrollGeometryCallbacks, admitsNativeScrollCallbacks else { return }
             if geometry.hasViewportChange(from: previous) {
                 scrollCoordinator.viewportChanged(previous: previous, current: geometry)
             } else {
@@ -383,6 +382,7 @@ struct ChatView: View {
             }
         }
         .overlay { openingSurface }
+        .animation(transcriptRevealAnimation, value: isTranscriptReady)
     }
 
     @ViewBuilder
@@ -484,6 +484,30 @@ struct ChatView: View {
         }
     }
 
+    private var transcriptTailMarker: some View {
+        let rowLayoutEpoch = scrollCoordinator.layoutEpoch
+        return Color.clear
+            .frame(height: 12)
+            .id("transcript-bottom")
+            .accessibilityHidden(true)
+            .onGeometryChange(for: ChatSemanticFrameObservation.self) { geometry in
+                ChatSemanticFrameObservation(
+                    layoutEpoch: rowLayoutEpoch,
+                    frame: geometry.frame(in: .scrollView(axis: .vertical)),
+                    entranceAdmissionTag: nil
+                )
+            } action: { sample in
+                scrollCoordinator.semanticFrameChanged(
+                    renderedID: "transcript-bottom",
+                    layoutEpoch: sample.layoutEpoch,
+                    frame: sample.frame
+                )
+                #if HOSTED_TEST
+                hostedProbe?.updateRowFrame(id: "transcript-bottom", frame: sample.frame)
+                #endif
+            }
+    }
+
     private var selectedAuthoritativeSnapshot: SessionSnapshot? {
         model.authoritativeSnapshot(for: sessionID)
     }
@@ -574,6 +598,14 @@ struct ChatView: View {
 
     private var isTranscriptReady: Bool { openPresentation.phase == .ready }
 
+    private var transcriptRevealAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.26)
+    }
+
+    private var admitsScrollGeometryCallbacks: Bool {
+        openPresentation.phase == .positioning || openPresentation.phase == .ready
+    }
+
     private var admitsNativeScrollCallbacks: Bool {
         #if HOSTED_TEST
         hostedProbe?.usesDrivenScrollAuthority != true
@@ -584,7 +616,7 @@ struct ChatView: View {
 
     @ViewBuilder private var openingSurface: some View {
         switch openPresentation.phase {
-        case .opening:
+        case .opening, .positioning:
             VStack(spacing: 12) {
                 ProgressView().controlSize(.regular)
                 Text("Opening conversation…")
@@ -594,6 +626,7 @@ struct ChatView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.tronBackground)
             .accessibilityElement(children: .combine)
+            .transition(.opacity)
         case .failed(let message):
             VStack(spacing: 12) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -667,11 +700,22 @@ struct ChatView: View {
                     }
                     return
                 }
-                openedGeneration = nil
-                positionLatestTail(
+                let positioned = await positionLatestTail(
                     epoch: epoch,
-                    targetRenderedID: installed.timeline.ids.last
+                    targetRenderedID: physicalOpeningTailID(for: installed)
                 )
+                guard positioned,
+                      !Task.isCancelled,
+                      revealPositionedTranscript(epoch: epoch) else {
+                    performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                    await model.closeSessionPresentation(sessionID, generation: generation)
+                    if modelPresentationGeneration == generation {
+                        modelPresentationGeneration = nil
+                        transcriptPresentation.reset()
+                    }
+                    return
+                }
+                openedGeneration = nil
                 _ = await completeFirstReadyFrame(interval, epoch: epoch)
             } catch {
                 if let generation = openedGeneration {
@@ -794,17 +838,43 @@ struct ChatView: View {
             },
             invalidatePresentation: {
                 scrollCoordinator.resetForPresentation()
+            },
+            cancelPresentation: {
+                scrollCoordinator.cancel()
             }
         )
-        probe.markReady()
-        positionLatestTail(
+        let positioned = await positionLatestTail(
             epoch: epoch,
-            targetRenderedID: installed.timeline.ids.last
+            targetRenderedID: physicalOpeningTailID(for: installed)
         )
-        _ = await completeFirstReadyFrame(interval, epoch: epoch)
+        guard positioned,
+              revealPositionedTranscript(epoch: epoch) else {
+            performanceSignposts.end(interval, result: .discarded, metrics: .none)
+            return
+        }
+        probe.markReady()
+        if transcriptGeometry.isAtCatchUpBoundary {
+            probe.recordScrollSettle(distanceFromBottom: transcriptGeometry.distanceFromBottom)
+        }
+        let presented = await completeFirstReadyFrame(interval, epoch: epoch)
+        if presented { await scrollCoordinator.waitForOpeningTailSettlement() }
         probe.recordReadyFrameCompletion()
     }
     #endif
+
+    @MainActor
+    private func revealPositionedTranscript(epoch: Int) -> Bool {
+        withAnimation(
+            transcriptRevealAnimation,
+            completionCriteria: .logicallyComplete
+        ) {
+            openPresentation.installPositionedViewport(sessionID: sessionID, epoch: epoch)
+        } completion: {
+            guard openPresentation.epoch == epoch,
+                  openPresentation.phase == .ready else { return }
+            scrollCoordinator.openingRevealCompleted()
+        }
+    }
 
     @MainActor
     private func completeFirstReadyFrame(_ interval: PerformanceInterval, epoch: Int) async -> Bool {
@@ -828,26 +898,43 @@ struct ChatView: View {
         }
     }
 
+    private func physicalOpeningTailID(for installed: InstalledChatTranscript) -> String? {
+        installed.displayedItems.isEmpty && installed.queuedMessages.isEmpty
+            ? nil
+            : "transcript-bottom"
+    }
+
     @MainActor
-    private func positionLatestTail(epoch: Int, targetRenderedID: String?) {
-        // Arm coordinator-owned final placement for the exact installed tail.
-        // Empty timelines take the explicit no-transcript path.
+    private func positionLatestTail(epoch: Int, targetRenderedID: String?) async -> Bool {
+        // The opening surface remains opaque until the exact physical marker
+        // after transcript and queue rows intersects a plausible bottom viewport.
         guard !Task.isCancelled,
               openPresentation.epoch == epoch,
-              openPresentation.phase == .ready else { return }
-        scrollCoordinator.requestOpeningTail(targetRenderedID: targetRenderedID)
+              openPresentation.phase == .positioning else { return false }
+        let positioned = await scrollCoordinator.positionOpeningTail(
+            targetRenderedID: targetRenderedID
+        )
+        if positioned { performanceTracker.settleScroll() }
+        return positioned
+            && !Task.isCancelled
+            && openPresentation.epoch == epoch
+            && openPresentation.phase == .positioning
     }
 
     @MainActor
     private func executePendingScrollCommand() {
         guard let command = scrollCoordinator.command else { return }
-        performanceTracker.beginScrollCommand()
+        if command.destination != .releaseBinding {
+            performanceTracker.beginScrollCommand()
+        }
         let update = {
             switch command.destination {
             case .resetToBottom:
                 transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
             case .tail:
                 transcriptScrollPosition.scrollTo(edge: .bottom)
+            case .openingTail(let renderedID):
+                transcriptScrollPosition.scrollTo(id: renderedID, anchor: .bottom)
             case .offsetY(let offsetY):
                 transcriptScrollPosition.scrollTo(y: offsetY)
             case .releaseBinding:
@@ -872,10 +959,12 @@ struct ChatView: View {
             performanceTracker.settleScroll()
         }
         #if HOSTED_TEST
-        hostedProbe?.recordScrollCommand(
-            isAutomatic: command.origin == .automaticFollow,
-            isSmooth: command.animation != .disabled
-        )
+        if command.destination != .releaseBinding {
+            hostedProbe?.recordScrollCommand(
+                isAutomatic: command.origin == .automaticFollow,
+                isSmooth: command.animation != .disabled
+            )
+        }
         #endif
         scrollCoordinator.commandApplied(command)
     }
