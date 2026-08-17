@@ -41,6 +41,12 @@ admits and reduces mounted-session topics:
   authoritative pair. Legacy string-only projections remain visibly locked and direct the user to
   update Tron on Mac. Confirmed clear may remove both rich and legacy projections immediately,
   while edit/reorder/remove waits for the authoritative revisioned snapshot;
+- `compactionQueued` is an optional rolling snapshot field owned by the Gateway's
+  single pending maintenance slot. iOS renders it as explicit runtime feedback and never
+  inserts a transcript entry or retries the mutation. The row is replaced by existing
+  compacting feedback when the Gateway picks up the work, then by the canonical JSONL
+  compaction entry. `automaticCompactionEnabled` likewise reports runtime truth rather
+  than a mobile inference; older snapshots may omit either field;
 - provider, package, settings, trust, and custom-model mutation invalidations
   advance owner revisions across connected clients; each visible surface reloads
   its explicit global or project scope instead of sharing a wrong-scope payload;

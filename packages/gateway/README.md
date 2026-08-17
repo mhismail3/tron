@@ -143,6 +143,19 @@ Prompt RPC admission follows the pinned runtime's preflight callback as its sole
 the Gateway does not race it against a local deadline that could report rejection while
 the same uncancelled runtime call later starts canonical work.
 
+Manual compaction has a separate Gateway-owned single-entry maintenance admission. Its
+synchronous claim covers pending, direct, and queued execution, so a second request is rejected
+rather than serialized behind the first. An idle request starts canonical compaction immediately.
+A request accepted during an active agent run publishes `compactionQueued`, retains the run marker,
+and keeps its command receipt pending until the exact compaction starts after final `agent_settled`
+and completes or fails. Handoff revalidates that no newer agent run owns the session, and queued
+completion awaits durable marker removal before publishing settled. Gateway shutdown synchronously
+closes runtime-slot admission, drains any already-entered creation/import critical section through the
+registry mutex, then cancels unstarted queued work and drains every captured runtime before blob disposal.
+This state is not a
+prompt queue entry and is never replayed by iOS. Snapshots also project the runtime's effective
+`automaticCompactionEnabled` value; both fields remain optional for rolling clients.
+
 Session structure/context/resource invalidations refresh
 already-presented secondary surfaces. Provider, settings, trust, package, and
 custom-model mutations publish bounded global invalidations so another connected

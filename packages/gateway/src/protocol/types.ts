@@ -216,6 +216,10 @@ export interface SessionSnapshot {
   queued: { steering: string[]; followUp: string[] };
   queueRevision?: number;
   queuedItems?: QueuedMessageState[];
+  /** Gateway-owned manual compaction waiting for the active run to settle. */
+  compactionQueued?: boolean;
+  /** Effective runtime setting; optional for rolling protocol compatibility. */
+  automaticCompactionEnabled?: boolean;
   transcript: TranscriptItem[];
   transcriptStart: number;
   transcriptTotal: number;

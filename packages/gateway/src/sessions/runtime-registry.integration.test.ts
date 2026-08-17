@@ -1228,6 +1228,546 @@ export default function (pi) {
     await waitUntil(() => !slot.isBusy);
   });
 
+  it("queues one manual compaction behind an active run and keeps its receipt pending", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-queued-compaction-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+
+    let releaseResponse!: () => void;
+    const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    let releaseCompaction!: () => void;
+    const compactionBarrier = new Promise<void>((resolve) => { releaseCompaction = resolve; });
+    const faux = fauxProvider({ provider: "tron-queued-compaction", tokensPerSecond: 10_000 });
+    faux.setResponses([async () => {
+      await responseBarrier;
+      return fauxAssistantMessage("run complete");
+    }]);
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: createModels,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const session = (slot as unknown as {
+      runtime: { session: { compact: (instructions?: string) => Promise<unknown> } };
+    }).runtime.session;
+    const compact = vi.spyOn(session, "compact").mockImplementation(async () => {
+      await compactionBarrier;
+      return {};
+    });
+    let releaseMarker!: () => void;
+    const markerBarrier = new Promise<void>((resolve) => { releaseMarker = resolve; });
+    const markerStore = (slot as unknown as {
+      dependencies: { markers: { clear: (sessionId: string) => Promise<void> } };
+    }).dependencies.markers;
+    const clearMarker = vi.spyOn(markerStore, "clear").mockImplementation(async () => markerBarrier);
+
+    await slot.prompt("start");
+    await waitUntil(() => slot.isBusy);
+    const queuedCompaction = slot.compact("Preserve exact decisions");
+    await waitUntil(() => slot.snapshot().compactionQueued === true);
+
+    expect(slot.snapshot()).toMatchObject({
+      phase: "running",
+      compactionQueued: true,
+      automaticCompactionEnabled: true,
+    });
+    expect(registry.activeSessionIds()).toContain(slot.id);
+    await expect(slot.compact()).rejects.toMatchObject({
+      code: "busy",
+      message: "A manual compaction is already pending for this session",
+    });
+    expect(compact).not.toHaveBeenCalled();
+
+    releaseResponse();
+    await waitUntil(() => compact.mock.calls.length === 1);
+    expect(compact).toHaveBeenCalledWith("Preserve exact decisions");
+    expect(slot.snapshot()).toMatchObject({ phase: "compacting", compactionQueued: false });
+    expect(registry.activeSessionIds()).toContain(slot.id);
+
+    let queuedSettled = false;
+    void queuedCompaction.then(() => { queuedSettled = true; }, () => {});
+    releaseCompaction();
+    await waitUntil(() => clearMarker.mock.calls.length === 1);
+    await Promise.resolve();
+    expect(queuedSettled).toBe(false);
+    expect(registry.activeSessionIds()).toContain(slot.id);
+    releaseMarker();
+    await expect(queuedCompaction).resolves.toEqual({ queued: true });
+    await waitUntil(() => !slot.isBusy);
+    expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
+    expect(registry.activeSessionIds()).not.toContain(slot.id);
+  });
+
+  it("cleans up queued manual compaction state when canonical compaction fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-queued-compaction-failure-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+
+    let releaseResponse!: () => void;
+    const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    const faux = fauxProvider({ provider: "tron-queued-compaction-failure", tokensPerSecond: 10_000 });
+    faux.setResponses([async () => {
+      await responseBarrier;
+      return fauxAssistantMessage("run complete");
+    }]);
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: createModels,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const session = (slot as unknown as {
+      runtime: { session: { compact: (instructions?: string) => Promise<unknown> } };
+    }).runtime.session;
+    vi.spyOn(session, "compact").mockRejectedValue(new Error("manual compaction failed"));
+
+    await slot.prompt("start");
+    await waitUntil(() => slot.isBusy);
+    const queuedCompaction = slot.compact();
+    const failure = expect(queuedCompaction).rejects.toThrow("manual compaction failed");
+    await waitUntil(() => slot.snapshot().compactionQueued === true);
+    releaseResponse();
+    await failure;
+    await waitUntil(() => !slot.isBusy);
+    expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
+    expect(slot.snapshot().operation).toBeUndefined();
+  });
+
+  it("does not publish queued compaction as settled when durable marker removal fails", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-compaction-marker-failure-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let releaseResponse!: () => void;
+    const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    const faux = fauxProvider({ provider: "tron-compaction-marker-failure", tokensPerSecond: 10_000 });
+    faux.setResponses([async () => {
+      await responseBarrier;
+      return fauxAssistantMessage("run complete");
+    }]);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      },
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const session = (slot as unknown as {
+      runtime: { session: { compact: (instructions?: string) => Promise<unknown> } };
+    }).runtime.session;
+    vi.spyOn(session, "compact").mockResolvedValue({});
+    const markerStore = (slot as unknown as {
+      dependencies: { markers: { clear: (sessionId: string) => Promise<void> } };
+    }).dependencies.markers;
+    const clearMarker = vi.spyOn(markerStore, "clear")
+      .mockRejectedValueOnce(new Error("marker removal failed"));
+
+    await slot.prompt("start");
+    await waitUntil(() => slot.isBusy);
+    const queuedCompaction = slot.compact();
+    await waitUntil(() => slot.snapshot().compactionQueued === true);
+    releaseResponse();
+    await expect(queuedCompaction).rejects.toThrow("marker removal failed");
+    expect(slot.snapshot()).toMatchObject({ phase: "interrupted", compactionQueued: false });
+    expect(slot.snapshot().operation).toBeUndefined();
+    clearMarker.mockRestore();
+  });
+
+  it("admits only one direct manual compaction and retains the claim through completion", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-direct-compaction-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    let releaseCompaction!: () => void;
+    const barrier = new Promise<void>((resolve) => { releaseCompaction = resolve; });
+    const session = (slot as unknown as {
+      runtime: { session: { compact: (instructions?: string) => Promise<unknown> } };
+    }).runtime.session;
+    const compact = vi.spyOn(session, "compact").mockImplementation(async () => {
+      await barrier;
+      return {};
+    });
+
+    const first = slot.compact("Keep decisions");
+    await waitUntil(() => slot.snapshot().phase === "compacting");
+    expect(registry.activeSessionIds()).toContain(slot.id);
+    await expect(slot.compact()).rejects.toMatchObject({
+      code: "busy",
+      message: "A manual compaction is already pending for this session",
+    });
+    expect(compact).toHaveBeenCalledTimes(1);
+
+    releaseCompaction();
+    await expect(first).resolves.toEqual({ queued: false });
+    await waitUntil(() => !slot.isBusy);
+    expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
+  });
+
+  it("cleans up a failed direct manual compaction claim", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-direct-compaction-failure-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const session = (slot as unknown as {
+      runtime: { session: { compact: (instructions?: string) => Promise<unknown> } };
+    }).runtime.session;
+    const compact = vi.spyOn(session, "compact")
+      .mockRejectedValueOnce(new Error("direct compaction failed"))
+      .mockResolvedValueOnce({});
+
+    await expect(slot.compact()).rejects.toThrow("direct compaction failed");
+    expect(slot.snapshot()).toMatchObject({ phase: "idle", compactionQueued: false });
+    expect(slot.snapshot().operation).toBeUndefined();
+    await expect(slot.compact()).resolves.toEqual({ queued: false });
+    expect(compact).toHaveBeenCalledTimes(2);
+  });
+
+  it("defers queued compaction when a newer prompt enters preflight before handoff", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-compaction-handoff-race-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const firstBarrier = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const secondBarrier = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    const faux = fauxProvider({ provider: "tron-compaction-handoff-race", tokensPerSecond: 10_000 });
+    faux.setResponses([
+      async () => { await firstBarrier; return fauxAssistantMessage("first complete"); },
+      async () => { await secondBarrier; return fauxAssistantMessage("second complete"); },
+    ]);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      },
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const runtimeSession = (slot as unknown as {
+      runtime: { session: {
+        compact: (instructions?: string) => Promise<unknown>;
+        isStreaming: boolean;
+      } };
+    }).runtime.session;
+    const compact = vi.spyOn(runtimeSession, "compact").mockResolvedValue({});
+    const lane = (slot as unknown as {
+      lane: { run<T>(operation: () => Promise<T> | T): Promise<T> };
+    }).lane;
+
+    await slot.prompt("first");
+    await waitUntil(() => runtimeSession.isStreaming);
+    const queuedCompaction = slot.compact();
+    await waitUntil(() => slot.snapshot().compactionQueued === true);
+
+    let releaseLane!: () => void;
+    let laneEntered!: () => void;
+    const laneWasEntered = new Promise<void>((resolve) => { laneEntered = resolve; });
+    const laneBarrier = new Promise<void>((resolve) => { releaseLane = resolve; });
+    const blocker = lane.run(async () => {
+      laneEntered();
+      await laneBarrier;
+    });
+    await laneWasEntered;
+    const newerPrompt = slot.prompt("newer");
+    releaseFirst();
+    await waitUntil(() => !runtimeSession.isStreaming);
+    releaseLane();
+    await blocker;
+    await newerPrompt;
+    await waitUntil(() => runtimeSession.isStreaming);
+    await lane.run(() => {});
+    expect(compact).not.toHaveBeenCalled();
+    expect(slot.snapshot().compactionQueued).toBe(true);
+
+    releaseSecond();
+    await waitUntil(() => compact.mock.calls.length === 1);
+    await expect(queuedCompaction).resolves.toEqual({ queued: true });
+    await waitUntil(() => !slot.isBusy);
+  });
+
+  it("cancels pending compaction and drains its runtime during registry shutdown", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-queued-compaction-shutdown-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let releaseResponse!: () => void;
+    const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
+    const faux = fauxProvider({ provider: "tron-queued-compaction-shutdown", tokensPerSecond: 10_000 });
+    faux.setResponses([async () => {
+      await responseBarrier;
+      return fauxAssistantMessage("run complete");
+    }]);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      },
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    const session = (slot as unknown as {
+      runtime: { session: { compact: (instructions?: string) => Promise<unknown> } };
+    }).runtime.session;
+    const compact = vi.spyOn(session, "compact").mockResolvedValue({});
+
+    await slot.prompt("start");
+    await waitUntil(() => slot.isBusy);
+    const queuedCompaction = slot.compact();
+    const queuedOutcome = queuedCompaction.then(
+      () => ({ status: "fulfilled" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+    await waitUntil(() => slot.snapshot().compactionQueued === true);
+    const shutdown = registry.dispose();
+    releaseResponse();
+
+    const outcome = await queuedOutcome;
+    expect(outcome).toMatchObject({ status: "rejected", error: { code: "cancelled" } });
+    await shutdown;
+    expect(compact).not.toHaveBeenCalled();
+    expect(registry.activeSessionIds()).toEqual([]);
+    const index = registries.indexOf(registry);
+    if (index >= 0) registries.splice(index, 1);
+  });
+
+  it("aborts and drains an in-flight direct compaction during registry shutdown", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-direct-compaction-shutdown-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    let releaseCompaction!: () => void;
+    const compactionBarrier = new Promise<void>((resolve) => { releaseCompaction = resolve; });
+    const session = (slot as unknown as {
+      runtime: { session: {
+        compact: (instructions?: string) => Promise<unknown>;
+        abortCompaction: () => void;
+      } };
+    }).runtime.session;
+    vi.spyOn(session, "compact").mockImplementation(async () => {
+      await compactionBarrier;
+      return {};
+    });
+    const originalAbort = session.abortCompaction.bind(session);
+    const abortCompaction = vi.spyOn(session, "abortCompaction").mockImplementation(() => {
+      originalAbort();
+      releaseCompaction();
+    });
+
+    const compaction = slot.compact();
+    await waitUntil(() => slot.snapshot().phase === "compacting");
+    const shutdown = registry.dispose();
+    await expect(compaction).resolves.toEqual({ queued: false });
+    await shutdown;
+    expect(abortCompaction).toHaveBeenCalled();
+    expect(registry.activeSessionIds()).toEqual([]);
+    const index = registries.indexOf(registry);
+    if (index >= 0) registries.splice(index, 1);
+  });
+
+  it("closes global slot admission before draining an already-entered creation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-registry-admission-shutdown-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let factoryEntered!: () => void;
+    let releaseFactory!: () => void;
+    const factoryWasEntered = new Promise<void>((resolve) => { factoryEntered = resolve; });
+    const factoryBarrier = new Promise<void>((resolve) => { releaseFactory = resolve; });
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => {
+        factoryEntered();
+        await factoryBarrier;
+        return ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      },
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+
+    const creating = registry.create(cwd);
+    await factoryWasEntered;
+    let shutdownFinished = false;
+    const shutdown = registry.dispose().then(() => { shutdownFinished = true; });
+    await Promise.resolve();
+    expect(shutdownFinished).toBe(false);
+    await expect(registry.create(cwd)).rejects.toMatchObject({
+      code: "conflict",
+      message: "Session runtime registry is shutting down",
+    });
+
+    releaseFactory();
+    const created = await creating;
+    await shutdown;
+    expect(shutdownFinished).toBe(true);
+    expect(registry.activeSessionIds()).toEqual([]);
+    expect((registry as unknown as { slots: Map<string, unknown> }).slots.size).toBe(0);
+    await expect(registry.acquire(created.id)).rejects.toMatchObject({ code: "conflict" });
+    const index = registries.indexOf(registry);
+    if (index >= 0) registries.splice(index, 1);
+  });
+
+  it("does not tear down blob ownership before every captured slot drains", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-registry-blob-drain-order-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+
+    let shutdownEntered!: () => void;
+    let releaseShutdown!: () => void;
+    const shutdownWasEntered = new Promise<void>((resolve) => { shutdownEntered = resolve; });
+    const shutdownBarrier = new Promise<void>((resolve) => { releaseShutdown = resolve; });
+    const originalShutdown = slot.shutdown.bind(slot);
+    let slotDrained = false;
+    vi.spyOn(slot, "shutdown").mockImplementation(async () => {
+      shutdownEntered();
+      await shutdownBarrier;
+      await originalShutdown();
+      slotDrained = true;
+    });
+    const blobs = (registry as unknown as { blobs: { dispose: () => Promise<void> } }).blobs;
+    const originalBlobDispose = blobs.dispose.bind(blobs);
+    let blobDisposeStarted = false;
+    vi.spyOn(blobs, "dispose").mockImplementation(async () => {
+      blobDisposeStarted = true;
+      expect(slotDrained).toBe(true);
+      await originalBlobDispose();
+    });
+
+    const shutdown = registry.dispose();
+    await shutdownWasEntered;
+    expect(blobDisposeStarted).toBe(false);
+    releaseShutdown();
+    await shutdown;
+    expect(slotDrained).toBe(true);
+    expect(blobDisposeStarted).toBe(true);
+    const index = registries.indexOf(registry);
+    if (index >= 0) registries.splice(index, 1);
+  });
+
   it("projects stable ordinals for parallel tools from start through completion", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-tool-order-integration-"));
     const agentDir = join(root, "agent");

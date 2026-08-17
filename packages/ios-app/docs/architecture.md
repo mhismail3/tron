@@ -567,6 +567,13 @@ translation, with its strongest edge beyond the layout boundary instead of formi
 Reduce Motion uses one static subtle emerald state, while VoiceOver retains a
 nonvisual “Tron is working” status on the active blur. Custom working messages,
 compaction, and provider retry attempts retain explicit compact rows so operational detail is never hidden.
+A manual compaction accepted during an active turn remains a Gateway-owned pending maintenance
+operation: the optional snapshot flag renders “Compaction queued” without fabricating JSONL, then
+transitions through the existing compacting row to the canonical compaction entry. One synchronous
+Gateway claim spans pending and execution, handoff revalidates against newer agent ownership, and
+settlement waits for durable run-marker retirement. The confirmed mutation stays pending until
+canonical completion; shutdown cancels only work that has not started. Older Gateways may omit queued and effective
+automatic-compaction evidence.
 A non-empty active draft replaces the trailing Stop
 action with Send and is admitted as a steering message, while an empty active
 composer retains Stop. The keyboard remains focused after steering so multiple messages can

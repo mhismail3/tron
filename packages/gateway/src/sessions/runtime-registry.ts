@@ -75,6 +75,8 @@ export class RuntimeRegistry {
   private catalogAcquisitionInvalidationGeneration = 0;
   private catalogAcquisitionAdmission: CatalogAcquisitionAdmission | undefined;
   private evictionTimer?: NodeJS.Timeout;
+  private shutdownState: "active" | "shuttingDown" | "disposed" = "active";
+  private disposalPromise: Promise<void> | undefined;
 
   constructor(
     private readonly options: {
@@ -764,8 +766,10 @@ export class RuntimeRegistry {
   }
 
   async create(cwdInput: string): Promise<RuntimeSlot> {
+    this.assertSlotAdmissionOpen();
     const trust = await this.options.trust.requireResolved(cwdInput);
     return this.mutex.run(async () => {
+      this.assertSlotAdmissionOpen();
       if (this.trustReloadProjects.has(trust.cwd)) {
         throw new GatewayError("busy", "Project trust is being reconfigured", true);
       }
@@ -781,6 +785,7 @@ export class RuntimeRegistry {
   }
 
   async acquire(sessionId: string): Promise<RuntimeSlot> {
+    this.assertSlotAdmissionOpen();
     const existing = this.slots.get(sessionId);
     if (existing && !this.ambiguousSessionIds.has(sessionId)) {
       existing.touch();
@@ -801,6 +806,7 @@ export class RuntimeRegistry {
       throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
     }
     return this.mutex.run(async () => {
+      this.assertSlotAdmissionOpen();
       const raced = this.slots.get(sessionId);
       if (raced && !this.ambiguousSessionIds.has(sessionId)) {
         raced.touch();
@@ -861,8 +867,10 @@ export class RuntimeRegistry {
   }
 
   async importFromJsonl(path: string, cwdInput: string): Promise<RuntimeSlot> {
+    this.assertSlotAdmissionOpen();
     const trust = await this.options.trust.requireResolved(cwdInput);
     return this.mutex.run(async () => {
+      this.assertSlotAdmissionOpen();
       if (this.trustReloadProjects.has(trust.cwd)) {
         throw new GatewayError("busy", "Project trust is being reconfigured", true);
       }
@@ -1032,14 +1040,43 @@ export class RuntimeRegistry {
   }
 
   async dispose(): Promise<void> {
+    if (this.shutdownState === "disposed") return;
+    if (this.disposalPromise) return this.disposalPromise;
+
+    // Close admission synchronously before waiting for any in-flight critical
+    // section. The mutex snapshot then includes every slot whose insertion had
+    // already begun and excludes every later create/acquire/import attempt.
+    this.shutdownState = "shuttingDown";
     if (this.evictionTimer) clearInterval(this.evictionTimer);
-    const busy = [...this.slots.values()].filter((slot) => slot.isBusy);
-    await Promise.allSettled(busy.map((slot) => slot.abort()));
-    await Promise.allSettled([...this.slots.values()].map(async (slot) => {
-      if (!slot.isBusy) await slot.dispose();
-    }));
-    this.slots.clear();
+    const operation = this.performDispose();
+    this.disposalPromise = operation;
+    return operation;
+  }
+
+  private async performDispose(): Promise<void> {
+    const entries = await this.mutex.run(() => [...this.slots.entries()]);
+    const results = await Promise.allSettled(entries.map(([, slot]) => slot.shutdown()));
+    const failures: unknown[] = [];
+    for (let index = 0; index < entries.length; index += 1) {
+      const [id, slot] = entries[index]!;
+      const result = results[index]!;
+      if (result.status === "fulfilled") {
+        if (this.slots.get(id) === slot) this.slots.delete(id);
+      } else {
+        failures.push(result.reason);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "One or more session runtimes failed to shut down");
+    }
     await this.blobs.dispose();
+    this.shutdownState = "disposed";
+  }
+
+  private assertSlotAdmissionOpen(): void {
+    if (this.shutdownState !== "active") {
+      throw new GatewayError("conflict", "Session runtime registry is shutting down", true);
+    }
   }
 
   acquireBlob(id: string) {

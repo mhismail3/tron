@@ -268,7 +268,7 @@ struct SessionMutationServiceTests {
             }
             try await completeVoid(
                 compact, socket: harness.socket, frameIndex: &frameIndex,
-                method: "session.compact", result: .object(["compacted": .bool(true)]),
+                method: "session.compact", result: .object(["compacted": .bool(true), "queued": .bool(true)]),
                 expectedParams: ["sessionId": .string("compact-session")],
                 absentParams: ["instructions"]
             )

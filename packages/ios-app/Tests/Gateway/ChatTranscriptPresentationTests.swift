@@ -82,6 +82,28 @@ struct ChatTranscriptPresentationTests {
         #expect(runtime.first?.title == "Still working")
     }
 
+    @Test("queued compaction is explicit until canonical compaction starts")
+    func queuedCompactionPresentation() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.compactionQueued = true
+        snapshot.extensionUI.working = .init(message: nil, visible: true)
+
+        let queued = ChatNotificationPresentation.runtime(in: snapshot)
+        #expect(queued.map(\.id) == ["runtime-compaction-queued"])
+        #expect(queued.first?.title == "Compaction queued")
+        #expect(queued.first?.detail == "After current work")
+        #expect(queued.first?.semanticID == nil)
+        #expect(queued.first?.material == .flat)
+
+        snapshot.compactionQueued = false
+        snapshot.phase = .compacting
+        let active = ChatNotificationPresentation.runtime(in: snapshot)
+        #expect(active.count == 1)
+        #expect(active.first?.title == "Compacting context")
+        #expect(active.first?.id == "runtime-working")
+    }
+
     @Test("ordinary running state uses ambient bottom activity without a transcript row")
     func ordinaryRunningUsesAmbientActivity() throws {
         var snapshot = try fixture(transcript: "[]")

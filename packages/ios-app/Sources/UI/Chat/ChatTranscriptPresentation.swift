@@ -559,6 +559,18 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
 
     static func runtime(in snapshot: SessionSnapshot) -> [ChatNotificationPresentation] {
         var values: [ChatNotificationPresentation] = []
+        if snapshot.compactionQueued == true {
+            values.append(ChatNotificationPresentation(
+                id: "runtime-compaction-queued",
+                semanticID: nil,
+                icon: "arrow.down.right.and.arrow.up.left",
+                title: "Compaction queued",
+                detail: "After current work",
+                body: nil,
+                tone: .accent,
+                material: .flat
+            ))
+        }
         if let working = ChatRuntimeWorkingPresentation(
             phase: snapshot.phase,
             working: snapshot.extensionUI.working,

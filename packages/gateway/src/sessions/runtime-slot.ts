@@ -59,6 +59,12 @@ type RuntimeQueuedMessage = QueuedMessageState & {
 
 type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal">;
 
+type PendingManualCompaction = {
+  instructions?: string;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+};
+
 const MAXIMUM_QUEUED_MESSAGES = 32;
 const MAXIMUM_QUEUED_MESSAGE_BYTES = 64 * 1_024;
 const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
@@ -131,6 +137,11 @@ export class RuntimeSlot {
   private nextQueueOrdinal = 0;
   private queuedMessages: RuntimeQueuedMessage[] = [];
   private pendingQueueAdmission: PendingQueueAdmission | undefined;
+  private pendingManualCompaction: PendingManualCompaction | undefined;
+  private manualCompactionClaim: symbol | undefined;
+  private queuedManualCompactionInFlight = false;
+  private shuttingDown = false;
+  private shutdownPromise: Promise<void> | undefined;
   private suppressQueueEvents = false;
 
   private constructor(
@@ -172,6 +183,9 @@ export class RuntimeSlot {
 
   get isBusy(): boolean {
     return this.activeExports > 0
+      || this.manualCompactionClaim !== undefined
+      || this.pendingManualCompaction !== undefined
+      || this.queuedManualCompactionInFlight
       || this.effectivePhase === "running"
       || this.effectivePhase === "compacting"
       || this.effectivePhase === "retrying"
@@ -371,11 +385,18 @@ export class RuntimeSlot {
         this.publishSnapshot();
         break;
       case "agent_settled":
+        if (this.shuttingDown) break;
         // An extension completion can trigger the next turn while the previous
         // settlement callback is still unwinding. Never let that older callback
         // mark a newer agent-core run idle or erase its live tools.
         if (this.hasActiveAgentRun) {
           this.ensureAgentProjection();
+          this.publishSnapshot();
+          break;
+        }
+        if (this.queuedManualCompactionInFlight) {
+          // A late settlement callback from the preceding prompt cannot retire
+          // the queued maintenance operation that now owns the session.
           this.publishSnapshot();
           break;
         }
@@ -387,6 +408,15 @@ export class RuntimeSlot {
         this.nextToolOrder = 0;
         this.stopActivityHeartbeat();
         this.clearToolProgressTimers();
+        if (this.pendingManualCompaction) {
+          // The accepted compaction command owns the existing run marker until
+          // its exact canonical mutation settles. Publishing first exposes a
+          // brief authoritative queued state if the SDK settlement callback and
+          // lane handoff occur in different turns of the event loop.
+          this.publishSnapshot();
+          this.startPendingManualCompaction();
+          break;
+        }
         void this.dependencies.markers.clear(this.id);
         this.hooks.settled(this.id);
         this.publishSnapshot();
@@ -780,6 +810,8 @@ export class RuntimeSlot {
       queued: { steering: [...session.getSteeringMessages()], followUp: [...session.getFollowUpMessages()] },
       queueRevision: this.queueRevision,
       queuedItems,
+      compactionQueued: this.pendingManualCompaction !== undefined,
+      automaticCompactionEnabled: session.autoCompactionEnabled,
       transcript: transcriptPage.items,
       transcriptStart: transcriptPage.start,
       transcriptTotal: transcriptPage.total,
@@ -870,13 +902,20 @@ export class RuntimeSlot {
       });
       void run.catch((error) => {
         this.emit("session.operationFailed", safeJson({ operationId, message: error instanceof Error ? error.message : String(error) }));
+        if (this.shuttingDown) return;
         if (!session.isStreaming) {
+          if (this.queuedManualCompactionInFlight) return;
           this.phase = "idle";
           this.activeOperationId = undefined;
           this.operation = undefined;
-          void this.dependencies.markers.clear(this.id);
-          this.hooks.settled(this.id);
-          this.publishSnapshot();
+          if (this.pendingManualCompaction) {
+            this.publishSnapshot();
+            this.startPendingManualCompaction();
+          } else {
+            void this.dependencies.markers.clear(this.id);
+            this.hooks.settled(this.id);
+            this.publishSnapshot();
+          }
         }
       });
       let admitted: boolean;
@@ -1054,23 +1093,114 @@ export class RuntimeSlot {
     });
   }
 
-  async compact(instructions?: string): Promise<void> {
-    await this.lane.run(async () => {
-      this.assertIdle();
-      this.phase = "compacting";
-      this.operation = { kind: "compaction", startedAt: new Date().toISOString(), reason: "manual" };
-      this.revision += 1;
-      this.publishSnapshot();
+  async compact(instructions?: string): Promise<{ queued: boolean }> {
+    this.assertUsable();
+    if (this.manualCompactionClaim) {
+      throw new GatewayError("busy", "A manual compaction is already pending for this session");
+    }
+    const claim = Symbol("manual-compaction");
+    this.manualCompactionClaim = claim;
+
+    try {
+      let queuedCompletion: Promise<void> | undefined;
+      const queued = await this.lane.run(async () => {
+        this.assertUsable();
+        if (this.manualCompactionClaim !== claim) {
+          throw new GatewayError("conflict", "Manual compaction ownership changed", true);
+        }
+        if (this.hasActiveAgentRun) {
+          queuedCompletion = new Promise<void>((resolve, reject) => {
+            this.pendingManualCompaction = {
+              ...(instructions === undefined ? {} : { instructions }),
+              resolve,
+              reject,
+            };
+          });
+          this.revision += 1;
+          this.publishSnapshot();
+          return true;
+        }
+
+        this.assertIdleForManualCompaction(claim);
+        await this.performManualCompaction(instructions, false);
+        return false;
+      });
+
+      // Keep the command receipt pending until the exact queued mutation has
+      // completed. A disconnected client therefore cannot turn accepted work
+      // into an acknowledged-but-unperformed compaction.
+      if (queuedCompletion) await queuedCompletion;
+      return { queued };
+    } finally {
+      if (this.manualCompactionClaim === claim) this.manualCompactionClaim = undefined;
+    }
+  }
+
+  private startPendingManualCompaction(): void {
+    const pending = this.pendingManualCompaction;
+    if (!pending || this.shuttingDown) return;
+    void this.lane.run(async () => {
+      if (this.pendingManualCompaction !== pending || this.shuttingDown) return;
+      // Another prompt can enter SDK preflight before this lane handoff runs.
+      // Leave the exact compaction pending for that newer run's final settlement.
+      if (this.hasActiveAgentRun) return;
+      this.pendingManualCompaction = undefined;
+      this.queuedManualCompactionInFlight = true;
       try {
-        await this.runtime.session.compact(instructions);
-      } finally {
-        this.phase = "idle";
+        await this.performManualCompaction(pending.instructions, true);
+        pending.resolve();
+      } catch (error) {
+        pending.reject(error);
+      }
+    }).catch((error) => {
+      if (this.pendingManualCompaction === pending) {
+        this.pendingManualCompaction = undefined;
+        this.revision += 1;
+        this.publishSnapshot();
+      }
+      pending.reject(error);
+    });
+  }
+
+  private async performManualCompaction(instructions: string | undefined, queued: boolean): Promise<void> {
+    let operationError: unknown;
+    this.phase = "compacting";
+    this.operation = { kind: "compaction", startedAt: new Date().toISOString(), reason: "manual" };
+    this.revision += 1;
+    this.publishSnapshot();
+    try {
+      await this.runtime.session.compact(instructions);
+    } catch (error) {
+      operationError = error;
+    }
+
+    if (queued) {
+      try {
+        // The queued command and restart-drain owner cannot settle ahead of the
+        // durable marker that proves accepted work remains live across restart.
+        await this.dependencies.markers.clear(this.id);
+      } catch (markerError) {
+        this.queuedManualCompactionInFlight = false;
+        this.phase = "interrupted";
         this.operation = undefined;
         this.retry = undefined;
         this.revision += 1;
         this.publishSnapshot();
+        if (operationError !== undefined) {
+          throw new AggregateError([operationError, markerError], "Compaction and run-marker cleanup failed");
+        }
+        throw markerError;
       }
-    });
+      this.queuedManualCompactionInFlight = false;
+      this.hooks.settled(this.id);
+    }
+
+    this.phase = "idle";
+    this.operation = undefined;
+    this.retry = undefined;
+    this.revision += 1;
+    this.publishSnapshot();
+    if (operationError !== undefined) throw operationError;
   }
 
   async executeBash(command: string, excludeFromContext: boolean): Promise<JsonValue> {
@@ -1368,13 +1498,62 @@ export class RuntimeSlot {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     if (this.isBusy || this.trustReloadPending) throw new GatewayError("busy", "Cannot evict a busy session runtime");
-    this.disposed = true;
+    await this.disposeRuntime();
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.disposed) return;
+    if (this.shutdownPromise) return this.shutdownPromise;
+    const operation = this.performShutdown();
+    this.shutdownPromise = operation;
+    try {
+      await operation;
+    } catch (error) {
+      if (this.shutdownPromise === operation) this.shutdownPromise = undefined;
+      throw error;
+    }
+  }
+
+  private async performShutdown(): Promise<void> {
+    this.shuttingDown = true;
+    const cancellation = new GatewayError("cancelled", "Gateway shutdown cancelled queued compaction");
+    const pending = this.pendingManualCompaction;
+    if (pending) {
+      this.pendingManualCompaction = undefined;
+      pending.reject(cancellation);
+    }
+
+    // Abort every possible SDK owner before waiting on the lane it may hold.
+    // These methods are idempotent no-ops when their owner is inactive.
+    this.runtime.session.abortCompaction();
+    this.runtime.session.abortRetry();
+    this.runtime.session.abortBranchSummary();
+    this.runtime.session.abortBash();
+    await this.runtime.session.abort();
+
+    await this.lane.run(async () => {
+      const latePending = this.pendingManualCompaction;
+      if (latePending) {
+        this.pendingManualCompaction = undefined;
+        latePending.reject(cancellation);
+      }
+      await this.dependencies.markers.clear(this.id);
+      this.queuedManualCompactionInFlight = false;
+      this.phase = "idle";
+      this.operation = undefined;
+      this.retry = undefined;
+      await this.disposeRuntime();
+    });
+  }
+
+  private async disposeRuntime(): Promise<void> {
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
     this.stopActivityHeartbeat();
     this.clearToolProgressTimers();
     this.unsubscribe?.();
     this.ui.cancelAll();
     await this.runtime.dispose();
+    this.disposed = true;
   }
 
   private assertNoTrustReload(): void {
@@ -1385,8 +1564,25 @@ export class RuntimeSlot {
 
   private assertUsable(allowTrustReload = false): void {
     if (this.disposed) throw new GatewayError("conflict", "Session runtime was disposed", true);
+    if (this.shuttingDown) throw new GatewayError("conflict", "Session runtime is shutting down", true);
     if (!allowTrustReload) this.assertNoTrustReload();
     this.touch();
+  }
+
+  private assertIdleForManualCompaction(claim: symbol): void {
+    this.assertUsable();
+    if (this.manualCompactionClaim !== claim) {
+      throw new GatewayError("conflict", "Manual compaction ownership changed", true);
+    }
+    if (this.runtime.session.isStreaming
+      || this.activeExports > 0
+      || this.queuedManualCompactionInFlight
+      || this.effectivePhase === "running"
+      || this.effectivePhase === "compacting"
+      || this.effectivePhase === "retrying"
+      || this.runtime.session.isBashRunning) {
+      throw new GatewayError("busy", "Session must be idle for this operation");
+    }
   }
 
   private assertIdle(allowTrustReload = false): void {

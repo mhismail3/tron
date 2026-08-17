@@ -281,8 +281,8 @@ export class GatewayService {
         });
       case "session.compact":
         return this.mutation(client, method, params, async () => {
-          await (await this.openedSlot(client, params)).compact(optionalString(params.instructions, "instructions", 20_000));
-          return { compacted: true };
+          const result = await (await this.openedSlot(client, params)).compact(optionalString(params.instructions, "instructions", 20_000));
+          return { compacted: true, queued: result.queued };
         });
       case "session.rename":
         return this.mutation(client, method, params, async () => {

@@ -16,6 +16,7 @@ struct GatewayProtocolContractTests {
           "queued":{"steering":[],"followUp":["later"]},
           "queueRevision":4,
           "queuedItems":[{"id":"queued-1","behavior":"followUp","text":"later","attachmentCount":2}],
+          "compactionQueued":true,"automaticCompactionEnabled":false,
           "transcript":[
             {"id":"entry-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"entry-1:0","type":"text","text":"hello"},{"id":"entry-1:1","type":"text","text":"notes.pdf","attachment":{"name":"notes.pdf","mimeType":"application/pdf","size":2048}}]},
             {"id":"entry-2","parentId":"entry-1","timestamp":"2026-01-01T00:00:01Z","kind":"modelChange","modelRef":{"provider":"openai","id":"next"}}
@@ -38,12 +39,24 @@ struct GatewayProtocolContractTests {
         #expect(snapshot.transcriptTotal == 12)
         #expect(snapshot.stats.latestCacheHitRate == 99.7)
         #expect(snapshot.queueRevision == 4)
+        #expect(snapshot.compactionQueued == true)
+        #expect(snapshot.automaticCompactionEnabled == false)
         #expect(snapshot.displayedQueuedMessages == [SessionSnapshot.QueuedMessage(
             id: "queued-1",
             behavior: .followUp,
             text: "later",
             attachmentCount: 2
         )])
+
+        var legacyObject = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacyObject.removeValue(forKey: "compactionQueued")
+        legacyObject.removeValue(forKey: "automaticCompactionEnabled")
+        let legacy = try JSONDecoder.gateway.decode(
+            SessionSnapshot.self,
+            from: JSONSerialization.data(withJSONObject: legacyObject)
+        )
+        #expect(legacy.compactionQueued == nil)
+        #expect(legacy.automaticCompactionEnabled == nil)
     }
 
     @Test("dashboard summary update carries a monotonic revision")

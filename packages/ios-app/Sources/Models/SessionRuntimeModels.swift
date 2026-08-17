@@ -152,6 +152,8 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     var queued: QueuedMessages
     var queueRevision: Int? = nil
     var queuedItems: [QueuedMessage]? = nil
+    var compactionQueued: Bool? = nil
+    var automaticCompactionEnabled: Bool? = nil
     var transcript: [TranscriptItem]
     var transcriptStart: Int?
     var transcriptTotal: Int?
