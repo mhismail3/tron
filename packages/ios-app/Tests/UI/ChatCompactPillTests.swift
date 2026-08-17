@@ -170,7 +170,6 @@ struct ChatCompactPillTests {
         #expect(SessionHistoryPolicy.nodes(nodes, mode: .branches).map(\.id) == ["earlier", "earlier-response"])
         #expect(SessionHistoryPolicy.nodes(nodes, mode: .bookmarks).map(\.id) == ["bookmark"])
         #expect(SessionHistoryPolicy.nodes(nodes, mode: .recentLog).count == 7)
-        #expect(SessionHistoryPolicy.forkPoints(nodes).map(\.id) == ["earlier", "prompt"])
         #expect(SessionHistoryPolicy.canNavigate(node: prompt, leafID: "response"))
         #expect(!SessionHistoryPolicy.canNavigate(node: response, leafID: "response"))
         #expect(SessionHistoryPolicy.canNavigate(node: historyNode(id: "leaf-prompt", role: .user, current: true), leafID: "leaf-prompt"))

@@ -924,8 +924,11 @@ a backing-runtime location override.
 Deep session history is projected as a bounded flat outline with depth, branch,
 and current-path metadata so large canonical sessions neither overflow the
 gateway stack nor exceed the mobile frame. The single History sheet explains Timeline,
-Branches, Bookmarks, and Recent Log modes, owns fork-point selection and entry actions,
-and identifies JSONL export as the complete canonical audit. Gateway produces that audit by copying the
+Branches, Bookmarks, and Recent Log modes, and identifies JSONL export as the complete canonical audit.
+History rows use compact aligned content without a structural branch rail; the row opens details while only
+its standard circular ellipsis control morphs into the native actions menu. Forking is available from that
+menu and as the final action in Entry Details instead of occupying the history summary.
+Gateway produces that audit by copying the
 canonical append-only JSONL under the existing idle/file/concurrency bounds rather than linearizing only the active branch.
 Agent Context summarizes assembled instructions, context accounting, and capability
 counts without duplicating the detailed Project Resources inventory; full instructions

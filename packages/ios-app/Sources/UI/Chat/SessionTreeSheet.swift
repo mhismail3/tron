@@ -46,10 +46,6 @@ enum SessionHistoryPolicy {
         }
     }
 
-    static func forkPoints(_ nodes: [SessionTreeNode]) -> [SessionTreeNode] {
-        nodes.filter { $0.role == .user && !$0.preview.isEmpty }.reversed()
-    }
-
     static func canNavigate(node: SessionTreeNode, leafID: String?) -> Bool {
         node.role == .user || node.id != leafID
     }
@@ -120,16 +116,13 @@ struct SessionTreeSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var mode: SessionHistoryMode = .timeline
-    @State private var choosingFork = false
     @State private var selection: SessionHistorySelection?
     @State private var labelNode: SessionTreeNode?
     @State private var label = ""
     @State private var reloading = false
 
     private var visibleNodes: [SessionTreeNode] {
-        choosingFork
-            ? SessionHistoryPolicy.forkPoints(model.sessionTree)
-            : SessionHistoryPolicy.nodes(model.sessionTree, mode: mode)
+        SessionHistoryPolicy.nodes(model.sessionTree, mode: mode)
     }
 
     var body: some View {
@@ -140,11 +133,7 @@ struct SessionTreeSheet: View {
                         runtimeSummary(snapshot)
                     }
                     historyOverview
-                    if choosingFork {
-                        forkModeHeader
-                    } else {
-                        modeChooser
-                    }
+                    modeChooser
                     if reloading && model.sessionTree.isEmpty {
                         TronGlassCard(accent: .tronCyan) {
                             TronLoadingState(label: "Loading recent history…")
@@ -159,10 +148,7 @@ struct SessionTreeSheet: View {
                                 node: node,
                                 leafID: model.authoritativeSnapshot(for: sessionID)?.leafEntryId,
                                 select: {
-                                    selection = SessionHistorySelection(
-                                        node: node,
-                                        action: choosingFork ? .fork : .details
-                                    )
+                                    selection = SessionHistorySelection(node: node, action: .details)
                                 },
                                 fork: {
                                     selection = SessionHistorySelection(node: node, action: .fork)
@@ -294,16 +280,10 @@ struct SessionTreeSheet: View {
             Label("Recent canonical history", systemImage: "clock.arrow.circlepath")
                 .font(TronTypography.headline)
                 .foregroundStyle(Color.tronTextPrimary)
-            Text("Review activity, inspect branches, continue from an earlier point, or create a new session fork. This is a bounded recent projection; JSONL Export in Manage Session provides the complete canonical audit.")
+            Text("Review activity, inspect branches, continue from an earlier point, or fork from an entry action. This is a bounded recent projection; JSONL Export in Manage Session provides the complete canonical audit.")
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronTextSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button {
-                choosingFork = true
-            } label: {
-                Label("New Fork", systemImage: "arrow.triangle.branch")
-            }
-            .buttonStyle(TronActionButtonStyle(expands: false))
         }
         .padding(14)
         .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.09)
@@ -334,33 +314,17 @@ struct SessionTreeSheet: View {
         }
     }
 
-    private var forkModeHeader: some View {
-        TronSettingsGroup("Choose a Fork Point", detail: "Canonical user prompts · newest first", accent: .tronTeal) {
-            Button {
-                choosingFork = false
-            } label: {
-                TronSettingsRow(
-                    icon: "chevron.left",
-                    title: "Back to History",
-                    subtitle: "Select a prompt below to create a new canonical session",
-                    accent: .tronTeal
-                )
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
     private var emptyState: some View {
         TronGlassCard(accent: .tronSlate) {
             VStack(spacing: 10) {
-                Image(systemName: choosingFork ? "arrow.triangle.branch" : "point.3.connected.trianglepath.dotted")
+                Image(systemName: "point.3.connected.trianglepath.dotted")
                     .font(TronTypography.sans(size: TronTypography.sizeXXL, weight: .semibold))
                     .foregroundStyle(Color.tronTextMuted)
-                Text(model.sessionTree.isEmpty ? "History unavailable" : choosingFork ? "No fork points available" : "No matching entries")
+                Text(model.sessionTree.isEmpty ? "History unavailable" : "No matching entries")
                     .font(TronTypography.headline)
                 Text(model.sessionTree.isEmpty
                      ? "Reload the bounded canonical history projection."
-                     : choosingFork ? "This recent projection contains no user prompts." : "Choose another history view.")
+                     : "Choose another history view.")
                     .font(TronTypography.bodySM)
                     .foregroundStyle(Color.tronTextSecondary)
                     .multilineTextAlignment(.center)
@@ -412,60 +376,62 @@ private struct TreeNodeRow: View {
     let bookmark: () -> Void
 
     var body: some View {
-        Button(action: select) {
-            HStack(alignment: .top, spacing: 10) {
-                branchRail
-                Image(systemName: icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(width: 20, height: 20)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(title)
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .lineLimit(3)
-                        if node.id == leafID {
-                            Text("Current")
-                                .font(TronTypography.caption2)
-                                .foregroundStyle(Color.tronAccentText)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.tronEmerald.opacity(0.12), in: Capsule())
-                        }
-                    }
-                    HStack(spacing: 7) {
-                        Text(kindLabel)
-                        if node.childCount > 1 { Text("\(node.childCount) branches") }
-                        Text(relativeTimestamp)
-                    }
-                    .font(TronTypography.caption)
-                    .foregroundStyle(Color.tronTextMuted)
-                }
-                Spacer(minLength: 4)
-                Menu {
-                    if node.role == .user { Button("Fork New Session", systemImage: "arrow.triangle.branch", action: fork) }
-                    Button(node.label == nil ? "Add Bookmark" : "Edit Bookmark", systemImage: "bookmark", action: bookmark)
-                } label: {
-                    Image(systemName: "ellipsis")
+        HStack(alignment: .center, spacing: 8) {
+            Button(action: select) {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: icon)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .semibold))
                         .foregroundStyle(accent)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 18, height: 20)
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(title)
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                                .foregroundStyle(Color.tronTextPrimary)
+                                .multilineTextAlignment(.leading)
+                                .lineLimit(3)
+                            if node.id == leafID {
+                                Text("Current")
+                                    .font(TronTypography.caption2)
+                                    .foregroundStyle(Color.tronAccentText)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.tronEmerald.opacity(0.12), in: Capsule())
+                            }
+                        }
+                        HStack(spacing: 7) {
+                            Text(kindLabel)
+                            if node.childCount > 1 { Text("\(node.childCount) branches") }
+                            Text(relativeTimestamp)
+                        }
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .accessibilityLabel("Actions for \(title)")
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .tronGlassSurface(accent: accent, tintOpacity: node.id == leafID ? 0.15 : 0.07, interactive: true)
-    }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
-    private var branchRail: some View {
-        RoundedRectangle(cornerRadius: 2)
-            .fill(accent.opacity(node.isCurrentPath ? 0.75 : 0.35))
-            .frame(width: 3, height: 38)
-            .padding(.leading, CGFloat(min(node.depth, 8)) * 3)
+            Menu {
+                Button("View Details", systemImage: "doc.text.magnifyingglass", action: select)
+                Button("Fork New Session", systemImage: "arrow.triangle.branch", action: fork)
+                Button(node.label == nil ? "Add Bookmark" : "Edit Bookmark", systemImage: "bookmark", action: bookmark)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                    .foregroundStyle(accent)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+                    .glassEffect(.regular.tint(accent.opacity(0.14)).interactive(), in: .circle)
+            }
+            .accessibilityLabel("Actions for \(title)")
+        }
+        .padding(.leading, 12)
+        .padding(.trailing, 8)
+        .padding(.vertical, 9)
+        .tronGlassSurface(accent: accent, tintOpacity: node.id == leafID ? 0.15 : 0.07)
     }
 
     private var title: String {
@@ -545,15 +511,20 @@ private struct HistoryEntryDetailsSheet: View {
                                 }
                                 TronSettingsDivider(accent: .tronCyan)
                             }
-                            if node.role == .user {
-                                actionRow(icon: "arrow.triangle.branch", title: "Fork New Session", subtitle: "Create a separate canonical session from this prompt", accent: .tronTeal) {
-                                    showFork = true
-                                }
-                                TronSettingsDivider(accent: .tronCyan)
-                            }
                             actionRow(icon: "bookmark", title: node.label == nil ? "Add Bookmark" : "Edit Bookmark", subtitle: "Attach a canonical label to this entry", accent: .tronPurple) {
                                 label = node.label ?? ""
                                 showBookmark = true
+                            }
+                            TronSettingsDivider(accent: .tronCyan)
+                            actionRow(
+                                icon: "arrow.triangle.branch",
+                                title: "Fork New Session",
+                                subtitle: node.role == .user
+                                    ? "Create a separate canonical session from this prompt"
+                                    : "Create a separate canonical session from this entry",
+                                accent: .tronTeal
+                            ) {
+                                showFork = true
                             }
                         }
                     }
@@ -739,19 +710,31 @@ struct ForkConfirmationSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    TronSettingsGroup("Selected Prompt", accent: .tronTeal) {
+                    TronSettingsGroup(node.role == .user ? "Selected Prompt" : "Selected Entry", accent: .tronTeal) {
                         TronSettingsRow(
-                            icon: "person.crop.circle",
-                            title: SessionHistoryPreview.plain(node.preview.ifEmpty("User prompt")),
+                            icon: node.role == .user ? "person.crop.circle" : "point.3.connected.trianglepath.dotted",
+                            title: SessionHistoryPreview.plain(node.preview.ifEmpty(node.kind.humanized)),
                             subtitle: node.timestamp,
                             accent: .tronTeal
                         )
                     }
                     TronSettingsGroup("New Session", accent: .tronPurple) {
                         VStack(spacing: 0) {
-                            choice("Fork and edit prompt", detail: "Branch before this prompt and restore it to the composer.", value: "before")
+                            choice(
+                                node.role == .user ? "Fork and edit prompt" : "Fork before this entry",
+                                detail: node.role == .user
+                                    ? "Branch before this prompt and restore it to the composer."
+                                    : "Create the new session from the canonical position before this entry.",
+                                value: "before"
+                            )
                             TronSettingsDivider(accent: .tronPurple)
-                            choice("Clone after prompt", detail: "Include this prompt in the new branch.", value: "at")
+                            choice(
+                                node.role == .user ? "Clone after prompt" : "Clone through this entry",
+                                detail: node.role == .user
+                                    ? "Include this prompt in the new branch."
+                                    : "Include this entry in the new session's canonical history.",
+                                value: "at"
+                            )
                         }
                     }
                     Button(working ? "Creating…" : "Create Fork") { createFork() }
