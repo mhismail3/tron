@@ -501,7 +501,10 @@ struct PresentationStyleGuardTests {
         #expect(!history.contains("choosingFork"))
         #expect(!history.contains("private var branchRail"))
         #expect(history.contains("Button(\"Fork New Session\", systemImage: \"arrow.triangle.branch\", action: fork)"))
-        #expect(history.contains(".glassEffect(.regular.tint(accent.opacity(0.14)).interactive(), in: .circle)"))
+        #expect(history.contains("private enum SessionHistoryCardMetrics"))
+        #expect(history.components(separatedBy: ".frame(width: SessionHistoryCardMetrics.iconWidth)").count - 1 == 4)
+        #expect(!history.contains(".glassEffect(.regular.tint(accent.opacity(0.14)).interactive(), in: .circle)"))
+        #expect(history.contains(".frame(width: 44, height: 44)\n                    .contentShape(Rectangle())"))
         let detailActions = (history.components(separatedBy: "TronSettingsGroup(\"Actions\"").dropFirst().first ?? "")
             .components(separatedBy: "private func actionRow").first ?? ""
         let bookmarkAction = try #require(detailActions.firstRange(of: "Add Bookmark")?.lowerBound)

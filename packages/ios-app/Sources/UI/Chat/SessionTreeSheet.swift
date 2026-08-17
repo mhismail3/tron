@@ -108,13 +108,19 @@ private struct SessionHistorySelection: Identifiable {
     let action: Action
 }
 
+private enum SessionHistoryCardMetrics {
+    static let contentSpacing: CGFloat = 12
+    static let iconWidth: CGFloat = 24
+    static let horizontalPadding: CGFloat = 14
+    static let verticalPadding: CGFloat = 14
+}
+
 struct SessionTreeSheet: View {
     let sessionID: String
     let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     let onNavigated: () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var mode: SessionHistoryMode = .timeline
     @State private var selection: SessionHistorySelection?
     @State private var labelNode: SessionTreeNode?
@@ -222,34 +228,20 @@ struct SessionTreeSheet: View {
     }
 
     private func runtimeSummary(_ snapshot: SessionSnapshot) -> some View {
-        Group {
-            if dynamicTypeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 10) {
-                        runtimeIcon
-                        Text("Runtime")
-                            .font(TronTypography.headline)
-                            .foregroundStyle(Color.tronTextPrimary)
-                        Spacer(minLength: 8)
-                        runtimePhase(snapshot)
-                    }
-                    runtimeStatistics(snapshot)
-                }
-            } else {
-                HStack(alignment: .center, spacing: 12) {
-                    runtimeIcon
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Runtime")
-                            .font(TronTypography.headline)
-                            .foregroundStyle(Color.tronTextPrimary)
-                        runtimeStatistics(snapshot)
-                    }
-                    Spacer(minLength: 8)
-                    runtimePhase(snapshot)
-                }
+        HStack(alignment: .center, spacing: SessionHistoryCardMetrics.contentSpacing) {
+            runtimeIcon
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Runtime")
+                    .font(TronTypography.headline)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .multilineTextAlignment(.leading)
+                runtimeStatistics(snapshot)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            runtimePhase(snapshot)
         }
-        .padding(14)
+        .padding(.horizontal, SessionHistoryCardMetrics.horizontalPadding)
+        .padding(.vertical, SessionHistoryCardMetrics.verticalPadding)
         .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.09)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("session-history-runtime-summary")
@@ -259,13 +251,15 @@ struct SessionTreeSheet: View {
         Image(systemName: "waveform.path.ecg")
             .font(TronTypography.headline)
             .foregroundStyle(Color.tronAmber)
-            .frame(width: 28)
+            .frame(width: SessionHistoryCardMetrics.iconWidth)
+            .accessibilityHidden(true)
     }
 
     private func runtimeStatistics(_ snapshot: SessionSnapshot) -> some View {
         Text("\(snapshot.stats.totalMessages.formatted()) messages · \(snapshot.stats.toolCalls.formatted()) tool calls")
-            .font(TronTypography.caption)
+            .font(TronTypography.bodySM)
             .foregroundStyle(Color.tronTextSecondary)
+            .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -276,16 +270,27 @@ struct SessionTreeSheet: View {
     }
 
     private var historyOverview: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("Recent canonical history", systemImage: "clock.arrow.circlepath")
+        HStack(alignment: .center, spacing: SessionHistoryCardMetrics.contentSpacing) {
+            Image(systemName: "clock.arrow.circlepath")
                 .font(TronTypography.headline)
-                .foregroundStyle(Color.tronTextPrimary)
-            Text("Review activity, inspect branches, continue from an earlier point, or fork from an entry action. This is a bounded recent projection; JSONL Export in Manage Session provides the complete canonical audit.")
-                .font(TronTypography.bodySM)
-                .foregroundStyle(Color.tronTextSecondary)
-                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(Color.tronCyan)
+                .frame(width: SessionHistoryCardMetrics.iconWidth)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Recent canonical history")
+                    .font(TronTypography.headline)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .multilineTextAlignment(.leading)
+                Text("Review activity, inspect branches, continue from an earlier point, or fork from an entry action. This is a bounded recent projection; JSONL Export in Manage Session provides the complete canonical audit.")
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(14)
+        .padding(.horizontal, SessionHistoryCardMetrics.horizontalPadding)
+        .padding(.vertical, SessionHistoryCardMetrics.verticalPadding)
         .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.09)
     }
 
@@ -304,12 +309,29 @@ struct SessionTreeSheet: View {
                     }
                 }
             } label: {
-                TronSettingsRow(
-                    icon: mode.icon,
-                    title: mode.rawValue,
-                    subtitle: mode.explanation,
-                    accent: .tronCyan
-                )
+                HStack(alignment: .center, spacing: SessionHistoryCardMetrics.contentSpacing) {
+                    Image(systemName: mode.icon)
+                        .font(TronTypography.headline)
+                        .foregroundStyle(Color.tronCyan)
+                        .frame(width: SessionHistoryCardMetrics.iconWidth)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(mode.rawValue)
+                            .font(TronTypography.headline)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .multilineTextAlignment(.leading)
+                        Text(mode.explanation)
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, SessionHistoryCardMetrics.horizontalPadding)
+                .padding(.vertical, SessionHistoryCardMetrics.verticalPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
         }
     }
@@ -378,15 +400,16 @@ private struct TreeNodeRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             Button(action: select) {
-                HStack(alignment: .top, spacing: 8) {
+                HStack(alignment: .center, spacing: SessionHistoryCardMetrics.contentSpacing) {
                     Image(systemName: icon)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .semibold))
+                        .font(TronTypography.headline)
                         .foregroundStyle(accent)
-                        .frame(width: 18, height: 20)
+                        .frame(width: SessionHistoryCardMetrics.iconWidth)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(title)
-                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                                .font(TronTypography.headline)
                                 .foregroundStyle(Color.tronTextPrimary)
                                 .multilineTextAlignment(.leading)
                                 .lineLimit(3)
@@ -404,7 +427,7 @@ private struct TreeNodeRow: View {
                             if node.childCount > 1 { Text("\(node.childCount) branches") }
                             Text(relativeTimestamp)
                         }
-                        .font(TronTypography.caption)
+                        .font(TronTypography.bodySM)
                         .foregroundStyle(Color.tronTextMuted)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -423,14 +446,13 @@ private struct TreeNodeRow: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
                     .foregroundStyle(accent)
                     .frame(width: 44, height: 44)
-                    .contentShape(Circle())
-                    .glassEffect(.regular.tint(accent.opacity(0.14)).interactive(), in: .circle)
+                    .contentShape(Rectangle())
             }
             .accessibilityLabel("Actions for \(title)")
         }
-        .padding(.leading, 12)
+        .padding(.leading, SessionHistoryCardMetrics.horizontalPadding)
         .padding(.trailing, 8)
-        .padding(.vertical, 9)
+        .padding(.vertical, SessionHistoryCardMetrics.verticalPadding)
         .tronGlassSurface(accent: accent, tintOpacity: node.id == leafID ? 0.15 : 0.07)
     }
 
