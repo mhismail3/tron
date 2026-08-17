@@ -81,7 +81,8 @@ struct ToolCard: View {
                     title: displayTitle,
                     detail: subtitle.lowercased(),
                     tone: tone,
-                    showsProgress: subtitle == "Running"
+                    showsProgress: subtitle == "Running",
+                    iconSize: ChatCompactPillLayoutPolicy.toolIconSize
                 ) {
                     if let timing {
                         ToolElapsedText(tool: timing, color: tone.secondaryColor)
@@ -235,7 +236,8 @@ private struct ToolRunChip: View {
                     title: run.title,
                     detail: run.status,
                     tone: tone,
-                    showsProgress: run.isRunning
+                    showsProgress: run.isRunning,
+                    iconSize: ChatCompactPillLayoutPolicy.toolIconSize
                 ) {
                     ToolRunElapsedText(run: run, color: tone.secondaryColor)
                 }

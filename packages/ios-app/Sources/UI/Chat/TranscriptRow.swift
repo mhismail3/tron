@@ -79,6 +79,10 @@ struct TranscriptRow: View, Equatable {
                                 EmptyView() // Presented together above the prompt text.
                             } else if item.role == .user {
                                 UserPromptText(text: part.text ?? "")
+                                    .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
+                                    .padding(.top, ChatPromptContainerStyle.topPadding)
+                                    .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
+                                    .modifier(UserPromptGlassModifier())
                             } else {
                                 MarkdownText(
                                     text: part.text ?? "",
@@ -139,20 +143,11 @@ struct TranscriptRow: View, Equatable {
                     Text("\(provider) / \(modelName)").font(TronFont.mono(10)).foregroundStyle(Color.tronTextSecondary)
                 }
             }
-            .padding(
-                .horizontal,
-                item.role == .user ? ChatPromptContainerStyle.horizontalPadding : 2
-            )
-            .padding(.top, item.role == .user ? ChatPromptContainerStyle.topPadding : 0)
-            .padding(
-                .bottom,
-                item.role == .user ? ChatPromptContainerStyle.userPromptBottomPadding : 0
-            )
+            .padding(.horizontal, item.role == .user ? 0 : 2)
             .frame(
-                maxWidth: item.role == .user ? nil : .infinity,
+                maxWidth: .infinity,
                 alignment: item.role == .user ? .topTrailing : .topLeading
             )
-            .modifier(UserPromptGlassModifier(enabled: item.role == .user))
         }
     }
 
@@ -193,32 +188,25 @@ struct TranscriptRow: View, Equatable {
 }
 
 private struct UserPromptGlassModifier: ViewModifier {
-    let enabled: Bool
-
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if enabled {
-            let shape = RoundedRectangle(
-                cornerRadius: ChatPromptContainerStyle.cornerRadius,
-                style: .continuous
-            )
-            ViewThatFits(in: .horizontal) {
-                content
-                    .fixedSize(horizontal: true, vertical: false)
-                    .glassEffect(
-                        .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
-                        in: shape
-                    )
-                content
-                    .glassEffect(
-                        .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
-                        in: shape
-                    )
-            }
-            .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
-        } else {
+        let shape = RoundedRectangle(
+            cornerRadius: ChatPromptContainerStyle.cornerRadius,
+            style: .continuous
+        )
+        ViewThatFits(in: .horizontal) {
             content
+                .fixedSize(horizontal: true, vertical: false)
+                .glassEffect(
+                    .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
+                    in: shape
+                )
+            content
+                .glassEffect(
+                    .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
+                    in: shape
+                )
         }
+        .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
     }
 }
 
@@ -334,9 +322,12 @@ private struct TranscriptImageChip: View {
         let attempt: Int
     }
 
-    private struct PreviewRequest: Hashable {
+    private struct PreviewRequest: Identifiable {
         let identity: ChatMediaIdentity
         let leaseID: UUID
+        let initialImage: UIImage
+
+        var id: UUID { leaseID }
     }
 
     @Environment(AppModel.self) private var model
@@ -345,7 +336,6 @@ private struct TranscriptImageChip: View {
     @State private var thumbnailIdentity: ChatMediaIdentity?
     @State private var previewImage: UIImage?
     @State private var previewRequest: PreviewRequest?
-    @State private var showPreview = false
     @State private var failedLoadKey: LoadKey?
     @State private var loadAttempt = 0
 
@@ -369,8 +359,11 @@ private struct TranscriptImageChip: View {
         Button {
             if let currentThumbnail, let identity {
                 previewImage = currentThumbnail
-                previewRequest = PreviewRequest(identity: identity, leaseID: UUID())
-                showPreview = true
+                previewRequest = PreviewRequest(
+                    identity: identity,
+                    leaseID: UUID(),
+                    initialImage: currentThumbnail
+                )
             } else if loadFailed {
                 loadAttempt &+= 1
             }
@@ -426,30 +419,28 @@ private struct TranscriptImageChip: View {
         }
         .onChange(of: identity) { _, _ in
             previewImage = nil
-            showPreview = false
+            previewRequest = nil
         }
         .accessibilityHint(currentThumbnail == nil ? "Loads the unavailable image again" : "Opens a photo preview")
-        .sheet(isPresented: $showPreview) {
-            if let previewImage, let previewRequest {
-                AttachmentImagePreviewSheet(image: previewImage)
-                    .task(id: previewRequest) {
-                        guard let full = try? await model.chatMedia.fullPreview(
-                            for: previewRequest.identity,
-                            leaseID: previewRequest.leaseID
-                        ), !Task.isCancelled,
-                           showPreview,
-                           self.identity == previewRequest.identity else { return }
-                        self.previewImage = full
-                    }
-                    .onDisappear {
-                        model.chatMedia.cancelFullPreview(
-                            for: previewRequest.identity,
-                            leaseID: previewRequest.leaseID
-                        )
-                        self.previewImage = nil
-                        self.previewRequest = nil
-                    }
-            }
+        .sheet(item: $previewRequest) { request in
+            AttachmentImagePreviewSheet(image: previewImage ?? request.initialImage)
+                .task(id: request.id) {
+                    guard let full = try? await model.chatMedia.fullPreview(
+                        for: request.identity,
+                        leaseID: request.leaseID
+                    ), !Task.isCancelled,
+                       previewRequest?.id == request.id,
+                       self.identity == request.identity else { return }
+                    previewImage = full
+                }
+                .onDisappear {
+                    model.chatMedia.cancelFullPreview(
+                        for: request.identity,
+                        leaseID: request.leaseID
+                    )
+                    if previewRequest?.id == request.id { previewRequest = nil }
+                    previewImage = nil
+                }
         }
     }
 }

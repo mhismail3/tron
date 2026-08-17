@@ -1255,7 +1255,10 @@ struct ChatView: View {
             // before the bar's glass. Only the transparent menu hit target is
             // overlaid, so native menu styling cannot wash out or enlarge it.
             Image(systemName: "plus")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .font(TronTypography.sans(
+                    size: ComposerControlMetrics.symbolSize,
+                    weight: .semibold
+                ))
                 .foregroundStyle(attachmentActionsEnabled ? Color.tronEmerald : Color.tronTextMuted)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -1264,13 +1267,19 @@ struct ChatView: View {
                 isEnabled: attachmentActionsEnabled,
                 onSelect: requestAttachmentPresentation
             )
-            .frame(width: 40, height: 40)
+            .frame(
+                width: ComposerControlMetrics.hitTarget,
+                height: ComposerControlMetrics.hitTarget
+            )
             // Native menu action attributes may be cached across navigation.
             // Replace only when the viewed session or availability changes.
             .id(attachmentMenuState.identity)
             .accessibilityLabel("Add attachment")
         }
-        .frame(width: 40, height: 40)
+        .frame(
+            width: ComposerControlMetrics.hitTarget,
+            height: ComposerControlMetrics.hitTarget
+        )
     }
 
     private var catchUpButton: some View {
@@ -1280,7 +1289,10 @@ struct ChatView: View {
             Image(systemName: "arrow.down")
                 .font(TronTypography.buttonSM)
                 .foregroundStyle(Color.tronEmerald)
-                .frame(width: 40, height: 40)
+                .frame(
+                    width: ComposerControlMetrics.hitTarget,
+                    height: ComposerControlMetrics.hitTarget
+                )
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)

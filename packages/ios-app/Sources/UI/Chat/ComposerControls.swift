@@ -172,6 +172,12 @@ struct MultilineComposerTextView: UIViewRepresentable {
     }
 }
 
+enum ComposerControlMetrics {
+    static let hitTarget: CGFloat = 40
+    static let symbolSize: CGFloat = 16
+    static let contextRingDiameter: CGFloat = 16
+}
+
 /// Historical session-owned context indicator. Its value is projected from the
 /// canonical snapshot and tapping it opens Manage Session; it owns no runtime
 /// state or mutation path.
@@ -204,8 +210,14 @@ struct SessionContextProgressButton: View {
                     Circle().fill(accent).frame(width: 4, height: 4)
                 }
             }
-            .frame(width: 15, height: 15)
-            .frame(width: 40, height: 40)
+            .frame(
+                width: ComposerControlMetrics.contextRingDiameter,
+                height: ComposerControlMetrics.contextRingDiameter
+            )
+            .frame(
+                width: ComposerControlMetrics.hitTarget,
+                height: ComposerControlMetrics.hitTarget
+            )
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -292,12 +304,18 @@ struct ComposerTrailingButton: View {
                 switch mode {
                 case .stopAgent:
                     Image(systemName: "stop.fill")
-                        .font(TronTypography.buttonSM)
+                        .font(TronTypography.sans(
+                            size: ComposerControlMetrics.symbolSize,
+                            weight: .semibold
+                        ))
                         .foregroundStyle(Color.tronError)
                 case .send:
                     ZStack {
                         Image(systemName: "arrow.up.circle.fill")
-                            .font(TronTypography.button)
+                            .font(TronTypography.sans(
+                                size: ComposerControlMetrics.symbolSize,
+                                weight: .semibold
+                            ))
                             .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
                             .opacity(isSending ? 0 : 1)
                             .scaleEffect(isSending ? 0.72 : 1)
@@ -311,7 +329,10 @@ struct ComposerTrailingButton: View {
                     .animation(.smooth(duration: 0.18), value: isSending)
                 }
             }
-            .frame(width: 40, height: 40)
+            .frame(
+                width: ComposerControlMetrics.hitTarget,
+                height: ComposerControlMetrics.hitTarget
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(ComposerTrailingButtonPressStyle())

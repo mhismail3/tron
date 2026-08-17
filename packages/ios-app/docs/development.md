@@ -349,8 +349,9 @@ ID. Tests own exact 192-pixel oriented downsampling, duplicate single-flight beh
 preparation slot, the 32-flight ceiling, 64-item and 4 MiB decoded LRU eviction, transport-level 25 MiB
 response admission, stale-identity and late-publication rejection, uncached one-at-a-time full previews,
 and app-lifetime memory-pressure cleanup. The production row retains its 64-point loading/retry
-surface and opens the existing medium preview immediately from the thumbnail while full resolution
-loads. Physical pixel and peak-memory calibration remains required.
+surface and opens the existing medium preview immediately from a nonoptional thumbnail-backed item route
+while full resolution loads; a sheet must never be admitted with conditional empty content. Physical pixel and
+peak-memory calibration remains required.
 
 `ChatViewScrollHarnessTests` mount the actual `ChatView`, `LazyVStack`, composer
 inset, and native `UIScrollView` in a fixed hosted window. Test-only authority
@@ -518,8 +519,10 @@ trailing alignment for user turns, historical transcript/tool insertion motion,
 the Settings gear in the chat toolbar, the context ring at the trailing edge of
 an empty idle composer, the compact runtime working row without any composer-structure
 change, and emerald toolbar/sheet actions. Physical chat spacing acceptance additionally checks that
-a one-visual-line prompt has intrinsic height, tool pills retain six-point vertical insets without a
-44-point label minimum, elapsed timing hugs its intrinsic width, and a pending photo's 22-point remove
+a one-visual-line prompt has intrinsic height, sent photo/file chips stay above and outside prompt glass,
+tool pills retain six-point vertical insets with the slightly larger tool-only symbol step and without a
+44-point label minimum, attachment/context/send visuals share the 16-point metric inside 40-point targets,
+elapsed timing hugs its intrinsic width, and a pending photo's 22-point remove
 circle sits half outside the 64-point preview within a 30-point target centered on its top-trailing corner.
 Active-chat reliability checks must advance a desired completion before the displayed running tool receives
 geometry and verify that the running chip still reveals exactly once. The same rendered tool/group row stays

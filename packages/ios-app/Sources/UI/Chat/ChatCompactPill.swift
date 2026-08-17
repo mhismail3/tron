@@ -40,6 +40,8 @@ enum ChatCompactPillLayoutPolicy {
     static let horizontalPadding: CGFloat = 11
     static let verticalPadding: CGFloat = 6
     static let itemSpacing: CGFloat = 7
+    static let standardIconSize: CGFloat = 10
+    static let toolIconSize: CGFloat = 11
 }
 
 /// Shared visual primitive for compact transcript activity. Alignment and
@@ -133,6 +135,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
     let detail: String?
     let tone: ChatNotificationTone
     let showsProgress: Bool
+    let iconSize: CGFloat
     let titleWeight: Font.Weight
     let detailStyle: ChatCompactPillDetailStyle
     @ViewBuilder let trailing: Trailing
@@ -143,6 +146,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
         detail: String? = nil,
         tone: ChatNotificationTone,
         showsProgress: Bool = false,
+        iconSize: CGFloat = ChatCompactPillLayoutPolicy.standardIconSize,
         titleWeight: Font.Weight = .bold,
         detailStyle: ChatCompactPillDetailStyle = .status,
         @ViewBuilder trailing: () -> Trailing
@@ -152,6 +156,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
         self.detail = detail
         self.tone = tone
         self.showsProgress = showsProgress
+        self.iconSize = iconSize
         self.titleWeight = titleWeight
         self.detailStyle = detailStyle
         self.trailing = trailing()
@@ -164,7 +169,7 @@ struct ChatCompactPillLabel<Trailing: View>: View {
                     ProgressView().controlSize(.small).tint(tone.primaryColor)
                 } else {
                     Image(systemName: icon)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .font(TronTypography.sans(size: iconSize, weight: .semibold))
                         .foregroundStyle(tone.primaryColor)
                 }
             }
@@ -196,6 +201,7 @@ extension ChatCompactPillLabel where Trailing == EmptyView {
         detail: String? = nil,
         tone: ChatNotificationTone,
         showsProgress: Bool = false,
+        iconSize: CGFloat = ChatCompactPillLayoutPolicy.standardIconSize,
         titleWeight: Font.Weight = .bold,
         detailStyle: ChatCompactPillDetailStyle = .status
     ) {
@@ -205,6 +211,7 @@ extension ChatCompactPillLabel where Trailing == EmptyView {
             detail: detail,
             tone: tone,
             showsProgress: showsProgress,
+            iconSize: iconSize,
             titleWeight: titleWeight,
             detailStyle: detailStyle,
             trailing: { EmptyView() }

@@ -635,10 +635,12 @@ struct PresentationStyleGuardTests {
             .components(separatedBy: "private struct TranscriptFileChip").first ?? ""
         #expect(!sentImageChip.isEmpty)
         #expect(sentImageChip.contains(".frame(width: 64, height: 64)"))
-        #expect(sentImageChip.contains("AttachmentImagePreviewSheet(image: previewImage)"))
+        #expect(sentImageChip.contains(".sheet(item: $previewRequest)"))
+        #expect(sentImageChip.contains("AttachmentImagePreviewSheet(image: previewImage ?? request.initialImage)"))
         #expect(sentImageChip.contains("model.chatMedia.thumbnail(for: identity)"))
         #expect(sentImageChip.contains("model.chatMedia.fullPreview("))
-        #expect(sentImageChip.contains("leaseID: previewRequest.leaseID"))
+        #expect(sentImageChip.contains("leaseID: request.leaseID"))
+        #expect(!sentImageChip.contains(".sheet(isPresented:"))
         #expect(!sentImageChip.contains("model.client.blob"))
         #expect(!sentImageChip.contains(".presentationDetents([.medium, .large])"))
         #expect(!transcript.contains("private struct ZoomableAttachmentImage"))
@@ -925,7 +927,8 @@ struct PresentationStyleGuardTests {
         let catchUpButton = (chat.components(separatedBy: "private var catchUpButton").dropFirst().first ?? "")
             .components(separatedBy: "private var composerTrailingMode").first ?? ""
         #expect(catchUpButton.contains("Image(systemName: \"arrow.down\")"))
-        #expect(catchUpButton.contains(".frame(width: 40, height: 40)"))
+        #expect(catchUpButton.contains("width: ComposerControlMetrics.hitTarget"))
+        #expect(catchUpButton.contains("height: ComposerControlMetrics.hitTarget"))
         #expect(!catchUpButton.contains("composerInputBarHeight"))
         #expect(catchUpButton.contains("in: .circle"))
         #expect(catchUpButton.contains(".glassEffectTransition(.matchedGeometry)"))
@@ -972,7 +975,12 @@ struct PresentationStyleGuardTests {
         #expect(!userPrompt.contains(".padding(.leading"))
         #expect(!userPrompt.contains(".frame(maxWidth: .infinity"))
         #expect(transcript.contains("UserPromptTextLayoutPolicy.maximumWidth"))
-        #expect(transcript.contains("UserPromptGlassModifier(enabled: item.role == .user)"))
+        #expect(userPrompt.contains(".modifier(UserPromptGlassModifier())"))
+        let messageBody = (transcript.components(separatedBy: "@ViewBuilder private var message").dropFirst().first ?? "")
+            .components(separatedBy: "private var displayedMessageParts").first ?? ""
+        let attachmentPosition = try #require(messageBody.firstRange(of: "attachmentStrip")?.lowerBound)
+        let promptPosition = try #require(messageBody.firstRange(of: "UserPromptText(text:")?.lowerBound)
+        #expect(attachmentPosition < promptPosition)
         #expect(transcript.contains("ViewThatFits(in: .horizontal)"))
         #expect(transcript.contains(".fixedSize(horizontal: true, vertical: false)"))
         #expect(transcript.contains("ChatPromptContainerStyle.userPromptBottomPadding"))
@@ -1135,6 +1143,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
             encoding: .utf8
         )
+        let composerControls = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
+            encoding: .utf8
+        )
         let entranceRows = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatEntranceRows.swift"),
             encoding: .utf8
@@ -1185,8 +1197,16 @@ struct PresentationStyleGuardTests {
         #expect(compactPill.contains("struct ChatCompactPillVisualState: Hashable"))
         #expect(compactPill.contains("static let verticalPadding: CGFloat = 6"))
         #expect(compactPill.contains("static let itemSpacing: CGFloat = 7"))
+        #expect(compactPill.contains("static let toolIconSize: CGFloat = 11"))
         #expect(compactPill.contains("HStack(spacing: ChatCompactPillLayoutPolicy.itemSpacing)"))
+        #expect(toolRuns.occurrences(of: "iconSize: ChatCompactPillLayoutPolicy.toolIconSize") == 2)
         #expect(compactPill.contains("ProgressView().controlSize(.small)"))
+        #expect(composerControls.contains("static let hitTarget: CGFloat = 40"))
+        #expect(composerControls.contains("static let symbolSize: CGFloat = 16"))
+        #expect(composerControls.contains("static let contextRingDiameter: CGFloat = 16"))
+        #expect(composerControls.occurrences(of: "width: ComposerControlMetrics.hitTarget") == 2)
+        #expect(composerControls.occurrences(of: "height: ComposerControlMetrics.hitTarget") == 2)
+        #expect(composerControls.occurrences(of: "size: ComposerControlMetrics.symbolSize") == 2)
         #expect(transcript.contains(".font(TronFont.body(12))"))
         #expect(transcript.contains(".foregroundStyle(Color.tronTextSecondary)"))
         #expect(transcript.contains(".italic()"))
@@ -1209,7 +1229,8 @@ struct PresentationStyleGuardTests {
         let attachmentButton = (chat.components(separatedBy: "private var attachmentButton").dropFirst().first ?? "")
             .components(separatedBy: "private var catchUpButton").first ?? ""
         #expect(attachmentButton.contains("Image(systemName: \"plus\")"))
-        #expect(attachmentButton.contains(".font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))"))
+        #expect(attachmentButton.contains("size: ComposerControlMetrics.symbolSize"))
+        #expect(attachmentButton.occurrences(of: "ComposerControlMetrics.hitTarget") == 4)
         #expect(attachmentButton.contains(".foregroundStyle(attachmentActionsEnabled ? Color.tronEmerald : Color.tronTextMuted)"))
         #expect(attachmentButton.contains(".allowsHitTesting(false)"))
         #expect(attachmentButton.contains("ComposerAttachmentMenuButton("))

@@ -34,6 +34,8 @@ struct ChatCompactPillTests {
         #expect(ChatCompactPillLayoutPolicy.horizontalPadding == 11)
         #expect(ChatCompactPillLayoutPolicy.verticalPadding == 6)
         #expect(ChatCompactPillLayoutPolicy.itemSpacing == 7)
+        #expect(ChatCompactPillLayoutPolicy.standardIconSize == 10)
+        #expect(ChatCompactPillLayoutPolicy.toolIconSize == 11)
     }
 
     @Test("small warning and neutral text keeps accessible contrast")

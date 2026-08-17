@@ -596,8 +596,8 @@ exercise the same owner without camera hardware and do not model a second captur
 Images become native image input. Other files remain agent-readable
 through a deterministic canonical path envelope, while the mobile projection
 removes that path and exposes only display-safe name/type/size metadata. Sent
-images and files share one attachment strip above the prompt text: images use the
-same square previews as pending photos and files use named chips. Transcript images resolve through one
+images and files share one attachment strip above—and structurally outside—the prompt's Liquid Glass:
+images use the same square previews as pending photos and files use named chips. Transcript images resolve through one
 `ChatMediaLoader` keyed by profile, lifecycle generation, connection, and blob ID; views never fetch blobs
 directly. Thumbnail fetch/decode is identity-single-flight behind one shared preparation slot and a
 32-flight admission ceiling. Its bounded HTTP delegate rejects declared or streamed bodies over 25 MiB
@@ -605,7 +605,9 @@ while receiving them, then applies image orientation while downsampling off-main
 and retains at most 64 items/4 MiB decoded under deterministic LRU. Lifecycle replacement and the
 app-lifetime memory-pressure observer advance exact invalidation generations, cancel flights, and clear
 the cache; late fetch or detached-decode completion cannot repopulate it.
-A preview opens immediately with the thumbnail and may replace it with one uncached full image. Full-preview
+A preview uses one nonoptional item route, opens the historical medium sheet immediately with its captured
+thumbnail, and may replace it with one uncached full image; presentation never depends on optional content
+after the sheet has already been admitted. Full-preview
 ImageIO decode applies orientation and downsamples before publication to at most 4,096 pixels on either axis
 and 64 MiB of decoded rows, preventing compressed dimensions from forcing an unbounded eager allocation.
 Each sheet owns an exact lease, and dismissal cancels the underlying flight only after its final lease retires,
@@ -614,7 +616,8 @@ owner of a canonical session; terminal and mobile chat clients must attach to
 that owner rather than opening the same JSONL in separate Pi processes. Its
 historical context ring projects the
 canonical context percentage and opens Manage Session at the composer's trailing
-edge whenever no Send or Stop action is needed. When a draft adds Send, the action
+edge whenever no Send or Stop action is needed. Attachment, context, and send/stop controls share one
+40-point target and 16-point visual metric, keeping their in-bar geometry stable as modes change. When a draft adds Send, the action
 scales and fades in at its final in-bar position while the context ring springs left;
 Reduce Motion uses a short fade.
 Model and thinking configuration live in that sheet rather than as bootstrap
@@ -901,7 +904,8 @@ inside a 30-point target centered on the 64-point preview's top-trailing corner.
 preview alone owns rounded glass clipping, leaving the half-offset remove control visible.
 Pending and sent photo chips share the historical medium-detent,
 concentrically rounded preview with native pinch and double-tap zoom. Earlier-history loading, context summaries, and unread-response navigation share one
-content-sized compact pill treatment while preserving 44-point semantic targets. A
+content-sized compact pill treatment while preserving 44-point semantic targets; tool-chip symbols use the
+next one-point type step for slightly stronger visual weight without changing pill geometry. A
 history request captures the visually first measured semantic frame intersecting the
 viewport; threshold visibility cannot authorize loading. Canonical-to-rendered metadata
 maps every tool call to its single compact grouped transcript chip, so page-boundary
