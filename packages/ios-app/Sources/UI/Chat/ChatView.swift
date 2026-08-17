@@ -1174,11 +1174,11 @@ struct ChatView: View {
                 scrollCoordinator.composerViewportTransitionBegan()
             }
         }
-        .overlay(alignment: .bottom) {
+        .background(alignment: .bottom) {
             ChatBottomActivityBlur(isActive: showsAmbientWorkingBlur)
                 // The native safe-area inset moves the composer with the
-                // keyboard. Extending this nonstructural overlay below that
-                // owner keeps the pulse in the keyboard gap and bottom inset.
+                // keyboard. The background remains behind the input glass,
+                // while its translated lower edge fills the keyboard corners.
                 .offset(y: ChatBottomActivityBlurLayout.translation(
                     keyboardVisible: composerFocused
                 ))

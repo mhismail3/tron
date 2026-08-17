@@ -45,7 +45,7 @@ struct TronTopBlurOverlay: View {
 enum ChatBottomActivityBlurLayout {
     static let height: CGFloat = 68
     static let bottomSafeAreaTranslation: CGFloat = 44
-    static let keyboardTranslation: CGFloat = 0
+    static let keyboardTranslation: CGFloat = 24
     static let radius: CGFloat = 10
     static let pulseDuration: TimeInterval = 2.2
     static let restingTintOpacity = 0.02

@@ -32,7 +32,7 @@ struct ChatCompactPillTests {
     @Test("bottom activity blur follows keyboard focus without changing layout")
     func bottomActivityBlurGeometry() {
         #expect(ChatBottomActivityBlurLayout.height == 68)
-        #expect(ChatBottomActivityBlurLayout.translation(keyboardVisible: true) == 0)
+        #expect(ChatBottomActivityBlurLayout.translation(keyboardVisible: true) == 24)
         #expect(ChatBottomActivityBlurLayout.translation(keyboardVisible: false) == 44)
     }
 

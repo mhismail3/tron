@@ -558,10 +558,12 @@ an active turn; only submission waits for readiness. Default visible running sta
 space: a nonstructural 68-point bottom-safe-area blur gently oscillates between its neutral state and a
 clearly readable but low-saturation emerald tint. At rest its fixed 44-point safe-area translation leaves 24
 points of additional upward reach without increasing blur radius. The overlay belongs to the measured composer
-but remains nonstructural. While the editor owns keyboard focus, its translation becomes zero so the strongest
-edge aligns with the native keyboard boundary and remains visible in the thin composer/keyboard gap; native
-safe-area motion then carries both together. On dismissal it eases back into the device-bottom inset, with its
-strongest edge beyond the layout boundary instead of forming a clipped horizontal seam. Reduce Motion uses one static subtle emerald state, while VoiceOver retains a
+but remains nonstructural. It renders in the composer's background layer, keeping the Liquid Glass input and
+controls above the effect. While the editor owns keyboard focus, a 24-point downward translation extends the
+strongest portion beneath the native keyboard's rounded top corners while leaving 44 points behind the composer
+and gap; native safe-area motion carries both together. On dismissal it eases back to the 44-point device-bottom
+translation, with its strongest edge beyond the layout boundary instead of forming a clipped horizontal seam.
+Reduce Motion uses one static subtle emerald state, while VoiceOver retains a
 nonvisual “Tron is working” status on the active blur. Custom working messages,
 compaction, and provider retry attempts retain explicit compact rows so operational detail is never hidden.
 A non-empty active draft replaces the trailing Stop

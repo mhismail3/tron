@@ -517,8 +517,8 @@ required together because default toolbar Liquid Glass can differ materially
 between the simulator and physical hardware. Chat checkpoints must also verify
 trailing alignment for user turns, historical transcript/tool insertion motion,
 the Settings gear in the chat toolbar, the context ring at the trailing edge of
-an empty idle composer, the nonstructural short bottom blur at default running state, its native movement
-between the device-bottom inset and thin composer/keyboard gap, static subtle emerald under Reduce Motion,
+an empty idle composer, the nonstructural short bottom blur at default running state, its background-layer
+movement between the device-bottom inset and beneath the keyboard's rounded top corners, static subtle emerald under Reduce Motion,
 retained compact rows for custom/compaction/retry detail, and emerald toolbar/sheet actions. Physical chat spacing acceptance additionally checks that
 a one-visual-line prompt has intrinsic height, sent photo/file chips stay above and outside prompt glass,
 tool pills retain six-point vertical insets with the slightly larger tool-only symbol step and without a
