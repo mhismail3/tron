@@ -559,8 +559,8 @@ space: a nonstructural 68-point bottom-safe-area blur gently oscillates between 
 clearly readable but low-saturation emerald tint. At rest its fixed 44-point safe-area translation leaves 24
 points of additional upward reach without increasing blur radius. The overlay belongs to the measured composer
 but remains nonstructural. It renders in the composer's background layer, keeping the Liquid Glass input and
-controls above the effect. While the editor owns keyboard focus, a 24-point downward translation extends the
-strongest portion beneath the native keyboard's rounded top corners while leaving 44 points behind the composer
+controls above the effect. While the editor owns keyboard focus, a 12-point downward translation keeps the
+strongest portion beneath the native keyboard's rounded top corners while leaving 56 points behind the composer
 and gap; native safe-area motion carries both together. On dismissal it eases back to the 44-point device-bottom
 translation, with its strongest edge beyond the layout boundary instead of forming a clipped horizontal seam.
 Reduce Motion uses one static subtle emerald state, while VoiceOver retains a

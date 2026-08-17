@@ -277,7 +277,7 @@ struct PresentationStyleGuardTests {
         #expect(blur.contains("struct ChatBottomActivityBlur: View"))
         #expect(blur.contains("static let height: CGFloat = 68"))
         #expect(blur.contains("static let bottomSafeAreaTranslation: CGFloat = 44"))
-        #expect(blur.contains("static let keyboardTranslation: CGFloat = 24"))
+        #expect(blur.contains("static let keyboardTranslation: CGFloat = 12"))
         #expect(blur.contains("static let radius: CGFloat = 10"))
         #expect(blur.contains("static let activeTintOpacity = 0.105"))
         #expect(blur.contains(".rotationEffect(.degrees(180))"))
