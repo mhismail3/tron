@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, symlink, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ModelRuntime, SessionManager } from "@earendil-works/pi-coding-agent";
@@ -20,6 +20,42 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<v
 describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
+
+  async function coldFixture(label: string, options: { nested?: boolean; name?: string } = {}) {
+    const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const sessionDirectory = options.nested
+      ? join(agentDir, "sessions", "workspace", "child")
+      : join(agentDir, "sessions", "workspace");
+    await Promise.all([mkdir(sessionDirectory, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const manager = SessionManager.create(cwd, sessionDirectory);
+    manager.appendMessage(fauxAssistantMessage(`cold acquisition ${label}`));
+    if (options.name) manager.appendSessionInfo(options.name);
+    const runtimeFactory = vi.fn(async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }));
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: runtimeFactory,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    return {
+      root,
+      agentDir,
+      cwd,
+      manager,
+      registry,
+      runtimeFactory,
+      sessionFile: manager.getSessionFile()!,
+    };
+  }
 
   afterEach(async () => {
     await Promise.all(registries.splice(0).map((registry) => registry.dispose()));
@@ -250,6 +286,525 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }
   });
 
+  it("reuses one stable catalog acquisition without a second transcript-wide materialization", async () => {
+    const fixture = await coldFixture("reuse");
+    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const materialize = vi.spyOn(internals, "sessionInfos");
+
+    const catalog = await fixture.registry.catalog("user");
+    expect(catalog.sessions.map((session) => session.id)).toContain(fixture.manager.getSessionId());
+    expect(materialize).toHaveBeenCalledTimes(1);
+    fixture.manager.appendMessage(fauxAssistantMessage("ordinary append after catalog"));
+
+    expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
+    expect(materialize).toHaveBeenCalledTimes(1);
+    expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
+
+    // A hot slot not marked ambiguous by the latest full catalog bypasses
+    // both transcript materialization and global header validation.
+    const evidence = vi.spyOn(fixture.registry as any, "catalogStructureEvidence");
+    expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
+    expect(materialize).toHaveBeenCalledTimes(1);
+    expect(evidence).not.toHaveBeenCalled();
+  });
+
+  it("uses only bounded header evidence when cold acquisition has no reusable admission", async () => {
+    const fixture = await coldFixture("uncached");
+    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const materialize = vi.spyOn(internals, "sessionInfos");
+
+    expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id).toBe(fixture.manager.getSessionId());
+    expect(materialize).not.toHaveBeenCalled();
+    expect(fixture.runtimeFactory).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores jsonl-named directories during lightweight acquisition", async () => {
+    const fixture = await coldFixture("jsonl-directory");
+    await mkdir(join(fixture.agentDir, "sessions", "unrelated.jsonl"));
+    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const materialize = vi.spyOn(internals, "sessionInfos");
+
+    expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
+      .toBe(fixture.manager.getSessionId());
+    expect(materialize).not.toHaveBeenCalled();
+  });
+
+  it("falls back to stable SDK discovery for an unrelated malformed header", async () => {
+    const fixture = await coldFixture("malformed-fallback");
+    const unrelated = join(fixture.agentDir, "sessions", "unrelated");
+    await mkdir(unrelated, { recursive: true });
+    await writeFile(join(unrelated, "malformed.jsonl"), `${"x".repeat(70_000)}\n`);
+    const internals = fixture.registry as unknown as {
+      sessionInfos: () => Promise<unknown[]>;
+      catalogAcquisitionAdmission?: unknown;
+    };
+    const materialize = vi.spyOn(internals, "sessionInfos");
+
+    expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
+      .toBe(fixture.manager.getSessionId());
+    expect(materialize).toHaveBeenCalledTimes(3);
+    expect(internals.catalogAcquisitionAdmission).toBeUndefined();
+  });
+
+  it("revalidates oversized SDK identities after fallback resolution", async () => {
+    const fixture = await coldFixture("oversized-fallback-identity");
+    const unrelatedDirectory = join(fixture.agentDir, "sessions", "unrelated-oversized");
+    const unrelatedFile = join(unrelatedDirectory, "unrelated.jsonl");
+    await mkdir(unrelatedDirectory, { recursive: true });
+    const originalLines = (await readFile(fixture.sessionFile, "utf8")).split("\n");
+    const originalHeader = JSON.parse(originalLines[0]!) as Record<string, unknown>;
+    originalLines[0] = JSON.stringify({
+      ...originalHeader,
+      id: "unrelated-oversized-session",
+      padding: "x".repeat(70_000),
+    });
+    await writeFile(unrelatedFile, originalLines.join("\n"));
+    const internals = fixture.registry as unknown as {
+      fallbackCatalogAcquisition: () => Promise<unknown>;
+      sessionInfos: () => Promise<unknown[]>;
+    };
+    const originalFallback = internals.fallbackCatalogAcquisition.bind(fixture.registry);
+    const fallback = vi.spyOn(internals, "fallbackCatalogAcquisition").mockImplementation(async () => {
+      const resolution = await originalFallback();
+      const mutatedLines = (await readFile(unrelatedFile, "utf8")).split("\n");
+      const mutatedHeader = JSON.parse(mutatedLines[0]!) as Record<string, unknown>;
+      mutatedLines[0] = JSON.stringify({ ...mutatedHeader, id: fixture.manager.getSessionId() });
+      await writeFile(unrelatedFile, mutatedLines.join("\n"));
+      return resolution;
+    });
+    const materialize = vi.spyOn(internals, "sessionInfos");
+
+    await expect(fixture.registry.acquire(fixture.manager.getSessionId()))
+      .rejects.toMatchObject({ code: "busy", retryable: true });
+    expect(fallback).toHaveBeenCalledTimes(1);
+    expect(materialize).toHaveBeenCalledTimes(3);
+    expect(fixture.runtimeFactory).not.toHaveBeenCalled();
+  });
+
+  it("invalidates reusable acquisition when a duplicate or removal changes canonical membership", async () => {
+    const duplicateFixture = await coldFixture("duplicate-membership");
+    const duplicateInternals = duplicateFixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const duplicateMaterialize = vi.spyOn(duplicateInternals, "sessionInfos");
+    await duplicateFixture.registry.catalog("all");
+    const duplicateDirectory = join(duplicateFixture.agentDir, "sessions", "duplicate");
+    await mkdir(duplicateDirectory, { recursive: true });
+    await copyFile(
+      duplicateFixture.sessionFile,
+      join(duplicateDirectory, "duplicate.jsonl"),
+    );
+
+    await expect(duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(duplicateMaterialize).toHaveBeenCalledTimes(1);
+    expect(duplicateFixture.runtimeFactory).not.toHaveBeenCalled();
+    await rm(join(duplicateDirectory, "duplicate.jsonl"));
+    expect((await duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).id)
+      .toBe(duplicateFixture.manager.getSessionId());
+    expect(duplicateMaterialize).toHaveBeenCalledTimes(1);
+    const duplicateAgain = join(duplicateDirectory, "duplicate-again.jsonl");
+    await copyFile(duplicateFixture.sessionFile, duplicateAgain);
+    await duplicateFixture.registry.catalog("all");
+    await expect(duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await rm(duplicateAgain);
+    expect((await duplicateFixture.registry.acquire(duplicateFixture.manager.getSessionId())).id)
+      .toBe(duplicateFixture.manager.getSessionId());
+
+    const removedFixture = await coldFixture("removed-membership");
+    const removedInternals = removedFixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const removedMaterialize = vi.spyOn(removedInternals, "sessionInfos");
+    await removedFixture.registry.catalog("all");
+    await rm(removedFixture.sessionFile);
+
+    await expect(removedFixture.registry.acquire(removedFixture.manager.getSessionId())).rejects.toMatchObject({
+      code: "not_found",
+    });
+    expect(removedMaterialize).toHaveBeenCalledTimes(1);
+    expect(removedFixture.runtimeFactory).not.toHaveBeenCalled();
+  });
+
+  it("resolves deepest nested topology owners without scanning every root", async () => {
+    const fixture = await coldFixture("topology-helper");
+    const internals = fixture.registry as unknown as {
+      nestedOwners: (sessions: Array<{ id: string; path: string }>) => ReadonlyMap<string, string>;
+    };
+    const root = join(fixture.root, "topology");
+    const parent = join(root, "parent.jsonl");
+    const child = join(root, "parent", "child.jsonl");
+    const grandchild = join(root, "parent", "child", "run", "grandchild.jsonl");
+    const unrelated = join(root, "unrelated.jsonl");
+
+    expect([...internals.nestedOwners([
+      { id: "parent", path: parent },
+      { id: "child", path: child },
+      { id: "grandchild", path: grandchild },
+      { id: "unrelated", path: unrelated },
+    ])]).toEqual([
+      [resolve(child), "parent"],
+      [resolve(grandchild), "child"],
+    ]);
+  });
+
+  it("keeps structural and exact current named subagent sessions non-openable", async () => {
+    const nestedFixture = await coldFixture("nested-subagent", { nested: true });
+    const nestedInternals = nestedFixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const nestedMaterialize = vi.spyOn(nestedInternals, "sessionInfos");
+    const nestedCatalog = await nestedFixture.registry.catalog("all");
+    expect(nestedCatalog.sessions.find((session) => session.id === nestedFixture.manager.getSessionId())?.kind)
+      .toBe("subagent");
+    await expect(nestedFixture.registry.acquire(nestedFixture.manager.getSessionId())).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(nestedMaterialize).toHaveBeenCalledTimes(1);
+    expect(nestedFixture.runtimeFactory).not.toHaveBeenCalled();
+
+    const namedFixture = await coldFixture("named-subagent", { name: "subagent-catalog-child" });
+    const namedInternals = namedFixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const namedMaterialize = vi.spyOn(namedInternals, "sessionInfos");
+    await expect(namedFixture.registry.acquire(namedFixture.manager.getSessionId())).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(namedMaterialize).not.toHaveBeenCalled();
+    expect(namedFixture.runtimeFactory).not.toHaveBeenCalled();
+
+    const renamedFixture = await coldFixture("renamed-subagent");
+    const renamedInternals = renamedFixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const renamedMaterialize = vi.spyOn(renamedInternals, "sessionInfos");
+    await renamedFixture.registry.catalog("all");
+    renamedFixture.manager.appendSessionInfo("subagent-renamed-after-catalog");
+    await expect(renamedFixture.registry.acquire(renamedFixture.manager.getSessionId())).rejects.toMatchObject({
+      code: "conflict",
+    });
+    expect(renamedMaterialize).toHaveBeenCalledTimes(1);
+    expect(renamedFixture.runtimeFactory).not.toHaveBeenCalled();
+  });
+
+  it("rejects identity, cwd, or duplicate mutation before runtime creation", async () => {
+    for (const field of ["id", "cwd", "duplicate"] as const) {
+      const fixture = await coldFixture(`${field}-race`);
+      await fixture.registry.catalog("all");
+      const replacementCwd = join(fixture.root, "replacement-workspace");
+      await mkdir(replacementCwd);
+      const internals = fixture.registry as unknown as {
+        catalogAcquisition: () => Promise<unknown>;
+      };
+      const original = internals.catalogAcquisition.bind(fixture.registry);
+      const admission = vi.spyOn(internals, "catalogAcquisition").mockImplementation(async () => {
+        const acquired = await original();
+        if (field === "duplicate") {
+          const duplicateDirectory = join(fixture.agentDir, "sessions", "duplicate-gap");
+          await mkdir(duplicateDirectory, { recursive: true });
+          await copyFile(fixture.sessionFile, join(duplicateDirectory, "duplicate.jsonl"));
+        } else {
+          const lines = (await readFile(fixture.sessionFile, "utf8")).split("\n");
+          const header = JSON.parse(lines[0]!) as Record<string, unknown>;
+          lines[0] = JSON.stringify({
+            ...header,
+            [field]: field === "id" ? "replacement-session-id" : replacementCwd,
+          });
+          await writeFile(fixture.sessionFile, lines.join("\n"));
+        }
+        return acquired;
+      });
+
+      try {
+        await expect(fixture.registry.acquire(fixture.manager.getSessionId())).rejects.toMatchObject({
+          code: field === "duplicate" ? "busy" : "conflict",
+        });
+        expect(fixture.runtimeFactory).not.toHaveBeenCalled();
+      } finally {
+        admission.mockRestore();
+      }
+    }
+  });
+
+  it("retries lightweight acquisition without stamping invalidated evidence current", async () => {
+    const fixture = await coldFixture("lightweight-generation-race");
+    const internals = fixture.registry as unknown as {
+      buildCatalogAcquisition: (...arguments_: any[]) => Promise<unknown>;
+      catalogAcquisition: () => Promise<unknown>;
+      invalidateCatalogAcquisition: () => void;
+      catalogAcquisitionInvalidationGeneration: number;
+      catalogAcquisitionAdmission?: { invalidationGeneration: number };
+    };
+    const original = internals.buildCatalogAcquisition.bind(fixture.registry);
+    let calls = 0;
+    const build = vi.spyOn(internals, "buildCatalogAcquisition").mockImplementation(async (...arguments_) => {
+      const resolution = await original(...arguments_);
+      calls += 1;
+      if (calls === 1) internals.invalidateCatalogAcquisition();
+      return resolution;
+    });
+
+    await internals.catalogAcquisition();
+    expect(build).toHaveBeenCalledTimes(2);
+    expect(internals.catalogAcquisitionAdmission?.invalidationGeneration)
+      .toBe(internals.catalogAcquisitionInvalidationGeneration);
+  });
+
+  it("fails busy after a second lightweight acquisition invalidation", async () => {
+    const fixture = await coldFixture("repeated-lightweight-generation-race");
+    const internals = fixture.registry as unknown as {
+      catalogStructureEvidence: () => Promise<unknown>;
+      catalogAcquisition: () => Promise<unknown>;
+      invalidateCatalogAcquisition: () => void;
+      catalogAcquisitionAdmission?: unknown;
+    };
+    const original = internals.catalogStructureEvidence.bind(fixture.registry);
+    const evidence = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
+      const captured = await original();
+      internals.invalidateCatalogAcquisition();
+      return captured;
+    });
+
+    await expect(internals.catalogAcquisition()).rejects.toMatchObject({ code: "busy", retryable: true });
+    expect(evidence).toHaveBeenCalledTimes(2);
+    expect(internals.catalogAcquisitionAdmission).toBeUndefined();
+  });
+
+  it("cannot republish an acquisition invalidated during full materialization", async () => {
+    const fixture = await coldFixture("invalidation-race");
+    const internals = fixture.registry as unknown as {
+      sessionInfos: () => Promise<unknown[]>;
+      invalidateCatalogAcquisition: () => void;
+    };
+    const original = internals.sessionInfos.bind(fixture.registry);
+    let calls = 0;
+    const materialize = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
+      const infos = await original();
+      calls += 1;
+      if (calls === 1) internals.invalidateCatalogAcquisition();
+      return infos;
+    });
+
+    await fixture.registry.catalog("all");
+    expect(materialize).toHaveBeenCalledTimes(2);
+    await fixture.registry.acquire(fixture.manager.getSessionId());
+    expect(materialize).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a mutation in the final full-catalog publication gap", async () => {
+    const fixture = await coldFixture("final-publication-gap");
+    const internals = fixture.registry as unknown as {
+      publishCatalogAcquisition: (...arguments_: unknown[]) => Promise<boolean>;
+      invalidateCatalogAcquisition: () => void;
+      updateCatalogIdentity: (...arguments_: unknown[]) => void;
+      catalogAcquisitionAdmission?: unknown;
+    };
+    const original = internals.publishCatalogAcquisition.bind(fixture.registry);
+    const publication = vi.spyOn(internals, "publishCatalogAcquisition").mockImplementation(async (...arguments_) => {
+      const admitted = await original(...arguments_);
+      internals.invalidateCatalogAcquisition();
+      return admitted;
+    });
+    const identity = vi.spyOn(internals, "updateCatalogIdentity");
+
+    await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
+    expect(publication).toHaveBeenCalledTimes(1);
+    expect(identity).not.toHaveBeenCalled();
+    expect(internals.catalogAcquisitionAdmission).toBeUndefined();
+  });
+
+  it("fails busy without publishing after a second unstable full materialization", async () => {
+    const fixture = await coldFixture("repeated-instability");
+    const internals = fixture.registry as unknown as {
+      catalogStructureEvidence: () => Promise<{ digest: string; identitiesByPath: ReadonlyMap<string, unknown>; complete: boolean }>;
+      catalogAcquisition: () => Promise<unknown>;
+      sessionInfos: () => Promise<unknown[]>;
+      updateCatalogIdentity: (...arguments_: unknown[]) => void;
+      catalogAcquisitionAdmission?: unknown;
+    };
+    await internals.catalogAcquisition();
+    expect(internals.catalogAcquisitionAdmission).toBeDefined();
+    const originalEvidence = internals.catalogStructureEvidence.bind(fixture.registry);
+    let evidenceCall = 0;
+    const evidence = vi.spyOn(internals, "catalogStructureEvidence").mockImplementation(async () => {
+      const current = await originalEvidence();
+      evidenceCall += 1;
+      return { ...current, digest: `${current.digest}-${evidenceCall}` };
+    });
+    const materialize = vi.spyOn(internals, "sessionInfos");
+    const publishIdentity = vi.spyOn(internals, "updateCatalogIdentity");
+
+    try {
+      await expect(fixture.registry.catalog("all")).rejects.toMatchObject({ code: "busy", retryable: true });
+      expect(materialize).toHaveBeenCalledTimes(2);
+      expect(publishIdentity).not.toHaveBeenCalled();
+      expect(internals.catalogAcquisitionAdmission).toBeUndefined();
+    } finally {
+      evidence.mockRestore();
+    }
+  });
+
+  it("bounds validation reads and retained acquisition evidence before publication", async () => {
+    const headerFixture = await coldFixture("header-bound");
+    const headerRegistry = new RuntimeRegistry({
+      agentDir: headerFixture.agentDir,
+      tronHome: join(headerFixture.root, "tron-header-bound"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(headerFixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      catalogDiscoveryLimits: { maximumHeaderBytes: 1 },
+    });
+    registries.push(headerRegistry);
+    await expect(headerRegistry.catalog("all")).resolves.toMatchObject({
+      sessions: expect.arrayContaining([expect.objectContaining({ id: headerFixture.manager.getSessionId() })]),
+    });
+
+    const admissionRegistry = new RuntimeRegistry({
+      agentDir: headerFixture.agentDir,
+      tronHome: join(headerFixture.root, "tron-admission-bound"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(headerFixture.agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      catalogDiscoveryLimits: { maximumAcquisitionBytes: 1 },
+    });
+    registries.push(admissionRegistry);
+    await expect(admissionRegistry.catalog("all")).resolves.toMatchObject({
+      sessions: expect.arrayContaining([expect.objectContaining({ id: headerFixture.manager.getSessionId() })]),
+    });
+    await expect(admissionRegistry.acquire(headerFixture.manager.getSessionId()))
+      .rejects.toMatchObject({ code: "busy", retryable: true });
+  });
+
+  it("admits scaled short headers within the aggregate validation budget", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-short-header-budget-"));
+    const agentDir = join(root, "agent");
+    const directory = join(agentDir, "sessions", "workspace");
+    const cwd = join(root, "workspace");
+    const count = 64;
+    await Promise.all([mkdir(directory, { recursive: true }), mkdir(cwd)]);
+    await Promise.all(Array.from({ length: count }, (_, index) => writeFile(
+      join(directory, `session-${index}.jsonl`),
+      `${JSON.stringify({
+        type: "session",
+        version: 3,
+        id: `session-${index}`,
+        timestamp: "2026-01-01T00:00:00.000Z",
+        cwd,
+      })}\n${"x".repeat(4_096)}\n`,
+    )));
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      catalogDiscoveryLimits: {
+        maximumSessions: count,
+        maximumHeaderBytes: count * 512,
+        normalizationConcurrency: 4,
+      },
+    });
+    registries.push(registry);
+    const internals = registry as unknown as {
+      catalogAcquisition: () => Promise<{ entriesByID: ReadonlyMap<string, unknown> }>;
+      readCatalogHeader: (...arguments_: any[]) => Promise<unknown>;
+    };
+    const original = internals.readCatalogHeader.bind(registry);
+    let active = 0;
+    let maximumActive = 0;
+    let releaseResolve!: () => void;
+    let capacityResolve!: () => void;
+    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+    const capacity = new Promise<void>((resolve) => { capacityResolve = resolve; });
+    const headers = vi.spyOn(internals, "readCatalogHeader").mockImplementation(async (...arguments_) => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      if (maximumActive === 4) capacityResolve();
+      await release;
+      try { return await original(...arguments_); }
+      finally { active -= 1; }
+    });
+
+    const acquiring = internals.catalogAcquisition();
+    await capacity;
+    expect(maximumActive).toBe(4);
+    releaseResolve();
+    expect((await acquiring).entriesByID.size).toBe(count);
+    expect(headers).toHaveBeenCalledTimes(count);
+  });
+
+  it("reserves a deterministic aggregate header-read budget across concurrent readers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-catalog-strict-header-budget-"));
+    const agentDir = join(root, "agent");
+    const directory = join(agentDir, "sessions", "workspace");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(directory, { recursive: true }), mkdir(cwd)]);
+    await Promise.all(Array.from({ length: 8 }, (_, index) => writeFile(
+      join(directory, `session-${index}.jsonl`),
+      `${JSON.stringify({
+        type: "session",
+        id: `session-${index}`,
+        cwd: index < 4 ? "/x" : "x".repeat(200),
+      })}\n${"x".repeat(4_096)}\n`,
+    )));
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+      catalogDiscoveryLimits: {
+        maximumHeaderBytes: 2 * 512,
+        normalizationConcurrency: 4,
+      },
+    });
+    registries.push(registry);
+    const internals = registry as unknown as {
+      catalogStructureEvidence: () => Promise<{
+        complete: boolean;
+        digest: string;
+        identitiesByPath: ReadonlyMap<string, unknown>;
+      }>;
+    };
+
+    const first = await internals.catalogStructureEvidence();
+    const second = await internals.catalogStructureEvidence();
+    expect(first.complete).toBe(false);
+    expect(first.identitiesByPath.size).toBe(4);
+    expect([...first.identitiesByPath.keys()]).toEqual([...second.identitiesByPath.keys()]);
+    expect(first.digest).toBe(second.digest);
+  });
+
+  it("acquires from header evidence while a full catalog materialization is suspended", async () => {
+    const fixture = await coldFixture("concurrent-list");
+    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const original = internals.sessionInfos.bind(fixture.registry);
+    let suspendedResolve!: () => void;
+    let releaseResolve!: () => void;
+    const suspended = new Promise<void>((resolve) => { suspendedResolve = resolve; });
+    const release = new Promise<void>((resolve) => { releaseResolve = resolve; });
+    const materialize = vi.spyOn(internals, "sessionInfos").mockImplementation(async () => {
+      suspendedResolve();
+      await release;
+      return original();
+    });
+
+    const listing = fixture.registry.catalog("all");
+    await suspended;
+    try {
+      expect((await fixture.registry.acquire(fixture.manager.getSessionId())).id)
+        .toBe(fixture.manager.getSessionId());
+      expect(materialize).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseResolve();
+    }
+    await expect(listing).resolves.toMatchObject({
+      sessions: expect.arrayContaining([expect.objectContaining({ id: fixture.manager.getSessionId() })]),
+    });
+  });
+
   it("never stamps captured stale catalog fields with a newer summary revision", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-summary-race-"));
     const agentDir = join(root, "agent");
@@ -350,7 +905,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const reordered = await registry.catalog("all");
     expect(reordered.listRevision).toBe(conflicted.listRevision);
     expect(reordered.sessions.find((session) => session.id === slot.id)).toBeUndefined();
-    await expect(registry.acquire(slot.id)).rejects.toMatchObject({ code: "conflict" });
+    // Open admission uses current canonical headers rather than the stale global
+    // ambiguity last projected by a mocked full catalog.
+    expect((await registry.acquire(slot.id)).id).toBe(slot.id);
     await expect(registry.delete(slot.id)).rejects.toMatchObject({ code: "conflict" });
 
     discovery.mockRestore();
