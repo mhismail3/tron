@@ -18,7 +18,8 @@ struct ChatCompactPillTests {
         #expect(ChatPromptContainerStyle.cornerRadius == 18)
         #expect(ChatPromptContainerStyle.horizontalPadding == 12)
         #expect(ChatPromptContainerStyle.topPadding == 8)
-        #expect(ChatPromptContainerStyle.bottomPadding == 12)
+        #expect(ChatPromptContainerStyle.userPromptBottomPadding == 8)
+        #expect(ChatPromptContainerStyle.queuedMessageBottomPadding == 12)
         #expect(ChatPromptContainerStyle.tintOpacity == 0.16)
     }
 

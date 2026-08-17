@@ -407,8 +407,9 @@ maximum-excursion data only. Hosted discrete-insertion cases record aggregate en
 counts, prove a visible insertion admits once, and prove detached insertion emits no automatic write.
 Hosted streaming bursts must install only their newest exact source while detached composer/viewport work
 remains writable and creates no projection work. `ChatCompactPillTests` own intrinsic-width trailing placement for short prompts, the 364-point
-long-prompt bound, logical-leading line alignment, agent-matched Dynamic Type body sizing, shared
-prompt/queue Liquid Glass geometry, and flat/detail material policy. `ChatContentTransitionTests` own role
+long-prompt bound, intrinsic-width glass selection, equal user-prompt vertical padding, logical-leading
+line alignment, agent-matched Dynamic Type body sizing, shared prompt/queue Liquid Glass geometry, and
+flat/detail material policy. `ChatContentTransitionTests` own role
 classification, trailing composer-edge prompt/queue motion, aligned activity motion, and the
 identity transform required by Reduce Motion. Hosted scroll tests remain the authority that these
 visual transforms do not grant detached readers automatic writes or replay same-ID entrances.
@@ -544,8 +545,9 @@ row and verify progressive structured fields preserve the complete response-firs
 distinct-fallback, request-only, and missing-result cases without a readable-output duplicate or third fallback
 section; raw formatting must remain behind the structured view's explicit disclosure.
 Verify live updates and true-only truncation metadata without moving the primary sheet's reading position. With
-a nonempty focused composer, open the native attachment menu, verify the keyboard remains visible, and activate
-camera, photos, and files on the first option tap; the 40-point plus control and native menu appearance/order must remain unchanged. Terminal checkpoints must exercise
+a nonempty focused composer, open the native attachment menu, verify the keyboard remains visible, verify its
+option symbols are emerald while text retains native system styling, and activate camera, photos, and files on
+the first option tap; the 40-point plus control and native menu appearance/order must remain unchanged. Terminal checkpoints must exercise
 the native keyboard plus the floating shortcut and command-key surfaces rather
 than validating only PTY output.
 

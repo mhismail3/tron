@@ -120,7 +120,7 @@ struct QueuedMessageRow: View {
         }
         .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
         .padding(.top, ChatPromptContainerStyle.topPadding)
-        .padding(.bottom, ChatPromptContainerStyle.bottomPadding)
+        .padding(.bottom, ChatPromptContainerStyle.queuedMessageBottomPadding)
         .contentShape(shape)
         .glassEffect(
             isManageable

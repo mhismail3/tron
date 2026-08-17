@@ -144,11 +144,12 @@ struct TranscriptRow: View, Equatable {
                 item.role == .user ? ChatPromptContainerStyle.horizontalPadding : 2
             )
             .padding(.top, item.role == .user ? ChatPromptContainerStyle.topPadding : 0)
-            .padding(.bottom, item.role == .user ? ChatPromptContainerStyle.bottomPadding : 0)
+            .padding(
+                .bottom,
+                item.role == .user ? ChatPromptContainerStyle.userPromptBottomPadding : 0
+            )
             .frame(
-                maxWidth: item.role == .user
-                    ? UserPromptTextLayoutPolicy.maximumWidth
-                    : .infinity,
+                maxWidth: item.role == .user ? nil : .infinity,
                 alignment: item.role == .user ? .topTrailing : .topLeading
             )
             .modifier(UserPromptGlassModifier(enabled: item.role == .user))
@@ -201,10 +202,20 @@ private struct UserPromptGlassModifier: ViewModifier {
                 cornerRadius: ChatPromptContainerStyle.cornerRadius,
                 style: .continuous
             )
-            content.glassEffect(
-                .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
-                in: shape
-            )
+            ViewThatFits(in: .horizontal) {
+                content
+                    .fixedSize(horizontal: true, vertical: false)
+                    .glassEffect(
+                        .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
+                        in: shape
+                    )
+                content
+                    .glassEffect(
+                        .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
+                        in: shape
+                    )
+            }
+            .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
         } else {
             content
         }

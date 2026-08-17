@@ -581,9 +581,9 @@ Camera, photo, and file actions also remain enabled during an active turn: uploa
 and the eventual prompt carries the same steering behavior as text. The native attachment menu derives enablement
 from the immutable viewed session and an explicit authoritative phase; a missing phase remains
 unavailable. Its identity changes only when the session or effective availability changes. A transparent
-UIKit button preserves the native `UIMenu`, icon, and 40-point hit target as a single UIKit interaction
-boundary, so a focused nonempty composer keeps the keyboard visible while menu options receive their taps.
-Menu selections enter one cancellation-aware queue and become
+UIKit button preserves the native `UIMenu`, system text styling, and 40-point hit target as a single UIKit
+interaction boundary; menu symbols use emerald original-rendered images while a focused nonempty composer
+keeps the keyboard visible. Menu selections enter one cancellation-aware queue and become
 the active camera, photo, or file destination only after the native menu dismissal settles,
 preventing a competing presentation controller from dropping the selection on physical
 iOS. Camera, photo, and file importers share that enum-valued presentation state rather
@@ -761,8 +761,10 @@ Chat has one spatial role model: user prompts are right anchored, agent prose an
 anchored, and presentation-only system events are centered. A width-aware TextKit owner lets short
 prompts hug their measured content at the trailing edge, bounds longer prompts to 364 points, and
 uses logical-leading line alignment inside that block at the same Dynamic Type body size as agent
-prose. User prompts use the same 18-point emerald-tinted Liquid Glass container geometry as steer-next
-cards, without header icons or action chrome. Newly installed
+prose. User prompts choose an intrinsic-width glass candidate before the bounded wrapping fallback, so
+short text never expands the surface to the 364-point ceiling. They use an equal 8-point vertical inset and
+the same 18-point emerald-tinted Liquid Glass geometry as steer-next cards, without header icons or action
+chrome. Newly installed
 canonical content uses that same role geometry for presentation-only motion: user prompts and
 queued intents rise from the trailing composer edge, tool activity enters from the leading edge,
 system capsules settle from center, and assistant prose uses only a shallow vertical reveal. The

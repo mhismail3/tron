@@ -216,7 +216,8 @@ enum ChatPromptContainerStyle {
     static let cornerRadius: CGFloat = 18
     static let horizontalPadding: CGFloat = 12
     static let topPadding: CGFloat = 8
-    static let bottomPadding: CGFloat = 12
+    static let userPromptBottomPadding: CGFloat = 8
+    static let queuedMessageBottomPadding: CGFloat = 12
     static let tintOpacity: Double = 0.16
 }
 

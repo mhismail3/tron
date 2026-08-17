@@ -577,6 +577,8 @@ struct PresentationStyleGuardTests {
         let files = try #require(attachmentButton.firstRange(of: "action(\"Attach Files\"")?.lowerBound)
         #expect(camera < photos)
         #expect(photos < files)
+        #expect(attachmentButton.contains("UIColor(Color.tronEmerald)"))
+        #expect(attachmentButton.contains("renderingMode: .alwaysOriginal"))
         #expect(attachmentButton.contains("parent.onSelect(destination)"))
         #expect(chat.contains(".id(attachmentMenuState.identity)"))
         let attachmentMenu = try #require(
@@ -971,6 +973,9 @@ struct PresentationStyleGuardTests {
         #expect(!userPrompt.contains(".frame(maxWidth: .infinity"))
         #expect(transcript.contains("UserPromptTextLayoutPolicy.maximumWidth"))
         #expect(transcript.contains("UserPromptGlassModifier(enabled: item.role == .user)"))
+        #expect(transcript.contains("ViewThatFits(in: .horizontal)"))
+        #expect(transcript.contains(".fixedSize(horizontal: true, vertical: false)"))
+        #expect(transcript.contains("ChatPromptContainerStyle.userPromptBottomPadding"))
         #expect(transcript.contains("Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)"))
         #expect(compactPill.contains("static let fontScale: CGFloat = 1"))
         #expect(!compactPill.contains(".justified"))
