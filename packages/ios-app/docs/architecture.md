@@ -559,9 +559,10 @@ space: a nonstructural 68-point bottom-safe-area blur gently oscillates between 
 clearly readable but low-saturation emerald tint. At rest its fixed 44-point safe-area translation leaves 24
 points of additional upward reach without increasing blur radius. The overlay belongs to the measured composer
 but remains nonstructural. It renders in the composer's background layer, keeping the Liquid Glass input and
-controls above the effect. While the editor owns keyboard focus, a 12-point downward translation keeps the
-strongest portion beneath the native keyboard's rounded top corners while leaving 56 points behind the composer
-and gap; native safe-area motion carries both together. On dismissal it eases back to the 44-point device-bottom
+controls above the effect. While the editor owns keyboard focus, the blur grows from 68 to 80 points and its
+downward translation grows by the same 12 points, from 12 to 24. The upper edge therefore remains fixed at 56
+points behind the composer while only the lower edge extends beneath the native keyboard's rounded top corners;
+native safe-area motion carries both together. On dismissal it returns to the 68-point height and 44-point device-bottom
 translation, with its strongest edge beyond the layout boundary instead of forming a clipped horizontal seam.
 Reduce Motion uses one static subtle emerald state, while VoiceOver retains a
 nonvisual “Tron is working” status on the active blur. Custom working messages,

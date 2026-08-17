@@ -1175,7 +1175,10 @@ struct ChatView: View {
             }
         }
         .background(alignment: .bottom) {
-            ChatBottomActivityBlur(isActive: showsAmbientWorkingBlur)
+            ChatBottomActivityBlur(
+                isActive: showsAmbientWorkingBlur,
+                keyboardVisible: composerFocused
+            )
                 // The native safe-area inset moves the composer with the
                 // keyboard. The background remains behind the input glass,
                 // while its translated lower edge fills the keyboard corners.

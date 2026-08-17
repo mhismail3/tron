@@ -43,14 +43,19 @@ struct TronTopBlurOverlay: View {
 }
 
 enum ChatBottomActivityBlurLayout {
-    static let height: CGFloat = 68
+    static let bottomHeight: CGFloat = 68
+    static let keyboardHeight: CGFloat = 80
     static let bottomSafeAreaTranslation: CGFloat = 44
-    static let keyboardTranslation: CGFloat = 12
+    static let keyboardTranslation: CGFloat = 24
     static let radius: CGFloat = 10
     static let pulseDuration: TimeInterval = 2.2
     static let restingTintOpacity = 0.02
     static let activeTintOpacity = 0.105
     static let reduceMotionTintOpacity = 0.06
+
+    static func height(keyboardVisible: Bool) -> CGFloat {
+        keyboardVisible ? keyboardHeight : bottomHeight
+    }
 
     static func translation(keyboardVisible: Bool) -> CGFloat {
         keyboardVisible ? keyboardTranslation : bottomSafeAreaTranslation
@@ -62,6 +67,7 @@ enum ChatBottomActivityBlurLayout {
 /// transcript presentation.
 struct ChatBottomActivityBlur: View {
     let isActive: Bool
+    let keyboardVisible: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var emeraldPhase = false
@@ -80,7 +86,7 @@ struct ChatBottomActivityBlur: View {
             )
         }
         .frame(maxWidth: .infinity)
-        .frame(height: ChatBottomActivityBlurLayout.height)
+        .frame(height: ChatBottomActivityBlurLayout.height(keyboardVisible: keyboardVisible))
         .allowsHitTesting(false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Tron is working")

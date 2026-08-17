@@ -31,9 +31,15 @@ struct ChatCompactPillTests {
 
     @Test("bottom activity blur follows keyboard focus without changing layout")
     func bottomActivityBlurGeometry() {
-        #expect(ChatBottomActivityBlurLayout.height == 68)
-        #expect(ChatBottomActivityBlurLayout.translation(keyboardVisible: true) == 12)
+        #expect(ChatBottomActivityBlurLayout.height(keyboardVisible: false) == 68)
         #expect(ChatBottomActivityBlurLayout.translation(keyboardVisible: false) == 44)
+        #expect(ChatBottomActivityBlurLayout.height(keyboardVisible: true) == 80)
+        #expect(ChatBottomActivityBlurLayout.translation(keyboardVisible: true) == 24)
+        #expect(
+            ChatBottomActivityBlurLayout.height(keyboardVisible: true)
+                - ChatBottomActivityBlurLayout.translation(keyboardVisible: true)
+                == 56
+        )
     }
 
     @Test("compact transcript pills retain pre-shared vertical rhythm")
