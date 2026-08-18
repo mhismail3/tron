@@ -443,7 +443,11 @@ final class ChatScrollCoordinator {
         } else {
             if isAtBottom != current.isAtBottom { isAtBottom = current.isAtBottom }
             if movedOlder && !attributed { pendingUnattributedOlderMovement = true }
-            if attributed && !isUserInteracting && !isUserDrivenSettling && movedOlder {
+            if attributed && movedOlder {
+                // Publish detachment on the first measured upward movement,
+                // not only after the native scroll phase settles. The catch-up
+                // affordance should track the same live geometry that releases
+                // it when the reader returns to the tail.
                 commitScrollAway()
             }
         }
