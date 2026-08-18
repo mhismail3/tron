@@ -91,7 +91,10 @@ struct ToolCard: View {
             .accessibilityHidden(true)
         }
         .buttonStyle(.plain)
-        .contentShape(Capsule())
+        .contentShape(RoundedRectangle(
+            cornerRadius: ChatCompactPillLayoutPolicy.cornerRadius(for: tone),
+            style: .continuous
+        ))
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)

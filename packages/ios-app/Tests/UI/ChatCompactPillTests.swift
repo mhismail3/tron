@@ -49,7 +49,13 @@ struct ChatCompactPillTests {
         let phaseDelta = ChatBottomActivityBlurLayout.pulsePhase(at: next)
             - ChatBottomActivityBlurLayout.pulsePhase(at: start)
 
-        #expect(phaseDelta == 2 * Double.pi, accuracy: 0.000_001)
+        #expect(abs(phaseDelta - 2 * Double.pi) < 0.000_001)
+    }
+
+    @Test("error notifications use rounded rectangles while other notifications remain capsules")
+    func notificationShapes() {
+        #expect(ChatCompactPillLayoutPolicy.cornerRadius(for: .error) == ChatCompactPillLayoutPolicy.errorCornerRadius)
+        #expect(ChatCompactPillLayoutPolicy.cornerRadius(for: .accent) == ChatCompactPillLayoutPolicy.capsuleCornerRadius)
     }
 
     @Test("Manage Session compaction admission matches Gateway support")
