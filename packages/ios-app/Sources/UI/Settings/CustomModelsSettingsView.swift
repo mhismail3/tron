@@ -224,48 +224,61 @@ struct CustomModelsSettingsView: View {
 
     private func providerEditorSheet(_ provider: Binding<CustomModelProviderDraft>) -> some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                TronSettingsGroup(
+            LazyVStack(alignment: .leading, spacing: 18) {
+                editorSectionHeader(
                     "Connection",
-                    detail: "Identify the provider and choose the endpoint.",
-                    accent: .tronEmerald
-                ) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        fieldLabel("Provider identifier")
-                        TextField("ollama", text: provider.identifier)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .tronField(monospaced: true, compact: true, dense: true)
-                        fieldLabel("Base URL")
-                        TextField("https://example.com/v1", text: provider.baseURL)
-                            .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .tronField(monospaced: true, compact: true, dense: true)
-                    }
-                    .padding(10)
-                }
+                    detail: "Identify the provider and choose the endpoint."
+                )
+                fieldLabel("Provider identifier")
+                TextField("ollama", text: provider.identifier)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .tronField(
+                        monospaced: true,
+                        compact: true,
+                        dense: true,
+                        surfaceTint: Color.tronEmerald.opacity(0.14),
+                        border: Color.tronEmerald.opacity(0.42)
+                    )
+                fieldLabel("Base URL")
+                TextField("https://example.com/v1", text: provider.baseURL)
+                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .tronField(
+                        monospaced: true,
+                        compact: true,
+                        dense: true,
+                        surfaceTint: Color.tronEmerald.opacity(0.14),
+                        border: Color.tronEmerald.opacity(0.42)
+                    )
 
-                TronSettingsGroup(
+                editorSectionHeader(
                     "Models",
-                    detail: "Add one model ID per line. These names appear in model selection.",
-                    accent: .tronEmerald
-                ) {
-                    TextField("llama3:8b", text: provider.models, axis: .vertical)
-                        .lineLimit(2...8)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .tronField(monospaced: true, compact: true, dense: true)
-                        .padding(10)
-                }
+                    detail: "Add one model ID per line. These names appear in model selection."
+                )
+                TextField("llama3:8b", text: provider.models, axis: .vertical)
+                    .lineLimit(2...8)
+                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .tronField(
+                        monospaced: true,
+                        compact: true,
+                        dense: true,
+                        surfaceTint: Color.tronEmerald.opacity(0.14),
+                        border: Color.tronEmerald.opacity(0.42)
+                    )
 
-                TronSettingsGroup("Protocol", detail: "Choose the protocol used by this endpoint.", accent: .tronEmerald) {
-                    TronValueRow(icon: "network", title: "API format", accent: .tronEmerald) {
-                        TronInlineMenu(apiTitle(provider.wrappedValue.api), accent: .tronEmerald) {
-                            Button("Inherited / per model") { provider.wrappedValue.api = "" }
-                            Button("OpenAI Chat Completions") { provider.wrappedValue.api = "openai-completions" }
-                            Button("OpenAI Responses") { provider.wrappedValue.api = "openai-responses" }
-                            Button("Anthropic Messages") { provider.wrappedValue.api = "anthropic-messages" }
-                            Button("Google Generative AI") { provider.wrappedValue.api = "google-generative-ai" }
-                        }
+                editorSectionHeader(
+                    "Protocol",
+                    detail: "Choose the protocol used by this endpoint."
+                )
+                TronValueRow(icon: "network", title: "API format", accent: .tronEmerald) {
+                    TronInlineMenu(apiTitle(provider.wrappedValue.api), accent: .tronEmerald) {
+                        Button("Inherited / per model") { provider.wrappedValue.api = "" }
+                        Button("OpenAI Chat Completions") { provider.wrappedValue.api = "openai-completions" }
+                        Button("OpenAI Responses") { provider.wrappedValue.api = "openai-responses" }
+                        Button("Anthropic Messages") { provider.wrappedValue.api = "anthropic-messages" }
+                        Button("Google Generative AI") { provider.wrappedValue.api = "google-generative-ai" }
                     }
                 }
+                .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
@@ -275,6 +288,19 @@ struct CustomModelsSettingsView: View {
         .onChange(of: provider.wrappedValue) { _, _ in
             draftOwner.markEdited()
             rebuildDocument()
+        }
+    }
+
+    private func editorSectionHeader(_ title: String, detail: String) -> some View {
+        VStack(alignment: .leading, spacing: TronSpacing.xs) {
+            Text(title)
+                .font(TronTypography.sheetSectionHeader)
+                .foregroundStyle(Color.tronTextPrimary)
+                .accessibilityAddTraits(.isHeader)
+            Text(detail)
+                .font(TronTypography.caption)
+                .foregroundStyle(Color.tronTextMuted)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

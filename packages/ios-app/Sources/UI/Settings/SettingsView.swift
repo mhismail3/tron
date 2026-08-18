@@ -26,7 +26,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(spacing: 16) {
+                VStack(spacing: 16) {
                     TronSettingsGroup("App") {
                         VStack(spacing: 0) {
                             settingsLink("Appearance", icon: "circle.lefthalf.filled") { AppearanceSettingsView() }
