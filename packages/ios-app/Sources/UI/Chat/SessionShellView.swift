@@ -335,7 +335,7 @@ struct SessionShellView: View {
         } label: {
             HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
                 Image(systemName: isExpanded ? "folder.fill" : "folder")
-                    .font(.system(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
+                    .font(TronTypography.sans(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
                     .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
                     .contentTransition(.symbolEffect(.replace))
                 Text(group.name)
@@ -579,7 +579,7 @@ private struct SessionListExpansionControls: View {
                         )
                     )
                 Image(systemName: symbolName)
-                    .font(.system(size: SessionDashboardLayout.headerChevronSize, weight: .bold))
+                    .font(TronTypography.sans(size: SessionDashboardLayout.headerChevronSize, weight: .bold))
                     .accessibilityHidden(true)
             }
             .foregroundStyle(Color.tronEmerald)

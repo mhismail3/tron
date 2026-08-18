@@ -776,7 +776,8 @@ struct ChatView: View {
 
     private var pendingPromptPresentation: ChatPendingPromptPresentation? {
         guard let snapshot = selectedAuthoritativeSnapshot,
-              let pending = snapshot.pendingPrompt else { return nil }
+              let pending = snapshot.pendingPrompt,
+              !hasCanonicalPendingPrompt(pending, in: snapshot) else { return nil }
         return ChatPendingPromptPresentation(
             snapshot: pending,
             isCompacting: snapshot.phase == .compacting
@@ -784,11 +785,26 @@ struct ChatView: View {
         )
     }
 
+    private func hasCanonicalPendingPrompt(
+        _ pending: SessionSnapshot.PendingPrompt,
+        in snapshot: SessionSnapshot
+    ) -> Bool {
+        guard !pending.text.isEmpty,
+              let pendingDate = pending.createdAt.flatMap(GatewayTimestamp.parse) else { return false }
+        return snapshot.transcript.contains { item in
+            guard item.kind == .message,
+                  item.role == .user,
+                  let itemDate = GatewayTimestamp.parse(item.timestamp),
+                  itemDate >= pendingDate else { return false }
+            return item.text == pending.text
+        }
+    }
+
     private var displaysComposerOutgoingSubmission: Bool {
-        guard let outgoing = outgoingSubmissionPresentation,
-              let pending = pendingPromptPresentation else { return outgoingSubmissionPresentation != nil }
-        return outgoing.text != pending.text
-            || outgoing.attachmentIDs.count != pending.attachmentCount
+        // Once Gateway owns the pending admission, it is the only row. The
+        // composer-owned row is an optimistic fallback and must not coexist
+        // with its authoritative reconstruction, even during text normalization.
+        pendingPromptPresentation == nil && outgoingSubmissionPresentation != nil
     }
 
     private var submissionPending: Bool {

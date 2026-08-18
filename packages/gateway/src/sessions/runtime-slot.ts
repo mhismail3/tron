@@ -751,6 +751,12 @@ export class RuntimeSlot {
         this.scheduleSnapshot();
         break;
       case "message_end":
+        // Regular user messages are persisted by Pi at message_end; they do not
+        // emit entry_appended. Retire the transient pending projection here so
+        // it cannot survive the canonical prompt across reconnects.
+        if (this.pendingPrompt && event.message.role === "user") {
+          this.pendingPrompt = undefined;
+        }
         this.scheduleSnapshot();
         break;
       case "queue_update":
@@ -1111,6 +1117,7 @@ export class RuntimeSlot {
         this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString() };
         this.pendingPrompt = {
           id: operationId,
+          createdAt: new Date().toISOString(),
           ...(behavior === undefined ? {} : { behavior }),
           text: boundedSummaryText(
             queueDisplay?.text ?? text,

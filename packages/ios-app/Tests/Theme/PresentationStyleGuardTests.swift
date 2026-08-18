@@ -74,6 +74,7 @@ struct PresentationStyleGuardTests {
     func noRetiredDefaults() {
         let forbidden: [(String, String)] = [
             (#"\.font\(\.(largeTitle|title|title2|title3|headline|subheadline|body|callout|footnote|caption|caption2)"#, "system semantic font"),
+            (#"\.font\(\.system"#, "direct system font"),
             (#"\.buttonStyle\(\.(bordered|borderedProminent)"#, "stock bordered button"),
             (#"\.pickerStyle\(\.segmented"#, "stock segmented control"),
             (#"\.searchable\("#, "system search field"),
@@ -1313,6 +1314,7 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains("scrollCoordinator.isPrependingHistory"))
         #expect(earlierMessagesChip.contains(".disabled(isLoadingEarlierMessages)"))
         #expect(chat.contains(".onChange(of: scrollCoordinator.layoutEpoch)"))
+        #expect(chat.contains("pendingPromptPresentation == nil && outgoingSubmissionPresentation != nil"))
     }
 
     @Test("send-to-chat motion stays role-aware, authoritative, and accessible")

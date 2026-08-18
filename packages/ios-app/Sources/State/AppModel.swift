@@ -962,6 +962,9 @@ final class AppModel {
         guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
         defaultWorkspace = cwd
         UserDefaults.standard.set(cwd, forKey: "defaultWorkspace.v1")
+        // Creation is authoritative before the dashboard catalog's next list
+        // traversal. Reconcile in the shared lease without delaying navigation.
+        scheduleSessionListRefresh()
         return SessionNavigationRoute(
             sessionID: sessionID,
             editorText: nil,

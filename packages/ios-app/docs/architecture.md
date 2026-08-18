@@ -79,7 +79,9 @@ the dashboard” alert. Known revisioned `session.summary` events apply synchron
 and mounted transcript snapshots cannot overwrite those global row fields. The dashboard groups user
 sessions by workspace and renders the newest ten per workspace by default; explicit Show more/Show less
 pagination is a disposable UI projection with generation-checked staged animations, so catalog refreshes
-cannot expose stale rows or leave controls stuck. Cache/disconnect/authoritative installs and removals all
+cannot expose stale rows or leave controls stuck. Successful session creation starts a shared background
+catalog reconciliation without delaying chat navigation, so the new authoritative row does not depend on
+pull-to-refresh. Cache/disconnect/authoritative installs and removals all
 enter that one disposable projection; hidden/local selection policy remains outside it and cannot mount a chat. Cached or stale non-idle rows present as resuming without rewriting
 the canonical phase; only a live Gateway-authoritative interrupted phase uses the amber warning.
 A profile boundary synchronously invalidates lifecycle admission, chains behind any preceding
@@ -1054,7 +1056,10 @@ rounded UIKit fields, or system search and segmented styles.
 `SnapshotCache` admits duplicate-free snapshots only for the bounded session summary set,
 limits transcript size, individual encoded projections, session count, and each profile file to
 8 MiB, strips transient interactions, diagnostics, and streaming state, and rewrites active phases to
-`interrupted`. File-size admission precedes reads, which consume at most the exact ceiling; conservative
+`interrupted`. Running tool execution states are retained as explicitly cached
+state, so a disconnected snapshot cannot turn still-live Gateway work into a
+false green completion; the first authoritative reconnect snapshot replaces that
+state. File-size admission precedes reads, which consume at most the exact ceiling; conservative
 string/collection shape admission rejects oversized in-memory projections before JSON encoding. Corrupt, obsolete, or oversized
 files self-delete. Cache roots are backup-excluded, files request complete-until-first-authentication
 protection as part of atomic creation, profile removal deletes only its hashed file, and generation

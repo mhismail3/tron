@@ -553,16 +553,11 @@ struct AppModelPerformanceSignpostTests {
             let route = try await valueOfOwnedTask(creating)
             #expect(route.sessionID == "created-route")
             #expect(await MainActor.run { harness.model.ownsNavigationRoute(route) })
-            #expect(await harness.socket.sentFrames().count == 2)
             let selectedAfterCreate = await MainActor.run { harness.model.selectedSessionID }
             #expect(selectedAfterCreate == nil)
 
-            await harness.model.handle(GatewayEvent(
-                type: "event",
-                topic: "session.listChanged",
-                sessionId: nil,
-                payload: .object([:])
-            ))
+            // Creation starts a shared background catalog reconciliation without
+            // delaying route return; this caller joins that same traversal.
             let convergence = Task { await harness.model.refreshSessions() }
             let refresh = try await request(in: harness.socket, frameIndex: 2)
             #expect(refresh.method == "session.list")

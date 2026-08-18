@@ -312,7 +312,9 @@ actor SnapshotCache {
             leafEntryId: snapshot.leafEntryId,
             operation: nil,
             retry: nil,
-            toolExecutions: [],
+            // Preserve only running tools so the offline projection cannot
+            // manufacture completion while Gateway work may still continue.
+            toolExecutions: snapshot.toolExecutions.filter { $0.status == .running },
             extensionPresentation: ExtensionPresentationState(
                 version: 2,
                 hostEpoch: snapshot.extensionPresentation.hostEpoch,
@@ -334,7 +336,8 @@ actor SnapshotCache {
                 inputLease: nil,
                 projection: .init(complete: false, omitted: ["ephemeralPresentation"])
             ),
-            diagnostics: []
+            diagnostics: [],
+            isCachedProjection: true
         )
     }
 }

@@ -80,7 +80,7 @@ struct ExtensionFrameView: View {
     private func row(_ line: ExtensionFrameLine) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "circle.fill")
-                .font(.system(size: 5))
+                .font(TronTypography.sans(size: 5))
                 .foregroundStyle(Color.tronCyan)
                 .padding(.top, 7)
             Text(nativeText(for: line))

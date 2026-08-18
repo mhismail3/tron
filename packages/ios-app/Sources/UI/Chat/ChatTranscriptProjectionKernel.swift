@@ -625,9 +625,17 @@ enum ChatTranscriptProjectionKernel {
                     guard let canonical = site.canonicalBase else {
                         preconditionFailure("Canonical patch site lost its presentation base")
                     }
-                    updated = foregroundPresentation(resolved(canonical, live: live), phase: snapshot.phase)
+                    updated = foregroundPresentation(
+                        resolved(canonical, live: live),
+                        phase: snapshot.phase,
+                        preservesRunningState: snapshot.isCachedProjection == true
+                    )
                 case .unanchoredRuntime:
-                    updated = foregroundPresentation(livePresentation(live), phase: snapshot.phase)
+                    updated = foregroundPresentation(
+                        livePresentation(live),
+                        phase: snapshot.phase,
+                        preservesRunningState: snapshot.isCachedProjection == true
+                    )
                 }
                 var tools = currentRun.tools
                 tools[site.toolIndex] = updated.descriptor
@@ -744,7 +752,11 @@ enum ChatTranscriptProjectionKernel {
         func appendTools(_ tools: [PreparedTool]) {
             for prepared in tools {
                 let value = PreparedTool(
-                    presentation: foregroundPresentation(prepared.presentation, phase: snapshot.phase),
+                    presentation: foregroundPresentation(
+                        prepared.presentation,
+                        phase: snapshot.phase,
+                        preservesRunningState: snapshot.isCachedProjection == true
+                    ),
                     canonicalBase: prepared.canonicalBase,
                     classification: prepared.classification
                 )
@@ -992,8 +1004,12 @@ enum ChatTranscriptProjectionKernel {
     }
 
     /// Required compatibility normalization for older Gateway snapshots.
-    private static func foregroundPresentation(_ tool: ChatToolPresentation, phase: SessionPhase) -> ChatToolPresentation {
-        guard !phase.isActive, tool.isRunning else { return tool }
+    private static func foregroundPresentation(
+        _ tool: ChatToolPresentation,
+        phase: SessionPhase,
+        preservesRunningState: Bool = false
+    ) -> ChatToolPresentation {
+        guard !preservesRunningState, !phase.isActive, tool.isRunning else { return tool }
         return ChatToolPresentation(
             id: tool.id, title: tool.title, subtitle: "Interrupted", request: tool.request,
             response: tool.response, content: tool.content, fallbackContent: tool.fallbackContent,

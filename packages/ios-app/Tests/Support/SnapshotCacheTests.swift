@@ -49,6 +49,19 @@ struct SnapshotCacheTests {
             ),
             diagnostics: []
         )
+        snapshot.toolExecutions = [ToolExecutionState(
+            toolCallId: "running-tool",
+            toolName: "bash",
+            order: 0,
+            status: .running,
+            arguments: .object([:]),
+            partialResult: nil,
+            result: nil,
+            isError: false,
+            startedAt: "2026-01-01T00:00:00Z",
+            updatedAt: "2026-01-01T00:00:01Z",
+            lastProgressAt: "2026-01-01T00:00:01Z"
+        )]
         snapshot.extensionPresentation.semanticState.statuses = ["ephemeral": "value"]
         snapshot.extensionPresentation.surfaces = [.init(
             id: "surface", kind: .widget, placement: .aboveEditor, lifecycle: .retained,
@@ -72,6 +85,8 @@ struct SnapshotCacheTests {
         await cache.save(profileID: "profile", sessions: [summary], snapshots: [snapshot])
         let loaded = await cache.load(profileID: "profile")
         #expect(loaded.snapshots.first?.phase == .interrupted)
+        #expect(loaded.snapshots.first?.isCachedProjection == true)
+        #expect(loaded.snapshots.first?.toolExecutions.first?.status == .running)
         #expect(loaded.snapshots.first?.transcriptStart == 10)
         #expect(loaded.snapshots.first?.transcriptTotal == 12)
         #expect(loaded.snapshots.first?.extensionPresentation.surfaces.isEmpty == true)

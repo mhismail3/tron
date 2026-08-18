@@ -134,6 +134,9 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     var toolExecutions: [ToolExecutionState]
     var extensionPresentation: ExtensionPresentationState
     var diagnostics: [RuntimeDiagnostic]
+    /// Set only on the disposable offline cache projection. Gateway snapshots
+    /// leave this absent so canonical runtime state remains authoritative.
+    var isCachedProjection: Bool? = nil
 
     struct QueuedMessages: Codable, Hashable, Sendable {
         let steering: [String]
@@ -153,6 +156,7 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
 
     struct PendingPrompt: Codable, Hashable, Identifiable, Sendable {
         let id: String
+        let createdAt: String?
         let behavior: QueuedMessage.Behavior?
         let text: String
         let attachmentCount: Int

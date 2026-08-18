@@ -1253,6 +1253,7 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
     await slot.prompt("stream");
     await waitUntil(() => !slot.isBusy);
+    expect(slot.snapshot().pendingPrompt).toBeUndefined();
 
     const progress = events.filter((event) => event.topic === "session.progress");
     expect(progress.length).toBeGreaterThanOrEqual(2);

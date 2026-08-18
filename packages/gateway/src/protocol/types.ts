@@ -353,6 +353,8 @@ export interface QueuedMessageState {
  * Pi performs automatic compaction during prompt preflight. */
 export interface PendingPromptState {
   id: string;
+  /** Additive for clients that want to suppress a stale pre-canonical row. */
+  createdAt?: string;
   behavior?: "steer" | "followUp";
   text: string;
   attachmentCount: number;

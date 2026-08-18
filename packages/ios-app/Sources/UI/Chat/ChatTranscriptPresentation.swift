@@ -353,6 +353,7 @@ struct ChatOutgoingSubmissionPresentation: Equatable, Identifiable, Sendable {
 /// because it is reconstructed from the Gateway session snapshot.
 struct ChatPendingPromptPresentation: Equatable, Identifiable, Sendable {
     let id: String
+    let createdAt: String?
     let text: String
     let behavior: SessionSnapshot.QueuedMessage.Behavior?
     let attachmentCount: Int
@@ -360,6 +361,7 @@ struct ChatPendingPromptPresentation: Equatable, Identifiable, Sendable {
 
     init(snapshot: SessionSnapshot.PendingPrompt, isCompacting: Bool) {
         id = snapshot.id
+        createdAt = snapshot.createdAt
         text = snapshot.text
         behavior = snapshot.behavior
         attachmentCount = snapshot.attachmentCount

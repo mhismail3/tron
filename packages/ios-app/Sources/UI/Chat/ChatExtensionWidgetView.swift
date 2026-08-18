@@ -195,7 +195,7 @@ struct ExtensionWidgetView: View {
 
     private func nativeRow(_ line: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "circle.fill").font(.system(size: 5)).foregroundStyle(Color.tronCyan).padding(.top, 7)
+            Image(systemName: "circle.fill").font(TronTypography.sans(size: 5)).foregroundStyle(Color.tronCyan).padding(.top, 7)
             Text(line).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 7)

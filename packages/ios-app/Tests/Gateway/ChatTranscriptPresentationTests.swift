@@ -353,6 +353,7 @@ struct ChatTranscriptPresentationTests {
     func pendingPromptPresentation() {
         let steer = ChatPendingPromptPresentation(snapshot: .init(
             id: "pending-steer",
+            createdAt: "2026-01-01T00:00:00Z",
             behavior: .steer,
             text: "wait for compaction",
             attachmentCount: 0
@@ -362,6 +363,7 @@ struct ChatTranscriptPresentationTests {
 
         let ordinary = ChatPendingPromptPresentation(snapshot: .init(
             id: "pending-prompt",
+            createdAt: "2026-01-01T00:00:00Z",
             behavior: nil,
             text: "send after compaction",
             attachmentCount: 1

@@ -16,7 +16,7 @@ struct GatewayProtocolContractTests {
           "queued":{"steering":[],"followUp":["later"]},
           "queueRevision":4,
           "queuedItems":[{"id":"queued-1","behavior":"followUp","text":"later","attachmentCount":2}],
-          "pendingPrompt":{"id":"prompt-1","behavior":"steer","text":"waiting","attachmentCount":1},
+          "pendingPrompt":{"id":"prompt-1","createdAt":"2026-01-01T00:00:02Z","behavior":"steer","text":"waiting","attachmentCount":1},
           "compactionQueued":true,"automaticCompactionEnabled":false,
           "transcript":[
             {"id":"entry-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"entry-1:0","type":"text","text":"hello"},{"id":"entry-1:1","type":"text","text":"notes.pdf","attachment":{"name":"notes.pdf","mimeType":"application/pdf","size":2048}}]},
@@ -41,7 +41,8 @@ struct GatewayProtocolContractTests {
         #expect(snapshot.stats.latestCacheHitRate == 99.7)
         #expect(snapshot.queueRevision == 4)
         #expect(snapshot.pendingPrompt == SessionSnapshot.PendingPrompt(
-            id: "prompt-1", behavior: .steer, text: "waiting", attachmentCount: 1
+            id: "prompt-1", createdAt: "2026-01-01T00:00:02Z", behavior: .steer,
+            text: "waiting", attachmentCount: 1
         ))
         #expect(snapshot.compactionQueued == true)
         #expect(snapshot.automaticCompactionEnabled == false)
