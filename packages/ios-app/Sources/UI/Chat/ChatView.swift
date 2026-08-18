@@ -12,7 +12,6 @@ private struct ChatScrollGeometryObservation: Equatable {
     let geometry: ChatTranscriptGeometry
     let presentationEpoch: Int
     let phase: ChatOpenPresentationPhase
-    let layoutEpoch: Int
 }
 
 struct ChatView: View {
@@ -447,8 +446,7 @@ struct ChatView: View {
             ChatScrollGeometryObservation(
                 geometry: ChatTranscriptGeometry(geometry),
                 presentationEpoch: openPresentation.epoch,
-                phase: openPresentation.phase,
-                layoutEpoch: scrollCoordinator.layoutEpoch
+                phase: openPresentation.phase
             )
         } action: { previous, observation in
             guard observation.presentationEpoch == openPresentation.epoch,
@@ -489,6 +487,9 @@ struct ChatView: View {
         }
         .onChange(of: scrollCoordinator.commandRevision) { _, _ in
             executePendingScrollCommand()
+        }
+        .onChange(of: scrollCoordinator.layoutEpoch) { _, _ in
+            scrollCoordinator.installedLayoutEpochChanged()
         }
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: responseState, initial: true) { previous, current in
