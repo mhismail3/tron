@@ -52,6 +52,29 @@ describe("AuthBroker", () => {
     expect(runtime.hasConfiguredAuth("anthropic")).toBe(true);
   });
 
+  it("treats duplicate and late prompt submissions as idempotent no-ops", async () => {
+    let interaction: LoginInteraction | undefined;
+    const runtime = runtimeWithLogin(async (value) => {
+      interaction = value;
+      await value.prompt({ type: "secret", message: "Enter API key" });
+    });
+    const events: Array<{ topic: string; payload: JsonValue }> = []
+    const broker = new AuthBroker(runtime, (_client, topic, payload) => events.push({ topic, payload }))
+    const operationId = broker.start("phone", "provider", "api_key")
+    await waitFor(() => events.some((event) => event.topic === "auth.prompt"))
+    const prompt = events.find((event) => event.topic === "auth.prompt")!.payload as Record<string, JsonValue>
+
+    expect(broker.respond("phone", operationId, prompt.promptId as string, "first-key")).toBe(true)
+    expect(broker.respond("phone", operationId, prompt.promptId as string, "duplicate-key")).toBe(false)
+    await waitFor(() => events.some((event) => event.topic === "auth.completed"))
+
+    // The completion event and the response acknowledgement can cross the
+    // client presentation boundary. The bounded tombstone absorbs late UI work.
+    expect(broker.respond("phone", operationId, prompt.promptId as string, "late-key")).toBe(false)
+    expect(broker.cancel("phone", operationId)).toBe(false)
+    expect(interaction?.signal.aborted).toBe(false)
+  })
+
   it("bounds global and per-client operations and releases capacity on cancellation", () => {
     const runtime = runtimeWithLogin(async () => new Promise<void>(() => {}));
     const broker = new AuthBroker(runtime, () => {}, () => {}, {

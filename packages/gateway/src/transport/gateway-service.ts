@@ -388,12 +388,19 @@ export class GatewayService {
         );
         return { operationId };
       }
-      case "auth.respond":
-        this.dependencies.auth.respond(client.id, string(params.operationId, "operationId", { max: 100 }), string(params.promptId, "promptId", { max: 100 }), typeof params.value === "string" ? params.value : "");
-        return { answered: true };
-      case "auth.cancel":
-        this.dependencies.auth.cancel(client.id, string(params.operationId, "operationId", { max: 100 }));
-        return { cancelled: true };
+      case "auth.respond": {
+        const answered = this.dependencies.auth.respond(
+          client.id,
+          string(params.operationId, "operationId", { max: 100 }),
+          string(params.promptId, "promptId", { max: 100 }),
+          typeof params.value === "string" ? params.value : "",
+        );
+        return { answered };
+      }
+      case "auth.cancel": {
+        const cancelled = this.dependencies.auth.cancel(client.id, string(params.operationId, "operationId", { max: 100 }));
+        return { cancelled };
+      }
       case "auth.logout":
         return this.mutation(client, method, params, async () => {
           await (await this.modelRuntime(params)).logout(string(params.providerId, "providerId", { max: 120 }));

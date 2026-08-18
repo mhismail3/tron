@@ -16,14 +16,33 @@ struct GlobalSheets: ViewModifier {
 
 private struct ProviderAuthPresenter: ViewModifier {
     @Environment(AppModel.self) private var model
+    @State private var presentedOperationID: String?
+
+    private var currentOperationID: String? {
+        model.authPrompt?.operationId ?? model.authEvent?.operationId
+    }
 
     func body(content: Content) -> some View {
-        content.sheet(isPresented: Binding(
-            get: { model.authPrompt != nil || model.authEvent != nil },
-            set: { presented in if !presented { Task { await model.cancelAuth() } } }
-        )) {
-            ProviderAuthSheet()
-        }
+        content
+            .onChange(of: currentOperationID) { _, operationID in
+                // Capture the operation when this presenter first opens. Do not
+                // replace it while dismissal is in flight: a stale dismissal
+                // callback must never cancel a newer login operation.
+                guard presentedOperationID == nil, let operationID else { return }
+                presentedOperationID = operationID
+            }
+            .sheet(isPresented: Binding(
+                get: { currentOperationID != nil },
+                set: { presented in
+                    guard !presented else { return }
+                    let closingOperationID = presentedOperationID
+                    presentedOperationID = currentOperationID == closingOperationID ? nil : currentOperationID
+                    guard let closingOperationID else { return }
+                    Task { await model.cancelAuth(operationID: closingOperationID) }
+                }
+            )) {
+                ProviderAuthSheet()
+            }
     }
 }
 

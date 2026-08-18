@@ -229,6 +229,7 @@ final class ProviderAuthCoordinator {
     private var loadGenerationByTarget: [ProviderCatalogTarget: Int] = [:]
     private var targetByAuthOperation: [String: ProviderCatalogTarget] = [:]
     private var activeAuthOperationID: String?
+    private var answeringPromptID: String?
     private var authBeginGeneration = 0
     private var authPresentationGeneration = 0
     private var inFlightAuthBeginGenerations = Set<Int>()
@@ -353,9 +354,14 @@ final class ProviderAuthCoordinator {
     }
 
     func answerAuth(_ value: String) async throws {
-        guard let admittedPrompt = prompt else { return }
+        guard let admittedPrompt = prompt,
+              answeringPromptID != admittedPrompt.id else { return }
+        answeringPromptID = admittedPrompt.id
+        defer {
+            if answeringPromptID == admittedPrompt.id { answeringPromptID = nil }
+        }
         let admittedProfileGeneration = profileGeneration
-        let _: RespondResponse = try await client.request(
+        let response: RespondResponse = try await client.request(
             "auth.respond",
             RespondParams(
                 operationId: admittedPrompt.operationId,
@@ -364,6 +370,15 @@ final class ProviderAuthCoordinator {
             )
         )
         try requireProfile(admittedProfileGeneration)
+        guard response.answered else {
+            // The Gateway may have already completed or retired this prompt
+            // before a duplicate UI submission reached it. Do not turn that
+            // benign race into a user-facing operation-not-found error.
+            if prompt?.operationId == admittedPrompt.operationId, prompt?.id == admittedPrompt.id {
+                prompt = nil
+            }
+            return
+        }
         if prompt?.operationId == admittedPrompt.operationId, prompt?.id == admittedPrompt.id {
             prompt = nil
         }
@@ -459,6 +474,7 @@ final class ProviderAuthCoordinator {
         catalogByTarget.removeAll()
         targetByAuthOperation.removeAll()
         activeAuthOperationID = nil
+        answeringPromptID = nil
         inFlightAuthBeginGenerations.removeAll()
         removeAllQuarantinedPresentations()
         prompt = nil

@@ -20,11 +20,18 @@ interface AuthOperation {
   timer: NodeJS.Timeout;
 }
 
+interface RetiredAuthOperation {
+  clientId: string;
+  expiresAt: number;
+}
+
 export type AdminEventSink = (clientId: string, topic: string, payload: JsonValue) => void;
 
 const DEFAULT_MAX_AUTH_OPERATIONS = 8;
 const DEFAULT_MAX_AUTH_OPERATIONS_PER_CLIENT = 2;
 const DEFAULT_AUTH_OPERATION_TIMEOUT_MS = 15 * 60_000;
+const RETIRED_AUTH_OPERATION_TTL_MS = 60_000;
+const MAX_RETIRED_AUTH_OPERATIONS = 64;
 const MAX_AUTH_PROJECTION_BYTES = 128 * 1_024;
 const MAX_AUTH_ERROR_BYTES = 8 * 1_024;
 
@@ -52,6 +59,9 @@ function requireBoundedProjection(value: unknown, label: string): void {
 
 export class AuthBroker {
   private readonly operations = new Map<string, AuthOperation>();
+  // A short-lived bounded tombstone makes late duplicate UI submissions and
+  // response/event reordering harmless without retaining credentials or prompts.
+  private readonly retiredOperations = new Map<string, RetiredAuthOperation>();
 
   private readonly maximumOperations: number;
   private readonly maximumOperationsPerClient: number;
@@ -159,21 +169,36 @@ export class AuthBroker {
     });
   }
 
-  respond(clientId: string, operationId: string, promptId: string, value: string): void {
+  respond(clientId: string, operationId: string, promptId: string, value: string): boolean {
+    this.pruneRetiredOperations();
     const operation = this.operations.get(operationId);
-    if (!operation || operation.clientId !== clientId) throw new GatewayError("not_found", "Authentication operation was not found");
+    if (!operation) {
+      if (this.retiredOperations.get(operationId)?.clientId === clientId) return false;
+      throw new GatewayError("not_found", "Authentication operation was not found");
+    }
+    if (operation.clientId !== clientId) throw new GatewayError("not_found", "Authentication operation was not found");
     const prompt = operation.prompt;
-    if (!prompt || prompt.id !== promptId) throw new GatewayError("not_found", "Authentication prompt is no longer pending");
+    // A duplicate response can arrive after the first response has already
+    // resumed the provider login. Treat it as a harmless no-op rather than
+    // surfacing a misleading operation/prompt-not-found error to the user.
+    if (!prompt || prompt.id !== promptId) return false;
     operation.prompt = undefined;
     prompt.cleanup?.();
     prompt.resolve(value);
+    return true;
   }
 
-  cancel(clientId: string, operationId: string): void {
+  cancel(clientId: string, operationId: string): boolean {
+    this.pruneRetiredOperations();
     const operation = this.operations.get(operationId);
-    if (!operation || operation.clientId !== clientId) throw new GatewayError("not_found", "Authentication operation was not found");
+    if (!operation) {
+      if (this.retiredOperations.get(operationId)?.clientId === clientId) return false;
+      throw new GatewayError("not_found", "Authentication operation was not found");
+    }
+    if (operation.clientId !== clientId) throw new GatewayError("not_found", "Authentication operation was not found");
     operation.controller.abort();
     this.retire(operation, "Authentication cancelled");
+    return true;
   }
 
   cancelClient(clientId: string): void {
@@ -184,11 +209,27 @@ export class AuthBroker {
 
   private retire(operation: AuthOperation, reason: string): boolean {
     if (!this.operations.delete(operation.id)) return false;
+    this.pruneRetiredOperations();
+    this.retiredOperations.set(operation.id, {
+      clientId: operation.clientId,
+      expiresAt: Date.now() + RETIRED_AUTH_OPERATION_TTL_MS,
+    });
+    while (this.retiredOperations.size > MAX_RETIRED_AUTH_OPERATIONS) {
+      const oldest = this.retiredOperations.keys().next().value;
+      if (oldest === undefined) break;
+      this.retiredOperations.delete(oldest);
+    }
     clearTimeout(operation.timer);
     operation.prompt?.cleanup?.();
     operation.prompt?.reject(new GatewayError("cancelled", reason));
     operation.prompt = undefined;
     return true;
+  }
+
+  private pruneRetiredOperations(now = Date.now()): void {
+    for (const [operationID, retired] of this.retiredOperations) {
+      if (retired.expiresAt <= now) this.retiredOperations.delete(operationID);
+    }
   }
 
   private timeout(operation: AuthOperation): void {
