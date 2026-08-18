@@ -510,6 +510,8 @@ struct PresentationStyleGuardTests {
         #expect(providers.contains(".lineLimit(1)"))
         #expect(!providers.contains("glassEffect"))
         #expect(defaults.contains("TronInlineMenu(draft.trust.capitalized, accent: .tronAmber)"))
+        #expect(defaults.contains("TronSettingsGroup(\"Project Resources\", accent: .tronAmber)"))
+        #expect(defaults.contains("Text(\"Trust controls project resource loading; it is not a sandbox.\")"))
         #expect(!defaults.contains("accessibilityLabel(\"Default Trust:"))
         #expect(!defaults.contains("Menu {"))
         #expect(defaults.contains("TronSaveToolbarButton"))
