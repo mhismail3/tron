@@ -530,48 +530,46 @@ struct TronConfirmationSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 20) {
-                    Label(title, systemImage: icon)
-                        .font(TronTypography.largeTitle)
+                VStack(alignment: .center, spacing: 16) {
+                    Image(systemName: icon)
+                        .font(TronTypography.sans(size: TronTypography.sizeHero, weight: .semibold))
                         .foregroundStyle(accent)
+                        .accessibilityHidden(true)
+                    Text(title)
+                        .font(TronTypography.largeTitle)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                     Text(message)
                         .font(TronTypography.body)
                         .foregroundStyle(Color.tronTextSecondary)
+                        .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
-                    VStack(spacing: 12) {
-                        Button(confirmTitle, role: destructive ? .destructive : nil) {
-                            dismiss()
-                            onConfirm()
-                        }
-                        .buttonStyle(TronActionButtonStyle(role: destructive ? .destructive : .primary))
-                        if let secondaryTitle, let onSecondary {
-                            Button(secondaryTitle) {
-                                dismiss()
-                                onSecondary()
-                            }
-                            .buttonStyle(TronActionButtonStyle(role: .standard))
-                        }
-                    }
-                    Spacer(minLength: 180)
                 }
-                .padding(20)
+                .frame(maxWidth: .infinity, minHeight: 280, alignment: .center)
+                .padding(24)
             }
             .tronScrollEdgeChrome()
             .tronNavigationTitle(title, accent: accent)
             .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronTextMuted)
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(secondaryTitle ?? "Cancel") {
+                        dismiss()
+                        onSecondary?()
                     }
-                    .accessibilityLabel("Cancel")
+                    .tronToolbarAction(accent: .tronTextSecondary)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(confirmTitle, role: destructive ? .destructive : nil) {
+                        dismiss()
+                        onConfirm()
+                    }
+                    .tronToolbarAction(accent: accent)
                 }
             }
         }
         .tronTopBlur(.sheet)
-        .presentationDetents([.large])
+        .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
     }
 
