@@ -242,7 +242,11 @@ their original queued identity and cannot be fabricated by clients. Queue snapsh
 are bounded to 32 entries, 64 KiB per display message, and 256 KiB total.
 Prompt RPC admission follows the pinned runtime's preflight callback as its sole outcome;
 the Gateway does not race it against a local deadline that could report rejection while
-the same uncancelled runtime call later starts canonical work.
+the same uncancelled runtime call later starts canonical work. While the canonical user
+entry is pending, the snapshot's bounded `pendingPrompt` projection carries the display
+text and requested delivery behavior. It is cleared by the canonical user entry or a
+definitive rejection, so iOS can reconstruct an in-flight prompt across navigation without
+replaying it.
 
 Manual compaction has a separate Gateway-owned single-entry maintenance admission. Its
 synchronous claim covers pending, direct, and queued execution, so a second request is rejected

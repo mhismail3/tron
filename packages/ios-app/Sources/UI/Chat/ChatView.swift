@@ -394,7 +394,21 @@ struct ChatView: View {
                                 }
                             }
                         }
-                        if let outgoing = outgoingSubmissionPresentation {
+                        if let pendingPrompt = pendingPromptPresentation {
+                            stableTranscriptRow(
+                                id: "pending-prompt-\(pendingPrompt.id)",
+                                installedTag: nil,
+                                entranceState: .none
+                            ) {
+                                ChatOutgoingSubmissionEntranceRow(
+                                    reduceMotion: reduceMotion
+                                ) {
+                                    ChatPendingPromptRow(presentation: pendingPrompt)
+                                }
+                            }
+                        }
+                        if displaysComposerOutgoingSubmission,
+                           let outgoing = outgoingSubmissionPresentation {
                             stableTranscriptRow(
                                 id: outgoing.id,
                                 installedTag: nil,
@@ -758,6 +772,23 @@ struct ChatView: View {
             snapshot: snapshot,
             transportActive: model.composerDrafts.isSending(target: target)
         )
+    }
+
+    private var pendingPromptPresentation: ChatPendingPromptPresentation? {
+        guard let snapshot = selectedAuthoritativeSnapshot,
+              let pending = snapshot.pendingPrompt else { return nil }
+        return ChatPendingPromptPresentation(
+            snapshot: pending,
+            isCompacting: snapshot.phase == .compacting
+                || snapshot.operation?.kind == .compaction
+        )
+    }
+
+    private var displaysComposerOutgoingSubmission: Bool {
+        guard let outgoing = outgoingSubmissionPresentation,
+              let pending = pendingPromptPresentation else { return outgoingSubmissionPresentation != nil }
+        return outgoing.text != pending.text
+            || outgoing.attachmentIDs.count != pending.attachmentCount
     }
 
     private var submissionPending: Bool {

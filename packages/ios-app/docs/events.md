@@ -47,8 +47,12 @@ admits and reduces mounted-session topics:
   single pending maintenance slot. iOS renders it as explicit runtime feedback and never
   inserts a transcript entry or retries the mutation. The row is replaced by existing
   compacting feedback when the Gateway picks up the work, then by the canonical JSONL
-  compaction entry. `automaticCompactionEnabled` likewise reports runtime truth rather
-  than a mobile inference; older snapshots may omit either field;
+  compaction entry. `pendingPrompt` is the companion transient admission for a prompt
+  whose canonical user entry is still being prepared, including automatic compaction
+  during prompt preflight. iOS renders that exact prompt after runtime feedback and
+  reconstructs it from every authoritative snapshot until the canonical user entry
+  arrives; it never replays the prompt. `automaticCompactionEnabled` likewise reports
+  runtime truth rather than a mobile inference; older snapshots may omit these fields;
 - provider, package, settings, trust, and custom-model mutation invalidations
   advance owner revisions across connected clients; each visible surface reloads
   its explicit global or project scope instead of sharing a wrong-scope payload;

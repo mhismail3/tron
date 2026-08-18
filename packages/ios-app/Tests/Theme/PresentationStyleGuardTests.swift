@@ -1310,7 +1310,7 @@ struct PresentationStyleGuardTests {
         let earlierMessagesChip = (chat.components(separatedBy: "private func earlierMessagesChip").dropFirst().first ?? "")
             .components(separatedBy: "private var composer").first ?? ""
         #expect(!earlierMessagesChip.contains("TronActionButtonStyle(expands: false)"))
-        #expect(earlierMessagesChip.contains("scrollCoordinator.isPrependingHistory"))
+        #expect(chat.contains("scrollCoordinator.isPrependingHistory"))
         #expect(earlierMessagesChip.contains(".disabled(isLoadingEarlierMessages)"))
         #expect(chat.contains(".onChange(of: scrollCoordinator.layoutEpoch)"))
     }

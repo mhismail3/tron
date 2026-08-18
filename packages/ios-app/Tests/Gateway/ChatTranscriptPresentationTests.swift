@@ -349,6 +349,27 @@ struct ChatTranscriptPresentationTests {
         #expect(active.first?.id == "runtime-working")
     }
 
+    @Test("pending prompts retain their requested delivery label across reconstruction")
+    func pendingPromptPresentation() {
+        let steer = ChatPendingPromptPresentation(snapshot: .init(
+            id: "pending-steer",
+            behavior: .steer,
+            text: "wait for compaction",
+            attachmentCount: 0
+        ), isCompacting: true)
+        #expect(steer.statusTitle == "Steering after compaction")
+        #expect(steer.text == "wait for compaction")
+
+        let ordinary = ChatPendingPromptPresentation(snapshot: .init(
+            id: "pending-prompt",
+            behavior: nil,
+            text: "send after compaction",
+            attachmentCount: 1
+        ), isCompacting: false)
+        #expect(ordinary.statusTitle == "Sending")
+        #expect(ordinary.attachmentCount == 1)
+    }
+
     @Test("ordinary running state uses ambient bottom activity without a transcript row")
     func ordinaryRunningUsesAmbientActivity() throws {
         var snapshot = try fixture(transcript: "[]")

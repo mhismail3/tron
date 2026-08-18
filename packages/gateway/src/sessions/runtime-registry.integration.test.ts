@@ -1389,6 +1389,11 @@ export default function (pi) {
     try {
       const prompting = slot.prompt("delayed preflight");
       await started;
+      expect(slot.snapshot().pendingPrompt).toMatchObject({
+        id: expect.any(String),
+        text: "delayed preflight",
+        attachmentCount: 0,
+      });
       await vi.advanceTimersByTimeAsync(6_000);
       await expect(prompting).resolves.toMatchObject({ operationId: expect.any(String) });
     } finally {

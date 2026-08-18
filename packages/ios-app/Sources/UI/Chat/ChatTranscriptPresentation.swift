@@ -348,6 +348,40 @@ struct ChatOutgoingSubmissionPresentation: Equatable, Identifiable, Sendable {
     }
 }
 
+/// Authoritative prompt admission that has not reached canonical JSONL yet.
+/// Unlike the composer-owned outgoing row, this survives chat re-navigation
+/// because it is reconstructed from the Gateway session snapshot.
+struct ChatPendingPromptPresentation: Equatable, Identifiable, Sendable {
+    let id: String
+    let text: String
+    let behavior: SessionSnapshot.QueuedMessage.Behavior?
+    let attachmentCount: Int
+    let isCompacting: Bool
+
+    init(snapshot: SessionSnapshot.PendingPrompt, isCompacting: Bool) {
+        id = snapshot.id
+        text = snapshot.text
+        behavior = snapshot.behavior
+        attachmentCount = snapshot.attachmentCount
+        self.isCompacting = isCompacting
+    }
+
+    var statusTitle: String {
+        if isCompacting {
+            switch behavior {
+            case .steer: return "Steering after compaction"
+            case .followUp: return "Follow-up after compaction"
+            case nil: return "Sending after compaction"
+            }
+        }
+        switch behavior {
+        case .steer: return "Steering next"
+        case .followUp: return "Follow-up pending"
+        case nil: return "Sending"
+        }
+    }
+}
+
 /// The single ephemeral runtime row shown after the canonical transcript while
 /// an active session reports visible working state.
 struct ChatRuntimeWorkingPresentation: Equatable {

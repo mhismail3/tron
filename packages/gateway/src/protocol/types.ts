@@ -349,6 +349,15 @@ export interface QueuedMessageState {
   attachmentCount: number;
 }
 
+/** A prompt admitted before its canonical user entry exists, usually while
+ * Pi performs automatic compaction during prompt preflight. */
+export interface PendingPromptState {
+  id: string;
+  behavior?: "steer" | "followUp";
+  text: string;
+  attachmentCount: number;
+}
+
 export interface SessionSnapshot {
   sessionId: string;
   runtimeGeneration: string;
@@ -367,6 +376,8 @@ export interface SessionSnapshot {
   queued: { steering: string[]; followUp: string[] };
   queueRevision?: number;
   queuedItems?: QueuedMessageState[];
+  /** Prompt admission awaiting its canonical user transcript entry. */
+  pendingPrompt?: PendingPromptState;
   /** Gateway-owned manual compaction waiting for the active run to settle. */
   compactionQueued?: boolean;
   /** Effective runtime setting; optional for rolling protocol compatibility. */

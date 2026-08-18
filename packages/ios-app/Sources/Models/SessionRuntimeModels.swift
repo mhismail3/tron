@@ -120,6 +120,7 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     var queued: QueuedMessages
     var queueRevision: Int? = nil
     var queuedItems: [QueuedMessage]? = nil
+    var pendingPrompt: PendingPrompt? = nil
     var compactionQueued: Bool? = nil
     var automaticCompactionEnabled: Bool? = nil
     var transcript: [TranscriptItem]
@@ -147,6 +148,13 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
         let id: String
         var behavior: Behavior
         var text: String
+        let attachmentCount: Int
+    }
+
+    struct PendingPrompt: Codable, Hashable, Identifiable, Sendable {
+        let id: String
+        let behavior: QueuedMessage.Behavior?
+        let text: String
         let attachmentCount: Int
     }
 
