@@ -121,7 +121,11 @@ snapshot. `session.summary` is a bounded, per-session revisioned global projecti
 of phase, name, activity time, message count, and first-message title. It updates every connected
 dashboard immediately without broadcasting full transcripts; clients subscribe
 to `session.snapshot`, progress, tool, queue, and extension events only for chats
-they actually open. Active operations also emit a bounded sequenced heartbeat, so
+they actually open. Streaming progress republishes the cumulative live message, so
+updates are coalesced to one frame per short window (the first update stays
+immediate) and each frame is bounded to a marked live tail; intermediate frames
+are presentation-identical and the settled canonical message always pages through
+transcript projection. Active operations also emit a bounded sequenced heartbeat, so
 a long tool with no output remains distinguishable from a broken mobile stream.
 The embedded runtime's active-run flag outranks an older settlement callback when
 an extension completion immediately triggers a continuation, so phase, operation,
@@ -380,7 +384,12 @@ interruption represented by the durable run marker and is never automatically re
    and captures a snapshot cursor, returns that snapshot plus an ephemeral `syncToken` and
    explicit `subscriptionToken` ownership credential. The client acknowledges the exact
    baseline with `session.sync`, after which only later sequenced events are released.
-   A bounded barrier overflow requests another full sync. A failed open transaction revokes
+   While the barrier owns a session's catch-up it is the only delivery path, so every
+   in-window event reaches the client exactly once and in sequence. A bounded barrier
+   overflow converges the client with a fresh authoritative `session.rebaseline`
+   snapshot instead of a resync dead end; only an unavailable session falls back to
+   `transport.resyncRequired`.
+   A failed open transaction revokes
    its barrier, timer, and subscription ownership immediately, so retrying cannot produce
    a stale “already synchronizing” conflict. Concurrent opens for the same connection and
    session are rejected before they can replace the owner; establishment and synchronization
