@@ -153,6 +153,7 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
         #expect(presentation.contains("struct TronConfirmationSheet: View"))
+        #expect(presentation.contains(".tronNavigationTitle(\"Confirm\", accent: .tronEmerald)"))
         #expect(presentation.contains(".presentationDetents([.medium])"))
         #expect(presentation.contains("ToolbarItem(placement: .topBarLeading)"))
         #expect(presentation.contains("ToolbarItem(placement: .topBarTrailing)"))
