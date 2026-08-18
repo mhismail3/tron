@@ -30,7 +30,10 @@ second cache or reducer.
 `GatewayClient` performs one authenticated WebSocket connection, protocol hello,
 request correlation, deadlines, and event delivery. One private connection epoch owns the
 exact socket, receive/liveness tasks, pending requests, liveness timestamp, overflow state,
-and handshake projection. Connect and close invalidate older attempts across every suspension;
+and handshake projection. The focused chat uses the lifecycle-owned client; the dashboard
+uses one bounded lightweight client per non-focused paired Mac through
+`DashboardGatewayConnectionPool`, so catalog state from another Mac can update without
+replacing the active chat connection. Connect and close invalidate older attempts across every suspension;
 late hello, frame, failure, liveness, completion, and close callbacks can only detach or publish
 for their captured epoch. Event deliveries carry that non-wire connection identity. App lifecycle
 connects prepare the epoch without starting receive/liveness work, install the returned identity,
@@ -61,14 +64,19 @@ codes, item counts, and byte counts; identifiers, paths, methods, filenames, mod
 names, prompts, transcript content, and terminal output are never recorded. `AppModel`
 is the shrinking MainActor composition façade; narrow typed owners retain lifecycle and
 coordination state instead of routing facts through unrelated façade fields.
-`GatewayLifecycleCoordinator` is the sole owner of enrollment attempts, selected-profile lifecycle,
+`GatewayLifecycleCoordinator` is the sole owner of enrollment attempts, focused-profile lifecycle,
 connection state/info/identity, exact admissions, reconnect, foreground reconciliation, serial
-retire/close transitions, and final teardown. It composes `GatewayClient` without copying that actor's
+retire/close transitions, and final teardown. A non-selecting pairing commit adds a server without
+changing the focused profile; the dashboard pool owns shallow catalog connections for the other
+paired profiles, each with an independent failure boundary. It composes `GatewayClient` without copying that actor's
 byte-transport epoch. `AppModel` supplies narrow projection hooks for cache installation, refresh,
 session/terminal reconciliation, and synchronous retirement; it no longer stores a parallel lifecycle
 phase, reconnect task, pairing attempt, connection identity, or transition waiters. A dedicated
-`SessionCatalogCoordinator` owns dashboard summaries, an ID-indexed monotonic live-summary overlay,
-cached/stale/live provenance, and exact profile/lifecycle/connection load admission. Equivalent
+`SessionCatalogCoordinator` owns the focused profile's summaries, while the dashboard pool owns
+profile-qualified shallow catalogs for non-focused profiles. `SessionSummary` carries dashboard-only
+profile ownership and the dashboard aggregates by `(profileID, sessionID)`; an ID-indexed monotonic
+live-summary overlay, cached/stale/live provenance, and exact profile/lifecycle/connection load admission
+remain scoped to each source. Equivalent
 foreground, reconnect, pull-to-refresh, unknown-summary, and structural-invalidations share one
 catalog traversal; invalidation during a traversal sets one dirty bit and receives at most one immediate
 follow-up before handing newest truth to a new bounded lease. iOS requests user scope in 500-row pages,
@@ -84,9 +92,10 @@ catalog reconciliation without delaying chat navigation, so the new authoritativ
 pull-to-refresh. Cache/disconnect/authoritative installs and removals all
 enter that one disposable projection; hidden/local selection policy remains outside it and cannot mount a chat. Cached or stale non-idle rows present as resuming without rewriting
 the canonical phase; only a live Gateway-authoritative interrupted phase uses the amber warning.
-A profile boundary synchronously invalidates lifecycle admission, chains behind any preceding
+A focused-profile boundary synchronously invalidates lifecycle admission, chains behind any preceding
 retirement, revokes profile-scoped loads and presentation intake, and awaits the exact transport close
-before another profile may connect. Pairing pre-encodes profile metadata and uses one transactional profile
+before the focused profile changes. Non-focused dashboard connections are independently retired or
+reconnected and never blank healthy profiles when one Mac is offline. Pairing pre-encodes profile metadata and uses one transactional profile
 store boundary: atomic Keychain upsert succeeds before a single-document metadata commit, metadata failure
 restores the exact prior credential (or removes a newly created one), credential-deletion failure restores
 removed metadata, and explicit profile selection must commit its metadata before replacement cache or

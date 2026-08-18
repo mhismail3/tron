@@ -64,6 +64,7 @@ final class GatewayLifecycleCoordinator {
     private let uuidSource: UUIDSource
     private let pairer: GatewayPairer
     private let pairingCommit: GatewayPairingCommit
+    private let pairingCommitWithoutSelection: GatewayPairingCommit?
     private let profileTokenLookup: GatewayProfileTokenLookup
 
     weak var delegate: (any GatewayLifecycleProjectionDelegate)?
@@ -95,6 +96,7 @@ final class GatewayLifecycleCoordinator {
         uuidSource: UUIDSource,
         pairer: GatewayPairer,
         pairingCommit: @escaping GatewayPairingCommit,
+        pairingCommitWithoutSelection: GatewayPairingCommit? = nil,
         profileTokenLookup: @escaping GatewayProfileTokenLookup
     ) {
         self.client = client
@@ -104,6 +106,7 @@ final class GatewayLifecycleCoordinator {
         self.uuidSource = uuidSource
         self.pairer = pairer
         self.pairingCommit = pairingCommit
+        self.pairingCommitWithoutSelection = pairingCommitWithoutSelection
         self.profileTokenLookup = profileTokenLookup
     }
 
@@ -251,7 +254,7 @@ final class GatewayLifecycleCoordinator {
         backgroundRetirementTask = retirement
     }
 
-    func pair(_ invitation: PairingInvitation) async throws {
+    func pair(_ invitation: PairingInvitation, selectingProfile: Bool = true) async throws {
         guard phase.admitsWork else { throw CancellationError() }
         let previousConnectionState = pairingAttempt?.previousConnectionState ?? connectionState
         invalidatePairingAttempt()
@@ -259,7 +262,12 @@ final class GatewayLifecycleCoordinator {
         let attemptID = uuidSource.next()
         let task = Task { @MainActor [weak self] in
             guard let self else { throw CancellationError() }
-            try await self.performPair(invitation, attemptID: attemptID)
+            try await self.performPair(
+                invitation,
+                attemptID: attemptID,
+                selectingProfile: selectingProfile,
+                previousConnectionState: previousConnectionState
+            )
         }
         pairingAttempt = PairingAttempt(
             id: attemptID,
@@ -432,12 +440,31 @@ final class GatewayLifecycleCoordinator {
         guard admitsGeneration(generation) else { throw CancellationError() }
     }
 
-    private func performPair(_ invitation: PairingInvitation, attemptID: UUID) async throws {
+    private func performPair(
+        _ invitation: PairingInvitation,
+        attemptID: UUID,
+        selectingProfile: Bool,
+        previousConnectionState: GatewayConnectionState
+    ) async throws {
         connectionState = .connecting
         let name = UIDevice.current.name
         let (profile, token) = try await pairer.pair(invitation, deviceName: name)
         try requirePairingAttempt(attemptID)
-        try pairingCommit(profile, token)
+        if selectingProfile {
+            try pairingCommit(profile, token)
+        } else {
+            guard let pairingCommitWithoutSelection else {
+                throw GatewayFailure(
+                    code: "pairing_mode_unavailable",
+                    message: "This app cannot add another server without replacing the current connection.",
+                    retryable: false,
+                    details: nil
+                )
+            }
+            try pairingCommitWithoutSelection(profile, token)
+            connectionState = previousConnectionState
+            return
+        }
         // Credential commit is the point of no return. The lifecycle must leave
         // transition state even when the presenting task is cancelled afterward.
         let generation = await beginTransition(invalidatePairing: false)

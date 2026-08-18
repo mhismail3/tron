@@ -33,6 +33,70 @@ enum DashboardSessionActivity: Equatable, Sendable {
     case interrupted
 }
 
+enum DashboardServerConnectionState: Equatable, Sendable {
+    case connecting
+    case connected
+    case offline
+    case stale
+
+    var label: String {
+        switch self {
+        case .connecting: "Connecting"
+        case .connected: "Connected"
+        case .offline: "Offline"
+        case .stale: "Cached"
+        }
+    }
+}
+
+struct DashboardServerSource: Identifiable, Equatable, Sendable {
+    let profileID: String
+    let label: String
+    let sessionCount: Int
+    let state: DashboardServerConnectionState
+
+    var id: String { profileID }
+}
+
+struct DashboardServerFilterState: Equatable, Sendable {
+    private(set) var selectedProfileIDs: Set<String> = []
+    private var availableProfileIDs: Set<String> = []
+
+    var isFiltering: Bool { !selectedProfileIDs.isEmpty }
+    var isAllSelected: Bool { selectedProfileIDs.isEmpty }
+    var accessibilityLabel: String {
+        isFiltering ? "Filter servers, \(selectedProfileIDs.count) selected" : "Filter servers, all selected"
+    }
+
+    mutating func reconcile(profileIDs: [String]) {
+        availableProfileIDs = Set(profileIDs)
+        selectedProfileIDs = selectedProfileIDs.intersection(availableProfileIDs)
+        if selectedProfileIDs.count == availableProfileIDs.count { selectedProfileIDs.removeAll() }
+    }
+
+    func allows(_ profileID: String?) -> Bool {
+        guard let profileID else { return selectedProfileIDs.isEmpty }
+        return selectedProfileIDs.isEmpty || selectedProfileIDs.contains(profileID)
+    }
+
+    func isSelected(_ profileID: String) -> Bool {
+        selectedProfileIDs.isEmpty || selectedProfileIDs.contains(profileID)
+    }
+
+    mutating func selectAll() { selectedProfileIDs.removeAll() }
+
+    mutating func toggle(_ profileID: String) {
+        if selectedProfileIDs.isEmpty {
+            selectedProfileIDs = availableProfileIDs.subtracting([profileID])
+        } else if selectedProfileIDs.contains(profileID) {
+            selectedProfileIDs.remove(profileID)
+        } else {
+            selectedProfileIDs.insert(profileID)
+        }
+        if selectedProfileIDs.count == availableProfileIDs.count { selectedProfileIDs.removeAll() }
+    }
+}
+
 enum SessionCatalogRefreshOutcome: Equatable, Sendable {
     case published
     case retained

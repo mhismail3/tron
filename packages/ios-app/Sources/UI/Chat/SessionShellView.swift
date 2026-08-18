@@ -40,6 +40,9 @@ struct SessionShellView: View {
     @State private var sessionExpansion = SessionListSessionExpansion()
     @State private var navigationOwner = DashboardNavigationOwner()
     @State private var profileRouteOwner = SessionShellProfileRouteOwner()
+    @State private var serverFilter = DashboardServerFilterState()
+    @State private var showingServerFilter = false
+    @State private var openingSessionID: String?
 
     var body: some View {
         dashboardNavigation
@@ -93,6 +96,9 @@ struct SessionShellView: View {
             )
             workspaceDisclosure.reconcile(groupIDs: Set(groups.map(\.id)))
         }
+        .onChange(of: model.dashboardServerSources, initial: true) { _, sources in
+            serverFilter.reconcile(profileIDs: sources.map(\.profileID))
+        }
     }
 
     private var dashboardNavigation: some View {
@@ -106,7 +112,7 @@ struct SessionShellView: View {
         ZStack(alignment: .bottomTrailing) {
             sessionList
             TronTopBlurOverlay(style: .dashboard)
-            newSessionButton
+            dashboardBottomControls
         }
             .scrollContentBackground(.hidden)
             .background(Color.tronBackground)
@@ -122,7 +128,7 @@ struct SessionShellView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { await model.refreshSessions() }
+            .refreshable { await model.refreshDashboardSessions() }
             .navigationDestination(item: $presentedSession) { route in
                 ChatView(
                     sessionID: route.sessionID,
@@ -130,7 +136,7 @@ struct SessionShellView: View {
                     initialModel: route.initialModel,
                     onForkCreated: present
                 )
-                .id(route.sessionID)
+                .id(route.id)
             }
     }
 
@@ -143,6 +149,80 @@ struct SessionShellView: View {
         presentedSession = route
     }
 
+    private var dashboardBottomControls: some View {
+        HStack(alignment: .bottom) {
+            serverFilterControl
+            Spacer(minLength: 12)
+            newSessionButton
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private var serverFilterControl: some View {
+        if showingServerFilter {
+            serverFilterPopup
+                .transition(.scale(scale: 0.92, anchor: .bottomLeading).combined(with: .opacity))
+        } else {
+            Button {
+                withAnimation(.snappy(duration: 0.2)) { showingServerFilter = true }
+            } label: {
+                Image(systemName: serverFilter.isFiltering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+            }
+            .buttonStyle(TronIconButtonStyle(size: 56))
+            .accessibilityLabel(serverFilter.accessibilityLabel)
+        }
+    }
+
+    private var serverFilterPopup: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Servers")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
+                Spacer()
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) { showingServerFilter = false }
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .accessibilityLabel("Close server filter")
+            }
+            Button { serverFilter.selectAll() } label: {
+                filterRow(title: "All servers", detail: nil, selected: serverFilter.isAllSelected)
+            }
+            .buttonStyle(.plain)
+            ForEach(model.dashboardServerSources) { source in
+                Button { serverFilter.toggle(source.profileID) } label: {
+                    filterRow(
+                        title: source.label,
+                        detail: "\(source.sessionCount) session\(source.sessionCount == 1 ? "" : "s") · \(source.state.label)",
+                        selected: serverFilter.isSelected(source.profileID)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .frame(minWidth: 260, maxWidth: 310)
+        .foregroundStyle(Color.tronTextPrimary)
+        .tronGlassSurface(accent: .tronEmerald, cornerRadius: 18, tintOpacity: 0.16)
+    }
+
+    private func filterRow(title: String, detail: String?, selected: Bool) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(selected ? Color.tronEmerald : Color.tronTextMuted)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                if let detail { Text(detail).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
+            }
+            Spacer(minLength: 8)
+        }
+        .frame(minHeight: 36)
+        .contentShape(Rectangle())
+    }
+
     private var newSessionButton: some View {
         Button {
             showNewSession = true
@@ -152,8 +232,6 @@ struct SessionShellView: View {
         .buttonStyle(TronIconButtonStyle(size: 56))
         .accessibilityLabel("New Session")
         .accessibilityHint("Opens the new session sheet")
-        .padding(.trailing, 20)
-        .padding(.bottom, 8)
     }
 
     @ToolbarContentBuilder
@@ -204,7 +282,7 @@ struct SessionShellView: View {
         let name = renameName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         Task {
-            do { try await model.renameSession(session.id, name: name) }
+            do { try await model.performOnOwningGateway(session) { try await model.renameSession(session.id, name: name) } }
             catch { model.lastError = error.localizedDescription }
             sessionToRename = nil
         }
@@ -212,7 +290,7 @@ struct SessionShellView: View {
 
     private func delete(_ session: SessionSummary) {
         Task {
-            do { try await model.deleteSession(session.id) }
+            do { try await model.performOnOwningGateway(session) { try await model.deleteSession(session.id) } }
             catch { model.lastError = error.localizedDescription }
             sessionToDelete = nil
         }
@@ -250,7 +328,7 @@ struct SessionShellView: View {
 
             Section {
                 if workspaceDisclosure.shouldRenderRows(group.id) {
-                    ForEach(Array(visibleSessions.enumerated()), id: \.element.id) { index, session in
+                    ForEach(Array(visibleSessions.enumerated()), id: \.element.dashboardID) { index, session in
                         let paginationRowIsVisible = sessionExpansion.isRowVisible(
                             groupID: group.id,
                             index: index
@@ -307,11 +385,23 @@ struct SessionShellView: View {
 
     private func sessionButton(_ session: SessionSummary) -> some View {
         return Button {
-            present(AppModel.SessionNavigationRoute(sessionID: session.id, editorText: nil))
+            guard openingSessionID == nil else { return }
+            openingSessionID = session.dashboardID
+            Task {
+                defer { openingSessionID = nil }
+                do {
+                    let route = try await model.navigationRoute(for: session)
+                    present(route)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    model.lastError = error.localizedDescription
+                }
+            }
         } label: {
             HistoricalSessionRow(
                 session: session,
-                activity: model.dashboardActivity(for: session.id)
+                activity: model.dashboardActivity(for: session)
             )
         }
         .buttonStyle(.plain)
@@ -338,7 +428,7 @@ struct SessionShellView: View {
                     .font(TronTypography.sans(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
                     .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
                     .contentTransition(.symbolEffect(.replace))
-                Text(group.name)
+                Text(group.displayName)
                     .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .bold))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -365,15 +455,18 @@ struct SessionShellView: View {
 
     private var workspaceGroups: [SessionListWorkspaceGroup] {
         let filtered = model.visibleSessions.filter { session in
-            search.isEmpty
-                || session.title.localizedCaseInsensitiveContains(search)
-                || session.cwd.localizedCaseInsensitiveContains(search)
+            serverFilter.allows(session.gatewayProfileID)
+                && (search.isEmpty
+                    || session.title.localizedCaseInsensitiveContains(search)
+                    || session.cwd.localizedCaseInsensitiveContains(search))
         }
         return SessionListWorkspaceGroup.groups(from: filtered)
             .map { group in
                 SessionListWorkspaceGroup(
                     path: group.path,
                     name: group.name,
+                    profileID: group.profileID,
+                    profileLabel: group.profileLabel,
                     sessions: group.sessions.sorted { $0.updatedAt > $1.updatedAt }
                 )
             }

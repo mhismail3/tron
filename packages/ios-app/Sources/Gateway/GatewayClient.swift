@@ -171,6 +171,8 @@ actor GatewayClient {
 
     var info: GatewayInfo? { connection?.info }
 
+    func activeConnectionID() -> Int? { connection?.id }
+
     init(
         socketFactory: GatewaySocketFactory = .urlSession,
         clock: MonotonicClock = .continuous,

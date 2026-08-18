@@ -3,6 +3,11 @@ import SwiftUI
 /// Paged first-run sheet. The session shell remains mounted underneath, matching
 /// Tron's established onboarding presentation while gateway state changes.
 struct OnboardingView: View {
+    enum Mode: Hashable {
+        case setup
+        case addServer
+    }
+
     enum Step: Int, CaseIterable, Hashable {
         case welcome, tailscale, mac, pair, workspace, anthropic, openAI, providers, model
 
@@ -11,7 +16,7 @@ struct OnboardingView: View {
             case .welcome: "Welcome to Tron"
             case .tailscale: "Install Tailscale"
             case .mac: "Install Tron on Mac"
-            case .pair: "Connect your Mac"
+            case .pair: "Connect a Mac"
             case .workspace: "Default workspace"
             case .anthropic: "Anthropic"
             case .openAI: "OpenAI"
@@ -24,7 +29,19 @@ struct OnboardingView: View {
     @Environment(AppModel.self) private var model
     @Binding var selectedDetent: PresentationDetent
     let onComplete: () -> Void
-    @State private var step: Step = .welcome
+    let mode: Mode
+    @State private var step: Step
+
+    init(
+        mode: Mode = .setup,
+        selectedDetent: Binding<PresentationDetent>,
+        onComplete: @escaping () -> Void
+    ) {
+        self.mode = mode
+        self._selectedDetent = selectedDetent
+        self.onComplete = onComplete
+        self._step = State(initialValue: mode == .addServer ? .pair : .welcome)
+    }
     @State private var showScanner = false
     @State private var showManualPairing = false
     @State private var host = ""
@@ -52,11 +69,15 @@ struct OnboardingView: View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 TabView(selection: $step) {
-                    welcomePage.tag(Step.welcome)
-                    tailscalePage.tag(Step.tailscale)
-                    macPage.tag(Step.mac)
-                    pairingPage.tag(Step.pair)
-                    if isPaired {
+                    if mode == .addServer {
+                        pairingPage.tag(Step.pair)
+                    } else {
+                        welcomePage.tag(Step.welcome)
+                        tailscalePage.tag(Step.tailscale)
+                        macPage.tag(Step.mac)
+                        pairingPage.tag(Step.pair)
+                    }
+                    if mode == .setup && isPaired {
                         workspacePage.tag(Step.workspace)
                         preferredProviderPage(ids: ["anthropic"], name: "Anthropic").tag(Step.anthropic)
                         preferredProviderPage(ids: ["openai-codex", "openai"], name: "OpenAI").tag(Step.openAI)
@@ -66,16 +87,18 @@ struct OnboardingView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
 
-                pageDots
-                    .padding(.horizontal, TronSpacing.xlarge)
-                    .padding(.bottom, 10)
+                if mode == .setup {
+                    pageDots
+                        .padding(.horizontal, TronSpacing.xlarge)
+                        .padding(.bottom, 10)
+                }
             }
             .tronTopBlurSurface()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    if step != .welcome {
+                    if mode == .setup && step != .welcome {
                         Button { goBack() } label: {
                             Label("Back", systemImage: "chevron.left")
                                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
@@ -158,6 +181,10 @@ struct OnboardingView: View {
             }
         }
         .task {
+            if mode == .addServer {
+                applyDetent()
+                return
+            }
             #if HOSTED_TEST
             selectedWorkspace = ProcessInfo.processInfo.environment["TRON_E2E_WORKSPACE"] ?? model.defaultWorkspace ?? ""
             #else
@@ -184,7 +211,8 @@ struct OnboardingView: View {
             withAnimation(.snappy(duration: 0.28)) { selectedDetent = visible ? .large : .medium }
         }
         .onChange(of: model.connectionState) { _, state in
-            if state == .connected && !model.setupComplete && step.rawValue < Step.workspace.rawValue {
+            if mode == .setup,
+               state == .connected && !model.setupComplete && step.rawValue < Step.workspace.rawValue {
                 withAnimation(.snappy(duration: 0.28)) { step = .workspace }
             }
         }
@@ -389,7 +417,8 @@ struct OnboardingView: View {
     }
 
     private func goBack() {
-        guard let previous = Step(rawValue: step.rawValue - 1) else { return }
+        guard mode == .setup,
+              let previous = Step(rawValue: step.rawValue - 1) else { return }
         withAnimation(.snappy(duration: 0.24)) { step = previous }
     }
     private func goForward() {
@@ -420,7 +449,11 @@ struct OnboardingView: View {
         pairing = true
         defer { pairing = false }
         do {
-            try await model.pair(invitation)
+            try await model.pair(invitation, selectingProfile: mode == .setup)
+            if mode == .addServer {
+                onComplete()
+                return
+            }
             if !model.setupComplete {
                 withAnimation(.snappy(duration: 0.28)) { step = .workspace }
                 if !selectedWorkspace.isEmpty { await inspectTrust() }

@@ -41,13 +41,16 @@ final class GatewayProfileStore {
         return document.profiles.first { $0.id == document.selectedProfileID } ?? document.profiles.first
     }
 
-    func save(_ profile: GatewayProfile, token: String) throws {
+    func save(_ profile: GatewayProfile, token: String, selecting: Bool = true) throws {
         guard profile.hasValidEndpoint else { throw GatewayProfileStoreError.invalidEndpoint }
         let previousDocument = document
         let previousToken = try tokens.read(profileID: profile.id)
         var values = previousDocument.profiles.filter { $0.id != profile.id }
         values.append(profile)
-        let replacement = GatewayProfileDocument(profiles: values, selectedProfileID: profile.id)
+        let replacement = GatewayProfileDocument(
+            profiles: values,
+            selectedProfileID: selecting ? profile.id : (previousDocument.selectedProfileID ?? values.first?.id)
+        )
 
         // Keychain upsert is atomic for an existing item. Metadata is committed
         // only after it succeeds; a metadata failure restores the exact prior

@@ -19,6 +19,25 @@ struct DashboardStateOwnerTests {
         #expect(!admittedDuplicate)
     }
 
+    @Test("server filter defaults to all and preserves explicit selections")
+    func serverFilterSelection() {
+        var filter = DashboardServerFilterState()
+        filter.reconcile(profileIDs: ["a", "b", "c"])
+        #expect(filter.isAllSelected)
+        #expect(filter.allows("a"))
+
+        filter.toggle("b")
+        #expect(filter.isFiltering)
+        #expect(filter.allows("a"))
+        #expect(!filter.allows("b"))
+        #expect(filter.isSelected("c"))
+
+        filter.toggle("b")
+        #expect(filter.isAllSelected)
+        filter.selectAll()
+        #expect(filter.isAllSelected)
+    }
+
     @Test("direct navigation invalidates pending asynchronous navigation")
     func navigationInvalidation() {
         var owner = DashboardNavigationOwner()

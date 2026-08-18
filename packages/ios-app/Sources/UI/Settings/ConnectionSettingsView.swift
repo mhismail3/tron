@@ -5,9 +5,21 @@ struct ConnectionsSettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var confirmForget = false
     @State private var deviceToRevoke: PairedDevice?
+    @State private var showAddServer = false
+    @State private var addServerDetent: PresentationDetent = .medium
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
+                Button {
+                    showAddServer = true
+                } label: {
+                    Label("Connect New Server", systemImage: "plus.circle.fill")
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                }
+                .buttonStyle(TronActionButtonStyle())
+                .accessibilityHint("Opens the Connect a Mac pairing screen")
+
                 TronSettingsGroup("Paired Macs") {
                     VStack(spacing: 0) {
                         ForEach(Array(model.profiles.profiles.enumerated()), id: \.element.id) { index, profile in
@@ -66,6 +78,15 @@ struct ConnectionsSettingsView: View {
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Connections")
+        .sheet(isPresented: $showAddServer) {
+            OnboardingView(mode: .addServer, selectedDetent: $addServerDetent) {
+                showAddServer = false
+            }
+            .tronTopBlur(.sheet)
+            .presentationDetents([.medium, .large], selection: $addServerDetent)
+            .presentationDragIndicator(.hidden)
+            .presentationContentInteraction(.resizes)
+        }
         .alert("Forget this Mac?", isPresented: $confirmForget) {
             Button("Cancel", role: .cancel) {}
             Button("Forget Mac", role: .destructive) {

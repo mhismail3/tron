@@ -5,29 +5,45 @@ import Foundation
 struct SessionListWorkspaceGroup: Identifiable, Equatable {
     let path: String
     let name: String
+    let profileID: String?
+    let profileLabel: String?
     let sessions: [SessionSummary]
 
-    var id: String { path.isEmpty ? "__default_workspace__" : path }
+    var id: String {
+        let workspaceID = path.isEmpty ? "__default_workspace__" : path
+        return "\(profileID ?? "__unqualified__")|\(workspaceID)"
+    }
+
+    var displayName: String {
+        guard let profileLabel, !profileLabel.isEmpty else { return name }
+        return "\(profileLabel) · \(name)"
+    }
 
     static func groups(from sessions: [SessionSummary]) -> [SessionListWorkspaceGroup] {
-        var orderedPaths: [String] = []
-        var sessionsByPath: [String: [SessionSummary]] = [:]
+        var orderedKeys: [String] = []
+        var sessionsByKey: [String: [SessionSummary]] = [:]
 
         for session in sessions {
-            if sessionsByPath[session.cwd] == nil {
-                orderedPaths.append(session.cwd)
-                sessionsByPath[session.cwd] = []
+            let key = "\(session.gatewayProfileID ?? "__unqualified__")|\(session.cwd)"
+            if sessionsByKey[key] == nil {
+                orderedKeys.append(key)
+                sessionsByKey[key] = []
             }
-            sessionsByPath[session.cwd, default: []].append(session)
+            sessionsByKey[key, default: []].append(session)
         }
 
-        return orderedPaths.compactMap { path in
-            guard let sessions = sessionsByPath[path], !sessions.isEmpty else { return nil }
+        return orderedKeys.compactMap { key in
+            guard let sessions = sessionsByKey[key],
+                  let first = sessions.first,
+                  !sessions.isEmpty else { return nil }
+            let path = first.cwd
             return SessionListWorkspaceGroup(
                 path: path,
                 name: URL(fileURLWithPath: path).lastPathComponent.isEmpty
                     ? path
                     : URL(fileURLWithPath: path).lastPathComponent,
+                profileID: first.gatewayProfileID,
+                profileLabel: first.gatewayProfileLabel,
                 sessions: sessions
             )
         }

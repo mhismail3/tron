@@ -20,11 +20,15 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
     let firstMessage: String
     let phase: SessionPhase
     let summaryRevision: Int?
+    /// Dashboard-only ownership metadata. Gateway payloads omit these fields.
+    let gatewayProfileID: String?
+    let gatewayProfileLabel: String?
 
     init(
         id: String, name: String?, cwd: String, kind: Kind = .user, parentSessionId: String?,
         createdAt: String, updatedAt: String, messageCount: Int,
-        firstMessage: String, phase: SessionPhase, summaryRevision: Int? = nil
+        firstMessage: String, phase: SessionPhase, summaryRevision: Int? = nil,
+        gatewayProfileID: String? = nil, gatewayProfileLabel: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -37,6 +41,8 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         self.firstMessage = firstMessage
         self.phase = phase
         self.summaryRevision = summaryRevision
+        self.gatewayProfileID = gatewayProfileID
+        self.gatewayProfileLabel = gatewayProfileLabel
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -56,6 +62,30 @@ struct SessionSummary: Codable, Hashable, Identifiable, Sendable {
         firstMessage = try container.decode(String.self, forKey: .firstMessage)
         phase = try container.decode(SessionPhase.self, forKey: .phase)
         summaryRevision = try container.decodeIfPresent(Int.self, forKey: .summaryRevision)
+        gatewayProfileID = nil
+        gatewayProfileLabel = nil
+    }
+
+    func withGatewaySource(id profileID: String, label: String) -> SessionSummary {
+        SessionSummary(
+            id: id,
+            name: name,
+            cwd: cwd,
+            kind: kind,
+            parentSessionId: parentSessionId,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            messageCount: messageCount,
+            firstMessage: firstMessage,
+            phase: phase,
+            summaryRevision: summaryRevision,
+            gatewayProfileID: profileID,
+            gatewayProfileLabel: label
+        )
+    }
+
+    var dashboardID: String {
+        gatewayProfileID.map { "\($0):\(id)" } ?? id
     }
 
     var title: String {

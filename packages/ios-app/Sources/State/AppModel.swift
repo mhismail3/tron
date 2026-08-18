@@ -62,7 +62,7 @@ final class AppModel {
         let initialModel: ModelRef?
         fileprivate let gatewayProfileID: String?
         fileprivate let gatewayLifecycleGeneration: Int?
-        var id: String { sessionID }
+        var id: String { gatewayProfileID.map { "\($0):\(sessionID)" } ?? sessionID }
 
         init(
             sessionID: String,
@@ -130,9 +130,16 @@ final class AppModel {
     var gatewayInfo: GatewayInfo? { lifecycle.gatewayInfo }
     private var gatewayConnectionID: Int? { lifecycle.connectionID }
     private var sessionCatalog = SessionCatalogCoordinator()
+    private let dashboardConnections = DashboardGatewayConnectionPool()
+    private var dashboardSessionsByProfile: [String: [SessionSummary]] = [:]
+    private var dashboardStatesByProfile: [String: DashboardServerConnectionState] = [:]
+    private var dashboardCacheLoadGeneration = 0
     var sessions: [SessionSummary] {
         get { sessionCatalog.sessions }
-        set { sessionCatalog.replaceForFacade(newValue) }
+        set {
+            sessionCatalog.replaceForFacade(newValue)
+            installSelectedDashboardCatalog()
+        }
     }
     private let sessionPresentation: SessionPresentationStore
     var settingsInvalidationGeneration: Int { settingsTrust.settingsInvalidationGeneration }
@@ -208,7 +215,10 @@ final class AppModel {
         exportArtifacts: SessionExportArtifactStore = SessionExportArtifactStore()
     ) {
         let resolvedPairingCommit = pairingCommit ?? { profile, token in
-            try profiles.save(profile, token: token)
+            try profiles.save(profile, token: token, selecting: true)
+        }
+        let resolvedPairingCommitWithoutSelection: PairingCommit = { profile, token in
+            try profiles.save(profile, token: token, selecting: false)
         }
         let resolvedProfileTokenLookup = profileTokenLookup ?? { profile in
             profiles.token(for: profile)
@@ -221,6 +231,7 @@ final class AppModel {
             uuidSource: uuidSource,
             pairer: pairer,
             pairingCommit: resolvedPairingCommit,
+            pairingCommitWithoutSelection: resolvedPairingCommitWithoutSelection,
             profileTokenLookup: resolvedProfileTokenLookup
         )
         let mutationExecutor = ConfirmedMutationExecutor(
@@ -337,6 +348,7 @@ final class AppModel {
         self.uuidSource = uuidSource
         self.performanceSignposts = performanceSignposts
         self.exportArtifacts = exportArtifacts
+        dashboardConnections.delegate = self
         Task { try? await exportArtifacts.prune() }
         #if HOSTED_TEST
         if ProcessInfo.processInfo.arguments.contains("--tron-reset-ui-test-state") {
@@ -563,12 +575,48 @@ final class AppModel {
         providerAuth.preferredAvailableModel(for: target)
     }
 
+    var dashboardServerSources: [DashboardServerSource] {
+        profiles.profiles.map { profile in
+            let sourceSessions = dashboardSessionsByProfile[profile.id] ?? []
+            let state: DashboardServerConnectionState
+            if profiles.selected?.id == profile.id {
+                switch connectionState {
+                case .connected: state = .connected
+                case .connecting, .reconnecting: state = .connecting
+                case .offline: state = .offline
+                case .unpaired, .unauthorized: state = .stale
+                }
+            } else {
+                state = dashboardStatesByProfile[profile.id] ?? .stale
+            }
+            return DashboardServerSource(
+                profileID: profile.id,
+                label: profile.label,
+                sessionCount: sourceSessions.count,
+                state: state
+            )
+        }
+    }
+
     var visibleSessions: [SessionSummary] {
-        SessionSummary.dashboardSessions(sessions)
+        let projected = dashboardSessionsByProfile.values.flatMap { $0 }
+        let values = projected.isEmpty ? sessions : projected
+        return SessionSummary.dashboardSessions(values).sorted { $0.updatedAt > $1.updatedAt }
     }
 
     func dashboardActivity(for sessionID: String) -> DashboardSessionActivity {
         sessionCatalog.activity(for: sessionID)
+    }
+
+    func dashboardActivity(for session: SessionSummary) -> DashboardSessionActivity {
+        guard let profileID = session.gatewayProfileID,
+              profileID != profiles.selected?.id else {
+            return sessionCatalog.activity(for: session.id)
+        }
+        let live = dashboardStatesByProfile[profileID] == .connected
+        guard live else { return session.phase == .idle ? .idle : .resuming }
+        if session.phase.isActive { return .active }
+        return session.phase == .interrupted ? .interrupted : .idle
     }
 
     func postNotice(_ message: String, replacing key: GlobalNoticeKey? = nil) {
@@ -604,16 +652,20 @@ final class AppModel {
 
     func start() async {
         await lifecycle.start()
+        reconcileDashboardConnections()
     }
 
     @discardableResult
     func becameActive() -> Task<Void, Never>? {
         sceneAllowsCatalogRefresh = true
-        return lifecycle.becameActive()
+        let task = lifecycle.becameActive()
+        reconcileDashboardConnections()
+        return task
     }
 
     func enteredBackground() {
         sceneAllowsCatalogRefresh = false
+        dashboardConnections.retire()
         // The canonical session may still be running on the Gateway, but this
         // mobile projection is intentionally retiring its transport lease.
         sessionCatalog.markDisconnected()
@@ -622,8 +674,9 @@ final class AppModel {
         cancelCatalogRefresh()
     }
 
-    func pair(_ invitation: PairingInvitation) async throws {
-        try await lifecycle.pair(invitation)
+    func pair(_ invitation: PairingInvitation, selectingProfile: Bool = true) async throws {
+        try await lifecycle.pair(invitation, selectingProfile: selectingProfile)
+        if !selectingProfile { reconcileDashboardConnections() }
     }
 
     private func admitsLifecycle(_ admission: GatewayLifecycleCoordinator.Admission) -> Bool {
@@ -696,6 +749,12 @@ final class AppModel {
         async let settingLoad: Bool = refreshSettings(target: settingsTarget)
         async let deviceLoad: Void = refreshDevices()
         _ = await (sessionLoad, providerLoad, settingLoad, deviceLoad)
+    }
+
+    func refreshDashboardSessions() async {
+        async let selected = refreshSessions()
+        await dashboardConnections.refreshAll()
+        _ = await selected
     }
 
     @discardableResult
@@ -823,6 +882,7 @@ final class AppModel {
                 }
                 guard sessionCatalog.publishAuthoritative(all, admission: loadAdmission) else { return .retained }
                 reconcileSelection()
+                installSelectedDashboardCatalog()
                 scheduleCacheCheckpoint()
                 return .published
             } catch is CancellationError {
@@ -952,6 +1012,39 @@ final class AppModel {
         guard profiles.selected?.id == gatewayProfileID,
               let generation = route.gatewayLifecycleGeneration else { return false }
         return lifecycle.admits(.init(generation: generation, connectionID: nil))
+    }
+
+    func navigationRoute(for session: SessionSummary) async throws -> SessionNavigationRoute {
+        let profileID = session.gatewayProfileID ?? profiles.selected?.id
+        try await activateDashboardProfile(profileID)
+        guard let profileID,
+              let admission = lifecycle.generationAdmission,
+              lifecycle.selectedProfileID == profileID else { throw CancellationError() }
+        return SessionNavigationRoute(
+            sessionID: session.id,
+            editorText: nil,
+            gatewayProfileID: profileID,
+            gatewayLifecycleGeneration: admission.generation
+        )
+    }
+
+    func performOnOwningGateway<Value>(
+        _ session: SessionSummary,
+        operation: @escaping @MainActor () async throws -> Value
+    ) async throws -> Value {
+        try await activateDashboardProfile(session.gatewayProfileID ?? profiles.selected?.id)
+        return try await operation()
+    }
+
+    private func activateDashboardProfile(_ profileID: String?) async throws {
+        guard let profileID,
+              let profile = profiles.profiles.first(where: { $0.id == profileID }),
+              profiles.token(for: profile) != nil else { throw CancellationError() }
+        if profiles.selected?.id != profileID {
+            await switchGateway(profile)
+        }
+        guard profiles.selected?.id == profileID,
+              connectionState == .connected else { throw CancellationError() }
     }
 
     func createSession(cwd: String) async throws -> SessionNavigationRoute {
@@ -1781,7 +1874,41 @@ final class AppModel {
         case .unknownSession:
             scheduleSessionListRefresh()
         case .updated:
+            installSelectedDashboardCatalog()
             scheduleCacheCheckpoint()
+        }
+    }
+
+    private func installSelectedDashboardCatalog() {
+        guard let profile = profiles.selected else { return }
+        dashboardSessionsByProfile[profile.id] = sessionCatalog.sessions.map {
+            $0.withGatewaySource(id: profile.id, label: profile.label)
+        }
+    }
+
+    private func reconcileDashboardConnections() {
+        dashboardCacheLoadGeneration &+= 1
+        let cacheGeneration = dashboardCacheLoadGeneration
+        let selectedProfileID = profiles.selected?.id
+        dashboardConnections.reconcile(
+            profiles: profiles.profiles,
+            selectedProfileID: selectedProfileID,
+            token: { [profiles] profile in profiles.token(for: profile) }
+        )
+        for profile in profiles.profiles where profile.id != selectedProfileID {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let cached = await self.cache.load(profileID: profile.id)
+                guard self.dashboardCacheLoadGeneration == cacheGeneration,
+                      self.profiles.profiles.contains(where: { $0.id == profile.id }),
+                      self.profiles.selected?.id != profile.id,
+                      self.dashboardStatesByProfile[profile.id] != .connected,
+                      self.dashboardSessionsByProfile[profile.id]?.isEmpty != false else { return }
+                self.dashboardSessionsByProfile[profile.id] = cached.sessions.map {
+                    $0.withGatewaySource(id: profile.id, label: profile.label)
+                }
+                self.dashboardStatesByProfile[profile.id] = .stale
+            }
         }
     }
 
@@ -1797,6 +1924,10 @@ final class AppModel {
         sessionCatchUpNoticeTask = nil
         noticeStore.removeAll()
         sessionCatalog.markDisconnected()
+        if let profileID = profiles.selected?.id {
+            dashboardSessionsByProfile[profileID] = nil
+            dashboardStatesByProfile[profileID] = nil
+        }
     }
 
     private func reconcileSelection() {
@@ -1855,6 +1986,7 @@ final class AppModel {
         guard admitsLifecycle(admission), profiles.selected?.id == profileID else { return }
         sessionCatalog.installCached(value.sessions)
         reconcileSelection()
+        installSelectedDashboardCatalog()
     }
 
     private func scheduleCacheCheckpoint() {
@@ -1893,6 +2025,21 @@ final class AppModel {
         cacheCheckpointTask = nil
     }
 
+}
+
+extension AppModel: DashboardGatewayConnectionPoolDelegate {
+    func dashboardPoolDidUpdate(
+        profileID: String,
+        sessions: [SessionSummary],
+        state: DashboardServerConnectionState
+    ) {
+        // Once a profile becomes focused, the lifecycle/catalog owner is the
+        // only authority allowed to publish its dashboard rows. A delayed pool
+        // stop callback must not erase that newly authoritative projection.
+        guard profileID != profiles.selected?.id else { return }
+        dashboardSessionsByProfile[profileID] = sessions
+        dashboardStatesByProfile[profileID] = state
+    }
 }
 
 extension AppModel: SessionPresentationStoreDelegate {
@@ -2002,6 +2149,8 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard admitsLifecycle(admission) else { return }
         await refreshAll()
+        guard admitsLifecycle(admission) else { return }
+        reconcileDashboardConnections()
     }
 
     func lifecycleRestoreMountedPresentation(
@@ -2026,6 +2175,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         await sessionPresentation.reconnectMountedPresentation()
         await terminal.reattach(admission: admission)
         _ = await catalog
+        reconcileDashboardConnections()
         try requireLifecycle(admission)
     }
 

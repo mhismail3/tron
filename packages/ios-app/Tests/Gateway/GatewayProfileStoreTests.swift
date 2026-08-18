@@ -89,6 +89,22 @@ struct GatewayProfileStoreTests {
         #expect(metadata.saveCount == 1)
     }
 
+    @Test("an added profile can commit without changing the focused server")
+    func nonSelectingSavePreservesSelection() throws {
+        let first = profile(id: "first", label: "First")
+        let second = profile(id: "second", label: "Second")
+        let metadata = RecordingProfileMetadata(document: .init(profiles: [first], selectedProfileID: first.id))
+        let store = GatewayProfileStore(
+            metadata: metadata,
+            tokens: RecordingTokenStore(values: [first.id: "first-token"])
+        )
+
+        try store.save(second, token: "second-token", selecting: false)
+        #expect(store.profiles == [first, second])
+        #expect(store.selected == first)
+        #expect(store.token(for: second) == "second-token")
+    }
+
     @Test("selection persistence failure preserves the prior selected profile")
     func selectionFailurePreservesPriorProfile() throws {
         let first = profile(id: "first", label: "First")
