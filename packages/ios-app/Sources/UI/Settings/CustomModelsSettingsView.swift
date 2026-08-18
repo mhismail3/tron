@@ -25,33 +25,19 @@ struct CustomModelsSettingsView: View {
                         .font(TronTypography.bodySM)
                         .foregroundStyle(Color.tronTextPrimary)
                         .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.10)
                 }
 
-                TronSettingsGroup("Providers", detail: "Add OpenAI-compatible or provider-native endpoints. Authentication remains in the Mac credential store.", accent: .tronPurple) {
-                    if providers.isEmpty {
-                        TronSettingsRow(
-                            icon: "cpu",
-                            title: "No custom providers",
-                            subtitle: "Built-in providers are unchanged.",
-                            accent: .tronPurple
-                        )
-                    } else {
-                        VStack(spacing: 0) {
-                            ForEach($providers) { $provider in
-                                if provider.id != providers.first?.id { TronSettingsDivider(accent: .tronPurple) }
-                                customProviderEditor($provider)
-                            }
-                        }
-                    }
-                }
-                .disabled(advancedDocumentEdited)
+                providersSection
+                    .disabled(advancedDocumentEdited)
 
                 if advancedDocumentEdited {
                     Label("Advanced JSON has unsaved edits. Save it directly, or reload it into the guided editor.", systemImage: "curlybraces")
                         .font(TronTypography.bodySM)
                         .foregroundStyle(Color.tronTextPrimary)
                         .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.09)
                     Button("Load JSON into Guided Editor") {
                         localTransformationTask?.cancel()
@@ -62,15 +48,6 @@ struct CustomModelsSettingsView: View {
                     }
                         .buttonStyle(TronActionButtonStyle())
                 }
-
-                Button {
-                    providers.append(CustomModelProviderDraft())
-                    draftOwner.markEdited()
-                } label: {
-                    Label("Add Provider", systemImage: "plus")
-                }
-                .buttonStyle(TronActionButtonStyle())
-                .disabled(advancedDocumentEdited)
 
                 DisclosureGroup(isExpanded: $showingAdvanced) {
                     TextEditor(text: $document)
@@ -119,7 +96,9 @@ struct CustomModelsSettingsView: View {
         ) {
             Button("Cancel", role: .cancel) { providerToRemove = nil }
             Button("Remove Provider", role: .destructive) {
-                if let providerToRemove { providers.removeAll { $0.id == providerToRemove.id } }
+                if let providerToRemove {
+                    providers.removeAll { $0.id == providerToRemove.id }
+                }
                 providerToRemove = nil
                 draftOwner.markEdited()
                 rebuildDocument()
@@ -127,50 +106,156 @@ struct CustomModelsSettingsView: View {
         }
     }
 
-    private func customProviderEditor(_ provider: Binding<CustomModelProviderDraft>) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(provider.wrappedValue.identifier.isEmpty ? "New Provider" : provider.wrappedValue.identifier)
-                    .font(TronTypography.headline)
+    private var providersSection: some View {
+        VStack(alignment: .leading, spacing: TronSpacing.md) {
+            VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                Text("Providers")
+                    .font(TronTypography.sheetSectionHeader)
                     .foregroundStyle(Color.tronTextPrimary)
-                Spacer()
-                Button(role: .destructive) { providerToRemove = provider.wrappedValue } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(Color.tronError)
-                        .frame(width: 44, height: 44)
-                }
-                .accessibilityLabel("Remove provider")
-            }
-            TextField("Provider identifier", text: provider.identifier)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                .tronField(monospaced: true, compact: true)
-            TextField("Base URL", text: provider.baseURL)
-                .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                .tronField(monospaced: true, compact: true)
-            TronValueRow(icon: "network", title: "API format", accent: .tronPurple) {
-                TronInlineMenu(apiTitle(provider.wrappedValue.api), accent: .tronPurple) {
-                    Button("Inherited / per model") { provider.wrappedValue.api = "" }
-                    Button("OpenAI Chat Completions") { provider.wrappedValue.api = "openai-completions" }
-                    Button("OpenAI Responses") { provider.wrappedValue.api = "openai-responses" }
-                    Button("Anthropic Messages") { provider.wrappedValue.api = "anthropic-messages" }
-                    Button("Google Generative AI") { provider.wrappedValue.api = "google-generative-ai" }
-                }
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Model IDs · one per line")
+                    .accessibilityAddTraits(.isHeader)
+                Text("Choose a provider to edit its endpoint, format, and model IDs.")
                     .font(TronTypography.caption)
-                    .foregroundStyle(Color.tronTextSecondary)
-                TextField("model-id", text: provider.models, axis: .vertical)
-                    .lineLimit(2...6)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .tronField(monospaced: true, compact: true)
+                    .foregroundStyle(Color.tronTextMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+
+            if providers.isEmpty {
+                Label("No custom providers. Built-in providers are unchanged.", systemImage: "cpu")
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach($providers) { $provider in
+                        providerRow($provider)
+                    }
+                }
+            }
+
+            Button {
+                providers.append(CustomModelProviderDraft())
+                draftOwner.markEdited()
+            } label: {
+                Label("Add Provider", systemImage: "plus")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(TronRowButtonStyle(accent: .tronEmerald))
         }
-        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func providerRow(_ provider: Binding<CustomModelProviderDraft>) -> some View {
+        CustomModelProviderRow(
+            provider: provider.wrappedValue,
+            onRemove: { providerToRemove = provider.wrappedValue },
+            destination: { providerEditorSheet(provider) }
+        ) {
+            providerSummary(provider.wrappedValue)
+        }
+    }
+
+    private func providerSummary(_ provider: CustomModelProviderDraft) -> some View {
+        let modelCount = provider.models
+            .split(whereSeparator: \.isNewline)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .count
+        let modelLabel = modelCount == 0 ? "No model IDs" : "\(modelCount) model \(modelCount == 1 ? "ID" : "IDs")"
+
+        return HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "cpu")
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(provider.identifier.isEmpty ? "New Provider" : provider.identifier)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(provider.baseURL.isEmpty ? "Add an endpoint" : provider.baseURL)
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text("\(modelLabel) · \(apiTitle(provider.api))")
+                    .font(TronTypography.caption)
+                    .foregroundStyle(Color.tronTextMuted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 6)
+        }
+    }
+
+    private func providerEditorSheet(_ provider: Binding<CustomModelProviderDraft>) -> some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                    Text("Connection")
+                        .font(TronTypography.sheetSectionHeader)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("Identify the provider and choose the protocol used by its endpoint.")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    fieldLabel("Provider identifier")
+                    TextField("ollama", text: provider.identifier)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .tronField(monospaced: true, compact: true)
+                    fieldLabel("Base URL")
+                    TextField("https://example.com/v1", text: provider.baseURL)
+                        .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .tronField(monospaced: true, compact: true)
+                    TronValueRow(icon: "network", title: "API format", accent: .tronEmerald) {
+                        TronInlineMenu(apiTitle(provider.wrappedValue.api), accent: .tronEmerald) {
+                            Button("Inherited / per model") { provider.wrappedValue.api = "" }
+                            Button("OpenAI Chat Completions") { provider.wrappedValue.api = "openai-completions" }
+                            Button("OpenAI Responses") { provider.wrappedValue.api = "openai-responses" }
+                            Button("Anthropic Messages") { provider.wrappedValue.api = "anthropic-messages" }
+                            Button("Google Generative AI") { provider.wrappedValue.api = "google-generative-ai" }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
+                }
+
+                VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                    Text("Models")
+                        .font(TronTypography.sheetSectionHeader)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("Add one model ID per line. These names appear in model selection.")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("llama3:8b", text: provider.models, axis: .vertical)
+                        .lineLimit(2...8)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .tronField(monospaced: true, compact: true)
+                }
+            }
+            .padding(20)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle(provider.wrappedValue.identifier.isEmpty ? "New Provider" : provider.wrappedValue.identifier)
         .onChange(of: provider.wrappedValue) { _, _ in
             draftOwner.markEdited()
             rebuildDocument()
         }
+    }
+
+    private func fieldLabel(_ title: String) -> some View {
+        Text(title)
+            .font(TronTypography.caption)
+            .foregroundStyle(Color.tronTextSecondary)
     }
 
     private func apiTitle(_ api: String) -> String {
@@ -334,5 +419,70 @@ struct CustomModelsSettingsView: View {
                 advancedDocumentEdited = false
             }
         } catch { model.presentConfigurationActionError(error) }
+    }
+}
+
+private struct CustomModelProviderRow<Label: View, Destination: View>: View {
+    let provider: CustomModelProviderDraft
+    let onRemove: () -> Void
+    let destination: () -> Destination
+    let label: Label
+    @State private var isPresented = false
+
+    init(
+        provider: CustomModelProviderDraft,
+        onRemove: @escaping () -> Void,
+        @ViewBuilder destination: @escaping () -> Destination,
+        @ViewBuilder label: () -> Label
+    ) {
+        self.provider = provider
+        self.onRemove = onRemove
+        self.destination = destination
+        self.label = label()
+    }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            Button { isPresented = true } label: {
+                label
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Edit provider \(provider.identifier.isEmpty ? "New Provider" : provider.identifier)")
+
+            Menu {
+                Button("Remove Provider", systemImage: "trash", role: .destructive, action: onRemove)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .padding(.trailing, 8)
+            .accessibilityLabel("Provider actions")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
+        .sheet(isPresented: $isPresented) {
+            NavigationStack {
+                destination()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button { isPresented = false } label: {
+                                Image(systemName: "checkmark")
+                                    .font(TronTypography.buttonSM)
+                                    .foregroundStyle(Color.tronEmerald)
+                            }
+                            .accessibilityLabel("Done")
+                        }
+                    }
+            }
+            .tronTopBlur(.sheet)
+            .tronPresentation()
+            .presentationDragIndicator(.hidden)
+        }
     }
 }

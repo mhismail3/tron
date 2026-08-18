@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct SessionShellProfileRouteOwner {
     private var hasObservedProfile = false
@@ -31,7 +30,6 @@ struct SessionShellView: View {
     @State private var showNewSession = false
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
-    @State private var showImport = false
     @State private var search = ""
     @State private var showingSearch = false
     @State private var presentedSession: AppModel.SessionNavigationRoute?
@@ -52,14 +50,12 @@ struct SessionShellView: View {
                 .presentationDragIndicator(.hidden)
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView().presentationDragIndicator(.hidden)
+            SettingsView(onImported: { route in
+                showSettings = false
+                present(route)
+            })
+            .presentationDragIndicator(.hidden)
         }
-        .fileImporter(
-            isPresented: $showImport,
-            allowedContentTypes: [.json, .plainText, .data],
-            allowsMultipleSelection: false,
-            onCompletion: handleImport
-        )
         .confirmationDialog(
             "Delete \(sessionToDelete?.title ?? "this session")?",
             isPresented: deleteConfirmationPresented,
@@ -162,17 +158,13 @@ struct SessionShellView: View {
     @ToolbarContentBuilder
     private var dashboardToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            Menu {
-                Button("Import Session", systemImage: "square.and.arrow.down") { showImport = true }
-            } label: {
-                Image("TronLogoVector")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 28)
-                    .foregroundStyle(Color.tronEmerald)
-            }
-            .accessibilityLabel("Open Tron navigation")
+            Image("TronLogoVector")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(height: 28)
+                .foregroundStyle(Color.tronEmerald)
+                .accessibilityLabel("Tron")
         }
         ToolbarItem(placement: .principal) {
             Text("Tron")
@@ -192,29 +184,6 @@ struct SessionShellView: View {
             .accessibilityLabel(showingSearch ? "Close session search" : "Search sessions")
             Button("Settings", systemImage: "gearshape") { showSettings = true }
                 .tronToolbarAction(accent: .tronEmerald)
-        }
-    }
-
-    private func handleImport(_ result: Result<[URL], Error>) {
-        guard case .success(let urls) = result, let url = urls.first else { return }
-        let cwd = model.defaultWorkspace
-        guard let cwd else {
-            model.lastError = "Choose a workspace by creating a session before importing."
-            return
-        }
-        let navigationGeneration = navigationOwner.begin()
-        Task {
-            do {
-                let route = try await model.importSession(from: url, cwd: cwd)
-                guard navigationOwner.admit(navigationGeneration),
-                      model.ownsNavigationRoute(route) else { return }
-                present(route)
-            } catch is CancellationError {
-                _ = navigationOwner.admit(navigationGeneration)
-            } catch {
-                guard navigationOwner.admit(navigationGeneration) else { return }
-                model.lastError = error.localizedDescription
-            }
         }
     }
 

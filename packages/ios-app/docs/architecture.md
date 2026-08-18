@@ -416,14 +416,12 @@ command, query, diff, and readable result, while arbitrary extension tools may f
 trusted common string key and otherwise lead with their result. Bash commands wrap to the available width
 using word-preserving line breaks while outputs and other string metadata wrap; all previews bound pathological
 line count, total characters, and per-line length with explicit head/tail omission markers. Small numeric
-and boolean metadata remains unchanged. The final Technical details sub-sheet starts with compact selectable
-execution metadata, then exposes bounded constant-depth Request JSON and Result JSON summary rows in that order.
-Primary semantic content, faithful diff expansion, technical payload traversal, and navigation chrome remain
-separate presentation owners while preserving one established sheet hierarchy and detent behavior.
-Selecting one row opens the untouched payload through progressive structured-field traversal; structural path
-components own sheet identity, while arbitrary object keys use escaped bracket notation so punctuation cannot
-collide with nested paths. Full raw formatting requires that component's separate explicit disclosure and no
-second readable-output projection is introduced. Result JSON uses
+and boolean metadata remains unchanged. The final Technical details sub-sheet starts with larger, compact selectable
+execution metadata, then exposes bounded Request JSON and Result JSON containers in that order. Tapping either
+container opens the shared selectable, vertically scrollable raw JSON sheet directly; no intermediate structured
+traversal or duplicate readable-output projection is introduced. Primary semantic content, faithful diff expansion,
+technical payload evidence, and navigation chrome remain separate presentation owners while preserving one
+established sheet hierarchy and detent behavior. Result JSON uses
 the authoritative response first, otherwise the complete readable content string, then only a fallback distinct
 from the request; request-only projections cannot duplicate themselves as results. Shared nested
 structured field sheets remain available to unrelated arbitrary-data surfaces and resolve semantic paths
@@ -785,7 +783,9 @@ with the native top-right check action; top-left dismissal controls are reserved
 for navigation, not app-owned sheets. Settings containers and their nested font
 or model choices disclose as progressively stacked sub-sheets rather than
 horizontal navigation pushes; connected-provider logout lives in the provider
-row's compact action menu. The chat composer remains visually floating without an
+row's compact action menu while connection is a plain trailing affordance. Import
+is owned by one progressive Import sheet, including canonical session-file import
+and the bounded legacy migration path. The chat composer remains visually floating without an
 opaque footer, but structurally reserves the transcript's bottom safe area. Its UIKit
 text view is the sole first-responder owner; SwiftUI mirrors delegate focus only for
 presentation, so transcript relayout and programmatic tail-follow cannot dismiss a
@@ -935,15 +935,17 @@ model, thinking level, peer-presented Project Resources sheet, and final Rename 
 Session owns Agent Context, recent history/audit actions, terminal, Git evidence, and
 exports. Configuration row icons use the section's purple palette, while every Session row
 icon—including Git states, exports, sharing, and diagnostics—uses the section's blue palette.
-The compact top summary owns automatic-compaction status plus one reflowing
-context/cache-hit/read-write/input/output/cost statistics row, with every value kept to
-one visual line, while History owns the concise runtime
+The compact top summary owns automatic-compaction status beside a single-line context
+value, followed by the cache-hit/read-write/input/output/cost statistics row, with every
+value kept to one visual line, while History owns the concise runtime
 phase/message/tool summary. Its compact toolbar action invokes Pi's
 canonical compaction through Gateway and can leave one authoritative request queued
 behind an active turn. Project Resources presents resolved extensions, prompts, skills,
 context files, and tools as named rows over the canonical projection; each detail sheet
 foregrounds kind-specific purpose, invocation, availability, capabilities, schema/guidance,
-and source evidence instead of a generic field table. Extension tools and commands use
+and source evidence instead of a generic field table. Project Trust presents a high-signal
+state card and decision actions before deferring the complete trust record to raw JSON.
+Extension tools and commands use
 separate adaptive collections instead of comma-delimited prose, while resource descriptions
 keep compound words together for natural line wrapping. Arbitrary arrays derive labels from stable name/path/source fields instead of exposing
 positional “Item” labels. Reload is owned by that sheet and publishes visible progress; the canonical
@@ -1016,8 +1018,10 @@ Diagnostics parses the bounded
 Gateway log records into level-filtered rows and copyable details rather than
 showing raw JSON. Gateway/session/tree/tool/interaction timestamps share immutable ISO-8601
 format styles, while relative dashboard labels use one lock-serialized formatter instead of
-allocating Foundation formatters per visible row. Custom models have a guided provider/model editor while the
-complete JSON remains an explicit advanced path and is validated before mutation. One pure transformation owns
+allocating Foundation formatters per visible row. Custom models expose compact provider summary rows;
+tapping a provider opens a progressively loaded editor sheet with labeled connection and model sections,
+while the row keeps identity, endpoint, model-count, and format summaries visible. The complete JSON remains
+an explicit advanced path and is validated before mutation. One pure transformation owns
 lossless JSON↔guided conversion, preserves unknown/redacted fields, rejects ambiguous normalized identities, and
 runs parsing, traversal, rebuild, and formatting off MainActor before generation-checked view publication.
 System alerts, confirmation dialogs,

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { copyFile, mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -133,6 +134,8 @@ export class RuntimeSlot {
   private activityHeartbeat: NodeJS.Timeout | undefined;
   private readonly toolProgressTimers = new Map<string, NodeJS.Timeout>();
   private readonly toolProgressPublishedAt = new Map<string, number>();
+  /** Monotonic invocation starts keep duration independent of wall-clock changes. */
+  private readonly toolStartedAtMonotonicMs = new Map<string, number>();
   private activeOperationId: string | undefined;
   private activeExports = 0;
   private operation: SessionOperationState | undefined;
@@ -512,6 +515,7 @@ export class RuntimeSlot {
         }
         this.phase = "running";
         this.toolExecutions.clear();
+        this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
         this.activeOperationId ??= randomUUID();
         this.operation ??= { id: this.activeOperationId, kind: "prompt", startedAt: new Date().toISOString() };
@@ -541,6 +545,7 @@ export class RuntimeSlot {
         this.operation = undefined;
         this.retry = undefined;
         this.toolExecutions.clear();
+        this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
         this.stopActivityHeartbeat();
         this.clearToolProgressTimers();
@@ -624,6 +629,9 @@ export class RuntimeSlot {
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
         const startedAt = existing?.startedAt ?? now;
+        if (!this.toolStartedAtMonotonicMs.has(event.toolCallId)) {
+          this.toolStartedAtMonotonicMs.set(event.toolCallId, performance.now());
+        }
         const progressSequence = (existing?.progressSequence ?? 0) + 1;
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
@@ -683,6 +691,12 @@ export class RuntimeSlot {
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
         const startedAt = existing?.startedAt ?? now;
+        const durationMs = existing?.durationMs ?? this.measureToolDuration(
+          event.toolCallId,
+          startedAt,
+          now,
+          performance.now()
+        );
         const output = projectToolOutput(event.result);
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
@@ -703,7 +717,7 @@ export class RuntimeSlot {
           updatedAt: now,
           lastProgressAt: now,
           completedAt: now,
-          durationMs: Number.isFinite(Date.parse(startedAt)) ? Math.max(0, Date.parse(now) - Date.parse(startedAt)) : 0,
+          durationMs,
           progressSequence: (existing?.progressSequence ?? 0) + 1,
           ...(this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin
             ? { extensionOrigin: this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin }
@@ -711,6 +725,7 @@ export class RuntimeSlot {
         };
         this.toolExecutions.set(event.toolCallId, state);
         this.rememberToolMetadata(event.toolCallId, state);
+        this.toolStartedAtMonotonicMs.delete(event.toolCallId);
         this.publishToolProgress(state, true);
         this.scheduleSnapshot();
         break;
@@ -755,6 +770,23 @@ export class RuntimeSlot {
     }
   }
 
+  private measureToolDuration(
+    toolCallId: string,
+    startedAt: string,
+    completedAt: string,
+    completedMonotonicMs: number
+  ): number {
+    const startedMonotonicMs = this.toolStartedAtMonotonicMs.get(toolCallId);
+    if (startedMonotonicMs !== undefined) {
+      return Math.max(0, Math.round(completedMonotonicMs - startedMonotonicMs));
+    }
+    const startedWallClockMs = Date.parse(startedAt);
+    const completedWallClockMs = Date.parse(completedAt);
+    return Number.isFinite(startedWallClockMs) && Number.isFinite(completedWallClockMs)
+      ? Math.max(0, completedWallClockMs - startedWallClockMs)
+      : 0;
+  }
+
   private publishToolProgress(state: ToolExecutionState, immediate = false): void {
     const minimumIntervalMs = 200;
     const now = Date.now();
@@ -783,6 +815,7 @@ export class RuntimeSlot {
     for (const timer of this.toolProgressTimers.values()) clearTimeout(timer);
     this.toolProgressTimers.clear();
     this.toolProgressPublishedAt.clear();
+    this.toolStartedAtMonotonicMs.clear();
   }
 
   private startActivityHeartbeat(): void {

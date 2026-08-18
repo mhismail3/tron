@@ -11,13 +11,13 @@ struct ProvidersSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(spacing: 8) {
+            LazyVStack(spacing: 6) {
                 ForEach(model.providerCatalog(for: target)?.providers ?? []) { provider in
                     ProviderSetupRow(provider: provider, sessionID: sessionID)
                 }
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Providers")

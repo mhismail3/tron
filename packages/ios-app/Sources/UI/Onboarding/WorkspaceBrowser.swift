@@ -198,7 +198,7 @@ struct WorkspaceBrowser: View {
     private func browserGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
             Text(title.uppercased())
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .font(TronTypography.sheetSectionHeader)
                 .foregroundStyle(Color.tronTextMuted)
             content()
         }

@@ -77,13 +77,13 @@ struct PackagesSettingsView: View {
                     }
                 }
 
-                TronSettingsGroup("Install", detail: "Use an npm package, Git URL, or local path.", accent: .tronPurple) {
+                TronSettingsGroup("Install", detail: "Use an npm package, Git URL, or local path.", accent: .tronEmerald) {
                     VStack(spacing: 12) {
                         TextField("Package source", text: $source)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .tronField(monospaced: true, compact: true)
-                        TronToggleRow(icon: "folder.badge.gearshape", title: "Project scope", accent: .tronPurple, isOn: $local)
+                        TronToggleRow(icon: "folder.badge.gearshape", title: "Project scope", accent: .tronEmerald, isOn: $local)
                             .disabled(projectCWD == nil)
                         Button("Install Package") { install() }
                             .buttonStyle(TronActionButtonStyle(role: .primary))
@@ -114,6 +114,7 @@ struct PackagesSettingsView: View {
                     .font(TronTypography.bodySM)
                     .foregroundStyle(Color.tronTextPrimary)
                     .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.09)
             }
             .padding(.horizontal, 20)
@@ -161,7 +162,9 @@ struct PackagesSettingsView: View {
                     Button("Update", systemImage: "arrow.clockwise") { update(package) }
                     Button("Remove", systemImage: "trash", role: .destructive) { packageToRemove = package }
                 } label: {
-                    Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
+                    Image(systemName: "ellipsis")
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
             }
         }

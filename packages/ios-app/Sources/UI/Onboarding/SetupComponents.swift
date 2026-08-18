@@ -14,43 +14,42 @@ struct ProviderSetupRow: View {
             Image(systemName: provider.configured ? "checkmark.seal.fill" : "key")
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(provider.configured ? Color.tronEmerald : Color.tronTextSecondary)
-                .frame(width: 24, height: 24)
+                .frame(width: 22, height: 22)
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(provider.name)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(1)
                 Text(provider.configured ? (provider.authSource ?? "Configured") : "Not configured")
                     .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextPrimary)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .lineLimit(1)
             }
+            .layoutPriority(1)
             Spacer(minLength: 8)
             if provider.configured {
-                HStack(spacing: 8) {
-                    Label("Connected", systemImage: "checkmark.circle.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(Color.tronAccentText)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: 44)
-                        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.18)), in: Capsule())
+                Label("Connected", systemImage: "checkmark.circle.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(Color.tronEmerald)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
 
-                    Menu {
-                        Button("Log Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
-                            Task {
-                                do { try await model.logout(providerID: provider.id, target: providerTarget) }
-                                catch { model.lastError = error.localizedDescription }
-                            }
+                Menu {
+                    Button("Log Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                        Task {
+                            do { try await model.logout(providerID: provider.id, target: providerTarget) }
+                            catch { model.lastError = error.localizedDescription }
                         }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
-                            .foregroundStyle(Color.tronEmerald)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Circle())
-                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.14)).interactive(), in: .circle)
                     }
-                    .accessibilityLabel("\(provider.name) provider actions")
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                        .foregroundStyle(Color.tronEmerald)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
                 }
+                .accessibilityLabel("\(provider.name) provider actions")
             } else {
                 Menu {
                     ForEach(provider.authMethods, id: \.self) { method in
@@ -62,21 +61,19 @@ struct ProviderSetupRow: View {
                         }
                     }
                 } label: {
-                    Label("Connect", systemImage: "person.crop.circle.badge.plus")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                        .foregroundStyle(Color.tronAccentText)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 44)
-                        .contentShape(Capsule())
-                        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.16)).interactive(), in: Capsule())
+                    Text("Connect")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(Color.tronEmerald)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 .accessibilityLabel("Connect \(provider.name)")
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 58)
-        .tronGlassSurface(accent: .tronEmerald, cornerRadius: 14, tintOpacity: 0.11)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+        .tronGlassSurface(accent: .tronEmerald, cornerRadius: 12, tintOpacity: 0.08)
     }
 }
 

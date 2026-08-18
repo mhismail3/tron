@@ -160,7 +160,7 @@ struct ToolRunView: View {
                 }
             } else {
                 ToolRunChip(run: run) {
-                    guard let details = resolveDetails(run.tools.map(\.id), installationTag) else { return }
+                    guard let details = resolveDetails(detailToolIDs, installationTag) else { return }
                     resolvedGroup = details
                 }
             }
@@ -183,6 +183,10 @@ struct ToolRunView: View {
         }
     }
 
+    private var detailToolIDs: [String] {
+        run.reverseChronologicalTools.map(\.id)
+    }
+
     private func refreshResolvedDetails(for tag: ChatTranscriptProjectionTag) {
         if let detailRoute {
             guard let detail = resolveDetails([detailRoute.toolID], tag)?.first else {
@@ -194,7 +198,7 @@ struct ToolRunView: View {
             resolvedDetail = detail
         }
         if resolvedGroup != nil {
-            resolvedGroup = resolveDetails(run.tools.map(\.id), tag)
+            resolvedGroup = resolveDetails(detailToolIDs, tag)
         }
     }
 }
@@ -245,11 +249,15 @@ private struct ToolRunDetailSheet: View {
         return run.isRunning ? .warning : .accent
     }
 
+    private var orderedTools: [ChatToolPresentation] {
+        ChatToolInvocationOrdering.reverseChronological(tools)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 6) {
-                    ForEach(tools) { tool in
+                    ForEach(orderedTools) { tool in
                         ToolCard(data: tool)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -291,7 +299,7 @@ private struct ToolElapsedText: View {
 
     var body: some View {
         if tool.isRunning {
-            TimelineView(.periodic(from: ToolTiming.date(tool.startedAt) ?? .now, by: 0.5)) { context in
+            TimelineView(.animation(minimumInterval: 0.1)) { context in
                 elapsed(at: context.date)
             }
         } else {
@@ -317,7 +325,7 @@ private struct ToolRunElapsedText: View {
 
     var body: some View {
         if run.isRunning {
-            TimelineView(.periodic(from: .now, by: 0.5)) { context in elapsed(at: context.date) }
+            TimelineView(.animation(minimumInterval: 0.1)) { context in elapsed(at: context.date) }
         } else {
             elapsed(at: .now)
         }

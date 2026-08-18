@@ -201,7 +201,7 @@ struct TronStructuredJSONView: View {
         } else {
             VStack(alignment: .leading, spacing: TronSpacing.md) {
                 Text("FIELDS")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .font(TronTypography.sheetSectionHeader)
                     .foregroundStyle(Color.tronTextMuted)
                 TronGlassCard(accent: accent) {
                     LazyVStack(spacing: 0) {
@@ -264,6 +264,7 @@ struct TronStructuredJSONView: View {
 struct TronTechnicalJSONRow: View {
     let value: JSONValue
     var title = "Technical JSON"
+    var subtitle = "View full protocol representation"
     var sheetTitle = "Technical JSON"
     var accent: Color = .tronSlate
     @State private var isPresented = false
@@ -277,7 +278,7 @@ struct TronTechnicalJSONRow: View {
             TronSettingsRow(
                 icon: "curlybraces",
                 title: title,
-                subtitle: "View full protocol representation",
+                subtitle: subtitle,
                 accent: accent
             )
         }
@@ -356,7 +357,7 @@ private struct JSONFieldSheet: View {
                 VStack(alignment: .leading, spacing: TronSpacing.section) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("SELECTED FIELD")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                            .font(TronTypography.sheetSectionHeader)
                             .foregroundStyle(Color.tronTextMuted)
                         Text(selection.path)
                             .font(TronTypography.codeContent)

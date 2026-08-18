@@ -314,7 +314,6 @@ struct SessionContextSheet: View {
             "—"
         }
         let statistics = [
-            (contextValue, "Context"),
             (cacheValue, "Cache Hit"),
             ("\(snapshot.stats.tokens.cacheRead.formatted(.number.notation(.compactName))) / \(snapshot.stats.tokens.cacheWrite.formatted(.number.notation(.compactName)))", "Read / Write"),
             (snapshot.stats.tokens.input.formatted(.number.notation(.compactName)), "Input"),
@@ -350,12 +349,7 @@ struct SessionContextSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Label(
-                "Automatic Compaction: \(SessionCompactionControlPolicy.automaticStatus(snapshot.automaticCompactionEnabled))",
-                systemImage: "arrow.triangle.2.circlepath"
-            )
-            .font(TronTypography.caption)
-            .foregroundStyle(Color.tronTextSecondary)
+            contextAndCompactionRow(contextValue: contextValue, snapshot: snapshot)
 
             Divider().overlay(Color.tronEmerald.opacity(0.14))
 
@@ -377,6 +371,35 @@ struct SessionContextSheet: View {
         .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.14)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(usage.accessibilityLabel)
+    }
+
+    private func contextAndCompactionRow(contextValue: String, snapshot: SessionSnapshot) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(contextValue)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .regular))
+                .foregroundStyle(Color.tronTextSecondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .layoutPriority(1)
+                .accessibilityLabel("Context usage: \(contextValue)")
+
+            Spacer(minLength: 8)
+
+            Label(
+                "Automatic Compaction: \(SessionCompactionControlPolicy.automaticStatus(snapshot.automaticCompactionEnabled))",
+                systemImage: "arrow.triangle.2.circlepath"
+            )
+            .font(TronTypography.caption)
+            .foregroundStyle(Color.tronTextSecondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .truncationMode(.tail)
+            .multilineTextAlignment(.trailing)
+            .layoutPriority(0)
+            .accessibilityLabel("Automatic compaction: \(SessionCompactionControlPolicy.automaticStatus(snapshot.automaticCompactionEnabled))")
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .accessibilityElement(children: .contain)
     }
 
     private func metric(_ value: String, _ label: String) -> some View {
@@ -689,6 +712,7 @@ private struct AgentContextSheet: View {
                         .font(TronTypography.bodySM)
                         .foregroundStyle(Color.tronTextPrimary)
                         .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.08)
 
                     VStack(alignment: .leading, spacing: 10) {

@@ -341,9 +341,9 @@ Live tool arguments,
 structured current results, and readable output are independently projected to
 bounded previews; current output updates the existing chip/detail view in place
 rather than creating transcript rows. Exact timing is retained for the current
-owning runtime and projected onto settled results; older Pi JSONL entries, which do
-not persist execution timing, use the canonical call-to-result interval as an
-observed fallback. Completed results leave the live overlay as soon as their
+owning runtime using a monotonic start-to-end measurement and projected onto settled
+results; older Pi JSONL entries, which do not persist execution timing, use the
+canonical call-to-result interval as an observed fallback. Completed results leave the live overlay as soon as their
 canonical transcript entry exists. A final snapshot fitter compacts duplicate live
 detail before canonical rows. Active snapshots preserve their baseline page so a
 tool burst cannot reveal a new pagination boundary in an already-open chat; resumed

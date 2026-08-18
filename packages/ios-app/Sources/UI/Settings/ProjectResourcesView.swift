@@ -177,6 +177,7 @@ struct ProjectResourcesView: View {
                             .font(TronTypography.bodySM)
                             .foregroundStyle(Color.tronTextPrimary)
                             .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
                         ForEach(ProjectResourceKind.allCases) { kind in
                             resourceGroup(kind, values: values(for: kind, root: root))
@@ -410,7 +411,7 @@ private struct ProjectResourceDetailSheet: View {
                     if let path = presentation.path {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("SOURCE FILE")
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                                .font(TronTypography.sheetSectionHeader)
                                 .foregroundStyle(Color.tronTextMuted)
                             Label(path, systemImage: "folder")
                                 .font(TronTypography.codeContent)

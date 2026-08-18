@@ -173,13 +173,6 @@ struct ToolDetailSheet: View {
                         .padding(12)
                         .tronGlassSurface(accent: accent, tintOpacity: 0.07)
                 }
-                if preview.isBounded {
-                    boundedPreviewNote(
-                        tool.outputTruncated
-                            ? "Complete available result data is in Technical details; Gateway marked the output truncated."
-                            : "Complete result data is available in Technical details."
-                    )
-                }
             }
         } else if let structured = presentation.structuredResult, presentation.diff == nil {
             VStack(alignment: .leading, spacing: 7) {
@@ -214,7 +207,7 @@ struct ToolDetailSheet: View {
 
     private func sectionLabel(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+            .font(TronTypography.sheetSectionHeader)
             .foregroundStyle(Color.tronTextMuted)
     }
 

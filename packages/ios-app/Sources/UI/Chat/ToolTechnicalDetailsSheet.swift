@@ -4,7 +4,6 @@ struct ToolTechnicalDetailsSheet: View {
     let tool: ChatToolPresentation
     let presentation: ToolDetailPresentation
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedPayload: ToolTechnicalPayload?
 
     private var accent: Color { tool.error ? .tronError : .tronSlate }
 
@@ -37,9 +36,6 @@ struct ToolTechnicalDetailsSheet: View {
                     .accessibilityLabel("Done")
                 }
             }
-        }
-        .sheet(item: $selectedPayload) { payload in
-            ToolTechnicalPayloadSheet(payload: payload, accent: accent)
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
@@ -107,50 +103,43 @@ struct ToolTechnicalDetailsSheet: View {
     private func compactMetadataRow(_ item: ToolTechnicalMetadataItem) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: item.icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
                 .foregroundStyle(accent)
                 .frame(width: 16)
             Text(item.title)
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(Color.tronTextPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             Text(item.value)
-                .font(TronTypography.code(size: TronTypography.sizeBody2))
+                .font(TronTypography.code(size: TronTypography.sizeBody3))
                 .foregroundStyle(Color.tronTextSecondary)
                 .multilineTextAlignment(.trailing)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.vertical, 9)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(item.title), \(item.value)")
     }
 
     private func payload(_ title: String, value: JSONValue) -> some View {
-        let summary = ToolTechnicalPayloadSummary.summary(for: value)
-        return VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             sectionLabel("\(title) JSON")
-            Button {
-                selectedPayload = ToolTechnicalPayload(title: title, value: value)
-            } label: {
-                TronSettingsRow(
-                    icon: "curlybraces",
-                    title: "Inspect \(title) JSON",
-                    subtitle: summary,
-                    accent: accent
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Inspect \(title) JSON, \(summary)")
-            .tronGlassSurface(accent: accent, tintOpacity: 0.08, interactive: true)
+            TronTechnicalJSONRow(
+                value: value,
+                title: "Inspect \(title) JSON",
+                subtitle: ToolTechnicalPayloadSummary.summary(for: value),
+                sheetTitle: "\(title) JSON",
+                accent: accent
+            )
         }
     }
 
     private func sectionLabel(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+            .font(TronTypography.sheetSectionHeader)
             .foregroundStyle(Color.tronTextMuted)
     }
 }
@@ -164,52 +153,6 @@ enum ToolTechnicalPayloadSummary {
             return "\(array.count) top-level item\(array.count == 1 ? "" : "s")"
         }
         return "Scalar protocol value"
-    }
-}
-
-private struct ToolTechnicalPayload: Identifiable {
-    let title: String
-    let value: JSONValue
-
-    var id: String { title }
-}
-
-private struct ToolTechnicalPayloadSheet: View {
-    let payload: ToolTechnicalPayload
-    let accent: Color
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                TronStructuredJSONView(
-                    value: payload.value,
-                    title: "\(payload.title) JSON",
-                    accent: accent
-                )
-                .padding(18)
-            }
-            .defaultScrollAnchor(.top)
-            .tronScrollEdgeChrome()
-            .tronToolDetailNavigationChrome()
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "\(payload.title) JSON", accent: accent)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark")
-                            .font(TronTypography.buttonSM)
-                            .foregroundStyle(Color.tronEmerald)
-                    }
-                    .accessibilityLabel("Done")
-                }
-            }
-        }
-        .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
-        .tronPresentation()
     }
 }
 

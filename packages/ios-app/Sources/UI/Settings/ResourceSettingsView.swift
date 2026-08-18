@@ -124,6 +124,7 @@ struct ResourceSettingsView: View {
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronTextPrimary)
                 .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
 
                 TronSettingsGroup("Additional Locations", detail: "Optional paths outside automatic discovery.") {
@@ -218,6 +219,7 @@ struct ResourceSettingsView: View {
                         .font(TronTypography.bodySM)
                         .foregroundStyle(Color.tronTextPrimary)
                         .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
                     if value == .proxy {
                         SecureField(value.placeholder, text: binding(for: value))

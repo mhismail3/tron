@@ -6,6 +6,7 @@ struct SettingsView: View {
     let scope: Scope
     let projectSessionID: String?
     let projectCWD: String?
+    let onImported: (AppModel.SessionNavigationRoute) -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -13,11 +14,13 @@ struct SettingsView: View {
     init(
         scope: Scope = .dashboard,
         projectSessionID: String? = nil,
-        projectCWD: String? = nil
+        projectCWD: String? = nil,
+        onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }
     ) {
         self.scope = scope
         self.projectSessionID = scope == .project ? projectSessionID : nil
         self.projectCWD = scope == .project ? projectCWD : nil
+        self.onImported = onImported
     }
 
     var body: some View {
@@ -70,8 +73,12 @@ struct SettingsView: View {
                     }
                     TronSettingsGroup("Gateway") {
                         VStack(spacing: 0) {
-                            settingsLink("Import Legacy Sessions", icon: "tray.and.arrow.down") { LegacyImportSettingsView() }
-                            TronSettingsDivider()
+                            if scope == .dashboard {
+                                settingsLink("Import", icon: "tray.and.arrow.down") {
+                                    ImportSettingsView(onImported: onImported)
+                                }
+                                TronSettingsDivider()
+                            }
                             settingsLink("Diagnostics", icon: "stethoscope") { GatewayDiagnosticsView() }
                         }
                     }
@@ -110,7 +117,7 @@ struct SettingsView: View {
     private func settingsLink<Destination: View>(
         _ title: String,
         icon: String,
-        @ViewBuilder destination: () -> Destination
+        @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
         TronProgressiveSheetLink(accessibilityLabel: title, destination: destination) {
             TronSettingsRow(icon: icon, title: title)
@@ -121,17 +128,19 @@ struct SettingsView: View {
 
 struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
     let accessibilityLabel: String
-    let destination: Destination
+    /// Keep destination construction inside the presented sheet so large
+    /// settings payloads are not built while the parent sheet is scrolling.
+    let destination: () -> Destination
     let label: Label
     @State private var isPresented = false
 
     init(
         accessibilityLabel: String,
-        @ViewBuilder destination: () -> Destination,
+        @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder label: () -> Label
     ) {
         self.accessibilityLabel = accessibilityLabel
-        self.destination = destination()
+        self.destination = destination
         self.label = label()
     }
 
@@ -141,7 +150,7 @@ struct TronProgressiveSheetLink<Label: View, Destination: View>: View {
             .accessibilityLabel(accessibilityLabel)
             .sheet(isPresented: $isPresented) {
                 NavigationStack {
-                    destination
+                    destination()
                         .toolbar {
                             ToolbarItem(placement: .confirmationAction) {
                                 Button { isPresented = false } label: {

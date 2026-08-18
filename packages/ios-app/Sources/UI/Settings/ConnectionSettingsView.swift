@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ConnectionsSettingsView: View {
     @Environment(AppModel.self) private var model
@@ -107,17 +108,34 @@ struct ConnectionsSettingsView: View {
     }
 }
 
-struct LegacyImportSettingsView: View {
+struct ImportSettingsView: View {
     @Environment(AppModel.self) private var model
+    let onImported: (AppModel.SessionNavigationRoute) -> Void
+    @State private var showSessionImporter = false
     @State private var port = 9849
     @State private var importing = false
 
+    init(onImported: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in }) {
+        self.onImported = onImported
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 18) {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                TronSettingsGroup("Session file", detail: "Open a canonical Tron session export in a new session.") {
+                    Button { showSessionImporter = true } label: {
+                        TronSettingsRow(
+                            icon: "square.and.arrow.down",
+                            title: "Import Session",
+                            subtitle: "JSON, JSONL, or plain-text session export"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 TronSettingsGroup(
-                    "Read-only Migration",
-                    detail: "Legacy databases and credentials remain read-only during migration.",
+                    "Legacy migration",
+                    detail: "Optional import from the retired Tron server.",
                     accent: .tronAmber
                 ) {
                     VStack(spacing: 0) {
@@ -132,30 +150,58 @@ struct LegacyImportSettingsView: View {
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 100)
                         }
+                        TronSettingsDivider(accent: .tronAmber)
+                        Button(importing ? "Importing…" : "Import Legacy Sessions") {
+                            importing = true
+                            Task {
+                                defer { importing = false }
+                                do { try await model.importLegacySessions(port: port) }
+                                catch { model.lastError = error.localizedDescription }
+                            }
+                        }
+                        .buttonStyle(TronActionButtonStyle(role: .primary))
+                        .disabled(importing || !model.legacyImportAvailable || !(1...65_535).contains(port))
                     }
                 }
+
                 Text(model.legacyImportAvailable
-                     ? "Start the retired Tron server on this Mac at the port above before importing. Existing imports are skipped safely."
+                     ? "Start the retired Tron server on this Mac at the port above before using legacy migration. Existing imports are skipped safely."
                      : "No secure legacy Tron credential was found on this Mac.")
                     .font(TronTypography.bodySM)
                     .foregroundStyle(Color.tronTextPrimary)
                     .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .tronGlassSurface(accent: .tronSlate, tintOpacity: 0.08)
-                Button(importing ? "Importing…" : "Import Sessions") {
-                    importing = true
-                    Task {
-                        defer { importing = false }
-                        do { try await model.importLegacySessions(port: port) }
-                        catch { model.lastError = error.localizedDescription }
-                    }
-                }
-                .buttonStyle(TronActionButtonStyle(role: .primary))
-                .disabled(importing || !model.legacyImportAvailable || !(1...65_535).contains(port))
             }
             .padding(20)
         }
         .tronScrollEdgeChrome()
-        .tronNavigationTitle("Legacy Import")
+        .tronNavigationTitle("Import")
+        .fileImporter(
+            isPresented: $showSessionImporter,
+            allowedContentTypes: [.json, .plainText, .data],
+            allowsMultipleSelection: false,
+            onCompletion: handleSessionImport
+        )
         .task { await model.inspectLegacyImport() }
+    }
+
+    private func handleSessionImport(_ result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        guard let cwd = model.defaultWorkspace else {
+            model.lastError = "Choose a workspace by creating a session before importing."
+            return
+        }
+        Task {
+            do {
+                let route = try await model.importSession(from: url, cwd: cwd)
+                guard model.ownsNavigationRoute(route) else { return }
+                onImported(route)
+            } catch is CancellationError {
+                return
+            } catch {
+                model.lastError = error.localizedDescription
+            }
+        }
     }
 }

@@ -37,6 +37,8 @@ enum TronTypography {
     static var subheadline: Font { sans(size: sizeBody) }
     static var body: Font { sans(size: sizeBody) }
     static var bodySM: Font { sans(size: sizeBodySM) }
+    /// Shared section-label treatment used by every sheet and settings group.
+    static var sheetSectionHeader: Font { sans(size: sizeBodySM, weight: .semibold) }
     static var caption: Font { sans(size: sizeCaption) }
     static var caption2: Font { sans(size: sizeSM) }
     static var input: Font { sans(size: sizeBodyLG) }
@@ -589,7 +591,7 @@ struct TronSettingsGroup<Content: View>: View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
             VStack(alignment: .leading, spacing: TronSpacing.xs) {
                 Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .bold))
+                    .font(TronTypography.sheetSectionHeader)
                     .foregroundStyle(Color.tronTextPrimary)
                     .accessibilityAddTraits(.isHeader)
                 if let detail {
@@ -601,6 +603,7 @@ struct TronSettingsGroup<Content: View>: View {
             }
             TronGlassCard(accent: accent) { content }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -65,13 +65,16 @@ admits and reduces mounted-session topics:
   consume the newest immutable call presentation, showing status, the bounded readable
   live-output tail, explicit output-truncation state only when the runtime flag or
   structured truncation contract says `truncated: true`, and the age of the most recent
-  runtime update without automatic scrolling. Known built-ins derive only a semantic
-  primary summary from exact request/result keys; compact protocol identifiers, timing,
-  and progress remain first in Technical details, followed directly by complete Request JSON
-  and Result JSON in that order. Result JSON prefers the response, then content-only output,
-  then only a fallback distinct from Request. Exact current-runtime durations are used
-  when available; older canonical history derives only an observed call-to-result
-  interval because Pi JSONL does not persist tool execution timing;
+  runtime update without automatic scrolling. Multi-tool run chips show accumulated time as
+  the sum of their invocation durations. The detail rows are always reverse chronological by
+  invocation timestamp, with canonical tool order as the
+  single deterministic fallback when timestamp metadata is incomplete. Known built-ins
+  derive only a semantic primary summary from exact request/result keys; compact protocol
+  identifiers, timing, and progress remain first in Technical details, followed directly by
+  complete Request JSON and Result JSON in that order. Result JSON prefers the response, then
+  content-only output, then only a fallback distinct from Request. Exact current-runtime
+  start-to-end intervals are preferred when available; older canonical history derives only
+  an observed call-to-result interval because Pi JSONL does not persist tool execution timing;
 - structure/context/resource invalidations reload an already-presented History,
   Manage Session, Agent Context, or Project Resources surface from the runtime. Context,
   tree, and resource reads each carry a subscription-scoped request generation, so an older

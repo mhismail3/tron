@@ -549,10 +549,10 @@ mounted while its fields settle from the newest matching call ID. Exercise one p
 primary preview wraps, explicitly marks omissions, and leaves the complete projected value in the final
 Technical details sheet. With VoiceOver enabled, verify pathological path/glob metadata speaks only the concise
 preview plus the Technical details disclosure. Verify compact selectable execution metadata remains first and
-records bounded-command completeness, followed by bounded Request JSON then Result JSON summary rows. Open each
-row and verify progressive structured fields preserve the complete response-first, content-only string,
-distinct-fallback, request-only, and missing-result cases without a readable-output duplicate or third fallback
-section; raw formatting must remain behind the structured view's explicit disclosure.
+records bounded-command completeness, followed by Request JSON then Result JSON containers. Open each
+container and verify it immediately presents selectable, vertically scrollable raw JSON for the complete
+response-first, content-only string, distinct-fallback, request-only, and missing-result cases without a
+readable-output duplicate or third fallback section.
 Verify live updates and true-only truncation metadata without moving the primary sheet's reading position. With
 a nonempty focused composer, open the native attachment menu, verify the keyboard remains visible, verify its
 option symbols are emerald while text retains native system styling, and activate camera, photos, and files on

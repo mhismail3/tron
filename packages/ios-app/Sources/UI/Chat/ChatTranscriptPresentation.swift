@@ -625,11 +625,17 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
 
     func elapsedMilliseconds(at date: Date = .now) -> Int? {
-        if !isRunning, let durationMs { return max(0, durationMs) }
-        guard let start = ToolTiming.date(startedAt) else { return durationMs.map { max(0, $0) } }
-        guard isRunning || ToolTiming.date(completedAt) != nil else { return durationMs }
-        let end = isRunning ? date : ToolTiming.date(completedAt)!
-        return max(0, Int((end.timeIntervalSince(start) * 1_000).rounded()))
+        guard let start = ToolTiming.date(startedAt) else {
+            return durationMs.map { max(0, $0) }
+        }
+        if isRunning {
+            return ToolTiming.milliseconds(from: start, to: date)
+        }
+        return ToolTiming.resolvedDuration(
+            startedAt: startedAt,
+            completedAt: completedAt,
+            fallback: durationMs
+        )
     }
 }
 
@@ -739,11 +745,17 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
 
     func elapsedMilliseconds(at date: Date = .now) -> Int? {
-        if !isRunning, let durationMs { return max(0, durationMs) }
-        guard let start = ToolTiming.date(startedAt) else { return durationMs.map { max(0, $0) } }
-        guard isRunning || ToolTiming.date(completedAt) != nil else { return durationMs }
-        let end = isRunning ? date : ToolTiming.date(completedAt)!
-        return max(0, Int((end.timeIntervalSince(start) * 1_000).rounded()))
+        guard let start = ToolTiming.date(startedAt) else {
+            return durationMs.map { max(0, $0) }
+        }
+        if isRunning {
+            return ToolTiming.milliseconds(from: start, to: date)
+        }
+        return ToolTiming.resolvedDuration(
+            startedAt: startedAt,
+            completedAt: completedAt,
+            fallback: durationMs
+        )
     }
 
 }
@@ -766,7 +778,34 @@ enum ToolTiming {
 
     static func intervalMilliseconds(start: String?, end: String?) -> Int? {
         guard let start = date(start), let end = date(end) else { return nil }
-        return max(0, Int((end.timeIntervalSince(start) * 1_000).rounded()))
+        return milliseconds(from: start, to: end)
+    }
+
+    static func milliseconds(from start: Date, to end: Date) -> Int {
+        let interval = end.timeIntervalSince(start)
+        guard interval.isFinite else { return 0 }
+        let milliseconds = interval * 1_000
+        guard milliseconds.isFinite else { return interval.sign == .minus ? 0 : Int.max }
+        let rounded = milliseconds.rounded()
+        guard rounded <= Double(Int.max) else { return Int.max }
+        guard rounded >= Double(Int.min) else { return 0 }
+        return max(0, Int(rounded))
+    }
+
+    /// Prefer the observed start-to-end interval when both runtime timestamps
+    /// exist. A runtime duration remains a fallback and protects against coarse
+    /// or malformed timestamp pairs without allowing a tiny duration to erase a
+    /// longer observed invocation.
+    static func resolvedDuration(
+        startedAt: String?,
+        completedAt: String?,
+        fallback: Int?
+    ) -> Int? {
+        let fallback = fallback.map { max(0, $0) }
+        guard let interval = intervalMilliseconds(start: startedAt, end: completedAt) else {
+            return fallback
+        }
+        return max(interval, fallback ?? 0)
     }
 
     static func format(milliseconds: Int) -> String {
@@ -779,9 +818,10 @@ enum ToolTiming {
     }
 
     static func observedDuration(callTimestamp: String, result: TranscriptItem) -> Int? {
-        result.durationMs ?? intervalMilliseconds(
-            start: result.startedAt ?? callTimestamp,
-            end: result.completedAt ?? result.timestamp
+        resolvedDuration(
+            startedAt: result.startedAt ?? callTimestamp,
+            completedAt: result.completedAt ?? result.timestamp,
+            fallback: result.durationMs
         )
     }
 }
@@ -933,6 +973,46 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
     }
 }
 
+enum ChatToolInvocationOrdering {
+    /// Detail surfaces intentionally reverse the canonical invocation order:
+    /// the newest tool is always the first row. If every row has usable
+    /// invocation metadata, timestamps determine the order. Otherwise the
+    /// canonical array order is used as one consistent fallback; mixing those
+    /// policies pair-by-pair would produce an unstable, non-transitive sort.
+    static func reverseChronological(_ tools: [ChatToolDescriptor]) -> [ChatToolDescriptor] {
+        reverseChronological(tools, descriptor: { $0 })
+    }
+
+    static func reverseChronological(_ tools: [ChatToolPresentation]) -> [ChatToolPresentation] {
+        reverseChronological(tools, descriptor: \.descriptor)
+    }
+
+    private static func reverseChronological<Element>(
+        _ tools: [Element],
+        descriptor: (Element) -> ChatToolDescriptor
+    ) -> [Element] {
+        let indexed = tools.enumerated()
+        let dates = indexed.map { invocationDate(for: descriptor($0.element)) }
+        let allHaveDates = dates.allSatisfy { $0 != nil }
+
+        return indexed.sorted { left, right in
+            if allHaveDates,
+               let leftDate = dates[left.offset],
+               let rightDate = dates[right.offset],
+               leftDate != rightDate {
+                return leftDate > rightDate
+            }
+            return left.offset > right.offset
+        }.map(\.element)
+    }
+
+    private static func invocationDate(for tool: ChatToolDescriptor) -> Date? {
+        ToolTiming.date(tool.startedAt)
+            ?? ToolTiming.date(tool.completedAt)
+            ?? ToolTiming.date(tool.lastProgressAt)
+    }
+}
+
 struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     let tools: [ChatToolDescriptor]
     let anchorID: String
@@ -949,6 +1029,9 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     }
 
     var id: String { "tool-run-" + anchorID }
+    var reverseChronologicalTools: [ChatToolDescriptor] {
+        ChatToolInvocationOrdering.reverseChronological(tools)
+    }
     var isExtensionActivity: Bool { !tools.isEmpty && tools.allSatisfy { $0.extensionOrigin != nil } }
     var isRunning: Bool { tools.contains(where: \.isRunning) }
     var failureCount: Int { tools.filter(\.error).count }
@@ -960,9 +1043,15 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
         if failureCount > 0 { return "\(failureCount) failed" }
         return isRunning ? "in progress" : nil
     }
+    /// Accumulated tool time is the sum of each invocation, rather than the
+    /// wall-clock span of the run. This remains correct when tools overlap and
+    /// keeps the Used tools detail surface consistent with its individual rows.
     func elapsedMilliseconds(at date: Date = .now) -> Int? {
         let values = tools.compactMap { $0.elapsedMilliseconds(at: date) }
-        return values.max()
+        guard !values.isEmpty else { return nil }
+        return values.reduce(into: 0) { total, value in
+            total = total > Int.max - value ? Int.max : total + value
+        }
     }
 }
 

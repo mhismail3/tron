@@ -762,6 +762,24 @@ struct ChatTranscriptPresentationTests {
         #expect(ordered.id == "tool-run-opaque-z-first")
     }
 
+    @Test("tool detail rows are reverse chronological with stable source fallback")
+    func reverseChronologicalToolDetails() {
+        let run = ChatToolRunPresentation(tools: [
+            toolPresentation("old", startedAt: "2026-01-01T00:00:01Z").descriptor,
+            toolPresentation("new", startedAt: "2026-01-01T00:00:03Z").descriptor,
+            toolPresentation("latest-without-timestamp").descriptor,
+            toolPresentation("middle", startedAt: "2026-01-01T00:00:02Z").descriptor,
+        ])
+
+        #expect(run.reverseChronologicalTools.map(\.id) == [
+            "middle", "latest-without-timestamp", "new", "old",
+        ])
+        #expect(ChatToolInvocationOrdering.reverseChronological([
+            toolPresentation("old", startedAt: "2026-01-01T00:00:01Z"),
+            toolPresentation("new", startedAt: "2026-01-01T00:00:03Z"),
+        ]).map(\.id) == ["new", "old"])
+    }
+
     @Test("compaction token counts use compact K shorthand")
     func compactCompactionTokenCounts() {
         #expect(ChatTokenCountPresentation.beforeCompaction(0) == "0 tokens before compaction")
@@ -1307,6 +1325,11 @@ struct ChatTranscriptPresentationTests {
         #expect(tool.outputTruncated)
         #expect(tool.progressSequence == 14)
         #expect(tool.elapsedMilliseconds(at: try #require(ToolTiming.date("2026-01-01T00:00:13Z"))) == 12_000)
+        #expect(ToolTiming.format(milliseconds: 0) == "0ms")
+        #expect(ToolTiming.format(milliseconds: 99) == "99ms")
+        #expect(ToolTiming.format(milliseconds: 100) == "100ms")
+        #expect(ToolTiming.format(milliseconds: 999) == "999ms")
+        #expect(ToolTiming.format(milliseconds: 1_000) == "1.0s")
         #expect(ToolTiming.format(milliseconds: 478_000) == "7m 58s")
     }
 
@@ -1337,6 +1360,27 @@ struct ChatTranscriptPresentationTests {
         }
         #expect(tool.durationMs == 2_000)
         #expect(tool.elapsedMilliseconds() == 2_000)
+    }
+
+    @Test("completed timing prefers the observed interval and tool runs accumulate durations")
+    func completedAndAccumulatedTiming() {
+        let first = ChatToolPresentation(
+            id: "first", title: "edit", subtitle: "Completed", request: nil, response: nil,
+            content: "", fallbackContent: nil, error: false,
+            startedAt: "2026-01-01T00:00:01Z", completedAt: "2026-01-01T00:00:03Z",
+            durationMs: 25, lastProgressAt: nil, progressSequence: nil
+        )
+        let second = ChatToolPresentation(
+            id: "second", title: "write", subtitle: "Completed", request: nil, response: nil,
+            content: "", fallbackContent: nil, error: false,
+            startedAt: "2026-01-01T00:00:04Z", completedAt: "2026-01-01T00:00:07Z",
+            durationMs: 40, lastProgressAt: nil, progressSequence: nil
+        )
+        let run = ChatToolRunPresentation(tools: [first.descriptor, second.descriptor])
+
+        #expect(first.elapsedMilliseconds() == 2_000)
+        #expect(second.elapsedMilliseconds() == 3_000)
+        #expect(run.elapsedMilliseconds() == 5_000)
     }
 
     @Test("conversation content interrupts tool grouping")
@@ -1476,7 +1520,7 @@ struct ChatTranscriptPresentationTests {
         ])
     }
 
-    private func toolPresentation(_ id: String) -> ChatToolPresentation {
+    private func toolPresentation(_ id: String, startedAt: String? = nil) -> ChatToolPresentation {
         ChatToolPresentation(
             id: id,
             title: "read",
@@ -1486,7 +1530,7 @@ struct ChatTranscriptPresentationTests {
             content: "",
             fallbackContent: nil,
             error: false,
-            startedAt: nil,
+            startedAt: startedAt,
             completedAt: nil,
             durationMs: nil,
             lastProgressAt: nil,
