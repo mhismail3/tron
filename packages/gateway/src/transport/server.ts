@@ -194,6 +194,8 @@ export class GatewayServer {
       host: string;
       port: number;
       maxFrameBytes: number;
+      maximumConnections?: number;
+      maximumConnectionsPerIdentity?: number;
       maximumSubscriptionsPerConnection?: number;
       synchronizationTimeoutMs?: number;
       devices: DeviceStore;
@@ -384,8 +386,17 @@ export class GatewayServer {
         socket.destroy();
         return;
       }
+      const identity = authenticated.kind === "local" ? "local-wrapper" : authenticated.device.id;
+      const maximumConnections = this.options.maximumConnections ?? 32;
+      const maximumPerIdentity = this.options.maximumConnectionsPerIdentity ?? 4;
+      const identityConnections = [...this.clients.values()].filter((client) => client.identity === identity).length;
+      if (this.clients.size >= maximumConnections || identityConnections >= maximumPerIdentity) {
+        socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
       this.sockets.handleUpgrade(request, socket, head, (webSocket) => {
-        this.admit(webSocket, authenticated.kind === "local" ? "local-wrapper" : authenticated.device.id, authenticated.kind === "local");
+        this.admit(webSocket, identity, authenticated.kind === "local");
       });
     } catch {
       socket.destroy();
