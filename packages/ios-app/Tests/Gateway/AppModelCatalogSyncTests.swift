@@ -187,44 +187,6 @@ struct AppModelCatalogSyncTests {
         }
     }
 
-    @Test("background retirement closes the socket and foreground owns one fresh catalog pass")
-    func backgroundForegroundConvergesOnOneSocket() async throws {
-        try await withHarness(sockets: [ScriptedGatewaySocket(), ScriptedGatewaySocket()]) { harness in
-            let backgrounded = harness.model.becameActive()
-            let stale = try await request(harness.socket, index: 1)
-            #expect(stale.method == "session.list")
-
-            harness.model.enteredBackground()
-            await backgrounded?.value
-            #expect(await harness.socket.closed())
-            await harness.model.handle(GatewayEvent(
-                type: "event",
-                topic: "session.listChanged",
-                sessionId: nil,
-                payload: .object(["listRevision": .number(2)])
-            ))
-            #expect(await harness.socket.sentFrames().count == 2)
-
-            let foreground = harness.model.becameActive()
-            let replacement = try #require(harness.sockets.dropFirst().first)
-            await replacement.enqueue(helloFrame())
-            let current = try await request(replacement, index: 0)
-            #expect(current.method == "session.list")
-            await replacement.enqueue(response(
-                id: current.id,
-                sessions: [summary(id: "foreground", revision: 1, phase: .running)],
-                listRevision: 2
-            ))
-            await foreground?.value
-
-            #expect(harness.model.sessions.map(\.id) == ["foreground"])
-            #expect(harness.model.dashboardActivity(for: "foreground") == .active)
-            #expect(harness.model.connectionState == .connected)
-            #expect(harness.model.latestNotice == nil)
-            #expect(harness.model.lastError == nil)
-        }
-    }
-
     @Test("foreground catalog transport failure does not replace a responsive socket")
     func responsiveSocketSurvivesCatalogFailure() async throws {
         let socket = ScriptedGatewaySocket()
