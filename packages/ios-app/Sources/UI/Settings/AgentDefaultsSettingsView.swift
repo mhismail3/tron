@@ -37,6 +37,7 @@ struct AgentDefaultsSettingsView: View {
     @State private var draft = AgentDefaultsDraft()
     @State private var drafts = ScopedSettingsDraftStore<AgentDefaultsDraft>()
     @State private var scope: SettingsScope = .global
+    @State private var saving = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -102,14 +103,19 @@ struct AgentDefaultsSettingsView: View {
                         .accessibilityLabel("Default Trust: \(draft.trust.capitalized)")
                     }
                 }
-                Button("Save Defaults") { Task { await save() } }
-                    .buttonStyle(TronActionButtonStyle(role: .primary))
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Models and Defaults")
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                TronSaveToolbarButton(isSaving: saving, isEnabled: hasUnsavedChanges) {
+                    Task { await save() }
+                }
+            }
+        }
         .onChange(of: draft) { _, value in
             guard let target = settingsTarget else { return }
             drafts.update(value, for: target)
@@ -131,6 +137,11 @@ struct AgentDefaultsSettingsView: View {
 
     private var catalogTarget: ProviderCatalogTarget {
         scope == .project ? providerTarget : .global
+    }
+
+    private var hasUnsavedChanges: Bool {
+        guard let target = settingsTarget else { return false }
+        return drafts.isDirty(target)
     }
 
     private func selectScope(_ newScope: SettingsScope) {
@@ -186,10 +197,13 @@ struct AgentDefaultsSettingsView: View {
     private func save() async {
         guard let target = settingsTarget else { return }
         drafts.update(draft, for: target)
-        guard let savingRevision = drafts.revision(for: target) else { return }
+        guard drafts.isDirty(target),
+              let savingRevision = drafts.revision(for: target) else { return }
         let savingDraft = draft
         let baseline = drafts.baseline(for: target) ?? AgentDefaultsDraft()
         let patch = savingDraft.patch(comparedTo: baseline)
+        saving = true
+        defer { saving = false }
         do {
             try await model.updateSettings(patch, target: target)
             guard target == settingsTarget else { return }

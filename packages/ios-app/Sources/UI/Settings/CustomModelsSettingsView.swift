@@ -70,16 +70,19 @@ struct CustomModelsSettingsView: View {
                 }
                 .padding(14)
                 .tronGlassSurface(accent: .tronSlate, tintOpacity: 0.08)
-
-                Button(saving ? "Validating…" : "Save and Restart") { Task { await save() } }
-                    .buttonStyle(TronActionButtonStyle(role: .primary))
-                    .disabled(saving || (!advancedDocumentEdited && providers.contains(where: { $0.identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })))
             }
             .padding(20)
         }
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Custom Models")
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                TronSaveToolbarButton(isSaving: saving, isEnabled: canSave) {
+                    Task { await save() }
+                }
+            }
+        }
         .task(id: CustomModelLoadID(
             target: target,
             invalidationGeneration: model.customModelInvalidationGeneration
@@ -393,7 +396,14 @@ struct CustomModelsSettingsView: View {
         return providerToRemove.identifier.isEmpty ? "this provider" : providerToRemove.identifier
     }
 
+    private var canSave: Bool {
+        draftOwner.isDirty && (advancedDocumentEdited || !providers.contains {
+            $0.identifier.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        })
+    }
+
     private func save() async {
+        guard canSave else { return }
         saving = true
         defer { saving = false }
         do {

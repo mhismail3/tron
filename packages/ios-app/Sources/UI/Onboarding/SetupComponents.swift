@@ -21,7 +21,7 @@ struct ProviderSetupRow: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(1)
-                Text(provider.configured ? (provider.authSource ?? "Configured") : "Not configured")
+                Text(connectionDetail)
                     .font(TronTypography.bodySM)
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(1)
@@ -29,12 +29,6 @@ struct ProviderSetupRow: View {
             .layoutPriority(1)
             Spacer(minLength: 8)
             if provider.configured {
-                Label("Connected", systemImage: "checkmark.circle.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(Color.tronEmerald)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-
                 Menu {
                     Button("Log Out", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                         Task {
@@ -74,6 +68,19 @@ struct ProviderSetupRow: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
         .tronGlassSurface(accent: .tronEmerald, cornerRadius: 12, tintOpacity: 0.08)
+    }
+
+    private var connectionDetail: String {
+        guard provider.configured else { return "Not configured" }
+        let source = provider.authSource?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = source?.lowercased().replacingOccurrences(of: "_", with: " ")
+        let label: String
+        switch normalized {
+        case "oauth": label = "OAuth"
+        case "stored credential", "stored cred", "api key", "credential": label = "stored credential"
+        default: label = (source?.isEmpty == false ? source : nil) ?? "stored credential"
+        }
+        return "Connected - \(label)"
     }
 }
 

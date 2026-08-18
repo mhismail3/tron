@@ -425,11 +425,24 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/AgentDefaultsSettingsView.swift"),
             encoding: .utf8
         )
+        let runtime = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/RuntimeBehaviorSettingsView.swift"),
+            encoding: .utf8
+        )
+        let resources = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ResourceSettingsView.swift"),
+            encoding: .utf8
+        )
+        let customModels = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/CustomModelsSettingsView.swift"),
+            encoding: .utf8
+        )
         #expect(!settings.contains("NavigationLink"))
         #expect(settings.contains("struct TronProgressiveSheetLink"))
         #expect(!settings.contains("struct AppearanceSettingsView"))
         #expect(appearance.contains("struct AppearanceSettingsView"))
-        #expect(appearance.contains(".pickerStyle(.segmented)"))
+        #expect(appearance.contains("TronSegmentedControl"))
+        #expect(!appearance.contains(".pickerStyle(.segmented)"))
         #expect(appearance.contains("icon: \"textformat.size\""))
         #expect(appearance.contains("icon: \"slider.horizontal.3\""))
         let textFontSection = (appearance.components(separatedBy: "TronSettingsGroup(\"Text Font\"").dropFirst().first ?? "")
@@ -456,8 +469,23 @@ struct PresentationStyleGuardTests {
         #expect(providerSettings.contains("currently visible provider"))
         #expect(providers.contains("Button(\"Log Out\", systemImage: \"rectangle.portrait.and.arrow.right\", role: .destructive)"))
         #expect(providers.contains("Image(systemName: \"ellipsis\")"))
+        #expect(providers.contains("return \"Connected - "))
+        #expect(!providers.contains("Label(\"Connected\""))
         #expect(providers.contains(".lineLimit(1)"))
         #expect(!providers.contains("glassEffect"))
+        #expect(defaults.contains("TronSaveToolbarButton"))
+        #expect(defaults.contains("isEnabled: hasUnsavedChanges"))
+        #expect(!defaults.contains("Save Defaults"))
+        #expect(runtime.contains("TronSaveToolbarButton"))
+        #expect(runtime.contains("isEnabled: hasUnsavedChanges"))
+        #expect(!runtime.contains("Save Runtime Settings"))
+        #expect(resources.contains("TronSaveToolbarButton"))
+        #expect(resources.contains("isEnabled: hasUnsavedChanges"))
+        #expect(!resources.contains("Save Changes"))
+        #expect(customModels.contains("TronSaveToolbarButton"))
+        #expect(customModels.contains("isEnabled: canSave"))
+        #expect(!customModels.contains("Save and Restart"))
+        #expect(connections.contains("Button(importing ? \"Importing…\" : \"Import Legacy Sessions\")"))
     }
 
     @Test("project resources and diagnostics use readable bounded presentations")

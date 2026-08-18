@@ -782,12 +782,14 @@ presenting backing-process sessions as user sessions. Modal detail flows dismiss
 with the native top-right check action; top-left dismissal controls are reserved
 for navigation, not app-owned sheets. Settings containers and their nested font
 or model choices disclose as progressively stacked sub-sheets rather than
-horizontal navigation pushes; Appearance uses a segmented color-mode selector and
-keeps font axes directly beneath each font choice before its preview. Connected-provider
-logout lives in the provider row's compact action menu while connection is a plain
-trailing affordance. Import
+horizontal navigation pushes; Appearance uses the custom Liquid Glass segmented
+color-mode control and keeps font axes directly beneath each font choice before its
+preview. Draft-backed settings save from a disabled-until-dirty leading toolbar
+button rather than a trailing page action. Connected-provider logout lives in the
+provider row's compact action menu while connection is a plain trailing affordance. Import
 is owned by one progressive Import sheet, including canonical session-file import
-and the bounded legacy migration path. The chat composer remains visually floating without an
+and the bounded legacy migration path; the legacy import action is outside its
+amber status/configuration card. The chat composer remains visually floating without an
 opaque footer, but structurally reserves the transcript's bottom safe area. Its UIKit
 text view is the sole first-responder owner; SwiftUI mirrors delegate focus only for
 presentation, so transcript relayout and programmatic tail-follow cannot dismiss a

@@ -8,14 +8,11 @@ struct AppearanceSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 20) {
                 TronSettingsGroup("Color Mode") {
-                    Picker("Color Mode", selection: $appearance.mode) {
-                        ForEach(AppearanceMode.allCases) { mode in
-                            Label(mode.label, systemImage: mode.icon)
-                                .tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .tint(Color.tronEmerald)
+                    TronSegmentedControl(
+                        options: AppearanceMode.allCases.map { (label: $0.label, value: $0) },
+                        selection: $appearance.mode,
+                        accent: .tronEmerald
+                    )
                     .padding(14)
                     .accessibilityLabel("Color Mode")
                 }

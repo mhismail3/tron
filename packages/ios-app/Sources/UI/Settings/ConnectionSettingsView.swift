@@ -150,19 +150,19 @@ struct ImportSettingsView: View {
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 100)
                         }
-                        TronSettingsDivider(accent: .tronAmber)
-                        Button(importing ? "Importing…" : "Import Legacy Sessions") {
-                            importing = true
-                            Task {
-                                defer { importing = false }
-                                do { try await model.importLegacySessions(port: port) }
-                                catch { model.lastError = error.localizedDescription }
-                            }
-                        }
-                        .buttonStyle(TronActionButtonStyle(role: .primary))
-                        .disabled(importing || !model.legacyImportAvailable || !(1...65_535).contains(port))
                     }
                 }
+
+                Button(importing ? "Importing…" : "Import Legacy Sessions") {
+                    importing = true
+                    Task {
+                        defer { importing = false }
+                        do { try await model.importLegacySessions(port: port) }
+                        catch { model.lastError = error.localizedDescription }
+                    }
+                }
+                .buttonStyle(TronActionButtonStyle(role: .primary))
+                .disabled(importing || !model.legacyImportAvailable || !(1...65_535).contains(port))
 
                 Text(model.legacyImportAvailable
                      ? "Start the retired Tron server on this Mac at the port above before using legacy migration. Existing imports are skipped safely."

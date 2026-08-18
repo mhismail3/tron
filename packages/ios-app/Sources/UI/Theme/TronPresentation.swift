@@ -490,6 +490,30 @@ struct TronSheetTitle: View {
     }
 }
 
+struct TronSaveToolbarButton: View {
+    let isSaving: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if isSaving {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Color.tronEmerald)
+                }
+                Text(isSaving ? "Saving…" : "Save")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+            }
+            .foregroundStyle(isEnabled ? Color.tronEmerald : Color.tronTextMuted)
+        }
+        .disabled(isSaving || !isEnabled)
+        .accessibilityLabel(isSaving ? "Saving" : "Save")
+        .accessibilityValue(isSaving ? "In progress" : isEnabled ? "Available" : "No changes")
+    }
+}
+
 struct TronReloadToolbarButton: View {
     let isReloading: Bool
     let action: () -> Void

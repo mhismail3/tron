@@ -150,10 +150,6 @@ struct ResourceSettingsView: View {
                         editorRow(.proxy, icon: "network", value: draft.proxy, accent: .tronAmber)
                     }
                 }
-
-                Button(saving ? "Saving…" : "Save Changes") { Task { await save() } }
-                    .buttonStyle(TronActionButtonStyle(role: .primary))
-                    .disabled(saving)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
@@ -161,6 +157,13 @@ struct ResourceSettingsView: View {
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Resource Locations")
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                TronSaveToolbarButton(isSaving: saving, isEnabled: hasUnsavedChanges) {
+                    Task { await save() }
+                }
+            }
+        }
         .task(id: SettingsLoadID(target: settingsTarget, invalidationGeneration: model.settingsInvalidationGeneration)) {
             if !allowsProjectScope { scope = .global }
             await load()
@@ -289,6 +292,11 @@ struct ResourceSettingsView: View {
         SettingsTarget(scope: scope, projectCWD: projectCWD)
     }
 
+    private var hasUnsavedChanges: Bool {
+        guard let target = settingsTarget else { return false }
+        return drafts.isDirty(target)
+    }
+
     private func selectScope(_ newScope: SettingsScope) {
         guard newScope != scope,
               let newTarget = SettingsTarget(scope: newScope, projectCWD: projectCWD) else { return }
@@ -334,7 +342,8 @@ struct ResourceSettingsView: View {
     private func save() async {
         guard let target = settingsTarget else { return }
         drafts.update(draft, for: target)
-        guard let savingRevision = drafts.revision(for: target) else { return }
+        guard drafts.isDirty(target),
+              let savingRevision = drafts.revision(for: target) else { return }
         let savingDraft = draft
         saving = true
         defer { saving = false }
