@@ -147,7 +147,16 @@ struct PresentationStyleGuardTests {
     }
 
     @Test("app-owned sheets use one top-right confirmation dismissal and actionable cards omit disclosure chevrons")
-    func sheetAndCardConventions() {
+    func sheetAndCardConventions() throws {
+        let presentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Theme/TronPresentation.swift"),
+            encoding: .utf8
+        )
+        #expect(presentation.contains("struct TronConfirmationSheet: View"))
+        #expect(presentation.contains(".presentationDetents([.medium])"))
+        #expect(presentation.contains("ToolbarItem(placement: .topBarLeading)"))
+        #expect(presentation.contains("ToolbarItem(placement: .topBarTrailing)"))
+
         for (url, source) in uiSources {
             #expect(
                 !source.contains("ToolbarItem(placement: .cancellationAction)"),
