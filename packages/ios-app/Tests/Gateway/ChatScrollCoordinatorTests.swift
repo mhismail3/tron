@@ -1599,6 +1599,49 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("prepend accepts an installed layout boundary without a native geometry delta")
+    func prependInstalledLayoutBoundaryReplay() async throws {
+        try await withTestWatchdog { @MainActor in
+            let coordinator = ChatScrollCoordinator()
+            coordinator.geometryChanged(previous: away, current: away)
+            coordinator.semanticFrameChanged(
+                renderedID: "old-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 40)
+            )
+            let anchor = ChatSemanticAnchor(
+                semanticID: "semantic",
+                renderedID: "old-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                viewportOffsetY: 20
+            )
+            let results = ScrollResultRecorder()
+            let began = coordinator.beginPrepend(anchor: anchor, load: {
+                let installedLayout = coordinator.beginInstalledLayoutEpoch()
+                return ChatPrependPage(
+                    renderedAnchorID: "new-row",
+                    installedLayout: installedLayout
+                )
+            }, completion: { results.record($0) })
+            #expect(began)
+
+            try await coordinator.hostedWaitForPrependSemanticSample()
+            let installedEpoch = coordinator.layoutEpoch
+            coordinator.semanticFrameChanged(
+                renderedID: "new-row",
+                layoutEpoch: installedEpoch,
+                frame: CGRect(x: 0, y: 220, width: 100, height: 40)
+            )
+            #expect(coordinator.command == nil)
+
+            coordinator.installedLayoutEpochChanged()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(command.destination == .offsetY(500))
+            coordinator.cancel()
+            #expect(results.values == [.cancelled])
+        }
+    }
+
     @Test("semantic anchor correction preserves viewport offset without total-height input")
     func semanticAnchorCorrection() {
         #expect(ChatScrollCoordinator.prependCorrectionOffset(

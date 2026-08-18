@@ -409,6 +409,15 @@ final class ChatScrollCoordinator {
         directTailReturnArmed = false
     }
 
+    /// Replays the geometry boundary for an installed layout even when native
+    /// scroll geometry reports identical numeric values. SwiftUI can coalesce
+    /// that observation while the semantic row frames still advance.
+    func installedLayoutEpochChanged() {
+        geometryRevision &+= 1
+        evaluateLayoutMutationIfReady()
+        evaluatePrependMeasurementIfReady()
+    }
+
     func geometryChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
         geometry = current
         geometryRevision &+= 1
