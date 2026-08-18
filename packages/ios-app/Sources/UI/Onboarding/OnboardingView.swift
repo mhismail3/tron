@@ -93,6 +93,7 @@ struct OnboardingView: View {
                         .padding(.bottom, 10)
                 }
             }
+            .tronTopBlurSurface()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
@@ -136,6 +137,9 @@ struct OnboardingView: View {
                 }
             }
         }
+        .tronPresentation()
+        .tronScreenBackground()
+        .tronTopBlur(.sheet)
         .tint(.tronEmerald)
         .gatewayGlobalSheets()
         .providerAuthPresenter()

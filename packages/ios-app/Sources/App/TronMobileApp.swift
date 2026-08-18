@@ -63,7 +63,6 @@ private struct RootView: View {
             OnboardingView(selectedDetent: $onboardingDetent) {
                 showOnboarding = false
             }
-                .tronTopBlur(.sheet)
                 .presentationDetents([.medium, .large], selection: $onboardingDetent)
                 .presentationDragIndicator(.hidden)
                 .presentationContentInteraction(.resizes)

@@ -82,7 +82,6 @@ struct ConnectionsSettingsView: View {
             OnboardingView(mode: .addServer, selectedDetent: $addServerDetent) {
                 showAddServer = false
             }
-            .tronTopBlur(.sheet)
             .presentationDetents([.medium, .large], selection: $addServerDetent)
             .presentationDragIndicator(.hidden)
             .presentationContentInteraction(.resizes)
