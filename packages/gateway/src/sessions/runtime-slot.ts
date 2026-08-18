@@ -25,6 +25,7 @@ import type {
   SessionOperationState,
   SessionPhase,
   SessionSnapshot,
+  PendingPromptState,
   SessionSummaryUpdate,
   SessionTreeNode,
   ToolExecutionState,
@@ -74,6 +75,7 @@ type PendingManualCompaction = {
 
 const MAXIMUM_QUEUED_MESSAGES = 32;
 const MAXIMUM_QUEUED_MESSAGE_BYTES = 64 * 1_024;
+const MAXIMUM_PENDING_PROMPT_BYTES = MAXIMUM_QUEUED_MESSAGE_BYTES;
 const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
 /**
  * Streaming progress events republish the cumulative live message. Emitting
@@ -162,6 +164,7 @@ export class RuntimeSlot {
   private nextQueueOrdinal = 0;
   private queuedMessages: RuntimeQueuedMessage[] = [];
   private pendingQueueAdmission: PendingQueueAdmission | undefined;
+  private pendingPrompt: PendingPromptState | undefined;
   private pendingManualCompaction: PendingManualCompaction | undefined;
   private manualCompactionClaim: symbol | undefined;
   private queuedManualCompactionInFlight = false;
@@ -735,6 +738,9 @@ export class RuntimeSlot {
         break;
       case "entry_appended":
         this.summaryContentDirty = true;
+        if (this.pendingPrompt && event.entry.type === "message" && event.entry.message.role === "user") {
+          this.pendingPrompt = undefined;
+        }
         if (event.entry.type === "message" && event.entry.message.role === "toolResult") {
           // The canonical result now owns presentation. Keeping the same payload
           // in the live overlay for the rest of a long run duplicates output and
@@ -1009,6 +1015,7 @@ export class RuntimeSlot {
       queued: { steering: [...session.getSteeringMessages()], followUp: [...session.getFollowUpMessages()] },
       queueRevision: this.queueRevision,
       queuedItems,
+      ...(this.pendingPrompt ? { pendingPrompt: this.pendingPrompt } : {}),
       compactionQueued: this.pendingManualCompaction !== undefined,
       automaticCompactionEnabled: session.autoCompactionEnabled,
       transcript: transcriptPage.items,
@@ -1102,6 +1109,19 @@ export class RuntimeSlot {
       } else if (!queuesIntoActiveRun) {
         this.activeOperationId = operationId;
         this.operation = { id: operationId, kind: "prompt", startedAt: new Date().toISOString() };
+        this.pendingPrompt = {
+          id: operationId,
+          ...(behavior === undefined ? {} : { behavior }),
+          text: boundedSummaryText(
+            queueDisplay?.text ?? text,
+            MAXIMUM_PENDING_PROMPT_BYTES
+          ),
+          attachmentCount: queueDisplay?.attachmentCount ?? images.length,
+        };
+        this.revision += 1;
+        // Publish before entering Pi preflight. Automatic compaction can begin
+        // inside that call before the RPC receives its admission result.
+        this.publishSnapshot();
       }
 
       let acceptedResolve!: (accepted: boolean) => void;
@@ -1128,6 +1148,7 @@ export class RuntimeSlot {
         if (this.shuttingDown || this.hasActiveAgentRun || queuesIntoActiveRun) return;
         const owned = this.activeOperationId === operationId || this.operation?.id === operationId;
         if (!owned || this.queuedManualCompactionInFlight) return;
+        if (this.pendingPrompt?.id === operationId) this.pendingPrompt = undefined;
         if (!this.pendingManualCompaction) await this.dependencies.markers.clear(this.id, operationId);
         // Marker I/O may suspend behind a newer run. Clear only this run's live
         // projection; conditional marker deletion already protects its successor.
@@ -1166,8 +1187,11 @@ export class RuntimeSlot {
       if (!admitted) {
         if (this.activeOperationId === operationId) this.activeOperationId = undefined;
         if (this.operation?.id === operationId) this.operation = undefined;
+        if (this.pendingPrompt?.id === operationId) this.pendingPrompt = undefined;
         if (this.pendingExtensionCommand?.id === operationId) this.pendingExtensionCommand = undefined;
         await this.dependencies.markers.clear(this.id, operationId);
+        this.revision += 1;
+        this.publishSnapshot();
         throw new GatewayError("invalid_request", "The agent runtime rejected the prompt before admission");
       }
 

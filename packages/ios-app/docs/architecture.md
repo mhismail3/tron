@@ -568,10 +568,12 @@ share delivery, post-confirmation projection changes, catalog refresh, navigatio
 
 ## Sessions
 
-A snapshot contains phase, model, thinking level, queue state, transcript,
-streaming projection, context usage, pending extension interactions, and runtime
-diagnostics. Model identity is always `(provider,id)`; model IDs alone are not
-assumed globally unique.
+A snapshot contains phase, model, thinking level, queue state, pending prompt
+admission, transcript, streaming projection, context usage, pending extension
+interactions, and runtime diagnostics. A pending prompt is transient Gateway
+admission, not JSONL; iOS renders it until the canonical user entry replaces it
+and reconstructs it from authoritative snapshots after navigation. Model identity
+is always `(provider,id)`; model IDs alone are not assumed globally unique.
 
 The composer supports text, system-keyboard dictation, images, and bounded file
 uploads. It does not expose an app-owned microphone control until a proper voice mode exists.
@@ -606,8 +608,10 @@ composer retains Stop. The keyboard remains focused after steering so multiple m
 be queued without waiting for the current turn to settle. The send control's native context
 menu can explicitly choose steering after the current turn or follow-up after current work. A press
 has immediate scale/opacity feedback, admitted sends replace the arrow with a compact progress
-indicator, and the composer surface subtly acknowledges the in-flight admission without creating a
-provisional transcript row. Pending attachment chips enter and leave with bounded composer-owned
+indicator, and the composer surface acknowledges in-flight admission through the authoritative
+Gateway queue or pending-prompt snapshot. A prompt that enters automatic compaction before its
+canonical user entry exists remains visible as a right-anchored pending bubble and survives chat
+navigation without replay. Pending attachment chips enter and leave with bounded composer-owned
 motion; their height changes explicitly arm the sole scroll coordinator's viewport transition.
 Authoritative queued entries render after any explicit runtime detail as right-anchored compact cards
 that hug their content and wrap at the same 364-point maximum as a user prompt. They retain stable
