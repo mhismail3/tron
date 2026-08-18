@@ -92,7 +92,6 @@ struct AgentDefaultsSettingsView: View {
                             Button("Always") { draft.trust = "always" }
                             Button("Never") { draft.trust = "never" }
                         }
-                        .accessibilityLabel("Default Trust: \(draft.trust.capitalized)")
                     }
                 }
             }
