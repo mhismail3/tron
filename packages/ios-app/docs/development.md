@@ -146,7 +146,10 @@ separate presentation owners; only their directly shared layout/diff primitives 
 The settings shell and its appearance, connection/import, provider, agent-default, runtime-behavior, resource-path,
 package, trust, custom-model, and diagnostics destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators.
 Resolved package JSON is constructed only inside its progressive detail destination; the overview retains a
-constant-depth top-level count instead of recursively rendering a potentially large resource tree.
+constant-depth top-level count instead of recursively rendering a potentially large resource tree. Package reload
+refreshes the inventory and update projection together, while installation controls live in a medium/large
+progressive sheet. Custom provider editors keep their three dense text fields together before the API-format row
+and use the standard settings-group header treatment.
 Terminal sheet composition, presentation lifecycle/error state, and native SwiftTerm/keyboard rendering live
 in separate source files. The presentation owner permits one active start/show/open flight and one newest pending
 route; read replacement cancels safely, while attach/open replacement waits for stale compensation before launching
