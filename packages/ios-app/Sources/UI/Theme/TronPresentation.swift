@@ -500,19 +500,24 @@ struct TronSaveToolbarButton: View {
     let isEnabled: Bool
     let action: () -> Void
 
+    private var actionColor: Color {
+        isEnabled && !isSaving ? .tronEmerald : .tronTextMuted
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
                 if isSaving {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(Color.tronEmerald)
+                        .tint(actionColor)
                 }
                 Text(isSaving ? "Saving…" : "Save")
             }
             .tronToolbarAction()
-            .foregroundStyle(isEnabled && !isSaving ? Color.tronEmerald : Color.tronTextMuted)
+            .foregroundStyle(actionColor)
         }
+        .tint(actionColor)
         .disabled(isSaving || !isEnabled)
         .accessibilityLabel(isSaving ? "Saving" : "Save")
         .accessibilityValue(isSaving ? "In progress" : isEnabled ? "Available" : "No changes")
