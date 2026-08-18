@@ -73,6 +73,27 @@ struct SettingsDraftStoreTests {
         #expect(saved.proxyConfigured)
     }
 
+    @Test("a clean initial snapshot enables saving only after an edit")
+    func cleanInitialSnapshotTracksEditsAndSavedState() {
+        var store = ScopedSettingsDraftStore<String>()
+        let target = SettingsTarget.global
+
+        let installed = store.install("loaded", for: target)
+        #expect(installed)
+        #expect(!store.isDirty(target))
+
+        store.update("edited", for: target)
+        #expect(store.isDirty(target))
+
+        let revision = store.revision(for: target)!
+        let saved = store.markSaved("edited", for: target, expectedRevision: revision)
+        #expect(saved)
+        #expect(!store.isDirty(target))
+
+        store.update("edited again", for: target)
+        #expect(store.isDirty(target))
+    }
+
     @Test("runtime drafts preserve independent global and project edits")
     func runtimeDraftTargets() {
         let project = SettingsTarget.project(cwd: "/workspace/project")
