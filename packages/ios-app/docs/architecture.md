@@ -76,9 +76,11 @@ rejects more than 50 pages/25,000 identities, duplicate IDs, cursor cycles, and 
 publishes only a complete catalog. A mixed revision from an older Gateway or an expired continuation lease restarts silently once from a nil
 cursor; it is expected optimistic invalidation, not the former actionable “Sessions changed while loading
 the dashboard” alert. Known revisioned `session.summary` events apply synchronously without a list read,
-and mounted transcript snapshots cannot overwrite those global row fields. Cache/disconnect/authoritative
-installs and removals all enter that one disposable projection; hidden/local selection policy remains
-outside it and cannot mount a chat. Cached or stale non-idle rows present as resuming without rewriting
+and mounted transcript snapshots cannot overwrite those global row fields. The dashboard groups user
+sessions by workspace and renders the newest ten per workspace by default; explicit Show more/Show less
+pagination is a disposable UI projection with generation-checked staged animations, so catalog refreshes
+cannot expose stale rows or leave controls stuck. Cache/disconnect/authoritative installs and removals all
+enter that one disposable projection; hidden/local selection policy remains outside it and cannot mount a chat. Cached or stale non-idle rows present as resuming without rewriting
 the canonical phase; only a live Gateway-authoritative interrupted phase uses the amber warning.
 A profile boundary synchronously invalidates lifecycle admission, chains behind any preceding
 retirement, revokes profile-scoped loads and presentation intake, and awaits the exact transport close
@@ -575,9 +577,11 @@ The composer supports text, system-keyboard dictation, images, and bounded file
 uploads. It does not expose an app-owned microphone control until a proper voice mode exists.
 Drafting remains available while authoritative opening finishes and throughout
 an active turn; only submission waits for readiness. Default visible running state consumes no transcript
-space: a nonstructural 68-point bottom-safe-area blur gently oscillates between its neutral state and an
-emerald tint. Dark appearance keeps the restrained historical pulse; light appearance uses modestly higher
-resting, peak, and Reduce Motion opacity so the same pulse remains visibly saturated against pale surfaces.
+space: a nonstructural 68-point bottom-safe-area blur keeps the existing restrained emerald tint and adds a
+low-amplitude, blurred traveling waveform. The timeline-driven motion resumes when the chat returns to the
+foreground; dark appearance receives the same black tint as the top blur instead of a gray material lift,
+while light appearance uses modestly higher resting, peak, and Reduce Motion opacity so the effect remains
+visibly saturated against pale surfaces.
 At rest its fixed 44-point safe-area translation leaves 24
 points of additional upward reach without increasing blur radius. The overlay belongs to the measured composer
 but remains nonstructural. It renders in the composer's background layer, keeping the Liquid Glass input and

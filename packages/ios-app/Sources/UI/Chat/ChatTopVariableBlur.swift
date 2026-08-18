@@ -82,31 +82,71 @@ enum ChatBottomActivityBlurLayout {
     static func translation(keyboardVisible: Bool) -> CGFloat {
         keyboardVisible ? keyboardTranslation : bottomSafeAreaTranslation
     }
+
+    static func pulsePhase(at date: Date) -> Double {
+        date.timeIntervalSinceReferenceDate / pulseDuration * 2 * Double.pi
+    }
 }
 
 /// A short, nonstructural safe-area treatment. Ordinary running state changes
 /// only its tint; retry, compaction, and custom working detail retain explicit
-/// transcript presentation.
+/// transcript presentation. The animation is timeline-driven so it resumes
+/// when a chat returns to the foreground instead of depending on a one-shot
+/// state animation that can remain at its terminal value.
 struct ChatBottomActivityBlur: View {
     let isActive: Bool
     let keyboardVisible: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
-    @State private var emeraldPhase = false
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        ZStack {
-            ChatTopVariableBlur(maxBlurRadius: ChatBottomActivityBlurLayout.radius)
-                .rotationEffect(.degrees(180))
-            LinearGradient(
-                colors: [
-                    Color.clear,
-                    Color.tronEmerald.opacity(tintOpacity),
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+        TimelineView(.animation(
+            minimumInterval: 1.0 / 30.0,
+            paused: !isActive || reduceMotion || scenePhase != .active
+        )) { context in
+            ZStack {
+                ChatTopVariableBlur(maxBlurRadius: ChatBottomActivityBlurLayout.radius)
+                    .rotationEffect(.degrees(180))
+
+                // Match the top blur's dark-mode treatment. The public regular
+                // blur lifts toward gray, so a black tint keeps the idle state
+                // anchored to the chat background rather than changing its hue.
+                if colorScheme == .dark {
+                    LinearGradient(
+                        colors: [
+                            Color.black.opacity(0.28),
+                            Color.black.opacity(0.24),
+                            Color.black.opacity(0.14),
+                            Color.black.opacity(0.04),
+                            Color.clear,
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+
+                LinearGradient(
+                    colors: [
+                        Color.clear,
+                        Color.tronEmerald.opacity(tintOpacity(at: context.date)),
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+
+                if isActive {
+                    ChatThinkingWaveform(
+                        date: context.date,
+                        reduceMotion: reduceMotion
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, keyboardVisible ? 10 : 14)
+                }
+            }
         }
         .frame(maxWidth: .infinity)
         .frame(height: ChatBottomActivityBlurLayout.height(keyboardVisible: keyboardVisible))
@@ -114,47 +154,87 @@ struct ChatBottomActivityBlur: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Tron is working")
         .accessibilityHidden(!isActive)
-        .onChange(of: isActive, initial: true) { _, active in
-            updatePulse(active: active)
-        }
-        .onChange(of: reduceMotion) { _, _ in
-            updatePulse(active: isActive)
-        }
     }
 
-    private var tintOpacity: Double {
+    private func tintOpacity(at date: Date) -> Double {
         guard isActive else { return 0 }
         if reduceMotion {
             return colorScheme == .light
                 ? ChatBottomActivityBlurLayout.lightReduceMotionTintOpacity
                 : ChatBottomActivityBlurLayout.reduceMotionTintOpacity
         }
-        if colorScheme == .light {
-            return emeraldPhase
-                ? ChatBottomActivityBlurLayout.lightActiveTintOpacity
-                : ChatBottomActivityBlurLayout.lightRestingTintOpacity
-        }
-        return emeraldPhase
-            ? ChatBottomActivityBlurLayout.activeTintOpacity
-            : ChatBottomActivityBlurLayout.restingTintOpacity
-    }
 
-    private func updatePulse(active: Bool) {
-        guard active else {
-            withAnimation(.easeOut(duration: 0.24)) { emeraldPhase = false }
-            return
+        let pulse = 0.5 + 0.5 * sin(ChatBottomActivityBlurLayout.pulsePhase(at: date))
+        if colorScheme == .light {
+            return ChatBottomActivityBlurLayout.lightRestingTintOpacity
+                + (ChatBottomActivityBlurLayout.lightActiveTintOpacity
+                    - ChatBottomActivityBlurLayout.lightRestingTintOpacity) * pulse
         }
-        guard !reduceMotion else {
-            emeraldPhase = true
-            return
+        return ChatBottomActivityBlurLayout.restingTintOpacity
+            + (ChatBottomActivityBlurLayout.activeTintOpacity
+                - ChatBottomActivityBlurLayout.restingTintOpacity) * pulse
+    }
+}
+
+private struct ChatThinkingWaveform: View {
+    let date: Date
+    let reduceMotion: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            guard size.width > 0, size.height > 0 else { return }
+
+            let pointCount = max(Int(size.width / 3), 2)
+            let phase = reduceMotion
+                ? 0
+                : ChatBottomActivityBlurLayout.pulsePhase(at: date) * 1.35
+            let centerY = size.height / 2
+            var primaryWave = Path()
+            var secondaryWave = Path()
+
+            for index in 0...pointCount {
+                let progress = Double(index) / Double(pointCount)
+                let x = CGFloat(progress) * size.width
+                let envelope = sin(progress * Double.pi)
+                let primary = sin(progress * Double.pi * 5 - phase)
+                let secondary = sin(progress * Double.pi * 9 - phase * 1.2)
+                let primaryAmplitude = 3.0 + 4.0 * envelope
+                let secondaryAmplitude = 2.0 + 3.0 * envelope
+                let primaryY = centerY + CGFloat(primary * primaryAmplitude)
+                let secondaryY = centerY + CGFloat(secondary * secondaryAmplitude + 1)
+
+                if index == 0 {
+                    primaryWave.move(to: CGPoint(x: x, y: primaryY))
+                    secondaryWave.move(to: CGPoint(x: x, y: secondaryY))
+                } else {
+                    primaryWave.addLine(to: CGPoint(x: x, y: primaryY))
+                    secondaryWave.addLine(to: CGPoint(x: x, y: secondaryY))
+                }
+            }
+
+            // Use broad strokes and then blur the whole drawing. The result is
+            // a soft traveling green waveform, not a sharp equalizer line.
+            context.stroke(
+                primaryWave,
+                with: .color(Color.tronEmerald.opacity(reduceMotion ? 0.07 : 0.11)),
+                style: StrokeStyle(lineWidth: 14, lineCap: .round, lineJoin: .round)
+            )
+            context.stroke(
+                secondaryWave,
+                with: .color(Color.tronEmerald.opacity(reduceMotion ? 0.035 : 0.06)),
+                style: StrokeStyle(lineWidth: 24, lineCap: .round, lineJoin: .round)
+            )
         }
-        emeraldPhase = false
-        withAnimation(
-            .easeInOut(duration: ChatBottomActivityBlurLayout.pulseDuration)
-                .repeatForever(autoreverses: true)
-        ) {
-            emeraldPhase = true
+        .frame(height: 32)
+        .blur(radius: reduceMotion ? 6 : 9)
+        .mask {
+            LinearGradient(
+                colors: [.clear, .black, .black, .clear],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
         }
+        .accessibilityHidden(true)
     }
 }
 

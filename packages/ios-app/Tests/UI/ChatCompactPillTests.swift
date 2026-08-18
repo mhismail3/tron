@@ -42,6 +42,16 @@ struct ChatCompactPillTests {
         )
     }
 
+    @Test("activity pulse phase advances continuously and has a stable period")
+    func activityPulsePhase() {
+        let start = Date(timeIntervalSinceReferenceDate: 10)
+        let next = start.addingTimeInterval(ChatBottomActivityBlurLayout.pulseDuration)
+        let phaseDelta = ChatBottomActivityBlurLayout.pulsePhase(at: next)
+            - ChatBottomActivityBlurLayout.pulsePhase(at: start)
+
+        #expect(phaseDelta == 2 * Double.pi, accuracy: 0.000_001)
+    }
+
     @Test("Manage Session compaction admission matches Gateway support")
     func sessionCompactionAdmission() {
         #expect(SessionCompactionControlPolicy.canRequest(phase: .idle, compactionQueued: false, submitting: false))

@@ -38,7 +38,8 @@ struct SessionShellView: View {
     @State private var sessionToDelete: SessionSummary?
     @State private var sessionToRename: SessionSummary?
     @State private var renameName = ""
-    @State private var collapsedWorkspaces = Set<String>()
+    @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
+    @State private var sessionExpansion = SessionListSessionExpansion()
     @State private var navigationOwner = DashboardNavigationOwner()
     @State private var profileRouteOwner = SessionShellProfileRouteOwner()
 
@@ -87,6 +88,13 @@ struct SessionShellView: View {
                 navigationOwner.invalidate()
                 presentedSession = route
             }
+        }
+        .onChange(of: model.visibleSessions, initial: true) { _, sessions in
+            let groups = SessionListWorkspaceGroup.groups(from: sessions)
+            sessionExpansion.reconcile(
+                groupCounts: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.sessions.count) })
+            )
+            workspaceDisclosure.reconcile(groupIDs: Set(groups.map(\.id)))
         }
     }
 
@@ -264,15 +272,75 @@ struct SessionShellView: View {
 
     @ViewBuilder
     private var sessionSections: some View {
-        ForEach(workspaceGroups, id: \.key) { group in
+        ForEach(workspaceGroups) { group in
+            let visibleSessions = sessionExpansion.visibleSessions(in: group)
+            let canShowMore = sessionExpansion.canViewMore(
+                groupID: group.id,
+                totalCount: group.sessions.count
+            )
+            let canShowLess = sessionExpansion.canViewLess(
+                groupID: group.id,
+                totalCount: group.sessions.count
+            )
+            let hasExpansionControls = canShowMore || canShowLess
+            let disclosureItemCount = visibleSessions.count + (hasExpansionControls ? 1 : 0)
+            let rowsAreVisible = workspaceDisclosure.areRowsVisible(group.id)
+            let paginationTransition = sessionExpansion.transition(for: group.id)
+            let paginationIsTransitioning = sessionExpansion.isTransitioning(groupID: group.id)
+
             Section {
-                if !collapsedWorkspaces.contains(group.key) {
-                    ForEach(group.value) { session in
+                if workspaceDisclosure.shouldRenderRows(group.id) {
+                    ForEach(Array(visibleSessions.enumerated()), id: \.element.id) { index, session in
+                        let paginationRowIsVisible = sessionExpansion.isRowVisible(
+                            groupID: group.id,
+                            index: index
+                        )
                         sessionButton(session)
+                            .opacity(paginationRowIsVisible ? 1 : 0)
+                            .animation(
+                                paginationRowAnimation(
+                                    transition: paginationTransition,
+                                    index: index,
+                                    isVisible: paginationRowIsVisible
+                                ),
+                                value: paginationRowIsVisible
+                            )
+                            .opacity(rowsAreVisible ? 1 : 0)
+                            .animation(
+                                SessionDashboardLayout.disclosureRowAnimation(
+                                    index: index,
+                                    itemCount: disclosureItemCount,
+                                    isVisible: rowsAreVisible
+                                ),
+                                value: rowsAreVisible
+                            )
+                    }
+
+                    if hasExpansionControls {
+                        SessionListExpansionControls(
+                            workspaceName: group.name,
+                            canShowLess: canShowLess,
+                            canShowMore: canShowMore,
+                            isEnabled: !paginationIsTransitioning,
+                            onShowLess: { beginPaginationHide(group) },
+                            onShowMore: { beginPaginationReveal(group) }
+                        )
+                        .opacity(rowsAreVisible ? 1 : 0)
+                        .animation(
+                            SessionDashboardLayout.disclosureRowAnimation(
+                                index: visibleSessions.count,
+                                itemCount: disclosureItemCount,
+                                isVisible: rowsAreVisible
+                            ),
+                            value: rowsAreVisible
+                        )
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(SessionDashboardLayout.rowInsets)
                     }
                 }
             } header: {
-                workspaceHeader(group.key)
+                workspaceHeader(group, itemCount: disclosureItemCount)
             }
         }
     }
@@ -297,25 +365,26 @@ struct SessionShellView: View {
         }
     }
 
-    private func workspaceHeader(_ path: String) -> some View {
-        let collapsed = collapsedWorkspaces.contains(path)
-        let component = URL(fileURLWithPath: path).lastPathComponent
-        let title = component.isEmpty ? path : component
+    private func workspaceHeader(
+        _ group: SessionListWorkspaceGroup,
+        itemCount: Int
+    ) -> some View {
+        let isExpanded = workspaceDisclosure.isExpanded(group.id)
         return Button {
-            withAnimation(.smooth(duration: 0.18)) {
-                if collapsed { collapsedWorkspaces.remove(path) }
-                else { collapsedWorkspaces.insert(path) }
-            }
+            toggleWorkspaceGroup(group.id, itemCount: itemCount)
         } label: {
             HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
-                Image(systemName: collapsed ? "folder" : "folder.fill")
+                Image(systemName: isExpanded ? "folder.fill" : "folder")
                     .font(.system(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
                     .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
-                Text(title)
+                    .contentTransition(.symbolEffect(.replace))
+                Text(group.name)
                     .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .bold))
                     .lineLimit(1)
-                Image(systemName: collapsed ? "plus" : "minus")
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
             }
             .foregroundStyle(Color.tronEmerald)
             .padding(.leading, SessionDashboardLayout.headerLeadingPadding)
@@ -324,22 +393,111 @@ struct SessionShellView: View {
             .padding(.bottom, SessionDashboardLayout.headerBottomPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+            .animation(SessionDashboardLayout.expansionAnimation, value: isExpanded)
         }
         .buttonStyle(.plain)
         .textCase(nil)
         .listRowInsets(SessionDashboardLayout.headerInsets)
-        .accessibilityLabel(title)
-        .accessibilityValue(collapsed ? "collapsed" : "expanded")
+        .accessibilityLabel(group.name)
+        .accessibilityValue(isExpanded ? "expanded" : "collapsed")
+        .accessibilityHint(isExpanded ? "Double tap to hide sessions" : "Double tap to show sessions")
     }
 
-    private var workspaceGroups: [(key: String, value: [SessionSummary])] {
-        Dictionary(grouping: model.visibleSessions.filter { session in
+    private var workspaceGroups: [SessionListWorkspaceGroup] {
+        let filtered = model.visibleSessions.filter { session in
             search.isEmpty
                 || session.title.localizedCaseInsensitiveContains(search)
                 || session.cwd.localizedCaseInsensitiveContains(search)
-        }, by: \.cwd)
-        .map { (key: $0.key, value: $0.value.sorted { $0.updatedAt > $1.updatedAt }) }
-        .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+        }
+        return SessionListWorkspaceGroup.groups(from: filtered)
+            .map { group in
+                SessionListWorkspaceGroup(
+                    path: group.path,
+                    name: group.name,
+                    sessions: group.sessions.sorted { $0.updatedAt > $1.updatedAt }
+                )
+            }
+            .sorted {
+                $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending
+            }
+    }
+
+    private func toggleWorkspaceGroup(_ groupID: String, itemCount: Int) {
+        let direction = workspaceDisclosure.toggleDirection(for: groupID)
+        let transition: SessionListWorkspaceDisclosureTransition
+        switch direction {
+        case .collapse:
+            transition = workspaceDisclosure.beginToggle(groupID)
+        case .expand:
+            transition = withAnimation(SessionDashboardLayout.expansionAnimation) {
+                workspaceDisclosure.beginToggle(groupID)
+            }
+        }
+
+        Task { @MainActor in
+            let delay = transition.direction == .collapse
+                ? SessionDashboardLayout.disclosureCollapseDelay(itemCount: itemCount)
+                : SessionDashboardLayout.disclosureLayoutDelay
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            if transition.direction == .collapse {
+                _ = withAnimation(SessionDashboardLayout.expansionAnimation) {
+                    workspaceDisclosure.complete(transition)
+                }
+            } else {
+                workspaceDisclosure.complete(transition)
+            }
+        }
+    }
+
+    private func paginationRowAnimation(
+        transition: SessionListPaginationTransition?,
+        index: Int,
+        isVisible: Bool
+    ) -> Animation? {
+        guard let transition, index >= transition.stableCount else { return nil }
+        return SessionDashboardLayout.disclosureRowAnimation(
+            index: index - transition.stableCount,
+            itemCount: transition.affectedCount,
+            isVisible: isVisible
+        )
+    }
+
+    private func beginPaginationReveal(_ group: SessionListWorkspaceGroup) {
+        guard let transition = withAnimation(SessionDashboardLayout.expansionAnimation, {
+            sessionExpansion.beginRevealMore(
+                groupID: group.id,
+                totalCount: group.sessions.count
+            )
+        }) else { return }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: SessionDashboardLayout.disclosureLayoutDelay)
+            guard !Task.isCancelled,
+                  sessionExpansion.beginRevealRows(transition) else { return }
+            try? await Task.sleep(
+                for: SessionDashboardLayout.disclosureCollapseDelay(itemCount: transition.affectedCount)
+            )
+            guard !Task.isCancelled else { return }
+            sessionExpansion.finish(transition)
+        }
+    }
+
+    private func beginPaginationHide(_ group: SessionListWorkspaceGroup) {
+        guard let transition = sessionExpansion.beginShowLess(
+            groupID: group.id,
+            totalCount: group.sessions.count
+        ) else { return }
+
+        Task { @MainActor in
+            try? await Task.sleep(
+                for: SessionDashboardLayout.disclosureCollapseDelay(itemCount: transition.affectedCount)
+            )
+            guard !Task.isCancelled else { return }
+            _ = withAnimation(SessionDashboardLayout.expansionAnimation) {
+                sessionExpansion.finish(transition)
+            }
+        }
     }
 }
 
@@ -348,9 +506,17 @@ private enum SessionDashboardLayout {
     static let rowContentHorizontalPadding: CGFloat = 12
     static let iconColumnWidth: CGFloat = 18
     static let iconTextSpacing: CGFloat = 8
+    static let minimumRowHeight: CGFloat = 38
     static let headerIconSize: CGFloat = 14
+    static let headerChevronSize: CGFloat = 10
     static let headerTopPadding: CGFloat = 10
     static let headerBottomPadding: CGFloat = 3
+    static let expansionControlMinimumHeight: CGFloat = 44
+    static let expansionControlTitleSize: CGFloat = 13
+    static let expansionAnimation = Animation.smooth(duration: 0.18)
+    static let disclosureRowFadeDuration: TimeInterval = 0.13
+    static let disclosureMaximumStaggerDuration: TimeInterval = 0.06
+    static let disclosureLayoutDelay: Duration = .milliseconds(180)
     static var headerLeadingPadding: CGFloat {
         rowContainerHorizontalInset + rowContentHorizontalPadding
     }
@@ -364,6 +530,106 @@ private enum SessionDashboardLayout {
             bottom: 2,
             trailing: rowContainerHorizontalInset
         )
+    }
+
+    static var expansionControlLeadingPadding: CGFloat { rowContentHorizontalPadding }
+    static var expansionControlTrailingPadding: CGFloat { rowContentHorizontalPadding }
+
+    static func disclosureRowDelay(
+        index: Int,
+        itemCount: Int,
+        isVisible: Bool
+    ) -> TimeInterval {
+        let boundedCount = max(itemCount, 1)
+        let boundedIndex = min(max(index, 0), boundedCount - 1)
+        let order = isVisible ? boundedIndex : boundedCount - boundedIndex - 1
+        let step = boundedCount > 1
+            ? disclosureMaximumStaggerDuration / Double(boundedCount - 1)
+            : 0
+        return Double(order) * step
+    }
+
+    static func disclosureRowAnimation(
+        index: Int,
+        itemCount: Int,
+        isVisible: Bool
+    ) -> Animation {
+        .easeOut(duration: disclosureRowFadeDuration)
+            .delay(disclosureRowDelay(index: index, itemCount: itemCount, isVisible: isVisible))
+    }
+
+    static func disclosureCollapseDelay(itemCount: Int) -> Duration {
+        let stagger = itemCount > 1 ? disclosureMaximumStaggerDuration : 0
+        let milliseconds = Int(((disclosureRowFadeDuration + stagger) * 1_000).rounded(.up))
+        return .milliseconds(milliseconds)
+    }
+}
+
+private struct SessionListExpansionControls: View {
+    let workspaceName: String
+    let canShowLess: Bool
+    let canShowMore: Bool
+    let isEnabled: Bool
+    let onShowLess: () -> Void
+    let onShowMore: () -> Void
+
+    var body: some View {
+        HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
+            if canShowMore {
+                expansionButton(
+                    title: "Show more",
+                    symbolName: "chevron.down",
+                    hint: "Shows 10 more older sessions in \(workspaceName)",
+                    action: onShowMore
+                )
+                .transition(.opacity)
+            }
+
+            Spacer(minLength: SessionDashboardLayout.iconTextSpacing)
+
+            if canShowLess {
+                expansionButton(
+                    title: "Show less",
+                    symbolName: "chevron.up",
+                    hint: "Shows only the latest 10 sessions in \(workspaceName)",
+                    action: onShowLess
+                )
+                .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.leading, SessionDashboardLayout.expansionControlLeadingPadding)
+        .padding(.trailing, SessionDashboardLayout.expansionControlTrailingPadding)
+        .disabled(!isEnabled)
+    }
+
+    private func expansionButton(
+        title: String,
+        symbolName: String,
+        hint: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
+                Text(title)
+                    .font(
+                        TronTypography.sans(
+                            size: SessionDashboardLayout.expansionControlTitleSize,
+                            weight: .semibold
+                        )
+                    )
+                Image(systemName: symbolName)
+                    .font(.system(size: SessionDashboardLayout.headerChevronSize, weight: .bold))
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle(Color.tronEmerald)
+            .frame(minHeight: SessionDashboardLayout.expansionControlMinimumHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .accessibilityLabel("\(title) sessions in \(workspaceName)")
+        .accessibilityHint(hint)
     }
 }
 
