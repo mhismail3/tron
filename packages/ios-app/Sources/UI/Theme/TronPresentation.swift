@@ -287,6 +287,8 @@ private struct TronFieldSurfaceModifier: ViewModifier {
     let monospaced: Bool
     let compact: Bool
     let dense: Bool
+    let surfaceTint: Color
+    let border: Color
 
     func body(content: Content) -> some View {
         content
@@ -298,12 +300,12 @@ private struct TronFieldSurfaceModifier: ViewModifier {
             .padding(.vertical, dense ? TronSpacing.xs : compact ? TronSpacing.sm : TronSpacing.md)
             .frame(minHeight: dense ? 48 : 52)
             .glassEffect(
-                .regular.tint(Color.tronSurfaceElevated.opacity(0.34)),
+                .regular.tint(surfaceTint),
                 in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
             )
             .overlay {
                 RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
-                    .stroke(Color.tronBorder.opacity(0.55), lineWidth: 0.5)
+                    .stroke(border, lineWidth: 0.5)
             }
     }
 }
@@ -358,8 +360,20 @@ private struct TronTextEditorSurfaceModifier: ViewModifier {
 }
 
 extension View {
-    func tronField(monospaced: Bool = false, compact: Bool = false, dense: Bool = false) -> some View {
-        modifier(TronFieldSurfaceModifier(monospaced: monospaced, compact: compact, dense: dense))
+    func tronField(
+        monospaced: Bool = false,
+        compact: Bool = false,
+        dense: Bool = false,
+        surfaceTint: Color = Color.tronSurfaceElevated.opacity(0.34),
+        border: Color = Color.tronBorder.opacity(0.55)
+    ) -> some View {
+        modifier(TronFieldSurfaceModifier(
+            monospaced: monospaced,
+            compact: compact,
+            dense: dense,
+            surfaceTint: surfaceTint,
+            border: border
+        ))
     }
 
     func tronComposerField() -> some View {

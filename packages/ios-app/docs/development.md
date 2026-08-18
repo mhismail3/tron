@@ -144,7 +144,7 @@ controls and tool-run/detail routing live in dedicated owners without widening t
 primary tool sheet, diff destination, technical-payload destination, and shared navigation chrome also have
 separate presentation owners; only their directly shared layout/diff primitives use module-internal access.
 The settings shell and its appearance, connection/import, provider, agent-default, runtime-behavior, resource-path,
-package, trust, custom-model, and diagnostics destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators.
+package, trust, custom-model, and diagnostics destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators. The dashboard settings overview uses an eager stack so the Gateway Import destination is materialized with the initial sheet; project-scoped settings intentionally omit that dashboard-only action.
 Resolved package JSON is constructed only inside its progressive detail destination; the overview retains a
 constant-depth top-level count instead of recursively rendering a potentially large resource tree. Package reload
 refreshes the inventory and update projection together, while installation controls live in a medium/large
