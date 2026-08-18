@@ -194,6 +194,7 @@ export class GatewayServer {
       host: string;
       port: number;
       maxFrameBytes: number;
+      maximumSubscriptionsPerConnection?: number;
       synchronizationTimeoutMs?: number;
       devices: DeviceStore;
       uploads: UploadStore;
@@ -542,6 +543,10 @@ export class GatewayServer {
             throw new GatewayError("conflict", "This mobile presentation open was retired", true);
           }
           if (connection.presentationOnly) revokePresentationOwners(sessionId);
+          if (!connection.subscriptionTokens.has(sessionId)
+              && connection.subscriptionTokens.size >= (this.options.maximumSubscriptionsPerConnection ?? 64)) {
+            throw new GatewayError("busy", "Connection subscription capacity is full", true);
+          }
           if (connection.synchronizations.has(sessionId)) {
             // A genuinely overlapping in-flight open is a race the protocol
             // must reject; only the current owner may proceed.

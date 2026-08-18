@@ -84,6 +84,7 @@ export class RuntimeRegistry {
       agentDir: string;
       tronHome: string;
       idleRuntimeMs: number;
+      maximumLiveRuntimes?: number;
       modelRuntimeFactory?: () => Promise<ModelRuntime>;
       trust: TrustService;
       broadcast: SessionBroadcast;
@@ -783,6 +784,7 @@ export class RuntimeRegistry {
       if (this.trustReloadProjects.has(trust.cwd)) {
         throw new GatewayError("busy", "Project trust is being reconfigured", true);
       }
+      this.requireLiveSlotCapacity();
       const manager = SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd));
       const id = manager.getSessionId();
       const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false);
@@ -831,6 +833,7 @@ export class RuntimeRegistry {
         raced.touch();
         return raced;
       }
+      this.requireLiveSlotCapacity();
       let canonicalPath: string;
       try { canonicalPath = await realpath(entry.path); }
       catch { throw new GatewayError("not_found", "Tron session was removed before it could be opened"); }
@@ -988,6 +991,13 @@ export class RuntimeRegistry {
       this.revision += 1;
       this.options.sessionListChanged();
     });
+  }
+
+  private requireLiveSlotCapacity(): void {
+    const maximum = this.options.maximumLiveRuntimes;
+    if (maximum !== undefined && this.slots.size >= maximum) {
+      throw new GatewayError("busy", "Gateway live runtime capacity is full; close or wait for an idle session", true);
+    }
   }
 
   private requireUnambiguousSessionId(

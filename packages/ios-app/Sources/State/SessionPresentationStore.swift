@@ -441,9 +441,13 @@ final class SessionPresentationStore {
                 pendingRebaselines[authoritative.sessionId] = rebaseline
                 return
             }
+            let replacedRuntime = prepareSecondaryProjectionForRuntimeInstallation(authoritative)
             snapshot = authoritative
             authoritativeTailSnapshot = authoritative
             hasLoadedTranscriptHistory = false
+            if replacedRuntime {
+                Task { [weak self] in await self?.loadCommands(sessionID: authoritative.sessionId) }
+            }
             advanceChatProjection(canonical: true)
             isAuthoritative = mountedTarget?.sessionID == authoritative.sessionId
             delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)

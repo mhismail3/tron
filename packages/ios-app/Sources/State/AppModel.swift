@@ -614,6 +614,9 @@ final class AppModel {
 
     func enteredBackground() {
         sceneAllowsCatalogRefresh = false
+        // The canonical session may still be running on the Gateway, but this
+        // mobile projection is intentionally retiring its transport lease.
+        sessionCatalog.markDisconnected()
         lifecycle.enteredBackground()
         catalogInvalidationGeneration &+= 1
         cancelCatalogRefresh()

@@ -16,6 +16,13 @@ export interface GatewayConfig {
   readonly maxUploadBytes: number;
   readonly terminalReplayBytes: number;
   readonly idleRuntimeMs: number;
+  readonly maxConnections: number;
+  readonly maxConnectionsPerIdentity: number;
+  readonly maxSubscriptionsPerConnection: number;
+  readonly maxLiveRuntimes: number;
+  readonly maxOutboundFrames: number;
+  readonly maxOutboundBytes: number;
+  readonly maxSynchronizationBytes: number;
 }
 
 const GATEWAY_CONFIG_MAX_BYTES = 16 * 1_024;
@@ -145,5 +152,12 @@ export async function loadConfig(
     maxUploadBytes: 25 * 1_048_576,
     terminalReplayBytes: 768 * 1_024,
     idleRuntimeMs: 10 * 60_000,
+    maxConnections: 32,
+    maxConnectionsPerIdentity: 4,
+    maxSubscriptionsPerConnection: 64,
+    maxLiveRuntimes: 16,
+    maxOutboundFrames: 32,
+    maxOutboundBytes: 2 * 1_048_576,
+    maxSynchronizationBytes: 2 * 1_048_576,
   };
 }

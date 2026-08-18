@@ -13,56 +13,78 @@ enum GatewayUploadPolicy {
     static let maximumResponseBytes = 64 * 1_024
 }
 
+struct GatewayEventBufferPolicy: Sendable {
+    let maximumEvents: Int
+    let maximumBytes: Int
+
+    static let `default` = Self(maximumEvents: 512, maximumBytes: 2 * 1_024 * 1_024)
+}
+
 private actor GatewayEventHub {
-    private let maximumBufferedEvents: Int
-    private var buffered: [GatewayEventDelivery] = []
-    private var waiter: CheckedContinuation<GatewayEventDelivery?, Never>?
+    private struct BufferedDelivery {
+        let delivery: GatewayEventDelivery
+        let bytes: Int
+        let key: String?
+    }
+
+    private let policy: GatewayEventBufferPolicy
+    private var buffered: [BufferedDelivery] = []
+    private var bufferedBytes = 0
+    private var waiters: [(UUID, CheckedContinuation<GatewayEventDelivery?, Never>)] = []
     private var finished = false
 
-    init(maximumBufferedEvents: Int = 512) {
-        self.maximumBufferedEvents = maximumBufferedEvents
+    init(policy: GatewayEventBufferPolicy = .default) {
+        self.policy = policy
     }
 
     func next() async -> GatewayEventDelivery? {
         if let first = buffered.first {
             buffered.removeFirst()
-            return first
+            bufferedBytes -= first.bytes
+            return first.delivery
         }
         if finished || Task.isCancelled { return nil }
+        let waiterID = UUID()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 if let first = buffered.first {
                     buffered.removeFirst()
-                    continuation.resume(returning: first)
+                    bufferedBytes -= first.bytes
+                    continuation.resume(returning: first.delivery)
                 } else if finished || Task.isCancelled {
                     continuation.resume(returning: nil)
                 } else {
-                    waiter = continuation
+                    waiters.append((waiterID, continuation))
                 }
             }
         } onCancel: {
-            Task { await self.cancelWaiter() }
+            Task { await self.cancelWaiter(waiterID) }
         }
     }
 
-    /// Returns true when an older delivery was discarded. The caller must
-    /// replace its connection and rebaseline rather than continue on a gap.
-    func yield(_ delivery: GatewayEventDelivery) -> Bool {
-        if let waiter {
-            self.waiter = nil
+    /// Returns true when preserving the ordered event would exceed a hard
+    /// bound. The caller must retire the epoch and rebaseline; it never drops a
+    /// sequenced event silently.
+    func yield(_ delivery: GatewayEventDelivery, bytes: Int) -> Bool {
+        guard !finished else { return false }
+        if !waiters.isEmpty {
+            let (_, waiter) = waiters.removeFirst()
             waiter.resume(returning: delivery)
             return false
         }
-        guard !finished else { return false }
-        if let key = coalescingKey(for: delivery),
-           let index = buffered.lastIndex(where: { coalescingKey(for: $0) == key }) {
-            buffered[index] = delivery
-            return false
+        let byteCount = max(0, bytes)
+        let key = coalescingKey(for: delivery)
+        if let key, let index = buffered.lastIndex(where: { $0.key == key }) {
+            bufferedBytes += byteCount - buffered[index].bytes
+            buffered[index] = BufferedDelivery(delivery: delivery, bytes: byteCount, key: key)
+            return bufferedBytes > policy.maximumBytes
         }
-        let dropped = buffered.count >= maximumBufferedEvents
-        if dropped { buffered.removeFirst() }
-        buffered.append(delivery)
-        return dropped
+        guard buffered.count < policy.maximumEvents,
+              byteCount <= policy.maximumBytes,
+              bufferedBytes <= policy.maximumBytes - byteCount else { return true }
+        buffered.append(BufferedDelivery(delivery: delivery, bytes: byteCount, key: key))
+        bufferedBytes += byteCount
+        return false
     }
 
     private func coalescingKey(for delivery: GatewayEventDelivery) -> String? {
@@ -74,19 +96,24 @@ private actor GatewayEventHub {
     }
 
     func reset(connectionID: Int) {
-        buffered.removeAll { $0.connectionID == connectionID }
+        let retained = buffered.filter { $0.delivery.connectionID != connectionID }
+        bufferedBytes = retained.reduce(0) { $0 + $1.bytes }
+        buffered = retained
     }
 
     func finish() {
         finished = true
         buffered.removeAll(keepingCapacity: false)
-        waiter?.resume(returning: nil)
-        waiter = nil
+        bufferedBytes = 0
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.1.resume(returning: nil) }
     }
 
-    private func cancelWaiter() {
-        waiter?.resume(returning: nil)
-        waiter = nil
+    private func cancelWaiter(_ id: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.0 == id }) else { return }
+        let (_, waiter) = waiters.remove(at: index)
+        waiter.resume(returning: nil)
     }
 }
 
@@ -152,7 +179,8 @@ actor GatewayClient {
         boundedHTTPDataTransport: BoundedHTTPDataTransport = .urlSession,
         boundedHTTPUploadTransport: BoundedHTTPUploadTransport = .urlSession,
         boundedHTTPFileTransport: BoundedHTTPFileTransport = .urlSession,
-        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
+        eventBufferPolicy: GatewayEventBufferPolicy = .default
     ) {
         self.socketFactory = socketFactory
         self.clock = clock
@@ -162,7 +190,7 @@ actor GatewayClient {
         self.boundedHTTPUploadTransport = boundedHTTPUploadTransport
         self.boundedHTTPFileTransport = boundedHTTPFileTransport
         self.performanceSignposts = performanceSignposts
-        let eventHub = GatewayEventHub()
+        let eventHub = GatewayEventHub(policy: eventBufferPolicy)
         self.eventHub = eventHub
         events = GatewayEventStream(hub: eventHub)
     }
@@ -731,7 +759,7 @@ actor GatewayClient {
                 sessionId: nil,
                 payload: .object(["message": .string(failure.message)])
             )
-        ))
+        ), bytes: 256)
     }
 
     private func handle(_ data: Data, epochID: Int) async throws {
@@ -755,7 +783,7 @@ actor GatewayClient {
             if await eventHub.yield(GatewayEventDelivery(
                 connectionID: epochID,
                 event: event
-            )) {
+            ), bytes: data.count) {
                 guard var current = connection,
                       current.id == epochID,
                       !current.overflowResyncSignaled else { return }
