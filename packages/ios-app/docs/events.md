@@ -51,7 +51,7 @@ admits and reduces mounted-session topics:
   advance owner revisions across connected clients; each visible surface reloads
   its explicit global or project scope instead of sharing a wrong-scope payload;
 - authentication prompts drive the generic secure prompt sheet;
-- the single `session.extensionPresentation` stream drives semantic updates, select/confirm/input/editor sheets, dormant generic surfaces, lease projection, diagnostics, and non-replayed notices;
+- the single `session.extensionPresentation` stream drives semantic updates, select/confirm/input/editor sheets, the compact composer activity pill and dynamic native detail sheet for admitted read-only widgets, bounded statuses, and live service activity; native editor echoes are coalesced per mounted target and empty text is valid; tool provenance is optional disposable metadata from public Pi source information, and unknown/ambiguous ownership remains an ordinary tool row;
 - chat rendering joins canonical calls, live progress, and canonical results by
   `toolCallId` into one ordered timeline. Parallel calls carry a Gateway-issued
   monotonic ordinal, and each call carries a monotonic progress sequence so equal
@@ -135,8 +135,9 @@ Fitted snapshots retain bounded omitted surface ID/revision baselines and lease 
 full-frame deltas converge; complete session snapshots replace the projection. Surface clearing is explicit
 by ID, so malformed upserts cannot erase valid content;
 unknown kinds retain sanitized `plainText`. Notifications travel in a mutation but are never retained or
-replayed. Widget/status and rendered-surface chrome remains gated, with no package, command, or opaque-key
-special treatment. Actionable responses carry the interaction's admission epoch/revision, and offline cache
+replayed. Generic status pills, semantic string widgets, and admitted read-only widget surfaces render in
+composer-owned slots with no package, command, or opaque-key special treatment; custom/overlay and
+interactive surfaces remain deferred. Actionable responses carry the interaction's admission epoch/revision, and offline cache
 strips all interactions, surfaces, focus/lease, capabilities/diagnostics, and ephemeral semantic state. Native
 composer synchronization is scoped to the exact mounted presentation, suppresses its operation-ID echo,
 and never retries a stale base revision as an unconditional overwrite. The run
@@ -161,7 +162,7 @@ a profile-generation replacement discards it. Ordinary scene backgrounding is no
 enters the ordinary reconnect loop. Compatible reconnect requests share one typed result instead of polling mutable tokens. Fresh
 presentation and reconnect intents arbitrate serially, and at most three immediate authoritative
 attempts are retained for a continuous gap/overflow burst before the bounded catch-up state wins.
-A temporary catch-up pill is deduplicated and removed by the next successful authoritative session synchronization rather than persisting as an error state.
+A temporary catch-up notice is deduplicated, removed on successful synchronization and presentation navigation/close, and automatically expires after a bounded interval if a terminal retry path cannot converge. It never outlives its presentation owner.
 Earlier canonical entries are fetched through `session.transcript` pages when requested. Each page
 is capped at 600 KB and 512 items, carries exact `start`/`end`/`total` bounds, and installs only when
 `end` equals the requested boundary, `total` still equals the captured canonical total, and

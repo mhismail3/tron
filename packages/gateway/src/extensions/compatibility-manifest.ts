@@ -30,7 +30,7 @@ export const extensionPresentationCompatibility = {
   notify: entry("native-semantic", "notifications"), setStatus: entry("native-semantic", "status"),
   setWorkingMessage: entry("native-semantic", "working.message"), setWorkingVisible: entry("native-semantic", "working.visible"),
   setWorkingIndicator: entry("native-semantic", "working.indicator"), setHiddenThinkingLabel: entry("native-semantic", "thinking.hidden-label"),
-  setWidget: entry("native-semantic", "widgets.string", "The public component rendering seam is proven by the dormant Phase 4A harness; production factory mounting awaits Phase 4C."),
+  setWidget: entry("native-semantic", "widgets.string", "String widgets remain semantic; component-valued retained widgets are projected as bounded read-only generic surfaces."),
   setTitle: entry("native-semantic", "title"), pasteToEditor: entry("native-semantic", "editor.revisioned"),
   setEditorText: entry("native-semantic", "editor.revisioned"), getEditorText: entry("native-semantic", "editor.revisioned"),
   getToolsExpanded: entry("native-semantic", "tools.expanded"), setToolsExpanded: entry("native-semantic", "tools.expanded"),
@@ -98,12 +98,12 @@ export const toolDefinitionCompatibility = {
 } satisfies Record<keyof ToolDefinition, "pi-runtime" | "renderer">;
 
 export const remoteTuiFeasibilityCompatibility = {
-  terminal: entry("remote-component", "feasibility.terminal", "A bounded no-stdio Terminal is proven but is not production-bound."),
-  composition: entry("remote-component", "feasibility.main-screen", "Root-exported TuiMainScreen capture is retained only as a dormant bounded foundation; overlay geometry, stacking, and focus fidelity are explicitly deferred."),
-  recording: entry("remote-component", "feasibility.recording", "Recording wrappers capture Pi's single render invocation; production surface identity awaits Phase 4C."),
+  terminal: entry("remote-component", "feasibility.terminal", "A bounded no-stdio Terminal drives production read-only component widgets; remote input remains unavailable."),
+  composition: entry("remote-component", "feasibility.main-screen", "Root-exported TuiMainScreen capture composes retained read-only widgets; overlay geometry, stacking, focus, and blocking custom UI remain deferred."),
+  recording: entry("remote-component", "feasibility.recording", "Recording wrappers capture Pi's single render invocation into generic widget surfaces; interactive component surfaces remain deferred."),
   frameParser: entry("remote-component", "feasibility.frame-parser", "Logical lines sanitize to bounded plain text, RGB styles, safe links, and cursor state for the unified v2 presentation protocol."),
   presentationStore: entry("remote-component", "presentation.aggregate-revision", "One epoch-scoped store atomically owns semantic state, surfaces, interactions, leases, capabilities, and diagnostics while production remains RPC."),
-  fullFrames: entry("remote-component", "presentation.full-frames", "Bounded full-frame surface transport is foundation-only; production component mounting and all native UI activation remain deferred."),
+  fullFrames: entry("remote-component", "presentation.full-frames", "Retained component widgets may publish bounded read-only frames; interactive custom/overlay surfaces remain deferred."),
   inputLeaseProjection: entry("remote-component", "presentation.input-lease", "The scoped lease is modeled and retained; acquisition and input routing await Phase 4C."),
   terminalImages: entry("explicit-fallback", "feasibility.images", "Kitty/iTerm image and file controls are stripped; remote terminal images are not advertised."),
   kittyKeyRelease: entry("explicit-fallback", "feasibility.kitty-key-release", "The in-memory terminal truthfully reports Kitty keyboard protocol unavailable."),

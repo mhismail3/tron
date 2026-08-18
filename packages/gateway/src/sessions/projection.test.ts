@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { BlobStore } from "./blob-store.js";
 import type { SessionSnapshot } from "../protocol/types.js";
 import {
@@ -9,6 +10,7 @@ import {
   COMMAND_CATALOG_STRING_BYTES,
   fitSessionSnapshot,
   projectJson,
+  projectMessage,
   projectToolOutput,
   projectTranscript,
   projectTranscriptPage,
@@ -50,6 +52,31 @@ describe("catalog projection admission", () => {
 });
 
 describe("transcript projection", () => {
+  it("retains optional extension provenance only in the disposable tool projection", () => {
+    const message: AgentMessage = {
+      role: "toolResult",
+      toolCallId: "call-extension",
+      toolName: "example-tool",
+      content: [{ type: "text", text: "done" }],
+      isError: false,
+      timestamp: 1,
+    };
+    const projected = projectMessage(
+      "result",
+      null,
+      "2026-01-01T00:00:00Z",
+      message,
+      new BlobStore(),
+      {
+        startedAt: "2026-01-01T00:00:00Z",
+        lastProgressAt: "2026-01-01T00:00:01Z",
+        progressSequence: 1,
+        extensionOrigin: { source: "public-source" },
+      },
+    );
+    expect(projected).toMatchObject({ extensionOrigin: { source: "public-source" } });
+  });
+
   it("preserves Pi entry IDs and branch order", () => {
     const manager = SessionManager.inMemory("/tmp/project");
     const first = manager.appendMessage({ role: "user", content: "hello", timestamp: 1 });
@@ -378,6 +405,33 @@ describe("transcript projection", () => {
       omittedSurfaces: [{ id: "decorative", revision: 5 }],
     });
     expect(fitted.extensionPresentation.diagnostics.at(-1)?.code).toContain("projection.");
+  });
+
+  it("retains the revisioned editor baseline when decorative presentation is omitted", () => {
+    const editorText = "draft\n".repeat(1_000);
+    const snapshot: SessionSnapshot = {
+      sessionId: "editor-pressure", runtimeGeneration: "generation", revision: 1, eventSequence: 1,
+      phase: "idle", cwd: "/tmp/project", thinkingLevel: "off", availableThinkingLevels: ["off"],
+      stats: { userMessages: 0, assistantMessages: 0, toolCalls: 0, toolResults: 0, totalMessages: 0,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: 0 },
+      queued: { steering: [], followUp: [] }, transcript: [], transcriptStart: 0, transcriptTotal: 0,
+      toolExecutions: [], diagnostics: [],
+      extensionPresentation: {
+        version: 2, hostEpoch: "host", revision: 9, capabilities: [], diagnostics: [],
+        semanticState: {
+          statuses: { decorative: "x".repeat(40_000) },
+          working: { visible: false, indicator: { kind: "default", frames: [] } },
+          widgets: [], toolsExpanded: false, editorRevision: 7, editorText,
+        },
+        surfaces: [], pendingInteractions: [],
+      },
+    };
+
+    const fitted = fitSessionSnapshot(snapshot, 16_000);
+    expect(fitted.extensionPresentation.semanticState.statuses).toEqual({});
+    expect(fitted.extensionPresentation.semanticState.editorRevision).toBe(7);
+    expect(fitted.extensionPresentation.semanticState.editorText).toBe(editorText);
+    expect(fitted.extensionPresentation.projection?.omitted).not.toContain("editorText");
   });
 
   it("advances a page containing one projected item above the requested page target", () => {

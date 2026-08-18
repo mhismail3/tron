@@ -22,6 +22,20 @@ The embedded runtime remains canonical for sessions, provider/model semantics,
 credentials, settings, packages, resources, compaction, and retries. Gateway
 does not maintain a session database or event journal.
 
+## Moonshot Kimi K3
+
+The built-in Moonshot K3 model uses the Open Platform OpenAI-compatible endpoint
+and preserves K3 reasoning/tool message fields. Gateway caps the requested
+completion reservation at 32,768 tokens and sends the documented
+`max_completion_tokens` field; this is separate from K3's 1M-token context
+window because Moonshot TPM accounting includes the requested completion budget.
+Terminal Moonshot account/org quota responses are normalized as non-retryable;
+max-concurrency responses with explicit provider guidance receive one bounded
+retry, while transient engine overload responses remain retryable. This prevents
+the same over-budget request from consuming the account's RPM through repeated
+retries. The provider key still belongs in the runtime credential store and is
+never persisted by Gateway.
+
 ## Runtime and state
 
 - Agent state: `PI_CODING_AGENT_DIR`, default `~/.pi/agent`
@@ -139,13 +153,21 @@ authoritative interaction lists, full-frame surface upserts, explicit removals,
 lease replacement/clear, capabilities, diagnostics, and transient notifications
 share this stream. Malformed upserts never mean removal. Responses retain the
 interaction's admission revision; native editor patches retain bounded operation IDs
-so the originating presentation can suppress its own echo. Under snapshot pressure,
+so the originating presentation can suppress its own echo. Native clients may toggle Pi's public
+`setToolsExpanded` state through the command-ID/epoch/revision-checked `extension.toolsExpanded`
+mutation; retained component frames rerender only after that authoritative mutation. Under snapshot pressure,
 actionable interactions and epoch/revision identity outrank decorative frames;
 omission is explicit through projection diagnostics; omitted surface identity and
 revision remain as a bounded delta baseline, while blocking/focused/leased surfaces
 are retained ahead of decoration so exact-next full frames converge without loops.
+The revisioned editor text and revision are retained as one inseparable baseline;
+pressure may omit decorative statuses/widgets but never fabricate an empty editor at
+a nonzero revision.
 Pending interactions remain live across ordinary client disconnect and all imperative
-presentation is excluded from offline mobile cache. Exact extension commands persist a provisional run marker
+presentation is excluded from offline mobile cache. Native editor updates admit an
+empty or whitespace-only text payload without trimming; per-session clients coalesce
+possibly-sent updates and treat revision conflicts as ordinary convergence rather than
+user-visible failures. Exact extension commands persist a provisional run marker
 before their handler starts; forced shutdown preserves admitted-work markers while a
 verified clean idle shutdown removes them.
 
@@ -156,21 +178,26 @@ second host render call, and
 a fail-closed parser converts logical lines into bounded plain text, concrete RGB
 style runs, safe HTTP(S)/mailto links, and cursor position. The parser strips terminal
 movement, device, clipboard, title, image/file, DCS/APC/PM, and other control
-sequences and never forwards ANSI. This proves the public composition seam only:
-production remains bound as `mode: "rpc"`, terminal images and Kitty key releases are
-unavailable, and existing status/widget visibility gates remain unchanged.
+sequences and never forwards ANSI. Production remains bound as `mode: "rpc"`:
+semantic status/widgets and select/confirm/input/editor dialogs use the RPC
+projection, while retained component-valued widgets are captured as bounded,
+read-only generic surfaces. Terminal images, Kitty key releases, and component input
+remain unavailable.
 
-Phase 4C is currently limited to a foundation checkpoint: one bounded,
+Phase 4C currently exposes a bounded first UI validation pass: one bounded,
 epoch-scoped host/store owner, generic full-frame protocol models, strict admission,
 atomic revisions, stale-callback protection, exact-once disposal/settlement, and
 reload/shutdown/drain/reconnect-safe ownership. The direct harness admits at most one
 non-overlay blocking custom call and uses a real public pi-tui 0.84.1 keybindings
-manager. Overlay custom calls fail closed before factory invocation with one bounded
-deferred diagnostic and publish no overlay surface. No custom/overlay conformance or
-UI fidelity is claimed. Production remains bound as `mode: "rpc"` to
-`SemanticUIBroker`; active input leases/routing, iOS surface rendering, status/widget
-chrome, footer/header/editor/autocomplete, theme UI, renderer hosting, package-specific
-integration, and truthful TUI activation are deferred to a later manual iteration.
+manager; the production RPC host rejects blocking custom calls before invoking
+extension factories because no native client surface exists for them. Overlay
+custom calls fail closed before factory invocation with one bounded
+deferred diagnostic and publish no overlay surface. Component input, arbitrary custom
+UI, native custom/overlay rendering, footer/header/editor/autocomplete, theme UI,
+renderer hosting, package-specific integration, and truthful TUI activation remain
+deferred.
+
+Live tool projections may carry an optional extension provenance record derived from the public Pi tool `sourceInfo` and the loaded extension inventory. The Gateway emits that record only when exactly one extension owns the tool and the source path agrees; unknown or ambiguous ownership omits provenance and fails open to the ordinary tool projection. This metadata is disposable presentation state and never modifies Pi JSONL.
 
 Parallel tool events carry a monotonic per-run ordinal; each call additionally has
 a monotonic progress sequence, bounded display-safe live-output tail, runtime start,

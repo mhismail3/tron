@@ -18,6 +18,7 @@ import { GatewayLogger } from "./transport/logger.js";
 import { CommandReceiptStore } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
+import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
 
 const config = await loadConfig();
 process.env.PI_CODING_AGENT_DIR = config.agentDir;
@@ -29,13 +30,13 @@ const logger = new GatewayLogger();
 const devices = new DeviceStore(config.tronHome, config.machineId);
 await devices.initialize();
 
-const modelRuntime = await ModelRuntime.create({
+const modelRuntime = installKimiK3Policy(await ModelRuntime.create({
   authPath: join(config.agentDir, "auth.json"),
   modelsPath: join(config.agentDir, "models.json"),
   modelsStorePath: join(config.agentDir, "models-store.json"),
   refreshOnCreate: true,
   allowModelNetwork: false,
-});
+}));
 // Compose global extension providers into the administration runtime used by
 // onboarding. Project providers remain isolated in their RuntimeSlot runtime.
 // Retain these services for the gateway lifetime. Their resource loader owns

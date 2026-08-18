@@ -122,6 +122,7 @@ struct SessionShellView: View {
                 ChatView(
                     sessionID: route.sessionID,
                     initialEditorText: route.editorText,
+                    initialModel: route.initialModel,
                     onForkCreated: present
                 )
                 .id(route.sessionID)

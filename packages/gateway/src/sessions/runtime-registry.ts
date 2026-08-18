@@ -3,6 +3,7 @@ import { open, opendir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
+import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
 import type { SessionSummary, SessionSummaryUpdate } from "../protocol/types.js";
 import { AsyncMutex } from "../util/async-mutex.js";
 import type { TrustService } from "../admin/trust-service.js";
@@ -169,13 +170,13 @@ export class RuntimeRegistry {
   private dependencies() {
     return {
       agentDir: this.options.agentDir,
-      createModelRuntime: this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
+      createModelRuntime: async () => installKimiK3Policy(await (this.options.modelRuntimeFactory ?? (() => ModelRuntime.create({
         authPath: join(this.options.agentDir, "auth.json"),
         modelsPath: join(this.options.agentDir, "models.json"),
         modelsStorePath: join(this.options.agentDir, "models-store.json"),
         refreshOnCreate: true,
         allowModelNetwork: false,
-      })),
+      })))()),
       trust: this.options.trust,
       blobs: this.blobs,
       markers: this.markers,

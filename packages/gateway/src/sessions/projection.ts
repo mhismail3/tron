@@ -4,7 +4,7 @@ import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { BlobStore } from "./blob-store.js";
-import type { CommandInfo, ContentPart, ExtensionSurface, JsonValue, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
+import type { CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
 
 const MAX_TEXT = 64_000;
 const MAX_JSON_STRING = 100_000;
@@ -232,6 +232,9 @@ export function fitSessionSnapshot(
     if (frameBytes(projected) <= maximumBytes) return projected;
   }
 
+  // Statuses and widgets are disposable chrome. The revisioned editor baseline
+  // is not: retaining editorRevision while clearing editorText would make a
+  // later paste delta impossible for the client to validate or converge.
   projected = {
     ...projected,
     extensionPresentation: {
@@ -240,7 +243,6 @@ export function fitSessionSnapshot(
         ...projected.extensionPresentation.semanticState,
         statuses: {},
         widgets: [],
-        editorText: "",
       },
       diagnostics: [
         ...projected.extensionPresentation.diagnostics.filter((item) => item.code !== "projection.surfaces-omitted").slice(0, 63),
@@ -248,7 +250,7 @@ export function fitSessionSnapshot(
       ],
       projection: {
         complete: false,
-        omitted: ["surfaces", "statuses", "widgets", "editorText"],
+        omitted: ["surfaces", "statuses", "widgets"],
         ...(projected.extensionPresentation.projection?.omittedSurfaces
           ? { omittedSurfaces: projected.extensionPresentation.projection.omittedSurfaces }
           : {}),
@@ -401,6 +403,7 @@ export interface ToolProjectionMetadata {
   durationMs?: number;
   lastProgressAt: string;
   progressSequence: number;
+  extensionOrigin?: ExtensionToolOrigin;
 }
 
 export function projectMessage(
@@ -447,6 +450,7 @@ export function projectMessage(
           ...(toolMetadata.durationMs === undefined ? {} : { durationMs: toolMetadata.durationMs }),
           lastProgressAt: toolMetadata.lastProgressAt,
           progressSequence: toolMetadata.progressSequence,
+          ...(toolMetadata.extensionOrigin ? { extensionOrigin: toolMetadata.extensionOrigin } : {}),
         } : {
           // Pi JSONL does not currently persist tool execution start/end metadata.
           // The result timestamp is an observed completion anchor; clients pair it

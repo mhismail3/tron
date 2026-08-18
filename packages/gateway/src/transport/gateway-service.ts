@@ -4,7 +4,7 @@ import type { GatewayConfig } from "../config.js";
 import { GatewayError } from "../errors.js";
 import type { JsonValue } from "../protocol/types.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
-import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string } from "../util/validation.js";
+import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { FilesystemService } from "../machine/filesystem-service.js";
@@ -30,7 +30,7 @@ const PROVIDER_CATALOG_MAX_FIELD_CHARACTERS = 100_000;
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "gateway.restart",
   "session.list", "session.open", "session.sync", "session.close", "session.transcript",
-  "session.abort", "session.clearQueue", "session.queue.replace", "extension.respond", "extension.editor.update",
+  "session.abort", "session.clearQueue", "session.queue.replace", "extension.respond", "extension.editor.update", "extension.toolsExpanded",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
 ]);
 
@@ -349,7 +349,13 @@ export class GatewayService {
           string(params.hostEpoch, "hostEpoch", { max: 100 }),
           integer(params.baseRevision, "baseRevision", 0, Number.MAX_SAFE_INTEGER),
           string(params.operationId, "operationId", { max: 256 }),
-          string(params.text, "text", { max: 192 * 1_024 }),
+          text(params.text, "text", 192 * 1_024),
+        ));
+      case "extension.toolsExpanded":
+        return this.mutation(client, method, params, async () => (await this.openedSlot(client, params)).setExtensionToolsExpanded(
+          string(params.hostEpoch, "hostEpoch", { max: 100 }),
+          integer(params.presentationRevision, "presentationRevision", 0, Number.MAX_SAFE_INTEGER),
+          boolean(params.expanded, "expanded"),
         ));
 
       case "provider.list":

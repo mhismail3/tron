@@ -1009,7 +1009,7 @@ struct SessionPresentationStoreTests {
         }
     }
 
-    @Test("editor debounce retains the scheduling epoch and base revision")
+    @Test("serialized editor updates use the newest authoritative base revision")
     func editorDebounceDoesNotRebase() async throws {
         try await withTestWatchdog { @MainActor in
             let socket = ScriptedGatewaySocket()
@@ -1061,7 +1061,7 @@ struct SessionPresentationStoreTests {
             request = try JSONDecoder.gateway.decode(JSONValue.self, from: updateFrame)
             #expect(request.objectValue?["method"]?.stringValue == "extension.editor.update")
             #expect(request.objectValue?["params"]?.objectValue?["hostEpoch"]?.stringValue == "debounce-host")
-            #expect(request.objectValue?["params"]?.objectValue?["baseRevision"]?.intValue == 3)
+            #expect(request.objectValue?["params"]?.objectValue?["baseRevision"]?.intValue == 4)
             let updateID = try #require(request.objectValue?["id"]?.stringValue)
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("response"), "id": .string(updateID), "ok": .bool(true),

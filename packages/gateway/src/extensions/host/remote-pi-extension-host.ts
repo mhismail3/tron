@@ -1,7 +1,7 @@
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionUIContext, KeybindingsManager as PiKeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { Theme } from "@earendil-works/pi-coding-agent";
 import {
-  KeybindingsManager,
+  KeybindingsManager as TuiKeybindingsManager,
   TUI_KEYBINDINGS,
   type Component,
   type OverlayHandle,
@@ -17,10 +17,19 @@ import { InMemoryTerminal } from "./in-memory-terminal.js";
 import { type ComponentDiagnostic } from "./recording-component.js";
 import { boundedDisplayError, stripTerminalControls } from "./terminal-sanitizer.js";
 
-export interface RemotePiExtensionHostOptions { columns?: number; rows?: number }
+export interface RemotePiExtensionHostOptions {
+  columns?: number;
+  rows?: number;
+  /** Production RPC has no truthful native path for blocking component UI. */
+  enableBlockingCustom?: boolean;
+}
 export const MAX_HOST_COMPONENTS = 24;
 export const MAX_HOST_DIAGNOSTICS = 16;
 const MAX_HOST_KEY_BYTES = 256;
+
+export function widgetSurfaceId(key: string): string {
+  return `widget:${Buffer.from(key, "utf8").toString("base64url")}`;
+}
 
 type SurfacePlacement = "aboveEditor" | "belowEditor" | "fullscreen";
 type SurfaceKind = "widget" | "custom";
@@ -29,7 +38,7 @@ type CustomComponent = Component & { dispose?(): void };
 type CustomFactory<T> = (
   tui: TUI,
   theme: Theme,
-  keybindings: KeybindingsManager,
+  keybindings: PiKeybindingsManager,
   done: (result: T) => void,
 ) => CustomComponent | Promise<CustomComponent>;
 
@@ -61,17 +70,17 @@ interface CustomCall<T> {
 }
 
 /**
- * Foundation-only, per-presentation-epoch Pi host. The host is a dormant
- * direct-conformance seam: RuntimeSlot deliberately binds SemanticUIBroker in
- * RPC mode. It owns bounded retained widgets and one exclusive non-overlay
- * custom call; overlay presentation is intentionally unsupported.
+ * Per-presentation-epoch Pi host. RuntimeSlot binds this context in RPC mode so
+ * retained component widgets can publish bounded read-only frames while every
+ * semantic API continues through SemanticUIBroker and the same presentation
+ * store. Blocking custom and overlay UI remain disabled in production.
  */
 export class RemotePiExtensionHost {
   private readonly baseContext: ExtensionUIContext;
   private terminal?: InMemoryTerminal;
   private screen?: CapturingTuiMainScreen;
   private tuiProxy?: TUI;
-  private keybindings?: KeybindingsManager;
+  private keybindings?: PiKeybindingsManager;
   private registry?: ComponentRegistry;
   private renderQueued = false;
   private renderActive = false;
@@ -98,10 +107,17 @@ export class RemotePiExtensionHost {
   get mountedComponentCount(): number { return this.registry?.mountedRecords.length ?? 0; }
   get pendingCustomCall(): boolean { return this.customCall !== undefined; }
 
+  /** Re-render retained component surfaces after a native semantic UI mutation. */
+  rerender(): void { if (!this.retired) this.requestRender(true); }
+
   context(): FoundationExtensionUIContext {
     const host = this;
     return {
       ...this.baseContext,
+      setToolsExpanded(expanded) {
+        host.baseContext.setToolsExpanded(expanded);
+        host.requestRender(true);
+      },
       setWidget(key, content, options) {
         if (typeof key !== "string" || !key || Buffer.byteLength(key, "utf8") > MAX_HOST_KEY_BYTES) {
           host.recordDiagnostic({ code: "render-invalid", message: "Widget key exceeds the bounded extension-host limit" });
@@ -134,11 +150,15 @@ export class RemotePiExtensionHost {
     return true;
   }
 
-  private ensureTui(): { tui: TUI; theme: Theme; keybindings: KeybindingsManager } {
+  private ensureTui(): { tui: TUI; theme: Theme; keybindings: PiKeybindingsManager } {
     if (this.retired) throw new Error("Extension host epoch was retired");
     if (this.screen && this.tuiProxy && this.keybindings) return { tui: this.tuiProxy, theme: this.baseContext.theme as Theme, keybindings: this.keybindings };
     this.terminal = new InMemoryTerminal(this.options.columns, this.options.rows);
-    this.keybindings = new KeybindingsManager(TUI_KEYBINDINGS);
+    // pi-coding-agent's public callback type extends the public pi-tui
+    // manager with settings helpers. The direct host is intentionally
+    // settings-neutral; the pi-tui manager is the concrete public object and
+    // is structurally compatible for documented key lookup operations.
+    this.keybindings = new TuiKeybindingsManager(TUI_KEYBINDINGS) as unknown as PiKeybindingsManager;
     this.screen = new CapturingTuiMainScreen(this.terminal, {
       onRender: () => this.publishCapturedSurfaces(),
       onRenderComplete: (error) => this.finishRender(error),
@@ -179,6 +199,11 @@ export class RemotePiExtensionHost {
 
   private mountCustom<T>(factory: CustomFactory<T>, options?: CustomOptions): Promise<T> {
     if (this.retired) return Promise.reject(new Error("Extension host epoch was retired"));
+    if (this.options.enableBlockingCustom === false) {
+      const error = new Error("Blocking component UI is deferred in RPC mode");
+      this.recordDiagnostic({ code: "render-invalid", message: error.message });
+      return Promise.reject(error);
+    }
     if (options?.overlay === true) {
       const error = new Error("Overlay extension UI is deferred at the foundation checkpoint");
       this.recordDiagnostic({ code: "render-invalid", message: error.message });
@@ -256,7 +281,13 @@ export class RemotePiExtensionHost {
     this.finishCustom(key, undefined, error);
   }
 
-  private surfaceId(key: string): string { return key.startsWith("widget:") || key.startsWith("custom:") ? key : `widget:${key}`; }
+  private surfaceId(key: string, kind = this.surfaceMeta.get(key)?.kind): string {
+    if (kind === "custom") return key;
+    // Opaque extension keys must never share identity with reserved surface
+    // prefixes or with another key. Base64url is bounded to 4/3 of the input
+    // bytes and contains no protocol separators.
+    return widgetSurfaceId(key);
+  }
 
   private removeComponent(key: string): void {
     this.registry?.remove(key);
@@ -361,7 +392,8 @@ export class RemotePiExtensionHost {
     const width = Math.min(this.terminal?.columns ?? 80, 160);
     const bounded = boundedExtensionFrame(stripTerminalControls(`[Extension component unavailable: ${diagnostic.message}]`, false), width);
     const frame: ExtensionFrame = { width, height: 1, lines: bounded.lines.map((line) => ({ plainText: line.plainText, runs: line.runs.map((run) => ({ text: run.text, style: { ...run.style } })) })), plainText: bounded.plainText };
-    this.stageSurface({ id: this.surfaceId(key), kind: "widget", placement: this.placements.get(key) ?? "aboveEditor", lifecycle: "retained", revision: this.nextRevision(this.surfaceId(key)), focused: false, inputMode: "none", frame });
+    const id = this.surfaceId(key, "widget");
+    this.stageSurface({ id, kind: "widget", placement: this.placements.get(key) ?? "aboveEditor", lifecycle: "retained", revision: this.nextRevision(id), focused: false, inputMode: "none", frame });
     this.recordDiagnostic(diagnostic);
     this.flushPresentation();
   }

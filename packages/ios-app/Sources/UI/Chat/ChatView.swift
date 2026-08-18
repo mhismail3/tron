@@ -16,6 +16,7 @@ private struct ChatScrollGeometryObservation: Equatable {
 struct ChatView: View {
     let sessionID: String
     private let initialEditorText: String?
+    private let initialModel: ModelRef?
     private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
     private let displayFrameScheduler: DisplayFrameScheduler
     private let performanceSignposts: any PerformanceSignposting
@@ -28,10 +29,15 @@ struct ChatView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var composerScope: ComposerDraftScope?
     @State private var photos: [PhotosPickerItem] = []
+    @State private var photoImportTask: Task<Void, Never>?
+    @State private var photoImportTarget: SessionPresentationIdentity?
     @State private var attachmentDestination: ChatAttachmentDestination?
     @State private var queuedAttachmentDestination: ChatAttachmentDestination?
     @State private var attachmentPresentationTask: Task<Void, Never>?
     @State private var showContext = false
+    @State private var showExtensionDetails = false
+    @State private var extensionDetailsGroupID: String?
+    @State private var initialModelSettled = true
     @State private var showSettings = false
     @State private var queuedMessageEditor: QueuedMessageEditorRoute?
     @State private var mutatingQueuedMessageIDs: Set<String> = []
@@ -51,11 +57,13 @@ struct ChatView: View {
     // placeholder/scroll presentation; SwiftUI FocusState must not compete with
     // a UIViewRepresentable that has no `.focused` registration.
     @State private var composerFocused = false
+    @State private var suppressedInteractionScope: ExtensionInteractionScope?
 
     #if HOSTED_TEST
     init(
         sessionID: String,
         initialEditorText: String? = nil,
+        initialModel: ModelRef? = nil,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         hostedProbe: ChatHostedProbe? = nil,
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
@@ -63,6 +71,8 @@ struct ChatView: View {
     ) {
         self.sessionID = sessionID
         self.initialEditorText = initialEditorText
+        self.initialModel = initialModel
+        self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
         self.hostedProbe = hostedProbe
         self.displayFrameScheduler = displayFrameScheduler
@@ -80,12 +90,15 @@ struct ChatView: View {
     init(
         sessionID: String,
         initialEditorText: String? = nil,
+        initialModel: ModelRef? = nil,
         onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
         displayFrameScheduler: DisplayFrameScheduler = .displayLink,
         performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
     ) {
         self.sessionID = sessionID
         self.initialEditorText = initialEditorText
+        self.initialModel = initialModel
+        self._initialModelSettled = State(initialValue: initialModel == nil)
         self.onForkCreated = onForkCreated
         self.displayFrameScheduler = displayFrameScheduler
         self.performanceSignposts = performanceSignposts
@@ -166,8 +179,17 @@ struct ChatView: View {
             maxSelectionCount: ChatAttachmentImportPolicy.maximumPhotoSelection,
             matching: .images
         )
+        .sheet(isPresented: $showExtensionDetails) {
+            ExtensionDetailsSheet(sessionID: sessionID, groupID: extensionDetailsGroupID)
+        }
         .sheet(item: interactionBinding) { interaction in
-            ExtensionInteractionSheet(sessionID: sessionID, interaction: interaction)
+            ExtensionInteractionSheet(
+                sessionID: sessionID,
+                interaction: interaction,
+                onResolved: {
+                    suppressedInteractionScope = ExtensionInteractionScope(interaction)
+                }
+            )
         }
         .fileImporter(
             isPresented: attachmentPresentationBinding(for: .files),
@@ -176,16 +198,33 @@ struct ChatView: View {
         ) { result in
             Task { await importFiles(result) }
         }
-        .onChange(of: photos) { _, values in Task { await importPhotos(values) } }
+        .onChange(of: photos) { _, values in
+            guard !values.isEmpty, let target = presentationTarget else { return }
+            photoImportTask?.cancel()
+            photoImportTarget = target
+            photos = []
+            photoImportTask = Task { @MainActor in
+                await importPhotos(values, target: target)
+                guard !Task.isCancelled, photoImportTarget == target else { return }
+                photoImportTask = nil
+                photoImportTarget = nil
+            }
+        }
         .onChange(of: attachmentMenuState) { previous, current in
             if previous.sessionID != current.sessionID {
                 cancelAttachmentPresentation(includingActive: true)
+                photoImportTask?.cancel()
+                photoImportTask = nil
+                photoImportTarget = nil
             } else if !current.actionsEnabled {
                 cancelAttachmentPresentation(includingActive: false)
+                photoImportTask?.cancel()
+                photoImportTask = nil
+                photoImportTarget = nil
             }
         }
         .confirmationDialog(ComposerEditorRequestPolicy.confirmationTitle, isPresented: Binding(
-            get: { routedEditorRequest != nil },
+            get: { initialModelSettled && routedEditorRequest != nil },
             set: { isPresented in
                 guard !isPresented,
                       let request = routedEditorRequest,
@@ -207,6 +246,14 @@ struct ChatView: View {
             Text(ComposerEditorRequestPolicy.confirmationMessage)
         }
         .task(id: sessionID) { await beginOpeningPresentation() }
+        .onChange(of: pendingInteractionScopes, initial: true) { _, scopes in
+            guard let suppressedInteractionScope,
+                  ChatExtensionInteractionPolicy.shouldClearSuppression(
+                      suppressedInteractionScope,
+                      from: selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []
+                  ) else { return }
+            self.suppressedInteractionScope = nil
+        }
         .onChange(of: transcriptProjectionSource, initial: true) { _, source in
             guard let currentSource = transcriptProjectionSource else {
                 transcriptPresentation.reset()
@@ -260,6 +307,9 @@ struct ChatView: View {
             transcriptPresentation.reset()
             performanceTracker.cancelAll()
             cancelAttachmentPresentation(includingActive: true)
+            photoImportTask?.cancel()
+            photoImportTask = nil
+            photoImportTarget = nil
             if let generation = modelPresentationGeneration {
                 Task { await model.closeSessionPresentation(sessionID, generation: generation) }
             }
@@ -616,8 +666,32 @@ struct ChatView: View {
         presentationTarget.map(model.composerDrafts.pendingAttachments(for:)) ?? []
     }
 
+    private var candidatePresentedInteraction: ExtensionInteraction? {
+        ChatExtensionInteractionPolicy.presentedInteraction(
+            selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? [],
+            suppressing: suppressedInteractionScope
+        )
+    }
+
+    private var candidateEditorRequest: ComposerEditorRequest? {
+        guard let target = presentationTarget else { return nil }
+        return model.composerDrafts.editorRequest(for: target)
+    }
+
+    private var extensionForegroundPresentation: ChatExtensionForegroundPresentation {
+        ChatExtensionPresentationArbiter.presentation(
+            modelSettled: initialModelSettled,
+            hasInteraction: candidatePresentedInteraction != nil,
+            hasEditorRequest: candidateEditorRequest != nil
+        )
+    }
+
+    private var pendingPresentedInteraction: ExtensionInteraction? {
+        extensionForegroundPresentation == .interaction ? candidatePresentedInteraction : nil
+    }
+
     private var routedEditorRequest: ComposerEditorRequest? {
-        presentationTarget.flatMap(model.composerDrafts.editorRequest(for:))
+        extensionForegroundPresentation == .editorRequest ? candidateEditorRequest : nil
     }
 
     private var sending: Bool {
@@ -711,7 +785,21 @@ struct ChatView: View {
                     composerScope: composerScope
                 )
                 openedGeneration = generation
+                if let initialModel {
+                    defer { initialModelSettled = true }
+                    if let snapshot = model.authoritativeSnapshot(for: sessionID),
+                       snapshot.model?.provider != initialModel.provider || snapshot.model?.id != initialModel.id {
+                        do {
+                            try await model.setModel(initialModel, sessionID: sessionID)
+                        } catch is CancellationError {
+                            throw CancellationError()
+                        } catch {
+                            model.postNotice("The selected model could not be applied; this session will use its current model.")
+                        }
+                    }
+                }
                 guard !Task.isCancelled,
+
                       model.authoritativeSnapshot(for: sessionID)?.sessionId == sessionID else {
                     performanceSignposts.end(interval, result: .discarded, metrics: .none)
                     await model.closeSessionPresentation(sessionID, generation: generation)
@@ -1094,11 +1182,23 @@ struct ChatView: View {
     private var composer: some View {
         VStack(spacing: 10) {
             if let snapshot = selectedAuthoritativeSnapshot {
-                ForEach(ChatExtensionWidgetPolicy.visibleWidgets(
-                    snapshot.extensionPresentation.semanticState.widgets,
-                    placement: .aboveEditor
-                )) { widget in
-                    ExtensionWidgetView(widget: widget)
+                let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, executions: snapshot.toolExecutions)
+                if !groups.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(groups) { group in
+                                ExtensionActivityPill(group: group) {
+                                    extensionDetailsGroupID = group.id
+                                    showExtensionDetails = true
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.horizontal, 16)
+                    }
+                    .scrollClipDisabled()
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                    .accessibilityElement(children: .contain)
                 }
             }
 
@@ -1159,15 +1259,6 @@ struct ChatView: View {
             )
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
-
-            if let snapshot = selectedAuthoritativeSnapshot {
-                ForEach(ChatExtensionWidgetPolicy.visibleWidgets(
-                    snapshot.extensionPresentation.semanticState.widgets,
-                    placement: .belowEditor
-                )) { widget in
-                    ExtensionWidgetView(widget: widget)
-                }
-            }
         }
         .onGeometryChange(for: CGFloat.self) { geometry in
             geometry.size.height
@@ -1393,9 +1484,13 @@ struct ChatView: View {
         }
     }
 
+    private var pendingInteractionScopes: [ExtensionInteractionScope] {
+        selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions.map(ExtensionInteractionScope.init) ?? []
+    }
+
     private var interactionBinding: Binding<ExtensionInteraction?> {
         Binding(
-            get: { selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions.first },
+            get: { pendingPresentedInteraction },
             set: { _ in }
         )
     }
@@ -1413,6 +1508,10 @@ struct ChatView: View {
 
     private func requestAttachmentPresentation(_ destination: ChatAttachmentDestination) {
         guard attachmentActionsEnabled else { return }
+        // End the responder lifetime before UIKit presents a picker. This also
+        // invalidates queued becomeFirstResponder callbacks in the representable.
+        composerFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
 
         // A native Menu is still dismissing when its action runs. Presenting a
         // sheet or system picker synchronously can collide with that transient
@@ -1558,10 +1657,10 @@ struct ChatView: View {
         catch { model.presentComposerActionError(error, target: target) }
     }
 
-    private func importPhotos(_ values: [PhotosPickerItem]) async {
-        photos = []
-        guard let target = presentationTarget else { return }
+    private func importPhotos(_ values: [PhotosPickerItem], target: SessionPresentationIdentity) async {
+        guard !values.isEmpty, presentationTarget == target else { return }
         for item in values {
+            guard !Task.isCancelled, presentationTarget == target else { return }
             do {
                 guard let data = try await item.loadTransferable(type: Data.self) else {
                     model.presentComposerActionError(
@@ -1570,6 +1669,7 @@ struct ChatView: View {
                     )
                     continue
                 }
+                guard !Task.isCancelled, presentationTarget == target else { return }
                 try await model.upload(
                     name: "photo.jpg",
                     mimeType: item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg",
@@ -1577,6 +1677,7 @@ struct ChatView: View {
                     target: target
                 )
             }
+            catch is CancellationError { return }
             catch { model.presentComposerActionError(error, target: target) }
         }
     }

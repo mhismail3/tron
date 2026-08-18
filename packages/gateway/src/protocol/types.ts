@@ -71,6 +71,8 @@ export type TranscriptItem =
       durationMs?: number;
       lastProgressAt?: string;
       progressSequence?: number;
+      /** Disposable provenance derived from public Pi sourceInfo; absent means unknown/ambiguous. */
+      extensionOrigin?: ExtensionToolOrigin | undefined;
     }
   | TranscriptBase & {
       kind: "bash";
@@ -115,6 +117,11 @@ export type TranscriptItem =
       label?: string;
     };
 
+export interface ExtensionToolOrigin {
+  /** Public Pi source identity; package and extension names are intentionally not interpreted by Tron. */
+  source: string;
+}
+
 export interface ToolExecutionState {
   toolCallId: string;
   toolName: string;
@@ -135,6 +142,8 @@ export interface ToolExecutionState {
   durationMs?: number;
   /** Monotonic per call; authoritative even when wall-clock timestamps collide. */
   progressSequence: number;
+  /** Disposable provenance derived from public Pi sourceInfo; absent means unknown/ambiguous. */
+  extensionOrigin?: ExtensionToolOrigin | undefined;
 }
 
 export interface RetryState {

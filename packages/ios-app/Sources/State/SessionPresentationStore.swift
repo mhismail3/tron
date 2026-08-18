@@ -162,6 +162,7 @@ final class SessionPresentationStore {
     }
 
     func open(_ sessionID: String) async throws -> Int {
+        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
         let interval = performanceSignposts.begin(.sessionOpen)
         var result = PerformanceResult.failure
         defer {
@@ -178,10 +179,21 @@ final class SessionPresentationStore {
         isAuthoritative = false
         var didOpen = false
         defer {
-            if !didOpen { deferredEffectsByTarget[requested] = nil }
+            if !didOpen {
+                deferredEffectsByTarget[requested] = nil
+                // A failed fresh open must not leave the dashboard believing
+                // this exact route is still selected. The live subscription
+                // owner is closed by the synchronization failure path.
+                if pendingTarget == requested { pendingTarget = nil }
+            }
         }
         clearSecondaryProjection()
-        if subscribedSessionID != sessionID { await closeCurrentSubscription() }
+        if subscribedSessionID != sessionID {
+            guard await closeCurrentSubscription() else {
+                if pendingTarget == requested { pendingTarget = nil }
+                throw GatewayFailure(code: "subscription_close_failed", message: "The previous session is still closing. Please try again.", retryable: true, details: nil)
+            }
+        }
         guard pendingTarget == requested else { throw CancellationError() }
         let synchronized = await synchronize(
             sessionID,
@@ -211,6 +223,11 @@ final class SessionPresentationStore {
         revokedTargets.remove(requested)
         deferredEffectsByTarget[requested] = nil
         guard target == requested else { return }
+        // A newer open owns the transition while the previously mounted target
+        // remains visible. Its eventual close callback must not clear the new
+        // owner's notice or subscription.
+        guard pendingTarget == nil || pendingTarget == requested else { return }
+        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
         target = nil
         if pendingTarget == requested { pendingTarget = nil }
         isAuthoritative = false
@@ -531,14 +548,15 @@ final class SessionPresentationStore {
         resources = nil
     }
 
-    private func closeCurrentSubscription() async {
-        guard let sessionID = subscribedSessionID else { return }
-        await closeSubscription(sessionID, expectedTarget: nil)
+    private func closeCurrentSubscription() async -> Bool {
+        guard let sessionID = subscribedSessionID else { return true }
+        return await closeSubscription(sessionID, expectedTarget: nil)
     }
 
-    private func closeSubscription(_ sessionID: String, expectedTarget: SessionPresentationIdentity?) async {
-        if let expectedTarget, subscriptionTarget != expectedTarget { return }
-        guard subscribedSessionID == sessionID, let token = subscriptionToken else { return }
+    @discardableResult
+    private func closeSubscription(_ sessionID: String, expectedTarget: SessionPresentationIdentity?) async -> Bool {
+        if let expectedTarget, subscriptionTarget != expectedTarget { return false }
+        guard subscribedSessionID == sessionID, let token = subscriptionToken else { return true }
         let expectedConnectionGeneration = connectionGeneration
         let expectedSubscriptionTarget = subscriptionTarget
         struct Params: Codable { let sessionId, subscriptionToken: String }
@@ -549,15 +567,15 @@ final class SessionPresentationStore {
         )
         guard connectionGeneration == expectedConnectionGeneration,
               subscribedSessionID == sessionID,
-              subscriptionTarget == expectedSubscriptionTarget,
-              Self.shouldClearSubscription(
-                  installedToken: subscriptionToken,
-                  closingToken: token,
-                  gatewayClosed: response?.closed == true
-              ) else { return }
+              subscriptionTarget == expectedSubscriptionTarget else { return false }
+        // A decoded `closed:false` is authoritative evidence that the Gateway
+        // no longer owns this token. Only an interrupted/undecodable request
+        // retains local ownership for retry; never overwrite a newer owner.
+        guard response != nil else { return false }
         subscriptionToken = nil
         subscribedSessionID = nil
         subscriptionTarget = nil
+        return true
     }
 
     private func closeProvisionalSubscription(
@@ -640,7 +658,11 @@ final class SessionPresentationStore {
         return false
     }
 
-    private enum AttemptOutcome { case success, retry, failed }
+    private enum AttemptOutcome {
+        case success
+        case retry
+        case failed(showCatchUpNotice: Bool)
+    }
 
     private enum ReducerEffect {
         case catalogRefresh
@@ -655,6 +677,7 @@ final class SessionPresentationStore {
         operation: PerformanceOperation
     ) async -> Bool {
         var nextOperation = operation
+        let synchronizationConnectionGeneration = connectionGeneration
         for _ in 0..<3 {
             guard !Task.isCancelled,
                   synchronization.owns(lease),
@@ -669,16 +692,48 @@ final class SessionPresentationStore {
                 delegate?.sessionPresentationStoreCheckpointCache()
                 return true
             case .retry:
+                // The attempt may already have installed a subscription before
+                // discovering a contiguous-replay race. Retire that exact
+                // owner before opening the replacement attempt.
+                if subscriptionToken != nil,
+                   !(await closeSubscription(sessionID, expectedTarget: nil)) {
+                    let ownsNotice = ownsSynchronizationAttempt(
+                        lease,
+                        sessionID: sessionID,
+                        connectionGeneration: synchronizationConnectionGeneration
+                    )
+                    synchronization.complete(lease, outcome: false)
+                    if ownsNotice { delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp) }
+                    return false
+                }
                 synchronization.restartBuffer(for: lease)
                 nextOperation = .sessionResync
-            case .failed:
+            case .failed(let showCatchUpNotice):
+                let ownsNotice = ownsSynchronizationAttempt(
+                    lease,
+                    sessionID: sessionID,
+                    connectionGeneration: synchronizationConnectionGeneration
+                ) && synchronizationTarget(for: lease.intent, sessionID: sessionID) != nil
                 synchronization.complete(lease, outcome: false)
+                guard ownsNotice else { return false }
+                if showCatchUpNotice {
+                    delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
+                } else {
+                    delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+                }
                 return false
             }
         }
         if subscriptionToken != nil { await closeSubscription(sessionID, expectedTarget: nil) }
+        let ownsNotice = ownsSynchronizationAttempt(
+            lease,
+            sessionID: sessionID,
+            connectionGeneration: synchronizationConnectionGeneration
+        ) && synchronizationTarget(for: lease.intent, sessionID: sessionID) != nil
         synchronization.complete(lease, outcome: false)
-        delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
+        if ownsNotice {
+            delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
+        }
         return false
     }
 
@@ -713,7 +768,7 @@ final class SessionPresentationStore {
                     expectedConnectionGeneration: attemptConnectionGeneration
                 )
                 result = .discarded
-                return .failed
+                return .failed(showCatchUpNotice: false)
             }
 
             try await acknowledgeSync(sessionID: sessionID, syncToken: response.syncToken)
@@ -729,7 +784,7 @@ final class SessionPresentationStore {
                     expectedConnectionGeneration: attemptConnectionGeneration
                 )
                 result = .discarded
-                return .failed
+                return .failed(showCatchUpNotice: false)
             }
 
             let mode: SessionSnapshotInstallationMode
@@ -823,7 +878,7 @@ final class SessionPresentationStore {
                     expectedConnectionGeneration: attemptConnectionGeneration
                 )
                 result = .discarded
-                return .failed
+                return .failed(showCatchUpNotice: false)
             }
             let replacedRuntime = prepareSecondaryProjectionForRuntimeInstallation(installed)
             subscribedSessionID = sessionID
@@ -860,13 +915,22 @@ final class SessionPresentationStore {
                     expectedConnectionGeneration: attemptConnectionGeneration
                 )
             }
+            guard ownsSynchronizationAttempt(
+                lease,
+                sessionID: sessionID,
+                connectionGeneration: attemptConnectionGeneration
+            ), synchronizationTarget(for: lease.intent, sessionID: sessionID) != nil else {
+                return .failed(showCatchUpNotice: false)
+            }
+            let showCatchUpNotice: Bool
             if let failure = error as? GatewayFailure,
                failure.retryable || failure.code == "response_too_large" {
-                delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
+                showCatchUpNotice = true
             } else {
+                showCatchUpNotice = false
                 delegate?.sessionPresentationStoreSurface(error)
             }
-            return .failed
+            return .failed(showCatchUpNotice: showCatchUpNotice)
         }
     }
 

@@ -1,7 +1,7 @@
 import { visibleWidth, type Component } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 import { ExtensionPresentationStore } from "./extension-presentation-store.js";
-import { MAX_HOST_COMPONENTS, RemotePiExtensionHost } from "./remote-pi-extension-host.js";
+import { MAX_HOST_COMPONENTS, RemotePiExtensionHost, widgetSurfaceId } from "./remote-pi-extension-host.js";
 import type { SemanticUIBroker } from "../../sessions/semantic-ui-broker.js";
 
 function deferred<T>() {
@@ -16,16 +16,24 @@ function component(lines: string[], dispose = vi.fn()): Component & { dispose: (
 function fixture() {
   const events: unknown[] = [];
   const presentation = new ExtensionPresentationStore((_topic, payload) => events.push(payload));
-  const semantic = { presentation, context: () => ({
+  const context = {
     ...({} as ReturnType<SemanticUIBroker["context"]>),
     theme: undefined,
     setWidget: vi.fn(),
-  }) } as unknown as SemanticUIBroker;
+    setToolsExpanded: vi.fn(),
+  };
+  const semantic = { presentation, context: () => context } as unknown as SemanticUIBroker;
   const host = new RemotePiExtensionHost(semantic);
-  return { host, presentation, events };
+  return { host, presentation, events, context };
 }
 
 describe("RemotePiExtensionHost retained component foundation", () => {
+  it("forwards native tools-expanded changes and schedules a rerender", async () => {
+    const { host, context } = fixture();
+    host.context().setToolsExpanded(true);
+    expect(context.setToolsExpanded).toHaveBeenCalledWith(true);
+  });
+
   it("lazily starts, mounts sync factories, captures one render, and publishes bounded frames", async () => {
     const { host, presentation, events } = fixture();
     const original = component(["hello", "\u001b[31mworld\u001b[0m"]);
@@ -35,7 +43,7 @@ describe("RemotePiExtensionHost retained component foundation", () => {
     expect(host.isTuiStarted).toBe(true);
     await Promise.resolve();
     const surface = presentation.state().surfaces[0];
-    expect(surface).toMatchObject({ id: "widget:one", kind: "widget", frame: { plainText: "hello\nworld" } });
+    expect(surface).toMatchObject({ id: widgetSurfaceId("one"), kind: "widget", frame: { plainText: "hello\nworld" } });
     expect(surface?.placement).toBe("belowEditor");
     expect(original.render).toHaveBeenCalledTimes(1);
     expect(events.length).toBeGreaterThan(0);
@@ -48,6 +56,18 @@ describe("RemotePiExtensionHost retained component foundation", () => {
     expect(original.render).toHaveBeenCalledTimes(3);
     expect(presentation.state().surfaces[0]?.frame.width).toBe(100);
     expect(events.length).toBe(2);
+    host.retire();
+  });
+
+  it("namespaces every opaque widget key without surface collisions", async () => {
+    const { host, presentation } = fixture();
+    const keys = ["foo", "widget:foo", "custom:c1"];
+    for (const key of keys) host.context().setWidget(key, (() => component([key])) as never);
+    await Promise.resolve();
+    const surfaces = presentation.state().surfaces.filter((surface) => surface.kind === "widget");
+    expect(new Set(surfaces.map((surface) => surface.id)).size).toBe(keys.length);
+    expect(surfaces.map((surface) => surface.frame.plainText).sort()).toEqual(keys.sort());
+    expect(surfaces.every((surface) => surface.id.startsWith("widget:"))).toBe(true);
     host.retire();
   });
 
@@ -70,7 +90,7 @@ describe("RemotePiExtensionHost retained component foundation", () => {
     context.setWidget("reject", (() => component(["replacement"])) as never);
     rejected.reject(new Error("late rejection"));
     await Promise.resolve();
-    expect(presentation.state().surfaces.some((surface) => surface.id === "widget:reject")).toBe(true);
+    expect(presentation.state().surfaces.some((surface) => surface.id === widgetSurfaceId("reject"))).toBe(true);
     host.retire();
   });
 
@@ -79,7 +99,7 @@ describe("RemotePiExtensionHost retained component foundation", () => {
     const context = host.context();
     context.setWidget("throwing", (() => { throw new Error("factory exploded"); }) as never);
     await Promise.resolve();
-    expect(presentation.state().surfaces.find((surface) => surface.id === "widget:throwing")?.frame.plainText)
+    expect(presentation.state().surfaces.find((surface) => surface.id === widgetSurfaceId("throwing"))?.frame.plainText)
       .toContain("Extension component unavailable");
     expect(presentation.state().diagnostics.some((diagnostic) => diagnostic.code === "component.render-failed")).toBe(true);
 
@@ -87,13 +107,13 @@ describe("RemotePiExtensionHost retained component foundation", () => {
     context.setWidget("rejected", (() => rejected.promise) as never);
     rejected.reject(new Error("factory rejected"));
     await Promise.resolve();
-    expect(presentation.state().surfaces.find((surface) => surface.id === "widget:rejected")?.frame.plainText)
+    expect(presentation.state().surfaces.find((surface) => surface.id === widgetSurfaceId("rejected"))?.frame.plainText)
       .toContain("Extension component unavailable");
 
     context.setWidget("invalid", (() => ({}) as Component) as never);
     await Promise.resolve();
     await new Promise((resolve) => setTimeout(resolve, 5));
-    expect(presentation.state().surfaces.find((surface) => surface.id === "widget:invalid")?.frame.plainText)
+    expect(presentation.state().surfaces.find((surface) => surface.id === widgetSurfaceId("invalid"))?.frame.plainText)
       .toContain("Extension component unavailable");
     host.retire();
   });
@@ -104,7 +124,7 @@ describe("RemotePiExtensionHost retained component foundation", () => {
     host.context().setWidget("wide", (() => { throw new Error(wideMessage); }) as never);
     await Promise.resolve();
 
-    const surface = presentation.state().surfaces.find((candidate) => candidate.id === "widget:wide");
+    const surface = presentation.state().surfaces.find((candidate) => candidate.id === widgetSurfaceId("wide"));
     expect(surface).toBeDefined();
     expect(surface?.frame.lines).toHaveLength(surface?.frame.height);
     expect(surface?.frame.plainText).toBe(surface?.frame.lines.map((line) => line.plainText).join("\n"));
@@ -125,7 +145,7 @@ describe("RemotePiExtensionHost retained component foundation", () => {
 
     context.setWidget("one", (() => component(["stable"])) as never, { placement: "belowEditor" });
     await Promise.resolve();
-    expect(presentation.state().surfaces.find((surface) => surface.id === "widget:one")?.placement).toBe("belowEditor");
+    expect(presentation.state().surfaces.find((surface) => surface.id === widgetSurfaceId("one"))?.placement).toBe("belowEditor");
 
     let retryLines = ["stable"];
     const retrying = component(retryLines);
@@ -136,11 +156,11 @@ describe("RemotePiExtensionHost retained component foundation", () => {
     const transact = vi.spyOn(presentation, "transact").mockImplementationOnce(() => { throw new Error("temporary capacity"); });
     host.requestRender(true);
     await new Promise((resolve) => setTimeout(resolve, 25));
-    expect(presentation.state().surfaces.find((surface) => surface.id === "widget:one")?.frame.plainText).toBe("stable");
+    expect(presentation.state().surfaces.find((surface) => surface.id === widgetSurfaceId("one"))?.frame.plainText).toBe("stable");
     host.requestRender(true);
     await new Promise((resolve) => setTimeout(resolve, 25));
     expect(transact).toHaveBeenCalled();
-    expect(presentation.state().surfaces.find((surface) => surface.id === "widget:one")?.frame.plainText).toBe("stable");
+    expect(presentation.state().surfaces.find((surface) => surface.id === widgetSurfaceId("one"))?.frame.plainText).toBe("stable");
     transact.mockRestore();
 
     host.retire();

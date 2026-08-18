@@ -568,7 +568,7 @@ struct PresentationStyleGuardTests {
         for action in ["renameSession", "compact", "setModel", "setThinking", "reloadResources"] {
             #expect(!context.contains("try? await model.\(action)"))
         }
-        #expect(interactions.contains("guard !submitting else { return }"))
+        #expect(interactions.contains("guard !submitting"))
         #expect(interactions.contains("catch is CancellationError"))
         #expect(!interactions.contains("try? await model."))
         #expect(context.contains("let sessionID: String"))
@@ -676,7 +676,7 @@ struct PresentationStyleGuardTests {
 
         let chat = try #require(productionSources.first { $0.0.lastPathComponent == "ChatView.swift" }?.1)
         #expect(!chat.contains("snapshot.extensionPresentation.semanticState.widgets.filter"))
-        #expect(chat.occurrences(of: "ChatExtensionWidgetPolicy.visibleWidgets") == 2)
+        #expect(chat.occurrences(of: "ChatExtensionWidgetPolicy.mergedItems") == 2)
     }
 
     @Test("composer owns capped UIKit scrolling and attachment photos keep stable previews")

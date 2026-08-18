@@ -38,7 +38,8 @@ describe("pinned public Pi extension-host contract", () => {
       "terminal", "composition", "recording", "frameParser", "presentationStore", "fullFrames",
       "inputLeaseProjection", "terminalImages", "kittyKeyRelease",
     ]);
-    expect(remoteTuiFeasibilityCompatibility.terminal.limitation).toContain("not production-bound");
+    expect(remoteTuiFeasibilityCompatibility.terminal.limitation).toContain("production read-only component widgets");
+    expect(remoteTuiFeasibilityCompatibility.terminal.limitation).toContain("remote input remains unavailable");
   });
 
   it("keeps the feasibility harness on package-root imports", async () => {

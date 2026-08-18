@@ -31,6 +31,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     let completedAt: String?
     let durationMs: Int?
     let progressSequence: Int?
+    let extensionOrigin: ExtensionToolOrigin?
     var id: String { toolCallId }
 
     init(
@@ -39,7 +40,8 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         output: String? = nil, outputTruncated: Bool? = nil,
         isError: Bool, startedAt: String, updatedAt: String,
         lastProgressAt: String? = nil, completedAt: String? = nil,
-        durationMs: Int? = nil, progressSequence: Int? = nil
+        durationMs: Int? = nil, progressSequence: Int? = nil,
+        extensionOrigin: ExtensionToolOrigin? = nil
     ) {
         self.toolCallId = toolCallId
         self.toolName = toolName
@@ -57,6 +59,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         self.completedAt = completedAt
         self.durationMs = durationMs
         self.progressSequence = progressSequence
+        self.extensionOrigin = extensionOrigin
     }
 }
 

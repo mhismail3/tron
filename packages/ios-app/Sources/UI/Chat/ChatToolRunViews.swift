@@ -121,7 +121,8 @@ struct ToolCard: View {
             durationMs: timing?.durationMs,
             lastProgressAt: timing?.lastProgressAt,
             progressSequence: timing?.progressSequence,
-            outputTruncated: timing?.outputTruncated ?? outputTruncated
+            outputTruncated: timing?.outputTruncated ?? outputTruncated,
+            extensionOrigin: timing?.extensionOrigin
         )
     }
 
@@ -145,7 +146,10 @@ struct ToolCard: View {
         if error { return .error }
         return subtitle == "Running" ? .warning : .accent
     }
-    private var displayTitle: String { ToolDetailPresentation.displayTitle(for: title) }
+    private var displayTitle: String {
+        if timing?.extensionOrigin != nil { return "Extension activity" }
+        return ToolDetailPresentation.displayTitle(for: title)
+    }
     private var icon: String {
         error ? "exclamationmark.triangle.fill" : ToolDetailPresentation.icon(for: title)
     }

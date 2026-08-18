@@ -59,6 +59,7 @@ final class AppModel {
     struct SessionNavigationRoute: Identifiable, Hashable {
         let sessionID: String
         let editorText: String?
+        let initialModel: ModelRef?
         fileprivate let gatewayProfileID: String?
         fileprivate let gatewayLifecycleGeneration: Int?
         var id: String { sessionID }
@@ -66,13 +67,25 @@ final class AppModel {
         init(
             sessionID: String,
             editorText: String?,
+            initialModel: ModelRef? = nil,
             gatewayProfileID: String? = nil,
             gatewayLifecycleGeneration: Int? = nil
         ) {
             self.sessionID = sessionID
             self.editorText = editorText
+            self.initialModel = initialModel
             self.gatewayProfileID = gatewayProfileID
             self.gatewayLifecycleGeneration = gatewayLifecycleGeneration
+        }
+
+        func withInitialModel(_ model: ModelRef?) -> SessionNavigationRoute {
+            SessionNavigationRoute(
+                sessionID: sessionID,
+                editorText: editorText,
+                initialModel: model,
+                gatewayProfileID: gatewayProfileID,
+                gatewayLifecycleGeneration: gatewayLifecycleGeneration
+            )
         }
     }
 
@@ -135,6 +148,7 @@ final class AppModel {
     var authPrompt: AuthPromptState? { providerAuth.prompt }
     var authEvent: AuthEventState? { providerAuth.event }
     private var noticeStore = GlobalNoticeStore()
+    private var sessionCatchUpNoticeTask: Task<Void, Never>?
     var latestNotice: String? { noticeStore.latest }
     var lastError: String?
     var onboardingError: String?
@@ -158,6 +172,7 @@ final class AppModel {
 
     private var eventTask: Task<Void, Never>?
     private var extensionEditorSyncTasks: [SessionPresentationIdentity: Task<Void, Never>] = [:]
+    private var extensionEditorPendingText: [SessionPresentationIdentity: String] = [:]
     private var extensionEditorSyncGenerations: [SessionPresentationIdentity: Int] = [:]
     private var extensionEditorOperationReceipts: [SessionPresentationIdentity: [String]] = [:]
     private var deviceLoadGeneration = 0
@@ -557,14 +572,28 @@ final class AppModel {
     }
 
     func postNotice(_ message: String, replacing key: GlobalNoticeKey? = nil) {
-        noticeStore.post(message, replacing: key)
+        if key == .sessionCatchUp {
+            sessionCatchUpNoticeTask?.cancel()
+            noticeStore.post(message, replacing: key)
+            sessionCatchUpNoticeTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(12))
+                guard !Task.isCancelled else { return }
+                self?.noticeStore.remove(.sessionCatchUp)
+                self?.sessionCatchUpNoticeTask = nil
+            }
+        } else {
+            noticeStore.post(message, replacing: key)
+        }
     }
 
     func removeNotice(_ key: GlobalNoticeKey) {
+        if key == .sessionCatchUp { sessionCatchUpNoticeTask?.cancel(); sessionCatchUpNoticeTask = nil }
         noticeStore.remove(key)
     }
 
     func dismissNotices() {
+        sessionCatchUpNoticeTask?.cancel()
+        sessionCatchUpNoticeTask = nil
         noticeStore.removeAll()
     }
 
@@ -1122,6 +1151,20 @@ final class AppModel {
         try await sessionMutations.setTools(tools, sessionID: sessionID)
     }
 
+    func setExtensionToolsExpanded(
+        sessionID: String,
+        hostEpoch: String,
+        presentationRevision: Int,
+        expanded: Bool
+    ) async throws {
+        try await sessionMutations.setExtensionToolsExpanded(
+            sessionID: sessionID,
+            hostEpoch: hostEpoch,
+            presentationRevision: presentationRevision,
+            expanded: expanded
+        )
+    }
+
     func fork(
         sessionID: String,
         entryID: String,
@@ -1461,6 +1504,7 @@ final class AppModel {
     private func cancelExtensionEditorSynchronization(for target: SessionPresentationIdentity) {
         extensionEditorSyncTasks[target]?.cancel()
         extensionEditorSyncTasks[target] = nil
+        extensionEditorPendingText[target] = nil
         extensionEditorSyncGenerations[target] = nil
         extensionEditorOperationReceipts[target] = nil
     }
@@ -1468,52 +1512,66 @@ final class AppModel {
     private func cancelAllExtensionEditorSynchronization() {
         for task in extensionEditorSyncTasks.values { task.cancel() }
         extensionEditorSyncTasks.removeAll()
+        extensionEditorPendingText.removeAll()
         extensionEditorSyncGenerations.removeAll()
         extensionEditorOperationReceipts.removeAll()
     }
 
+    /// Coalesces native composer echoes into one target-scoped worker. A worker
+    /// never cancels after a request may have crossed the wire; later edits are
+    /// retained as the latest value and use the next authoritative revision.
     func scheduleExtensionEditorUpdate(target: SessionPresentationIdentity, text: String) {
         guard ownsPresentation(target),
-              let scheduledPresentation = authoritativeSnapshot(for: target.sessionID)?.extensionPresentation,
-              !scheduledPresentation.hostEpoch.isEmpty else { return }
-        let scheduledHostEpoch = scheduledPresentation.hostEpoch
-        let scheduledBaseRevision = scheduledPresentation.semanticState.editorRevision
-        extensionEditorSyncTasks[target]?.cancel()
+              let presentation = authoritativeSnapshot(for: target.sessionID)?.extensionPresentation,
+              !presentation.hostEpoch.isEmpty else { return }
+        extensionEditorPendingText[target] = text
+        guard extensionEditorSyncTasks[target] == nil else { return }
         let generation = (extensionEditorSyncGenerations[target] ?? 0) + 1
         extensionEditorSyncGenerations[target] = generation
         extensionEditorSyncTasks[target] = Task { @MainActor [weak self] in
+            guard let self else { return }
             do {
-                try await Task.sleep(for: .milliseconds(150))
-                guard !Task.isCancelled, let self, self.ownsPresentation(target),
-                      self.authoritativeSnapshot(for: target.sessionID)?.extensionPresentation.hostEpoch == scheduledHostEpoch else { return }
-                let hostEpoch = scheduledHostEpoch
-                let operationID = self.uuidSource.next().uuidString
-                var receipts = self.extensionEditorOperationReceipts[target] ?? []
-                receipts.append(operationID)
-                if receipts.count > 128 { receipts.removeFirst(receipts.count - 128) }
-                self.extensionEditorOperationReceipts[target] = receipts
-                let result = try await self.sessionMutations.updateExtensionEditor(
-                    sessionID: target.sessionID,
-                    hostEpoch: hostEpoch,
-                    baseRevision: scheduledBaseRevision,
-                    operationID: operationID,
-                    text: text
-                )
-                guard !Task.isCancelled, self.ownsPresentation(target),
-                      self.authoritativeSnapshot(for: target.sessionID)?.extensionPresentation.hostEpoch == hostEpoch else { return }
-                // Never force a stale local edit through at a newer revision. A
-                // fresh user edit will use the newly authoritative base.
-                if !result.applied, self.extensionEditorSyncGenerations[target] == generation {
-                    self.lastError = "The extension editor changed before the composer update could be applied."
+                while !Task.isCancelled {
+                    try await Task.sleep(for: .milliseconds(150))
+                    guard self.ownsPresentation(target),
+                          let current = self.authoritativeSnapshot(for: target.sessionID)?.extensionPresentation,
+                          !current.hostEpoch.isEmpty,
+                          let pending = self.extensionEditorPendingText.removeValue(forKey: target) else { break }
+                    let operationID = self.uuidSource.next().uuidString
+                    var receipts = self.extensionEditorOperationReceipts[target] ?? []
+                    receipts.append(operationID)
+                    if receipts.count > 128 { receipts.removeFirst(receipts.count - 128) }
+                    self.extensionEditorOperationReceipts[target] = receipts
+                    let result = try await self.sessionMutations.updateExtensionEditor(
+                        sessionID: target.sessionID,
+                        hostEpoch: current.hostEpoch,
+                        baseRevision: current.semanticState.editorRevision,
+                        operationID: operationID,
+                        text: pending
+                    )
+                    guard self.ownsPresentation(target) else { break }
+                    if !result.applied {
+                        // With one serialized native writer, rejection proves a
+                        // newer extension-owned revision won. Its authoritative
+                        // directive is delivered through the presentation reducer
+                        // and existing use/keep arbiter; blindly retrying this
+                        // attempted value would either overwrite that directive or
+                        // spin against a revision the client has not installed yet.
+                        // A genuinely newer local edit remains in pendingText and
+                        // is handled after the directive settles.
+                    }
+                    // Any newer pending value, including an empty deletion, is
+                    // retained and sent by this same serialized worker.
                 }
             } catch is CancellationError {
                 return
             } catch {
-                guard !Task.isCancelled, let self, self.ownsPresentation(target) else { return }
-                self.lastError = error.localizedDescription
+                // Transport failures are surfaced by the connection owner. Do
+                // not turn an expected editor race into a global alert.
             }
-            if self?.extensionEditorSyncGenerations[target] == generation {
-                self?.extensionEditorSyncTasks[target] = nil
+            if self.extensionEditorSyncGenerations[target] == generation {
+                self.extensionEditorSyncTasks[target] = nil
+                if self.extensionEditorPendingText[target] != nil { self.scheduleExtensionEditorUpdate(target: target, text: self.extensionEditorPendingText[target]!) }
             }
         }
     }
@@ -1719,6 +1777,8 @@ final class AppModel {
     }
 
     private func clearLiveConnectionProjection() {
+        sessionCatchUpNoticeTask?.cancel()
+        sessionCatchUpNoticeTask = nil
         noticeStore.removeAll()
         sessionCatalog.markDisconnected()
     }

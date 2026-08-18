@@ -969,7 +969,8 @@ enum ChatTranscriptProjectionKernel {
             durationMs: live.durationMs ?? canonical.durationMs,
             lastProgressAt: live.lastProgressAt ?? live.updatedAt,
             progressSequence: live.progressSequence,
-            outputTruncated: live.outputTruncated == true || canonical.outputTruncated
+            outputTruncated: live.outputTruncated == true || canonical.outputTruncated,
+            extensionOrigin: live.extensionOrigin ?? canonical.extensionOrigin
         )
     }
 
@@ -981,7 +982,8 @@ enum ChatTranscriptProjectionKernel {
             fallbackContent: tool.output == nil ? (response ?? tool.arguments) : nil,
             error: tool.isError, startedAt: tool.startedAt, completedAt: tool.completedAt,
             durationMs: tool.durationMs, lastProgressAt: tool.lastProgressAt ?? tool.updatedAt,
-            progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated == true
+            progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated == true,
+            extensionOrigin: tool.extensionOrigin
         )
     }
 
@@ -997,7 +999,8 @@ enum ChatTranscriptProjectionKernel {
             response: tool.response, content: tool.content, fallbackContent: tool.fallbackContent,
             error: true, startedAt: tool.startedAt, completedAt: tool.completedAt,
             durationMs: tool.durationMs, lastProgressAt: tool.lastProgressAt,
-            progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated
+            progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated,
+            extensionOrigin: tool.extensionOrigin
         )
     }
 
@@ -1024,7 +1027,8 @@ enum ChatTranscriptProjectionKernel {
         case .message where item.role == .toolResult:
             return [toolResultPresentation(item)]
         case .message:
-            return (item.content ?? []).compactMap { part in
+            let parts: [ContentPart] = (item.content ?? []) ?? []
+            return parts.compactMap { part -> ChatToolPresentation? in
                 guard part.type == .toolCall else { return nil }
                 if let callID = part.toolCallId, let result = results[callID] {
                     return ChatToolPresentation(
@@ -1035,14 +1039,15 @@ enum ChatTranscriptProjectionKernel {
                         error: result.isError == true, startedAt: result.startedAt ?? item.timestamp,
                         completedAt: result.completedAt ?? result.timestamp,
                         durationMs: ToolTiming.observedDuration(callTimestamp: item.timestamp, result: result),
-                        lastProgressAt: result.lastProgressAt, progressSequence: result.progressSequence
+                        lastProgressAt: result.lastProgressAt, progressSequence: result.progressSequence,
+                        extensionOrigin: result.extensionOrigin
                     )
                 }
                 return ChatToolPresentation(
                     id: part.toolCallId ?? part.id, title: part.name ?? "Tool", subtitle: "Invocation",
                     request: part.arguments, response: nil, content: "", fallbackContent: part.arguments,
                     error: false, startedAt: item.timestamp, completedAt: nil, durationMs: nil,
-                    lastProgressAt: item.timestamp, progressSequence: nil
+                    lastProgressAt: item.timestamp, progressSequence: nil, extensionOrigin: nil
                 )
             }
         case .compaction, .branchSummary, .modelChange, .thinkingChange, .label:

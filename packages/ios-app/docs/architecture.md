@@ -439,8 +439,15 @@ next revision, ignore only equal-revision duplicates, and request an authoritati
 lower/reordered revision, malformed mutation, or epoch mismatch. Fitted snapshots retain bounded omitted
 surface ID/revision baselines and leased/actionable state so later exact-next full frames converge; a complete
 snapshot replaces the whole projection. Unknown surface kinds decode to a readable plain-text fallback; malformed upserts never erase an existing
-surface, and removal is an explicit ID list. Native surface rendering and widget/status chrome remain
-temporarily disabled; the gate never inspects extension-owned keys. Offline cache strips all surfaces,
+surface, and removal is an explicit ID list. Native rendering admits only read-only widget surfaces through deterministic, horizontally-scrolling
+composer pills (one opaque pill per semantic widget; explicitly matching public surface provenance may
+share a pill); tapping a pill opens a bounded native detail sheet scoped to that group. The sheet
+translates terminal-only hints into native disclosure controls and uses the public tools-expanded
+mutation with exact epoch/revision/command ownership to rerender retained surfaces. Frame runs use a
+wrapping native flow layout rather than a horizontal terminal viewport, preserving admitted safe links. Status/service-only
+activity uses one conservative fallback pill. Custom, overlay, editor, tool, message, and entry surfaces
+remain deferred. Unknown or ambiguous provenance fails open to separate opaque groups, and the UI never
+inspects package names or extension-owned keys. Offline cache strips all surfaces,
 interactions, lease/focus, capabilities/diagnostics, and ephemeral semantic values.
 Native safe-area layout therefore pushes the transcript exactly once and reverses naturally when
 the keyboard or composer contracts. One geometry observation of the complete composer—not
@@ -807,8 +814,8 @@ morphs never replay an entrance. Reduce Motion retains only a brief opacity reve
 compaction/branch/configuration entries, embedded assistant failures, and exact admitted custom/retry
 working detail share one semantic notification projection and capsule primitive. Ordinary default running
 state instead drives only the bottom-safe-area blur and never changes transcript geometry. Extension status
-state remains canonical but its native pill presentation is temporarily disabled. Only a pill
-with real detail content is an interactive Liquid Glass button; no-detail events use a flat tinted
+state remains canonical and its bounded native pill presentation is enabled generically.
+Only a pill with real detail content is an interactive Liquid Glass button; no-detail events use a flat tinted
 fill and stroke with identical type and geometry. Tones are Sendable semantic values resolved to
 SwiftUI color only at the view boundary. Conversation turns retain one row owner for text, thinking, and
 lifecycle-safe attachments; event/control capsules and tool-run/detail routes are separate presentation owners
@@ -818,7 +825,7 @@ canonical entry share a presentation-only global-ordinal identity, so “Compact
 
 Runtime working pills install atomically beside the exact tagged timeline. Working/status-only revisions reuse
 the unchanged expensive transcript projection. Status events continue to advance chat timeline generation even
-while their output is hidden, so restoring status pills remains the single explicit presentation-policy change. Pending and admitted entrance ownership each retain
+while their output is visible, so status rendering remains a projection-only policy change. Pending and admitted entrance ownership each retain
 at most the 512-item page bound in deterministic FIFO order. Retired pending rows become visible
 without replay, while retired admitted rows preserve their local revealed state. Candidates are
 admitted by current row geometry: each pending row carries the exact displayed installation tag, so a

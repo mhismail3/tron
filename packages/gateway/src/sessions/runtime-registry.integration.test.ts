@@ -1034,16 +1034,29 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await expect(registry.acquire(sessionID)).rejects.toMatchObject({ code: "not_found" });
   });
 
-  it("keeps RPC factories semantic and does not start the dormant TUI host", async () => {
+  it("projects retained component widgets through the RPC-bound host without enabling TUI mode", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-rpc-factory-dormant-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
     const extensionDir = join(cwd, ".pi", "extensions");
     await mkdir(extensionDir, { recursive: true });
     await writeFile(join(extensionDir, "rpc-factory.ts"), `export default function (pi) {
-      pi.on("session_start", (_event, ctx) => ctx.ui.setWidget("factory", () => ({
-        render: () => ["must not mount"], invalidate: () => {}
-      })));
+      let invoked = false;
+      pi.on("session_start", async (_event, ctx) => {
+        ctx.ui.setStatus("context-has-ui", ctx.hasUI ? "true" : "false");
+        ctx.ui.setStatus("context-mode", ctx.mode);
+        ctx.ui.setWidget("factory", () => ({
+          render: () => ["must mount"], invalidate: () => {}
+        }));
+        try {
+          await ctx.ui.custom(() => {
+            invoked = true;
+            return { render: () => ["must not invoke"], invalidate: () => {} };
+          });
+        } catch {
+          ctx.ui.setStatus("custom-deferred", invoked ? "invoked" : "not-invoked");
+        }
+      });
     }\n`);
     const trust = new TrustService(agentDir);
     await trust.set(cwd, true);
@@ -1055,9 +1068,48 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     await registry.initialize();
     const slot = await registry.create(cwd);
     const internal = slot as unknown as { extensionHost: { isTuiStarted: boolean; mountedComponentCount: number } };
-    expect(internal.extensionHost.isTuiStarted).toBe(false);
-    expect(internal.extensionHost.mountedComponentCount).toBe(0);
-    expect(slot.snapshot().extensionPresentation.semanticState.widgets).toEqual([]);
+    await waitUntil(() => internal.extensionHost.mountedComponentCount === 1);
+    expect(internal.extensionHost.isTuiStarted).toBe(true);
+    const snapshot = slot.snapshot();
+    expect(snapshot.extensionPresentation.semanticState.statuses).toMatchObject({
+      "context-has-ui": "true", "context-mode": "rpc", "custom-deferred": "not-invoked",
+    });
+    expect(snapshot.extensionPresentation.semanticState.widgets).toEqual([]);
+    expect(snapshot.extensionPresentation.surfaces).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "widget:ZmFjdG9yeQ", kind: "widget", placement: "aboveEditor", inputMode: "none" }),
+    ]));
+  });
+
+  it("keeps ask-style semantic selection on the RPC interaction path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-rpc-semantic-ask-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const extensionDir = join(cwd, ".pi", "extensions");
+    await mkdir(extensionDir, { recursive: true });
+    await writeFile(join(extensionDir, "semantic-ask.ts"), `export default function (pi) {
+      pi.registerCommand("semantic-ask", { handler: async (_args, ctx) => {
+        const answer = await ctx.ui.select("Choose a path", ["Keep", "Change"]);
+        ctx.ui.setStatus("answer", answer ?? "Cancelled");
+      }});
+    }\n`);
+    const trust = new TrustService(agentDir);
+    await trust.set(cwd, true);
+    const registry = new RuntimeRegistry({
+      agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
+      broadcast: () => {}, sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const command = slot.prompt("/semantic-ask");
+    await waitUntil(() => slot.snapshot().extensionPresentation.pendingInteractions.length === 1);
+    const pending = slot.snapshot().extensionPresentation.pendingInteractions[0]!;
+    expect(pending.method).toBe("select");
+    expect(pending.options).toEqual(["Keep", "Change"]);
+    const internal = slot as unknown as { respondToInteraction: (id: string, epoch: string, revision: number, value: unknown, cancelled: boolean) => void };
+    internal.respondToInteraction(pending.id, pending.hostEpoch, pending.presentationRevision, "Keep", false);
+    await command;
+    expect(slot.snapshot().extensionPresentation.semanticState.statuses.answer).toBe("Keep");
   });
 
   it("rotates and retires semantic epochs on direct, command, and trust reload paths", async () => {

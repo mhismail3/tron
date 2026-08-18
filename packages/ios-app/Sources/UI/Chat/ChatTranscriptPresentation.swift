@@ -5,17 +5,275 @@ enum ChatExtensionChromePolicy {
     // Canonical extension state continues to flow. These presentation gates stay
     // explicit so native widgets/statuses can be restored only after their layout
     // mutations participate in the chat viewport transaction.
-    static let rendersWidgets = false
+    static let rendersWidgets = true
     static let rendersStatusPills = false
 }
 
+struct ChatExtensionWidgetItem: Identifiable, Hashable {
+    enum Content: Hashable {
+        case semantic(ExtensionWidget)
+        case surface(ExtensionSurface)
+    }
+    let id: String
+    let content: Content
+}
+
+struct ExtensionInteractionScope: Equatable, Hashable, Sendable {
+    let id: String
+    let hostEpoch: String
+    let presentationRevision: Int
+
+    init(_ interaction: ExtensionInteraction) {
+        id = interaction.id
+        hostEpoch = interaction.hostEpoch
+        presentationRevision = interaction.presentationRevision
+    }
+}
+
+enum ChatExtensionForegroundPresentation: Equatable {
+    case none
+    case interaction
+    case editorRequest
+}
+
+enum ChatExtensionPresentationArbiter {
+    /// Semantic questions have deterministic priority over draft replacement
+    /// confirmation. The lower-priority request remains in the authoritative
+    /// store and is presented after the interaction settles.
+    static func presentation(
+        modelSettled: Bool,
+        hasInteraction: Bool,
+        hasEditorRequest: Bool
+    ) -> ChatExtensionForegroundPresentation {
+        guard modelSettled else { return .none }
+        if hasInteraction { return .interaction }
+        if hasEditorRequest { return .editorRequest }
+        return .none
+    }
+}
+
+enum ChatExtensionInteractionPolicy {
+    static func presentedInteraction(
+        _ interactions: [ExtensionInteraction],
+        suppressing scope: ExtensionInteractionScope?
+    ) -> ExtensionInteraction? {
+        interactions.first { interaction in
+            guard let scope else { return true }
+            return ExtensionInteractionScope(interaction) != scope
+        }
+    }
+
+    static func shouldClearSuppression(
+        _ scope: ExtensionInteractionScope,
+        from interactions: [ExtensionInteraction]
+    ) -> Bool {
+        !interactions.contains { ExtensionInteractionScope($0) == scope }
+    }
+}
+
+struct ExtensionActivityStatus: Identifiable, Hashable, Sendable {
+    /// The complete admitted key is identity. Display truncation is separate so
+    /// two 256-byte keys sharing a long prefix never collapse into one row.
+    let key: String
+    let displayKey: String
+    let value: String
+    var id: String { key }
+}
+
+struct ExtensionActivityServiceItem: Identifiable, Hashable, Sendable {
+    let id: String
+    let title: String
+    let status: String
+    let source: String
+    let error: Bool
+}
+
+struct ExtensionActivitySummary: Hashable, Sendable {
+    let label: String
+    let statusCount: Int
+    let widgetCount: Int
+    let serviceCount: Int
+    let runningServiceCount: Int
+    let services: [ExtensionActivityServiceItem]
+
+    var totalCount: Int { statusCount + widgetCount + serviceCount }
+}
+
+/// A separately addressable native extension affordance. Semantic widgets have
+/// no public provenance field, so each widget is conservatively kept opaque;
+/// rendered surfaces with the same explicit public source may share a group.
+struct ExtensionWidgetGroup: Identifiable, Hashable, Sendable {
+    let id: String
+    let label: String
+    let items: [ChatExtensionWidgetItem]
+    let statuses: [ExtensionActivityStatus]
+    let services: [ExtensionActivityServiceItem]
+
+    var isWidgetGroup: Bool { !items.isEmpty }
+}
+
 enum ChatExtensionWidgetPolicy {
+    static let maximumStackHeight: CGFloat = 220
+    static let maximumStatuses = 16
+    static let maximumStatusValueCharacters = 512
+    static let maximumWidgets = 24
+    static let maximumWidgetLines = 200
+    static let maximumServiceItems = 24
+
+    static func bounded(_ value: String, maximum: Int) -> String {
+        let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clean.count > maximum else { return clean }
+        return String(clean.prefix(maximum - 1)) + "…"
+    }
+
+    static func admittedStatuses(_ statuses: [String: String]) -> [ExtensionActivityStatus] {
+        statuses
+            .compactMap { key, value -> ExtensionActivityStatus? in
+                let displayKey = bounded(key, maximum: 128)
+                let boundedValue = bounded(value, maximum: maximumStatusValueCharacters)
+                guard !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !boundedValue.isEmpty else { return nil }
+                return ExtensionActivityStatus(key: key, displayKey: displayKey, value: boundedValue)
+            }
+            .sorted { $0.key < $1.key }
+            .prefix(maximumStatuses)
+            .map { $0 }
+    }
+
+    static func admittedItems(_ presentation: ExtensionPresentationState) -> [ChatExtensionWidgetItem] {
+        Array((mergedItems(widgets: presentation.semanticState.widgets, surfaces: presentation.surfaces, placement: .aboveEditor)
+            + mergedItems(widgets: presentation.semanticState.widgets, surfaces: presentation.surfaces, placement: .belowEditor)).prefix(maximumWidgets))
+    }
+
+    static func serviceItems(_ executions: [ToolExecutionState]) -> [ExtensionActivityServiceItem] {
+        executions
+            .filter { $0.extensionOrigin != nil }
+            .sorted { lhs, rhs in
+                if lhs.order != rhs.order { return (lhs.order ?? Int.max) < (rhs.order ?? Int.max) }
+                return lhs.toolCallId < rhs.toolCallId
+            }
+            .prefix(maximumServiceItems)
+            .map {
+                ExtensionActivityServiceItem(
+                    id: $0.toolCallId,
+                    title: bounded($0.toolName, maximum: 96),
+                    status: $0.status == .running ? "Running" : ($0.status == .failed ? "Failed" : "Completed"),
+                    source: bounded($0.extensionOrigin?.source ?? "Extension", maximum: 128),
+                    error: $0.isError
+                )
+            }
+    }
+
+    static func groups(_ presentation: ExtensionPresentationState, executions: [ToolExecutionState] = []) -> [ExtensionWidgetGroup] {
+        let statuses = admittedStatuses(presentation.semanticState.statuses)
+        let services = serviceItems(executions)
+        var matchedStatusKeys = Set<String>()
+        var semantic = presentation.semanticState.widgets
+            .sorted { lhs, rhs in
+                if lhs.placement != rhs.placement { return lhs.placement.rawValue < rhs.placement.rawValue }
+                return lhs.key < rhs.key
+            }
+            .map { widget in
+                let exactStatus = statuses.first(where: { $0.key == widget.key })
+                if let exactStatus { matchedStatusKeys.insert(exactStatus.key) }
+                let contentLabel = widget.lines
+                    .map(NativeExtensionText.clean)
+                    .first { !$0.isEmpty && !NativeExtensionText.isDetailHint($0) }
+                let label = exactStatus?.value ?? contentLabel ?? widget.key
+                return ExtensionWidgetGroup(
+                    id: "semantic:\(widget.key)",
+                    label: bounded(label, maximum: 64),
+                    items: [ChatExtensionWidgetItem(id: "semantic-widget:\(widget.key)", content: .semantic(widget))],
+                    statuses: exactStatus.map { [$0] } ?? [], services: []
+                )
+            }
+        let surfaces = visibleSurfaces(presentation.surfaces, placement: .aboveEditor)
+            + visibleSurfaces(presentation.surfaces, placement: .belowEditor)
+        let groupedSurfaces = Dictionary(grouping: surfaces) { surface in
+            surface.provenance?.source.map { "source:\($0)" } ?? "surface:\(surface.id)"
+        }
+        var matchedServiceIDs = Set<String>()
+        var surfaceGroups = groupedSurfaces.map { key, group in
+            let ordered = group.sorted { $0.id < $1.id }
+            let source = ordered.first?.provenance?.source?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let exactServices = source.map { source in services.filter { $0.source == source } } ?? []
+            exactServices.forEach { matchedServiceIDs.insert($0.id) }
+            let contentLabel = ordered
+                .flatMap { $0.frame.lines.map(\.plainText) }
+                .map(NativeExtensionText.clean)
+                .first { !$0.isEmpty && !NativeExtensionText.isDetailHint($0) }
+            let label = source.flatMap { $0.isEmpty ? nil : $0 } ?? contentLabel ?? "Extension widget"
+            return ExtensionWidgetGroup(
+                id: key,
+                label: bounded(label, maximum: 64),
+                items: ordered.map { ChatExtensionWidgetItem(id: "surface-widget:\($0.id)", content: .surface($0)) },
+                statuses: [], services: exactServices
+            )
+        }.sorted { $0.id < $1.id }
+        let unmatchedStatuses = statuses.filter { !matchedStatusKeys.contains($0.key) }
+        let unmatchedServices = services.filter { !matchedServiceIDs.contains($0.id) }
+        if !unmatchedStatuses.isEmpty || !unmatchedServices.isEmpty || (semantic.isEmpty && surfaceGroups.isEmpty && (!statuses.isEmpty || !services.isEmpty)) {
+            let fallback = ExtensionWidgetGroup(
+                id: "activity",
+                label: "Extension activity",
+                items: [],
+                statuses: unmatchedStatuses,
+                services: unmatchedServices
+            )
+            if !fallback.statuses.isEmpty || !fallback.services.isEmpty { surfaceGroups.append(fallback) }
+        }
+        return (semantic + surfaceGroups).sorted { $0.id < $1.id }
+    }
+
+    static func summary(_ presentation: ExtensionPresentationState, executions: [ToolExecutionState] = []) -> ExtensionActivitySummary? {
+        let statuses = admittedStatuses(presentation.semanticState.statuses)
+        let items = admittedItems(presentation)
+        let services = serviceItems(executions)
+        guard !statuses.isEmpty || !items.isEmpty || !services.isEmpty else { return nil }
+        let running = services.filter { $0.status == "Running" }.count
+        let label: String
+        if running > 0 { label = running == 1 ? "Extension activity · 1 running" : "Extension activity · \(running) running" }
+        else if statuses.count == 1 { label = bounded(statuses[0].value, maximum: 72) }
+        else if items.count == 1 && statuses.isEmpty && services.isEmpty { label = "Extension widget" }
+        else { label = "Extension activity" }
+        return ExtensionActivitySummary(label: label, statusCount: statuses.count, widgetCount: items.count, serviceCount: services.count, runningServiceCount: running, services: services)
+    }
+
+    static func hasActivity(_ presentation: ExtensionPresentationState, executions: [ToolExecutionState] = []) -> Bool {
+        guard ChatExtensionChromePolicy.rendersWidgets else { return false }
+        return summary(presentation, executions: executions) != nil
+    }
+
     static func visibleWidgets(
         _ widgets: [ExtensionWidget],
         placement: ExtensionWidget.Placement
     ) -> [ExtensionWidget] {
         guard ChatExtensionChromePolicy.rendersWidgets else { return [] }
         return widgets.filter { $0.placement == placement }
+    }
+
+    static func visibleSurfaces(
+        _ surfaces: [ExtensionSurface],
+        placement: ExtensionSurface.Placement
+    ) -> [ExtensionSurface] {
+        guard ChatExtensionChromePolicy.rendersWidgets else { return [] }
+        return surfaces
+            .filter { $0.kind == .widget && $0.placement == placement && $0.inputMode == .none }
+            .sorted { $0.id == $1.id ? $0.revision < $1.revision : $0.id < $1.id }
+    }
+
+    static func mergedItems(
+        widgets: [ExtensionWidget],
+        surfaces: [ExtensionSurface],
+        placement: ExtensionWidget.Placement
+    ) -> [ChatExtensionWidgetItem] {
+        guard ChatExtensionChromePolicy.rendersWidgets else { return [] }
+        let semantic = widgets.filter { $0.placement == placement }.map {
+            ChatExtensionWidgetItem(id: "semantic-widget:\($0.key)", content: .semantic($0))
+        }
+        let remotePlacement: ExtensionSurface.Placement = placement == .aboveEditor ? .aboveEditor : .belowEditor
+        let remote = visibleSurfaces(surfaces, placement: remotePlacement)
+            .map { ChatExtensionWidgetItem(id: "surface-widget:\($0.id)", content: .surface($0)) }
+        return (semantic + remote).sorted { $0.id < $1.id }
     }
 }
 
@@ -277,6 +535,7 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let lastProgressAt: String?
     let progressSequence: Int?
     let outputTruncated: Bool
+    let extensionOrigin: ExtensionToolOrigin?
 
     init(_ tool: ChatToolPresentation) {
         id = tool.id
@@ -289,6 +548,7 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         lastProgressAt = tool.lastProgressAt
         progressSequence = tool.progressSequence
         outputTruncated = tool.outputTruncated
+        extensionOrigin = tool.extensionOrigin
     }
 
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
@@ -341,6 +601,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     let lastProgressAt: String?
     let progressSequence: Int?
     let outputTruncated: Bool
+    let extensionOrigin: ExtensionToolOrigin?
 
     init(
         id: String,
@@ -356,7 +617,8 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         durationMs: Int?,
         lastProgressAt: String?,
         progressSequence: Int?,
-        outputTruncated: Bool = false
+        outputTruncated: Bool = false,
+        extensionOrigin: ExtensionToolOrigin? = nil
     ) {
         self.id = id
         self.title = title
@@ -372,6 +634,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         self.lastProgressAt = lastProgressAt
         self.progressSequence = progressSequence
         self.outputTruncated = outputTruncated || response?.hasToolOutputTruncationMetadata == true
+        self.extensionOrigin = extensionOrigin
     }
 
     init(descriptor: ChatToolDescriptor, payload: ChatToolPayload) {
@@ -389,6 +652,7 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         lastProgressAt = descriptor.lastProgressAt
         progressSequence = descriptor.progressSequence
         outputTruncated = descriptor.outputTruncated
+        extensionOrigin = descriptor.extensionOrigin
     }
 
     var descriptor: ChatToolDescriptor { ChatToolDescriptor(self) }
@@ -591,17 +855,9 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                 material: .flat
             ))
         }
-        if ChatExtensionChromePolicy.rendersStatusPills {
-            values.append(contentsOf: snapshot.extensionPresentation.semanticState.statuses
-                .sorted(by: { $0.key < $1.key })
-                .map { key, value in
-                    ChatNotificationPresentation(
-                        id: "runtime-status-\(key)", semanticID: nil,
-                        icon: "info.circle.fill", title: value, detail: nil, body: nil,
-                        tone: .information, material: .flat
-                    )
-                })
-        }
+        // Extension statuses are presented by the composer activity pill, not
+        // as transcript rows. This keeps transient extension chrome out of
+        // canonical conversation scrolling.
         return values
     }
 }
@@ -622,9 +878,13 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     }
 
     var id: String { "tool-run-" + anchorID }
+    var isExtensionActivity: Bool { !tools.isEmpty && tools.allSatisfy { $0.extensionOrigin != nil } }
     var isRunning: Bool { tools.contains(where: \.isRunning) }
     var failureCount: Int { tools.filter(\.error).count }
-    var title: String { "\(isRunning ? "Using" : "Used") \(tools.count) \(tools.count == 1 ? "tool" : "tools")" }
+    var title: String {
+        if isExtensionActivity { return isRunning ? "Extension activity" : "Extension activity complete" }
+        return "\(isRunning ? "Using" : "Used") \(tools.count) \(tools.count == 1 ? "tool" : "tools")"
+    }
     var status: String? {
         if failureCount > 0 { return "\(failureCount) failed" }
         return isRunning ? "in progress" : nil

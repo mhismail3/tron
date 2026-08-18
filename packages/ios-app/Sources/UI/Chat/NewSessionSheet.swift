@@ -294,31 +294,17 @@ struct NewSessionSheet: View {
         defer { creationOwner.finish() }
         do {
             let route = try await model.createSession(cwd: cwd)
-            let overrideResolution = await applyModelOverride(modelOverride, to: route)
-            guard overrideResolution.presentsCreatedRoute,
-                  model.ownsNavigationRoute(route) else { return }
-            onCreated(route)
+            guard model.ownsNavigationRoute(route) else {
+                model.lastError = "The new session was created, but this navigation request is no longer current."
+                dismiss()
+                return
+            }
+            onCreated(route.withInitialModel(modelOverride))
             dismiss()
         } catch is CancellationError {
             return
         } catch {
             model.lastError = error.localizedDescription
-        }
-    }
-
-    private func applyModelOverride(
-        _ modelOverride: ModelRef?,
-        to route: AppModel.SessionNavigationRoute
-    ) async -> NewSessionModelOverrideResolution {
-        guard let modelOverride else { return .notRequested }
-        do {
-            try await model.setModel(modelOverride, sessionID: route.sessionID)
-            return .applied
-        } catch is CancellationError {
-            return .cancelled
-        } catch {
-            model.lastError = "Session created, but the selected model could not be applied: \(error.localizedDescription)"
-            return .failed
         }
     }
 

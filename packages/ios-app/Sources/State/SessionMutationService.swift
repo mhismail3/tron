@@ -357,6 +357,31 @@ final class SessionMutationService {
         )
     }
 
+    func setExtensionToolsExpanded(
+        sessionID: String,
+        hostEpoch: String,
+        presentationRevision: Int,
+        expanded: Bool
+    ) async throws {
+        struct Params: Codable {
+            let sessionId, hostEpoch, commandId: String
+            let presentationRevision: Int
+            let expanded: Bool
+        }
+        struct Response: Codable { let updated: Bool }
+        let commandID = uuidSource.next().uuidString
+        let params = Params(
+            sessionId: sessionID,
+            hostEpoch: hostEpoch,
+            commandId: commandID,
+            presentationRevision: presentationRevision,
+            expanded: expanded
+        )
+        let _: Response = try await executor.perform(method: "extension.toolsExpanded", commandID: commandID) {
+            try await client.request("extension.toolsExpanded", params)
+        }
+    }
+
     func answerInteraction(
         interactionID: String,
         hostEpoch: String,

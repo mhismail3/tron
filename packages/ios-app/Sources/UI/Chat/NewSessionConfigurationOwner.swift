@@ -42,15 +42,6 @@ struct NewSessionConfigurationOwner: Equatable, Sendable {
     }
 }
 
-enum NewSessionModelOverrideResolution: Equatable, Sendable {
-    case notRequested
-    case applied
-    case failed
-    case cancelled
-
-    var presentsCreatedRoute: Bool { self != .cancelled }
-}
-
 struct NewSessionCreationOwner: Equatable, Sendable {
     private(set) var isCreating = false
 

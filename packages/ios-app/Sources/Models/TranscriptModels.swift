@@ -26,6 +26,10 @@ private protocol TranscriptPayload: Codable, Hashable, Sendable {
     var timestamp: String { get }
 }
 
+struct ExtensionToolOrigin: Codable, Hashable, Sendable {
+    let source: String
+}
+
 struct MessageTranscriptItem: TranscriptPayload {
     let id: String
     let parentId: String?
@@ -47,6 +51,7 @@ struct MessageTranscriptItem: TranscriptPayload {
     let durationMs: Int?
     let lastProgressAt: String?
     let progressSequence: Int?
+    let extensionOrigin: ExtensionToolOrigin? = nil
 }
 
 struct BashTranscriptItem: TranscriptPayload {
@@ -194,6 +199,7 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
     var errorMessage: String? { if case .message(let value) = self { value.errorMessage } else { nil } }
     var toolCallId: String? { if case .message(let value) = self { value.toolCallId } else { nil } }
     var toolName: String? { if case .message(let value) = self { value.toolName } else { nil } }
+    var extensionOrigin: ExtensionToolOrigin? { if case .message(let value) = self { value.extensionOrigin } else { nil } }
     var isError: Bool? { if case .message(let value) = self { value.isError } else { nil } }
     var details: JSONValue? {
         switch self {

@@ -17,6 +17,7 @@ import {
 import { GatewayError } from "../errors.js";
 import type {
   CommandInfo,
+  ExtensionToolOrigin,
   JsonValue,
   QueuedMessageState,
   RetryState,
@@ -160,7 +161,7 @@ export class RuntimeSlot {
   ) {
     this.phase = interrupted ? "interrupted" : "idle";
     this.ui = this.createSemanticBroker();
-    this.extensionHost = new RemotePiExtensionHost(this.ui);
+    this.extensionHost = new RemotePiExtensionHost(this.ui, { enableBlockingCustom: false });
     this.lifecycle = new ExtensionLifecycleCoordinator(this.ui.presentation, () => this.hasRuntimeWork());
   }
 
@@ -175,7 +176,8 @@ export class RuntimeSlot {
         "semantic.revisioned-editor", "semantic.tools-expanded", "surfaces.full-frame",
       ],
       diagnostics: [
-        { code: "remote-components.pending", message: "Pi component surfaces are not mounted while production remains in RPC mode." },
+        { code: "remote-components.enabled", message: "Retained component widgets are projected as bounded read-only surfaces; blocking custom and overlay UI remain deferred." },
+        { code: "remote-components.overlay-deferred", message: "Overlay and interactive component UI remain deferred until native rendering and input leases are available." },
         { code: "theme.baseline-only", message: "Per-session process-global Pi theme synchronization is unavailable through the pinned public API." },
       ],
     });
@@ -350,12 +352,12 @@ export class RuntimeSlot {
     this.extensionHost.retire(reason);
     this.ui.retire(reason);
     this.ui = this.createSemanticBroker();
-    this.extensionHost = new RemotePiExtensionHost(this.ui);
+    this.extensionHost = new RemotePiExtensionHost(this.ui, { enableBlockingCustom: false });
     this.lifecycle.replaceActivity(this.ui.presentation);
     // reload() has already built its new public runner and invokes this hook
     // before session_start. Updating it directly avoids bindExtensions(), which
     // would emit a duplicate session_start.
-    this.runtime.session.extensionRunner.setUIContext(this.ui.context(), "rpc");
+    this.runtime.session.extensionRunner.setUIContext(this.extensionHost.context(), "rpc");
   }
 
   private async reloadBoundSession(): Promise<void> {
@@ -372,7 +374,7 @@ export class RuntimeSlot {
     const session = this.runtime.session;
     this.sessionManager = session.sessionManager;
     await session.bindExtensions({
-      uiContext: this.ui.context(),
+      uiContext: this.extensionHost.context(),
       mode: "rpc",
       commandContextActions: this.commandActions(),
       abortHandler: () => void this.abort(),
@@ -600,6 +602,7 @@ export class RuntimeSlot {
           updatedAt: now,
           lastProgressAt: now,
           progressSequence,
+          ...(this.extensionToolOrigin(event.toolName) ? { extensionOrigin: this.extensionToolOrigin(event.toolName) } : {}),
         };
         this.toolExecutions.set(event.toolCallId, state);
         this.rememberToolMetadata(event.toolCallId, state);
@@ -631,6 +634,9 @@ export class RuntimeSlot {
           updatedAt: now,
           lastProgressAt: now,
           progressSequence: (existing?.progressSequence ?? 0) + 1,
+          ...(this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin
+            ? { extensionOrigin: this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin }
+            : {}),
         };
         this.toolExecutions.set(event.toolCallId, state);
         this.rememberToolMetadata(event.toolCallId, state);
@@ -665,6 +671,9 @@ export class RuntimeSlot {
           completedAt: now,
           durationMs: Number.isFinite(Date.parse(startedAt)) ? Math.max(0, Date.parse(now) - Date.parse(startedAt)) : 0,
           progressSequence: (existing?.progressSequence ?? 0) + 1,
+          ...(this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin
+            ? { extensionOrigin: this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin }
+            : {}),
         };
         this.toolExecutions.set(event.toolCallId, state);
         this.rememberToolMetadata(event.toolCallId, state);
@@ -762,6 +771,19 @@ export class RuntimeSlot {
     this.activityHeartbeat = undefined;
   }
 
+  private extensionToolOrigin(toolName: string): ExtensionToolOrigin | undefined {
+    const session = this.runtime?.session;
+    if (!session) return undefined;
+    const tool = session.getAllTools().find(candidate => candidate.name === toolName);
+    if (!tool) return undefined;
+    const extensions = session.resourceLoader.getExtensions().extensions.filter(extension => extension.tools.has(toolName));
+    if (extensions.length !== 1) return undefined;
+    const extension = extensions[0]!;
+    if (tool.sourceInfo.path !== extension.path && tool.sourceInfo.path !== extension.resolvedPath) return undefined;
+    const source = tool.sourceInfo.source.trim();
+    return source ? { source } : undefined;
+  }
+
   private rememberToolMetadata(toolCallId: string, state: ToolExecutionState): void {
     this.toolMetadata.delete(toolCallId);
     this.toolMetadata.set(toolCallId, {
@@ -770,6 +792,7 @@ export class RuntimeSlot {
       ...(state.durationMs === undefined ? {} : { durationMs: state.durationMs }),
       lastProgressAt: state.lastProgressAt,
       progressSequence: state.progressSequence,
+      ...(state.extensionOrigin ? { extensionOrigin: state.extensionOrigin } : {}),
     });
     while (this.toolMetadata.size > 2_048) {
       const oldest = this.toolMetadata.keys().next().value as string | undefined;
@@ -1592,6 +1615,16 @@ export class RuntimeSlot {
   updateExtensionEditor(hostEpoch: string, baseRevision: number, operationId: string, text: string): JsonValue {
     this.assertNoTrustReload();
     return this.ui.updateEditor(hostEpoch, baseRevision, operationId, text) as unknown as JsonValue;
+  }
+
+  setExtensionToolsExpanded(hostEpoch: string, presentationRevision: number, expanded: boolean): JsonValue {
+    this.assertNoTrustReload();
+    const state = this.ui.presentation.state();
+    if (state.hostEpoch !== hostEpoch) throw new GatewayError("conflict", "Extension presentation epoch is stale");
+    if (state.revision !== presentationRevision) throw new GatewayError("conflict", "Extension presentation revision is stale");
+    this.runtime.session.extensionRunner.getUIContext().setToolsExpanded(expanded);
+    this.extensionHost.rerender();
+    return { updated: true };
   }
 
   beginTrustReload(): void {

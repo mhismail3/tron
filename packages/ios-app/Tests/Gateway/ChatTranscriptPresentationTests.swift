@@ -55,8 +55,8 @@ struct ChatTranscriptPresentationTests {
         #expect(!undersizedOvershoot.isPlausibleOpeningViewport)
     }
 
-    @Test("extension widgets remain canonical but are temporarily hidden")
-    func extensionWidgetPresentationIsSuppressed() {
+    @Test("extension widgets project into their generic composer slots")
+    func extensionWidgetPresentationIsVisible() {
         let widgets = [
             ExtensionWidget(key: "below-one", lines: ["One"], placement: .belowEditor),
             ExtensionWidget(key: "above-one", lines: ["Two"], placement: .aboveEditor),
@@ -64,13 +64,201 @@ struct ChatTranscriptPresentationTests {
             ExtensionWidget(key: "above-two", lines: ["Four"], placement: .aboveEditor),
         ]
 
-        #expect(!ChatExtensionChromePolicy.rendersWidgets)
-        #expect(ChatExtensionWidgetPolicy.visibleWidgets(widgets, placement: .aboveEditor).isEmpty)
-        #expect(ChatExtensionWidgetPolicy.visibleWidgets(widgets, placement: .belowEditor).isEmpty)
+        #expect(ChatExtensionChromePolicy.rendersWidgets)
+        #expect(ChatExtensionWidgetPolicy.visibleWidgets(widgets, placement: .aboveEditor).map(\.key) == ["above-one", "above-two"])
+        #expect(ChatExtensionWidgetPolicy.visibleWidgets(widgets, placement: .belowEditor).map(\.key) == ["below-one", "below-two"])
     }
 
-    @Test("extension statuses are hidden while working state remains visible")
-    func extensionStatusesAreSuppressed() throws {
+    @Test("extension activity policy is bounded, deterministic, and summarizes service work")
+    func extensionActivityPolicy() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.extensionPresentation.semanticState.statuses = [
+            "z": "Last status",
+            "a": String(repeating: "x", count: 700)
+        ]
+        snapshot.extensionPresentation.semanticState.widgets = [
+            ExtensionWidget(key: "widget", lines: ["detail"], placement: .aboveEditor)
+        ]
+        let service = ToolExecutionState(
+            toolCallId: "call-1", toolName: "subtask", order: 3, status: .running,
+            arguments: .null, partialResult: nil, result: nil,
+            isError: false, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
+            extensionOrigin: ExtensionToolOrigin(source: "public-source")
+        )
+        let summary = try #require(ChatExtensionWidgetPolicy.summary(snapshot.extensionPresentation, executions: [service]))
+        #expect(summary.runningServiceCount == 1)
+        #expect(summary.services.first?.source == "public-source")
+        #expect(summary.label == "Extension activity · 1 running")
+        #expect(ChatExtensionWidgetPolicy.admittedStatuses(snapshot.extensionPresentation.semanticState.statuses).count == 2)
+        #expect(ChatExtensionWidgetPolicy.admittedStatuses(snapshot.extensionPresentation.semanticState.statuses).allSatisfy { $0.value.count <= ChatExtensionWidgetPolicy.maximumStatusValueCharacters })
+        let descriptor = ChatToolDescriptor(ChatToolPresentation(
+            id: "call-1", title: "subtask", subtitle: "Running", request: nil, response: nil,
+            content: "", fallbackContent: nil, error: false, startedAt: nil, completedAt: nil,
+            durationMs: nil, lastProgressAt: nil, progressSequence: nil,
+            extensionOrigin: ExtensionToolOrigin(source: "public-source")
+        ))
+        let run = ChatToolRunPresentation(tools: [descriptor])
+        #expect(run.isExtensionActivity)
+        #expect(run.title == "Extension activity")
+    }
+
+    @Test("widget groups remain separate and deterministic with conservative activity fallback")
+    func widgetGroupsAreSeparate() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.extensionPresentation.semanticState.widgets = [
+            ExtensionWidget(key: "second", lines: ["B"], placement: .belowEditor),
+            ExtensionWidget(key: "first", lines: ["A"], placement: .belowEditor)
+        ]
+        snapshot.extensionPresentation.semanticState.statuses = ["status": "live"]
+        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation)
+        #expect(groups.map(\.id) == ["activity", "semantic:first", "semantic:second"])
+        #expect(groups.filter(\.isWidgetGroup).count == 2)
+        #expect(groups.first(where: { $0.id == "activity" })?.statuses.map(\.key) == ["status"])
+        snapshot.extensionPresentation.semanticState.statuses["first"] = "First status"
+        let matched = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation)
+        #expect(matched.first(where: { $0.id == "semantic:first" })?.statuses.map(\.key) == ["first"])
+        let frame = ExtensionFrame(width: 5, height: 1, lines: [ExtensionFrameLine(plainText: "Surface", runs: [ExtensionFrameRun(text: "Surface", style: ExtensionFrameStyle())])], plainText: "Surface")
+        snapshot.extensionPresentation.surfaces = [ExtensionSurface(id: "surface", kind: .widget, placement: .belowEditor, lifecycle: .retained, targetId: nil, provenance: .init(source: "public-source", path: nil), revision: 1, focused: false, inputMode: .none, frame: frame)]
+        let service = ToolExecutionState(toolCallId: "service", toolName: "tool", order: 1, status: .running, arguments: .null, partialResult: nil, result: nil, isError: false, startedAt: "now", updatedAt: "now", extensionOrigin: .init(source: "public-source"))
+        let sourced = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, executions: [service])
+        #expect(sourced.first(where: { $0.id == "source:public-source" })?.services.map(\.id) == ["service"])
+        snapshot.extensionPresentation.semanticState.widgets = []
+        snapshot.extensionPresentation.surfaces = []
+        #expect(ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation).count == 1)
+        #expect(ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation).first?.id == "activity")
+    }
+
+    @Test("native extension text strips complete terminal navigation hints only")
+    func nativeExtensionTextStripsTerminalChrome() {
+        #expect(NativeExtensionText.isDetailHint("Press ↓/← to inspect") == true)
+        #expect(NativeExtensionText.isDetailHint("↔ to inspect") == true)
+        #expect(NativeExtensionText.clean("Press ↓/← to inspect") == "")
+        #expect(NativeExtensionText.clean("  useful arrow status  ") == "useful arrow status")
+        #expect(NativeExtensionText.clean("Keyboard shortcuts: arrow keys move the cursor") == "Keyboard shortcuts: arrow keys move the cursor")
+    }
+
+    @Test("status identity remains complete when display keys share a long prefix")
+    func statusIdentityIsNotTruncated() {
+        let prefix = String(repeating: "k", count: 255)
+        let firstKey = prefix + "a"
+        let secondKey = prefix + "b"
+        let statuses = ChatExtensionWidgetPolicy.admittedStatuses([
+            firstKey: "one",
+            secondKey: "two"
+        ])
+        #expect(statuses.count == 2)
+        #expect(Set(statuses.map(\.id)) == Set([firstKey, secondKey]))
+        #expect(statuses.allSatisfy { $0.displayKey.count <= 128 })
+    }
+
+    @Test("interaction and editor presentation use deterministic priority")
+    func extensionPresentationArbiterPriority() {
+        #expect(ChatExtensionPresentationArbiter.presentation(
+            modelSettled: false, hasInteraction: true, hasEditorRequest: true
+        ) == .none)
+        #expect(ChatExtensionPresentationArbiter.presentation(
+            modelSettled: true, hasInteraction: true, hasEditorRequest: true
+        ) == .interaction)
+        #expect(ChatExtensionPresentationArbiter.presentation(
+            modelSettled: true, hasInteraction: false, hasEditorRequest: true
+        ) == .editorRequest)
+        #expect(ChatExtensionPresentationArbiter.presentation(
+            modelSettled: true, hasInteraction: false, hasEditorRequest: false
+        ) == .none)
+    }
+
+    @Test("unknown tool provenance fails open and does not become extension activity")
+    func unknownToolProvenanceFailsOpen() throws {
+        var snapshot = try fixture(transcript: "[]")
+        let service = ToolExecutionState(
+            toolCallId: "call-unknown", toolName: "tool", order: 1, status: .completed,
+            arguments: .null, partialResult: nil, result: nil,
+            isError: false, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z"
+        )
+        #expect(ChatExtensionWidgetPolicy.serviceItems([service]).isEmpty)
+        #expect(!ChatExtensionWidgetPolicy.hasActivity(snapshot.extensionPresentation, executions: [service]))
+    }
+
+    @Test("semantic and remote widgets merge with stable namespaced order")
+    func mergedExtensionWidgetPolicyIsDeterministic() {
+        let widget = ExtensionWidget(key: "goal", lines: ["Goal"], placement: .belowEditor)
+        let frame = ExtensionFrame(width: 4, height: 1, lines: [ExtensionFrameLine(plainText: "run", runs: [ExtensionFrameRun(text: "run", style: ExtensionFrameStyle())])], plainText: "run")
+        let surface = ExtensionSurface(id: "widget:c3Vi", kind: .widget, placement: .belowEditor, lifecycle: .retained, targetId: nil, provenance: nil, revision: 1, focused: false, inputMode: .none, frame: frame)
+        let items = ChatExtensionWidgetPolicy.mergedItems(widgets: [widget], surfaces: [surface], placement: .belowEditor)
+        #expect(items.map(\.id) == ["semantic-widget:goal", "surface-widget:widget:c3Vi"])
+        #expect(items.count == 2)
+    }
+
+    @Test("only admitted read-only widget surfaces project into composer slots")
+    func extensionSurfaceWidgetPolicyIsBounded() {
+        let frame = ExtensionFrame(width: 4, height: 1, lines: [ExtensionFrameLine(plainText: "goal", runs: [ExtensionFrameRun(text: "goal", style: ExtensionFrameStyle())])], plainText: "goal")
+        let surfaces = [
+            ExtensionSurface(id: "widget:subagent", kind: .widget, placement: .belowEditor, lifecycle: .retained, targetId: nil, provenance: nil, revision: 1, focused: false, inputMode: .none, frame: frame),
+            ExtensionSurface(id: "overlay:blocked", kind: .overlay, placement: .overlay, lifecycle: .blocking, targetId: nil, provenance: nil, revision: 1, focused: true, inputMode: .keys, frame: frame),
+            ExtensionSurface(id: "widget:interactive", kind: .widget, placement: .aboveEditor, lifecycle: .retained, targetId: nil, provenance: nil, revision: 1, focused: false, inputMode: .keys, frame: frame),
+        ]
+        #expect(ChatExtensionWidgetPolicy.visibleSurfaces(surfaces, placement: .belowEditor).map(\.id) == ["widget:subagent"])
+        #expect(ChatExtensionWidgetPolicy.visibleSurfaces(surfaces, placement: .aboveEditor).isEmpty)
+    }
+
+    @Test("extreme frame colors fall back when contrast is unreadable")
+    func extensionFrameContrastPolicy() {
+        #expect(ExtensionFrameColorPolicy.contrastRatio("000000", "FFFFFF") > 20)
+        #expect(ExtensionFrameColorPolicy.contrastRatio("000000", "000000") < 1.1)
+        #expect(ExtensionFrameColorPolicy.usableForeground("000000", background: "000000", fallback: "FFFFFF") == "FFFFFF")
+        #expect(ExtensionFrameColorPolicy.usableBackground("FFFFFF", foreground: "FFFFFF", fallback: "16181D") == "16181D")
+    }
+
+    @Test("inverse frame colors resolve as one contrast-checked swapped pair")
+    func inverseFrameColorsRemainReadable() {
+        let colors = ExtensionFrameColorPolicy.resolvedColors(
+            foreground: "FFFFFF",
+            background: "FFFFFF",
+            inverse: true,
+            nativeForeground: "F8FAFC",
+            nativeBackground: "090A0C",
+            fallbackBackground: "16181D"
+        )
+        #expect(colors.foreground == "FFFFFF")
+        #expect(colors.background == "16181D")
+        #expect(ExtensionFrameColorPolicy.contrastRatio(colors.foreground, colors.background) >= ExtensionFrameColorPolicy.minimumContrast)
+        let defaults = ExtensionFrameColorPolicy.resolvedColors(
+            foreground: nil,
+            background: nil,
+            inverse: true,
+            nativeForeground: "F8FAFC",
+            nativeBackground: "090A0C",
+            fallbackBackground: "16181D"
+        )
+        #expect(defaults.foreground == "090A0C")
+        #expect(defaults.background == "F8FAFC")
+    }
+
+    @Test("interaction suppression is exact-scope and queue-safe")
+    func interactionSuppressionScope() {
+        let first = ExtensionInteraction(id: "first", hostEpoch: "epoch", presentationRevision: 4, method: .select, title: "First", options: ["A"])
+        let newer = ExtensionInteraction(id: "newer", hostEpoch: "epoch", presentationRevision: 5, method: .input, title: "Newer")
+        let replacement = ExtensionInteraction(id: "first", hostEpoch: "epoch", presentationRevision: 6, method: .select, title: "Replacement", options: ["B"])
+        let nextEpoch = ExtensionInteraction(id: "first", hostEpoch: "next", presentationRevision: 1, method: .select, title: "Next", options: ["C"])
+        let scope = ExtensionInteractionScope(first)
+
+        #expect(ChatExtensionInteractionPolicy.presentedInteraction([first], suppressing: scope) == nil)
+        #expect(ChatExtensionInteractionPolicy.presentedInteraction([first, newer], suppressing: scope) == newer)
+        #expect(ChatExtensionInteractionPolicy.presentedInteraction([replacement], suppressing: scope) == replacement)
+        #expect(ChatExtensionInteractionPolicy.presentedInteraction([nextEpoch], suppressing: scope) == nextEpoch)
+        #expect(!ChatExtensionInteractionPolicy.shouldClearSuppression(scope, from: [first, newer]))
+        #expect(ChatExtensionInteractionPolicy.shouldClearSuppression(scope, from: [replacement]))
+        #expect(ChatExtensionInteractionPolicy.shouldClearSuppression(scope, from: []))
+    }
+
+    @Test("failed interaction responses do not create suppression scope")
+    func failedInteractionResponseLeavesScopeAvailable() {
+        let interaction = ExtensionInteraction(id: "failed", hostEpoch: "epoch", presentationRevision: 2, method: .confirm, title: "Continue?")
+        #expect(ChatExtensionInteractionPolicy.presentedInteraction([interaction], suppressing: nil) == interaction)
+    }
+
+    @Test("extension statuses stay out of transcript notifications and drive the activity pill")
+    func extensionStatusesAreVisible() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
         snapshot.extensionPresentation.semanticState.statuses = ["goal": "Pursuing goal"]
@@ -79,7 +267,7 @@ struct ChatTranscriptPresentationTests {
         let runtime = ChatNotificationPresentation.runtime(in: snapshot)
         #expect(!ChatExtensionChromePolicy.rendersStatusPills)
         #expect(runtime.map(\.id) == ["runtime-working"])
-        #expect(runtime.first?.title == "Still working")
+        #expect(ChatExtensionWidgetPolicy.hasActivity(snapshot.extensionPresentation))
     }
 
     @Test("queued compaction is explicit until canonical compaction starts")
