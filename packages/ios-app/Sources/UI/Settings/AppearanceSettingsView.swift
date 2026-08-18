@@ -7,13 +7,17 @@ struct AppearanceSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 20) {
-                TronSettingsGroup("Color Mode") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Color Mode")
+                        .font(TronTypography.sheetSectionHeader)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .accessibilityAddTraits(.isHeader)
                     TronSegmentedControl(
                         options: AppearanceMode.allCases.map { (label: $0.label, value: $0) },
                         selection: $appearance.mode,
                         accent: .tronEmerald
                     )
-                    .padding(14)
+                    .frame(maxWidth: .infinity)
                     .accessibilityLabel("Color Mode")
                 }
 

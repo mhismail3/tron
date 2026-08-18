@@ -224,16 +224,7 @@ struct ResourceSettingsView: View {
                         .padding(14)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
-                    if value == .proxy {
-                        SecureField(value.placeholder, text: binding(for: value))
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .tronField(monospaced: true, compact: true)
-                    } else {
-                        TextField(value.placeholder, text: binding(for: value), axis: value.acceptsMultipleLines ? .vertical : .horizontal)
-                            .lineLimit(value.acceptsMultipleLines ? 3...10 : 1...1)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            .tronField(monospaced: true, compact: true)
-                    }
+                    pathEditor(value)
                     if value.acceptsMultipleLines {
                         TronCaption("Enter one file, directory, glob, or exclusion per line.")
                     }
@@ -258,6 +249,36 @@ struct ResourceSettingsView: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+    }
+
+    @ViewBuilder
+    private func pathEditor(_ value: Editor) -> some View {
+        ZStack(alignment: .topLeading) {
+            if value == .proxy {
+                SecureField("", text: binding(for: value))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            } else {
+                TextField("", text: binding(for: value), axis: value.acceptsMultipleLines ? .vertical : .horizontal)
+                    .lineLimit(value.acceptsMultipleLines ? 3...10 : 1...1)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .multilineTextAlignment(.leading)
+            }
+            if binding(for: value).wrappedValue.isEmpty {
+                Text(value.placeholder)
+                    .font(TronTypography.code(size: TronTypography.sizeBody))
+                    .foregroundStyle(Color.tronTextMuted)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(
+            maxWidth: .infinity,
+            minHeight: value.acceptsMultipleLines ? 120 : 52,
+            alignment: value.acceptsMultipleLines ? .topLeading : .leading
+        )
+        .tronField(monospaced: true, compact: true)
+        .accessibilityLabel(value.title)
     }
 
     private func binding(for editor: Editor) -> Binding<String> {

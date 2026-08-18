@@ -308,7 +308,7 @@ private struct TechnicalJSONSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 Text(value.prettyPrinted)
-                    .font(TronTypography.codeContent)
+                    .font(TronTypography.codeJSON)
                     .foregroundStyle(Color.tronTextSecondary)
                     .textSelection(.enabled)
                     .padding(18)
@@ -360,7 +360,7 @@ private struct JSONFieldSheet: View {
                             .font(TronTypography.sheetSectionHeader)
                             .foregroundStyle(Color.tronTextMuted)
                         Text(selection.path)
-                            .font(TronTypography.codeContent)
+                            .font(TronTypography.codeJSON)
                             .foregroundStyle(Color.tronTextSecondary)
                             .textSelection(.enabled)
                     }

@@ -100,9 +100,13 @@ struct TrustSettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: summary.stateIcon)
-                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(summary.effectiveDecision == false ? Color.tronError : Color.tronAmber)
-                    .frame(width: 28)
+                    .frame(width: 38, height: 38)
+                    .background(
+                        (summary.effectiveDecision == false ? Color.tronError : Color.tronAmber).opacity(0.12),
+                        in: Circle()
+                    )
                 VStack(alignment: .leading, spacing: 4) {
                     Text(summary.stateTitle)
                         .font(TronTypography.headline)

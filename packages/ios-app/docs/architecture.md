@@ -785,7 +785,9 @@ or model choices disclose as progressively stacked sub-sheets rather than
 horizontal navigation pushes; Appearance uses the custom Liquid Glass segmented
 color-mode control and keeps font axes directly beneath each font choice before its
 preview. Draft-backed settings save from a disabled-until-dirty leading toolbar
-button rather than a trailing page action. Connected-provider logout lives in the
+button rather than a trailing page action. Resource path editors share one padded,
+top-leading multiline field treatment, while numeric settings use the shared
+larger numeric scale. Connected-provider logout lives in the
 provider row's compact action menu while connection is a plain trailing affordance. Import
 is owned by one progressive Import sheet, including canonical session-file import
 and the bounded legacy migration path; the legacy import action is outside its
@@ -948,7 +950,7 @@ behind an active turn. Project Resources presents resolved extensions, prompts, 
 context files, and tools as named rows over the canonical projection; each detail sheet
 foregrounds kind-specific purpose, invocation, availability, capabilities, schema/guidance,
 and source evidence instead of a generic field table. Project Trust presents a high-signal
-state card and decision actions before deferring the complete trust record to raw JSON.
+state card with an explicit status icon and decision actions before deferring the complete trust record to raw JSON.
 Extension tools and commands use
 separate adaptive collections instead of comma-delimited prose, while resource descriptions
 keep compound words together for natural line wrapping. Arbitrary arrays derive labels from stable name/path/source fields instead of exposing
@@ -977,7 +979,8 @@ counts without duplicating the detailed Project Resources inventory; full instru
 open from a separate matching row. Every raw technical JSON affordance is the same
 non-disclosing row and opens selectable, vertically scrollable protocol evidence in a
 wrapping single-column medium/large sheet; technical JSON never creates a horizontal
-viewport. A same-session reconnect that
+viewport; selectable raw JSON uses the shared readable code scale across every
+standardized JSON sheet. A same-session reconnect that
 installs a replacement Gateway runtime clears every secondary projection, advances its reload revisions, and rejects both
 stale completions and stale failures by exact subscription token plus request generation.
 Manage Session displays the runtime-projected latest cache-hit rate—the

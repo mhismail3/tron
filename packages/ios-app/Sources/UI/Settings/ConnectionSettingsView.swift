@@ -32,7 +32,7 @@ struct ConnectionsSettingsView: View {
                             TronSettingsDivider(accent: .tronCyan)
                             infoRow("cpu", "Agent runtime", info.piVersion, accent: .tronCyan)
                             TronSettingsDivider(accent: .tronCyan)
-                            infoRow("point.3.connected.trianglepath.dotted", "Protocol", String(info.protocolVersion), accent: .tronCyan)
+                            infoRow("point.3.connected.trianglepath.dotted", "Protocol", String(info.protocolVersion), accent: .tronCyan, numeric: true)
                         }
                     }
                 }
@@ -98,10 +98,10 @@ struct ConnectionsSettingsView: View {
         .task { await model.refreshDevices() }
     }
 
-    private func infoRow(_ icon: String, _ title: String, _ value: String, accent: Color) -> some View {
+    private func infoRow(_ icon: String, _ title: String, _ value: String, accent: Color, numeric: Bool = false) -> some View {
         TronValueRow(icon: icon, title: title, accent: accent) {
             Text(value)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .font(numeric ? TronTypography.numericValue : TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(Color.tronTextPrimary)
                 .multilineTextAlignment(.trailing)
         }
@@ -140,13 +140,14 @@ struct ImportSettingsView: View {
                 ) {
                     VStack(spacing: 0) {
                         TronValueRow(icon: "tray.and.arrow.down", title: "Previously imported", accent: .tronAmber) {
-                            Text(String(model.legacyImportedCount)).font(TronTypography.bodySM)
+                            Text(String(model.legacyImportedCount))
+                                .font(TronTypography.numericValue)
                         }
                         TronSettingsDivider(accent: .tronAmber)
                         TronValueRow(icon: "network", title: "Legacy server port", accent: .tronAmber) {
                             TextField("Port", value: $port, format: .number)
                                 .keyboardType(.numberPad)
-                                .tronInlineField(monospaced: true)
+                                .tronInlineField(numeric: true)
                                 .multilineTextAlignment(.trailing)
                                 .frame(width: 100)
                         }

@@ -87,18 +87,10 @@ struct AgentDefaultsSettingsView: View {
                 }
                 TronSettingsGroup("Project Resources", detail: "Trust controls project resource loading; it is not a sandbox.", accent: .tronAmber) {
                     TronValueRow(icon: "checkmark.shield", title: "Default Trust", accent: .tronAmber) {
-                        Menu {
+                        TronInlineMenu(draft.trust.capitalized, accent: .tronAmber) {
                             Button("Ask") { draft.trust = "ask" }
                             Button("Always") { draft.trust = "always" }
                             Button("Never") { draft.trust = "never" }
-                        } label: {
-                            Text(draft.trust.capitalized)
-                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                .foregroundStyle(Color.tronAmber)
-                                .padding(.horizontal, 10)
-                                .frame(minHeight: 36)
-                                .contentShape(Capsule())
-                                .glassEffect(.regular.tint(Color.tronAmber.opacity(0.10)).interactive(), in: Capsule())
                         }
                         .accessibilityLabel("Default Trust: \(draft.trust.capitalized)")
                     }

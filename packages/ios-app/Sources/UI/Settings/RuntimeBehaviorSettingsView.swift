@@ -196,14 +196,15 @@ struct RuntimeBehaviorSettingsView: View {
 
     private var scopeGroup: some View {
         TronSettingsGroup("Scope") {
-            VStack(spacing: 0) {
-                choiceRow("scope", "Settings Scope", scope == .project ? "Current Project" : "Global Defaults") {
-                    Button("Global Defaults") { selectScope(.global) }
-                    if allowsProjectScope { Button("Current Project") { selectScope(.project) } }
-                }
-                Text(scope == .project ? "These overrides apply only to the trusted current workspace." : "These defaults apply to every workspace on this Mac.")
-                    .font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).padding(14)
+            choiceRow("scope", "Settings Scope", scope == .project ? "Current Project" : "Global Defaults") {
+                Button("Global Defaults") { selectScope(.global) }
+                if allowsProjectScope { Button("Current Project") { selectScope(.project) } }
             }
+            Text(scope == .project ? "These overrides apply only to the trusted current workspace." : "These defaults apply to every workspace on this Mac.")
+                .font(TronTypography.bodySM)
+                .foregroundStyle(Color.tronTextPrimary)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
         }
     }
 
@@ -229,7 +230,7 @@ struct RuntimeBehaviorSettingsView: View {
         TronValueRow(icon: icon, title: title, detail: detail, accent: accent) {
             TextField(title, value: value, format: .number)
                 .keyboardType(.numberPad)
-                .tronInlineField(monospaced: true)
+                .tronInlineField(numeric: true)
                 .multilineTextAlignment(.trailing)
                 .frame(width: 118)
         }
