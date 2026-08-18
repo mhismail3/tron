@@ -35,9 +35,12 @@ export function existingSessionOpenOwner(
   subscriptionTokens: ReadonlyMap<string, string>,
   sessionId: string,
 ): string | undefined {
+  // Only genuinely in-flight opens are rejected. An installed subscription is
+  // not an open owner: beginSynchronization replaces it deterministically so
+  // reconnecting clients always converge instead of deadlocking on conflict.
+  void subscriptionTokens;
   return pendingSessionOpens.get(sessionId)
-    ?? synchronizations.get(sessionId)?.requestId
-    ?? (subscriptionTokens.has(sessionId) ? "installed" : undefined);
+    ?? synchronizations.get(sessionId)?.requestId;
 }
 
 export function releaseOwnedSubscription(
@@ -461,7 +464,7 @@ export class GatewayServer {
           type: "response",
           id: frame.id,
           ok: false,
-          error: publicError(new GatewayError("conflict", "A session synchronization is already in progress or installed for this connection", true)),
+          error: publicError(new GatewayError("conflict", "A session synchronization is already in progress for this connection", true)),
         });
         return;
       }
@@ -512,9 +515,20 @@ export class GatewayServer {
         identity: connection.identity,
         isLocal: connection.isLocal,
         beginSynchronization: (sessionId) => {
-          const previous = connection.synchronizations.get(sessionId);
-          if (previous || connection.subscriptionTokens.has(sessionId)) {
-            throw new GatewayError("conflict", "A session synchronization is already in progress or installed for this connection", true);
+          if (connection.synchronizations.has(sessionId)) {
+            // A genuinely overlapping in-flight open is a race the protocol
+            // must reject; only the current owner may proceed.
+            throw new GatewayError("conflict", "A session synchronization is already in progress for this connection", true);
+          }
+          const installedToken = connection.subscriptionTokens.get(sessionId);
+          if (installedToken !== undefined) {
+            // The client asked for a fresh authoritative baseline. Replace the
+            // installed subscription deterministically instead of conflicting:
+            // after recycled client state, a missed close, or a half-open
+            // reconnect, an unconditional replacement is the only path that
+            // keeps client and server subscription ownership convergent. A
+            // stale close for the revoked token is ignored harmlessly.
+            revokeSubscription(sessionId, installedToken);
           }
           connection.subscriptions.add(sessionId);
           this.options.sessions.subscribe(connection.id, sessionId);

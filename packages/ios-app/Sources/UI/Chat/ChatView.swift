@@ -271,7 +271,8 @@ struct ChatView: View {
             if let target = presentationTarget {
                 model.composerDrafts.reconcileSubmission(
                     target: target,
-                    canonicalTranscript: snapshot.transcript
+                    canonicalTranscript: snapshot.transcript,
+                    queuedMessages: snapshot.displayedQueuedMessages
                 )
             }
             // Prepend owns its exact page projection/layout-epoch transaction.

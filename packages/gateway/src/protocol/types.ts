@@ -174,11 +174,18 @@ export type ExtensionInteraction = {
   expiresAt?: string;
 };
 
+export interface ExtensionOwner {
+  id: string;
+  title: string;
+  source: string;
+}
+
 export interface ExtensionWidget {
   key: string;
   revision: number;
   lines: string[];
   placement: "aboveEditor" | "belowEditor";
+  owner?: ExtensionOwner;
 }
 
 export interface ExtensionPresentationDiagnostic {
@@ -236,6 +243,7 @@ export interface ExtensionInputLease {
 
 export interface ExtensionSemanticState {
   statuses: Record<string, string>;
+  statusOwners: Record<string, ExtensionOwner>;
   working: {
     message?: string;
     visible: boolean;
@@ -269,6 +277,7 @@ export interface ExtensionPresentationState {
 
 export interface ExtensionSemanticPatch {
   statuses?: Record<string, string>;
+  statusOwners?: Record<string, ExtensionOwner>;
   working?: ExtensionSemanticState["working"];
   hiddenThinkingLabel?: string | null;
   widgets?: ExtensionWidget[];

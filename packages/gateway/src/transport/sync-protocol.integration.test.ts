@@ -58,6 +58,9 @@ describe("two-phase session synchronization protocol", () => {
           context.completeSynchronization(sessionId, params.syncToken as string);
           return { synchronized: true };
         }
+        if (method === "session.close") {
+          return { closed: context.unsubscribe(sessionId, params.subscriptionToken as string | undefined) };
+        }
         throw new Error(`unexpected method ${method}`);
       },
     };
@@ -103,9 +106,24 @@ describe("two-phase session synchronization protocol", () => {
     const first = frames.find((frame) => frame.id === "open-1");
     request("sync-1", "session.sync", "same", { syncToken: first.result.syncToken });
     while (!frames.some((frame) => frame.id === "sync-1")) await new Promise((resolve) => setTimeout(resolve, 1));
+
+    // A sequential re-open replaces the installed subscription instead of
+    // conflicting, so a reconnecting client always converges on one owner. The
+    // revoked token can no longer close the replacement, and the replacement
+    // synchronizes normally.
     request("open-3", "session.open", "same");
+    await waitStarted("same", 2);
+    openResolvers.get("same")?.();
     while (!frames.some((frame) => frame.id === "open-3")) await new Promise((resolve) => setTimeout(resolve, 1));
-    expect(frames.find((frame) => frame.id === "open-3").error.code).toBe("conflict");
+    const replaced = frames.find((frame) => frame.id === "open-3");
+    expect(replaced.error).toBeUndefined();
+    expect(replaced.result.syncToken).not.toBe(first.result.syncToken);
+    request("close-stale", "session.close", "same", { subscriptionToken: first.result.subscriptionToken });
+    while (!frames.some((frame) => frame.id === "close-stale")) await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(frames.find((frame) => frame.id === "close-stale").result).toEqual({ closed: false });
+    request("sync-3", "session.sync", "same", { syncToken: replaced.result.syncToken });
+    while (!frames.some((frame) => frame.id === "sync-3")) await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(frames.find((frame) => frame.id === "sync-3").result).toEqual({ synchronized: true });
 
     request("open-a", "session.open", "a");
     request("open-b", "session.open", "b");

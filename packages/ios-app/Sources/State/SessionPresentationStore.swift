@@ -1086,6 +1086,7 @@ final class SessionPresentationStore {
         let previousSemantic = next.semanticState
         if let patch = mutation.semantic {
             if let statuses = patch.statuses { next.semanticState.statuses = statuses }
+            if let statusOwners = patch.statusOwners { next.semanticState.statusOwners = statusOwners }
             if let working = patch.working { next.semanticState.working = working }
             if let value = patch.hiddenThinkingLabel {
                 guard value == .null || value.stringValue != nil else { return .resynchronize }

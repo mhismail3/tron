@@ -73,24 +73,32 @@ struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+struct ExtensionOwner: Codable, Hashable, Sendable {
+    let id: String
+    let title: String
+    let source: String
+}
+
 struct ExtensionWidget: Codable, Hashable, Identifiable, Sendable {
     enum Placement: String, Codable, Sendable { case aboveEditor, belowEditor }
     let key: String
     var revision: Int? = nil
     let lines: [String]
     let placement: Placement
+    let owner: ExtensionOwner?
     var id: String { key }
 
-    init(key: String, revision: Int? = nil, lines: [String], placement: Placement) {
-        self.key = key; self.revision = revision; self.lines = lines; self.placement = placement
+    init(key: String, revision: Int? = nil, lines: [String], placement: Placement, owner: ExtensionOwner? = nil) {
+        self.key = key; self.revision = revision; self.lines = lines; self.placement = placement; self.owner = owner
     }
-    private enum CodingKeys: String, CodingKey { case key, revision, lines, placement }
+    private enum CodingKeys: String, CodingKey { case key, revision, lines, placement, owner }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         key = try container.decode(String.self, forKey: .key)
         revision = try container.decodeIfPresent(Int.self, forKey: .revision)
         lines = try container.decodeBoundedArray(String.self, forKey: .lines, maximum: 12)
         placement = try container.decode(Placement.self, forKey: .placement)
+        owner = try container.decodeIfPresent(ExtensionOwner.self, forKey: .owner)
     }
 }
 
@@ -123,6 +131,7 @@ struct ExtensionSemanticState: Codable, Hashable, Sendable {
         var indicator: Indicator? = nil
     }
     var statuses: [String: String]
+    var statusOwners: [String: ExtensionOwner]
     var working: Working
     var hiddenThinkingLabel: String?
     var widgets: [ExtensionWidget]
@@ -131,14 +140,15 @@ struct ExtensionSemanticState: Codable, Hashable, Sendable {
     var editorRevision: Int
     var editorText: String
 
-    init(statuses: [String: String], working: Working, hiddenThinkingLabel: String? = nil, widgets: [ExtensionWidget], title: String? = nil, toolsExpanded: Bool, editorRevision: Int, editorText: String) {
-        self.statuses = statuses; self.working = working; self.hiddenThinkingLabel = hiddenThinkingLabel; self.widgets = widgets
+    init(statuses: [String: String], statusOwners: [String: ExtensionOwner] = [:], working: Working, hiddenThinkingLabel: String? = nil, widgets: [ExtensionWidget], title: String? = nil, toolsExpanded: Bool, editorRevision: Int, editorText: String) {
+        self.statuses = statuses; self.statusOwners = statusOwners; self.working = working; self.hiddenThinkingLabel = hiddenThinkingLabel; self.widgets = widgets
         self.title = title; self.toolsExpanded = toolsExpanded; self.editorRevision = editorRevision; self.editorText = editorText
     }
-    private enum CodingKeys: String, CodingKey { case statuses, working, hiddenThinkingLabel, widgets, title, toolsExpanded, editorRevision, editorText }
+    private enum CodingKeys: String, CodingKey { case statuses, statusOwners, working, hiddenThinkingLabel, widgets, title, toolsExpanded, editorRevision, editorText }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         statuses = try container.decodeBoundedStringDictionary(forKey: .statuses, maximum: 32)
+        statusOwners = try container.decodeIfPresent([String: ExtensionOwner].self, forKey: .statusOwners) ?? [:]
         working = try container.decode(Working.self, forKey: .working)
         hiddenThinkingLabel = try container.decodeIfPresent(String.self, forKey: .hiddenThinkingLabel)
         widgets = try container.decodeBoundedArray(ExtensionWidget.self, forKey: .widgets, maximum: 24)
@@ -274,6 +284,7 @@ struct ExtensionPresentationState: Codable, Hashable, Sendable {
 
 struct ExtensionSemanticPatch: Codable, Hashable, Sendable {
     var statuses: [String: String]?
+    var statusOwners: [String: ExtensionOwner]?
     var working: ExtensionSemanticState.Working?
     var hiddenThinkingLabel: JSONValue?
     var widgets: [ExtensionWidget]?
@@ -286,12 +297,13 @@ struct ExtensionSemanticPatch: Codable, Hashable, Sendable {
     var editorOperationId: String?
 
     private enum CodingKeys: String, CodingKey {
-        case statuses, working, hiddenThinkingLabel, widgets, title, toolsExpanded
+        case statuses, statusOwners, working, hiddenThinkingLabel, widgets, title, toolsExpanded
         case editorRevision, editorText, editorAction, editorDelta, editorOperationId
     }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         statuses = try container.decodeBoundedStringDictionaryIfPresent(forKey: .statuses, maximum: 32)
+        statusOwners = try container.decodeIfPresent([String: ExtensionOwner].self, forKey: .statusOwners)
         working = try container.decodeIfPresent(ExtensionSemanticState.Working.self, forKey: .working)
         hiddenThinkingLabel = container.contains(.hiddenThinkingLabel)
             ? try container.decode(JSONValue.self, forKey: .hiddenThinkingLabel) : nil
@@ -307,6 +319,7 @@ struct ExtensionSemanticPatch: Codable, Hashable, Sendable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(statuses, forKey: .statuses)
+        try container.encodeIfPresent(statusOwners, forKey: .statusOwners)
         try container.encodeIfPresent(working, forKey: .working)
         if let hiddenThinkingLabel { try container.encode(hiddenThinkingLabel, forKey: .hiddenThinkingLabel) }
         try container.encodeIfPresent(widgets, forKey: .widgets)
@@ -417,13 +430,21 @@ enum ExtensionPresentationPolicy {
               (mutation.surfaceRemovals ?? []).allSatisfy({ !$0.isEmpty }),
               Set((mutation.surfaceUpserts ?? []).map(\.id)).count == (mutation.surfaceUpserts ?? []).count,
               Set(mutation.surfaceRemovals ?? []).count == (mutation.surfaceRemovals ?? []).count else { return false }
+        if let semantic = mutation.semantic,
+           semantic.statusOwners?.count ?? 0 > 32
+            || semantic.statusOwners?.allSatisfy({ !$0.key.isEmpty && admit($0.value) }) == false { return false }
         if let interactionList = mutation.interactionList,
            (interactionList.count > 8 || !interactionList.allSatisfy({ admit($0, hostEpoch: mutation.hostEpoch, maximumRevision: mutation.revision) })) { return false }
         return true
     }
 
+    private static func admit(_ owner: ExtensionOwner) -> Bool {
+        boundedSafe(owner.id, 512) && boundedSafe(owner.title, 256) && boundedSafe(owner.source, 512)
+    }
+
     private static func admit(_ state: ExtensionSemanticState) -> Bool {
-        guard state.statuses.count <= 32, state.widgets.count <= 24,
+        guard state.statuses.count <= 32, state.statusOwners.count <= 32, state.widgets.count <= 24,
+              state.statusOwners.allSatisfy({ key, owner in state.statuses[key] != nil && admit(owner) }),
               state.statuses.allSatisfy({ !$0.key.isEmpty && boundedSafe($0.key, 256) && boundedSafe($0.value, 4 * 1_024, newlines: true) }),
               state.working.message.map({ boundedSafe($0, 8 * 1_024, newlines: true) }) ?? true,
               state.working.indicator.map({ indicator in
@@ -436,6 +457,7 @@ enum ExtensionPresentationPolicy {
               Set(state.widgets.map(\.key)).count == state.widgets.count,
               state.widgets.allSatisfy({ widget in
                   !widget.key.isEmpty && boundedSafe(widget.key, 256) && (widget.revision ?? 0) > 0
+                    && widget.owner.map(admit) ?? true
                     && widget.lines.count <= 12 && widget.lines.allSatisfy({ boundedSafe($0, 512) })
               }) else { return false }
         return true
@@ -457,7 +479,8 @@ enum ExtensionPresentationPolicy {
 
     static func admit(_ surface: ExtensionSurface) -> Bool {
         let runs = surface.frame.lines.reduce(0) { $0 + $1.runs.count }
-        guard !surface.id.isEmpty, surface.revision > 0,
+        guard !surface.id.isEmpty, boundedSafe(surface.id, 512), surface.revision > 0,
+              surface.provenance.map({ ($0.source.map { boundedSafe($0, 512) } ?? true) && ($0.path.map { boundedSafe($0, 512) } ?? true) }) ?? true,
               (1...maximumColumns).contains(surface.frame.width),
               (0...maximumLines).contains(surface.frame.height),
               surface.frame.lines.count == surface.frame.height,

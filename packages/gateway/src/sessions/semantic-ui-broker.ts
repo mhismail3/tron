@@ -9,6 +9,7 @@ import { GatewayError } from "../errors.js";
 import type { ExtensionInteraction, ExtensionSemanticState, ExtensionWidget } from "../protocol/types.js";
 import { ExtensionPresentationStore } from "../extensions/host/extension-presentation-store.js";
 import { stripTerminalControls } from "../extensions/host/terminal-sanitizer.js";
+import { currentExtensionOwner } from "../extensions/owner-attribution.js";
 
 interface PendingInteraction {
   wire: ExtensionInteraction;
@@ -249,11 +250,16 @@ export class SemanticUIBroker {
       setStatus(key, text) {
         broker.assertActive(); requireBoundedString(key, MAX_KEY_BYTES, "status key"); key = stripTerminalPresentation(key);
         if (text !== undefined) { requireBoundedString(text, MAX_STATUS_BYTES, "status text"); text = stripTerminalPresentation(text); }
+        const owner = currentExtensionOwner();
         broker.mutate((state) => {
           if (text !== undefined) {
             if (!(key in state.statuses) && Object.keys(state.statuses).length >= MAX_STATUSES) throw new GatewayError("busy", "Extension UI statuses reached their bounded capacity", true);
             state.statuses[key] = text;
-          } else delete state.statuses[key];
+            if (owner) state.statusOwners[key] = owner; else delete state.statusOwners[key];
+          } else {
+            delete state.statuses[key];
+            delete state.statusOwners[key];
+          }
         });
       },
       setWorkingMessage(message) {
@@ -291,7 +297,8 @@ export class SemanticUIBroker {
         broker.mutate((state) => {
           const index = state.widgets.findIndex((widget) => widget.key === key);
           if (index < 0 && state.widgets.length >= MAX_WIDGETS) throw new GatewayError("busy", "Extension UI widgets reached their bounded capacity", true);
-          const widget: ExtensionWidget = { key, revision: (index < 0 ? 0 : state.widgets[index]?.revision ?? 0) + 1, lines, placement };
+          const owner = currentExtensionOwner();
+          const widget: ExtensionWidget = { key, revision: (index < 0 ? 0 : state.widgets[index]?.revision ?? 0) + 1, lines, placement, ...(owner ? { owner } : {}) };
           if (index < 0) state.widgets.push(widget); else state.widgets[index] = widget;
         });
       },

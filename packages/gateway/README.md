@@ -203,6 +203,8 @@ deferred.
 
 Live tool projections may carry an optional extension provenance record derived from the public Pi tool `sourceInfo` and the loaded extension inventory. The Gateway emits that record only when exactly one extension owns the tool and the source path agrees; unknown or ambiguous ownership omits provenance and fails open to the ordinary tool projection. This metadata is disposable presentation state and never modifies Pi JSONL.
 
+Extension callbacks are wrapped through the public `DefaultResourceLoaderOptions.extensionsOverride` seam on every load and reload. An AsyncLocalStorage owner (`resolvedPath`, a generic humanized source/path title, and exact `sourceInfo.source`) follows handlers, tools, commands, renderers, promises, and timers. The semantic broker records optional widget owners and per-key status owners; rendered component surfaces retain only exact source provenance. Unattributed calls remain ownerless rather than being guessed, and protocol owner records are bounded at the store and native admission boundary.
+
 Parallel tool events carry a monotonic per-run ordinal; each call additionally has
 a monotonic progress sequence, bounded display-safe live-output tail, runtime start,
 last-progress/completion timestamps, and duration. The Gateway coalesces high-rate

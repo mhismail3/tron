@@ -128,6 +128,31 @@ struct ChatTranscriptPresentationTests {
         #expect(ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation).first?.id == "activity")
     }
 
+    @Test("owner provenance groups live semantic, surface, status, and service content")
+    func ownerProvenanceGroupsLiveExtension() throws {
+        var snapshot = try fixture(transcript: "[]")
+        let goal = ExtensionOwner(id: "/extensions/goal.ts", title: "Goal", source: "goal-source")
+        let subagent = ExtensionOwner(id: "/extensions/subagents.ts", title: "Subagents", source: "subagent-source")
+        snapshot.extensionPresentation.semanticState.widgets = [
+            ExtensionWidget(key: "goal", lines: ["Goal"], placement: .belowEditor, owner: goal),
+            ExtensionWidget(key: "subagent", lines: ["Subagent"], placement: .belowEditor, owner: subagent)
+        ]
+        snapshot.extensionPresentation.semanticState.statuses = ["goal-status": "Goal is live", "subagent": "Running"]
+        snapshot.extensionPresentation.semanticState.statusOwners = ["goal-status": goal, "subagent": subagent]
+        let longSource = String(repeating: "source/", count: 40)
+        let service = ToolExecutionState(toolCallId: "service", toolName: "subagent", order: 1, status: .running, arguments: .null, partialResult: nil, result: nil, isError: false, startedAt: "now", updatedAt: "now", extensionOrigin: .init(source: "subagent-source"))
+        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, executions: [service])
+        #expect(groups.map(\.label) == ["Goal", "Subagents"])
+        #expect(groups.first(where: { $0.label == "Goal" })?.statuses.map(\.key) == ["goal-status"])
+        #expect(groups.first(where: { $0.label == "Subagents" })?.items.count == 1)
+        #expect(groups.first(where: { $0.label == "Subagents" })?.services.map(\.id) == ["service"])
+        let sourcedOwner = ExtensionOwner(id: "/extensions/long.ts", title: "Long", source: longSource)
+        snapshot.extensionPresentation.semanticState.widgets = [ExtensionWidget(key: "long", lines: ["Long"], placement: .belowEditor, owner: sourcedOwner)]
+        let longService = ToolExecutionState(toolCallId: "long-service", toolName: "long", order: 2, status: .running, arguments: .null, partialResult: nil, result: nil, isError: false, startedAt: "now", updatedAt: "now", extensionOrigin: .init(source: longSource))
+        let sourcedGroups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, executions: [service, longService])
+        #expect(sourcedGroups.first(where: { $0.label == "Long" })?.services.map(\.id) == ["long-service"])
+    }
+
     @Test("semantic and surface representations share one canonical widget group")
     func semanticSurfaceRepresentationsDeduplicate() throws {
         var snapshot = try fixture(transcript: "[]")

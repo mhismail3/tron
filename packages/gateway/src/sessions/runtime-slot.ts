@@ -50,6 +50,7 @@ import {
   type TranscriptPage,
 } from "./projection.js";
 import type { RunMarkerStore } from "./run-markers.js";
+import { attributeExtensions } from "../extensions/owner-attribution.js";
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
@@ -317,6 +318,7 @@ export class RuntimeSlot {
         cwd: trust.cwd,
         agentDir: this.dependencies.agentDir,
         modelRuntime,
+        resourceLoaderOptions: { extensionsOverride: attributeExtensions },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });
       const created = await createAgentSessionFromServices({

@@ -44,6 +44,9 @@ const MAX_INDICATOR_FRAME_BYTES = 256;
 const MAX_INTERACTION_BYTES = 192 * 1_024;
 const MAX_EDITOR_DIRECTIVE_BYTES = 192 * 1_024;
 const MAX_NOTIFICATION_BYTES = 32 * 1_024;
+const MAX_OWNER_ID_BYTES = 512;
+const MAX_OWNER_TITLE_BYTES = 256;
+const MAX_OWNER_SOURCE_BYTES = 512;
 
 type PresentationBroadcast = (topic: "session.extensionPresentation", payload: JsonValue) => void;
 
@@ -84,6 +87,10 @@ function validateSurface(surface: ExtensionSurface): void {
     throw new GatewayError("conflict", "Extension presentation surface is malformed");
   }
   requireId(surface.id, "surface ID");
+  if (surface.provenance && ((!surface.provenance.source || !boundedSafe(surface.provenance.source, MAX_OWNER_SOURCE_BYTES))
+    || (surface.provenance.path !== undefined && !boundedSafe(surface.provenance.path, MAX_OWNER_SOURCE_BYTES)))) {
+    throw new GatewayError("conflict", "Extension surface provenance is invalid");
+  }
   const kinds = new Set(["header", "footer", "widget", "custom", "overlay", "editor", "toolRenderer", "messageRenderer", "entryRenderer", "markdown", "unknown"]);
   const placements = new Set(["header", "footer", "aboveEditor", "belowEditor", "transcript", "overlay", "fullscreen"]);
   if (!kinds.has(surface.kind) || !placements.has(surface.placement)
@@ -142,6 +149,7 @@ export interface ExtensionPresentationDraft {
 
 const DEFAULT_SEMANTIC_STATE: ExtensionSemanticState = {
   statuses: {},
+  statusOwners: {},
   working: { visible: true, indicator: { kind: "default", frames: [] } },
   widgets: [],
   toolsExpanded: false,
@@ -395,17 +403,31 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
     }
   }
 
+  private validateOwner(owner: unknown): boolean {
+    if (!owner || typeof owner !== "object") return false;
+    const value = owner as { id?: unknown; title?: unknown; source?: unknown };
+    return boundedSafe(value.id, MAX_OWNER_ID_BYTES)
+      && boundedSafe(value.title, MAX_OWNER_TITLE_BYTES)
+      && boundedSafe(value.source, MAX_OWNER_SOURCE_BYTES);
+  }
+
   private validateSemantic(state: ExtensionSemanticState): void {
     if (typeof state.statuses !== "object" || state.statuses === null || Array.isArray(state.statuses)
       || typeof state.working !== "object" || state.working === null
       || typeof state.working.indicator !== "object" || state.working.indicator === null
-      || !Array.isArray(state.working.indicator.frames) || !Array.isArray(state.widgets)) {
+      || !Array.isArray(state.working.indicator.frames) || !Array.isArray(state.widgets)
+      || typeof state.statusOwners !== "object" || state.statusOwners === null || Array.isArray(state.statusOwners)) {
       throw new GatewayError("conflict", "Extension semantic presentation is malformed");
     }
     const statuses = Object.entries(state.statuses);
+    const statusOwners = Object.entries(state.statusOwners);
+    if (statusOwners.some(([key, owner]) => !(key in state.statuses) || !this.validateOwner(owner))) {
+      throw new GatewayError("conflict", "Extension status owner metadata is invalid");
+    }
     if (statuses.length > EXTENSION_MAX_STATUSES
       || statuses.some(([key, value]) => key.length === 0 || !boundedSafe(key, MAX_KEY_BYTES) || !boundedSafe(value, MAX_STATUS_BYTES, true))
       || typeof state.working.visible !== "boolean"
+      || state.statusOwners === undefined || statusOwners.length > EXTENSION_MAX_STATUSES
       || (state.working.message !== undefined && !boundedSafe(state.working.message, MAX_WORKING_BYTES, true))
       || !["default", "hidden", "static", "animated"].includes(state.working.indicator.kind)
       || state.working.indicator.frames.length > MAX_INDICATOR_FRAMES
@@ -419,6 +441,7 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
       || state.widgets.length > EXTENSION_MAX_WIDGETS
       || new Set(state.widgets.map((widget) => widget.key)).size !== state.widgets.length
       || state.widgets.some((widget) => widget.key.length === 0 || !boundedSafe(widget.key, MAX_KEY_BYTES)
+        || (widget.owner !== undefined && !this.validateOwner(widget.owner))
         || !Number.isSafeInteger(widget.revision) || widget.revision < 1
         || !["aboveEditor", "belowEditor"].includes(widget.placement)
         || widget.lines.length > EXTENSION_MAX_WIDGET_LINES

@@ -188,7 +188,7 @@ struct TranscriptRow: View, Equatable {
 
 }
 
-private struct UserPromptGlassModifier: ViewModifier {
+struct UserPromptGlassModifier: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(
             cornerRadius: ChatPromptContainerStyle.cornerRadius,
@@ -446,7 +446,7 @@ private struct TranscriptImageChip: View {
     }
 }
 
-private struct TranscriptFileChip: View {
+struct TranscriptFileChip: View {
     let name: String
     let mimeType: String
     let size: Int?

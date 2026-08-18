@@ -351,11 +351,11 @@ struct ComposerDraftCoordinatorTests {
                 initialText: "  outgoing  "
             )
             harness.coordinator.installHostedAttachment(
-                .init(id: "a", name: "a", mimeType: "text/plain", size: 1, previewData: nil),
+                .init(id: "a", name: "a", mimeType: "image/jpeg", size: 1, previewData: nil),
                 target: target
             )
             harness.coordinator.installHostedAttachment(
-                .init(id: "b", name: "b", mimeType: "text/plain", size: 1, previewData: nil),
+                .init(id: "b", name: "b", mimeType: "image/jpeg", size: 1, previewData: nil),
                 target: target
             )
             let sending = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
@@ -384,8 +384,8 @@ struct ComposerDraftCoordinatorTests {
                 kind: .message, role: .user,
                 content: [
                     ContentPart(id: "text", type: .text, text: "outgoing", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
-                    ContentPart(id: "a", type: .image, text: nil, attachment: nil, redacted: nil, mimeType: "image/jpeg", blobId: "a", toolCallId: nil, name: nil, arguments: nil),
-                    ContentPart(id: "b", type: .image, text: nil, attachment: nil, redacted: nil, mimeType: "image/jpeg", blobId: "b", toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "image-one", type: .image, text: nil, attachment: .init(name: "a", mimeType: "image/jpeg", size: 1), redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob-a", toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "image-two", type: .image, text: nil, attachment: .init(name: "b", mimeType: "image/jpeg", size: 1), redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob-b", toolCallId: nil, name: nil, arguments: nil),
                 ],
                 provider: nil, modelId: nil, stopReason: nil, errorMessage: nil, toolCallId: nil,
                 toolName: nil, isError: nil, details: nil, usage: nil, startedAt: nil,

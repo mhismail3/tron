@@ -84,7 +84,11 @@ struct ExtensionActivityServiceItem: Identifiable, Hashable, Sendable {
     let id: String
     let title: String
     let status: String
+    /// Bounded text shown in the native card.
     let source: String
+    /// The canonical source used for owner matching. Display truncation must
+    /// never change grouping identity.
+    let matchingSource: String
     let error: Bool
 }
 
@@ -158,6 +162,7 @@ enum ChatExtensionWidgetPolicy {
                     title: bounded($0.toolName, maximum: 96),
                     status: $0.status == .running ? "Running" : ($0.status == .failed ? "Failed" : "Completed"),
                     source: bounded($0.extensionOrigin?.source ?? "Extension", maximum: 128),
+                    matchingSource: $0.extensionOrigin?.source ?? "Extension",
                     error: $0.isError
                 )
             }
@@ -166,25 +171,45 @@ enum ChatExtensionWidgetPolicy {
     static func groups(_ presentation: ExtensionPresentationState, executions: [ToolExecutionState] = []) -> [ExtensionWidgetGroup] {
         let statuses = admittedStatuses(presentation.semanticState.statuses)
         let services = serviceItems(executions)
+        var owners: [String: ExtensionOwner] = [:]
+        for owner in presentation.semanticState.widgets.compactMap(\.owner) + Array(presentation.semanticState.statusOwners.values) {
+            owners[owner.id] = owner
+        }
+        var ownerBySource: [String: ExtensionOwner] = [:]
+        var ambiguousSources = Set<String>()
+        for owner in owners.values {
+            if let previous = ownerBySource[owner.source], previous.id != owner.id { ambiguousSources.insert(owner.source) }
+            else { ownerBySource[owner.source] = owner }
+        }
+        for source in ambiguousSources { ownerBySource[source] = nil }
         var matchedStatusKeys = Set<String>()
         var matchedServiceIDs = Set<String>()
         var groups: [String: ExtensionWidgetGroup] = [:]
+        var semanticGroups: [String: String] = [:]
 
-        // Semantic widgets have no provenance of their own. Their canonical key
-        // is therefore the only safe identity and their label stays generic.
-        for widget in presentation.semanticState.widgets.sorted(by: { lhs, rhs in
-            if lhs.placement != rhs.placement { return lhs.placement.rawValue < rhs.placement.rawValue }
-            return lhs.key < rhs.key
-        }) {
-            let status = statuses.first(where: { $0.key == widget.key })
-            if let status { matchedStatusKeys.insert(status.key) }
-            groups["semantic:\(widget.key)"] = ExtensionWidgetGroup(
-                id: "semantic:\(widget.key)",
-                label: "Extension widget",
-                items: [ChatExtensionWidgetItem(id: "semantic-widget:\(widget.key)", content: .semantic(widget))],
-                statuses: status.map { [$0] } ?? [],
-                services: []
+        func ownerID(_ owner: ExtensionOwner) -> String { "owner:\(owner.id)" }
+        func add(_ groupID: String, label: String, item: ChatExtensionWidgetItem? = nil,
+                 status: ExtensionActivityStatus? = nil, serviceItems: [ExtensionActivityServiceItem] = []) {
+            let old = groups[groupID]
+            groups[groupID] = ExtensionWidgetGroup(
+                id: groupID, label: bounded(old?.label ?? label, maximum: 64),
+                items: (old?.items ?? []) + (item.map { [$0] } ?? []),
+                statuses: {
+                    let existing = old?.statuses ?? []
+                    guard let status, !existing.contains(where: { $0.key == status.key }) else { return existing }
+                    return existing + [status]
+                }(),
+                services: (old?.services ?? []) + serviceItems
             )
+        }
+
+        for widget in presentation.semanticState.widgets.sorted(by: { $0.placement.rawValue == $1.placement.rawValue ? $0.key < $1.key : $0.placement.rawValue < $1.placement.rawValue }) {
+            let groupID = widget.owner.map(ownerID) ?? "semantic:\(widget.key)"
+            semanticGroups[widget.key] = groupID
+            let status = statuses.first { $0.key == widget.key }
+            if let status { matchedStatusKeys.insert(status.key) }
+            add(groupID, label: widget.owner?.title ?? "Extension widget",
+                 item: ChatExtensionWidgetItem(id: "semantic-widget:\(widget.key)", content: .semantic(widget)), status: status)
         }
 
         let surfaces = visibleSurfaces(presentation.surfaces, placement: .aboveEditor)
@@ -192,45 +217,36 @@ enum ChatExtensionWidgetPolicy {
         for surface in surfaces.sorted(by: { $0.id < $1.id }) {
             let source = admittedSource(surface.provenance?.source)
             let canonicalKey = canonicalWidgetKey(for: surface.id)
-            let semanticID = canonicalKey.map { "semantic:\($0)" }
-            let groupID: String
-            if let semanticID, groups[semanticID] != nil {
-                // The host's surface ID is a lossless representation of the
-                // semantic widget key. Merge the two representations rather
-                // than exposing two composer affordances.
-                groupID = semanticID
-            } else if let source {
-                groupID = "source:\(source)"
-            } else {
-                groupID = "surface:\(surface.id)"
-            }
-
-            let status = canonicalKey.flatMap { key in statuses.first(where: { $0.key == key }) }
+            let owner = canonicalKey.flatMap { semanticGroups[$0].flatMap { groups[$0] }?.items.compactMap { item in
+                if case .semantic(let widget) = item.content { return widget.owner }
+                return nil
+            }.first } ?? source.flatMap { ownerBySource[$0] }
+            let groupID = canonicalKey.flatMap { semanticGroups[$0] } ?? owner.map(ownerID) ?? source.map { "source:\($0)" } ?? "surface:\(surface.id)"
+            let status = canonicalKey.flatMap { key in statuses.first { $0.key == key } }
             if let status { matchedStatusKeys.insert(status.key) }
-            let exactServices = source.map { source in services.filter { $0.source == source } } ?? []
-            let ownedServices = exactServices.filter { !matchedServiceIDs.contains($0.id) }
-            ownedServices.forEach { matchedServiceIDs.insert($0.id) }
-            let existing = groups[groupID]
-            let label = source.map(humanizedSource) ?? existing?.label ?? "Extension widget"
-            groups[groupID] = ExtensionWidgetGroup(
-                id: groupID,
-                label: bounded(label, maximum: 64),
-                items: (existing?.items ?? []) + [ChatExtensionWidgetItem(id: "surface-widget:\(surface.id)", content: .surface(surface))],
-                statuses: existing?.statuses ?? status.map { [$0] } ?? [],
-                services: (existing?.services ?? []) + ownedServices
-            )
+            let exactServices = (owner?.source ?? source).map { source in services.filter { $0.matchingSource == source } } ?? []
+            let newServices = exactServices.filter { matchedServiceIDs.insert($0.id).inserted }
+            add(groupID, label: owner?.title ?? source.map(humanizedSource) ?? "Extension widget",
+                 item: ChatExtensionWidgetItem(id: "surface-widget:\(surface.id)", content: .surface(surface)), status: status, serviceItems: newServices)
+        }
+
+        // Statuses and tools carry public source provenance. Only exact source
+        // matches are attributed; unknown values remain one truthful fallback.
+        for status in statuses where !matchedStatusKeys.contains(status.key) {
+            if let owner = presentation.semanticState.statusOwners[status.key], owners[owner.id] != nil {
+                matchedStatusKeys.insert(status.key)
+                add(ownerID(owner), label: owner.title, status: status)
+            }
+        }
+        for owner in owners.values.sorted(by: { $0.id < $1.id }) {
+            let ownerServices = services.filter { $0.matchingSource == owner.source && matchedServiceIDs.insert($0.id).inserted }
+            if !ownerServices.isEmpty { add(ownerID(owner), label: owner.title, serviceItems: ownerServices) }
         }
 
         let unmatchedStatuses = statuses.filter { !matchedStatusKeys.contains($0.key) }
         let unmatchedServices = services.filter { !matchedServiceIDs.contains($0.id) }
         if !unmatchedStatuses.isEmpty || !unmatchedServices.isEmpty {
-            groups["activity"] = ExtensionWidgetGroup(
-                id: "activity",
-                label: "Extension activity",
-                items: [],
-                statuses: unmatchedStatuses,
-                services: unmatchedServices
-            )
+            groups["activity"] = ExtensionWidgetGroup(id: "activity", label: "Extension activity", items: [], statuses: unmatchedStatuses, services: unmatchedServices)
         }
         return groups.values.sorted { $0.id < $1.id }
     }

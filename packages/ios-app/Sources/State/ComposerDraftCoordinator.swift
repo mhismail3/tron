@@ -375,17 +375,22 @@ final class ComposerDraftCoordinator {
     /// remain the sole source of transcript truth.
     func reconcileSubmission(
         target: SessionPresentationIdentity,
-        canonicalTranscript: [TranscriptItem]
+        canonicalTranscript: [TranscriptItem],
+        queuedMessages: [SessionSnapshot.QueuedMessage] = []
     ) {
         guard admits(target), var admission = submissionByTarget[target] else { return }
-        guard canonicalTranscript.contains(where: {
+        let transcriptObserved = canonicalTranscript.contains(where: {
             Self.canonicalUserMessage(
                 $0,
                 matches: admission.snapshot,
                 submittedAttachments: admission.submittedAttachments,
                 baselineTranscriptIDs: admission.baselineTranscriptIDs
             )
-        }) else { return }
+        })
+        let queuedObserved = admission.snapshot.behavior.map { behavior in
+            queuedMessages.contains { $0.behavior.rawValue == behavior && $0.text == admission.snapshot.outgoingText }
+        } ?? false
+        guard transcriptObserved || queuedObserved else { return }
         admission.canonicalObserved = true
         if admission.transportState == .accepted {
             finishSubmission(admission)
@@ -789,17 +794,29 @@ final class ComposerDraftCoordinator {
         guard !submittedAttachments.isEmpty else { return true }
 
         let contents = item.content ?? []
-        return submittedAttachments.allSatisfy { attachment in
-            if contents.contains(where: { $0.blobId == attachment.id }) { return true }
-            // Non-image uploads are represented by the canonical user text
-            // part's truthful attachment metadata, not by a blob ID.
-            return contents.contains(where: {
+        let imageAttachments = submittedAttachments.filter { $0.mimeType.hasPrefix("image/") }
+        let canonicalImages = contents.filter { $0.type == .image }
+        let imageMetadataMatches = imageAttachments.count == canonicalImages.count
+            && zip(imageAttachments, canonicalImages).allSatisfy { attachment, part in
+                guard attachment.mimeType == part.mimeType else { return false }
+                if let metadata = part.attachment {
+                    return metadata.name == attachment.name && metadata.mimeType == attachment.mimeType && metadata.size == attachment.size
+                }
+                // Canonical image projection uses a content-hash blob ID rather
+                // than the client's upload ID. Count and MIME correspondence is
+                // the truthful bounded identity when the projection omits names.
+                return true
+            }
+        let nonImageAttachments = submittedAttachments.filter { !$0.mimeType.hasPrefix("image/") }
+        let nonImageMatches = nonImageAttachments.allSatisfy { attachment in
+            contents.contains(where: {
                 guard let metadata = $0.attachment else { return false }
                 return metadata.name == attachment.name
                     && metadata.mimeType == attachment.mimeType
                     && metadata.size == attachment.size
             })
         }
+        return imageMetadataMatches && nonImageMatches
     }
 
     private func apply(_ request: ComposerEditorRequest, to scope: ComposerDraftScope) {

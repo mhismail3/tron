@@ -16,6 +16,7 @@ import { boundedExtensionFrame, parseExtensionFrame } from "./frame-parser.js";
 import { InMemoryTerminal } from "./in-memory-terminal.js";
 import { type ComponentDiagnostic } from "./recording-component.js";
 import { boundedDisplayError, stripTerminalControls } from "./terminal-sanitizer.js";
+import { currentExtensionOwner } from "../owner-attribution.js";
 
 export interface RemotePiExtensionHostOptions {
   columns?: number;
@@ -43,6 +44,7 @@ type CustomFactory<T> = (
 ) => CustomComponent | Promise<CustomComponent>;
 
 interface SurfaceMeta {
+  owner?: { source: string };
   kind: SurfaceKind;
   placement: SurfacePlacement;
   lifecycle: SurfaceLifecycle;
@@ -131,7 +133,8 @@ export class RemotePiExtensionHost {
         const placement = options?.placement === "belowEditor" ? "belowEditor" : "aboveEditor";
         if (!host.admitComponent(key)) return;
         host.placements.set(key, placement);
-        host.surfaceMeta.set(key, { kind: "widget", placement, lifecycle: "retained", inputMode: "none" });
+        const owner = currentExtensionOwner();
+        host.surfaceMeta.set(key, { kind: "widget", placement, lifecycle: "retained", inputMode: "none", ...(owner ? { owner: { source: owner.source } } : {}) });
         host.mountComponent(key, content as RemoteComponentFactory, placement);
       },
       custom<T>(factory: CustomFactory<T>, options?: CustomOptions) {
@@ -223,7 +226,8 @@ export class RemotePiExtensionHost {
       call = { key, resolve, reject, settled: false, factorySettled: false, retired: false };
       this.customCall = call as CustomCall<unknown>;
     });
-    this.surfaceMeta.set(key, { kind: "custom", placement: "fullscreen", lifecycle: "blocking", inputMode: "keys", callId });
+    const owner = currentExtensionOwner();
+    this.surfaceMeta.set(key, { kind: "custom", placement: "fullscreen", lifecycle: "blocking", inputMode: "keys", callId, ...(owner ? { owner: { source: owner.source } } : {}) });
     const done = (value: T): void => this.finishCustom(key, value, undefined);
     const customFactory: RemoteComponentFactory = () => factory(tui, theme, keybindings, done);
     if (!this.registry?.set(key, customFactory)) this.failCustom(key, new Error("Extension component capacity is full"));
@@ -335,7 +339,8 @@ export class RemotePiExtensionHost {
       for (const diagnostic of parsed.diagnostics) this.recordDiagnostic({ code: diagnostic.code as ComponentDiagnostic["code"], message: diagnostic.message });
       const frame = { ...parsed.frame, lines: parsed.frame.lines.map((line) => ({ plainText: line.plainText, runs: line.runs.map((run) => ({ text: run.text, style: { ...run.style } })) })), width: this.terminal.columns, height: parsed.frame.lines.length };
       const id = this.surfaceId(record.key);
-      this.stageSurface({ id, kind: meta.kind, placement: meta.placement, lifecycle: meta.lifecycle, revision: this.nextRevision(id), focused: meta.kind === "custom", inputMode: meta.inputMode, frame });
+      this.stageSurface({ id, kind: meta.kind, placement: meta.placement, lifecycle: meta.lifecycle, revision: this.nextRevision(id), focused: meta.kind === "custom", inputMode: meta.inputMode, frame,
+        ...(meta.owner ? { provenance: { source: meta.owner.source } } : {}) });
     }
     this.flushPresentation();
   }

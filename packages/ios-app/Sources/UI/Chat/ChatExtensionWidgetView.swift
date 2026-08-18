@@ -77,15 +77,13 @@ struct ExtensionDetailsSheet: View {
         if !group.statuses.isEmpty { statusSection(group.statuses) }
         if !group.services.isEmpty { serviceSection(group.services) }
         if !group.items.isEmpty {
-            TronSettingsGroup("Widget", detail: "Native read-only extension information.", accent: .tronCyan) {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(group.items) { item in
-                        switch item.content {
-                        case .semantic(let widget):
-                            ExtensionWidgetView(widget: widget, isExpanded: isExpanded) { toggleExpanded() }
-                        case .surface(let surface):
-                            ExtensionSurfaceWidgetView(surface: surface, isExpanded: isExpanded) { toggleExpanded() }
-                        }
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(group.items) { item in
+                    switch item.content {
+                    case .semantic(let widget):
+                        ExtensionWidgetView(widget: widget, isExpanded: isExpanded) { toggleExpanded() }
+                    case .surface(let surface):
+                        ExtensionSurfaceWidgetView(surface: surface, isExpanded: isExpanded) { toggleExpanded() }
                     }
                 }
             }
@@ -169,23 +167,26 @@ struct ExtensionWidgetView: View {
     var onToggleExpanded: (() -> Void)? = nil
 
     private var lines: [String] { widget.lines.map(NativeExtensionText.clean).filter { !$0.isEmpty } }
-    private var nativeLabel: String { "Extension widget" }
     private var hasDetail: Bool { widget.lines.contains { NativeExtensionText.isDetailHint($0) } }
+    private var visibleLines: [String] { isExpanded ? lines : Array(lines.prefix(1)) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(nativeLabel).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted).lineLimit(1)
-                Spacer()
-                if (hasDetail || isExpanded), let onToggleExpanded {
-                    Button(action: onToggleExpanded) {
-                        Label(isExpanded ? "Hide detail" : "Show detail", systemImage: isExpanded ? "chevron.up" : "chevron.down")
-                            .font(TronTypography.caption).foregroundStyle(Color.tronEmerald)
-                    }.buttonStyle(.plain)
+        Group {
+            if !lines.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Spacer()
+                        if (hasDetail || isExpanded), let onToggleExpanded {
+                            Button(action: onToggleExpanded) {
+                                Label(isExpanded ? "Hide detail" : "Show detail", systemImage: isExpanded ? "chevron.up" : "chevron.down")
+                                    .font(TronTypography.caption).foregroundStyle(Color.tronEmerald)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    ForEach(Array(visibleLines.enumerated()), id: \.offset) { _, line in
+                        nativeRow(line)
+                    }
                 }
-            }
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                nativeRow(line)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -206,22 +207,28 @@ struct ExtensionSurfaceWidgetView: View {
     let surface: ExtensionSurface
     var isExpanded = false
     var onToggleExpanded: (() -> Void)? = nil
-    private var nativeLabel: String {
-        guard let source = ChatExtensionWidgetPolicy.admittedSource(surface.provenance?.source) else {
-            return "Extension widget"
-        }
-        return ChatExtensionWidgetPolicy.bounded(ChatExtensionWidgetPolicy.humanizedSource(source), maximum: 64)
+    private var meaningfulLines: [String] {
+        surface.frame.plainText.split(separator: "\n").map(String.init).map(NativeExtensionText.clean).filter { !$0.isEmpty }
     }
+    private var hasDetail: Bool { surface.frame.plainText.split(separator: "\n").contains { NativeExtensionText.isDetailHint(String($0)) } }
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(nativeLabel).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted)
-                Spacer()
-                if (isExpanded || surface.frame.plainText.split(separator: "\n").contains(where: { NativeExtensionText.isDetailHint(String($0)) })), let onToggleExpanded {
-                    Button(action: onToggleExpanded) { Label(isExpanded ? "Hide detail" : "Show detail", systemImage: isExpanded ? "chevron.up" : "chevron.down").font(TronTypography.caption) }.buttonStyle(.plain)
+        Group {
+            if !meaningfulLines.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Spacer()
+                        if (hasDetail || isExpanded), let onToggleExpanded {
+                            Button(action: onToggleExpanded) { Label(isExpanded ? "Hide detail" : "Show detail", systemImage: isExpanded ? "chevron.up" : "chevron.down").font(TronTypography.caption) }.buttonStyle(.plain)
+                        }
+                    }
+                    if isExpanded {
+                        ExtensionFrameView(frame: surface.frame)
+                    } else {
+                        Text(meaningfulLines[0]).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                            .padding(.vertical, 7)
+                    }
                 }
             }
-            ExtensionFrameView(frame: surface.frame)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("extension-surface-widget-\(surface.id)")
