@@ -286,6 +286,7 @@ struct TronPrimaryActionButton: View {
 private struct TronFieldSurfaceModifier: ViewModifier {
     let monospaced: Bool
     let compact: Bool
+    let dense: Bool
 
     func body(content: Content) -> some View {
         content
@@ -294,8 +295,8 @@ private struct TronFieldSurfaceModifier: ViewModifier {
             .foregroundStyle(Color.tronTextPrimary)
             .tint(Color.tronEmerald)
             .padding(.horizontal, compact ? TronSpacing.md : TronSpacing.section)
-            .padding(.vertical, compact ? TronSpacing.sm : TronSpacing.md)
-            .frame(minHeight: 52)
+            .padding(.vertical, dense ? TronSpacing.xs : compact ? TronSpacing.sm : TronSpacing.md)
+            .frame(minHeight: dense ? 48 : 52)
             .glassEffect(
                 .regular.tint(Color.tronSurfaceElevated.opacity(0.34)),
                 in: RoundedRectangle(cornerRadius: TronSpacing.cornerMD, style: .continuous)
@@ -357,8 +358,8 @@ private struct TronTextEditorSurfaceModifier: ViewModifier {
 }
 
 extension View {
-    func tronField(monospaced: Bool = false, compact: Bool = false) -> some View {
-        modifier(TronFieldSurfaceModifier(monospaced: monospaced, compact: compact))
+    func tronField(monospaced: Bool = false, compact: Bool = false, dense: Bool = false) -> some View {
+        modifier(TronFieldSurfaceModifier(monospaced: monospaced, compact: compact, dense: dense))
     }
 
     func tronComposerField() -> some View {

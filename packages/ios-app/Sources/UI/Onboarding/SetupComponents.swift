@@ -38,9 +38,9 @@ struct ProviderSetupRow: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
                         .foregroundStyle(Color.tronEmerald)
-                        .frame(width: 28, height: 28)
+                        .frame(width: 36, height: 44, alignment: .center)
                         .contentShape(Rectangle())
                 }
                 .accessibilityLabel("\(provider.name) provider actions")
@@ -60,6 +60,7 @@ struct ProviderSetupRow: View {
                         .foregroundStyle(Color.tronEmerald)
                         .lineLimit(1)
                         .fixedSize(horizontal: true, vertical: false)
+                        .frame(minHeight: 44, alignment: .center)
                 }
                 .accessibilityLabel("Connect \(provider.name)")
             }
@@ -67,7 +68,11 @@ struct ProviderSetupRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-        .tronGlassSurface(accent: .tronEmerald, cornerRadius: 12, tintOpacity: 0.08)
+        .tronGlassSurface(
+            accent: .tronEmerald,
+            cornerRadius: 12,
+            tintOpacity: provider.configured ? 0.14 : 0.08
+        )
     }
 
     private var connectionDetail: String {

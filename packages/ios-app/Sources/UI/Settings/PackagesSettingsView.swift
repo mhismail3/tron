@@ -23,8 +23,8 @@ struct PackagesSettingsView: View {
     @State private var source = ""
     @State private var local = false
     @State private var packageToRemove: PackageSummary?
+    @State private var showingInstall = false
     @State private var workingSources: Set<String> = []
-    @State private var checking = false
     @State private var reloading = false
     @State private var packageError: String?
 
@@ -66,58 +66,16 @@ struct PackagesSettingsView: View {
                     }
                 }
 
-                TronSettingsGroup("Updates", accent: .tronCyan) {
-                    VStack(spacing: 0) {
-                        Button {
-                            checking = true
-                            Task {
-                                let loaded = await model.checkPackageUpdates(target: target, surfaceError: false)
-                                if loaded { packageError = nil }
-                                else { packageError = model.packageError(for: target) ?? "Package updates are unavailable. Try again." }
-                                checking = false
-                            }
-                        } label: {
-                            TronValueRow(icon: "arrow.clockwise", title: checking ? "Checking…" : "Check for Updates", accent: .tronCyan) {
-                                if checking { ProgressView().controlSize(.small) }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(checking)
-                        if !updates.isEmpty {
-                            TronSettingsDivider(accent: .tronCyan)
-                            Button("Update All") {
-                                Task {
-                                    do {
-                                        try await model.mutatePackage(
-                                            action: .update,
-                                            source: nil,
-                                            local: false,
-                                            target: target,
-                                            surfaceError: false
-                                        )
-                                        packageError = nil
-                                    } catch { packageError = error.localizedDescription }
-                                }
-                            }
-                            .buttonStyle(TronActionButtonStyle(role: .primary))
-                            .padding(12)
-                        }
-                    }
-                }
-
                 TronSettingsGroup("Install", detail: "Use an npm package, Git URL, or local path.", accent: .tronEmerald) {
-                    VStack(spacing: 12) {
-                        TextField("Package source", text: $source)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .tronField(monospaced: true, compact: true)
-                        TronToggleRow(icon: "folder.badge.gearshape", title: "Project scope", accent: .tronEmerald, isOn: $local)
-                            .disabled(projectCWD == nil)
-                        Button("Install Package") { install() }
-                            .buttonStyle(TronActionButtonStyle(role: .primary))
-                            .disabled(source.isEmpty || workingSources.contains("install:\(source)"))
+                    Button { showingInstall = true } label: {
+                        TronSettingsRow(
+                            icon: "shippingbox.and.arrow.down",
+                            title: "Install Package",
+                            subtitle: "Enter a package source and choose its scope.",
+                            accent: .tronEmerald
+                        )
                     }
-                    .padding(12)
+                    .buttonStyle(.plain)
                 }
 
                 if let resources = inventory?.resources {
@@ -156,9 +114,16 @@ struct PackagesSettingsView: View {
             }
         }
         .task(id: PackageLoadID(target: target, invalidationGeneration: model.packageInvalidationGeneration)) {
-            let loaded = await model.loadPackages(target: target, surfaceError: false)
-            if loaded { packageError = nil }
-            else { packageError = model.packageError(for: target) ?? "The package catalog is unavailable. Try again." }
+            await refreshPackages()
+        }
+        .sheet(isPresented: $showingInstall) {
+            NavigationStack {
+                packageInstallSheet
+            }
+            .tronTopBlur(.sheet)
+            .tronPresentation()
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.hidden)
         }
         .sheet(item: $packageToRemove) { package in
             TronConfirmationSheet(
@@ -177,9 +142,55 @@ struct PackagesSettingsView: View {
         reloading = true
         Task {
             defer { reloading = false }
-            let loaded = await model.loadPackages(target: target, surfaceError: false)
-            if loaded { packageError = nil }
-            else { packageError = model.packageError(for: target) ?? "The package catalog is unavailable. Try again." }
+            await refreshPackages()
+        }
+    }
+
+    private func refreshPackages() async {
+        let loaded = await model.loadPackages(target: target, surfaceError: false)
+        guard loaded else {
+            packageError = model.packageError(for: target) ?? "The package catalog is unavailable. Try again."
+            return
+        }
+        let updatesLoaded = await model.checkPackageUpdates(target: target, surfaceError: false)
+        if updatesLoaded {
+            packageError = nil
+        } else {
+            packageError = model.packageError(for: target) ?? "Package updates are unavailable. Try again."
+        }
+    }
+
+    private var packageInstallSheet: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                TronSettingsGroup("Source", detail: "Use an npm package, Git URL, or local path.", accent: .tronEmerald) {
+                    VStack(spacing: 10) {
+                        TextField("Package source", text: $source)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .tronField(monospaced: true, compact: true)
+                        TronToggleRow(icon: "folder.badge.gearshape", title: "Project scope", accent: .tronEmerald, isOn: $local)
+                            .disabled(projectCWD == nil)
+                        Button("Install Package") { install() }
+                            .buttonStyle(TronActionButtonStyle(role: .primary))
+                            .disabled(source.isEmpty || workingSources.contains("install:\(source)"))
+                    }
+                    .padding(10)
+                }
+            }
+            .padding(16)
+        }
+        .tronScrollEdgeChrome()
+        .tronNavigationTitle("Install Package")
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button { showingInstall = false } label: {
+                    Image(systemName: "checkmark")
+                        .font(TronTypography.buttonSM)
+                        .foregroundStyle(Color.tronEmerald)
+                }
+                .accessibilityLabel("Done")
+            }
         }
     }
 
