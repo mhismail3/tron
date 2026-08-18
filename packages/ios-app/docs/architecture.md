@@ -785,9 +785,10 @@ or model choices disclose as progressively stacked sub-sheets rather than
 horizontal navigation pushes; Appearance uses the custom Liquid Glass segmented
 color-mode control and keeps font axes directly beneath each font choice before its
 preview. Draft-backed settings save from a disabled-until-dirty leading toolbar
-button rather than a trailing page action. Resource path editors share one padded,
-top-leading multiline field treatment, while numeric settings use the shared
-larger numeric scale. Connected-provider logout lives in the
+button rather than a trailing page action; its compact appearance uses the
+system toolbar glass without nesting a second button surface. Resource path
+editors share one padded, top-leading multiline field treatment, while numeric
+settings use the shared larger numeric scale. Connected-provider logout lives in the
 provider row's compact action menu while connection is a plain trailing affordance. Import
 is owned by one progressive Import sheet, including canonical session-file import
 and the bounded legacy migration path; the legacy import action is outside its
