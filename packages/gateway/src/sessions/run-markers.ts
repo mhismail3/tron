@@ -1,6 +1,7 @@
 import { mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { atomicWriteJson, removeIfExists } from "../util/json.js";
+import { atomicWriteJson, readJson, removeIfExists } from "../util/json.js";
+import { AsyncMutex } from "../util/async-mutex.js";
 
 interface Marker {
   version: 1;
@@ -11,19 +12,38 @@ interface Marker {
 
 export class RunMarkerStore {
   private readonly directory: string;
+  private readonly lanes = new Map<string, AsyncMutex>();
 
   constructor(tronHome: string) {
     this.directory = join(tronHome, "gateway", "runtime-markers");
   }
 
-  async mark(sessionId: string, operationId: string): Promise<void> {
-    await mkdir(this.directory, { recursive: true, mode: 0o700 });
-    const marker: Marker = { version: 1, sessionId, operationId, acceptedAt: new Date().toISOString() };
-    await atomicWriteJson(join(this.directory, `${sessionId}.json`), marker);
+  private lane(sessionId: string): AsyncMutex {
+    const existing = this.lanes.get(sessionId);
+    if (existing) return existing;
+    const created = new AsyncMutex();
+    this.lanes.set(sessionId, created);
+    return created;
   }
 
-  async clear(sessionId: string): Promise<void> {
-    await removeIfExists(join(this.directory, `${sessionId}.json`));
+  async mark(sessionId: string, operationId: string): Promise<void> {
+    await this.lane(sessionId).run(async () => {
+      await mkdir(this.directory, { recursive: true, mode: 0o700 });
+      const marker: Marker = { version: 1, sessionId, operationId, acceptedAt: new Date().toISOString() };
+      await atomicWriteJson(join(this.directory, `${sessionId}.json`), marker);
+    });
+  }
+
+  /** Clear only the marker owned by operationId when one is supplied. */
+  async clear(sessionId: string, operationId?: string): Promise<void> {
+    await this.lane(sessionId).run(async () => {
+      const path = join(this.directory, `${sessionId}.json`);
+      if (operationId !== undefined) {
+        const marker = await readJson<Marker | undefined>(path, undefined, 4_096);
+        if (marker?.operationId !== operationId) return;
+      }
+      await removeIfExists(path);
+    });
   }
 
   async interruptedSessionIds(): Promise<Set<string>> {

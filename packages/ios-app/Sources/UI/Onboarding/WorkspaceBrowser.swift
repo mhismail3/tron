@@ -17,12 +17,9 @@ struct WorkspaceBrowser: View {
     let onSelect: (String) -> Void
 
     @State private var includeHidden = false
-    @State private var loading = false
-    @State private var navigating = false
-    @State private var errorMessage: String?
+    @State private var loadOwner = WorkspaceBrowserOwner()
     @State private var creatingFolder = false
     @State private var newFolderName = ""
-    @State private var submittingFolder = false
     @FocusState private var folderFieldFocused: Bool
 
     init(
@@ -37,6 +34,10 @@ struct WorkspaceBrowser: View {
 
     private var listing: WorkspaceListing? { model.workspace }
     private var currentPath: String { listing?.path ?? "" }
+    private var loading: Bool { loadOwner.loading }
+    private var navigating: Bool { loadOwner.navigating }
+    private var errorMessage: String? { loadOwner.errorMessage }
+    private var submittingFolder: Bool { loadOwner.submittingFolder }
     private var directories: [WorkspaceEntry] {
         (listing?.entries ?? []).filter {
             $0.kind == .directory && (includeHidden || !$0.hidden)
@@ -75,7 +76,9 @@ struct WorkspaceBrowser: View {
                 guard !currentPath.isEmpty else { return }
                 Task { await load(path: currentPath, navigation: true) }
             }
+            .onDisappear { loadOwner.cancel() }
         }
+        .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)
@@ -175,6 +178,8 @@ struct WorkspaceBrowser: View {
                                 }
                                 .padding(.horizontal, 14)
                                 .padding(.vertical, 12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                             .tronGlassSurface(accent: .tronSlate, cornerRadius: 14, tintOpacity: 0.07, interactive: true)
@@ -193,7 +198,7 @@ struct WorkspaceBrowser: View {
     private func browserGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
             Text(title.uppercased())
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .font(TronTypography.sheetSectionHeader)
                 .foregroundStyle(Color.tronTextMuted)
             content()
         }
@@ -249,27 +254,23 @@ struct WorkspaceBrowser: View {
     }
 
     private func load(path: String?, navigation: Bool = false) async {
-        if navigation { navigating = true } else { loading = true }
-        defer { navigating = false; loading = false }
-        do {
-            try await model.loadWorkspace(path: path)
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
-            if isTransientConnectionError(error.localizedDescription) { model.becameActive() }
-        }
+        await loadOwner.load(
+            navigation: navigation,
+            operation: { try await model.loadWorkspace(path: path) },
+            onTransientError: { model.becameActive() }
+        )
     }
 
     private func createFolder() {
         let name = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, !currentPath.isEmpty, !submittingFolder else { return }
-        submittingFolder = true
+        let parent = currentPath
         Task {
-            defer { submittingFolder = false }
-            do {
-                try await model.createFolder(parent: currentPath, name: name)
-                cancelFolder()
-            } catch { errorMessage = error.localizedDescription }
+            await loadOwner.createFolder(
+                operation: { try await model.createFolder(parent: parent, name: name) },
+                onSuccess: { cancelFolder() },
+                onTransientError: { model.becameActive() }
+            )
         }
     }
 
@@ -286,9 +287,7 @@ struct WorkspaceBrowser: View {
     }
 
     private func isTransientConnectionError(_ value: String) -> Bool {
-        value.localizedCaseInsensitiveContains("gateway is offline")
-            || value.localizedCaseInsensitiveContains("socket is not connected")
-            || value.localizedCaseInsensitiveContains("disconnected")
+        WorkspaceBrowserOwner.isTransientConnectionError(value)
     }
 
     private func abbreviated(_ path: String) -> String {

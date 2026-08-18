@@ -1,6 +1,7 @@
 import { homedir, hostname, networkInterfaces } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
 import { atomicWriteJson, readJson } from "./util/json.js";
 import { GatewayError } from "./errors.js";
 
@@ -15,7 +16,16 @@ export interface GatewayConfig {
   readonly maxUploadBytes: number;
   readonly terminalReplayBytes: number;
   readonly idleRuntimeMs: number;
+  readonly maxConnections: number;
+  readonly maxConnectionsPerIdentity: number;
+  readonly maxSubscriptionsPerConnection: number;
+  readonly maxLiveRuntimes: number;
+  readonly maxOutboundFrames: number;
+  readonly maxOutboundBytes: number;
+  readonly maxSynchronizationBytes: number;
 }
+
+const GATEWAY_CONFIG_MAX_BYTES = 16 * 1_024;
 
 interface StoredGatewayConfig {
   version: 1;
@@ -73,10 +83,56 @@ export function resolveTronHome(environment = process.env): string {
   return join(homedir(), ".tron");
 }
 
-export async function loadConfig(args = process.argv.slice(2)): Promise<GatewayConfig> {
-  const tronHome = resolveTronHome();
+function isStoredGatewayConfig(value: unknown): value is StoredGatewayConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const document = value as Record<string, unknown>;
+  const expectedKeys = document.defaultWorkspace === undefined
+    ? ["version", "machineId", "machineName"]
+    : ["version", "machineId", "machineName", "defaultWorkspace"];
+  const keys = Object.keys(document);
+  return keys.length === expectedKeys.length && keys.every((key) => expectedKeys.includes(key))
+    && document.version === 1
+    && typeof document.machineId === "string" && Buffer.byteLength(document.machineId) > 0
+    && Buffer.byteLength(document.machineId) <= 256 && !/[\u0000-\u001f\u007f]/.test(document.machineId)
+    && typeof document.machineName === "string" && Buffer.byteLength(document.machineName) > 0
+    && Buffer.byteLength(document.machineName) <= 1_024 && !/[\u0000-\u001f\u007f]/.test(document.machineName)
+    && (document.defaultWorkspace === undefined
+      || (typeof document.defaultWorkspace === "string" && Buffer.byteLength(document.defaultWorkspace) > 0
+        && Buffer.byteLength(document.defaultWorkspace) <= 8_192 && !/[\u0000-\u001f\u007f]/.test(document.defaultWorkspace)));
+}
+
+async function storedGatewayConfig(path: string): Promise<StoredGatewayConfig | null> {
+  const missing = {};
+  let value: unknown;
+  try { value = await readJson<unknown>(path, missing, GATEWAY_CONFIG_MAX_BYTES); }
+  catch (error) {
+    if (error instanceof RangeError || error instanceof SyntaxError) {
+      throw new GatewayError("conflict", "Gateway identity configuration is malformed or oversized");
+    }
+    throw error;
+  }
+  if (value === missing) {
+    try {
+      await stat(path);
+      throw new GatewayError("conflict", "Gateway identity configuration is empty");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+  if (!isStoredGatewayConfig(value)) {
+    throw new GatewayError("conflict", "Gateway identity configuration is malformed");
+  }
+  return value;
+}
+
+export async function loadConfig(
+  args = process.argv.slice(2),
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<GatewayConfig> {
+  const tronHome = resolveTronHome(environment);
   const configPath = join(tronHome, "gateway", "gateway.json");
-  const stored = await readJson<StoredGatewayConfig | null>(configPath, null);
+  const stored = await storedGatewayConfig(configPath);
   const next: StoredGatewayConfig = stored ?? {
     version: 1,
     machineId: randomUUID(),
@@ -84,17 +140,24 @@ export async function loadConfig(args = process.argv.slice(2)): Promise<GatewayC
   };
   if (!stored) await atomicWriteJson(configPath, next);
 
-  const agentDir = resolve(process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"));
+  const agentDir = resolve(environment.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"));
   return {
-    host: resolveBindHost(valueAfter(args, "--host") ?? process.env.TRON_GATEWAY_HOST),
-    port: parsePort(valueAfter(args, "--port") ?? process.env.TRON_GATEWAY_PORT),
+    host: resolveBindHost(valueAfter(args, "--host") ?? environment.TRON_GATEWAY_HOST),
+    port: parsePort(valueAfter(args, "--port") ?? environment.TRON_GATEWAY_PORT),
     tronHome,
     agentDir,
     machineId: next.machineId,
     machineName: next.machineName,
     maxFrameBytes: 1_048_576,
     maxUploadBytes: 25 * 1_048_576,
-    terminalReplayBytes: 2 * 1_048_576,
+    terminalReplayBytes: 768 * 1_024,
     idleRuntimeMs: 10 * 60_000,
+    maxConnections: 32,
+    maxConnectionsPerIdentity: 4,
+    maxSubscriptionsPerConnection: 64,
+    maxLiveRuntimes: 16,
+    maxOutboundFrames: 32,
+    maxOutboundBytes: 2 * 1_048_576,
+    maxSynchronizationBytes: 2 * 1_048_576,
   };
 }

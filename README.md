@@ -55,6 +55,9 @@ state only.
 
 Do not open the same session concurrently in another runtime client: the
 canonical session format does not provide a cross-process session-file lock.
+Use `scripts/tron chat [--session <id>]` for terminal chat; it attaches to the
+same Gateway-owned runtime as iOS and therefore stays on the authoritative
+snapshot/event sequence instead of becoming a competing JSONL writer.
 
 ## Repository
 
@@ -153,6 +156,6 @@ or credentials.
 - [Mac onboarding](packages/mac-app/docs/onboarding.md)
 - [Contributing](CONTRIBUTING.md)
 
-Successful `main` CI publishes an internal TestFlight beta for the maintainer.
-App Store release, public TestFlight distribution, Mac signing/notarization, and
-production deployment remain manual-only.
+CI validates source but does not publish production artifacts. iOS/TestFlight
+and App Store delivery, Mac signing/notarization, and production deployment are
+manual maintainer actions; see the platform development guides.

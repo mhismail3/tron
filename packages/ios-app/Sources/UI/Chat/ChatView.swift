@@ -2,359 +2,1522 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum ChatComposerLayoutSignalPolicy {
+    static func shouldSignal(previous: CGFloat, current: CGFloat) -> Bool {
+        previous > 0 && current > 0 && abs(current - previous) > 0.5
+    }
+}
+
+private struct ChatScrollGeometryObservation: Equatable {
+    let geometry: ChatTranscriptGeometry
+    let presentationEpoch: Int
+    let phase: ChatOpenPresentationPhase
+}
+
 struct ChatView: View {
+    let sessionID: String
+    private let initialEditorText: String?
+    private let initialModel: ModelRef?
+    private let onForkCreated: (AppModel.SessionNavigationRoute) -> Void
+    private let displayFrameScheduler: DisplayFrameScheduler
+    private let performanceSignposts: any PerformanceSignposting
+    #if HOSTED_TEST
+    let hostedProbe: ChatHostedProbe?
+    #endif
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
-    @State private var text = ""
+    @State private var composerScope: ComposerDraftScope?
     @State private var photos: [PhotosPickerItem] = []
-    @State private var showCamera = false
-    @State private var showPhotos = false
-    @State private var showFiles = false
+    @State private var photoImportTask: Task<Void, Never>?
+    @State private var photoImportTarget: SessionPresentationIdentity?
+    @State private var attachmentDestination: ChatAttachmentDestination?
+    @State private var queuedAttachmentDestination: ChatAttachmentDestination?
+    @State private var attachmentPresentationTask: Task<Void, Never>?
     @State private var showContext = false
+    @State private var showExtensionDetails = false
+    @State private var extensionDetailsGroupID: String?
+    @State private var initialModelSettled = true
     @State private var showSettings = false
-    @State private var sending = false
-    @State private var transcriptVisible = false
-    @State private var pendingEditorRequest: AppModel.EditorRequest?
-    @State private var transcriptAtBottom = true
-    @State private var userScrolledAway = false
-    @State private var hasUnreadTranscript = false
-    @State private var speech = SpeechTranscriber()
-    @State private var composerHeight: CGFloat = 72
-    @FocusState private var composerFocused: Bool
+    @State private var queuedMessageEditor: QueuedMessageEditorRoute?
+    @State private var mutatingQueuedMessageIDs: Set<String> = []
+    @State private var openPresentation: ChatOpenPresentationState
+    @State private var openingTask: Task<Void, Never>?
+    @State private var modelPresentationGeneration: Int?
+    @State private var composerTextHeight: CGFloat = 20
+    @State private var composerLayoutHeight: CGFloat = 0
+    @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
+    @State private var scrollCoordinator: ChatScrollCoordinator
+    @State private var transcriptPresentation: ChatTranscriptPresentationStore
+    @State private var performanceTracker: ChatPerformanceTracker
+    @State private var transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
+    @State private var transcriptGeometry = ChatTranscriptGeometry.zero
+    @Namespace private var composerGlassNamespace
+    // UITextView is the responder owner. This mirrors delegate callbacks for
+    // placeholder/scroll presentation; SwiftUI FocusState must not compete with
+    // a UIViewRepresentable that has no `.focused` registration.
+    @State private var composerFocused = false
+    @State private var suppressedInteractionScope: ExtensionInteractionScope?
+
+    #if HOSTED_TEST
+    init(
+        sessionID: String,
+        initialEditorText: String? = nil,
+        initialModel: ModelRef? = nil,
+        onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
+        hostedProbe: ChatHostedProbe? = nil,
+        displayFrameScheduler: DisplayFrameScheduler = .displayLink,
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
+    ) {
+        self.sessionID = sessionID
+        self.initialEditorText = initialEditorText
+        self.initialModel = initialModel
+        self._initialModelSettled = State(initialValue: initialModel == nil)
+        self.onForkCreated = onForkCreated
+        self.hostedProbe = hostedProbe
+        self.displayFrameScheduler = displayFrameScheduler
+        self.performanceSignposts = performanceSignposts
+        _composerScope = State(initialValue: nil)
+        _scrollCoordinator = State(initialValue: ChatScrollCoordinator(frameScheduler: displayFrameScheduler))
+        _transcriptPresentation = State(initialValue: ChatTranscriptPresentationStore(
+            performanceSignposts: performanceSignposts,
+            installationFrameScheduler: displayFrameScheduler
+        ))
+        _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
+        _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
+    }
+    #else
+    init(
+        sessionID: String,
+        initialEditorText: String? = nil,
+        initialModel: ModelRef? = nil,
+        onForkCreated: @escaping (AppModel.SessionNavigationRoute) -> Void = { _ in },
+        displayFrameScheduler: DisplayFrameScheduler = .displayLink,
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared
+    ) {
+        self.sessionID = sessionID
+        self.initialEditorText = initialEditorText
+        self.initialModel = initialModel
+        self._initialModelSettled = State(initialValue: initialModel == nil)
+        self.onForkCreated = onForkCreated
+        self.displayFrameScheduler = displayFrameScheduler
+        self.performanceSignposts = performanceSignposts
+        _composerScope = State(initialValue: nil)
+        _scrollCoordinator = State(initialValue: ChatScrollCoordinator(frameScheduler: displayFrameScheduler))
+        _transcriptPresentation = State(initialValue: ChatTranscriptPresentationStore(
+            performanceSignposts: performanceSignposts,
+            installationFrameScheduler: displayFrameScheduler
+        ))
+        _performanceTracker = State(initialValue: ChatPerformanceTracker(signposts: performanceSignposts))
+        _openPresentation = State(initialValue: ChatOpenPresentationState(sessionID: sessionID))
+    }
+    #endif
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            transcript
-            composer
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: ComposerHeightPreferenceKey.self,
-                            value: geometry.size.height
-                        )
-                    }
-                }
+        transcript
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                // The complete composer is the sole structural inset owner, so
+                // the keyboard, multiline text, and attachment chips push the
+                // native transcript viewport exactly once and reverse naturally.
+                composer
+            }
+            .overlay(alignment: .top) { topBlur }
+        .onGeometryChange(for: CGFloat.self) { geometry in
+            geometry.size.width
+        } action: { width in
+            toolbarContainerWidth = width
         }
-        .onPreferenceChange(ComposerHeightPreferenceKey.self) { composerHeight = $0 }
-        .background(Color.tronBackground)
+        .background { Color.tronBackground.ignoresSafeArea(.all) }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
         .navigationBarBackButtonHidden(true)
         .background(InteractivePopGestureEnabler())
         .tint(Color.tronEmerald)
-        .toolbar { toolbar }
-        .sheet(isPresented: $showContext) { SessionContextSheet() }
-        .sheet(isPresented: $showSettings) { SettingsView().presentationDragIndicator(.hidden) }
-        .sheet(isPresented: $showCamera) {
+        .toolbar {
+            toolbar(titleWidth: ChatToolbarTitleLayout.width(containerWidth: toolbarContainerWidth))
+        }
+        .sheet(isPresented: $showContext) {
+            SessionContextSheet(sessionID: sessionID, onForkCreated: onForkCreated)
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(
+                scope: .project,
+                projectSessionID: sessionID,
+                projectCWD: model.authoritativeSnapshot(for: sessionID)?.cwd
+            )
+            .presentationDragIndicator(.hidden)
+        }
+        .sheet(item: $queuedMessageEditor) { route in
+            if let message = selectedAuthoritativeSnapshot?.displayedQueuedMessages.first(
+                where: { $0.id == route.id }
+            ) {
+                QueuedMessageEditorSheet(
+                    message: message,
+                    isSaving: mutatingQueuedMessageIDs.contains(message.id),
+                    onSave: { text, behavior in
+                        Task { await updateQueuedMessage(message.id, text: text, behavior: behavior) }
+                    },
+                    onDelete: {
+                        Task { await removeQueuedMessage(message.id) }
+                    }
+                )
+            } else {
+                ContentUnavailableView(
+                    "Message No Longer Queued",
+                    systemImage: "text.badge.xmark",
+                    description: Text("It was delivered or removed before the editor opened.")
+                )
+            }
+        }
+        .sheet(isPresented: attachmentPresentationBinding(for: .camera)) {
             CameraCaptureSheet { image in Task { await importCameraImage(image) } }
         }
-        .photosPicker(isPresented: $showPhotos, selection: $photos, maxSelectionCount: 5, matching: .images)
-        .sheet(item: interactionBinding) { interaction in ExtensionInteractionSheet(interaction: interaction) }
-        .fileImporter(isPresented: $showFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+        .photosPicker(
+            isPresented: attachmentPresentationBinding(for: .photos),
+            selection: $photos,
+            maxSelectionCount: ChatAttachmentImportPolicy.maximumPhotoSelection,
+            matching: .images
+        )
+        .sheet(isPresented: $showExtensionDetails) {
+            ExtensionDetailsSheet(sessionID: sessionID, groupID: extensionDetailsGroupID)
+        }
+        .sheet(item: interactionBinding) { interaction in
+            if interaction.questionnaire != nil {
+                ExtensionQuestionnaireSheet(
+                    sessionID: sessionID,
+                    interaction: interaction,
+                    onResolved: {
+                        suppressedInteractionScope = ExtensionInteractionScope(interaction)
+                    },
+                    onLocallyClosed: {
+                        suppressedInteractionScope = ExtensionInteractionScope(interaction)
+                    }
+                )
+            } else {
+                ExtensionInteractionSheet(
+                    sessionID: sessionID,
+                    interaction: interaction,
+                    onResolved: {
+                        suppressedInteractionScope = ExtensionInteractionScope(interaction)
+                    },
+                    onLocallyClosed: {
+                        suppressedInteractionScope = ExtensionInteractionScope(interaction)
+                    }
+                )
+            }
+        }
+        .fileImporter(
+            isPresented: attachmentPresentationBinding(for: .files),
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
             Task { await importFiles(result) }
         }
-        .onChange(of: photos) { _, values in Task { await importPhotos(values) } }
-        .onChange(of: speech.transcript) { _, value in if !value.isEmpty { text = value } }
-        .onChange(of: speech.error) { _, value in if let value { model.lastError = value } }
-        .onChange(of: model.editorRequest) { _, request in
-            guard let request, request.sessionId == model.selectedSessionID else { return }
-            if text.isEmpty {
-                text = request.action == .paste ? text + request.text : request.fullText
-                model.editorRequest = nil
-            } else {
-                pendingEditorRequest = request
+        .onChange(of: photos) { _, values in
+            guard !values.isEmpty, let target = presentationTarget else { return }
+            photoImportTask?.cancel()
+            photoImportTarget = target
+            photos = []
+            photoImportTask = Task { @MainActor in
+                await importPhotos(values, target: target)
+                guard !Task.isCancelled, photoImportTarget == target else { return }
+                photoImportTask = nil
+                photoImportTarget = nil
             }
         }
-        .confirmationDialog("Replace the current draft?", isPresented: Binding(
-            get: { pendingEditorRequest != nil },
-            set: { if !$0 { pendingEditorRequest = nil } }
+        .onChange(of: attachmentMenuState) { previous, current in
+            if previous.sessionID != current.sessionID {
+                cancelAttachmentPresentation(includingActive: true)
+                photoImportTask?.cancel()
+                photoImportTask = nil
+                photoImportTarget = nil
+            } else if !current.actionsEnabled {
+                cancelAttachmentPresentation(includingActive: false)
+                photoImportTask?.cancel()
+                photoImportTask = nil
+                photoImportTarget = nil
+            }
+        }
+        .confirmationDialog(ComposerEditorRequestPolicy.confirmationTitle, isPresented: Binding(
+            get: { initialModelSettled && routedEditorRequest != nil },
+            set: { isPresented in
+                guard !isPresented,
+                      let request = routedEditorRequest,
+                      let target = presentationTarget else { return }
+                model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
+            }
         )) {
-            Button("Use Extension Text") {
-                if let request = pendingEditorRequest {
-                    text = request.action == .paste ? text + request.text : request.fullText
-                    model.editorRequest = nil
-                }
-                pendingEditorRequest = nil
+            Button(ComposerEditorRequestPolicy.useActionTitle) {
+                guard let request = routedEditorRequest,
+                      let target = presentationTarget else { return }
+                model.disposeExtensionEditorRequest(request, disposition: .use, target: target)
             }
-            Button("Keep Current Draft", role: .cancel) { pendingEditorRequest = nil }
+            Button(ComposerEditorRequestPolicy.keepActionTitle, role: .cancel) {
+                guard let request = routedEditorRequest,
+                      let target = presentationTarget else { return }
+                model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
+            }
         } message: {
-            Text("An extension requested a composer change. Tron will not overwrite what you typed without confirmation.")
+            Text(ComposerEditorRequestPolicy.confirmationMessage)
         }
-        .task(id: model.selectedSessionID) {
-            transcriptVisible = false
-            await Task.yield()
-            withAnimation(.easeOut(duration: 0.28)) { transcriptVisible = true }
+        .task(id: sessionID) { await beginOpeningPresentation() }
+        .onChange(of: pendingInteractionScopes, initial: true) { _, scopes in
+            guard let suppressedInteractionScope,
+                  ChatExtensionInteractionPolicy.shouldClearSuppression(
+                      suppressedInteractionScope,
+                      from: selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? []
+                  ) else { return }
+            self.suppressedInteractionScope = nil
         }
-        .onDisappear { speech.stop() }
+        .onChange(of: transcriptProjectionSource, initial: true) { _, source in
+            guard let currentSource = transcriptProjectionSource else {
+                // A recycled same-session owner can briefly have no exact
+                // generation while the retained canonical snapshot is still
+                // valid. Keep the mounted projection until its replacement
+                // installs; only a genuinely absent session clears the view.
+                if selectedAuthoritativeSnapshot == nil { transcriptPresentation.reset() }
+                return
+            }
+            // Ignore a callback captured before opening installed its mounted
+            // generation; the newer exact source owns submission.
+            guard source == currentSource,
+                  let snapshot = selectedAuthoritativeSnapshot,
+                  snapshot.sessionId == currentSource.sessionID else { return }
+            if let target = presentationTarget {
+                model.composerDrafts.reconcileSubmission(
+                    target: target,
+                    canonicalTranscript: snapshot.transcript,
+                    queuedMessages: snapshot.displayedQueuedMessages
+                )
+            }
+            // Prepend owns its exact page projection/layout-epoch transaction.
+            guard !scrollCoordinator.isPrependingHistory else { return }
+            let installedBeforeSubmission = transcriptPresentation.installed
+            let startedWork = transcriptPresentation.submit(snapshot: snapshot, tag: currentSource)
+            if startedWork {
+                scrollCoordinator.transcriptProjectionWillChange(from: installedBeforeSubmission)
+            }
+            #if HOSTED_TEST
+            hostedProbe?.recordProjectionSubmit(startedWork: startedWork)
+            #endif
+        }
+        .onChange(of: scrollCoordinator.tailSettlementGeneration) { _, _ in
+            guard let generation = modelPresentationGeneration else { return }
+            model.discardLoadedTranscriptHistory(
+                sessionID: sessionID,
+                presentationGeneration: generation
+            )
+        }
+        .onChange(of: transcriptPresentation.installed?.tag) { _, _ in
+            let installed = transcriptPresentation.installed
+            scrollCoordinator.installedTranscriptChanged(installed)
+            #if HOSTED_TEST
+            if let installed {
+                hostedProbe?.recordProjectionInstall(
+                    rowCount: installed.timeline.items.count,
+                    sourceOrdinal: installed.tag.timelineGeneration
+                )
+            }
+            #endif
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didReceiveMemoryWarningNotification
+        )) { _ in
+            transcriptPresentation.handleMemoryPressure()
+        }
+        .onDisappear {
+            if let target = presentationTarget { model.revokePresentationIntake(target) }
+            openingTask?.cancel()
+            openingTask = nil
+            scrollCoordinator.cancel()
+            transcriptPresentation.reset()
+            performanceTracker.cancelAll()
+            cancelAttachmentPresentation(includingActive: true)
+            photoImportTask?.cancel()
+            photoImportTask = nil
+            photoImportTarget = nil
+            if let generation = modelPresentationGeneration {
+                Task { await model.closeSessionPresentation(sessionID, generation: generation) }
+            }
+        }
+    }
+
+    private var topBlur: some View {
+        TronTopBlurOverlay(style: .chat)
     }
 
     private var transcript: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if let snapshot = model.selectedSnapshot {
-                        if (snapshot.transcriptStart ?? 0) > 0 {
-                            Button {
-                                Task { await model.loadEarlierTranscript() }
-                            } label: {
-                                if model.loadingEarlierTranscript {
-                                    TronLoadingState(label: "Loading earlier messages…")
-                                } else {
-                                    Label("Load earlier messages", systemImage: "arrow.up")
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                if let snapshot = selectedAuthoritativeSnapshot {
+                    if (snapshot.transcriptStart ?? 0) > 0 {
+                        stableTranscriptRow(
+                            id: "earlier-messages",
+                            installedTag: nil,
+                            entranceState: .none
+                        ) {
+                            earlierMessagesChip(snapshot: snapshot)
+                        }
+                    }
+                    if let installed = transcriptPresentation.installed {
+                        ForEach(installed.displayedItems) { item in
+                            let entranceState = transcriptPresentation.entranceState(for: item.id)
+                            stableTranscriptRow(
+                                id: item.id,
+                                installedTag: installed.tag,
+                                entranceState: entranceState
+                            ) {
+                                ChatTranscriptEntranceRow(
+                                    state: entranceState,
+                                    kind: .classify(item),
+                                    reduceMotion: reduceMotion
+                                ) {
+                                    ChatTranscriptRenderRow(
+                                        item: item,
+                                        preparedText: installed.preparedText.slice(for: item),
+                                        hiddenThinkingLabel: snapshot.extensionPresentation.semanticState.hiddenThinkingLabel,
+                                        installationTag: installed.tag,
+                                        resolveToolDetails: { callIDs, tag in
+                                            transcriptPresentation.resolveToolDetails(
+                                                callIDs: callIDs,
+                                                installationTag: tag
+                                            )
+                                        }
+                                    )
+                                    .equatable()
+                                    .chatStableTranscriptUpdates()
                                 }
                             }
-                            .buttonStyle(TronActionButtonStyle(expands: false))
-                            .disabled(model.loadingEarlierTranscript)
-                            .frame(maxWidth: .infinity)
                         }
-                        let items = ChatTranscriptPresentation.renderItems(in: snapshot)
-                        let results = ChatTranscriptPresentation.toolResults(in: snapshot)
-                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                            ChatTranscriptRenderRow(item: item, toolResults: results)
-                                .id(item.id)
-                                .opacity(transcriptVisible ? 1 : 0)
-                                .offset(y: transcriptVisible ? 0 : 6)
-                                .animation(
-                                    .easeOut(duration: 0.22).delay(min(Double(index) * 0.025, 0.18)),
-                                    value: transcriptVisible
-                                )
-                                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
-                        }
-                        if let streaming = snapshot.streaming {
-                            TranscriptRow(item: streaming, streaming: true, toolResults: results)
-                                .id("streaming")
-                                .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
-                        }
-                        if let liveTools = ChatTranscriptPresentation.liveToolRun(in: snapshot) {
-                            ToolRunView(run: liveTools)
-                                .id("live-\(liveTools.id)")
-                                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .leading)))
-                        }
-                        if snapshot.phase.isActive && snapshot.extensionUI.working.visible {
-                            HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(snapshot.extensionUI.working.message ?? statusText(snapshot.phase)).foregroundStyle(.secondary)
-                                    if let retry = snapshot.retry {
-                                        Text("Attempt \(retry.attempt)\(retry.maxAttempts.map { " of \($0)" } ?? "")")
-                                            .foregroundStyle(.tertiary)
-                                    }
+                        if let outgoing = outgoingSubmissionPresentation {
+                            stableTranscriptRow(
+                                id: outgoing.id,
+                                installedTag: nil,
+                                entranceState: .none
+                            ) {
+                                ChatOutgoingSubmissionEntranceRow(
+                                    reduceMotion: reduceMotion
+                                ) {
+                                    ChatOutgoingSubmissionRow(
+                                        presentation: outgoing,
+                                        attachments: pendingAttachments.filter {
+                                            outgoing.attachmentIDs.contains($0.id)
+                                        }
+                                    )
                                 }
                             }
-                            .font(TronTypography.caption).padding(.vertical, 4)
                         }
-                        if !snapshot.extensionUI.statuses.isEmpty {
-                            ForEach(snapshot.extensionUI.statuses.sorted(by: { $0.key < $1.key }), id: \.key) { _, value in
-                                TranscriptNotice(
-                                    title: value,
-                                    icon: "info.circle.fill",
-                                    tint: .tronInfo
-                                )
-                            }
-                        }
-                    } else { ProgressView().frame(maxWidth: .infinity).padding(.top, 80) }
-                    Color.clear
-                        .frame(height: max(64, composerHeight - 6))
-                        .id("transcript-bottom")
-                        .accessibilityHidden(true)
-                }
-                .padding(.horizontal, 16).padding(.vertical, 18)
-                .animation(transcriptVisible ? .easeOut(duration: 0.25) : nil, value: model.selectedSnapshot?.transcript.map(\.id))
-                .animation(.spring(response: 0.28, dampingFraction: 0.86), value: model.selectedSnapshot?.toolExecutions)
-            }
-            .defaultScrollAnchor(.bottom)
-            .tronScrollEdgeChrome()
-            .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - 80
-            } action: { _, isAtBottom in
-                transcriptAtBottom = isAtBottom
-                if isAtBottom {
-                    userScrolledAway = false
-                    hasUnreadTranscript = false
-                }
-            }
-            .onScrollPhaseChange { _, phase, _ in
-                if phase == .interacting || phase == .tracking || phase == .decelerating {
-                    userScrolledAway = !transcriptAtBottom
-                }
-            }
-            .onChange(of: responseState, initial: true) { previous, current in
-                guard let current else {
-                    hasUnreadTranscript = false
-                    transcriptAtBottom = true
-                    userScrolledAway = false
-                    return
-                }
-                guard previous?.sessionID == current.sessionID else {
-                    // Opening or creating a session hydrates its first authoritative
-                    // snapshot before scroll geometry settles. That baseline is not
-                    // unread response content and must not inherit another session's pill.
-                    hasUnreadTranscript = false
-                    transcriptAtBottom = true
-                    userScrolledAway = false
-                    Task { @MainActor in
-                        await Task.yield()
-                        proxy.scrollTo("transcript-bottom", anchor: .bottom)
+                        queuedMessageRows(installed)
                     }
-                    return
                 }
-                if !userScrolledAway {
-                    withAnimation(.easeOut(duration: 0.16)) {
-                        proxy.scrollTo("transcript-bottom", anchor: .bottom)
-                    }
-                } else if ChatUnreadResponsePolicy.shouldMarkUnread(
-                    previous: previous,
-                    current: current,
-                    userScrolledAway: userScrolledAway
+                transcriptTailMarker
+            }
+            .padding(.vertical, 12)
+            .scrollTargetLayout()
+            // Keep rows physically realizable beneath the opaque opening surface.
+            // The cover fades away only after exact-tail positioning; opacity-zero
+            // lazy content can defer the very target needed to position it.
+            .offset(y: isTranscriptReady || reduceMotion ? 0 : 8)
+            .animation(transcriptRevealAnimation, value: isTranscriptReady)
+            .accessibilityHidden(!isTranscriptReady)
+            .allowsHitTesting(isTranscriptReady)
+        }
+        // Initial overflow opens at the latest tail, but undersized/lazily
+        // materializing content remains top-aligned. Bottom alignment here
+        // re-anchors during keyboard animation and can manufacture blank space.
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.top, for: .alignment)
+        .scrollPosition($transcriptScrollPosition)
+        .tronScrollEdgeChrome()
+        .onChange(of: transcriptScrollPosition.isPositionedByUser) { _, positionedByUser in
+            guard admitsNativeScrollCallbacks else { return }
+            if positionedByUser {
+                performanceTracker.discardScroll()
+                transcriptPresentation.discardPendingEntrances()
+            }
+            scrollCoordinator.scrollPositionChanged(isPositionedByUser: positionedByUser)
+        }
+        .onScrollGeometryChange(for: ChatScrollGeometryObservation.self) { geometry in
+            ChatScrollGeometryObservation(
+                geometry: ChatTranscriptGeometry(geometry),
+                presentationEpoch: openPresentation.epoch,
+                phase: openPresentation.phase
+            )
+        } action: { previous, observation in
+            guard observation.presentationEpoch == openPresentation.epoch,
+                  observation.phase == openPresentation.phase else { return }
+            let geometry = observation.geometry
+            let previousGeometry = previous.geometry
+            transcriptGeometry = geometry
+            #if HOSTED_TEST
+            hostedProbe?.updateGeometry(geometry)
+            if isTranscriptReady, geometry.isAtCatchUpBoundary {
+                hostedProbe?.recordScrollSettle(distanceFromBottom: geometry.distanceFromBottom)
+            }
+            #endif
+            guard observation.phase == .positioning || observation.phase == .ready,
+                  admitsScrollGeometryCallbacks,
+                  admitsNativeScrollCallbacks else { return }
+            // Phase and epoch participate in the observed value so entering
+            // positioning replays current native geometry even when its numeric
+            // fields are unchanged and SwiftUI would otherwise coalesce it.
+            if geometry.hasViewportChange(from: previousGeometry) {
+                scrollCoordinator.viewportChanged(previous: previousGeometry, current: geometry)
+            } else {
+                scrollCoordinator.geometryChanged(previous: previousGeometry, current: geometry)
+            }
+        }
+        .onScrollPhaseChange { oldPhase, newPhase, context in
+            guard admitsNativeScrollCallbacks else { return }
+            if newPhase == .interacting || newPhase == .tracking || newPhase == .decelerating {
+                performanceTracker.discardScroll()
+                transcriptPresentation.discardPendingEntrances()
+            }
+            let finalGeometry = ChatTranscriptGeometry(context.geometry)
+            scrollCoordinator.scrollPhaseChanged(
+                from: oldPhase,
+                to: newPhase,
+                finalGeometry: finalGeometry
+            )
+        }
+        .onChange(of: scrollCoordinator.commandRevision) { _, _ in
+            executePendingScrollCommand()
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .onChange(of: responseState, initial: true) { previous, current in
+            guard let current else { return }
+            guard previous?.sessionID == current.sessionID else { return }
+            if ChatUnreadResponsePolicy.shouldMarkUnread(
+                previous: previous,
+                current: current,
+                userScrolledAway: scrollCoordinator.shouldTrackUnreadResponse
+            ) {
+                scrollCoordinator.semanticResponseArrived()
+            }
+        }
+        .overlay { openingSurface }
+        .animation(transcriptRevealAnimation, value: isTranscriptReady)
+    }
+
+    @ViewBuilder
+    private func queuedMessageRows(_ installed: InstalledChatTranscript) -> some View {
+        let messages = installed.queuedMessages
+        let managementAvailability = QueuedMessageManagementPolicy.availability(
+            capabilities: model.gatewayInfo?.capabilities ?? [],
+            queueRevision: installed.queueRevision,
+            hasAuthoritativeItems: installed.supportsQueueManagement
+        )
+        ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+            stableTranscriptRow(
+                id: "queued-message-\(message.id)",
+                installedTag: nil,
+                entranceState: .none
+            ) {
+                ChatQueuedMessageEntranceRow(
+                    animatesEntrance: isTranscriptReady,
+                    reduceMotion: reduceMotion
                 ) {
-                    hasUnreadTranscript = true
-                }
-            }
-            .overlay(alignment: .bottomTrailing) {
-                if hasUnreadTranscript {
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
-                            proxy.scrollTo("transcript-bottom", anchor: .bottom)
+                    QueuedMessageRow(
+                        message: message,
+                        position: index + 1,
+                        total: messages.count,
+                        managementAvailability: managementAvailability,
+                        isMutating: !mutatingQueuedMessageIDs.isEmpty,
+                        onEdit: { queuedMessageEditor = .init(id: message.id) },
+                        onClear: { Task { await clearQueuedMessages() } },
+                        canMoveEarlier: index > 0 && messages[index - 1].behavior == message.behavior,
+                        canMoveLater: index + 1 < messages.count && messages[index + 1].behavior == message.behavior,
+                        onMove: { offset in
+                            Task { await moveQueuedMessage(message.id, offset: offset) }
                         }
-                        hasUnreadTranscript = false
-                        userScrolledAway = false
-                    } label: {
-                        Label("New response", systemImage: "arrow.down")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .padding(.horizontal, 10).padding(.vertical, 7)
-                            .frame(minHeight: 44)
-                            .contentShape(Capsule())
-                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.24)).interactive(), in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("New response")
-                    .padding(.trailing, 12)
-                    .padding(.bottom, composerHeight + 8)
+                    )
                 }
             }
         }
     }
 
+    @ViewBuilder
+    private func stableTranscriptRow<Content: View>(
+        id: String,
+        installedTag: ChatTranscriptProjectionTag?,
+        entranceState: ChatTranscriptEntranceState,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let rowLayoutEpoch = scrollCoordinator.layoutEpoch
+        let entranceAdmissionTag = entranceState == .pending ? installedTag : nil
+        let row = content()
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .id(id)
+        row.onGeometryChange(for: ChatSemanticFrameObservation.self) { geometry in
+            ChatSemanticFrameObservation(
+                layoutEpoch: rowLayoutEpoch,
+                frame: geometry.frame(in: .scrollView(axis: .vertical)),
+                entranceAdmissionTag: entranceAdmissionTag
+            )
+        } action: { sample in
+            scrollCoordinator.semanticFrameChanged(
+                renderedID: id,
+                layoutEpoch: sample.layoutEpoch,
+                frame: sample.frame
+            )
+            let installed = transcriptPresentation.installed
+            let currentEntranceState = transcriptPresentation.entranceState(for: id)
+            if ChatEntranceGeometryAdmissionPolicy.admits(
+                observation: sample,
+                installedTag: installed?.tag,
+                installedContainsRenderedID: installed?.containsDisplayedID(id) == true,
+                currentLayoutEpoch: scrollCoordinator.layoutEpoch,
+                entranceState: currentEntranceState
+            ), let entranceTag = sample.entranceAdmissionTag {
+                let intersectsViewport = transcriptGeometry.isValid
+                    && sample.frame.maxY > 0
+                    && sample.frame.minY < transcriptGeometry.containerHeight
+                // A realized tail insertion owned by a pinned reader is the
+                // exact upcoming viewport target even when its first frame sits
+                // just below the current edge. Detached readers require actual
+                // intersection and never gain automatic authority here.
+                let isVisible = intersectsViewport || scrollCoordinator.canAutomaticallyFollow
+                let animated = transcriptPresentation.resolveEntrance(
+                    id: id,
+                    installationTag: entranceTag,
+                    isVisible: isVisible
+                )
+                #if HOSTED_TEST
+                hostedProbe?.recordEntranceResolution(
+                    animated: animated,
+                    sourceOrdinal: entranceTag.timelineGeneration
+                )
+                #endif
+                if animated { scrollCoordinator.discreteContentInserted(renderedID: id) }
+            }
+            #if HOSTED_TEST
+            hostedProbe?.updateRowFrame(id: id, frame: sample.frame)
+            hostedProbe?.recordMaximumSemanticExcursion(scrollCoordinator.maximumPrependSemanticExcursion)
+            #endif
+        }
+    }
+
+    private var transcriptTailMarker: some View {
+        let rowLayoutEpoch = scrollCoordinator.layoutEpoch
+        return Color.clear
+            .frame(height: 12)
+            .id("transcript-bottom")
+            .accessibilityHidden(true)
+            .onGeometryChange(for: ChatSemanticFrameObservation.self) { geometry in
+                ChatSemanticFrameObservation(
+                    layoutEpoch: rowLayoutEpoch,
+                    frame: geometry.frame(in: .scrollView(axis: .vertical)),
+                    entranceAdmissionTag: nil
+                )
+            } action: { sample in
+                scrollCoordinator.semanticFrameChanged(
+                    renderedID: "transcript-bottom",
+                    layoutEpoch: sample.layoutEpoch,
+                    frame: sample.frame
+                )
+                #if HOSTED_TEST
+                hostedProbe?.updateRowFrame(id: "transcript-bottom", frame: sample.frame)
+                #endif
+            }
+    }
+
+    private var selectedAuthoritativeSnapshot: SessionSnapshot? {
+        model.authoritativeSnapshot(for: sessionID)
+    }
+
+    private var showsAmbientWorkingBlur: Bool {
+        guard let snapshot = selectedAuthoritativeSnapshot else { return false }
+        return ChatRuntimeWorkingPresentation(
+            phase: snapshot.phase,
+            working: snapshot.extensionPresentation.semanticState.working,
+            retry: snapshot.retry
+        )?.usesAmbientBottomIndicator == true
+    }
+
+    private var presentationTarget: AppModel.SessionPresentationTarget? {
+        modelPresentationGeneration.map {
+            AppModel.SessionPresentationTarget(sessionID: sessionID, generation: $0)
+        }
+    }
+
+    private var transcriptProjectionSource: ChatTranscriptProjectionTag? {
+        guard let snapshot = selectedAuthoritativeSnapshot,
+              let generation = modelPresentationGeneration,
+              let projection = model.chatProjectionGenerations(
+                for: sessionID,
+                presentationGeneration: generation
+              ),
+              snapshot.sessionId == sessionID else { return nil }
+        return ChatTranscriptProjectionTag(
+            snapshot: snapshot,
+            presentationGeneration: generation,
+            canonicalGeneration: projection.canonical,
+            timelineGeneration: projection.timeline
+        )
+    }
+
+    @MainActor
+    private func installCurrentTranscriptProjection(
+        presentationGeneration: Int
+    ) async throws -> InstalledChatTranscript {
+        while true {
+            try Task.checkCancellation()
+            guard modelPresentationGeneration == presentationGeneration,
+                  let snapshot = model.authoritativeSnapshot(for: sessionID),
+                  let projection = model.chatProjectionGenerations(
+                    for: sessionID,
+                    presentationGeneration: presentationGeneration
+                  ),
+                  snapshot.sessionId == sessionID else { throw CancellationError() }
+            let tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: presentationGeneration,
+                canonicalGeneration: projection.canonical,
+                timelineGeneration: projection.timeline
+            )
+            transcriptPresentation.submit(snapshot: snapshot, tag: tag)
+            do {
+                let installed = try await transcriptPresentation.waitForInstall(of: tag)
+                guard modelPresentationGeneration == presentationGeneration else {
+                    throw CancellationError()
+                }
+                if transcriptProjectionSource == tag { return installed }
+            } catch ChatTranscriptPresentationStoreError.superseded {
+                continue
+            }
+        }
+    }
+
+    private var composerText: String {
+        composerScope.map(model.composerDrafts.text(for:)) ?? ""
+    }
+
+    private var composerTextBinding: Binding<String> {
+        Binding(
+            get: { composerText },
+            set: { value in
+                guard let composerScope else { return }
+                model.composerDrafts.setText(value, for: composerScope)
+                if selectedAuthoritativeSnapshot?.extensionPresentation.hostEpoch.isEmpty == false,
+                   let presentationTarget {
+                    model.scheduleExtensionEditorUpdate(target: presentationTarget, text: value)
+                }
+            }
+        )
+    }
+
+    private var pendingAttachments: [PendingAttachment] {
+        presentationTarget.map(model.composerDrafts.pendingAttachments(for:)) ?? []
+    }
+
+    private var candidatePresentedInteraction: ExtensionInteraction? {
+        ChatExtensionInteractionPolicy.presentedInteraction(
+            selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? [],
+            suppressing: suppressedInteractionScope
+        )
+    }
+
+    private var candidateEditorRequest: ComposerEditorRequest? {
+        guard let target = presentationTarget else { return nil }
+        return model.composerDrafts.editorRequest(for: target)
+    }
+
+    private var extensionForegroundPresentation: ChatExtensionForegroundPresentation {
+        ChatExtensionPresentationArbiter.presentation(
+            modelSettled: initialModelSettled,
+            hasInteraction: candidatePresentedInteraction != nil,
+            hasEditorRequest: candidateEditorRequest != nil
+        )
+    }
+
+    private var pendingPresentedInteraction: ExtensionInteraction? {
+        extensionForegroundPresentation == .interaction ? candidatePresentedInteraction : nil
+    }
+
+    private var routedEditorRequest: ComposerEditorRequest? {
+        extensionForegroundPresentation == .editorRequest ? candidateEditorRequest : nil
+    }
+
+    private var sending: Bool {
+        presentationTarget.map(model.composerDrafts.isSending(target:)) ?? false
+    }
+
+    private var outgoingSubmissionPresentation: ChatOutgoingSubmissionPresentation? {
+        guard let target = presentationTarget,
+              let snapshot = model.composerDrafts.outgoingSubmission(for: target) else { return nil }
+        return ChatOutgoingSubmissionPresentation(
+            snapshot: snapshot,
+            transportActive: model.composerDrafts.isSending(target: target)
+        )
+    }
+
+    private var submissionPending: Bool {
+        presentationTarget.map(model.composerDrafts.hasPendingSubmission(target:)) ?? false
+    }
+
     private var responseState: ChatResponseState? {
-        model.selectedSnapshot.map(ChatResponseState.init)
+        selectedAuthoritativeSnapshot.map(ChatResponseState.init)
+    }
+
+    private var isTranscriptReady: Bool { openPresentation.phase == .ready }
+
+    private var transcriptRevealAnimation: Animation {
+        reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.26)
+    }
+
+    private var admitsScrollGeometryCallbacks: Bool {
+        openPresentation.phase == .positioning || openPresentation.phase == .ready
+    }
+
+    private var admitsNativeScrollCallbacks: Bool {
+        #if HOSTED_TEST
+        hostedProbe?.usesDrivenScrollAuthority != true
+        #else
+        true
+        #endif
+    }
+
+    @ViewBuilder private var openingSurface: some View {
+        switch openPresentation.phase {
+        case .opening, .positioning:
+            VStack(spacing: 12) {
+                ProgressView().controlSize(.regular)
+                Text("Opening conversation…")
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronTextSecondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.tronBackground)
+            .accessibilityElement(children: .combine)
+            .transition(.opacity)
+        case .failed(let message):
+            VStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(Color.tronError)
+                Text("Conversation unavailable")
+                    .font(TronTypography.body)
+                Text(message)
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .multilineTextAlignment(.center)
+                Button("Retry") { Task { await beginOpeningPresentation() } }
+                    .buttonStyle(.plain)
+                    .chatTranscriptPill()
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.tronBackground)
+        case .ready:
+            EmptyView()
+        }
+    }
+
+    @MainActor
+    private func beginOpeningPresentation() async {
+        if composerScope == nil, let profileID = model.profiles.selected?.id {
+            composerScope = model.composerDrafts.prepareDraft(
+                profileID: profileID,
+                sessionID: sessionID,
+                initialText: initialEditorText
+            )
+        }
+        #if HOSTED_TEST
+        if let hostedProbe {
+            await beginHostedPresentation(probe: hostedProbe)
+            return
+        }
+        #endif
+        openingTask?.cancel()
+        performanceTracker.discardScroll()
+        let retainsVisiblePresentation = modelPresentationGeneration != nil
+            && selectedAuthoritativeSnapshot?.sessionId == sessionID
+        if !retainsVisiblePresentation {
+            modelPresentationGeneration = nil
+            transcriptPresentation.reset()
+        }
+        let epoch = openPresentation.begin(retainingVisiblePresentation: retainsVisiblePresentation)
+        scrollCoordinator.resetForPresentation(epoch)
+        let task = Task { @MainActor in
+            let interval = performanceSignposts.begin(.firstReadyFrame)
+            var openedGeneration: Int?
+            do {
+                let generation = try await model.openSessionPresentation(
+                    sessionID,
+                    composerScope: composerScope
+                )
+                openedGeneration = generation
+                if let initialModel {
+                    defer { initialModelSettled = true }
+                    if let snapshot = model.authoritativeSnapshot(for: sessionID),
+                       snapshot.model?.provider != initialModel.provider || snapshot.model?.id != initialModel.id {
+                        do {
+                            try await model.setModel(initialModel, sessionID: sessionID)
+                        } catch is CancellationError {
+                            throw CancellationError()
+                        } catch {
+                            model.postNotice("The selected model could not be applied; this session will use its current model.")
+                        }
+                    }
+                }
+                guard !Task.isCancelled,
+
+                      model.authoritativeSnapshot(for: sessionID)?.sessionId == sessionID else {
+                    performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                    await model.closeSessionPresentation(sessionID, generation: generation)
+                    return
+                }
+                modelPresentationGeneration = generation
+                let installed = try await installCurrentTranscriptProjection(
+                    presentationGeneration: generation
+                )
+                if retainsVisiblePresentation {
+                    guard !Task.isCancelled,
+                          transcriptProjectionSource == installed.tag,
+                          openPresentation.epoch == epoch,
+                          openPresentation.phase == .ready else {
+                        performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                        await model.closeSessionPresentation(sessionID, generation: generation)
+                        return
+                    }
+                    openedGeneration = nil
+                    _ = await completeFirstReadyFrame(interval, epoch: epoch)
+                    return
+                }
+                guard !Task.isCancelled,
+                      transcriptProjectionSource == installed.tag,
+                      openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
+                    performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                    await model.closeSessionPresentation(sessionID, generation: generation)
+                    if modelPresentationGeneration == generation {
+                        modelPresentationGeneration = nil
+                        transcriptPresentation.reset()
+                    }
+                    return
+                }
+                let positioned = await positionLatestTail(
+                    epoch: epoch,
+                    targetRenderedID: physicalOpeningTailID(for: installed)
+                )
+                guard positioned else {
+                    let isCurrentTimeout = !Task.isCancelled
+                        && openPresentation.epoch == epoch
+                        && openPresentation.phase == .positioning
+                    performanceSignposts.end(
+                        interval,
+                        result: isCurrentTimeout ? .failure : .discarded,
+                        metrics: .none
+                    )
+                    if isCurrentTimeout {
+                        _ = openPresentation.fail(
+                            sessionID: sessionID,
+                            epoch: epoch,
+                            message: "The conversation layout did not settle. Please retry."
+                        )
+                    }
+                    await model.closeSessionPresentation(sessionID, generation: generation)
+                    if modelPresentationGeneration == generation {
+                        modelPresentationGeneration = nil
+                        transcriptPresentation.reset()
+                    }
+                    return
+                }
+                guard !Task.isCancelled,
+                      revealPositionedTranscript(epoch: epoch) else {
+                    performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                    await model.closeSessionPresentation(sessionID, generation: generation)
+                    if modelPresentationGeneration == generation {
+                        modelPresentationGeneration = nil
+                        transcriptPresentation.reset()
+                    }
+                    return
+                }
+                openedGeneration = nil
+                _ = await completeFirstReadyFrame(interval, epoch: epoch)
+            } catch {
+                if let generation = openedGeneration {
+                    await model.closeSessionPresentation(sessionID, generation: generation)
+                    if modelPresentationGeneration == generation {
+                        modelPresentationGeneration = nil
+                        transcriptPresentation.reset()
+                    }
+                }
+                let result = PerformanceResult.forFailure(error)
+                performanceSignposts.end(interval, result: result, metrics: .none)
+                if result == .cancelled { return }
+                _ = openPresentation.fail(
+                    sessionID: sessionID,
+                    epoch: epoch,
+                    message: error.localizedDescription
+                )
+            }
+        }
+        openingTask = task
+        await task.value
+        if openPresentation.epoch == epoch { openingTask = nil }
+    }
+
+    #if HOSTED_TEST
+    @MainActor
+    private func beginHostedPresentation(probe: ChatHostedProbe) async {
+        performanceTracker.discardScroll()
+        transcriptPresentation.reset()
+        let epoch = openPresentation.begin()
+        let interval = performanceSignposts.begin(.firstReadyFrame)
+        guard selectedAuthoritativeSnapshot != nil,
+              let presentationGeneration = model.presentationGeneration(for: sessionID) else {
+            performanceSignposts.end(interval, result: .failure, metrics: .none)
+            _ = openPresentation.fail(
+                sessionID: sessionID,
+                epoch: epoch,
+                message: "Hosted authoritative snapshot unavailable"
+            )
+            return
+        }
+        modelPresentationGeneration = presentationGeneration
+        scrollCoordinator.resetForPresentation(presentationGeneration)
+        let installed: InstalledChatTranscript
+        do {
+            installed = try await installCurrentTranscriptProjection(
+                presentationGeneration: presentationGeneration
+            )
+        } catch {
+            performanceSignposts.end(interval, result: PerformanceResult.forFailure(error), metrics: .none)
+            _ = openPresentation.fail(
+                sessionID: sessionID,
+                epoch: epoch,
+                message: "Hosted transcript projection unavailable"
+            )
+            return
+        }
+        guard openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
+            performanceSignposts.end(interval, result: .discarded, metrics: .none)
+            return
+        }
+        probe.installScrollControls(
+            geometry: { previous, current, viewport in
+                if viewport {
+                    scrollCoordinator.viewportChanged(previous: previous, current: current)
+                } else {
+                    scrollCoordinator.geometryChanged(previous: previous, current: current)
+                }
+            },
+            phase: { old, new, geometry in
+                scrollCoordinator.scrollPhaseChanged(from: old, to: new, finalGeometry: geometry)
+            },
+            native: { owned in
+                scrollCoordinator.scrollPositionChanged(isPositionedByUser: owned)
+            },
+            catchUp: { reduceMotion in
+                scrollCoordinator.requestCatchUp(reduceMotion: reduceMotion)
+            },
+            composerViewport: {
+                scrollCoordinator.composerViewportTransitionBegan()
+            },
+            semanticResponse: {
+                scrollCoordinator.semanticResponseArrived()
+            },
+            frame: {
+                try await displayFrameScheduler.nextFrame()
+            },
+            state: {
+                ChatHostedScrollState(
+                    isDetached: scrollCoordinator.userScrolledAway,
+                    hasUnread: scrollCoordinator.hasUnreadContent,
+                    isWaitingForPrependSemanticFrame: scrollCoordinator.isWaitingForPrependSemanticFrame
+                )
+            },
+            prepend: {
+                guard let installed = transcriptPresentation.installed,
+                      installed.tag == transcriptProjectionSource else { return false }
+                let anchor = scrollCoordinator.semanticAnchor(in: installed.timeline)
+                return scrollCoordinator.beginPrepend(
+                    anchor: anchor,
+                    load: {
+                        do { try await probe.waitForPrependPageRelease() }
+                        catch { return nil }
+                        guard let anchor,
+                              let generation = modelPresentationGeneration else { return nil }
+                        guard let current = try? await installCurrentTranscriptProjection(
+                            presentationGeneration: generation
+                        ),
+                              let renderedID = current.timeline.renderedIDBySemanticID[anchor.semanticID] else {
+                            return nil
+                        }
+                        let installedLayout = scrollCoordinator.beginInstalledLayoutEpoch()
+                        return ChatPrependPage(
+                            renderedAnchorID: renderedID,
+                            installedLayout: installedLayout
+                        )
+                    },
+                    completion: { probe.recordPrependCompletion($0) }
+                )
+            },
+            invalidatePresentation: {
+                scrollCoordinator.resetForPresentation()
+            },
+            cancelPresentation: {
+                scrollCoordinator.cancel()
+            }
+        )
+        let positioned = await positionLatestTail(
+            epoch: epoch,
+            targetRenderedID: physicalOpeningTailID(for: installed)
+        )
+        guard positioned,
+              revealPositionedTranscript(epoch: epoch) else {
+            performanceSignposts.end(interval, result: .discarded, metrics: .none)
+            return
+        }
+        probe.markReady()
+        if transcriptGeometry.isAtCatchUpBoundary {
+            probe.recordScrollSettle(distanceFromBottom: transcriptGeometry.distanceFromBottom)
+        }
+        let presented = await completeFirstReadyFrame(interval, epoch: epoch)
+        if presented { await scrollCoordinator.waitForOpeningTailSettlement() }
+        probe.recordReadyFrameCompletion()
+    }
+    #endif
+
+    @MainActor
+    private func revealPositionedTranscript(epoch: Int) -> Bool {
+        withAnimation(
+            transcriptRevealAnimation,
+            completionCriteria: .logicallyComplete
+        ) {
+            openPresentation.installPositionedViewport(sessionID: sessionID, epoch: epoch)
+        } completion: {
+            guard openPresentation.epoch == epoch,
+                  openPresentation.phase == .ready else { return }
+            scrollCoordinator.openingRevealCompleted()
+        }
+    }
+
+    @MainActor
+    private func completeFirstReadyFrame(_ interval: PerformanceInterval, epoch: Int) async -> Bool {
+        do {
+            try await displayFrameScheduler.nextFrame()
+            guard !Task.isCancelled,
+                  openPresentation.epoch == epoch,
+                  openPresentation.phase == .ready else {
+                performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                return false
+            }
+            performanceSignposts.end(interval, result: .success, metrics: .none)
+            return true
+        } catch {
+            performanceSignposts.end(
+                interval,
+                result: PerformanceResult.forFailure(error),
+                metrics: .none
+            )
+            return false
+        }
+    }
+
+    private func physicalOpeningTailID(for installed: InstalledChatTranscript) -> String? {
+        installed.displayedItems.isEmpty && installed.queuedMessages.isEmpty
+            ? nil
+            : "transcript-bottom"
+    }
+
+    @MainActor
+    private func positionLatestTail(epoch: Int, targetRenderedID: String?) async -> Bool {
+        // The opening surface remains opaque until the exact physical marker
+        // after transcript and queue rows intersects a plausible bottom viewport.
+        guard !Task.isCancelled,
+              openPresentation.epoch == epoch,
+              openPresentation.phase == .positioning else { return false }
+        let positioned = await scrollCoordinator.positionOpeningTail(
+            targetRenderedID: targetRenderedID
+        )
+        if positioned { performanceTracker.settleScroll() }
+        return positioned
+            && !Task.isCancelled
+            && openPresentation.epoch == epoch
+            && openPresentation.phase == .positioning
+    }
+
+    @MainActor
+    private func executePendingScrollCommand() {
+        guard let command = scrollCoordinator.command else { return }
+        if command.destination != .releaseBinding {
+            performanceTracker.beginScrollCommand()
+        }
+        let update = {
+            switch command.destination {
+            case .resetToBottom:
+                transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
+            case .tail:
+                transcriptScrollPosition.scrollTo(edge: .bottom)
+            case .openingTail(let renderedID):
+                transcriptScrollPosition.scrollTo(id: renderedID, anchor: .bottom)
+            case .offsetY(let offsetY):
+                transcriptScrollPosition.scrollTo(y: offsetY)
+            case .releaseBinding:
+                transcriptScrollPosition = ScrollPosition(idType: String.self)
+            }
+        }
+        switch command.animation {
+        case .disabled:
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction, update)
+        case .smooth(let duration):
+            if reduceMotion {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction, update)
+            } else {
+                withAnimation(.smooth(duration: duration), update)
+            }
+        }
+        if command.destination == .releaseBinding {
+            performanceTracker.settleScroll()
+        }
+        #if HOSTED_TEST
+        if command.destination != .releaseBinding {
+            hostedProbe?.recordScrollCommand(
+                isAutomatic: command.origin == .automaticFollow,
+                isSmooth: command.animation != .disabled
+            )
+        }
+        #endif
+        scrollCoordinator.commandApplied(command)
+    }
+
+    @MainActor
+    private func catchUpToTail() {
+        transcriptPresentation.discardPendingEntrances()
+        scrollCoordinator.requestCatchUp(reduceMotion: reduceMotion)
+    }
+
+    private func earlierMessagesChip(snapshot: SessionSnapshot) -> some View {
+        Button {
+            let sessionID = snapshot.sessionId
+            let runtimeGeneration = snapshot.runtimeGeneration
+            let previousStart = snapshot.transcriptStart ?? 0
+            guard let installed = transcriptPresentation.installed,
+                  installed.tag == transcriptProjectionSource else { return }
+            let anchor = scrollCoordinator.semanticAnchor(in: installed.timeline)
+            guard let presentationGeneration = modelPresentationGeneration else { return }
+            let performanceGeneration = performanceTracker.beginPrepend()
+            let began = scrollCoordinator.beginPrepend(
+                anchor: anchor,
+                load: {
+                    await model.loadEarlierTranscript(
+                        sessionID: sessionID,
+                        presentationGeneration: presentationGeneration
+                    )
+                    guard !Task.isCancelled,
+                          modelPresentationGeneration == presentationGeneration,
+                          let current = model.authoritativeSnapshot(for: sessionID),
+                          current.sessionId == sessionID,
+                          current.runtimeGeneration == runtimeGeneration,
+                          (current.transcriptStart ?? previousStart) < previousStart else { return nil }
+                    guard let anchor else { return nil }
+                    guard let installed = try? await installCurrentTranscriptProjection(
+                        presentationGeneration: presentationGeneration
+                    ),
+                          let renderedID = installed.timeline.renderedIDBySemanticID[anchor.semanticID] else {
+                        return nil
+                    }
+                    let installedLayout = scrollCoordinator.beginInstalledLayoutEpoch()
+                    return ChatPrependPage(
+                        renderedAnchorID: renderedID,
+                        installedLayout: installedLayout
+                    )
+                },
+                completion: { result in
+                    performanceTracker.endPrepend(generation: performanceGeneration, result: result)
+                }
+            )
+            if !began {
+                performanceTracker.endPrepend(generation: performanceGeneration, result: .discarded)
+            }
+        } label: {
+            HStack(spacing: 7) {
+                if model.loadingEarlierTranscript {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(Color.tronEmerald)
+                } else {
+                    Image(systemName: "arrow.up")
+                }
+                Text(model.loadingEarlierTranscript ? "Loading earlier…" : "Load earlier messages")
+            }
+            .chatTranscriptPill()
+        }
+        .buttonStyle(.plain)
+        .disabled(model.loadingEarlierTranscript)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .accessibilityLabel(model.loadingEarlierTranscript ? "Loading earlier messages" : "Load earlier messages")
     }
 
     private var composer: some View {
         VStack(spacing: 10) {
-            if let snapshot = model.selectedSnapshot {
-                ForEach(snapshot.extensionUI.widgets.filter { $0.placement == .aboveEditor }) { widget in
-                    ExtensionWidgetView(widget: widget)
+            if let snapshot = selectedAuthoritativeSnapshot {
+                let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, executions: snapshot.toolExecutions)
+                if !groups.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(groups) { group in
+                                ExtensionActivityPill(group: group) {
+                                    extensionDetailsGroupID = group.id
+                                    showExtensionDetails = true
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                        .padding(.horizontal, 16)
+                    }
+                    .scrollClipDisabled()
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                    .accessibilityElement(children: .contain)
                 }
             }
 
-            if !model.pendingAttachments.isEmpty {
+            if !pendingAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        ForEach(model.pendingAttachments) { attachment in
+                        ForEach(pendingAttachments) { attachment in
                             PendingAttachmentChip(attachment: attachment) {
-                                model.removeAttachment(attachment.id)
+                                if let target = presentationTarget {
+                                    model.composerDrafts.removeAttachment(attachment.id, target: target)
+                                }
                             }
+                            .transition(
+                                reduceMotion
+                                    ? .opacity
+                                    : .asymmetric(
+                                        insertion: .move(edge: .bottom)
+                                            .combined(with: .scale(scale: 0.92, anchor: .bottom))
+                                            .combined(with: .opacity),
+                                        removal: .move(edge: .top)
+                                            .combined(with: .scale(scale: 0.94, anchor: .top))
+                                            .combined(with: .opacity)
+                                    )
+                            )
                         }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 2)
                 }
                 .scrollClipDisabled()
-                .transition(.opacity)
-            }
-
-            HStack(alignment: .bottom, spacing: 4) {
-                Color.clear
-                    .frame(width: 40, height: 40)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-
-                ZStack(alignment: .leading) {
-                    if text.isEmpty && !composerFocused {
-                        Text(speech.isRecording ? "Listening…" : "Type here")
-                            .font(TronTypography.input)
-                            .foregroundStyle(Color.tronEmerald)
-                            .padding(.leading, 2)
-                            .padding(.vertical, 10)
-                            .transition(.opacity)
-                            .accessibilityHidden(true)
-                    }
-                    TextField("", text: $text, axis: .vertical)
-                        .tronInlineField(composer: true)
-                        .foregroundStyle(Color.tronEmerald)
-                        .padding(.horizontal, 2)
-                        .padding(.vertical, 10)
-                        .lineLimit(1...8)
-                        .focused($composerFocused)
-                        .disabled(model.selectedSnapshot?.phase.isActive == true)
-                        .accessibilityLabel("Message input")
-                        .onSubmit { Task { await send() } }
-                }
-                .frame(minHeight: 40)
-                .animation(.easeOut(duration: 0.18), value: speech.isRecording)
-
-                if let snapshot = model.selectedSnapshot, !speech.isRecording {
-                    SessionContextProgressButton(
-                        contextPercentage: contextPercentage(snapshot),
-                        modelName: snapshot.model.map { "\($0.provider) / \($0.id)" },
-                        isCompacting: snapshot.phase == .compacting
-                    ) { showContext = true }
-                }
-
-                ComposerTrailingButton(
-                    mode: composerTrailingMode,
-                    isDisabled: sending,
-                    onSend: { Task { await send() } },
-                    onAbort: { Task { await model.abort() } },
-                    onMicTap: {
-                        composerFocused = false
-                        Task { await speech.toggle() }
-                    }
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .move(edge: .top).combined(with: .opacity)
+                        )
+                )
+                .animation(
+                    ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion),
+                    value: pendingAttachments.map(\.id)
                 )
             }
-            .frame(minHeight: 40)
-            .padding(.horizontal, 4)
-            .glassEffect(
-                .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
-                in: RoundedRectangle(cornerRadius: 22, style: .continuous)
-            )
-            .overlay(alignment: .bottomLeading) {
-                Menu {
-                    Button("Take Photo", systemImage: "camera") { showCamera = true }
-                    Button("Select Photos", systemImage: "photo.on.rectangle") { showPhotos = true }
-                    Button("Attach Files", systemImage: "folder") { showFiles = true }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(TronTypography.buttonSM)
-                        .foregroundStyle(Color.tronEmerald)
-                        .frame(width: 40, height: 40)
-                        .contentShape(Circle())
+
+            GlassEffectContainer(spacing: 8) {
+                HStack(alignment: .bottom, spacing: 8) {
+                    composerInputBar
+                    if scrollCoordinator.shouldShowCatchUpButton {
+                        catchUpButton
+                    }
                 }
-                .accessibilityLabel("Add attachment")
-                .padding(.leading, 4)
             }
-            .buttonStyle(.plain)
+            .animation(
+                reduceMotion
+                    ? .easeOut(duration: 0.12)
+                    : .spring(response: 0.32, dampingFraction: 0.82),
+                value: scrollCoordinator.shouldShowCatchUpButton
+            )
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
-
-            if let snapshot = model.selectedSnapshot {
-                ForEach(snapshot.extensionUI.widgets.filter { $0.placement == .belowEditor }) { widget in
-                    ExtensionWidgetView(widget: widget)
-                }
+        }
+        .onGeometryChange(for: CGFloat.self) { geometry in
+            geometry.size.height
+        } action: { height in
+            let previous = composerLayoutHeight
+            composerLayoutHeight = height
+            if ChatComposerLayoutSignalPolicy.shouldSignal(previous: previous, current: height) {
+                scrollCoordinator.composerViewportTransitionBegan()
             }
+        }
+        .background(alignment: .bottom) {
+            ChatBottomActivityBlur(
+                isActive: showsAmbientWorkingBlur,
+                keyboardVisible: composerFocused
+            )
+                // The native safe-area inset moves the composer with the
+                // keyboard. The background remains behind the input glass,
+                // while its translated lower edge fills the keyboard corners.
+                .offset(y: ChatBottomActivityBlurLayout.translation(
+                    keyboardVisible: composerFocused
+                ))
+                .ignoresSafeArea(edges: .bottom)
+                .animation(
+                    reduceMotion ? nil : .easeOut(duration: 0.22),
+                    value: composerFocused
+                )
         }
     }
 
-    private var composerTrailingMode: ComposerTrailingMode {
-        if model.selectedSnapshot?.phase.isActive == true { return .stopAgent }
-        if speech.isRecording { return .stopRecording }
-        if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.pendingAttachments.isEmpty {
-            return .send
+    private var composerInputBar: some View {
+        HStack(alignment: .bottom, spacing: 4) {
+            attachmentButton
+
+            ZStack(alignment: .leading) {
+                if composerText.isEmpty && !composerFocused {
+                    Text("Type here")
+                        .font(TronTypography.input)
+                        .foregroundStyle(Color.tronEmerald)
+                        .padding(.leading, 2)
+                        .padding(.vertical, 10)
+                        .transition(.opacity)
+                        .accessibilityHidden(true)
+                }
+                MultilineComposerTextView(
+                    text: composerTextBinding,
+                    isFocused: Binding(
+                        get: { composerFocused },
+                        set: { composerFocused = $0 }
+                    ),
+                    height: $composerTextHeight,
+                    isEditable: ChatComposerPolicy.isTextEditable(isTranscriptReady: isTranscriptReady),
+                    keyboardAppearance: colorScheme == .dark ? .dark : .light
+                )
+                .frame(height: composerTextHeight)
+                .padding(.horizontal, 2)
+                .padding(.vertical, 10)
+            }
+            .frame(minHeight: 40)
+
+            if let snapshot = selectedAuthoritativeSnapshot {
+                SessionContextProgressButton(
+                    contextPercentage: contextPercentage(snapshot),
+                    modelName: snapshot.model.map { "\($0.provider) / \($0.id)" },
+                    isCompacting: snapshot.phase == .compacting
+                ) { showContext = true }
+            }
+
+            if let composerTrailingMode {
+                ComposerTrailingButton(
+                    mode: composerTrailingMode,
+                    isDisabled: sending || submissionPending || !isTranscriptReady,
+                    isSending: sending,
+                    offersQueueChoices: selectedAuthoritativeSnapshot?.phase.isActive == true,
+                    onSend: { behavior in Task { await send(behavior: behavior) } },
+                    onAbort: { Task { await model.abort(sessionID: sessionID) } }
+                )
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .scale(scale: 0.78, anchor: .center)
+                            .combined(with: .opacity)
+                )
+            }
         }
-        return .record
+        .animation(
+            reduceMotion
+                ? .easeOut(duration: 0.12)
+                : .spring(response: 0.32, dampingFraction: 0.82),
+            value: composerTrailingMode
+        )
+        .frame(maxWidth: .infinity, minHeight: 40)
+        .padding(.horizontal, 4)
+        .scaleEffect(sending && !reduceMotion ? 0.992 : 1, anchor: .bottom)
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.tronEmerald.opacity(sending ? 0.30 : 0), lineWidth: 0.75)
+        }
+        .animation(
+            reduceMotion
+                ? .easeOut(duration: 0.12)
+                : .spring(response: 0.30, dampingFraction: 0.86),
+            value: sending
+        )
+        .glassEffect(
+            .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
+            in: RoundedRectangle(cornerRadius: 22, style: .continuous)
+        )
+        .glassEffectID("chat-composer", in: composerGlassNamespace)
+        .buttonStyle(.plain)
+    }
+
+    private var attachmentButton: some View {
+        ZStack {
+            // The original compact SF Symbol is a real composer child rendered
+            // before the bar's glass. Only the transparent menu hit target is
+            // overlaid, so native menu styling cannot wash out or enlarge it.
+            Image(systemName: "plus")
+                .font(TronTypography.sans(
+                    size: ComposerControlMetrics.symbolSize,
+                    weight: .semibold
+                ))
+                .foregroundStyle(attachmentActionsEnabled ? Color.tronEmerald : Color.tronTextMuted)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+
+            ComposerAttachmentMenuButton(
+                isEnabled: attachmentActionsEnabled,
+                onSelect: requestAttachmentPresentation
+            )
+            .frame(
+                width: ComposerControlMetrics.hitTarget,
+                height: ComposerControlMetrics.hitTarget
+            )
+            // Native menu action attributes may be cached across navigation.
+            // Replace only when the viewed session or availability changes.
+            .id(attachmentMenuState.identity)
+            .accessibilityLabel("Add attachment")
+        }
+        .frame(
+            width: ComposerControlMetrics.hitTarget,
+            height: ComposerControlMetrics.hitTarget
+        )
+    }
+
+    private var catchUpButton: some View {
+        Button {
+            catchUpToTail()
+        } label: {
+            Image(systemName: "arrow.down")
+                .font(TronTypography.buttonSM)
+                .foregroundStyle(Color.tronEmerald)
+                .frame(
+                    width: ComposerControlMetrics.hitTarget,
+                    height: ComposerControlMetrics.hitTarget
+                )
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(
+            .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
+            in: .circle
+        )
+        .glassEffectID("chat-catch-up", in: composerGlassNamespace)
+        .glassEffectTransition(.matchedGeometry)
+        .transition(
+            reduceMotion
+                ? .opacity
+                : .move(edge: .leading)
+                    .combined(with: .scale(scale: 0.82, anchor: .leading))
+                    .combined(with: .opacity)
+        )
+        .accessibilityLabel("Catch up")
+        .accessibilityHint("Returns to the latest response and follows new messages")
+    }
+
+    private var composerTrailingMode: ComposerTrailingMode? {
+        ChatComposerPolicy.trailingMode(
+            phase: selectedAuthoritativeSnapshot?.phase,
+            hasContent: !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !pendingAttachments.isEmpty,
+            isSending: sending
+        )
     }
 
     private func contextPercentage(_ snapshot: SessionSnapshot) -> Int {
@@ -363,7 +1526,13 @@ struct ChatView: View {
         return min(max(Int((Double(tokens) / Double(usage.contextWindow) * 100).rounded()), 0), 100)
     }
 
-    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+    private var chatTitle: String {
+        selectedAuthoritativeSnapshot?.name
+            ?? model.sessions.first { $0.id == sessionID }?.title
+            ?? "Session"
+    }
+
+    @ToolbarContentBuilder private func toolbar(titleWidth: CGFloat) -> some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.left")
@@ -373,10 +1542,14 @@ struct ChatView: View {
             .accessibilityLabel("Back")
         }
         ToolbarItem(placement: .principal) {
-            Text(model.selectedSnapshot?.extensionUI.title ?? model.selectedSnapshot?.name ?? model.sessions.first { $0.id == model.selectedSessionID }?.title ?? "Session")
+            Text(chatTitle)
                 .font(TronTypography.headline)
                 .foregroundStyle(Color.tronEmerald)
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(width: titleWidth)
+                .clipped()
+                .accessibilityLabel(chatTitle)
         }
         ToolbarItem(placement: .primaryAction) {
             Button { showSettings = true } label: {
@@ -388,127 +1561,222 @@ struct ChatView: View {
         }
     }
 
+    private var pendingInteractionScopes: [ExtensionInteractionScope] {
+        selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions.map(ExtensionInteractionScope.init) ?? []
+    }
+
     private var interactionBinding: Binding<ExtensionInteraction?> {
         Binding(
-            get: { model.selectedSnapshot?.extensionUI.pendingInteractions.first },
+            get: { pendingPresentedInteraction },
             set: { _ in }
         )
     }
 
-    private func send() async {
-        let outgoing = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !outgoing.isEmpty || !model.pendingAttachments.isEmpty else { return }
-        text = ""
+    private var attachmentMenuState: ChatAttachmentMenuState {
+        ChatAttachmentMenuState(
+            sessionID: sessionID,
+            phase: selectedAuthoritativeSnapshot?.phase,
+            isTranscriptReady: isTranscriptReady,
+            isSending: sending
+        )
+    }
+
+    private var attachmentActionsEnabled: Bool { attachmentMenuState.actionsEnabled }
+
+    private func requestAttachmentPresentation(_ destination: ChatAttachmentDestination) {
+        guard attachmentActionsEnabled else { return }
+        // End the responder lifetime before UIKit presents a picker. This also
+        // invalidates queued becomeFirstResponder callbacks in the representable.
         composerFocused = false
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        sending = true
-        defer { sending = false }
-        do { try await model.send(outgoing) }
-        catch { text = outgoing; model.lastError = error.localizedDescription }
+
+        // A native Menu is still dismissing when its action runs. Presenting a
+        // sheet or system picker synchronously can collide with that transient
+        // presentation controller on physical iOS. Queue one destination, force
+        // a fresh presentation edge, and activate it after dismissal settles.
+        attachmentPresentationTask?.cancel()
+        attachmentDestination = nil
+        queuedAttachmentDestination = destination
+        attachmentPresentationTask = Task { @MainActor in
+            do { try await Task.sleep(for: .milliseconds(200)) }
+            catch { return }
+            guard !Task.isCancelled,
+                  queuedAttachmentDestination == destination,
+                  attachmentActionsEnabled else { return }
+            queuedAttachmentDestination = nil
+            attachmentDestination = destination
+        }
+    }
+
+    private func cancelAttachmentPresentation(includingActive: Bool) {
+        attachmentPresentationTask?.cancel()
+        attachmentPresentationTask = nil
+        queuedAttachmentDestination = nil
+        if includingActive { attachmentDestination = nil }
+    }
+
+    private func attachmentPresentationBinding(
+        for destination: ChatAttachmentDestination
+    ) -> Binding<Bool> {
+        Binding(
+            get: { attachmentDestination == destination },
+            set: { isPresented in
+                if isPresented {
+                    guard attachmentActionsEnabled else { return }
+                    attachmentDestination = destination
+                } else if attachmentDestination == destination {
+                    attachmentDestination = nil
+                }
+            }
+        )
+    }
+
+    @MainActor
+    private func updateQueuedMessage(
+        _ id: String,
+        text: String,
+        behavior: SessionSnapshot.QueuedMessage.Behavior
+    ) async {
+        await mutateQueue(affectedID: id) { items in
+            guard let index = items.firstIndex(where: { $0.id == id }) else {
+                throw CancellationError()
+            }
+            items[index].text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            items[index].behavior = behavior
+        }
+    }
+
+    @MainActor
+    private func removeQueuedMessage(_ id: String) async {
+        await mutateQueue(affectedID: id) { items in
+            guard items.contains(where: { $0.id == id }) else { throw CancellationError() }
+            items.removeAll { $0.id == id }
+        }
+    }
+
+    @MainActor
+    private func clearQueuedMessages() async {
+        await mutateQueue(affectedID: "queue-clear-all") { items in
+            items.removeAll(keepingCapacity: false)
+        }
+    }
+
+    @MainActor
+    private func moveQueuedMessage(_ id: String, offset: Int) async {
+        await mutateQueue(affectedID: id) { items in
+            guard let index = items.firstIndex(where: { $0.id == id }) else {
+                throw CancellationError()
+            }
+            let destination = index + offset
+            guard items.indices.contains(destination) else { return }
+            items.swapAt(index, destination)
+        }
+    }
+
+    @MainActor
+    private func mutateQueue(
+        affectedID: String,
+        mutation: (inout [SessionSnapshot.QueuedMessage]) throws -> Void
+    ) async {
+        guard mutatingQueuedMessageIDs.isEmpty,
+              let target = presentationTarget,
+              let snapshot = selectedAuthoritativeSnapshot,
+              let expectedRevision = snapshot.queueRevision,
+              var items = snapshot.queuedItems else { return }
+        do { try mutation(&items) }
+        catch { return }
+        mutatingQueuedMessageIDs.insert(affectedID)
+        defer { mutatingQueuedMessageIDs.remove(affectedID) }
+        do {
+            try await model.replaceQueue(
+                sessionID: sessionID,
+                expectedRevision: expectedRevision,
+                items: items
+            )
+        } catch {
+            model.presentComposerActionError(error, target: target)
+        }
+    }
+
+    private func send(behavior explicitBehavior: String? = nil) async {
+        guard let target = presentationTarget else { return }
+        let behavior = explicitBehavior
+            ?? ChatComposerPolicy.submissionBehavior(phase: selectedAuthoritativeSnapshot?.phase)
+        if !ChatComposerPolicy.preservesFocus(submissionBehavior: behavior) {
+            composerFocused = false
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        }
+        do {
+            try await model.sendComposer(
+                target: target,
+                behavior: behavior,
+                canonicalTranscript: selectedAuthoritativeSnapshot?.transcript ?? []
+            )
+            if selectedAuthoritativeSnapshot?.extensionPresentation.hostEpoch.isEmpty == false {
+                model.scheduleExtensionEditorUpdate(target: target, text: "")
+            }
+        } catch { model.presentComposerActionError(error, target: target) }
     }
 
     private func importCameraImage(_ image: UIImage) async {
+        guard let target = presentationTarget else { return }
         guard let data = image.jpegData(compressionQuality: 0.92) else {
-            model.lastError = "The captured photo could not be prepared."
+            model.presentComposerActionError(
+                "The captured photo could not be prepared.",
+                target: target
+            )
             return
         }
-        do { try await model.upload(name: "photo.jpg", mimeType: "image/jpeg", data: data) }
-        catch { model.lastError = error.localizedDescription }
+        do {
+            try await model.upload(
+                name: "photo.jpg",
+                mimeType: "image/jpeg",
+                data: data,
+                target: target
+            )
+        }
+        catch { model.presentComposerActionError(error, target: target) }
     }
 
-    private func importPhotos(_ values: [PhotosPickerItem]) async {
-        photos = []
+    private func importPhotos(_ values: [PhotosPickerItem], target: SessionPresentationIdentity) async {
+        guard !values.isEmpty, presentationTarget == target else { return }
         for item in values {
-            guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
-            do { try await model.upload(name: "photo.jpg", mimeType: item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg", data: data) }
-            catch { model.lastError = error.localizedDescription }
+            guard !Task.isCancelled, presentationTarget == target else { return }
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self) else {
+                    model.presentComposerActionError(
+                        "The selected photo could not be prepared.",
+                        target: target
+                    )
+                    continue
+                }
+                guard !Task.isCancelled, presentationTarget == target else { return }
+                let mimeType = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
+                let filename = "photo.\(UTType(mimeType: mimeType)?.preferredFilenameExtension ?? "jpg")"
+                try await model.upload(
+                    name: filename,
+                    mimeType: mimeType,
+                    data: data,
+                    target: target
+                )
+            }
+            catch is CancellationError { return }
+            catch { model.presentComposerActionError(error, target: target) }
         }
     }
 
     private func importFiles(_ result: Result<[URL], Error>) async {
-        guard case .success(let urls) = result else { return }
-        for url in urls.prefix(10) {
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            do {
-                let data = try Data(contentsOf: url, options: .mappedIfSafe)
-                try await model.upload(name: url.lastPathComponent, mimeType: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream", data: data)
-            } catch { model.lastError = error.localizedDescription }
-        }
-    }
-
-    private func statusText(_ phase: SessionPhase) -> String {
-        switch phase { case .running: "Tron is working"; case .compacting: "Compacting context"; case .retrying: "Retrying provider"; case .interrupted: "Previous run was interrupted"; case .idle: "" }
-    }
-}
-
-private struct PendingAttachmentChip: View {
-    let attachment: AppModel.PendingAttachment
-    let onRemove: () -> Void
-
-    var body: some View {
-        HStack(spacing: 5) {
-            Image(systemName: attachment.mimeType.hasPrefix("image/") ? "photo.fill" : "doc.text.fill")
-                .foregroundStyle(Color.tronBlue)
-            Text(attachment.name)
-                .font(TronTypography.code(size: TronTypography.sizeBody2))
-                .foregroundStyle(Color.tronTextPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 100)
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(Color.tronTextMuted)
-                    .frame(width: 28, height: 28)
+        guard let target = presentationTarget else { return }
+        guard case .success(let urls) = result else {
+            if case .failure(let error) = result {
+                model.presentComposerActionError(error, target: target)
             }
-            .accessibilityLabel("Remove \(attachment.name)")
+            return
         }
-        .font(TronTypography.caption)
-        .padding(.leading, 9)
-        .padding(.trailing, 4)
-        .padding(.vertical, 5)
-        .glassEffect(.regular.tint(Color.tronBlue.opacity(0.22)).interactive(), in: Capsule())
-    }
-}
-
-private struct ChatTranscriptRenderRow: View {
-    let item: ChatTranscriptRenderItem
-    let toolResults: [String: TranscriptItem]
-
-    @ViewBuilder var body: some View {
-        switch item {
-        case .transcript(let transcript):
-            TranscriptRow(
-                item: transcript,
-                toolResults: toolResults,
-                rendersToolCalls: false
-            )
-        case .toolRun(let run):
-            ToolRunView(run: run)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        for url in urls.prefix(ChatAttachmentImportPolicy.maximumFileSelection) {
+            do { try await model.uploadFile(url, target: target) }
+            catch is CancellationError { return }
+            catch { model.presentComposerActionError(error, target: target) }
         }
-    }
-}
-
-private struct ComposerHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat { 72 }
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
-private struct ExtensionWidgetView: View {
-    let widget: ExtensionWidget
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(Array(widget.lines.enumerated()), id: \.offset) { _, line in
-                Text(line).font(TronFont.mono(12)).textSelection(.enabled)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14).padding(.vertical, 9)
-        .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.10)
-        .padding(.horizontal, 12)
     }
 }

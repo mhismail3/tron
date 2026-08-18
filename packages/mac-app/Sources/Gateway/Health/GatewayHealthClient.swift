@@ -23,6 +23,8 @@ enum GatewayHealthResult: Sendable, Equatable {
 /// lifecycle coordinator owns retry policy and presentation mapping.
 enum GatewayHealthClient {
     static let requestID = "mac-system-info"
+    static let supportedProtocolVersion = 3
+    static let minimumProtocolVersion = 3
 
     /// Performs a single ping with a default 3 s timeout. Classifies
     /// failures so the caller can render the right state without
@@ -53,7 +55,7 @@ enum GatewayHealthClient {
 
         let hello: [String: Any] = [
             "type": "hello",
-            "protocolVersion": 2,
+            "protocolVersion": supportedProtocolVersion,
         ]
         let payload: [String: Any] = [
             "type": "request",
@@ -69,10 +71,17 @@ enum GatewayHealthClient {
         }
 
         do {
+            // The Gateway requires the client hello before it emits its own
+            // hello. Do not pipeline the request: accepting a response before
+            // validating the server's transport version would turn an older or
+            // incompatible peer into a false health result.
             try await task.send(.string(helloString))
+            guard let serverHello = messageData(from: try await task.receive()),
+                  decodeHello(data: serverHello) else {
+                return .malformedResponse
+            }
             try await task.send(.string(str))
 
-            var sawGatewayFrame = false
             for _ in 0..<8 {
                 let message = try await task.receive()
                 guard let raw = messageData(from: message) else {
@@ -83,16 +92,13 @@ enum GatewayHealthClient {
                 case .result(let info):
                     return .success(info)
                 case .ignore:
-                    sawGatewayFrame = true
                     continue
-                case .error:
-                    return .malformedResponse
-                case .malformed:
+                case .error, .malformed:
                     return .malformedResponse
                 }
             }
 
-            return sawGatewayFrame ? .unauthorized : .malformedResponse
+            return .malformedResponse
         } catch {
             // Gateway returned a non-101 status during upgrade — most
             // commonly 401 when auth fails. The delegate captured it.
@@ -111,6 +117,11 @@ enum GatewayHealthClient {
                      .notConnectedToInternet,
                      .dnsLookupFailed:
                     return .unreachable
+                case .badServerResponse:
+                    // A non-WebSocket response without a captured status is
+                    // most commonly an authentication rejection. Surface it
+                    // through the same re-pair affordance as a 401.
+                    return .unauthorized
                 default:
                     return .unreachable
                 }
@@ -140,6 +151,16 @@ enum GatewayHealthClient {
         }
     }
 
+    static func decodeHello(data: Data) -> Bool {
+        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+              json["type"] as? String == "hello",
+              json["protocolVersion"] as? Int == supportedProtocolVersion,
+              json["minProtocolVersion"] as? Int == minimumProtocolVersion else {
+            return false
+        }
+        return true
+    }
+
     static func decodeFrame(
         data: Data,
         expectedID: String = requestID
@@ -160,7 +181,8 @@ enum GatewayHealthClient {
         }
         guard let value = frame.result,
               !value.gatewayVersion.isEmpty,
-              value.protocolVersion >= value.minProtocolVersion,
+              value.protocolVersion == supportedProtocolVersion,
+              value.minProtocolVersion == minimumProtocolVersion,
               !value.machineId.isEmpty else {
             return .malformed
         }

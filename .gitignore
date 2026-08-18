@@ -62,5 +62,6 @@ temp/
 # Debug
 .debug/
 
-# Claude runtime state
+# Agent runtime state
 .claude/scheduled_tasks.lock
+.pi/

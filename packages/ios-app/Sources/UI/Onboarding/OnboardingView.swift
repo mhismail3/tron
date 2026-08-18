@@ -30,10 +30,19 @@ struct OnboardingView: View {
     @State private var host = ""
     @State private var port = "9847"
     @State private var code = ""
+
+    private var providers: [ProviderSummary] {
+        model.providerCatalog(for: .global)?.providers ?? []
+    }
+
+    private var models: [ModelSummary] {
+        model.providerCatalog(for: .global)?.models ?? []
+    }
     @State private var pairing = false
     @State private var selectedWorkspace = ""
     @State private var showWorkspace = false
     @State private var trustInspection: JSONValue?
+    @State private var trustLoadOwner = TrustLoadOwner()
     @State private var selectedModel: ModelRef?
     @State private var finishing = false
     @FocusState private var pairingFieldFocused: Bool
@@ -61,6 +70,7 @@ struct OnboardingView: View {
                     .padding(.horizontal, TronSpacing.xlarge)
                     .padding(.bottom, 10)
             }
+            .tronTopBlurSurface()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -104,6 +114,7 @@ struct OnboardingView: View {
         }
         .tint(.tronEmerald)
         .gatewayGlobalSheets()
+        .providerAuthPresenter()
         .alert("Tron", isPresented: Binding(
             get: { model.onboardingError != nil || model.lastError != nil },
             set: { if !$0 { model.onboardingError = nil; model.lastError = nil } }
@@ -139,6 +150,8 @@ struct OnboardingView: View {
         }
         .sheet(isPresented: $showWorkspace) {
             WorkspaceBrowser { path in
+                trustInspection = nil
+                if let target = TrustTarget(cwd: path) { trustLoadOwner.begin(target: target) }
                 selectedWorkspace = path
                 showWorkspace = false
                 Task { await inspectTrust() }
@@ -162,8 +175,8 @@ struct OnboardingView: View {
             applyDetent()
             if value == .model, selectedModel == nil {
                 Task {
-                    await model.refreshSettings()
-                    selectedModel = model.configuredDefaultModel ?? model.preferredAvailableModel
+                    await model.refreshSettings(target: .global)
+                    selectedModel = model.configuredDefaultModel(for: .global) ?? model.preferredAvailableModel(for: .global)
                 }
             }
         }
@@ -285,21 +298,21 @@ struct OnboardingView: View {
 
     private func preferredProviderPage(ids: Set<String>, name: String) -> some View {
         OnboardingPage(subtitle: "Add \(name) credentials now, or skip this and add them later in Settings.") {
-            if let provider = model.providers.first(where: { ids.contains($0.id) }) {
+            if let provider = providers.first(where: { ids.contains($0.id) }) {
                 ProviderSetupRow(provider: provider)
             } else {
                 OnboardingCard {
                     OnboardingInfoRow(icon: "checkmark.circle", title: "No setup required", subtitle: "This provider is not enabled by the current Tron runtime.")
                 }
             }
-            Button("Refresh Providers", systemImage: "arrow.clockwise") { Task { await model.refreshProviders() } }
+            Button("Refresh Providers", systemImage: "arrow.clockwise") { Task { await model.refreshProviders(target: .global) } }
                 .buttonStyle(TronActionButtonStyle())
         }
     }
 
     private var remainingProvidersPage: some View {
         OnboardingPage(subtitle: "Add optional model providers, or leave them for Settings.") {
-            let remaining = model.providers.filter { !["anthropic", "openai-codex", "openai"].contains($0.id) }
+            let remaining = providers.filter { !["anthropic", "openai-codex", "openai"].contains($0.id) }
             if remaining.isEmpty {
                 OnboardingCard {
                     OnboardingInfoRow(icon: "checkmark.circle", title: "No additional providers", subtitle: "You can install provider extensions later in Settings.")
@@ -312,7 +325,7 @@ struct OnboardingView: View {
 
     private var modelPage: some View {
         OnboardingPage(subtitle: "Choose the provider-qualified model Tron should start with.") {
-            ModelPicker(selection: $selectedModel, models: model.models.filter(\.available)).frame(minHeight: 260)
+            ModelPicker(selection: $selectedModel, models: models.filter(\.available)).frame(minHeight: 260)
             if let error = model.onboardingError {
                 Text(error).font(TronTypography.bodySM).foregroundStyle(Color.tronError).fixedSize(horizontal: false, vertical: true)
             }
@@ -367,7 +380,10 @@ struct OnboardingView: View {
         switch step {
         case .welcome, .tailscale, .mac, .anthropic, .openAI, .providers: true
         case .pair: false
-        case .workspace: !selectedWorkspace.isEmpty && !needsTrustDecision
+        case .workspace:
+            !selectedWorkspace.isEmpty
+                && TrustTarget(cwd: selectedWorkspace).map(trustLoadOwner.isReady(for:)) == true
+                && !needsTrustDecision
         case .model: selectedModel != nil
         }
     }
@@ -405,17 +421,43 @@ struct OnboardingView: View {
         defer { pairing = false }
         do {
             try await model.pair(invitation)
-            if !model.setupComplete { withAnimation(.snappy(duration: 0.28)) { step = .workspace } }
-        } catch { model.onboardingError = error.localizedDescription }
+            if !model.setupComplete {
+                withAnimation(.snappy(duration: 0.28)) { step = .workspace }
+                if !selectedWorkspace.isEmpty { await inspectTrust() }
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            model.onboardingError = error.localizedDescription
+        }
     }
     private func inspectTrust() async {
-        guard !selectedWorkspace.isEmpty else { return }
-        do { trustInspection = try await model.inspectTrust(cwd: selectedWorkspace) }
-        catch { model.onboardingError = error.localizedDescription }
+        guard let target = TrustTarget(cwd: selectedWorkspace) else { return }
+        trustInspection = nil
+        trustLoadOwner.begin(target: target)
+        do {
+            let value = try await model.inspectTrust(target: target)
+            guard selectedWorkspace == target.cwd,
+                  trustLoadOwner.admit(target: target) else { return }
+            trustInspection = value
+        } catch is CancellationError {
+            return
+        } catch {
+            guard selectedWorkspace == target.cwd else { return }
+            model.onboardingError = error.localizedDescription
+        }
     }
     private func setTrust(_ decision: Bool) async {
-        do { trustInspection = try await model.setTrust(cwd: selectedWorkspace, decision: decision) }
-        catch { model.onboardingError = error.localizedDescription }
+        guard let target = TrustTarget(cwd: selectedWorkspace) else { return }
+        do {
+            let value = try await model.setTrust(target: target, decision: decision)
+            guard selectedWorkspace == target.cwd,
+                  trustLoadOwner.admit(target: target) else { return }
+            trustInspection = value
+        } catch {
+            guard selectedWorkspace == target.cwd else { return }
+            model.onboardingError = error.localizedDescription
+        }
     }
     private func finish() async {
         guard let selectedModel else { return }
@@ -423,7 +465,10 @@ struct OnboardingView: View {
         defer { finishing = false }
         do {
             model.onboardingError = nil
-            try await model.updateSettings(.object(["defaultModel": .object(["provider": .string(selectedModel.provider), "id": .string(selectedModel.id)])]))
+            try await model.updateSettings(
+                .object(["defaultModel": .object(["provider": .string(selectedModel.provider), "id": .string(selectedModel.id)])]),
+                target: .global
+            )
             model.setupComplete = true
             onComplete()
         } catch { model.onboardingError = error.localizedDescription }
@@ -433,114 +478,5 @@ struct OnboardingView: View {
             .keyboardType(numberPad ? .numberPad : .URL).textInputAutocapitalization(.never).autocorrectionDisabled()
             .tronField(monospaced: true)
             .focused($pairingFieldFocused).accessibilityLabel(title)
-    }
-}
-
-private struct OnboardingNavigationTitle: UIViewRepresentable {
-    let text: String
-
-    func makeUIView(context: Context) -> UILabel {
-        let label = UILabel()
-        let base = TronFontLoader.createUIFont(size: 16, weight: .semibold)
-        label.font = UIFontMetrics(forTextStyle: .headline).scaledFont(for: base)
-        label.adjustsFontForContentSizeCategory = true
-        label.textAlignment = .center
-        label.textColor = UIColor { traits in
-            UIColor(hex: traits.userInterfaceStyle == .dark ? "#34D399" : "#047857")
-        }
-        label.accessibilityTraits.insert(.header)
-        return label
-    }
-
-    func updateUIView(_ label: UILabel, context: Context) {
-        label.text = text
-        label.accessibilityLabel = text
-    }
-
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UILabel, context: Context) -> CGSize? {
-        let intrinsic = uiView.intrinsicContentSize
-        return CGSize(width: min(proposal.width ?? intrinsic.width, intrinsic.width), height: intrinsic.height)
-    }
-}
-
-private struct PairingCodeField: UIViewRepresentable {
-    @Binding var text: String
-
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
-
-    func makeUIView(context: Context) -> UITextField {
-        let field = UITextField()
-        field.borderStyle = .none
-        field.backgroundColor = .clear
-        field.placeholder = "One-time code"
-        field.accessibilityLabel = "One-time code"
-        field.isSecureTextEntry = true
-        field.textContentType = .oneTimeCode
-        field.keyboardType = .asciiCapable
-        field.autocapitalizationType = .allCharacters
-        field.autocorrectionType = .no
-        field.spellCheckingType = .no
-        let base = TronFontLoader.createUIFont(size: TronTypography.sizeBody, weight: .regular, mono: true)
-        field.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: base)
-        field.adjustsFontForContentSizeCategory = true
-        field.setContentCompressionResistancePriority(.required, for: .vertical)
-        field.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
-        return field
-    }
-
-    func updateUIView(_ field: UITextField, context: Context) {
-        if field.text != text { field.text = text }
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        @Binding private var text: String
-        init(text: Binding<String>) { _text = text }
-        @objc func changed(_ sender: UITextField) { text = sender.text ?? "" }
-    }
-}
-
-private struct OnboardingPage<Content: View>: View {
-    let subtitle: String
-    @ViewBuilder let content: Content
-    init(subtitle: String, @ViewBuilder content: () -> Content) { self.subtitle = subtitle; self.content = content() }
-    var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: TronSpacing.section) {
-                Text(subtitle)
-                    .font(TronTypography.body)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                content
-            }
-            .padding(.horizontal, 24).padding(.top, 10).padding(.bottom, 126)
-            .frame(maxWidth: 620, alignment: .leading).frame(maxWidth: .infinity)
-        }
-        .tronScrollEdgeChrome()
-        .scrollDismissesKeyboard(.interactively)
-    }
-}
-
-struct OnboardingCard<Content: View>: View {
-    @ViewBuilder let content: Content
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) { content }
-            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.12)), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.tronEmerald.opacity(0.22), lineWidth: 1))
-    }
-}
-
-private struct OnboardingInfoRow: View {
-    let icon, title, subtitle: String
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronEmerald).frame(width: 26, height: 26)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold)).foregroundStyle(Color.tronTextPrimary).fixedSize(horizontal: false, vertical: true)
-                Text(subtitle).font(TronTypography.bodySM).foregroundStyle(Color.tronTextSecondary).fixedSize(horizontal: false, vertical: true)
-            }
-        }
     }
 }

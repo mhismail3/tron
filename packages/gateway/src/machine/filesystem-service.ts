@@ -1,5 +1,5 @@
 import { realpathSync } from "node:fs";
-import { mkdir, readdir, realpath, stat } from "node:fs/promises";
+import { lstat, mkdir, opendir, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { spawn } from "node:child_process";
@@ -17,11 +17,27 @@ function inside(root: string, candidate: string): boolean {
   return delta === "" || (!delta.startsWith(`..${sep}`) && delta !== ".." && !isAbsolute(delta));
 }
 
+export const WORKSPACE_MAXIMUM_ENTRIES = 1_000;
+export const WORKSPACE_MAXIMUM_PROJECTED_BYTES = 768 * 1_024;
+
+interface FilesystemServiceOptions {
+  maximumEntries?: number;
+  maximumProjectedBytes?: number;
+}
+
 export class FilesystemService {
   readonly root: string;
+  private readonly maximumEntries: number;
+  private readonly maximumProjectedBytes: number;
 
-  constructor(root = homedir()) {
+  constructor(root = homedir(), options: FilesystemServiceOptions = {}) {
     this.root = realpathSync(resolve(root));
+    this.maximumEntries = options.maximumEntries ?? WORKSPACE_MAXIMUM_ENTRIES;
+    this.maximumProjectedBytes = options.maximumProjectedBytes ?? WORKSPACE_MAXIMUM_PROJECTED_BYTES;
+    if (!Number.isSafeInteger(this.maximumEntries) || this.maximumEntries < 1
+      || !Number.isSafeInteger(this.maximumProjectedBytes) || this.maximumProjectedBytes < 1) {
+      throw new Error("Workspace listing bounds are invalid");
+    }
   }
 
   private async canonical(path: string): Promise<string> {
@@ -32,17 +48,51 @@ export class FilesystemService {
 
   async list(path = this.root): Promise<{ path: string; parent?: string; entries: WorkspaceEntry[] }> {
     const canonical = await this.canonical(path);
-    if (!(await stat(canonical)).isDirectory()) throw new GatewayError("invalid_request", "Path is not a directory");
-    const entries = await readdir(canonical, { withFileTypes: true });
-    const projected = entries
-      .filter((entry) => entry.isDirectory() || entry.isFile())
-      .map((entry) => ({
-        name: entry.name,
-        path: join(canonical, entry.name),
-        kind: entry.isDirectory() ? "directory" as const : "file" as const,
-        hidden: entry.name.startsWith("."),
-      }))
-      .sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "directory" ? -1 : 1));
+    const validated = await lstat(canonical);
+    if (!validated.isDirectory() || validated.isSymbolicLink()) {
+      throw new GatewayError("invalid_request", "Path is not a directory");
+    }
+    const projected: WorkspaceEntry[] = [];
+    let projectedBytes = 2;
+    let examinedEntries = 0;
+    const directory = await opendir(canonical);
+    try {
+      const opened = await lstat(canonical);
+      if (!opened.isDirectory() || opened.isSymbolicLink()
+        || opened.dev !== validated.dev || opened.ino !== validated.ino) {
+        throw new GatewayError("conflict", "The workspace folder changed while it was being opened", true);
+      }
+      for await (const entry of directory) {
+        examinedEntries += 1;
+        if (examinedEntries > this.maximumEntries) {
+          throw new GatewayError(
+            "conflict",
+            "This folder contains too many entries to browse safely. Choose a more specific folder on the Mac.",
+          );
+        }
+        if (!entry.isDirectory() && !entry.isFile()) continue;
+        const candidate: WorkspaceEntry = {
+          name: entry.name,
+          path: join(canonical, entry.name),
+          kind: entry.isDirectory() ? "directory" : "file",
+          hidden: entry.name.startsWith("."),
+        };
+        const candidateBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
+        if (candidateBytes > this.maximumProjectedBytes - projectedBytes) {
+          throw new GatewayError(
+            "conflict",
+            "This folder contains too many entries to browse safely. Choose a more specific folder on the Mac.",
+          );
+        }
+        projected.push(candidate);
+        projectedBytes += candidateBytes;
+      }
+    } finally {
+      await directory.close().catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ERR_DIR_CLOSED") throw error;
+      });
+    }
+    projected.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "directory" ? -1 : 1));
     const parent = canonical === this.root ? undefined : dirname(canonical);
     return { path: canonical, ...(parent ? { parent } : {}), entries: projected };
   }

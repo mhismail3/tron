@@ -45,7 +45,12 @@ npm audit --omit=dev
 
 Gateway mutations require `commandId`. Distinct sessions may run concurrently;
 all mutations for one session stay serialized. A disconnect must not abort an
-accepted run.
+accepted run. Use `scripts/tron chat --session <id>` when testing terminal/mobile
+handoff: it attaches to the Gateway-owned runtime. Never open the same canonical
+JSONL simultaneously in a separate Pi process. `scripts/tron dev --background`
+runs the isolated Gateway behind a restart supervisor. After rebuilding Gateway
+source, use `scripts/tron dev --restart --tailscale`; it drains admitted agent
+runs and reconnects clients. Never stop the Gateway from one of its own tools.
 
 ### iOS
 
@@ -96,7 +101,6 @@ to implementation-level detail.
 
 Keep commits reviewable and avoid generated build output. Xcode projects may be
 regenerated from `project.yml`; staged Mac gateway payloads and Node runtimes are
-ignored. Successful `main` CI automatically publishes the production iOS bundle
-to the maintainer's internal TestFlight group. Public TestFlight/App Store
-release, Mac signing and notarization, and production deployment remain manual
+ignored. CI does not publish production artifacts. TestFlight/App Store delivery,
+Mac signing and notarization, and production deployment are deliberate manual
 maintainer actions. Release tags use `tron-v<version>`.

@@ -12,31 +12,557 @@ implementation detail; all user-facing language calls the agent Tron.
 | `Sources/Gateway` | pairing, Keychain profiles, HTTP, WebSocket protocol |
 | `Sources/Models` | provider-qualified model and snapshot DTOs |
 | `Sources/State` | authoritative UI projection and reconnect orchestration |
-| `Sources/Support` | bounded cache, share intake, native speech |
-| `Sources/UI/Chat` | session shell, transcript, composer, context, forks |
-| `Sources/UI/Onboarding` | pairing, workspace, provider, and default setup |
-| `Sources/UI/Settings` | agent, trust, packages, devices, migration, diagnostics |
-| `Sources/UI/Terminal` | SwiftTerm adapter |
+| `Sources/Support` | bounded cache and share intake |
+| `Sources/UI/Chat` | session shell, chat composition, attachment presentation, entrance rows, transcript, composer, context, and forks |
+| `Sources/UI/Onboarding` | pairing/setup flow, reusable onboarding chrome, workspace, provider, and default setup |
+| `Sources/UI/Settings` | settings shell plus appearance, connection, provider, agent-default, on-demand package/resource, trust, custom-model, and diagnostic presentations |
+| `Sources/UI/Terminal` | sheet composition, presentation lifecycle, and SwiftTerm renderer |
 | `Sources/UI/Theme` | historical Tron colors and descriptor-based bundled typography |
 | `ShareExtension` | app-group share handoff |
+
+`Sources/Models` keeps wire-compatible value types grouped by authority rather than in one DTO
+monolith: gateway connection, session catalog, transcript, session runtime, resource catalog,
+workspace, and terminal files. Cross-file references remain plain value composition; no split model becomes a
+second cache or reducer.
 
 ## State flow
 
 `GatewayClient` performs one authenticated WebSocket connection, protocol hello,
-request correlation, deadlines, and event delivery. `AppModel` is the MainActor
-state owner. It loads a bounded disposable cache first, connects, fetches
+request correlation, deadlines, and event delivery. One private connection epoch owns the
+exact socket, receive/liveness tasks, pending requests, liveness timestamp, overflow state,
+and handshake projection. Connect and close invalidate older attempts across every suspension;
+late hello, frame, failure, liveness, completion, and close callbacks can only detach or publish
+for their captured epoch. Event deliveries carry that non-wire connection identity. App lifecycle
+connects prepare the epoch without starting receive/liveness work, install the returned identity,
+then activate delivery; buffered events from a retired profile therefore cannot cross a switch.
+Idle transport tasks do not retain an otherwise unowned client. Its
+injectable transport ends at WebSocket bytes, and its monotonic-clock and UUID inputs control only time and
+identity generation. The production transport is an actor-confined ephemeral
+`URLSession` owner and preserves the existing data frames, headers, deadlines, and
+random UUID behavior. Scripted test sockets contain no protocol, session, receipt,
+or event-admission policy; `GatewayClient` remains the only decoder and client
+runtime. Each inbound response/event frame crosses one discriminated `JSONDecoder`
+entry point. Typed event views decode directly from that original decoder's payload
+container; network bytes are not serialized and parsed again. The client actor best-effort
+prepares large session snapshots, summaries, envelopes, streaming items, tool states, unified extension-presentation mutations, and terminal output/exit payloads before delivery, so
+the MainActor reducer installs typed `Sendable` values instead of re-encoding and
+decoding dynamic payloads. Raw event payloads remain attached for global extension
+points and unknown topics. Every Gateway coder is fresh per operation; shared static Foundation
+coder instances are forbidden across concurrent frame preparation. Inbound bytes reject frames above
+the Gateway's 1 MiB protocol ceiling before JSON parsing. Dynamic `JSONValue` admission
+is capped at depth 64, 32,768 nodes, 8,192 members per collection, 1 MiB per UTF-8 string, and
+4 MiB of aggregate strings including object keys. Non-finite numbers fail coding, and integer
+projection uses exact range-safe conversion. Malformed known event data preserves its former live-reducer
+no-op semantics rather than becoming a transport failure, while a non-consumable
+quarantined suffix forces another authoritative attempt before its baseline can publish.
+Gateway connection and disposable cache intervals use the shared typed
+performance-signpost boundary. Signpost metadata is structurally limited to result
+codes, item counts, and byte counts; identifiers, paths, methods, filenames, model
+names, prompts, transcript content, and terminal output are never recorded. `AppModel`
+is the shrinking MainActor composition façade; narrow typed owners retain lifecycle and
+coordination state instead of routing facts through unrelated façade fields.
+`GatewayLifecycleCoordinator` is the sole owner of enrollment attempts, selected-profile lifecycle,
+connection state/info/identity, exact admissions, reconnect, foreground reconciliation, serial
+retire/close transitions, and final teardown. It composes `GatewayClient` without copying that actor's
+byte-transport epoch. `AppModel` supplies narrow projection hooks for cache installation, refresh,
+session/terminal reconciliation, and synchronous retirement; it no longer stores a parallel lifecycle
+phase, reconnect task, pairing attempt, connection identity, or transition waiters. A dedicated
+`SessionCatalogCoordinator` owns dashboard summaries, an ID-indexed monotonic live-summary overlay,
+cached/stale/live provenance, and exact profile/lifecycle/connection load admission. Equivalent
+foreground, reconnect, pull-to-refresh, unknown-summary, and structural-invalidations share one
+catalog traversal; invalidation during a traversal sets one dirty bit and receives at most one immediate
+follow-up before handing newest truth to a new bounded lease. iOS requests user scope in 500-row pages,
+rejects more than 50 pages/25,000 identities, duplicate IDs, cursor cycles, and mixed revisions, and
+publishes only a complete catalog. A mixed revision from an older Gateway or an expired continuation lease restarts silently once from a nil
+cursor; it is expected optimistic invalidation, not the former actionable “Sessions changed while loading
+the dashboard” alert. Known revisioned `session.summary` events apply synchronously without a list read,
+and mounted transcript snapshots cannot overwrite those global row fields. The dashboard groups user
+sessions by workspace and renders the newest ten per workspace by default; explicit Show more/Show less
+pagination is a disposable UI projection with generation-checked staged animations, so catalog refreshes
+cannot expose stale rows or leave controls stuck. Cache/disconnect/authoritative installs and removals all
+enter that one disposable projection; hidden/local selection policy remains outside it and cannot mount a chat. Cached or stale non-idle rows present as resuming without rewriting
+the canonical phase; only a live Gateway-authoritative interrupted phase uses the amber warning.
+A profile boundary synchronously invalidates lifecycle admission, chains behind any preceding
+retirement, revokes profile-scoped loads and presentation intake, and awaits the exact transport close
+before another profile may connect. Pairing pre-encodes profile metadata and uses one transactional profile
+store boundary: atomic Keychain upsert succeeds before a single-document metadata commit, metadata failure
+restores the exact prior credential (or removes a newly created one), credential-deletion failure restores
+removed metadata, and explicit profile selection must commit its metadata before replacement cache or
+socket admission begins. Selection, removal, and rollback failures remain observable to lifecycle ownership,
+which retains profile-scoped drafts/cache and enters recoverable offline state instead of reporting success.
+Corrupt v2 metadata self-cleans, malformed persisted host/port values are removed before selection,
+and valid legacy metadata migrates on the next write. Gateway socket/upload/blob construction uses
+failable validated URLs and rejects an invalid profile before opening transport, so neither malformed
+metadata nor credential failure can leave selected metadata without its owned secret. Every suspended connect/reconnect/cache boundary revalidates that
+lifecycle admission. Mutation receipt reconciliation captures generation-only admission so it may
+resolve across a same-profile reconnect, but profile replacement invalidates it before any poll or
+replay. Connection-owned terminal-open results that resolve after a same-lifecycle reconnect must attach
+again on the current connection before replay can publish; a profile-generation change discards them. Reconnect retains the nominal 2-second, ×1.7,
+15-second-cap progression. Each sleep is
+independently sampled within 80–120% of its nominal value with a hard 15-second effective cap; the
+injected unit-interval source and monotonic clock make the exact schedule deterministic in tests.
+Foreground activation may cancel only a delay-owned retry and start one immediate attempt; repeated
+activation cannot replace an active handshake, and exact attempt generations reject stale cancellation
+or unauthorized completion. Background scene transition cancels only disposable foreground/catalog
+reconciliation, leaves the route and responsive socket intact, and gates event-triggered catalog reads
+until the next active scene starts a fresh shared pass. After event activation, reconnect and foreground
+reconciliation starts dashboard convergence concurrently with mounted-session restoration; terminal
+reattachment follows exact mounted-session synchronization because the Gateway requires that connection's
+subscription before terminal attach. Provider/settings/device reads cannot delay mounted chat restoration,
+and a retained catalog failure never replaces an otherwise responsive socket. Final teardown cancels and joins the event listener and shares one
+completion across concurrent callers; scene backgrounding deliberately does not tear down accepted
+Gateway-owned work. It shares the clock/UUID seams for Gateway reconnect, receipt, debounce,
+and command-ID work. Its visible-open interval
+contains independently measured authoritative synchronization attempts; invalidated
+attempts end as discarded rather than being mislabeled as successful. Receipt timing
+begins only after an uncertain mutation response, never for an ordinary confirmed
+mutation. The observable `TerminalCoordinator` owns terminal request DTOs and wire execution,
+presentation/intents, cleanup tasks, receipt-aware commands, attach/replay intervals, gap reconciliation,
+and reconnect reattachment. Its sole `TerminalReducer` kernel owns per-terminal operations, shared
+attachment leases, typed terminal-event reduction, a global 16-terminal/256-chunk/1 MiB in-flight event
+quarantine, replay revisions, and post-detach event admission. Terminal open/attach uses one replay
+installer and closes its interval only after reset, delta, and contiguous quarantined chunks are admitted.
+`terminal.open` requires the exact installed iOS subscription and the Gateway validates the client's
+opened-session ownership before creating a PTY, preventing orphan terminal creation during route/reconnect
+races. Stale successful attachments schedule an exact-connection compensating detach unless a newer
+presentation still owns that terminal; a matching new attach cancels and joins unsent cleanup first.
+Resize debounce is keyed by exact presentation intent inside the owner: 120 ms and the existing
+20...400-column/5...200-row bounds are unchanged, supersession is silent, distinct presentations remain
+independent, and intent/route/profile retirement cancels pending work. The sheet presentation controller
+owns one active start/show/open flight and one latest pending route. Read-only phases cancel on replacement;
+possibly-sent attach/open phases finish under their revoked intent so stale completed receipts reach compensating
+cleanup, while an exact-intent replay gate prevents a confirmed-missing open from creating a new PTY. Only the
+newest pending route launches afterward, and terminal action failures use a dedicated visible alert without
+removing the native renderer. `AppModel` retains only the terminal façade and cross-domain
+Gateway event/lifecycle routing; canonical session subscription ownership stays in `SessionPresentationStore`.
+It loads a bounded disposable cache first, connects, fetches
 cursor-paginated sessions and model catalogs, and replaces local state with
-authoritative snapshots. Session snapshots carry a byte-bounded current
-transcript tail; `transcriptStart`/`transcriptTotal` expose earlier canonical Pi
-entries, which the chat can request backward without risking an oversized
-WebSocket frame.
-A just-created empty session remains locally selected until Pi indexes it after
-its first user message; absence from discovery alone does not discard the
-newly returned authoritative snapshot.
+authoritative snapshots. Session snapshots carry a current transcript tail bounded to
+800 KB and 512 items; `transcriptStart`/`transcriptTotal` expose earlier canonical Pi
+entries, which the chat can request backward in 600 KB/512-item pages without risking an
+oversized or generically truncated WebSocket frame. Page `start`/`end`/`total`, item count,
+neighbor identity, mount, runtime, and subscription ownership must all agree before prepend.
+The presentation owner keeps the newest authoritative tail separate from explicitly loaded
+older browsing rows. A pinned presentation replaces its tail instead of accumulating history;
+a detached reader retains loaded rows, and physical return to latest discards that disposable
+prefix with no control or pixel change. Only the authoritative tail enters the disk cache.
+`ChatTranscriptPresentationStore` serializes snapshot-to-timeline preparation off MainActor,
+coalesces a burst to one pending newest source, and atomically installs only an exact tag
+containing session, mounted presentation, runtime, canonical/timeline generations, and paging
+bounds/edge identity. It retains at most one installed, one building, and one pending immutable
+snapshot/timeline; it is disposable projection state, not a session mirror or event journal.
+One deterministic `ChatTranscriptProjectionKernel` converts exact canonical entries into ordered
+raw atoms and then globally assembles call/result joins, bootstrap filtering, ordinals, barriers,
+grouping, compatibility normalization, and semantic maps. `ToolExecutionStatePolicy` is shared with
+`SessionPresentationStore`, so progress-sequence, timestamp, status-tie, explicit-order, start-time,
+and call-ID rules cannot drift between canonical event reduction and sparse rendering. Raw fragments retain the complete
+currently visible disposable history—even beyond one 512-item page—because explicitly loaded
+history cannot be evicted until forward reload exists. Projection instrumentation reports only a closed privacy-safe mode (`cold`, `fragmentReuse`,
+`toolPayloadPatch`, or `isolatedStreamingSuffix`) and aggregate entry/fragment/tool/atom/rendered
+counts; it carries no identifiers or content. A pure tool patch reports zero source entries and atoms,
+counts every runtime membership state examined in `toolsInspected`, and reports only the distinct
+descriptors changed in `toolsPatched`. Opening
+a new chat presentation always synchronizes a fresh authoritative bounded latest page; disposable cached or previously paged prefixes are never revealed as
+its baseline. The transcript remains behind a nonblank opening surface until the
+two-phase `session.open`/`session.sync` handshake installs its authoritative tail, the
+exact initial transcript projection, and a physically verified viewport at the marker
+after transcript and queue rows. Rows remain fully realizable beneath that opaque cover;
+an opacity-zero lazy stack is never used as a layout gate. Only then does the cover fade
+while the positioned transcript rises eight points (opacity only under Reduce Motion).
+The first-ready performance interval closes after the next display-link frame proves
+that ready state was presented. Opening uses an exact-ID `ScrollPosition` command when
+the marker is not yet realized, rejects native overflow overshoot as a bottom boundary,
+and retains the position binding through animation completion plus two unchanged
+presented frames before releasing it. Test builds can admit one synthetic authoritative
+snapshot through the same read gate and skip only the network opening handshake.
+The hosted harness still mounts the production chat, lazy transcript, composer
+inset, and native scroll view; a display-link recorder coalesces geometry and
+semantic row-frame observations to at most one sample per presented frame. These
+hooks are absent from Beta and production builds and own no session policy or
+runtime state. The
+composer remains mounted and visible throughout opening so transient synchronization
+cannot remove the primary chat control; sending stays disabled until the authoritative
+baseline is ready. A failed transport/sync open shows an explicit retry surface. Once that mounted chat is ready, reconnect and
+resynchronization merge compatible live tails with history explicitly loaded in
+that viewport so a detached reader is not displaced. Explicit earlier-page loads
+remain request-only, are scoped to the exact mount generation/cursor, and restore the
+former visible anchor with bounded late-layout correction so the viewport does not jump.
+A gesture that begins during that correction cancels every remaining position write
+and its final native geometry wins over the pre-load detached state.
+Create and fork return navigation identity without mounting or selecting a transcript;
+only the destination route may establish live presentation authority.
+
+Gateway restart uses a supervised drain contract. The request freezes new mutations,
+waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway
+process; active PTYs must be closed first because their process state is not restartable.
+iOS keeps the chat mounted, follows `system.stopping` into its ordinary bounded reconnect
+loop, and installs a fresh authoritative session baseline from the replacement runtime.
+A restart response may be immediate or scheduled behind active runs. Diagnostics routes current
+unsupported, busy, receipt, and transport action failures through the existing global error surface;
+lifecycle-retired cancellation remains silent. Unexpected process
+death is different: a surviving run marker projects the session as interrupted and Tron
+never replays the accepted prompt automatically.
 
 Events are invalidation or live-presentation hints. They do not form a durable
-event journal and are never replayed into a local database. Reopening a session
-always converges through `session.open`.
+event journal and are never replayed into a local database. `SessionPresentationStore`
+is the sole MainActor owner of the mounted immutable target, revocation, live snapshot,
+subscription lease, synchronization/quarantine, cursor reducer, transcript paging, and
+session-keyed context/tree/resources/commands. `AppModel` routes cross-domain effects through
+a weak delegate and retains no token, snapshot graph, presentation generation, or secondary
+projection mirror. Revocation synchronously rejects every sequenced topic, not only full snapshots.
+Paging, exports, and secondary reads capture an exact unrevoked target plus installed token and
+revalidate both after suspension. Export blobs use a file-backed URLSession download with declared
+and streamed 25 MiB admission rather than response `Data`; completed downloads move into a protected,
+32-file/24-hour bounded staging owner before the artifact store atomically adopts them. Gateway-provided
+names reduce to a 160-byte last path component and each artifact enters a unique, protected,
+backup-excluded temporary directory. Exact route revalidation removes stale staging and artifacts,
+and app launch plus every new export prune malformed or older-than-24-hour disposable artifacts. Paging is read-only
+at the Gateway and cannot revive event subscription ownership after close. Cold cache snapshots never
+enter the store's authoritative read gate.
+`session.open` uses
+a two-phase subscription barrier: the authoritative snapshot and ephemeral sync
+token are returned first. The snapshot and subscription token remain provisional and
+unobservable until `session.sync` succeeds and the exact session/presentation intent is
+revalidated; stale or failed opens close only that provisional token. The same opaque token
+then becomes subscription ownership, and `session.close` only releases a subscription whose
+current token matches. Active protocol-v3 peers always provide explicit ownership.
+One intent-keyed synchronization coordinator owns the shared outcome and event quarantine.
+Compatible reconnect callers await that outcome directly instead of polling tokens; a fresh
+presentation never inherits reconnect installation semantics and waits to retry after incompatible
+work. Reconnect identity comes from the mounted presentation generation, never mutable dashboard
+selection. During an attempt, iOS quarantines that session's events, discards those covered by the new
+baseline, validates contiguity, and publishes the baseline plus drained suffix in one MainActor turn
+before completing all waiters. Retry and fresh-install invalidation stay in the same owner; one bounded
+three-attempt loop replaces recursive resynchronization. A synchronization-quarantine overflow uses the
+ownership-scoped `session.rebaseline` event, whose fitted snapshot is installed as a fresh authoritative baseline
+without another open handshake; stale/revoked owners ignore it and no fitted baseline retains the
+`transport.resyncRequired` fallback. Outside that explicit install, a full `session.snapshot` hint requires the
+current subscription plus either mounted authority or its active synchronization lease, the same runtime generation, and exactly
+the next event sequence. Equal/lower cursors are discarded without merge, summary write,
+or cache save; gaps, runtime replacement, and missing baselines converge through another
+authoritative open. Missing live authority and route/payload mismatch are discarded without
+creating state. Buffer overflow,
+oversized frames, reconnect, and foreground activation use that same path. Unknown sequenced session events
+still advance the cursor so a newer app can add hints without forcing false gaps.
+Dashboard phase/name/count updates use a separate bounded global `session.summary`
+projection: every connected client sees active/settled rows without subscribing to
+every transcript, while an opened chat receives the full sequenced snapshot and
+stream/tool events. Structure, context, and resource invalidations refresh any
+already-presented History, Fork, Manage Session, or Project Resources surface.
+Global settings, provider/model catalog, package, and custom-model event hints each
+advance a dedicated invalidation generation. Successful reads publish their projection
+without advancing that generation, so a visible `.task(id:)` performs one initial read
+and one read per actual invalidation rather than feeding its own reload loop.
+`SettingsTrustCoordinator` is the sole owner of target-keyed disposable settings values,
+per-target read admission, settings and trust event revisions, settings request/mutation
+construction, and trust inspection/mutation. Clearing a saved trust decision sends an explicit
+JSON `null`, while `true` and `false` remain distinct decisions. It uses the shared
+confirmed-mutation executor, and profile retirement synchronously revokes suspended work
+and clears settings projections. `ProviderAuthCoordinator` likewise solely owns typed-target
+provider/model catalogs, per-target paging admission, event-only provider invalidation,
+auth prompt/event parsing, and operation-to-target retention through completion or confirmed
+cancellation. Because provider login can synchronously emit presentation or completion events
+before `auth.begin` returns, a four-operation, 64-element, 16 KiB pre-response quarantine promotes only the
+newest admitted operation and is synchronously revoked on failure, cancellation, or profile
+retirement. Provider and model pages publish as one atomic catalog. Provider projection rejects
+more than 1,000 rows, 4 MiB of strings, or duplicate IDs. Model projection rejects repeated cursors,
+more than 50 pages, 25,000 models, 16 MiB of retained strings, pages above the requested 500 rows,
+and duplicate compound identities. Gateway cursors bind offsets to an exact whole-catalog fingerprint,
+so mutation cannot mix generations. Model pickers key rows by that compound identity, so equal model
+names from distinct providers remain stable. Profile retirement synchronously discards catalogs and auth routing.
+Its forced refresh and logout commands use the shared receipt executor before reloading the
+exact captured target. `PackageConfigurationCoordinator` solely owns target-keyed inventories,
+update markers, newest-list/check/mutation admission, event-only invalidation, closed
+install/update/remove wire construction, and confirmed exact-target reload effects. The separate
+`CustomModelConfigurationCoordinator` owns typed-global reads and validate-before-put mutation
+admission. Both synchronously clear disposable projections and reject suspended work across
+profile retirement—including A → B → A replacement—and both reuse the shared confirmed-mutation
+executor rather than defining receipt policy. Every throwing mutation boundary rechecks the
+captured owner admission before propagating an error: retired or superseded work becomes
+cancellation, while current-profile uncertainty and application failures remain visible.
+`GatewayDiagnosticsService` is the typed read-only boundary for project Git inspection and bounded
+Gateway log reads. SwiftUI surfaces provide the exact path or log limit and never construct Gateway
+methods or parse wire objects. The service preserves the established absent-repository, malformed-log
+skip, and newest-first projection semantics; `GatewayLogRecord` carries transport-safe fields while its
+color, icon, and date formatting remain UI-owned.
+`AppModel` only exposes observed computed reads and forwards operations; screen-owned
+revisioned draft stores remain local to their existing settings surfaces. Settings
+surfaces use typed `.global` or `.project(cwd:)` targets; installed values and automatic
+reload tasks are keyed by that exact target. Global reads and writes never inherit the
+currently selected session's project path, different targets cannot overwrite each other,
+and a newer same-target read rejects an older completion. New-session defaults are loaded
+for the workspace being created rather than the previously selected session. Changing that
+workspace or gateway profile clears the prior trust/model projection and closes creation admission
+until matching settings and trust reads complete; stale workspace/profile completions cannot reopen
+it. The toolbar identifies that preparation instead of presenting a silently inert Create action.
+One synchronous creation owner admits only one command per gesture. A confirmed create returns its
+profile/lifecycle-bound navigation route immediately; the `session.listChanged`-driven dashboard
+projection converges independently and never blocks opening canonical state. A known configured
+model default avoids a redundant follow-up mutation. If an explicit model override fails after
+canonical creation, the error remains visible but the existing route opens, so retry cannot create a
+duplicate session. Provider and model catalogs likewise use typed `.global` or `.session(id:)`
+targets and publish each fully
+paged provider/model pair atomically. Auth operations retain that target through completion or
+confirmed cancellation; unknown completions never guess from dashboard selection. Package
+inventory and update projections use typed `.global` or `.workspace(cwd:)` targets; the global
+Settings route never inherits the default workspace, and successful update/remove mutations
+clear only the matching cached update markers before refreshing that target's inventory. Project
+Settings captures its session/CWD when presented rather than consulting later dashboard selection.
+Trust reads and mutations require a typed nonempty project target; onboarding, project Settings,
+and new-session admission discard stale workspace results, and trust invalidations reopen the
+new-session readiness gate until the matching workspace is inspected again. Successful first-run
+pairing inspects an already selected workspace before enabling onward navigation; the initial
+pre-pair view task is never treated as evidence for that post-pair target. Custom-model
+documents have one explicit typed global target and generation-owned publication, so a slower
+older read cannot replace a newer document. Validation and put revalidate the same profile and
+mutation generation before every mutating boundary; retirement after validation never sends put.
+The Save and Restart flow captures one lifecycle admission around both operations, so a confirmed
+save cannot restart a replacement profile and a late restart failure cannot surface into replacement-profile
+UI. Configuration screens discard cancellation while preserving current-operation errors. `ComposerDraftCoordinator`
+is the sole owner of composer text, staged attachments, upload admission, editor requests, and submission state.
+Text is keyed by explicit profile/session scope with monotonic revisions and a deterministic 24-inactive-draft
+LRU; text is never truncated and survives route close/reopen until exact session/profile deletion or bounded
+eviction. The active lease is the immutable session/presentation generation plus lifecycle generation.
+Attachments, previews, concurrent upload admissions, editor requests, and submission snapshots live only for
+that lease and are synchronously discarded on revocation, close, or profile retirement. Completed plus active
+uploads are admitted against one 10-item/25 MiB presentation budget before network work; each image chip uses
+an orientation-correct 192-pixel PNG preview with 1 MiB decoded/encoded ceilings, so normal composer rendering
+never decodes the full attachment. The original bounded payload remains presentation-scoped solely for the existing
+explicit preview sheet, which installs the thumbnail immediately and prepares at most one 4,096-pixel/64 MiB image
+off-main through the same cancellation-aware media preparation slot before publication. HTTP response bodies
+have a separate 64 KiB ceiling and must return on the captured connection epoch. Uploads are independent, so
+completion order—not newest-request arbitration—orders staged IDs. A confirmed prompt removes only the IDs
+captured by its submission and never clears newer text or attachments. Admission installs one exact-target,
+bounded outgoing presentation row immediately; it is not a TranscriptItem and remains until matching canonical
+user-message state is observed. Definitive rejection restores outgoing text before newer input, while a possibly-sent
+transport outcome retains the row and captured IDs without replay. Retired completions publish neither restoration
+nor errors. Extension editor requests auto-apply only to an empty exact draft; nonempty drafts require the
+existing explicit Use/Keep disposition. Route-provided initial editor text seeds only an absent exact
+profile/session draft; reopen and repeated preparation cannot overwrite retained edits. `SessionShellView`
+observes explicit selected-profile identity through `SessionShellProfileRouteOwner`; an A → B → A change
+synchronously revokes the current presentation and clears its navigation route before another profile can
+reuse the screen's prior draft scope. File attachments and session imports require a regular file no larger than
+25 MiB and reject changed sizes before upload. Session imports and document attachments copy through one bounded
+off-main stream into protected temporary files, then release security-scoped access before the first network suspension.
+Non-image documents never become full request `Data`; image files retain bytes only for the established explicit preview. Staged attachment retention beyond a
+presentation remains a Phase 8D product decision; abandoned unclaimed remote IDs expire under the bounded Gateway
+store rather than being transferred speculatively. Guided and advanced editor changes share one monotonic
+revision owner; automatic invalidation loads cannot replace either form of unsaved input, and only
+the exact submitted revision can become clean after a suspended save. Model/default
+settings keep separate global/project drafts with baselines and monotonic revisions. Runtime,
+resource-location, and model/default screens all use that owner. Scope changes preserve dirty input,
+reloads cannot overwrite it, and a save completion can mark only the exact draft revision it
+submitted. Mutations diff against the admitted baseline, so editing one project field does not
+materialize inherited effective values as project overrides. Write-only proxy drafts expose only
+redacted state, encode clearing explicitly, and are scrubbed after a confirmed save. Global defaults
+always use the global model catalog; project defaults use the captured session catalog.
+Chat exposes one logical presentation timeline rather than independently rendered canonical,
+streaming, and live-tool arrays. Its cold oracle and detached worker use the same raw-atom/global-
+assembler kernel; there is no output-producing test builder, suffix builder, or second cold projector.
+The worker retains one complete disposable basis scoped by cache epoch, session, mounted presentation,
+and runtime, plus an exact projection-key return. A newer epoch clears the older basis before reuse;
+reset cancels the façade worker, skips obsolete text preparation at cooperative boundaries, and sends
+monotonic cache retirement that cannot erase a newer epoch. Worker identity prevents a retiring task
+from clearing its replacement. Exact source windows reuse fragments
+only when the complete prior `TranscriptItem` equals the incoming item at the intersecting global
+ordinal. Inexact legacy windows require one unique contiguous ordered-spine proof and still require
+complete source equality; duplicates and ambiguity assemble cold. Streaming call IDs participate in
+the same global result-visibility set, so a canonical result joins at its streaming call position rather
+than rendering first as an orphan. Every mixed fragment set returns to the same global assembler for
+joins, bootstrap filtering, grouping, ordinals, and semantic maps. Exact-bound checks use subtraction
+or reporting-overflow arithmetic and conservatively reject malformed maximum values.
+
+The random-access row collection is a flat immutable canonical base with direct index overrides and a
+tiny live suffix. A global assembly resets overrides; repeated runtime payload updates share the base
+and replace only affected tool-run rows rather than chaining overlays or copying 10,000 descriptors.
+Rendered identity spines and sets are cached/split so ordinary text/thinking/image streaming updates
+share the canonical rows and identities while the kernel constructs only the isolated live suffix.
+Markdown has one pure `Sendable` cold presentation model. It classifies the existing block dialect,
+constructs each inline `AttributedString` once with the established plain-`Text` fallback, and supplies
+the exact immutable document to `TronMarkdownView`; tables intentionally remain raw cell `Text`.
+Block and list identities combine exact content with UTF-8 source ranges, so equal duplicates remain
+distinct. An unchanged exact block retains identity and its subtree-local interaction state; changed
+content or block type resets identity, intentionally clearing `CodeBlock` copy confirmation and any
+other stale subtree state rather than transferring it to different source. The projection worker now
+prepares exact-source Markdown documents and attributed thinking segments off-MainActor under one
+shared disposable LRU: 4 MiB accounted source/presentation bytes, 512 Markdown revisions, 4,096
+thinking segments, and 320,000 bytes per source. Two preparations may run concurrently; one projection
+warms at most 32 new Markdown and 128 new thinking values from its bounded 512-entry render-critical
+tail. Installed rows receive only their tiny exact-source slice, while misses, oversized values, and
+older explicitly paged history retain the unchanged cold renderer. Scope/reset replacement and memory
+pressure clear both worker and installed prepared values, and generation admission prevents stale work
+from restoring them. This checkpoint adds no prefix parser. A future incremental path must prove exact
+cold equality and fall back to a full parse for open or closed fences, table promotion, lists, quotes,
+and incomplete inline syntax because appended text can reclassify prior source across each boundary.
+Any streaming fragment carrying a tool-call ID—including malformed text or extension content—is
+returned to global assembly so canonical result suppression and placement remain exact.
+Assembler-emitted unique tool sites retain canonical presentation bases, call classification, group
+order, and placement facts. Runtime-only patching requires unchanged canonical source, exact streaming,
+phase, unique membership, classification/order/start topology, stable run identity/order, and unchanged
+before-streaming placement. It patches immutable tool descriptors only; canonical result changes,
+membership/order/phase ambiguity, duplicate calls, or placement flips reuse fragments and globally
+assemble. Status, editor, widget, and other unrelated sequenced events do not manufacture projection
+work. `ChatView.body` never constructs the timeline: typing,
+focus, geometry, toolbar, and sheet invalidations reuse the installed immutable value, while
+streaming revisions are serialized/coalesced off-main and observable installs are limited to a
+display-frame boundary. Exact-tag waiters let prepend retain
+its existing semantic-alias and layout-epoch transaction. This adopts the useful
+pre-Gateway principles of a non-render-path measurement/projection owner and coalesced
+stream updates without reviving the retired Engine, local event reconstruction, or scroll
+proxy architecture. Tool calls, progress, and results join by `toolCallId`; collapsed rows retain structured
+request/response values without eagerly formatting JSON strings. Opening a detail sheet derives a
+bounded semantic presentation only for that selected tool: exact lowercase built-ins foreground their file,
+command, query, diff, and readable result, while arbitrary extension tools may foreground only the first
+trusted common string key and otherwise lead with their result. Bash commands wrap to the available width
+using word-preserving line breaks while outputs and other string metadata wrap; all previews bound pathological
+line count, total characters, and per-line length with explicit head/tail omission markers. Small numeric
+and boolean metadata remains unchanged. The final Technical details sub-sheet starts with larger, compact selectable
+execution metadata, then exposes bounded Request JSON and Result JSON containers in that order. Tapping either
+container opens the shared selectable, vertically scrollable raw JSON sheet directly; no intermediate structured
+traversal or duplicate readable-output projection is introduced. Primary semantic content, faithful diff expansion,
+technical payload evidence, and navigation chrome remain separate presentation owners while preserving one
+established sheet hierarchy and detent behavior. Result JSON uses
+the authoritative response first, otherwise the complete readable content string, then only a fallback distinct
+from the request; request-only projections cannot duplicate themselves as results. Shared nested
+structured field sheets remain available to unrelated arbitrary-data surfaces and resolve semantic paths
+against each newest live root value rather than snapshotting the selected value. The Gateway supplies a
+monotonic per-run ordinal for parallel calls, and the grouped
+row keeps the first call's identity as it moves from invocation to completion.
+Consolidation applies only to consecutive tool calls: every canonical thinking,
+text, attachment, or notification boundary flushes the current group, preserving
+the exact Pi content order without hiding or moving thinking traces.
+The immutable navigation session ID owns one opening task and one typed
+`ScrollPosition`; duplicate dashboard opens and competing proxy scroll commands are
+forbidden. The complete composer is the sole structural owner of the ScrollView's bottom
+safe-area inset, including wrapped text and staged attachments. Versioned extension presentation
+state is a disposable live projection scoped by runtime generation, host epoch, and one aggregate
+presentation revision. `ExtensionPresentationState` contains semantic state, authoritative pending
+interactions, bounded generic full-frame surfaces, capabilities/diagnostics, and an optional input-lease
+projection. Only `session.extensionPresentation` mutates it. Reducers accept the current epoch and exact
+next revision, ignore only equal-revision duplicates, and request an authoritative session resync for a gap,
+lower/reordered revision, malformed mutation, or epoch mismatch. Fitted snapshots retain bounded omitted
+surface ID/revision baselines and leased/actionable state so later exact-next full frames converge; a complete
+snapshot replaces the whole projection. Unknown surface kinds decode to a readable plain-text fallback; malformed upserts never erase an existing
+surface, and removal is an explicit ID list. Native rendering admits only read-only widget surfaces through deterministic, horizontally-scrolling
+composer pills (one opaque pill per canonical widget identity; semantic widgets merge with their
+host surface representation when its public surface ID decodes to the same key, while explicit provenance
+provides source grouping and labels); tapping a pill opens a bounded native detail sheet scoped to that group.
+The sheet translates terminal-only hints into native disclosure controls and uses the public tools-expanded
+mutation with exact epoch/revision/command ownership to rerender retained surfaces. Frame runs render as
+wrapping native information rows rather than a terminal viewport or per-run backgrounds, preserving only
+admitted safe links. Status/service-only activity uses one conservative fallback pill. Custom, overlay,
+editor, tool, message, and entry surfaces remain deferred. Unknown or ambiguous provenance fails open to
+separate opaque groups, and the UI never inspects package names or extension-owned keys. Offline cache strips all surfaces,
+interactions, lease/focus, capabilities/diagnostics, and ephemeral semantic values.
+Native safe-area layout therefore pushes the transcript exactly once and reverses naturally when
+the keyboard or composer contracts. One geometry observation of the complete composer—not
+field-specific focus, text-height, attachment, or widget hooks—arms the scroll owner for the next
+measured viewport transition; it never issues an independent jump. Fresh native geometry, direct-return,
+and user-settling authority survives composer measurement until its final callback is consumed.
+Interactive transcripts use bottom initial positioning but top alignment
+for undersized or lazily materializing content, preventing keyboard frames from repeatedly
+re-anchoring a partial stack. Once a bottom command or manual catch-up settles inside the
+practical tail boundary, its persistent `ScrollPosition` target is cleared without moving the viewport so later safe-area
+changes cannot replay stale edge ownership. Viewport resize owns mixed resize/streaming frames:
+a pinned reader receives only a bottom-edge command, while a detached reader receives no app
+position write. Native ownership arriving after geometry consumes preserved directional evidence
+instead of losing an upward gesture. Direct interactive scrolling always wins. `ChatScrollCoordinator` is the sole owner of
+raw geometry and semantic-row frame intake; pinned/detached and unread
+state; presentation and command generations; display-frame follow and catch-up tasks;
+and the exact ordinary-layout and paging semantic-anchor transactions. It publishes one exact-token typed
+command for `ChatView` to execute and acknowledge; presentation reset and settled
+binding release are command destinations rather than direct view policy. Opening arms final tail settlement
+with the exact physical marker after installed transcript and queue rows. Auxiliary/runtime rows cannot admit
+it, transient boundary geometry cannot clear it, and native visible geometry beyond an overflowing content edge
+is treated as overshoot rather than a settled bottom. If the marker is unrealized, one frame-gated exact-ID command
+forces lazy realization; command submission remains owned until current-layout marker and correlated native
+geometry prove physical settlement. The native geometry observation identity includes the opening epoch and
+phase, forcing a current geometry replay when the state advances to positioning even if every numeric field is
+unchanged; opening-time samples still never admit ordinary follow or detachment policy. At most one bounded
+second exact-ID submission is allowed when SwiftUI consumes the first against provisional lazy layout; later writes require new
+layout evidence. Exact-ID realization does not require a native geometry sample. If physical proof still disappears,
+a five-second deadline retains the bounded exact-ID binding and reveals the authoritative transcript best-effort
+rather than converting a presentation-only callback failure into an unavailable conversation. Undersized content remains top aligned. The opening surface then fades away
+while the binding remains owned through animation completion and two stable presented frames, preventing later
+lazy content-size correction from exposing empty space. An empty timeline takes an explicit no-transcript path,
+while any direct/native/accessibility interaction cancels the pending target permanently. Automatic streaming growth is
+latest-sample-wins behind one injected display-frame wait, emits at most one tail
+command per presented frame, and emits none inside the practical bottom boundary.
+Direct/native/accessibility interaction synchronously invalidates pending automatic
+commands. The performance tracker owns interval generations only. Upward user geometry is
+the only ordinary transition from pinned to detached; native ownership alone cannot
+detach a reader when streamed growth moves the physical bottom. A gesture commits
+detachment only after its settled geometry has moved toward older content, so bottom-edge
+rubber-banding cannot flash the catch-up control. Viewport expansion or later
+unattributed tail geometry cannot release detachment; only an admitted direct/native/
+accessibility return or a catch-up command that physically settles at the boundary may do so.
+If final bottom geometry arrives before native ownership, that exact callback pair admits the
+manual return immediately, clears unread state, and removes the catch-up control without a tap.
+A mixed viewport/scroll callback does the same only when direct interaction and measured movement
+toward the tail are both present; keyboard resize alone cannot release detachment. Bottom
+distance uses SwiftUI's atomically derived native `visibleRect.maxY` plus the bottom content
+inset, rather than reconstructing a visible edge from offset/container values that may belong
+to different lazy-layout or keyboard frames.
+While detached, a fixed action-sized circular
+glass down-arrow morphs from the composer's trailing edge; multiline editor height can never
+resize it. Reaching the practical tail boundary (with a small inset-rounding tolerance) or
+tapping that control starts an owned catch-up transaction. Long-distance catch-up
+jumps without animation to a small reveal distance, waits for the next actual display
+frame, and smoothly animates only the final approach; Reduce Motion uses one
+disabled-animation tail command. Catch-up remains explicit state through physical
+settlement; prior and newly arriving unread state remains admitted throughout staged,
+final, and settling phases. Interruption away from the tail restores detached/unread
+ownership, while successful physical settlement clears unread only at completion.
+Every later measured height increase coalesces into
+the next display-frame command until another upward gesture. An ordinary installed projection
+change captures the current visible semantic locus before publication and either settles a pinned
+reader to the tail once without animation or advances an exact layout epoch after installation to
+restore a surviving detached semantic anchor within one point. Persistent idle native ownership does
+not disable preservation, but active interaction, pending native geometry, or user-driven settling does.
+After each point correction, both a newer semantic sample and a newer scroll-geometry revision are
+required in either callback order before another correction or binding release. Stale generations and
+direct interaction cannot correct. Content shrink outside such an installed mutation remains inert for
+both pinned and detached readers and never creates an automatic position write.
+Progress-only tool mutations cannot request a tail position. Keyboard and complete-composer layout keep
+a logically pinned reader at the latest tail, while a detached reader receives no position write
+and retains the same semantic reading position. These layout changes cannot change the durable
+pinned/detached mode. Async editor
+height measurements carry a latest-revision guard, so an older wrap measurement cannot overwrite
+a newer line count. Every stable row owns its horizontal inset instead of relying on
+transient ScrollView content margins, so prompt insertion cannot expose a flush-left frame.
+Existing rows never participate in stack-wide insertion or scale animations. Thinking,
+Markdown, tool, and explicit custom/retry rows therefore remain stable above the composer while the user
+follows the tail. Ordinary default running activity owns no transcript row. Terminal output has its own monotonic sequence and reconnect replay cursor.
+Output/exit frames delivered while attach or gap recovery is suspended remain in a bounded
+coordinator quarantine and join the admitted replay contiguously. A reset increments an
+explicit replay revision so SwiftTerm is recreated even when replacement sequences do not
+increase; ordinary append/truncation does not change renderer identity. Presentation switch
+or dismissal revokes terminal intake and pending resize work synchronously, while multiple
+presentations sharing one terminal retain the connection subscription until the final owner
+closes. Secondary live-runtime reads require that exact session to be opened first, so a
+stale selection cannot read or render another session's context, tree, resources,
+export, or terminal inventory.
+Backward transcript pages carry an entry anchor and are rejected if branch
+navigation changed the requested boundary. Each WebSocket request owns its send and timeout
+tasks and moves through queued, sending, and sent transmission state. Cancellation before send
+is definitive; cancellation, timeout, failure, or disconnect after send begins produces a local,
+non-Codable possibly-sent error that a Gateway response cannot forge. Mutations with that local
+provenance wait for reconnect and poll the bounded command receipt: completed results are reused,
+only confirmed-missing commands are retried with the same ID after rechecking cancellation, and
+pending or cancelled uncertain outcomes are never replayed automatically. Definitive retryable
+application responses remain ordinary errors rather than receipt uncertainty.
+`ConfirmedMutationExecutor` is the single lifecycle-generation-bound owner of that receipt policy
+for every mutation domain. `SessionMutationService` owns explicit session command IDs, DTOs, wire
+methods, timeouts, and typed outcomes without reading presentation, catalog, cache, drafts, or route
+state. `SessionImportCoordinator` owns the security-scoped file read, upload, and existing
+`session.import` mutation pipeline under one captured lifecycle generation and selected profile.
+It revalidates after every suspension boundary, so an upload ID produced for a retired profile can
+never become a mutation on its replacement, and always balances acquired file access. The admitted
+import result retains that exact lifecycle/profile identity through catalog refresh and the immediate
+MainActor navigation handoff; a retired generation stays inadmissible even if profile selection cycles
+away and back before presentation. `AppModel` retains only cross-owner orchestration: immutable
+lifecycle/presentation mounting and revocation, admitted global error publication, direct no-attachment
+share delivery, post-confirmation projection changes, catalog refresh, navigation results, and delete ordering.
 
 ## Sessions
 
@@ -45,18 +571,142 @@ streaming projection, context usage, pending extension interactions, and runtime
 diagnostics. Model identity is always `(provider,id)`; model IDs alone are not
 assumed globally unique.
 
-The composer supports text, native speech transcription, images, and bounded
-file uploads. Images become native image input. Other files are represented by a
-deterministic uploaded path envelope. Its historical context ring projects the
-canonical context percentage and opens Manage Session immediately beside the
-microphone; model and thinking configuration live in that sheet rather than as
-bootstrap transcript rows. Disconnecting never implies aborting an accepted run.
+The composer supports text, system-keyboard dictation, images, and bounded file
+uploads. It does not expose an app-owned microphone control until a proper voice mode exists.
+Drafting remains available while authoritative opening finishes and throughout
+an active turn; only submission waits for readiness. Default visible running state consumes no transcript
+space: a nonstructural 68-point bottom-safe-area blur keeps the existing restrained emerald tint and adds a
+low-amplitude, blurred traveling waveform. The timeline-driven motion resumes when the chat returns to the
+foreground; dark appearance receives the same black tint as the top blur instead of a gray material lift,
+while light appearance uses modestly higher resting, peak, and Reduce Motion opacity so the effect remains
+visibly saturated against pale surfaces.
+At rest its fixed 44-point safe-area translation leaves 24
+points of additional upward reach without increasing blur radius. The overlay belongs to the measured composer
+but remains nonstructural. It renders in the composer's background layer, keeping the Liquid Glass input and
+controls above the effect. While the editor owns keyboard focus, the blur grows from 68 to 80 points and its
+downward translation grows by the same 12 points, from 12 to 24. The upper edge therefore remains fixed at 56
+points behind the composer while only the lower edge extends beneath the native keyboard's rounded top corners;
+native safe-area motion carries both together. On dismissal it returns to the 68-point height and 44-point device-bottom
+translation, with its strongest edge beyond the layout boundary instead of forming a clipped horizontal seam.
+Reduce Motion uses one static subtle emerald state, while VoiceOver retains a
+nonvisual “Tron is working” status on the active blur. Custom working messages,
+compaction, and provider retry attempts retain explicit compact rows so operational detail is never hidden.
+A manual compaction accepted during an active turn remains a Gateway-owned pending maintenance
+operation: the optional snapshot flag renders “Compaction queued” without fabricating JSONL, then
+transitions through the existing compacting row to the canonical compaction entry. One synchronous
+Gateway claim spans pending and execution, handoff revalidates against newer agent ownership, and
+settlement waits for durable run-marker retirement. The confirmed mutation stays pending until
+canonical completion; shutdown cancels only work that has not started. Older Gateways may omit queued and effective
+automatic-compaction evidence.
+A non-empty active draft replaces the trailing Stop
+action with Send and is admitted as a steering message, while an empty active
+composer retains Stop. The keyboard remains focused after steering so multiple messages can
+be queued without waiting for the current turn to settle. The send control's native context
+menu can explicitly choose steering after the current turn or follow-up after current work. A press
+has immediate scale/opacity feedback, admitted sends replace the arrow with a compact progress
+indicator, and the composer surface subtly acknowledges the in-flight admission without creating a
+provisional transcript row. Pending attachment chips enter and leave with bounded composer-owned
+motion; their height changes explicitly arm the sole scroll coordinator's viewport transition.
+Authoritative queued entries render after any explicit runtime detail as right-anchored compact cards
+that hug their content and wrap at the same 364-point maximum as a user prompt. They retain stable
+identity, delivery stage, position, text, and attachment count. Queue cards and the transcript
+timeline are installed from the same exact tagged source, so consuming a queued entry cannot remove
+its card one frame before the corresponding canonical prompt installs. Manageable cards use one
+interactive, accent-tinted Liquid Glass surface with an explicit full-shape hit region; tapping
+anywhere opens the editor without adding inline action chrome. The editor's leading toolbar owns
+removal, while a long-press menu retains
+same-stage reorder and clear-all. Text and behavior changes use an optimistic queue revision. Conflicts
+wait for the next authoritative snapshot rather than fabricating a local queue. Steering is always
+presented before follow-up to match runtime delivery order. Older Gateways retain a visibly locked
+read-only string projection that directs the user to update Tron on Mac.
+Camera, photo, and file actions also remain enabled during an active turn: uploads stage locally
+and the eventual prompt carries the same steering behavior as text. The native attachment menu derives enablement
+from the immutable viewed session and an explicit authoritative phase; a missing phase remains
+unavailable. Its identity changes only when the session or effective availability changes. A transparent
+UIKit button preserves the native `UIMenu`, system text styling, and 40-point hit target as a single UIKit
+interaction boundary; menu symbols use emerald original-rendered images while a focused nonempty composer
+keeps the keyboard visible. Menu selections enter one cancellation-aware queue and become
+the active camera, photo, or file destination only after the native menu dismissal settles,
+preventing a competing presentation controller from dropping the selection on physical
+iOS. Camera, photo, and file importers share that enum-valued presentation state rather
+than independent Booleans. `CameraModel` owns only UI-facing state and depends on narrow
+camera-authorization and capture-session providers; the system provider alone touches static
+AVFoundation authorization, device discovery, running sessions, and torch configuration.
+Capture configuration and photo request are the two explicitly unchecked Sendable envelopes
+required to move AVFoundation resources across the provider's serial queue boundary. Test providers
+exercise the same owner without camera hardware and do not model a second capture runtime.
+Images become native image input. Other files remain agent-readable
+through a deterministic canonical path envelope, while the mobile projection
+removes that path and exposes only display-safe name/type/size metadata. Sent
+images and files share one attachment strip above—and structurally outside—the prompt's Liquid Glass:
+images use the same square previews as pending photos and files use named chips. Transcript images resolve through one
+`ChatMediaLoader` keyed by profile, lifecycle generation, connection, and blob ID; views never fetch blobs
+directly. Thumbnail fetch/decode is identity-single-flight behind one shared preparation slot and a
+32-flight admission ceiling. Its bounded HTTP delegate rejects declared or streamed bodies over 25 MiB
+while receiving them, then applies image orientation while downsampling off-main to at most 192 pixels
+and retains at most 64 items/4 MiB decoded under deterministic LRU. Uploads publish an explicit
+content length, accept a same-profile WebSocket reconnect while the independent HTTP upload completes,
+and preserve bounded Gateway error envelopes instead of collapsing quota or body-admission failures into
+a generic photo error. Lifecycle replacement and the
+app-lifetime memory-pressure observer advance exact invalidation generations, cancel flights, and clear
+the cache; late fetch or detached-decode completion cannot repopulate it.
+A preview uses one nonoptional item route, opens the historical medium sheet immediately with its captured
+thumbnail, and may replace it with one uncached full image; presentation never depends on optional content
+after the sheet has already been admitted. Full-preview
+ImageIO decode applies orientation and downsamples before publication to at most 4,096 pixels on either axis
+and 64 MiB of decoded rows, preventing compressed dimensions from forcing an unbounded eager allocation.
+Each sheet owns an exact lease, and dismissal cancels the underlying flight only after its final lease retires,
+so full-preview lifetime remains sheet-owned. One gateway runtime is the sole mutable
+owner of a canonical session; terminal and mobile chat clients must attach to
+that owner rather than opening the same JSONL in separate Pi processes. Its
+historical context ring projects the
+canonical context percentage and opens Manage Session at the composer's trailing
+edge whenever no Send or Stop action is needed. Attachment, context, and send/stop controls share one
+40-point target and 16-point visual metric, keeping their in-bar geometry stable as modes change. When a draft adds Send, the action
+scales and fades in at its final in-bar position while the context ring springs left;
+Reduce Motion uses a short fade.
+Model and thinking configuration live in that sheet rather than as bootstrap
+transcript rows. Disconnecting never
+implies aborting an accepted run.
 
 ## Security
 
+Current Tron builds do not register for local or remote notifications and do not
+compute an icon badge from session state. On launch and foreground activation,
+the app writes a zero badge only to clear SpringBoard state left by the retired
+APNs implementation under the unchanged production bundle identifier. This
+one-way cleanup does not request notification permission or restore push delivery.
+
 Pairing accepts only `tron://pair` invitations containing a host, port, and
-8–32-character one-time code. The permanent returned device token goes directly
-to Keychain. Gateway profiles persist non-secret connection metadata only.
+8–32-character one-time code; missing values and every duplicate query key fail closed.
+`GatewayPairer` alone owns the narrow HTTP-data boundary for `POST /v1/pair`; it builds
+the request and deterministically maps HTTP status and response bytes. Production transport
+rejects declared or streamed responses above 64 KiB, and the pairer repeats that admission
+before decoding so injected transports cannot bypass the contract. The
+permanent returned device token goes directly to Keychain. Gateway profiles
+persist non-secret connection metadata only.
+
+`AppModel` admits one pairing attempt at a time. Supersession, forget, and switch
+synchronously invalidate and cancel that exact task. Attempt identity is checked
+immediately after HTTP returns, immediately before profile/Keychain save, before
+connect, and after the connect-owned suspension boundaries. Therefore a stale
+pre-commit HTTP result cannot persist or connect. Pairing attempt admission is separate from the
+cohesive generation-owned `GatewayClient` connection epoch; both boundaries reject stale suspended work.
+
+The pairing QR controller shares the camera-authorization boundary and delegates
+AVFoundation setup plus serial start/stop to a QR capture-session provider. Its one
+permission task is cancelled on disappearance and rechecks cancellation before capture
+configuration, so a late grant cannot restart a dismissed scanner. The first admitted QR
+value stops capture and permanently closes that controller's callback gate. These seams
+make hardware-free boundary tests possible without creating another pairing owner.
+
+The share extension reduces provider results through pure ordered fragment logic, writes
+through `PendingShareStoring`, and opens the app through a responder-chain adapter. The app
+reads through the same store boundary. Phase 0 intentionally preserves the current single-slot,
+clear-before-send handoff; Phase 8 owns bounded entries, destination leases, acknowledged clear,
+and retained uncertain/failure behavior. Both packaged targets declare the required-reason
+UserDefaults privacy manifest, and archive verification fails if either manifest is absent.
+
 Provider credentials and the Mac wrapper credential are never decoded by iOS.
 Custom-model documents are validated through the pinned gateway runtime before
 the canonical document is replaced.
@@ -70,7 +720,9 @@ immediate revocation; revoking this iPhone also removes its local profile.
 The gateway migration does not define a new visual language. The pre-migration
 client remains the interaction baseline. The session shell remains mounted under
 the adaptive first-run sheet, and session creation retains the floating action
-instead of adding a new toolbar destination. Tron preserves its bundled font
+instead of adding a new toolbar destination. Dashboard navigation/history and the
+new-session form have separate source owners without changing sheet identity,
+focus, detents, configuration readiness, or creation admission. Tron preserves its bundled font
 catalog, existing `fontFamily`/`monoFontFamily`/`fontAxisValues` preferences, and
 variable font axes. `TronFontLoader` builds `UIFontDescriptor` instances for
 custom weights, Recursive `MONO`/`CASL`, and Source Serif optical sizing; missing
@@ -86,9 +738,12 @@ icon buttons, loading labels, and prominent actions use shared semantic
 components. Toolbar and sheet action icons use Tron emerald while their
 container geometry and Liquid Glass remain default iOS styling rather than
 receiving a second app-drawn container. The chat toolbar's trailing gear opens
-app Settings; Manage Session is owned by the composer's context ring. App-owned workspace
+app Settings; Manage Session is owned by the composer's context ring. Its principal title
+is explicitly bounded from the mounted chat viewport and clipped after tail truncation,
+so a cancelled interactive-pop transition cannot temporarily restore intrinsic-width text
+across the back or Settings controls. App-owned workspace
 rows, session cards, setup cards, composer surfaces, attachment chips, tool
-chips and details, structured-data disclosures, Manage Session content, and
+chips and details, structured-data rows, Manage Session content, and
 settings groups use Tron's tinted Liquid Glass surfaces. The dashboard keeps
 search as an explicit toolbar action, aligns workspace headers to the session
 status column, uses compact separated session cards, and keeps relative activity
@@ -96,41 +751,180 @@ time at each row's trailing edge. Workspace headers and session cards share the
 same 28-point status-icon anchor: 16 points of outer row inset plus 12 points of
 card content padding. Selectable app-owned cards have one full-card
 hit region and no decorative disclosure chevron. Dashboard session rows never
-retain a selected tint. Canonical session selection is
-kept separate from dashboard navigation intent, so opening Settings or search
-cannot reveal a previously selected session. Dashboard search autofocuses in a
-floating bottom safe-area bar immediately above the keyboard. Modal detail flows dismiss
+retain a selected tint; their trailing swipe actions rename or delete the exact
+swiped canonical session without changing navigation selection. Dashboard discovery and refresh never select or open a transcript and global Settings never
+infer project scope. Catalog loads are latest-generation-owned, and an asynchronous import may
+navigate only while its exact dashboard intent is still current. Reconnect restores only the
+still-mounted presentation; it never uses a dashboard row as a subscription fallback. The mounted chat route supplies an immutable
+session ID to every prompt, runtime mutation, extension response, terminal operation, and
+secondary read. Those reads capture the route's exact subscription token, reject publication after
+a same-session reopen, and cannot silently open another session. Presentation teardown compares
+ownership per session rather than against an unrelated route's newer generation; share intake is
+admitted only when exactly one presentation remains mounted. Create, import, and fork return navigation results; they do not rewrite
+selection or claim subscription ownership before the destination mounts. Fork-restored editor
+text travels in that route result and installs into the exact profile/session composer draft rather
+than selection-backed global state. Uploaded attachments and extension editor requests are owned
+by `ComposerDraftCoordinator` under session plus presentation generation; native editor debounce tasks
+capture that exact target and host epoch, locally originated operation-ID echoes are suppressed, and a stale
+base revision is never automatically forced through. Late uploads, stale same-session editor events,
+removal, send completion, and errors cannot cross a reopen. Closing or
+replacing a route synchronously revokes its intake lease and disposes presentation-transient state
+while retaining only the bounded profile/session text draft. Share intake captures the sole admitted presentation target, never consumes that target's
+staged uploads, and clears the shared payload only after confirmed prompt admission. Dashboard
+imports use the explicit default workspace rather than a hidden transcript selection. Global
+notice projection is disposable and bounded to eight entries, 4 KiB per message, and 16 KiB total.
+Replaceable package, restart, and catch-up progress coalesces by owner, and profile teardown clears
+it. Dashboard search autofocuses in a
+floating bottom safe-area bar immediately above the keyboard. The dashboard shows only
+user sessions, including ordinary user forks; classified subagent backing sessions remain hidden.
+Disposable caches from before session-kind classification are invalidated rather than briefly
+presenting backing-process sessions as user sessions. Modal detail flows dismiss
 with the native top-right check action; top-left dismissal controls are reserved
 for navigation, not app-owned sheets. Settings containers and their nested font
 or model choices disclose as progressively stacked sub-sheets rather than
-horizontal navigation pushes; connected-provider logout lives in the provider
-row's compact action menu. The chat composer
-floats over the transcript without an opaque footer; transcript content scrolls
-behind it, a dynamic trailing clearance keeps the last response reachable, and
-the scroll-edge policy is attached to each concrete ScrollView/List inside its
+horizontal navigation pushes; Appearance uses the custom Liquid Glass segmented
+color-mode control and keeps font axes directly beneath each font choice before its
+preview. Draft-backed settings save from a disabled-until-dirty leading toolbar
+button rather than a trailing page action. Connected-provider logout lives in the
+provider row's compact action menu while connection is a plain trailing affordance. Import
+is owned by one progressive Import sheet, including canonical session-file import
+and the bounded legacy migration path; the legacy import action is outside its
+amber status/configuration card. The chat composer remains visually floating without an
+opaque footer, but structurally reserves the transcript's bottom safe area. Its UIKit
+text view is the sole first-responder owner; SwiftUI mirrors delegate focus only for
+presentation, so transcript relayout and programmatic tail-follow cannot dismiss a
+direct tap. Transcript content ends above the complete composer, and the scroll-edge
+policy is attached to each concrete ScrollView/List inside its
 NavigationStack, matching the working non-gateway presentation boundary. Every
-edge is explicitly soft because iOS 27's automatic top style can resolve to the
-hard cutoff; Tron instead keeps the prominent graduated blur/fade.
+edge is explicitly soft because the hard top style renders as an opaque cutoff
+on physical iOS 27 hardware instead of Tron's graduated translucent blur.
 System navigation-bar backgrounds remain hidden at that same boundary so
-scrolling content reaches the toolbar and newer iOS releases can render their
-native top blur/fade instead of having it masked by an app-owned material or
-lost across a sheet-host boundary. Sheets never use pull-to-refresh;
+scrolling content reaches the toolbar. Dashboard and chat add bounded,
+noninteractive top backdrops that are strongest beneath their toolbars and ease
+completely into scrolling content; chat uses the tallest fade. Progressive
+medium/large sheets and full-height settings/terminal sheets share a shorter
+fade sized to navigation chrome, while immersive camera and image sheets remain
+unmodified. Sheet backdrops are attached to the concrete scrolling surface
+inside each NavigationStack (or its non-scrolling content surface), so toolbar
+titles and controls always render above the effect. Each backdrop stays outside
+scroll content so scrolling geometry and tail following remain authoritative. Provider authentication is presented only by
+the currently visible Providers or Onboarding surface, preventing an underlying
+sheet from deferring the login prompt until the user navigates back. Sheets never use pull-to-refresh;
 session history, packages, and providers expose reload as an explicit toolbar
-action while non-sheet dashboard refresh remains available. Every tool chip owns a tappable, top-anchored detail sheet, including
+action while non-sheet dashboard refresh remains available.
+
+Chat has one spatial role model: user prompts are right anchored, agent prose and tools are left
+anchored, and presentation-only system events are centered. A width-aware TextKit owner lets short
+prompts hug their measured content at the trailing edge, bounds longer prompts to 364 points, and
+uses logical-leading line alignment inside that block at the same Dynamic Type body size as agent
+prose. User prompts choose an intrinsic-width glass candidate before the bounded wrapping fallback, so
+short text never expands the surface to the 364-point ceiling. They use an equal 8-point vertical inset and
+the same 18-point emerald-tinted Liquid Glass geometry as steer-next cards, without header icons or action
+chrome. Newly installed
+canonical content uses that same role geometry for presentation-only motion: user prompts and
+queued intents rise from the trailing composer edge, tool activity enters from the leading edge,
+system capsules settle from center, and assistant prose uses only a shallow vertical reveal. The
+exact installed-row geometry gate still owns admission, so projection preparation cannot animate a
+row that was never displayed, detached readers gain no follow authority, and same-ID tool/status
+morphs never replay an entrance. Reduce Motion retains only a brief opacity reveal. Canonical
+compaction/branch/configuration entries, embedded assistant failures, and exact admitted custom/retry
+working detail share one semantic notification projection and capsule primitive. Ordinary default running
+state instead drives only the bottom-safe-area blur and never changes transcript geometry. Extension status
+state remains canonical and its bounded native pill presentation is enabled generically.
+Only a pill with real detail content is an interactive Liquid Glass button; no-detail events use a flat tinted
+fill and stroke with identical type and geometry. Tones are Sendable semantic values resolved to
+SwiftUI color only at the view boundary. Conversation turns retain one row owner for text, thinking, and
+lifecycle-safe attachments; event/control capsules and tool-run/detail routes are separate presentation owners
+with unchanged SwiftUI identity and private state. Under exact tail bounds, a pending compaction and its
+canonical entry share a presentation-only global-ordinal identity, so “Compacting context” becomes
+“Context compacted” in place without changing Gateway identity or semantic scroll maps.
+
+Runtime working pills install atomically beside the exact tagged timeline. Working/status-only revisions reuse
+the unchanged expensive transcript projection. Status events continue to advance chat timeline generation even
+while their output is visible, so status rendering remains a projection-only policy change. Pending and admitted entrance ownership each retain
+at most the 512-item page bound in deterministic FIFO order. Retired pending rows become visible
+without replay, while retired admitted rows preserve their local revealed state. Candidates are
+admitted by current row geometry: each pending row carries the exact displayed installation tag, so a
+newer desired model source cannot suppress its reveal. Admission requires that captured tag, current
+installed tag, row membership, layout epoch, and pending state to agree; hidden-thinking label value
+changes also advance chat timeline generation because adding or removing that label can change mounted
+row height. Only pending rows include the tag
+in their geometry observation, allowing an installed replacement to re-emit exact evidence without
+invalidating every realized row. Visible/pinned discrete rows fade with a small non-layout transform
+exactly once, realized offscreen rows become visible without replay, and direct interaction discards
+unresolved candidates. `ChatScrollCoordinator` alone may consume one coalesced nonanimated tail
+settlement for an admitted discrete insertion. Its bounded rendered-ID entitlement is intersected only on
+actual installed transitions, so a surviving tool/group row retains the same one-shot settlement through
+completion while replacement removes it. Row entrance motion never combines with viewport animation.
+Continuous Markdown growth remains coalesced and nonanimated, while detached readers
+receive no writes and Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
+the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.
+
+Every tool chip owns a tappable, top-anchored detail sheet, including
 read/write/edit and filesystem search tools. The immersive camera retains the
 pre-gateway flashlight, morphing shutter/confirmation, and flip/retake controls
 over a full-sheet preview. A tool call and its canonical result are presented as
 one progressively updated chip when both are in the bounded transcript page; an
-unmatched result remains visible when its call is outside that page. Consecutive
+unmatched result remains visible when its call is outside that page. Unanchored runtime tools always follow
+non-tool streaming content regardless of running/completed status; isolated streaming-suffix projection is
+permitted only when every runtime tool has a canonical call anchor. Consecutive
 tool-only entries collapse into a single compact run chip whose sub-sheet keeps
-every tool and its individual detail available. Tool chips use a thin rounded
-rectangle rather than a tall capsule. Transcript configuration changes, errors,
+every tool and its individual detail available. Each exact installed projection builds one
+unique call-ID descriptor index, so live detail refresh resolves from bounded installed state
+without rescanning the full timeline. The run, individual tool, Changes, and
+Technical details sheets share one inline navigation-chrome policy; principal toolbar titles
+therefore cannot reserve an empty large-title region above the scroll view. Each medium/large
+tool detail sheet explicitly top-anchors short scroll content and begins immediately below
+native toolbar chrome. Its medium
+detent is a glance surface: a wrapping chip flow combines state and elapsed time and expresses only useful
+metadata in natural singular/plural copy. Pulling to large selects the expanded display density without
+changing the selected call or scroll ownership. Read/write/edit foreground a selectable path whose directory
+uses the restrained secondary tone and whose basename uses the tool accent; bash foregrounds a smaller
+selectable command that wraps without splitting words, while grep/find/list
+foreground their pattern and location. Code results use the larger code size.
+Edit uses an authoritative returned patch when present, otherwise it previews only exact requested old/new
+blocks. Exactly one verified requested change with exactly one authoritative diff unit containing a real
+addition or removal may appear inline: medium uses a compact bounded head/tail glance and large reveals the
+full bounded diff. Patch admission fails closed on malformed or combined hunk headers and uses the maximum
+evidence across file, `+++`, and valid unified-hunk headers, so extra header-only or binary files cannot hide
+behind one text hunk. File-header-like `---`/`+++` lines encountered inside a hunk retain their source-line
+rendering but make unit evidence ambiguous, conservatively preventing header-light multi-file patches from
+appearing inline. Multiple or uncertain changes fail closed to a dedicated Changes sub-sheet rather than
+crowding the primary sheet or claiming a false count. Compact and expanded lines share bounded source-derived
+identities; their omission rows carry distinct range identities so a rolling tail never reuses an identity for
+different visible content. Diff preparation retains only bounded head/tail lines in circular tail storage,
+bounds individual rendered line width, and marks every omitted line or character while the untouched payload remains available under
+the final Technical details row. Empty edit sides represent pure insertions/deletions; blank rows are retained
+only when a nonempty source value actually contains them. The tool-run row owns an open detail route and its
+detent above the one-tool/grouped rendering branch, resolving the selected stable call ID against every newest
+run projection so a second arriving call cannot dismiss the first call's sheet. Metadata VoiceOver labels use
+only concise bounded chip previews and disclose that complete values remain in Technical details. The chip
+flow measures every chip against the finite available width; status and scalar text may wrap to two lines at
+Accessibility Dynamic Type without escaping the sheet or changing VoiceOver order. Cached Sendable ISO 8601
+parse strategies handle both fractional and whole-second Gateway timestamps for live timers without repeated
+formatter allocation. Technical execution rows use compact selectable label/value geometry; a bounded bash
+preview records its completeness fact there, followed by on-demand Request JSON and Result JSON summary rows
+with explicit `null` for a truly missing side. Content-only results remain JSON strings, response data wins, and a fallback
+identical to Request is rejected. Running sheets consume the newest immutable tool presentation, update status, timing,
+partial output, and bounded-output disclosure in place, and never move
+the reader's scroll position. Tool chips retain six-point vertical capsule insets and
+intrinsic label/timing geometry without a layout-inflating minimum interaction frame.
+Thinking traces are noninteractive and never hide canonical text behind a
+disclosure: adjacent thinking parts and their nonempty lines form one compact inline
+paragraph, each presentation segment ends in an ellipsis, and newly appended segments
+fade in unless Reduce Motion is enabled. Tool chips and system events share compact
+capsule geometry while preserving their role alignment and interaction semantics.
+Compaction and branch-summary events use content-sized transcript pills whose sheets
+contain the complete canonical summary;
+compaction token counts use compact `K` shorthand.
+Transcript configuration changes, errors,
 bookmarks, and extension statuses share one readable notification-pill language,
 and thinking text and workspace shortcuts stay above the compact-caption scale.
 The hidden custom back button is paired with a UIKit navigation bridge so the
 native left-edge interactive-pop gesture remains available. Transcript rows enter with the historical soft
-opacity/scale transition, and tool status/result changes use spring and opacity
-content transitions. User turns are trailing-aligned while assistant and tool
+opacity/scale transition, newly appended thinking segments fade independently within
+their stable paragraph, and tool status/result changes use spring and opacity content
+transitions. User turns are trailing-aligned while assistant and tool
 content remain leading-aligned. Initial model/thinking entries describe
 bootstrap configuration and are omitted from chat; later canonical changes are
 shown as compact notification pills. Structured result data expands recursively, with raw
@@ -138,13 +932,105 @@ JSON only as the arbitrary-data fallback. Gateway connection state is driven by
 the current authenticated socket, ignores stale cancellation from replaced
 receivers, and uses gateway WebSocket heartbeats to keep Tailscale/iOS idle paths
 alive. Canonical settings determine the default model; catalog order is never a
-default-selection policy. Package and resource settings project Pi's canonical
-global configuration even when a current project is untrusted. Deep session
-history is projected iteratively with a bounded node count so large canonical
-sessions cannot overflow the gateway stack. Terminal presentation retains the
+default-selection policy. Dashboard Settings explicitly exposes only global configuration; project scope,
+trust, and project package actions appear only when Settings is opened from a
+project session. Manage Session has two primary groups: Configuration owns the
+model, thinking level, peer-presented Project Resources sheet, and final Rename action;
+Session owns Agent Context, recent history/audit actions, terminal, Git evidence, and
+exports. Configuration row icons use the section's purple palette, while every Session row
+icon—including Git states, exports, sharing, and diagnostics—uses the section's blue palette.
+The compact top summary owns automatic-compaction status beside a single-line context
+value, followed by the cache-hit/read-write/input/output/cost statistics row, with every
+value kept to one visual line, while History owns the concise runtime
+phase/message/tool summary. Its compact toolbar action invokes Pi's
+canonical compaction through Gateway and can leave one authoritative request queued
+behind an active turn. Project Resources presents resolved extensions, prompts, skills,
+context files, and tools as named rows over the canonical projection; each detail sheet
+foregrounds kind-specific purpose, invocation, availability, capabilities, schema/guidance,
+and source evidence instead of a generic field table. Project Trust presents a high-signal
+state card and decision actions before deferring the complete trust record to raw JSON.
+Extension tools and commands use
+separate adaptive collections instead of comma-delimited prose, while resource descriptions
+keep compound words together for natural line wrapping. Arbitrary arrays derive labels from stable name/path/source fields instead of exposing
+positional “Item” labels. Reload is owned by that sheet and publishes visible progress; the canonical
+`session.resourcesChanged` revision is the sole post-mutation read owner, so mutation and projection loads cannot race one shared busy flag.
+Resource Locations separates
+optional discovery paths from advanced Mac runtime overrides and explains each
+setting before editing it. Session storage is gateway-owned and is not exposed as
+a backing-runtime location override. Package catalog admission failures remain
+local to the Packages sheet, preserving the sheet while presenting a bounded retry
+state instead of routing a projection error through the global alert.
+Deep session history is projected as a bounded flat outline with depth, branch,
+and current-path metadata so large canonical sessions neither overflow the
+gateway stack nor exceed the mobile frame. The single History sheet explains Timeline,
+Branches, Bookmarks, and Recent Log modes, and identifies JSONL export as the complete canonical audit.
+Runtime, canonical-history, history-mode, and event cards share one icon width, content spacing, padding,
+supporting-text scale, and vertically centered icon-to-text alignment. All text blocks use the same leading
+edge; event titles intentionally use the smaller regular body style while summary and mode titles use the
+headline style. The row opens details while its uncontained ellipsis control opens the native actions
+menu. Forking is available from that menu and as the final action in Entry Details instead of occupying the
+history summary.
+Gateway produces that audit by copying the
+canonical append-only JSONL under the existing idle/file/concurrency bounds rather than linearizing only the active branch.
+Agent Context summarizes assembled instructions, context accounting, and capability
+counts without duplicating the detailed Project Resources inventory; full instructions
+open from a separate matching row. Every raw technical JSON affordance is the same
+non-disclosing row and opens selectable, vertically scrollable protocol evidence in a
+wrapping single-column medium/large sheet; technical JSON never creates a horizontal
+viewport. A same-session reconnect that
+installs a replacement Gateway runtime clears every secondary projection, advances its reload revisions, and rejects both
+stale completions and stale failures by exact subscription token plus request generation.
+Manage Session displays the runtime-projected latest cache-hit rate—the
+same canonical formula used by the terminal footer—and never derives a ratio
+from cumulative iOS fields. Export rows keep stable format identities and surface bounded
+failures locally without dismissing Manage Session. Other user actions surface current
+failures instead of silently changing local presentation. Extension interaction sheets serialize one response/cancellation, retain the sheet
+on rejection, and dismiss only after authoritative acknowledgement. Terminal presentation retains the
 historical connection indicator, options menu, native keyboard integration,
 floating shortcut bar, command-key keyboard, soft edges, and selected bundled
-code font over the gateway's retained PTY. System alerts, confirmation dialogs,
+code font over the gateway's retained PTY. Destructive Quit uses the system alert style and
+waits for Gateway-observed process-group exit; Done continues to detach only. Pending and transcript images use
+square previews with dedicated image sheets. A pending photo is a stable,
+non-morphing preview target; its separate remove control has a 22-point visible circle
+inside a 30-point target centered on the 64-point preview's top-trailing corner. The
+preview alone owns rounded glass clipping, leaving the half-offset remove control visible.
+Sent prompt attachment strips add three points of vertical breathing room without
+changing the 64-point image/file chip geometry. Pending and sent photo chips share the historical medium-detent,
+concentrically rounded preview with native pinch and double-tap zoom. Earlier-history loading, context summaries, and unread-response navigation share one
+content-sized compact pill treatment while preserving 44-point semantic targets; tool-chip symbols use the
+next one-point type step for slightly stronger visual weight without changing pill geometry. A
+history request captures the visually first measured semantic frame intersecting the
+viewport; threshold visibility cannot authorize loading. Canonical-to-rendered metadata
+maps every tool call to its single compact grouped transcript chip, so page-boundary
+regrouping cannot lose that visible semantic anchor. Exact detached-reader ordinary installs and
+page installs advance a layout/projection epoch, and the row geometry transform includes that epoch
+so an exact post-install sample is emitted even when its numeric frame is unchanged. Ordinary
+installs reuse the same bounded semantic correction contract for detached readers; pinned readers receive one
+coalesced nonanimated tail settlement. Settlement
+waits passively for that exact sample; after each disabled-animation correction the
+owner requires both a strictly newer sample of the same semantic frame and a newer scroll-geometry
+revision, accepts either callback order, permits at most one late correction, and succeeds only within
+one point. A corrected detached or prepend transaction then releases its programmatic point binding
+without moving the viewport. Prepend admission refuses active catch-up, opening-tail ownership, and any
+outstanding non-prepend command rather than overwriting position authority. There is no next-frame assumption,
+total content-height polling loop, unanchored success, or stale defer
+that can end a newer paging token. The
+multiline composer
+gives its capped UIKit text view sole ownership of caret visibility and internal
+scrolling. The composer itself is the transcript ScrollView's bottom safe-area inset. One direct geometry
+observation of that complete owner signals viewport transitions; no height preference, field-specific
+hook, or synthetic transcript spacer mirrors its geometry.
+Diagnostics parses the bounded
+Gateway log records into level-filtered rows and copyable details rather than
+showing raw JSON. Gateway/session/tree/tool/interaction timestamps share immutable ISO-8601
+format styles, while relative dashboard labels use one lock-serialized formatter instead of
+allocating Foundation formatters per visible row. Custom models expose compact provider summary rows;
+tapping a provider opens a progressively loaded editor sheet with labeled connection and model sections,
+while the row keeps identity, endpoint, model-count, and format summaries visible. The complete JSON remains
+an explicit advanced path and is validated before mutation. One pure transformation owns
+lossless JSON↔guided conversion, preserves unknown/redacted fields, rejects ambiguous normalized identities, and
+runs parsing, traversal, rebuild, and formatting off MainActor before generation-checked view publication.
+System alerts, confirmation dialogs,
 menus, document/photo pickers, and terminal emulation remain platform-owned, as
 they did before the gateway migration. New features must compose these
 primitives instead of introducing `.body`, `.caption`, stock bordered controls,
@@ -152,10 +1038,15 @@ rounded UIKit fields, or system search and segmented styles.
 
 ## Offline cache
 
-`SnapshotCache` admits snapshots only for the bounded session summary set,
-limits transcript size and session count, strips transient interactions and
-streaming state, and rewrites active phases to `interrupted`. It is disposable
-presentation state, not session truth.
+`SnapshotCache` admits duplicate-free snapshots only for the bounded session summary set,
+limits transcript size, individual encoded projections, session count, and each profile file to
+8 MiB, strips transient interactions, diagnostics, and streaming state, and rewrites active phases to
+`interrupted`. File-size admission precedes reads, which consume at most the exact ceiling; conservative
+string/collection shape admission rejects oversized in-memory projections before JSON encoding. Corrupt, obsolete, or oversized
+files self-delete. Cache roots are backup-excluded, files request complete-until-first-authentication
+protection as part of atomic creation, profile removal deletes only its hashed file, and generation
+ordering rejects stale checkpoints. Load/save signposts report only admitted aggregate item and
+encoded-byte counts. It is disposable presentation state, not session truth.
 
 ## Removed architecture
 

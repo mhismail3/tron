@@ -20,6 +20,8 @@ enum MenuBarLogReadError: Error, Equatable {
 enum MenuBarLogReader {
     static let defaultLimit = 200
     static let requestID = "mac-system-logs"
+    static let supportedProtocolVersion = 3
+    static let minimumProtocolVersion = 3
 
     static func fetchRecentLogs(
         host: String,
@@ -46,7 +48,7 @@ enum MenuBarLogReader {
 
         let hello: [String: Any] = [
             "type": "hello",
-            "protocolVersion": 2,
+            "protocolVersion": supportedProtocolVersion,
         ]
         let payload: [String: Any] = [
             "type": "request",
@@ -63,6 +65,12 @@ enum MenuBarLogReader {
 
         do {
             try await task.send(.string(helloString))
+            let helloResponse = try await task.receive()
+            guard let helloRaw = messageData(from: helloResponse),
+                  case .accepted = decodeHello(data: helloRaw) else {
+                return .failure(.unreadableOutput("Gateway protocol is not compatible."))
+            }
+            // Do not pipeline requests before the server has accepted the hello.
             try await task.send(.string(str))
 
             for _ in 0..<8 {
@@ -89,11 +97,31 @@ enum MenuBarLogReader {
         }
     }
 
+    enum HelloFrame: Equatable {
+        case accepted
+        case rejected
+        case malformed
+    }
+
     enum ResponseFrame: Equatable {
         case result(RecentLogsResult)
         case ignore
         case error(String)
         case malformed
+    }
+
+    static func decodeHello(data: Data) -> HelloFrame {
+        guard let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+              json["type"] as? String == "hello",
+              let protocolVersion = json["protocolVersion"] as? Int,
+              let serverMinimumProtocolVersion = json["minProtocolVersion"] as? Int else {
+            return .malformed
+        }
+        guard protocolVersion == supportedProtocolVersion,
+              serverMinimumProtocolVersion == Self.minimumProtocolVersion else {
+            return .rejected
+        }
+        return .accepted
     }
 
     static func decodeFrame(data: Data, expectedID: String = requestID) -> ResponseFrame {

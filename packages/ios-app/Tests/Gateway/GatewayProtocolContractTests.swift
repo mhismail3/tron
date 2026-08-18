@@ -12,14 +12,17 @@ struct GatewayProtocolContractTests {
           "model":{"provider":"anthropic","id":"model"},"thinkingLevel":"high",
           "availableThinkingLevels":["off","high"],
           "contextUsage":{"tokens":120,"contextWindow":1000,"percent":12},
-          "stats":{"userMessages":1,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":1,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"cost":0},
+          "stats":{"userMessages":1,"assistantMessages":0,"toolCalls":0,"toolResults":0,"totalMessages":1,"tokens":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0},"latestCacheHitRate":99.7,"cost":0},
           "queued":{"steering":[],"followUp":["later"]},
+          "queueRevision":4,
+          "queuedItems":[{"id":"queued-1","behavior":"followUp","text":"later","attachmentCount":2}],
+          "compactionQueued":true,"automaticCompactionEnabled":false,
           "transcript":[
-            {"id":"entry-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"entry-1:0","type":"text","text":"hello"}]},
+            {"id":"entry-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"entry-1:0","type":"text","text":"hello"},{"id":"entry-1:1","type":"text","text":"notes.pdf","attachment":{"name":"notes.pdf","mimeType":"application/pdf","size":2048}}]},
             {"id":"entry-2","parentId":"entry-1","timestamp":"2026-01-01T00:00:01Z","kind":"modelChange","modelRef":{"provider":"openai","id":"next"}}
           ],"transcriptStart":10,"transcriptTotal":12,
           "leafEntryId":"entry-2","toolExecutions":[],
-          "extensionUI":{"statuses":{},"working":{"visible":true},"widgets":[],"editorRevision":0,"editorText":"","pendingInteractions":[]},
+          "extensionPresentation":{"version":2,"hostEpoch":"host","revision":0,"capabilities":[],"diagnostics":[],"semanticState":{"statuses":{},"working":{"visible":true},"widgets":[],"toolsExpanded":false,"editorRevision":0,"editorText":""},"surfaces":[],"pendingInteractions":[]},
           "diagnostics":[]
         }
         """#.utf8)
@@ -29,8 +32,92 @@ struct GatewayProtocolContractTests {
         #expect(snapshot.transcript.first?.text == "hello")
         #expect(snapshot.transcript.last?.modelRef == ModelRef(provider: "openai", id: "next"))
         #expect(snapshot.transcript.first?.content?.first?.id == "entry-1:0")
+        #expect(snapshot.transcript.first?.content?.last?.type == .text)
+        #expect(snapshot.transcript.first?.content?.last?.attachment?.name == "notes.pdf")
+        #expect(snapshot.transcript.first?.content?.last?.attachment?.size == 2048)
         #expect(snapshot.transcriptStart == 10)
         #expect(snapshot.transcriptTotal == 12)
+        #expect(snapshot.stats.latestCacheHitRate == 99.7)
+        #expect(snapshot.queueRevision == 4)
+        #expect(snapshot.compactionQueued == true)
+        #expect(snapshot.automaticCompactionEnabled == false)
+        #expect(snapshot.displayedQueuedMessages == [SessionSnapshot.QueuedMessage(
+            id: "queued-1",
+            behavior: .followUp,
+            text: "later",
+            attachmentCount: 2
+        )])
+
+        var legacyObject = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        legacyObject.removeValue(forKey: "compactionQueued")
+        legacyObject.removeValue(forKey: "automaticCompactionEnabled")
+        let legacy = try JSONDecoder.gateway.decode(
+            SessionSnapshot.self,
+            from: JSONSerialization.data(withJSONObject: legacyObject)
+        )
+        #expect(legacy.compactionQueued == nil)
+        #expect(legacy.automaticCompactionEnabled == nil)
+    }
+
+    @Test("dashboard summary update carries a monotonic revision")
+    func summaryUpdateDecodes() throws {
+        let data = Data(#"{"sessionId":"session-1","summaryRevision":7,"phase":"running","updatedAt":"2026-01-01T00:00:01Z","messageCount":2,"firstMessage":"hello"}"#.utf8)
+        let update = try JSONDecoder.gateway.decode(SessionSummaryUpdate.self, from: data)
+        #expect(update.summaryRevision == 7)
+        #expect(update.phase == .running)
+    }
+
+    @Test("flat session-tree projection decodes")
+    func treeDecodes() throws {
+        let data = Data(#"[{"id":"entry","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","preview":"hello","role":"user","depth":0,"childCount":1,"isCurrentPath":true}]"#.utf8)
+        let nodes = try JSONDecoder.gateway.decode([SessionTreeNode].self, from: data)
+        #expect(nodes.first?.role == .user)
+        #expect(nodes.first?.isCurrentPath == true)
+        #expect(nodes.first?.depth == 0)
+    }
+
+    @Test("terminal events prepare typed payloads from original frame bytes")
+    func terminalEventPreparation() throws {
+        let output = try JSONDecoder.gateway.decode(GatewayEvent.self, from: Data(#"{"type":"event","topic":"terminal.output","sessionId":null,"payload":{"terminalId":"terminal-1","sequence":7,"data":"hello"}}"#.utf8))
+        let exit = try JSONDecoder.gateway.decode(GatewayEvent.self, from: Data(#"{"type":"event","topic":"terminal.exit","sessionId":null,"payload":{"terminalId":"terminal-1","sequence":8,"exitCode":0}}"#.utf8))
+
+        #expect(output.preparation == .terminalEvent(.output(PreparedTerminalOutputEvent(
+            terminalId: "terminal-1",
+            sequence: 7,
+            data: "hello"
+        ))))
+        #expect(exit.preparation == .terminalEvent(.exit(PreparedTerminalExitEvent(
+            terminalId: "terminal-1",
+            sequence: 8,
+            exitCode: 0
+        ))))
+        #expect(output.sessionCursor == nil)
+        #expect(exit.isConsumableSessionReplay)
+    }
+
+    @Test("malformed known terminal payload remains an inert event")
+    func malformedTerminalEventPreparation() throws {
+        let event = try JSONDecoder.gateway.decode(GatewayEvent.self, from: Data(#"{"type":"event","topic":"terminal.output","sessionId":null,"payload":{"terminalId":"terminal-1","sequence":"bad"}}"#.utf8))
+        #expect(event.preparation == .none)
+    }
+
+    @Test("synthetic terminal events use the same typed preparation")
+    func syntheticTerminalEventPreparation() {
+        let event = GatewayEvent(
+            type: "event",
+            topic: "terminal.exit",
+            sessionId: nil,
+            payload: .object([
+                "terminalId": .string("terminal-2"),
+                "sequence": .number(9),
+                "exitCode": .number(1),
+            ])
+        )
+        #expect(event.preparation == .terminalEvent(.exit(PreparedTerminalExitEvent(
+            terminalId: "terminal-2",
+            sequence: 9,
+            exitCode: 1
+        ))))
     }
 
     @Test("stored gateway profiles migrate when device identity was absent")
@@ -58,6 +145,230 @@ struct GatewayProtocolContractTests {
         let page = try JSONDecoder.gateway.decode(Page.self, from: data)
         #expect(page.models.first?.ref == ModelRef(provider: "extension", id: "model"))
         #expect(page.nextCursor == "500")
+    }
+
+    @Test("resource, workspace, and terminal DTOs preserve their wire shapes")
+    func resourceWorkspaceAndTerminalDTOsDecode() throws {
+        let inventory = try JSONDecoder.gateway.decode(
+            PackageInventory.self,
+            from: Data(#"{"packages":[{"source":"pkg","scope":"project","filtered":false,"installedPath":"/workspace/pkg"}],"resources":{"commands":2}}"#.utf8)
+        )
+        #expect(inventory.packages.first?.id == "project:pkg")
+        #expect(inventory.resources.objectValue?["commands"] == .number(2))
+
+        let workspace = try JSONDecoder.gateway.decode(
+            WorkspaceListing.self,
+            from: Data(#"{"path":"/workspace","parent":"/","entries":[{"name":"src","path":"/workspace/src","kind":"directory","hidden":false}]}"#.utf8)
+        )
+        #expect(workspace.entries.first?.id == "/workspace/src")
+        #expect(workspace.entries.first?.kind == .directory)
+
+        let terminal = try JSONDecoder.gateway.decode(
+            TerminalSummary.self,
+            from: Data(#"{"id":"terminal","sessionId":"session","cwd":"/workspace","createdAt":"2026-01-01T00:00:00Z","exitedAt":null,"exitCode":null,"sequence":9}"#.utf8)
+        )
+        #expect(terminal.sessionId == "session")
+        #expect(terminal.sequence == 9)
+    }
+
+    @Test("extension presentation collections reject limit plus one during decoding")
+    func extensionPresentationPreMaterializationBounds() throws {
+        let indicator: [String: Any] = ["kind": "default", "frames": []]
+        let semantic: [String: Any] = [
+            "statuses": [:], "working": ["visible": true, "indicator": indicator], "widgets": [],
+            "toolsExpanded": false, "editorRevision": 0, "editorText": "",
+        ]
+        let base: [String: Any] = [
+            "version": 2, "hostEpoch": "host", "revision": 0,
+            "capabilities": [], "diagnostics": [], "semanticState": semantic,
+            "surfaces": [], "pendingInteractions": [],
+        ]
+        func decode(_ object: [String: Any]) throws -> ExtensionPresentationState {
+            try JSONDecoder.gateway.decode(ExtensionPresentationState.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        var exact = base
+        exact["capabilities"] = Array(repeating: "capability", count: 128)
+        #expect(try decode(exact).capabilities.count == 128)
+        var over = base
+        over["capabilities"] = Array(repeating: "capability", count: 129)
+        #expect(throws: DecodingError.self) { try decode(over) }
+
+        let interaction: [String: Any] = [
+            "id": "id", "hostEpoch": "host", "presentationRevision": 1,
+            "method": "select", "title": "title", "options": Array(repeating: "option", count: 64),
+        ]
+        var interactionExact = base
+        interactionExact["revision"] = 1
+        interactionExact["pendingInteractions"] = Array(repeating: interaction, count: 8)
+        #expect(try decode(interactionExact).pendingInteractions.count == 8)
+        var interactionOver = interactionExact
+        interactionOver["pendingInteractions"] = Array(repeating: interaction, count: 9)
+        #expect(throws: DecodingError.self) { try decode(interactionOver) }
+        var optionOverInteraction = interaction
+        optionOverInteraction["options"] = Array(repeating: "option", count: 65)
+        var optionOver = base
+        optionOver["revision"] = 1
+        optionOver["pendingInteractions"] = [optionOverInteraction]
+        #expect(throws: DecodingError.self) { try decode(optionOver) }
+
+        let line: [String: Any] = ["plainText": "x", "runs": [["text": "x", "style": [:]]]]
+        let surface: [String: Any] = [
+            "id": "surface", "kind": "widget", "placement": "aboveEditor", "lifecycle": "retained",
+            "revision": 1, "focused": false, "inputMode": "none",
+            "frame": ["width": 1, "height": 1, "plainText": "x", "lines": [line]],
+        ]
+        var surfaceExact = base
+        surfaceExact["surfaces"] = Array(repeating: surface, count: 64)
+        #expect(try decode(surfaceExact).surfaces.count == 64)
+        var surfaceOver = base
+        surfaceOver["surfaces"] = Array(repeating: surface, count: 65)
+        #expect(throws: DecodingError.self) { try decode(surfaceOver) }
+
+        var diagnosticsExact = base
+        diagnosticsExact["diagnostics"] = Array(repeating: ["code": "c", "message": "m"], count: 64)
+        #expect(try decode(diagnosticsExact).diagnostics.count == 64)
+        var diagnosticsOver = base
+        diagnosticsOver["diagnostics"] = Array(repeating: ["code": "c", "message": "m"], count: 65)
+        #expect(throws: DecodingError.self) { try decode(diagnosticsOver) }
+
+        var semanticExact = semantic
+        semanticExact["statuses"] = Dictionary(uniqueKeysWithValues: (0..<32).map { ("s\($0)", "v") })
+        semanticExact["widgets"] = (0..<24).map { ["key": "w\($0)", "revision": 1, "lines": Array(repeating: "line", count: 12), "placement": "aboveEditor"] }
+        semanticExact["working"] = ["visible": true, "indicator": ["kind": "animated", "frames": Array(repeating: "-", count: 32)]]
+        var stateWithSemanticExact = base
+        stateWithSemanticExact["semanticState"] = semanticExact
+        let decodedSemanticExact = try decode(stateWithSemanticExact).semanticState
+        #expect(decodedSemanticExact.statuses.count == 32)
+        #expect(decodedSemanticExact.widgets.count == 24)
+        #expect(decodedSemanticExact.working.indicator?.frames.count == 32)
+
+        var semanticStatusOver = semanticExact
+        semanticStatusOver["statuses"] = Dictionary(uniqueKeysWithValues: (0..<33).map { ("s\($0)", "v") })
+        var stateWithStatusOver = base
+        stateWithStatusOver["semanticState"] = semanticStatusOver
+        #expect(throws: DecodingError.self) { try decode(stateWithStatusOver) }
+        var semanticWidgetOver = semantic
+        semanticWidgetOver["widgets"] = (0..<25).map { ["key": "w\($0)", "revision": 1, "lines": [], "placement": "aboveEditor"] }
+        var stateWithWidgetOver = base
+        stateWithWidgetOver["semanticState"] = semanticWidgetOver
+        #expect(throws: DecodingError.self) { try decode(stateWithWidgetOver) }
+        var semanticIndicatorOver = semantic
+        semanticIndicatorOver["working"] = ["visible": true, "indicator": ["kind": "animated", "frames": Array(repeating: "-", count: 33)]]
+        var stateWithIndicatorOver = base
+        stateWithIndicatorOver["semanticState"] = semanticIndicatorOver
+        #expect(throws: DecodingError.self) { try decode(stateWithIndicatorOver) }
+        var semanticWidgetLinesOver = semantic
+        semanticWidgetLinesOver["widgets"] = [["key": "widget", "revision": 1, "lines": Array(repeating: "line", count: 13), "placement": "aboveEditor"]]
+        var stateWithWidgetLinesOver = base
+        stateWithWidgetLinesOver["semanticState"] = semanticWidgetLinesOver
+        #expect(throws: DecodingError.self) { try decode(stateWithWidgetLinesOver) }
+
+        var lineBoundSurface = surface
+        lineBoundSurface["frame"] = [
+            "width": 1, "height": 120, "plainText": Array(repeating: "x", count: 120).joined(separator: "\n"),
+            "lines": Array(repeating: line, count: 120),
+        ]
+        var lineBoundState = base
+        lineBoundState["surfaces"] = [lineBoundSurface]
+        #expect(try decode(lineBoundState).surfaces[0].frame.lines.count == 120)
+        var lineOverSurface = lineBoundSurface
+        lineOverSurface["frame"] = ["width": 1, "height": 121, "plainText": "", "lines": Array(repeating: line, count: 121)]
+        var lineOverState = base
+        lineOverState["surfaces"] = [lineOverSurface]
+        #expect(throws: DecodingError.self) { try decode(lineOverState) }
+
+        let run: [String: Any] = ["text": "", "style": [:]]
+        var runBoundSurface = surface
+        runBoundSurface["frame"] = ["width": 1, "height": 1, "plainText": "", "lines": [["plainText": "", "runs": Array(repeating: run, count: 4_096)]]]
+        var runBoundState = base
+        runBoundState["surfaces"] = [runBoundSurface]
+        #expect(try decode(runBoundState).surfaces[0].frame.lines[0].runs.count == 4_096)
+        var runOverSurface = surface
+        runOverSurface["frame"] = ["width": 1, "height": 1, "plainText": "", "lines": [["plainText": "", "runs": Array(repeating: run, count: 4_097)]]]
+        var runOverState = base
+        runOverState["surfaces"] = [runOverSurface]
+        #expect(throws: DecodingError.self) { try decode(runOverState) }
+
+        var projectionExact = base
+        projectionExact["projection"] = [
+            "complete": false, "omitted": Array(repeating: "surfaces", count: 16),
+            "omittedSurfaces": (0..<64).map { ["id": "s\($0)", "revision": 1] },
+        ]
+        #expect(try decode(projectionExact).projection?.omittedSurfaces?.count == 64)
+        var projectionOver = base
+        projectionOver["projection"] = ["complete": false, "omitted": Array(repeating: "x", count: 17)]
+        #expect(throws: DecodingError.self) { try decode(projectionOver) }
+        var projectionSurfacesOver = base
+        projectionSurfacesOver["projection"] = ["complete": false, "omitted": [], "omittedSurfaces": (0..<65).map { ["id": "s\($0)", "revision": 1] }]
+        #expect(throws: DecodingError.self) { try decode(projectionSurfacesOver) }
+
+        func decodeMutation(_ object: [String: Any]) throws -> ExtensionPresentationMutation {
+            try JSONDecoder.gateway.decode(ExtensionPresentationMutation.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+        let mutationBase: [String: Any] = ["version": 2, "hostEpoch": "host", "revision": 1]
+        var mutationExact = mutationBase
+        mutationExact["interactionList"] = Array(repeating: interaction, count: 8)
+        mutationExact["surfaceUpserts"] = Array(repeating: surface, count: 64)
+        mutationExact["surfaceRemovals"] = Array(repeating: "id", count: 64)
+        mutationExact["capabilities"] = Array(repeating: "capability", count: 128)
+        mutationExact["diagnostics"] = Array(repeating: ["code": "c", "message": "m"], count: 64)
+        let decodedMutationExact = try decodeMutation(mutationExact)
+        #expect(decodedMutationExact.interactionList?.count == 8)
+        #expect(decodedMutationExact.surfaceUpserts?.count == 64)
+        #expect(decodedMutationExact.surfaceRemovals?.count == 64)
+        #expect(decodedMutationExact.capabilities?.count == 128)
+        #expect(decodedMutationExact.diagnostics?.count == 64)
+
+        var mutationInteractionOver = mutationBase
+        mutationInteractionOver["interactionList"] = Array(repeating: interaction, count: 9)
+        #expect(throws: DecodingError.self) { try decodeMutation(mutationInteractionOver) }
+        var mutationUpsertOver = mutationBase
+        mutationUpsertOver["surfaceUpserts"] = Array(repeating: surface, count: 65)
+        #expect(throws: DecodingError.self) { try decodeMutation(mutationUpsertOver) }
+        var removalOver = mutationBase
+        removalOver["surfaceRemovals"] = Array(repeating: "id", count: 65)
+        #expect(throws: DecodingError.self) { try decodeMutation(removalOver) }
+        var mutationCapabilitiesOver = mutationBase
+        mutationCapabilitiesOver["capabilities"] = Array(repeating: "capability", count: 129)
+        #expect(throws: DecodingError.self) { try decodeMutation(mutationCapabilitiesOver) }
+        var mutationDiagnosticsOver = mutationBase
+        mutationDiagnosticsOver["diagnostics"] = Array(repeating: ["code": "c", "message": "m"], count: 65)
+        #expect(throws: DecodingError.self) { try decodeMutation(mutationDiagnosticsOver) }
+        var patchStatusesExact = mutationBase
+        patchStatusesExact["semantic"] = ["statuses": Dictionary(uniqueKeysWithValues: (0..<32).map { ("s\($0)", "v") })]
+        #expect(try decodeMutation(patchStatusesExact).semantic?.statuses?.count == 32)
+        var patchStatusOver = mutationBase
+        patchStatusOver["semantic"] = ["statuses": Dictionary(uniqueKeysWithValues: (0..<33).map { ("s\($0)", "v") })]
+        #expect(throws: DecodingError.self) { try decodeMutation(patchStatusOver) }
+        var patchWidgetsExact = mutationBase
+        patchWidgetsExact["semantic"] = ["widgets": (0..<24).map { ["key": "w\($0)", "revision": 1, "lines": [], "placement": "aboveEditor"] }]
+        #expect(try decodeMutation(patchWidgetsExact).semantic?.widgets?.count == 24)
+        var patchWidgetOver = mutationBase
+        patchWidgetOver["semantic"] = ["widgets": (0..<25).map { ["key": "w\($0)", "revision": 1, "lines": [], "placement": "aboveEditor"] }]
+        #expect(throws: DecodingError.self) { try decodeMutation(patchWidgetOver) }
+    }
+
+    @Test("extension frames enforce visible terminal cell width")
+    func extensionFrameCellWidth() {
+        func surface(_ text: String, width: Int) -> ExtensionSurface {
+            .init(
+                id: "surface", kind: .widget, placement: .aboveEditor, lifecycle: .retained,
+                targetId: nil, provenance: nil, revision: 1, focused: false, inputMode: .none,
+                frame: .init(width: width, height: 1, lines: [.init(plainText: text, runs: [.init(text: text, style: .init())])], plainText: text)
+            )
+        }
+        #expect(!ExtensionPresentationPolicy.admit(surface("ab", width: 1)))
+        #expect(!ExtensionPresentationPolicy.admit(surface("界", width: 1)))
+        #expect(!ExtensionPresentationPolicy.admit(surface("👨‍👩‍👧‍👦", width: 1)))
+        #expect(!ExtensionPresentationPolicy.admit(surface("♥️", width: 1)))
+        #expect(ExtensionPresentationPolicy.admit(surface("é", width: 1)))
+        #expect(ExtensionPresentationPolicy.admit(surface("界👨‍👩‍👧‍👦", width: 4)))
+    }
+
+    @Test("iOS only requests restart from a drain-capable Gateway")
+    func safeRestartCapability() {
+        #expect(!AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1"]))
+        #expect(AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1", "restart-drain.v1"]))
     }
 
     @Test("gateway failure is a localized error")

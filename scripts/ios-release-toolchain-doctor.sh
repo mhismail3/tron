@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fail-closed preflight for the ephemeral GitHub-hosted TestFlight job. This
-# runs before any signing or App Store secret is admitted.
+# Release-toolchain validator retained for configuration checks. It does not
+# archive, upload, or distribute an app; production delivery remains manual.
 
 project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=/dev/null
@@ -40,7 +40,7 @@ for variable_name in "${required_release_values[@]}"; do
 done
 [[ "$TRON_RELEASE_IOS_XCODE_VERSION" != "latest" ]] || die "release Xcode must be exact"
 [[ "$TRON_RELEASE_IOS_DEVELOPER_DIR" != *[Bb]eta* ]] \
-    || die "TestFlight delivery must not use a beta Xcode bundle"
+    || die "release validation must not use a beta Xcode bundle"
 [[ "$TRON_RELEASE_IOS_XCODE_BUILD" =~ ^[[:alnum:]]+$ ]] || die "invalid release Xcode build"
 [[ "$TRON_RELEASE_IOS_SDK_VERSION" =~ ^[0-9]+\.[0-9]+$ ]] || die "invalid release SDK version"
 [[ "$TRON_RELEASE_IOS_DEPLOYMENT_TARGET" =~ ^[0-9]+\.[0-9]+$ ]] || die "invalid deployment target"
@@ -55,12 +55,12 @@ notice doctor_started \
     "github_actions=${GITHUB_ACTIONS:-false} runner_environment=${RUNNER_ENVIRONMENT:-unavailable} image_os=${ImageOS:-unavailable} source_sha=${GITHUB_SHA:-local}"
 
 [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]] \
-    || die "TestFlight delivery requires GitHub's macOS 26 ARM64 image"
-[[ "${GITHUB_ACTIONS:-}" == "true" ]] || die "live TestFlight preflight requires GitHub Actions"
+    || die "hosted release validation requires GitHub's macOS 26 ARM64 image"
+[[ "${GITHUB_ACTIONS:-}" == "true" ]] || die "hosted release validation requires GitHub Actions"
 [[ "${RUNNER_ENVIRONMENT:-}" == "github-hosted" ]] \
-    || die "TestFlight delivery must use an ephemeral GitHub-hosted runner"
+    || die "hosted release validation requires an ephemeral GitHub-hosted runner"
 [[ "${ImageOS:-}" == "macos26" ]] \
-    || die "TestFlight delivery requires the pinned macos-26 image"
+    || die "hosted release validation requires the pinned macos-26 image"
 [[ -d "${TRON_RELEASE_IOS_DEVELOPER_DIR%/Contents/Developer}" ]] \
     || die "pinned Xcode application is not installed"
 

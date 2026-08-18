@@ -41,6 +41,7 @@ Environment:
   TRON_IOS_DESTINATION          xcodebuild destination
   TRON_IOS_E2E_STATE_DIR        persistent fixture directory
   TRON_IOS_E2E_DERIVED_DATA     persistent focused-test DerivedData
+  TRON_E2E_ATTACHMENT_ONLY      set to 1 to stop after attachment picker coverage
 USAGE
 }
 
@@ -96,11 +97,13 @@ faux.setResponses([
     return fauxAssistantMessage("Streaming response starts now and remains active until the phone disconnects. Detached response complete");
   },
   fauxAssistantMessage([
-    fauxThinking("Preparing a portable permission interaction"),
-    fauxText("Checking the command before running it."),
-    fauxToolCall("bash", { command: "sleep 2; printf tool-output" }, { id: "e2e-tool" }),
+    fauxThinking("Preparing portable parallel tool interactions"),
+    fauxText("Checking the commands before running them."),
+    fauxToolCall("bash", { command: "sleep 2; printf first-output" }, { id: "e2e-tool-1" }),
+    fauxToolCall("bash", { command: "sleep 1; printf second-output" }, { id: "e2e-tool-2" }),
+    fauxToolCall("bash", { command: "printf third-output" }, { id: "e2e-tool-3" }),
   ], { stopReason: "toolUse" }),
-  fauxAssistantMessage("Tool response complete"),
+  fauxAssistantMessage("Tool response complete after all three tools."),
 ]);
 export default function (pi) {
   pi.registerProvider(faux.provider);
@@ -185,9 +188,9 @@ find_xctestrun() {
 
 patch_xctestrun() {
   local xctestrun="$1"
-  python3 - "$xctestrun" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" <<'PY'
+  python3 - "$xctestrun" "$TRON_E2E_PORT" "$TRON_E2E_CODE" "$TRON_E2E_WORKSPACE" "${TRON_E2E_ATTACHMENT_ONLY:-0}" <<'PY'
 import plistlib, sys
-path, port, code, workspace = sys.argv[1:]
+path, port, code, workspace, attachment_only = sys.argv[1:]
 with open(path, "rb") as handle:
     document = plistlib.load(handle)
 entry = document["TronMobileUITests"]
@@ -195,6 +198,7 @@ values = {
     "TRON_E2E_PORT": port,
     "TRON_E2E_CODE": code,
     "TRON_E2E_WORKSPACE": workspace,
+    "TRON_E2E_ATTACHMENT_ONLY": attachment_only,
 }
 entry.setdefault("EnvironmentVariables", {}).update(values)
 entry.setdefault("UITargetAppEnvironmentVariables", {}).update(values)

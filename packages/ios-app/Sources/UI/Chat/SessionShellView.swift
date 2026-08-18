@@ -1,34 +1,61 @@
 import SwiftUI
-import UniformTypeIdentifiers
+
+struct SessionShellProfileRouteOwner {
+    private var hasObservedProfile = false
+    private var profileID: String?
+
+    mutating func reconcile(
+        profileID nextProfileID: String?,
+        presentedSession: inout AppModel.SessionNavigationRoute?,
+        presentationTarget: (String) -> AppModel.SessionPresentationTarget?,
+        revoke: (AppModel.SessionPresentationTarget) -> Void
+    ) {
+        guard hasObservedProfile else {
+            hasObservedProfile = true
+            profileID = nextProfileID
+            return
+        }
+        guard profileID != nextProfileID else { return }
+        profileID = nextProfileID
+        if let sessionID = presentedSession?.sessionID,
+           let target = presentationTarget(sessionID) {
+            revoke(target)
+        }
+        presentedSession = nil
+    }
+}
 
 struct SessionShellView: View {
     @Environment(AppModel.self) private var model
     @State private var showNewSession = false
     @State private var newSessionDetent: PresentationDetent = .medium
     @State private var showSettings = false
-    @State private var showImport = false
     @State private var search = ""
     @State private var showingSearch = false
-    @State private var presentedSessionID: String?
+    @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
-    @State private var collapsedWorkspaces = Set<String>()
+    @State private var sessionToRename: SessionSummary?
+    @State private var renameName = ""
+    @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
+    @State private var sessionExpansion = SessionListSessionExpansion()
+    @State private var navigationOwner = DashboardNavigationOwner()
+    @State private var profileRouteOwner = SessionShellProfileRouteOwner()
 
     var body: some View {
         dashboardNavigation
         .sheet(isPresented: $showNewSession) {
-            NewSessionSheet { presentedSessionID = $0 }
+            NewSessionSheet(onCreated: present)
+                .tronTopBlur(.sheet)
                 .presentationDetents([.medium, .large], selection: $newSessionDetent)
                 .presentationDragIndicator(.hidden)
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView().presentationDragIndicator(.hidden)
+            SettingsView(onImported: { route in
+                showSettings = false
+                present(route)
+            })
+            .presentationDragIndicator(.hidden)
         }
-        .fileImporter(
-            isPresented: $showImport,
-            allowedContentTypes: [.json, .plainText, .data],
-            allowsMultipleSelection: false,
-            onCompletion: handleImport
-        )
         .confirmationDialog(
             "Delete \(sessionToDelete?.title ?? "this session")?",
             isPresented: deleteConfirmationPresented,
@@ -38,7 +65,33 @@ struct SessionShellView: View {
                 Text("This removes the canonical session from the Mac and cannot be undone.")
             }
         )
+        .alert("Rename Session", isPresented: renameConfirmationPresented, presenting: sessionToRename) { session in
+            TextField("Session name", text: $renameName)
+            Button("Save") { rename(session) }
+                .disabled(renameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("Cancel", role: .cancel) { sessionToRename = nil }
+        }
         .gatewayGlobalSheets()
+        .onChange(of: model.profiles.selected?.id, initial: true) { _, profileID in
+            var route = presentedSession
+            profileRouteOwner.reconcile(
+                profileID: profileID,
+                presentedSession: &route,
+                presentationTarget: model.presentationTarget(for:),
+                revoke: model.revokePresentationIntake
+            )
+            if presentedSession != route {
+                navigationOwner.invalidate()
+                presentedSession = route
+            }
+        }
+        .onChange(of: model.visibleSessions, initial: true) { _, sessions in
+            let groups = SessionListWorkspaceGroup.groups(from: sessions)
+            sessionExpansion.reconcile(
+                groupCounts: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.sessions.count) })
+            )
+            workspaceDisclosure.reconcile(groupIDs: Set(groups.map(\.id)))
+        }
     }
 
     private var dashboardNavigation: some View {
@@ -51,6 +104,7 @@ struct SessionShellView: View {
     private var dashboardScreen: some View {
         ZStack(alignment: .bottomTrailing) {
             sessionList
+            TronTopBlurOverlay(style: .dashboard)
             newSessionButton
         }
             .scrollContentBackground(.hidden)
@@ -68,9 +122,24 @@ struct SessionShellView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .refreshable { await model.refreshSessions() }
-            .navigationDestination(item: $presentedSessionID) { _ in
-                ChatView()
+            .navigationDestination(item: $presentedSession) { route in
+                ChatView(
+                    sessionID: route.sessionID,
+                    initialEditorText: route.editorText,
+                    initialModel: route.initialModel,
+                    onForkCreated: present
+                )
+                .id(route.sessionID)
             }
+    }
+
+    private func present(_ route: AppModel.SessionNavigationRoute) {
+        navigationOwner.invalidate()
+        if let current = presentedSession,
+           let target = model.presentationTarget(for: current.sessionID) {
+            model.revokePresentationIntake(target)
+        }
+        presentedSession = route
     }
 
     private var newSessionButton: some View {
@@ -89,17 +158,13 @@ struct SessionShellView: View {
     @ToolbarContentBuilder
     private var dashboardToolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
-            Menu {
-                Button("Import Session", systemImage: "square.and.arrow.down") { showImport = true }
-            } label: {
-                Image("TronLogoVector")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 28)
-                    .foregroundStyle(Color.tronEmerald)
-            }
-            .accessibilityLabel("Open Tron navigation")
+            Image("TronLogoVector")
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(height: 28)
+                .foregroundStyle(Color.tronEmerald)
+                .accessibilityLabel("Tron")
         }
         ToolbarItem(placement: .principal) {
             Text("Tron")
@@ -122,27 +187,33 @@ struct SessionShellView: View {
         }
     }
 
-    private func handleImport(_ result: Result<[URL], Error>) {
-        guard case .success(let urls) = result, let url = urls.first else { return }
-        let cwd = model.selectedSnapshot?.cwd ?? model.defaultWorkspace
-        guard let cwd else {
-            model.lastError = "Choose a workspace by creating a session before importing."
-            return
-        }
-        Task {
-            do {
-                try await model.importSession(from: url, cwd: cwd)
-                presentedSessionID = model.selectedSessionID
-            }
-            catch { model.lastError = error.localizedDescription }
-        }
-    }
-
     private var deleteConfirmationPresented: Binding<Bool> {
         Binding(
             get: { sessionToDelete != nil },
             set: { if !$0 { sessionToDelete = nil } }
         )
+    }
+
+    private var renameConfirmationPresented: Binding<Bool> {
+        Binding(
+            get: { sessionToRename != nil },
+            set: { if !$0 { sessionToRename = nil } }
+        )
+    }
+
+    private func beginRename(_ session: SessionSummary) {
+        renameName = session.title
+        sessionToRename = session
+    }
+
+    private func rename(_ session: SessionSummary) {
+        let name = renameName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        Task {
+            do { try await model.renameSession(session.id, name: name) }
+            catch { model.lastError = error.localizedDescription }
+            sessionToRename = nil
+        }
     }
 
     @ViewBuilder
@@ -170,29 +241,87 @@ struct SessionShellView: View {
 
     @ViewBuilder
     private var sessionSections: some View {
-        ForEach(workspaceGroups, id: \.key) { group in
+        ForEach(workspaceGroups) { group in
+            let visibleSessions = sessionExpansion.visibleSessions(in: group)
+            let canShowMore = sessionExpansion.canViewMore(
+                groupID: group.id,
+                totalCount: group.sessions.count
+            )
+            let canShowLess = sessionExpansion.canViewLess(
+                groupID: group.id,
+                totalCount: group.sessions.count
+            )
+            let hasExpansionControls = canShowMore || canShowLess
+            let disclosureItemCount = visibleSessions.count + (hasExpansionControls ? 1 : 0)
+            let rowsAreVisible = workspaceDisclosure.areRowsVisible(group.id)
+            let paginationTransition = sessionExpansion.transition(for: group.id)
+            let paginationIsTransitioning = sessionExpansion.isTransitioning(groupID: group.id)
+
             Section {
-                if !collapsedWorkspaces.contains(group.key) {
-                    ForEach(group.value) { session in
+                if workspaceDisclosure.shouldRenderRows(group.id) {
+                    ForEach(Array(visibleSessions.enumerated()), id: \.element.id) { index, session in
+                        let paginationRowIsVisible = sessionExpansion.isRowVisible(
+                            groupID: group.id,
+                            index: index
+                        )
                         sessionButton(session)
+                            .opacity(paginationRowIsVisible ? 1 : 0)
+                            .animation(
+                                paginationRowAnimation(
+                                    transition: paginationTransition,
+                                    index: index,
+                                    isVisible: paginationRowIsVisible
+                                ),
+                                value: paginationRowIsVisible
+                            )
+                            .opacity(rowsAreVisible ? 1 : 0)
+                            .animation(
+                                SessionDashboardLayout.disclosureRowAnimation(
+                                    index: index,
+                                    itemCount: disclosureItemCount,
+                                    isVisible: rowsAreVisible
+                                ),
+                                value: rowsAreVisible
+                            )
+                    }
+
+                    if hasExpansionControls {
+                        SessionListExpansionControls(
+                            workspaceName: group.name,
+                            canShowLess: canShowLess,
+                            canShowMore: canShowMore,
+                            isEnabled: !paginationIsTransitioning,
+                            onShowLess: { beginPaginationHide(group) },
+                            onShowMore: { beginPaginationReveal(group) }
+                        )
+                        .opacity(rowsAreVisible ? 1 : 0)
+                        .animation(
+                            SessionDashboardLayout.disclosureRowAnimation(
+                                index: visibleSessions.count,
+                                itemCount: disclosureItemCount,
+                                isVisible: rowsAreVisible
+                            ),
+                            value: rowsAreVisible
+                        )
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(SessionDashboardLayout.rowInsets)
                     }
                 }
             } header: {
-                workspaceHeader(group.key)
+                workspaceHeader(group, itemCount: disclosureItemCount)
             }
         }
     }
 
     private func sessionButton(_ session: SessionSummary) -> some View {
         return Button {
-            model.selectedSessionID = session.id
-            presentedSessionID = session.id
-            Task {
-                do { try await model.openSession(session.id) }
-                catch { model.lastError = error.localizedDescription }
-            }
+            present(AppModel.SessionNavigationRoute(sessionID: session.id, editorText: nil))
         } label: {
-            HistoricalSessionRow(session: session)
+            HistoricalSessionRow(
+                session: session,
+                activity: model.dashboardActivity(for: session.id)
+            )
         }
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)
@@ -200,28 +329,31 @@ struct SessionShellView: View {
         .listRowInsets(SessionDashboardLayout.rowInsets)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button("Delete", systemImage: "trash", role: .destructive) { sessionToDelete = session }
+            Button("Rename", systemImage: "pencil") { beginRename(session) }
+                .tint(Color.tronPurple)
         }
     }
 
-    private func workspaceHeader(_ path: String) -> some View {
-        let collapsed = collapsedWorkspaces.contains(path)
-        let component = URL(fileURLWithPath: path).lastPathComponent
-        let title = component.isEmpty ? path : component
+    private func workspaceHeader(
+        _ group: SessionListWorkspaceGroup,
+        itemCount: Int
+    ) -> some View {
+        let isExpanded = workspaceDisclosure.isExpanded(group.id)
         return Button {
-            withAnimation(.smooth(duration: 0.18)) {
-                if collapsed { collapsedWorkspaces.remove(path) }
-                else { collapsedWorkspaces.insert(path) }
-            }
+            toggleWorkspaceGroup(group.id, itemCount: itemCount)
         } label: {
             HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
-                Image(systemName: collapsed ? "folder" : "folder.fill")
+                Image(systemName: isExpanded ? "folder.fill" : "folder")
                     .font(.system(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
                     .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
-                Text(title)
+                    .contentTransition(.symbolEffect(.replace))
+                Text(group.name)
                     .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .bold))
                     .lineLimit(1)
-                Image(systemName: collapsed ? "plus" : "minus")
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.right")
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
             }
             .foregroundStyle(Color.tronEmerald)
             .padding(.leading, SessionDashboardLayout.headerLeadingPadding)
@@ -230,22 +362,111 @@ struct SessionShellView: View {
             .padding(.bottom, SessionDashboardLayout.headerBottomPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+            .animation(SessionDashboardLayout.expansionAnimation, value: isExpanded)
         }
         .buttonStyle(.plain)
         .textCase(nil)
         .listRowInsets(SessionDashboardLayout.headerInsets)
-        .accessibilityLabel(title)
-        .accessibilityValue(collapsed ? "collapsed" : "expanded")
+        .accessibilityLabel(group.name)
+        .accessibilityValue(isExpanded ? "expanded" : "collapsed")
+        .accessibilityHint(isExpanded ? "Double tap to hide sessions" : "Double tap to show sessions")
     }
 
-    private var workspaceGroups: [(key: String, value: [SessionSummary])] {
-        Dictionary(grouping: model.visibleSessions.filter { session in
+    private var workspaceGroups: [SessionListWorkspaceGroup] {
+        let filtered = model.visibleSessions.filter { session in
             search.isEmpty
                 || session.title.localizedCaseInsensitiveContains(search)
                 || session.cwd.localizedCaseInsensitiveContains(search)
-        }, by: \.cwd)
-        .map { (key: $0.key, value: $0.value.sorted { $0.updatedAt > $1.updatedAt }) }
-        .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+        }
+        return SessionListWorkspaceGroup.groups(from: filtered)
+            .map { group in
+                SessionListWorkspaceGroup(
+                    path: group.path,
+                    name: group.name,
+                    sessions: group.sessions.sorted { $0.updatedAt > $1.updatedAt }
+                )
+            }
+            .sorted {
+                $0.path.localizedCaseInsensitiveCompare($1.path) == .orderedAscending
+            }
+    }
+
+    private func toggleWorkspaceGroup(_ groupID: String, itemCount: Int) {
+        let direction = workspaceDisclosure.toggleDirection(for: groupID)
+        let transition: SessionListWorkspaceDisclosureTransition
+        switch direction {
+        case .collapse:
+            transition = workspaceDisclosure.beginToggle(groupID)
+        case .expand:
+            transition = withAnimation(SessionDashboardLayout.expansionAnimation) {
+                workspaceDisclosure.beginToggle(groupID)
+            }
+        }
+
+        Task { @MainActor in
+            let delay = transition.direction == .collapse
+                ? SessionDashboardLayout.disclosureCollapseDelay(itemCount: itemCount)
+                : SessionDashboardLayout.disclosureLayoutDelay
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            if transition.direction == .collapse {
+                _ = withAnimation(SessionDashboardLayout.expansionAnimation) {
+                    workspaceDisclosure.complete(transition)
+                }
+            } else {
+                workspaceDisclosure.complete(transition)
+            }
+        }
+    }
+
+    private func paginationRowAnimation(
+        transition: SessionListPaginationTransition?,
+        index: Int,
+        isVisible: Bool
+    ) -> Animation? {
+        guard let transition, index >= transition.stableCount else { return nil }
+        return SessionDashboardLayout.disclosureRowAnimation(
+            index: index - transition.stableCount,
+            itemCount: transition.affectedCount,
+            isVisible: isVisible
+        )
+    }
+
+    private func beginPaginationReveal(_ group: SessionListWorkspaceGroup) {
+        guard let transition = withAnimation(SessionDashboardLayout.expansionAnimation, {
+            sessionExpansion.beginRevealMore(
+                groupID: group.id,
+                totalCount: group.sessions.count
+            )
+        }) else { return }
+
+        Task { @MainActor in
+            try? await Task.sleep(for: SessionDashboardLayout.disclosureLayoutDelay)
+            guard !Task.isCancelled,
+                  sessionExpansion.beginRevealRows(transition) else { return }
+            try? await Task.sleep(
+                for: SessionDashboardLayout.disclosureCollapseDelay(itemCount: transition.affectedCount)
+            )
+            guard !Task.isCancelled else { return }
+            sessionExpansion.finish(transition)
+        }
+    }
+
+    private func beginPaginationHide(_ group: SessionListWorkspaceGroup) {
+        guard let transition = sessionExpansion.beginShowLess(
+            groupID: group.id,
+            totalCount: group.sessions.count
+        ) else { return }
+
+        Task { @MainActor in
+            try? await Task.sleep(
+                for: SessionDashboardLayout.disclosureCollapseDelay(itemCount: transition.affectedCount)
+            )
+            guard !Task.isCancelled else { return }
+            _ = withAnimation(SessionDashboardLayout.expansionAnimation) {
+                sessionExpansion.finish(transition)
+            }
+        }
     }
 }
 
@@ -254,9 +475,17 @@ private enum SessionDashboardLayout {
     static let rowContentHorizontalPadding: CGFloat = 12
     static let iconColumnWidth: CGFloat = 18
     static let iconTextSpacing: CGFloat = 8
+    static let minimumRowHeight: CGFloat = 38
     static let headerIconSize: CGFloat = 14
+    static let headerChevronSize: CGFloat = 10
     static let headerTopPadding: CGFloat = 10
     static let headerBottomPadding: CGFloat = 3
+    static let expansionControlMinimumHeight: CGFloat = 44
+    static let expansionControlTitleSize: CGFloat = 13
+    static let expansionAnimation = Animation.smooth(duration: 0.18)
+    static let disclosureRowFadeDuration: TimeInterval = 0.13
+    static let disclosureMaximumStaggerDuration: TimeInterval = 0.06
+    static let disclosureLayoutDelay: Duration = .milliseconds(180)
     static var headerLeadingPadding: CGFloat {
         rowContainerHorizontalInset + rowContentHorizontalPadding
     }
@@ -271,20 +500,121 @@ private enum SessionDashboardLayout {
             trailing: rowContainerHorizontalInset
         )
     }
+
+    static var expansionControlLeadingPadding: CGFloat { rowContentHorizontalPadding }
+    static var expansionControlTrailingPadding: CGFloat { rowContentHorizontalPadding }
+
+    static func disclosureRowDelay(
+        index: Int,
+        itemCount: Int,
+        isVisible: Bool
+    ) -> TimeInterval {
+        let boundedCount = max(itemCount, 1)
+        let boundedIndex = min(max(index, 0), boundedCount - 1)
+        let order = isVisible ? boundedIndex : boundedCount - boundedIndex - 1
+        let step = boundedCount > 1
+            ? disclosureMaximumStaggerDuration / Double(boundedCount - 1)
+            : 0
+        return Double(order) * step
+    }
+
+    static func disclosureRowAnimation(
+        index: Int,
+        itemCount: Int,
+        isVisible: Bool
+    ) -> Animation {
+        .easeOut(duration: disclosureRowFadeDuration)
+            .delay(disclosureRowDelay(index: index, itemCount: itemCount, isVisible: isVisible))
+    }
+
+    static func disclosureCollapseDelay(itemCount: Int) -> Duration {
+        let stagger = itemCount > 1 ? disclosureMaximumStaggerDuration : 0
+        let milliseconds = Int(((disclosureRowFadeDuration + stagger) * 1_000).rounded(.up))
+        return .milliseconds(milliseconds)
+    }
+}
+
+private struct SessionListExpansionControls: View {
+    let workspaceName: String
+    let canShowLess: Bool
+    let canShowMore: Bool
+    let isEnabled: Bool
+    let onShowLess: () -> Void
+    let onShowMore: () -> Void
+
+    var body: some View {
+        HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
+            if canShowMore {
+                expansionButton(
+                    title: "Show more",
+                    symbolName: "chevron.down",
+                    hint: "Shows 10 more older sessions in \(workspaceName)",
+                    action: onShowMore
+                )
+                .transition(.opacity)
+            }
+
+            Spacer(minLength: SessionDashboardLayout.iconTextSpacing)
+
+            if canShowLess {
+                expansionButton(
+                    title: "Show less",
+                    symbolName: "chevron.up",
+                    hint: "Shows only the latest 10 sessions in \(workspaceName)",
+                    action: onShowLess
+                )
+                .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.leading, SessionDashboardLayout.expansionControlLeadingPadding)
+        .padding(.trailing, SessionDashboardLayout.expansionControlTrailingPadding)
+        .disabled(!isEnabled)
+    }
+
+    private func expansionButton(
+        title: String,
+        symbolName: String,
+        hint: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
+                Text(title)
+                    .font(
+                        TronTypography.sans(
+                            size: SessionDashboardLayout.expansionControlTitleSize,
+                            weight: .semibold
+                        )
+                    )
+                Image(systemName: symbolName)
+                    .font(.system(size: SessionDashboardLayout.headerChevronSize, weight: .bold))
+                    .accessibilityHidden(true)
+            }
+            .foregroundStyle(Color.tronEmerald)
+            .frame(minHeight: SessionDashboardLayout.expansionControlMinimumHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .accessibilityLabel("\(title) sessions in \(workspaceName)")
+        .accessibilityHint(hint)
+    }
 }
 
 private struct HistoricalSessionRow: View {
     let session: SessionSummary
+    let activity: DashboardSessionActivity
 
     var body: some View {
         HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
             Group {
-                if session.phase.isActive {
+                if activity == .active || activity == .resuming {
                     ProgressView().controlSize(.small).tint(.tronEmerald)
                 } else {
-                    Image(systemName: session.phase == .interrupted ? "exclamationmark.circle" : "circle")
+                    Image(systemName: activity == .interrupted ? "exclamationmark.circle" : "circle")
                         .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                        .foregroundStyle(session.phase == .interrupted ? Color.tronAmber : Color.tronEmerald.opacity(0.82))
+                        .foregroundStyle(activity == .interrupted ? Color.tronAmber : Color.tronEmerald.opacity(0.82))
                 }
             }
             .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
@@ -312,227 +642,17 @@ private struct HistoricalSessionRow: View {
             interactive: true
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(session.title), \(session.phase.rawValue), \(session.relativeActivityDescription())")
+        .accessibilityLabel("\(session.title), \(activity.accessibilityDescription), \(session.relativeActivityDescription())")
     }
 }
 
-private struct NewSessionSheet: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @State private var workspace = ""
-    @State private var selectedModel: ModelRef?
-    @State private var showBrowser = false
-    @State private var showModels = false
-    @State private var creating = false
-    @State private var trustInspection: JSONValue?
-    let onCreated: (String) -> Void
-
-    var body: some View {
-        NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 12) {
-                    if !recentWorkspaces.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(recentWorkspaces) { shortcut in
-                                    Button {
-                                        workspace = shortcut.path
-                                        Task { await inspectTrust() }
-                                    } label: {
-                                        Text(shortcut.title)
-                                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                            .foregroundStyle(Color.tronAccentText)
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 6)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .glassEffect(
-                                        .regular.tint(Color.tronEmerald.opacity(workspace == shortcut.path ? 0.30 : 0.15)).interactive(),
-                                        in: Capsule()
-                                    )
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        .scrollClipDisabled()
-                    }
-
-                    setupCard(
-                        icon: "folder.fill",
-                        title: "Workspace",
-                        value: workspace.isEmpty ? "Select" : abbreviated(workspace),
-                        caption: "Directory where Tron will operate.",
-                        accent: .tronEmerald
-                    ) { showBrowser = true }
-
-                    setupCard(
-                        icon: "arrow.triangle.branch",
-                        title: "Source Control",
-                        value: "Use Existing",
-                        caption: "Use the selected checkout at its current commit.",
-                        accent: .tronTeal
-                    ) {}
-
-                    setupCard(
-                        icon: "cpu",
-                        title: "Model",
-                        value: selectedModel?.id ?? "Default",
-                        caption: selectedModel.map { "\($0.provider) / \($0.id)" } ?? "Use the current agent default.",
-                        accent: .tronPurple
-                    ) { showModels = true }
-
-                    if needsTrust {
-                        TronSettingsGroup(
-                            "Project Trust",
-                            detail: "Project resources execute with your Mac user authority. Trust is not a sandbox.",
-                            accent: .tronAmber
-                        ) {
-                            VStack(spacing: 10) {
-                                Button("Trust Project") { Task { await trust(true) } }
-                                    .buttonStyle(TronActionButtonStyle(role: .primary))
-                                Button("Open Without Project Resources") { Task { await trust(false) } }
-                                    .buttonStyle(TronActionButtonStyle(role: .destructive))
-                            }
-                            .padding(12)
-                        }
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
-                .padding(.bottom, 28)
-            }
-            .tronScrollEdgeChrome()
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "New Session") }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        Task { await create() }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if creating { ProgressView().controlSize(.mini) }
-                            else { Image(systemName: "checkmark") }
-                            Text(creating ? "Creating" : "Create")
-                        }
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(Color.tronEmerald)
-                    }
-                    .disabled(workspace.isEmpty || creating || needsTrust)
-                }
-            }
-            .sheet(isPresented: $showBrowser) {
-                WorkspaceBrowser(shortcuts: recentWorkspaces, initialPath: workspace) { value in
-                    workspace = value
-                    Task { await inspectTrust() }
-                }
-            }
-            .sheet(isPresented: $showModels) {
-                NavigationStack {
-                    ModelPicker(selection: $selectedModel, models: model.models.filter(\.available))
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .principal) { TronSheetTitle(title: "Model") }
-                            ToolbarItem(placement: .confirmationAction) {
-                                Button { showModels = false } label: {
-                                    Image(systemName: "checkmark")
-                                        .font(TronTypography.buttonSM)
-                                        .foregroundStyle(Color.tronEmerald)
-                                }
-                                .accessibilityLabel("Done")
-                            }
-                        }
-                }
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.hidden)
-            }
-            .task {
-                workspace = model.defaultWorkspace ?? ""
-                await model.refreshSettings()
-                selectedModel = model.selectedSnapshot?.model
-                    ?? model.configuredDefaultModel
-                    ?? model.preferredAvailableModel
-                if !workspace.isEmpty { await inspectTrust() }
-            }
+private extension DashboardSessionActivity {
+    var accessibilityDescription: String {
+        switch self {
+        case .idle: "idle"
+        case .active: "active"
+        case .resuming: "resuming"
+        case .interrupted: "interrupted"
         }
-        .interactiveDismissDisabled(creating)
-    }
-
-    private func setupCard(
-        icon: String,
-        title: String,
-        value: String,
-        caption: String,
-        accent: Color,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Image(systemName: icon)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .frame(width: 16)
-                    Text(title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                    Spacer(minLength: 10)
-                    Text(value)
-                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.55)
-                        .truncationMode(.middle)
-                }
-                .foregroundStyle(accent)
-                HStack(alignment: .top, spacing: 8) {
-                    Color.clear.frame(width: 16, height: 1)
-                    Text(caption)
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
-                        .foregroundStyle(Color.tronTextMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-        }
-        .buttonStyle(.plain)
-        .tronGlassSurface(accent: accent, cornerRadius: 12, tintOpacity: 0.15, interactive: true)
-    }
-
-    private var needsTrust: Bool {
-        guard let value = trustInspection?.objectValue else { return false }
-        return value["requiresDecision"]?.boolValue == true && value["effectiveDecision"] == .null
-    }
-
-    private var recentWorkspaces: [WorkspaceShortcut] {
-        var seen = Set<String>()
-        return model.visibleSessions.compactMap { session in
-            guard seen.insert(session.cwd).inserted else { return nil }
-            return WorkspaceShortcut(path: session.cwd, title: session.workspaceName, icon: "clock.arrow.circlepath")
-        }
-    }
-
-    private func inspectTrust() async {
-        guard !workspace.isEmpty else { return }
-        do { trustInspection = try await model.inspectTrust(cwd: workspace) }
-        catch { model.lastError = error.localizedDescription }
-    }
-
-    private func trust(_ value: Bool) async {
-        do { trustInspection = try await model.setTrust(cwd: workspace, decision: value) }
-        catch { model.lastError = error.localizedDescription }
-    }
-
-    private func create() async {
-        creating = true
-        defer { creating = false }
-        do {
-            try await model.createSession(cwd: workspace)
-            if let selectedModel { try await model.setModel(selectedModel) }
-            if let sessionID = model.selectedSessionID { onCreated(sessionID) }
-            dismiss()
-        } catch { model.lastError = error.localizedDescription }
-    }
-
-    private func abbreviated(_ path: String) -> String {
-        let components = URL(fileURLWithPath: path).pathComponents
-        return components.count > 3 ? "…/" + components.suffix(2).joined(separator: "/") : path
     }
 }

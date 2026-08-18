@@ -5,6 +5,7 @@ struct TronMobileApp: App {
     @State private var model = AppModel()
     @State private var appearance = AppearanceSettings.shared
     @Environment(\.scenePhase) private var scenePhase
+    private let pendingShares = UserDefaultsPendingShareStore()
 
     var body: some Scene {
         WindowGroup {
@@ -12,20 +13,39 @@ struct TronMobileApp: App {
                 .environment(model)
                 .tronPresentation()
                 .preferredColorScheme(appearance.mode.colorScheme)
-                .task { await model.start() }
+                .task {
+                    await RetiredNotificationBadge.clear()
+                    await model.start()
+                }
                 .onOpenURL { url in
                     if let invitation = PairingInvitationParser.parse(url) {
                         Task {
                             do { try await model.pair(invitation) }
+                            catch is CancellationError { return }
                             catch { model.lastError = error.localizedDescription }
                         }
-                    } else if url.host == "share", let shared = PendingShareService.load()?.buildSharePrompt() {
-                        PendingShareService.clear()
-                        Task { try? await model.send(shared.prompt) }
+                    } else if url.host == "share",
+                              let shared = pendingShares.load()?.buildSharePrompt(),
+                              let target = model.mountedPresentationTarget {
+                        Task {
+                            do {
+                                try await model.sendSharedContent(shared.prompt, target: target)
+                                pendingShares.clear()
+                            } catch is CancellationError {
+                                return
+                            } catch {
+                                model.lastError = error.localizedDescription
+                            }
+                        }
                     }
                 }
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { model.becameActive() }
+                    if phase == .active {
+                        Task { await RetiredNotificationBadge.clear() }
+                        model.becameActive()
+                    } else if phase == .background {
+                        model.enteredBackground()
+                    }
                 }
         }
     }
@@ -43,6 +63,7 @@ private struct RootView: View {
             OnboardingView(selectedDetent: $onboardingDetent) {
                 showOnboarding = false
             }
+                .tronTopBlur(.sheet)
                 .presentationDetents([.medium, .large], selection: $onboardingDetent)
                 .presentationDragIndicator(.hidden)
                 .presentationContentInteraction(.resizes)

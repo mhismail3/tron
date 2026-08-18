@@ -1,12 +1,38 @@
 import Foundation
 
-struct SharedContent: Codable {
+struct SharedContent: Codable, Equatable {
     let text: String?
     let url: String?
     let timestamp: Date
 }
 
-struct ShareMessagePayload { let prompt: String }
+struct ShareMessagePayload: Equatable { let prompt: String }
+
+enum SharedContentFragment: Equatable {
+    case text(String)
+    case url(String)
+}
+
+enum SharedContentReducer {
+    static func content(
+        from fragments: [SharedContentFragment],
+        timestamp: Date
+    ) -> SharedContent? {
+        var text: String?
+        var url: String?
+        for fragment in fragments {
+            switch fragment {
+            case .text(let value):
+                text = value
+            case .url(let value):
+                if url == nil { url = value }
+                else { text = [text, value].compactMap { $0 }.joined(separator: "\n") }
+            }
+        }
+        guard text != nil || url != nil else { return nil }
+        return SharedContent(text: text, url: url, timestamp: timestamp)
+    }
+}
 
 extension SharedContent {
     func buildSharePrompt() -> ShareMessagePayload? {
@@ -17,23 +43,33 @@ extension SharedContent {
     }
 }
 
-enum PendingShareService {
+protocol PendingShareStoring {
+    func save(_ content: SharedContent)
+    func load() -> SharedContent?
+    func clear()
+}
+
+struct UserDefaultsPendingShareStore: PendingShareStoring {
     static let suiteName = "group.com.tron.shared"
     private static let key = "pendingShare"
 
-    static func save(_ content: SharedContent, store: UserDefaults? = nil) {
-        guard let suite = store ?? UserDefaults(suiteName: suiteName),
-              let data = try? JSONEncoder().encode(content) else { return }
-        suite.set(data, forKey: key)
+    private let defaults: UserDefaults?
+
+    init(defaults: UserDefaults? = UserDefaults(suiteName: suiteName)) {
+        self.defaults = defaults
     }
 
-    static func load(store: UserDefaults? = nil) -> SharedContent? {
-        guard let suite = store ?? UserDefaults(suiteName: suiteName),
-              let data = suite.data(forKey: key) else { return nil }
+    func save(_ content: SharedContent) {
+        guard let defaults, let data = try? JSONEncoder().encode(content) else { return }
+        defaults.set(data, forKey: Self.key)
+    }
+
+    func load() -> SharedContent? {
+        guard let data = defaults?.data(forKey: Self.key) else { return nil }
         return try? JSONDecoder().decode(SharedContent.self, from: data)
     }
 
-    static func clear(store: UserDefaults? = nil) {
-        (store ?? UserDefaults(suiteName: suiteName))?.removeObject(forKey: key)
+    func clear() {
+        defaults?.removeObject(forKey: Self.key)
     }
 }

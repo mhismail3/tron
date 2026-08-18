@@ -32,10 +32,6 @@
 	<string>Tron uses the camera to scan Mac pairing QR codes and capture photos for messages.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Tron connects to your Mac over your trusted local or Tailscale network for agent sessions.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Tron records voice input so iOS speech recognition can turn it into a message draft.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Tron uses on-device and Apple speech recognition to transcribe message drafts.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

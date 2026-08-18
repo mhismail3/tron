@@ -1,0 +1,106 @@
+import { describe, expect, it, vi } from "vitest";
+import type { GatewayProtocolClient } from "./gateway-client.js";
+import { GatewayClientError } from "./gateway-client.js";
+import { connectResilient, listSessions, operationNeedsSettlement } from "./terminal-chat.js";
+
+function session(id: string, extra: Record<string, unknown> = {}) {
+  return { id, cwd: "/workspace", firstMessage: id, ...extra };
+}
+
+function clientWithPages(pages: unknown[]): Pick<GatewayProtocolClient, "request"> & { request: ReturnType<typeof vi.fn> } {
+  const request = vi.fn(async () => {
+    const page = pages.shift();
+    if (page === undefined) throw new Error("unexpected extra page request");
+    return page;
+  });
+  return { request } as unknown as Pick<GatewayProtocolClient, "request"> & { request: ReturnType<typeof vi.fn> };
+}
+
+describe("terminal chat connection", () => {
+  it("does not retry a non-retryable protocol mismatch", async () => {
+    const connect = vi.fn(async () => { throw new GatewayClientError("protocol_mismatch", "unsupported", false); });
+    const close = vi.fn();
+    const client = { connect, close } as unknown as import("./gateway-client.js").GatewayProtocolClient;
+
+    await expect(connectResilient(client)).rejects.toMatchObject({ code: "protocol_mismatch", retryable: false });
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+  });
+});
+
+describe("terminal chat operation settlement", () => {
+  it("does not reinstall a waiter after reconnect already observed settlement", () => {
+    expect(operationNeedsSettlement("operation-one", "operation-one")).toBe(false);
+    expect(operationNeedsSettlement("operation-two", "operation-one")).toBe(true);
+    expect(operationNeedsSettlement("operation-one", undefined)).toBe(true);
+  });
+});
+
+describe("terminal chat session catalog", () => {
+  it("collects one immutable bounded traversal", async () => {
+    const client = clientWithPages([
+      { sessions: [session("first")], nextCursor: "next", listRevision: 1 },
+      { sessions: [session("second")], listRevision: 1 },
+    ]);
+
+    await expect(listSessions(client, { pageSize: 1 })).resolves.toEqual([
+      session("first"), session("second"),
+    ]);
+    expect(client.request).toHaveBeenCalledTimes(2);
+    expect(client.request.mock.calls).toEqual([
+      ["session.list", { cursor: null, limit: 1 }],
+      ["session.list", { cursor: "next", limit: 1 }],
+    ]);
+  });
+
+  it("restarts mixed revisions once and retains only the fresh traversal", async () => {
+    const client = clientWithPages([
+      { sessions: [session("stale")], nextCursor: "stale-next", listRevision: 1 },
+      { sessions: [session("mixed")], listRevision: 2 },
+      { sessions: [session("fresh")], listRevision: 2 },
+    ]);
+
+    await expect(listSessions(client, { pageSize: 1 })).resolves.toEqual([session("fresh")]);
+    expect(client.request).toHaveBeenCalledTimes(3);
+  });
+
+  it("fails after one mixed-revision restart instead of recursing indefinitely", async () => {
+    const client = clientWithPages([
+      { sessions: [session("one")], nextCursor: "one", listRevision: 1 },
+      { sessions: [session("two")], listRevision: 2 },
+      { sessions: [session("three")], nextCursor: "three", listRevision: 3 },
+      { sessions: [session("four")], listRevision: 4 },
+    ]);
+
+    await expect(listSessions(client, { pageSize: 1 })).rejects.toThrow(/changed repeatedly/);
+    expect(client.request).toHaveBeenCalledTimes(4);
+  });
+
+  it("rejects cursor cycles, duplicate identities, and retained-byte overflow", async () => {
+    const cycling = clientWithPages([
+      { sessions: [session("one")], nextCursor: "same", listRevision: 1 },
+      { sessions: [session("two")], nextCursor: "same", listRevision: 1 },
+    ]);
+    await expect(listSessions(cycling, { pageSize: 1 })).rejects.toThrow(/cursor stalled/);
+
+    const duplicate = clientWithPages([{
+      sessions: [session("same"), session("same")], listRevision: 1,
+    }]);
+    await expect(listSessions(duplicate)).rejects.toThrow(/ambiguous/);
+
+    const oversized = clientWithPages([{
+      sessions: [session("large", { firstMessage: "x".repeat(100) })], listRevision: 1,
+    }]);
+    await expect(listSessions(oversized, { maximumBytes: 32 })).rejects.toThrow(/capacity/);
+  });
+
+  it("rejects malformed and overlong pages before publication", async () => {
+    const malformed = clientWithPages([{ sessions: "not-an-array", listRevision: 1 }]);
+    await expect(listSessions(malformed)).rejects.toThrow(/malformed/);
+
+    const overlong = clientWithPages([{
+      sessions: [session("one"), session("two")], listRevision: 1,
+    }]);
+    await expect(listSessions(overlong, { pageSize: 1 })).rejects.toThrow(/malformed/);
+  });
+});

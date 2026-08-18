@@ -13,10 +13,12 @@ import { PackageService } from "./admin/package-service.js";
 import { AuthBroker } from "./admin/auth-broker.js";
 import { LegacyImportService } from "./admin/legacy-import-service.js";
 import { RuntimeRegistry } from "./sessions/runtime-registry.js";
+import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { CommandReceiptStore } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
+import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
 
 const config = await loadConfig();
 process.env.PI_CODING_AGENT_DIR = config.agentDir;
@@ -28,13 +30,13 @@ const logger = new GatewayLogger();
 const devices = new DeviceStore(config.tronHome, config.machineId);
 await devices.initialize();
 
-const modelRuntime = await ModelRuntime.create({
+const modelRuntime = installKimiK3Policy(await ModelRuntime.create({
   authPath: join(config.agentDir, "auth.json"),
   modelsPath: join(config.agentDir, "models.json"),
   modelsStorePath: join(config.agentDir, "models-store.json"),
   refreshOnCreate: true,
   allowModelNetwork: false,
-});
+}));
 // Compose global extension providers into the administration runtime used by
 // onboarding. Project providers remain isolated in their RuntimeSlot runtime.
 // Retain these services for the gateway lifetime. Their resource loader owns
@@ -62,9 +64,13 @@ const sessions = new RuntimeRegistry({
   agentDir: config.agentDir,
   tronHome: config.tronHome,
   idleRuntimeMs: config.idleRuntimeMs,
+  maximumLiveRuntimes: config.maxLiveRuntimes,
   trust,
   broadcast: (sessionId, topic, payload) => transport?.broadcastSession(sessionId, topic, payload),
+  sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),
   sessionListChanged: () => transport?.notifySessionListChanged(),
+  sessionRekeyed: (previousId, nextId) => transport?.rekeySession(previousId, nextId),
+  sessionClosed: (sessionId) => transport?.revokeSessionTerminals(sessionId),
 });
 await sessions.initialize();
 
@@ -72,7 +78,11 @@ const terminal = new TerminalService(
   config.terminalReplayBytes,
   (terminalId, topic, payload) => transport?.broadcastTerminal(terminalId, topic, payload),
 );
-const auth = new AuthBroker(modelRuntime, (clientId, topic, payload) => transport?.emitToClient(clientId, topic, payload));
+const auth = new AuthBroker(
+  modelRuntime,
+  (clientId, topic, payload) => transport?.emitToClient(clientId, topic, payload),
+  (topic, payload) => transport?.broadcast(topic, payload),
+);
 const packages = new PackageService(config.agentDir, trust, (topic, payload) => transport?.broadcast(topic, payload));
 const legacyImport = new LegacyImportService(config.tronHome);
 
@@ -95,6 +105,19 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
   }
 }
 
+let requestedRestart: Promise<void> | undefined;
+function requestRestart(): void {
+  if (requestedRestart) return;
+  logger.log("info", "Gateway restart scheduled after accepted agent runs settle");
+  requestedRestart = (async () => {
+    await sessions.waitUntilIdle();
+    await shutdown("requested restart", 75);
+  })().catch((error) => {
+    logger.log("error", error instanceof Error ? error.message : String(error));
+    void shutdown("restart drain failed", 1);
+  });
+}
+
 const service = new GatewayService({
   config,
   modelRuntime,
@@ -111,16 +134,23 @@ const service = new GatewayService({
   legacyImport,
   logger,
   receipts,
-  // LaunchAgent KeepAlive restarts unsuccessful exits; an administrative
-  // restart must therefore use a deliberate non-zero service exit code.
-  requestRestart: () => void shutdown("requested restart", 75),
+  // LaunchAgent/supervisor restarts unsuccessful exits. Administrative
+  // restart drains accepted agent work before using the deliberate restart code.
+  requestRestart,
   deviceRevoked: (deviceId) => transport?.disconnectDevice(deviceId),
+  sessionDeleted: (sessionId) => transport?.revokeSessionTerminals(sessionId),
+  broadcast: (topic, payload) => transport?.broadcast(topic, payload),
 });
 transport = new GatewayServer({
   host: config.host,
   port: config.port,
   maxFrameBytes: config.maxFrameBytes,
-  maxUploadBytes: config.maxUploadBytes,
+  maximumConnections: config.maxConnections,
+  maximumConnectionsPerIdentity: config.maxConnectionsPerIdentity,
+  maximumSubscriptionsPerConnection: config.maxSubscriptionsPerConnection,
+  maximumOutboundFrames: config.maxOutboundFrames,
+  maximumOutboundBytes: config.maxOutboundBytes,
+  maximumSynchronizationBytes: config.maxSynchronizationBytes,
   devices,
   uploads,
   sessions,
@@ -141,4 +171,4 @@ process.on("unhandledRejection", (error) => {
 
 const enrollmentTimer = setInterval(() => void devices.ensureEnrollment(), 60_000);
 enrollmentTimer.unref();
-await transport.listen();
+await transport.listen(() => sessions.initializeBlobStorage());

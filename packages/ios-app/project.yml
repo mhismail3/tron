@@ -18,16 +18,19 @@ configFiles:
   ProdDebug: Configuration/ProdDebug.xcconfig
   Prod: Configuration/Prod.xcconfig
   Test: Configuration/Test.xcconfig
+  DeviceTest: Configuration/DeviceTest.xcconfig
 
 configs:
   Beta: debug
   ProdDebug: debug
   Prod: release
   Test: debug
+  DeviceTest: debug
 
 settings:
   base:
     SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "7"
     TRON_CANONICAL_VERSION: "0.1.0-beta.7"
@@ -61,6 +64,7 @@ targets:
     settings:
       base:
         INFOPLIST_FILE: Sources/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Support/PrivateVariableBlurBridge.h
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_EMIT_LOC_STRINGS: YES
@@ -73,6 +77,8 @@ targets:
         ProdDebug:
           CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
         Prod:
+          CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
+        DeviceTest:
           CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
         Test:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.testhost
@@ -98,6 +104,9 @@ targets:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
           CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements
         Prod:
+          PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
+          CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements
+        DeviceTest:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension
           CODE_SIGN_ENTITLEMENTS: ShareExtension/ShareExtensionProd.entitlements
         Test:
@@ -207,6 +216,28 @@ schemes:
     archive:
       config: Beta
 
+  Tron Device Performance:
+    build:
+      targets:
+        TronMobile: all
+        TronShareExtension: all
+        TronMobileTests: [test]
+    run:
+      config: DeviceTest
+    test:
+      config: DeviceTest
+      environmentVariables:
+        TRON_PERFORMANCE_BASELINE: "$(TRON_PERFORMANCE_BASELINE_VALUE)"
+      targets:
+        - TronMobileTests
+    profile:
+      config: DeviceTest
+    analyze:
+      config: DeviceTest
+    # Keep hosted-test compilation out of every archive action.
+    archive:
+      config: Prod
+
   Tron Fast:
     build:
       targets:
@@ -217,6 +248,8 @@ schemes:
       config: ProdDebug
     test:
       config: Test
+      environmentVariables:
+        TRON_PERFORMANCE_BASELINE: "$(TRON_PERFORMANCE_BASELINE_VALUE)"
       targets:
         - TronMobileTests
     profile:

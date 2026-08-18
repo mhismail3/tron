@@ -2,102 +2,161 @@ import Foundation
 import Observation
 import UIKit
 
+final class ChatMediaMemoryPressureObserver: @unchecked Sendable {
+    private let task: Task<Void, Never>
+
+    @MainActor
+    init(loader: ChatMediaLoader) {
+        task = Self.observe(loader: loader)
+    }
+
+    #if HOSTED_TEST
+    @MainActor
+    init(
+        loader: ChatMediaLoader,
+        hostedOnReady: @escaping @MainActor @Sendable () async -> Void,
+        hostedOnHandled: @escaping @MainActor @Sendable () async -> Void
+    ) {
+        task = Self.observe(
+            loader: loader,
+            onReady: hostedOnReady,
+            onHandled: hostedOnHandled
+        )
+    }
+    #endif
+
+    @MainActor
+    private static func observe(
+        loader: ChatMediaLoader,
+        onReady: (@MainActor @Sendable () async -> Void)? = nil,
+        onHandled: (@MainActor @Sendable () async -> Void)? = nil
+    ) -> Task<Void, Never> {
+        Task { @MainActor [weak loader] in
+            let notifications = NotificationCenter.default.notifications(
+                named: UIApplication.didReceiveMemoryWarningNotification
+            )
+            await onReady?()
+            for await _ in notifications {
+                guard !Task.isCancelled else { return }
+                loader?.removeAll()
+                await onHandled?()
+            }
+        }
+    }
+
+    deinit { task.cancel() }
+}
+
 @MainActor
 @Observable
 final class AppModel {
-    enum ConnectionState: Equatable {
-        case unpaired, connecting, connected, reconnecting, unauthorized, offline(String)
-    }
+    typealias SessionSnapshotInstallMode = SessionSnapshotInstallationMode
+    typealias ConnectionState = GatewayConnectionState
 
-    struct PendingAttachment: Identifiable, Hashable {
-        let id: String
-        let name: String
-        let mimeType: String
-        let size: Int
-    }
+    typealias AuthPromptState = ProviderAuthPromptState
+    typealias AuthEventState = ProviderAuthEventState
 
-    struct AuthPromptState: Identifiable, Hashable {
-        enum Kind: String { case text, secret, select, manualCode = "manual_code" }
-        let id: String
-        let operationId: String
-        let kind: Kind
-        let message: String
-        let placeholder: String?
-        let options: [Option]
-        struct Option: Hashable, Identifiable { let id: String; let label: String; let description: String? }
-    }
+    struct SessionNavigationRoute: Identifiable, Hashable {
+        let sessionID: String
+        let editorText: String?
+        let initialModel: ModelRef?
+        fileprivate let gatewayProfileID: String?
+        fileprivate let gatewayLifecycleGeneration: Int?
+        var id: String { sessionID }
 
-    struct AuthEventState: Identifiable, Hashable {
-        struct Link: Hashable, Identifiable {
-            let url: URL
-            let label: String?
-            var id: String { url.absoluteString }
+        init(
+            sessionID: String,
+            editorText: String?,
+            initialModel: ModelRef? = nil,
+            gatewayProfileID: String? = nil,
+            gatewayLifecycleGeneration: Int? = nil
+        ) {
+            self.sessionID = sessionID
+            self.editorText = editorText
+            self.initialModel = initialModel
+            self.gatewayProfileID = gatewayProfileID
+            self.gatewayLifecycleGeneration = gatewayLifecycleGeneration
         }
-        enum Kind: String { case info, authURL = "auth_url", deviceCode = "device_code", progress }
-        let operationId: String
-        let kind: Kind
-        let message: String?
-        let links: [Link]
-        let url: URL?
-        let instructions: String?
-        let userCode: String?
-        let verificationURL: URL?
-        let intervalSeconds: Int?
-        let expiresInSeconds: Int?
-        var id: String { operationId }
+
+        func withInitialModel(_ model: ModelRef?) -> SessionNavigationRoute {
+            SessionNavigationRoute(
+                sessionID: sessionID,
+                editorText: editorText,
+                initialModel: model,
+                gatewayProfileID: gatewayProfileID,
+                gatewayLifecycleGeneration: gatewayLifecycleGeneration
+            )
+        }
     }
 
-    struct EditorRequest: Identifiable, Hashable {
-        enum Action: String { case set, paste }
-        let sessionId: String
-        let revision: Int
-        let action: Action
-        let text: String
-        let fullText: String
-        var id: String { "\(sessionId):\(revision)" }
+    typealias SessionPresentationTarget = SessionPresentationIdentity
+
+    typealias SessionOpenResponse = GatewaySessionOpenResponse
+    typealias PairingCommit = GatewayPairingCommit
+    typealias ProfileTokenLookup = GatewayProfileTokenLookup
+
+    private struct CacheCheckpoint: Sendable {
+        let profileID: String
+        let generation: Int
+        let sessions: [SessionSummary]
+        let snapshots: [SessionSnapshot]
     }
 
-    private struct CommandStatusParams: Codable { let method, commandId: String }
-    private struct CommandStatusResponse: Decodable { let status: String; let result: JSONValue? }
-
-    let client: GatewayClient
-    let profiles: GatewayProfileStore
+    private let lifecycle: GatewayLifecycleCoordinator
+    var client: GatewayClient { lifecycle.client }
+    var profiles: GatewayProfileStore { lifecycle.profiles }
     private let cache: SnapshotCache
+    private let clock: MonotonicClock
+    private let uuidSource: UUIDSource
+    private let performanceSignposts: any PerformanceSignposting
+    private let exportArtifacts: SessionExportArtifactStore
+    private let mutationExecutor: ConfirmedMutationExecutor
+    private let sessionMutations: SessionMutationService
+    private let sessionImports: SessionImportCoordinator
+    private let terminal: TerminalCoordinator
+    private let settingsTrust: SettingsTrustCoordinator
+    private let providerAuth: ProviderAuthCoordinator
+    private let packageConfiguration: PackageConfigurationCoordinator
+    private let customModelConfiguration: CustomModelConfigurationCoordinator
+    let composerDrafts: ComposerDraftCoordinator
+    let gatewayDiagnostics: GatewayDiagnosticsService
+    let chatMedia: ChatMediaLoader
+    private let chatMediaMemoryPressureObserver: ChatMediaMemoryPressureObserver
 
-    var connectionState: ConnectionState = .unpaired
+    var connectionState: ConnectionState { lifecycle.connectionState }
     /// False only while the first launch credential/connection decision is
     /// unresolved. The UI must not infer "unpaired" from the temporary default.
-    var hasResolvedLaunchState = false
-    var gatewayInfo: GatewayInfo?
-    var sessions: [SessionSummary] = []
-    var selectedSessionID: String?
-    var snapshots: [String: SessionSnapshot] = [:]
-    var providers: [ProviderSummary] = []
-    var models: [ModelSummary] = []
+    var hasResolvedLaunchState: Bool { lifecycle.hasResolvedLaunchState }
+    var gatewayInfo: GatewayInfo? { lifecycle.gatewayInfo }
+    private var gatewayConnectionID: Int? { lifecycle.connectionID }
+    private var sessionCatalog = SessionCatalogCoordinator()
+    var sessions: [SessionSummary] {
+        get { sessionCatalog.sessions }
+        set { sessionCatalog.replaceForFacade(newValue) }
+    }
+    private let sessionPresentation: SessionPresentationStore
+    var settingsInvalidationGeneration: Int { settingsTrust.settingsInvalidationGeneration }
+    var providerInvalidationGeneration: Int { providerAuth.invalidationGeneration }
+    var packageInvalidationGeneration: Int { packageConfiguration.invalidationGeneration }
+    var customModelInvalidationGeneration: Int { customModelConfiguration.invalidationGeneration }
+    var trustRevision: Int { settingsTrust.trustRevision }
     var pairedDevices: [PairedDevice] = []
     var legacyImportAvailable = false
     var legacyImportedCount = 0
     var workspace: WorkspaceListing?
     var defaultWorkspace: String?
-    var pendingAttachments: [PendingAttachment] = []
-    var authPrompt: AuthPromptState?
-    var authEvent: AuthEventState?
-    var editorRequest: EditorRequest?
-    var notifications: [String] = []
+    var authPrompt: AuthPromptState? { providerAuth.prompt }
+    var authEvent: AuthEventState? { providerAuth.event }
+    private var noticeStore = GlobalNoticeStore()
+    private var sessionCatchUpNoticeTask: Task<Void, Never>?
+    var latestNotice: String? { noticeStore.latest }
     var lastError: String?
     var onboardingError: String?
-    var settings: JSONValue?
-    var context: JSONValue?
-    var sessionTree: [SessionTreeNode] = []
-    var loadingEarlierTranscript = false
-    var commands: [CommandInfo] = []
-    var resources: JSONValue?
-    var packageState: PackageInventory?
-    var packageUpdates: [PackageUpdate] = []
-    var customModels: JSONValue?
-    var terminals: [TerminalSummary] = []
-    var terminalChunks: [String: [TerminalChunk]] = [:]
-    var terminalExited: Set<String> = []
+    var context: JSONValue? { sessionPresentation.context }
+    var sessionTree: [SessionTreeNode] { sessionPresentation.sessionTree }
+    var loadingEarlierTranscript: Bool { sessionPresentation.loadingEarlierTranscript }
+    var commands: [CommandInfo] { sessionPresentation.commands }
+    var resources: JSONValue? { sessionPresentation.resources }
     var setupComplete: Bool {
         get {
             if UserDefaults.standard.object(forKey: "tronSetupComplete.v1") != nil {
@@ -112,1061 +171,1884 @@ final class AppModel {
     }
 
     private var eventTask: Task<Void, Never>?
-    private var reconnectTask: Task<Void, Never>?
-    private var refreshTask: Task<Void, Never>?
-    private var subscribedSessionID: String?
-    private var resyncingSessionIDs: Set<String> = []
-    private var hiddenSessionIDs: Set<String> = []
-    private var locallyCreatedUnindexedSessionIDs: Set<String> = []
+    private var extensionEditorSyncTasks: [SessionPresentationIdentity: Task<Void, Never>] = [:]
+    private var extensionEditorPendingText: [SessionPresentationIdentity: String] = [:]
+    private var extensionEditorSyncGenerations: [SessionPresentationIdentity: Int] = [:]
+    private var extensionEditorOperationReceipts: [SessionPresentationIdentity: [String]] = [:]
+    private var deviceLoadGeneration = 0
+    private var legacyImportLoadGeneration = 0
+    private var catalogRefreshTask: Task<SessionCatalogRefreshOutcome, Never>?
+    private var catalogRefreshKey: SessionCatalogLoadKey?
+    private var catalogRefreshRequestGeneration = 0
+    private var catalogInvalidationGeneration = 0
+    private var catalogDeferredFollowUpKey: SessionCatalogLoadKey?
+    private var sceneAllowsCatalogRefresh = true
+    private var cacheCheckpointTask: Task<Void, Never>?
+    private var cacheCheckpointTaskGeneration = 0
+    private var cacheCheckpointGeneration = 0
+    private var pendingCacheCheckpoint: CacheCheckpoint?
+    private var workspaceLoadGeneration = 0
 
     init(
         client: GatewayClient = GatewayClient(),
         profiles: GatewayProfileStore = GatewayProfileStore(),
-        cache: SnapshotCache = SnapshotCache()
+        cache: SnapshotCache = SnapshotCache(),
+        clock: MonotonicClock = .continuous,
+        reconnectDelayPolicy: ReconnectDelayPolicy = .standard,
+        uuidSource: UUIDSource = .random,
+        pairer: GatewayPairer = GatewayPairer(),
+        pairingCommit: PairingCommit? = nil,
+        profileTokenLookup: ProfileTokenLookup? = nil,
+        performanceSignposts: any PerformanceSignposting = SystemPerformanceSignposts.shared,
+        sessionImportFileAccess: SessionImportFileAccess = .live,
+        sessionImportUpload: SessionImportUpload? = nil,
+        composerUpload: ComposerUploadOperation? = nil,
+        composerFileUpload: ComposerFileUploadOperation? = nil,
+        composerAttachmentFileAccess: ComposerAttachmentFileAccess = .live,
+        exportArtifacts: SessionExportArtifactStore = SessionExportArtifactStore()
     ) {
-        self.client = client
-        self.profiles = profiles
+        let resolvedPairingCommit = pairingCommit ?? { profile, token in
+            try profiles.save(profile, token: token)
+        }
+        let resolvedProfileTokenLookup = profileTokenLookup ?? { profile in
+            profiles.token(for: profile)
+        }
+        let lifecycle = GatewayLifecycleCoordinator(
+            client: client,
+            profiles: profiles,
+            clock: clock,
+            reconnectDelayPolicy: reconnectDelayPolicy,
+            uuidSource: uuidSource,
+            pairer: pairer,
+            pairingCommit: resolvedPairingCommit,
+            profileTokenLookup: resolvedProfileTokenLookup
+        )
+        let mutationExecutor = ConfirmedMutationExecutor(
+            client: client,
+            lifecycle: lifecycle,
+            clock: clock,
+            performanceSignposts: performanceSignposts
+        )
+        let sessionMutations = SessionMutationService(
+            client: client,
+            executor: mutationExecutor,
+            uuidSource: uuidSource
+        )
+        let settingsTrust = SettingsTrustCoordinator(
+            client: client,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
+        let providerAuth = ProviderAuthCoordinator(
+            client: client,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
+        let packageConfiguration = PackageConfigurationCoordinator(
+            client: client,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
+        let customModelConfiguration = CustomModelConfigurationCoordinator(
+            client: client,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource
+        )
+        let sessionPresentation = SessionPresentationStore(
+            client: client,
+            performanceSignposts: performanceSignposts
+        )
+        let terminal = TerminalCoordinator(
+            client: client,
+            lifecycle: lifecycle,
+            mutationExecutor: mutationExecutor,
+            uuidSource: uuidSource,
+            clock: clock,
+            performanceSignposts: performanceSignposts,
+            installedSubscriptionToken: { sessionPresentation.installedSubscriptionToken(for: $0) }
+        )
+        let composerDrafts = ComposerDraftCoordinator(
+            upload: composerUpload ?? { name, mimeType, data in
+                try await client.upload(name: name, mimeType: mimeType, data: data)
+            },
+            fileUpload: composerFileUpload ?? { name, mimeType, fileURL, byteCount in
+                try await client.upload(
+                    name: name,
+                    mimeType: mimeType,
+                    fileURL: fileURL,
+                    byteCount: byteCount
+                )
+            },
+            attachmentFileAccess: composerAttachmentFileAccess,
+            send: { text, sessionID, uploadIDs, behavior in
+                try await sessionMutations.prompt(text, sessionID: sessionID, uploadIDs: uploadIDs, behavior: behavior)
+            },
+            admitsLifecycleGeneration: { lifecycle.admits(.init(generation: $0, connectionID: nil)) }
+        )
+        let gatewayDiagnostics = GatewayDiagnosticsService(client: client)
+        let chatMedia = ChatMediaLoader(
+            fetch: { identity in
+                let value = try await client.blob(
+                    id: identity.blobID,
+                    profileID: identity.profileID,
+                    connectionID: identity.connectionID,
+                    maximumBytes: ChatMediaPolicy.maximumEncodedBytes
+                )
+                return ChatMediaPayload(data: value.0, mimeType: value.1)
+            },
+            admits: { identity in
+                lifecycle.selectedProfileID == identity.profileID
+                    && lifecycle.admits(.init(
+                        generation: identity.lifecycleGeneration,
+                        connectionID: identity.connectionID
+                    ))
+            }
+        )
+        let chatMediaMemoryPressureObserver = ChatMediaMemoryPressureObserver(loader: chatMedia)
+        let resolvedSessionImportUpload = sessionImportUpload ?? { name, mimeType, fileURL, byteCount in
+            try await client.upload(
+                name: name,
+                mimeType: mimeType,
+                fileURL: fileURL,
+                byteCount: byteCount
+            )
+        }
+        self.lifecycle = lifecycle
+        self.mutationExecutor = mutationExecutor
+        self.sessionMutations = sessionMutations
+        self.sessionImports = SessionImportCoordinator(
+            lifecycle: lifecycle,
+            mutations: sessionMutations,
+            fileAccess: sessionImportFileAccess,
+            upload: resolvedSessionImportUpload
+        )
+        self.terminal = terminal
+        self.settingsTrust = settingsTrust
+        self.providerAuth = providerAuth
+        self.packageConfiguration = packageConfiguration
+        self.customModelConfiguration = customModelConfiguration
+        self.composerDrafts = composerDrafts
+        self.gatewayDiagnostics = gatewayDiagnostics
+        self.chatMedia = chatMedia
+        self.chatMediaMemoryPressureObserver = chatMediaMemoryPressureObserver
+        self.sessionPresentation = sessionPresentation
         self.cache = cache
+        self.clock = clock
+        self.uuidSource = uuidSource
+        self.performanceSignposts = performanceSignposts
+        self.exportArtifacts = exportArtifacts
+        Task { try? await exportArtifacts.prune() }
         #if HOSTED_TEST
         if ProcessInfo.processInfo.arguments.contains("--tron-reset-ui-test-state") {
-            for profile in profiles.profiles { profiles.remove(profile) }
+            for profile in profiles.profiles { try? profiles.remove(profile) }
             UserDefaults.standard.removeObject(forKey: "tronSetupComplete.v1")
             UserDefaults.standard.removeObject(forKey: "piSetupComplete.v1")
             UserDefaults.standard.removeObject(forKey: "defaultWorkspace.v1")
         }
         #endif
-        eventTask = Task { [weak self, client] in
-            for await event in client.events { await self?.handle(event) }
-        }
-    }
-
-    var selectedSnapshot: SessionSnapshot? {
-        selectedSessionID.flatMap { snapshots[$0] }
-    }
-
-    var configuredDefaultModel: ModelRef? {
-        guard let model = settings?.objectValue?["effective"]?.objectValue?["defaultModel"]?.objectValue,
-              let provider = model["provider"]?.stringValue,
-              let id = model["id"]?.stringValue else { return nil }
-        return ModelRef(provider: provider, id: id)
-    }
-
-    var preferredAvailableModel: ModelRef? {
-        let available = models.filter(\.available)
-        return available.first(where: { $0.provider == "openai-codex" && $0.id == "gpt-5.6-sol" })?.ref
-            ?? available.first?.ref
-    }
-
-    var visibleSessions: [SessionSummary] { sessions.filter { !hiddenSessionIDs.contains($0.id) } }
-
-    func start() async {
-        guard connectionState != .connecting, connectionState != .connected, connectionState != .reconnecting else { return }
-        guard let profile = profiles.selected, let token = profiles.token(for: profile) else {
-            connectionState = .unpaired
-            hasResolvedLaunchState = true
-            return
-        }
-        await loadCache(profileID: profile.id)
-        await connect(profile: profile, token: token)
-        hasResolvedLaunchState = true
-    }
-
-    func becameActive() {
-        guard connectionState != .connected,
-              connectionState != .connecting,
-              connectionState != .reconnecting else { return }
-        scheduleReconnect(immediate: true)
-    }
-
-    func pair(_ invitation: PairingInvitation) async throws {
-        connectionState = .connecting
-        let name = UIDevice.current.name
-        let (profile, token) = try await GatewayPairer.pair(invitation, deviceName: name)
-        try profiles.save(profile, token: token)
-        await connect(profile: profile, token: token)
-        hasResolvedLaunchState = true
-    }
-
-    func switchGateway(_ profile: GatewayProfile) async {
-        guard let token = profiles.token(for: profile) else {
-            lastError = "This gateway no longer has a Keychain token. Pair it again."
-            return
-        }
-        profiles.select(profile)
-        sessions = []
-        snapshots = [:]
-        selectedSessionID = nil
-        subscribedSessionID = nil
-        await loadCache(profileID: profile.id)
-        await connect(profile: profile, token: token)
-    }
-
-    func forgetCurrentGateway() {
-        if let profile = profiles.selected { profiles.remove(profile) }
-        Task { await client.close() }
-        gatewayInfo = nil
-        sessions = []
-        snapshots = [:]
-        selectedSessionID = nil
-        subscribedSessionID = nil
-        setupComplete = false
-        connectionState = .unpaired
-        hasResolvedLaunchState = true
-    }
-
-    private func connect(profile: GatewayProfile, token: String) async {
-        connectionState = .connecting
-        do {
-            gatewayInfo = try await client.connect(profile: profile, token: token)
-            subscribedSessionID = nil
-            reconnectTask?.cancel()
-            reconnectTask = nil
-            await refreshAll()
-            connectionState = .connected
-        } catch let failure as GatewayFailure where failure.code == "unauthenticated" {
-            connectionState = .unauthorized
-            lastError = failure.message
-        } catch {
-            connectionState = .offline(error.localizedDescription)
-            scheduleReconnect()
-        }
-    }
-
-    private func scheduleReconnect(immediate: Bool = false) {
-        guard profiles.selected != nil, reconnectTask == nil else { return }
-        reconnectTask = Task { [weak self] in
-            if !immediate { try? await Task.sleep(for: .seconds(2)) }
-            var delay = 2.0
-            while !Task.isCancelled {
-                guard let self else { return }
-                self.connectionState = .reconnecting
-                do {
-                    self.gatewayInfo = try await self.client.reconnect()
-                    self.subscribedSessionID = nil
-                    await self.refreshAll()
-                    self.connectionState = .connected
-                    self.reconnectTask = nil
-                    return
-                } catch let failure as GatewayFailure where failure.code == "unauthenticated" {
-                    self.connectionState = .unauthorized
-                    self.lastError = failure.message
-                    self.reconnectTask = nil
-                    return
-                } catch {
-                    self.connectionState = .offline(error.localizedDescription)
-                    try? await Task.sleep(for: .seconds(delay))
-                    delay = min(delay * 1.7, 15)
-                }
+        lifecycle.delegate = self
+        sessionPresentation.delegate = self
+        settingsTrust.delegate = self
+        providerAuth.delegate = self
+        packageConfiguration.delegate = self
+        customModelConfiguration.delegate = self
+        let events = client.events
+        eventTask = Task { [weak self, events] in
+            for await delivery in events {
+                await self?.handle(delivery.event, connectionID: delivery.connectionID)
             }
         }
     }
 
-    func refreshAll() async {
-        await refreshSessions()
-        async let providerLoad: Void = refreshProviders()
-        async let settingLoad: Void = refreshSettings()
-        async let deviceLoad: Void = refreshDevices()
-        _ = await (providerLoad, settingLoad, deviceLoad)
-        if let selectedSessionID { try? await openSession(selectedSessionID) }
+    func authoritativeSnapshot(for sessionID: String) -> SessionSnapshot? {
+        sessionPresentation.authoritativeSnapshot(for: sessionID)
     }
 
-    func refreshSessions() async {
-        struct Params: Encodable { let cursor: String?; let limit: Int }
-        struct Response: Decodable { let sessions: [SessionSummary]; let nextCursor: String? }
-        do {
-            var all: [SessionSummary] = []
-            var cursor: String?
-            var seenCursors = Set<String>()
-            repeat {
-                let response: Response = try await client.request(
-                    "session.list",
-                    Params(cursor: cursor, limit: 200)
-                )
-                all.append(contentsOf: response.sessions)
-                cursor = response.nextCursor
-                if let cursor, !seenCursors.insert(cursor).inserted {
-                    throw GatewayFailure(
-                        code: "invalid_pagination",
-                        message: "Tron returned a repeated session cursor.",
-                        retryable: true,
-                        details: nil
-                    )
+    func chatMediaIdentity(blobID: String) -> ChatMediaIdentity? {
+        guard let admission = lifecycle.admission,
+              let connectionID = admission.connectionID,
+              let profileID = lifecycle.selectedProfileID else { return nil }
+        return ChatMediaIdentity(
+            profileID: profileID,
+            lifecycleGeneration: admission.generation,
+            connectionID: connectionID,
+            blobID: blobID
+        )
+    }
+
+    #if HOSTED_TEST
+    var selectedSessionID: String? { sessionPresentation.selectedSessionID }
+    var selectedSnapshot: SessionSnapshot? { sessionPresentation.snapshot }
+
+    func selectHostedCompatibilitySession(_ sessionID: String?) {
+        sessionPresentation.installCompatibilitySelection(sessionID)
+    }
+
+    func installHostedSecondaryProjection(
+        context: JSONValue?,
+        tree: [SessionTreeNode],
+        commands: [CommandInfo] = [],
+        resources: JSONValue?
+    ) {
+        sessionPresentation.installHostedSecondaryProjection(
+            context: context,
+            tree: tree,
+            commands: commands,
+            resources: resources
+        )
+    }
+
+    func installHostedSnapshotWithoutPresentation(_ snapshot: SessionSnapshot) {
+        sessionPresentation.installHostedSnapshotWithoutPresentation(snapshot)
+    }
+
+    func replaceHostedAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
+        sessionPresentation.replaceHostedSnapshot(snapshot)
+    }
+
+    func invalidateHostedPendingPresentation() {
+        sessionPresentation.invalidateHostedPendingPresentation()
+    }
+
+    func installHostedSubscribedSnapshot(_ snapshot: SessionSnapshot, token: String = "hosted-token") {
+        sessionPresentation.installHostedSubscription(snapshot: snapshot, token: token)
+        installHostedComposerPresentationIfPossible()
+    }
+
+    func installHostedAuthoritativeSnapshot(_ snapshot: SessionSnapshot) {
+        sessionPresentation.installHostedAuthoritativeSnapshot(snapshot)
+        installHostedComposerPresentationIfPossible()
+    }
+
+    private func installHostedComposerPresentationIfPossible() {
+        guard let target = sessionPresentation.mountedTarget,
+              let profileID = lifecycle.selectedProfileID,
+              let generation = lifecycle.generationAdmission?.generation else { return }
+        _ = composerDrafts.installHostedPresentation(
+            profileID: profileID, target: target, lifecycleGeneration: generation
+        )
+    }
+
+    var hostedSessionOpenAdmissionOverride: Bool?
+
+    func connectHostedGateway(profile: GatewayProfile, token: String) async throws {
+        try await lifecycle.connectHosted(profile: profile, token: token)
+    }
+
+    func installHostedSettings(_ value: JSONValue?, for target: SettingsTarget) {
+        settingsTrust.installHostedSettings(value, for: target)
+    }
+
+    func setHostedSettingsInvalidationGeneration(_ generation: Int) {
+        settingsTrust.setHostedInvalidationGenerations(settings: generation)
+    }
+
+    func installHostedProviderCatalog(_ catalog: ProviderCatalog?, for target: ProviderCatalogTarget) {
+        providerAuth.installHostedCatalog(catalog, for: target)
+    }
+
+    func setHostedProviderInvalidationGeneration(_ generation: Int) {
+        providerAuth.setHostedInvalidationGeneration(generation)
+    }
+
+    func installHostedPackageInventory(
+        _ inventory: PackageInventory?,
+        for target: PackageConfigurationTarget
+    ) {
+        packageConfiguration.installHostedInventory(inventory, for: target)
+    }
+
+    func setHostedPackageInvalidationGeneration(_ generation: Int) {
+        packageConfiguration.setHostedInvalidationGeneration(generation)
+    }
+
+    func installHostedCustomModels(_ value: JSONValue?, for target: CustomModelTarget) {
+        customModelConfiguration.installHostedModels(value, for: target)
+    }
+
+    func setHostedCustomModelInvalidationGeneration(_ generation: Int) {
+        customModelConfiguration.setHostedInvalidationGeneration(generation)
+    }
+
+    func installHostedProviderAuthOperation(
+        _ operationID: String,
+        target: ProviderCatalogTarget = .global
+    ) {
+        providerAuth.installHostedAuthOperation(operationID, target: target)
+    }
+    #endif
+
+    func presentationGeneration(for sessionID: String) -> Int? {
+        sessionPresentation.presentationGeneration(for: sessionID)
+    }
+
+    func chatProjectionGenerations(
+        for sessionID: String,
+        presentationGeneration: Int
+    ) -> (canonical: Int, timeline: Int)? {
+        guard sessionPresentation.mountedTarget == SessionPresentationIdentity(
+            sessionID: sessionID,
+            generation: presentationGeneration
+        ) else { return nil }
+        return (
+            canonical: sessionPresentation.chatCanonicalGeneration,
+            timeline: sessionPresentation.chatTimelineGeneration
+        )
+    }
+
+    func presentationTarget(for sessionID: String) -> SessionPresentationTarget? {
+        sessionPresentation.presentationTarget(for: sessionID)
+    }
+
+    func ownsPresentation(_ target: SessionPresentationTarget) -> Bool {
+        sessionPresentation.owns(target)
+    }
+
+    func revokePresentationIntake(_ target: SessionPresentationTarget) {
+        cancelExtensionEditorSynchronization(for: target)
+        composerDrafts.revoke(target)
+        sessionPresentation.revokeIntake(target)
+    }
+
+    func presentComposerActionError(_ error: Error, target: SessionPresentationTarget) {
+        guard composerDrafts.admits(target), !(error is CancellationError) else { return }
+        lastError = error.localizedDescription
+    }
+
+    func presentComposerActionError(_ message: String, target: SessionPresentationTarget) {
+        guard composerDrafts.admits(target) else { return }
+        lastError = message
+    }
+
+    var mountedPresentationTarget: SessionPresentationTarget? {
+        sessionPresentation.mountedTarget
+    }
+
+    static func soleAdmittedPresentationTarget(
+        generations: [String: Int],
+        revoked: Set<SessionPresentationTarget>
+    ) -> SessionPresentationTarget? {
+        let targets = generations.compactMap { sessionID, generation in
+            let target = SessionPresentationTarget(sessionID: sessionID, generation: generation)
+            return revoked.contains(target) ? nil : target
+        }
+        return targets.count == 1 ? targets[0] : nil
+    }
+
+    func sessionStructureRevision(for sessionID: String) -> Int {
+        sessionPresentation.structureRevision(for: sessionID)
+    }
+
+    func sessionContextRevision(for sessionID: String) -> Int {
+        sessionPresentation.contextRevision(for: sessionID)
+    }
+
+    func sessionResourceRevision(for sessionID: String) -> Int {
+        sessionPresentation.resourceRevision(for: sessionID)
+    }
+
+    func settings(for target: SettingsTarget) -> JSONValue? {
+        settingsTrust.settings(for: target)
+    }
+
+    func configuredDefaultModel(for target: SettingsTarget) -> ModelRef? {
+        settingsTrust.configuredDefaultModel(for: target)
+    }
+
+    func providerCatalog(for target: ProviderCatalogTarget) -> ProviderCatalog? {
+        providerAuth.catalog(for: target)
+    }
+
+    func preferredAvailableModel(for target: ProviderCatalogTarget) -> ModelRef? {
+        providerAuth.preferredAvailableModel(for: target)
+    }
+
+    var visibleSessions: [SessionSummary] {
+        SessionSummary.dashboardSessions(sessions)
+    }
+
+    func dashboardActivity(for sessionID: String) -> DashboardSessionActivity {
+        sessionCatalog.activity(for: sessionID)
+    }
+
+    func postNotice(_ message: String, replacing key: GlobalNoticeKey? = nil) {
+        if key == .sessionCatchUp {
+            sessionCatchUpNoticeTask?.cancel()
+            noticeStore.post(message, replacing: key)
+            sessionCatchUpNoticeTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(12))
+                guard !Task.isCancelled else { return }
+                self?.noticeStore.remove(.sessionCatchUp)
+                self?.sessionCatchUpNoticeTask = nil
+            }
+        } else {
+            noticeStore.post(message, replacing: key)
+        }
+    }
+
+    func removeNotice(_ key: GlobalNoticeKey) {
+        if key == .sessionCatchUp { sessionCatchUpNoticeTask?.cancel(); sessionCatchUpNoticeTask = nil }
+        noticeStore.remove(key)
+    }
+
+    func dismissNotices() {
+        sessionCatchUpNoticeTask?.cancel()
+        sessionCatchUpNoticeTask = nil
+        noticeStore.removeAll()
+    }
+
+    func presentConfigurationActionError(_ error: Error) {
+        guard !(error is CancellationError) else { return }
+        lastError = error.localizedDescription
+    }
+
+    func start() async {
+        await lifecycle.start()
+    }
+
+    @discardableResult
+    func becameActive() -> Task<Void, Never>? {
+        sceneAllowsCatalogRefresh = true
+        return lifecycle.becameActive()
+    }
+
+    func enteredBackground() {
+        sceneAllowsCatalogRefresh = false
+        // The canonical session may still be running on the Gateway, but this
+        // mobile projection is intentionally retiring its transport lease.
+        sessionCatalog.markDisconnected()
+        lifecycle.enteredBackground()
+        catalogInvalidationGeneration &+= 1
+        cancelCatalogRefresh()
+    }
+
+    func pair(_ invitation: PairingInvitation) async throws {
+        try await lifecycle.pair(invitation)
+    }
+
+    private func admitsLifecycle(_ admission: GatewayLifecycleCoordinator.Admission) -> Bool {
+        lifecycle.admits(admission)
+    }
+
+    private func requireLifecycle(_ admission: GatewayLifecycleCoordinator.Admission) throws {
+        try lifecycle.require(admission)
+    }
+
+    private func requireConnection(_ admission: GatewayLifecycleCoordinator.Admission) throws {
+        try lifecycle.requireConnection(admission)
+    }
+
+    private func invalidateProfileScopedLoads() {
+        cancelCatalogRefresh()
+        sessionCatalog.invalidateLoads()
+        workspaceLoadGeneration &+= 1
+        deviceLoadGeneration &+= 1
+        legacyImportLoadGeneration &+= 1
+    }
+
+    private func clearGatewayProjection() {
+        sessionCatalog.clear()
+        sessionPresentation.clearProfile()
+        pairedDevices.removeAll()
+        legacyImportAvailable = false
+        legacyImportedCount = 0
+        workspace = nil
+        providerAuth.clearProfile()
+        settingsTrust.clearProfile()
+        packageConfiguration.clearProfile()
+        customModelConfiguration.clearProfile()
+        cancelAllExtensionEditorSynchronization()
+        composerDrafts.retireProfilePresentation()
+        lastError = nil
+        onboardingError = nil
+        clearLiveConnectionProjection()
+    }
+
+    func switchGateway(_ profile: GatewayProfile) async {
+        await lifecycle.switchGateway(profile)
+    }
+
+    func forgetCurrentGateway() async {
+        let forgottenProfileID = profiles.selected?.id
+        if await lifecycle.forgetCurrentGateway() {
+            if let forgottenProfileID {
+                composerDrafts.removeProfile(forgottenProfileID)
+                await cache.remove(profileID: forgottenProfileID)
+            }
+            setupComplete = false
+        }
+    }
+
+    func teardown() async {
+        await lifecycle.teardown()
+    }
+
+    func restoreMountedPresentationAfterReconnect() async {
+        _ = await sessionPresentation.reconnectMountedPresentation()
+    }
+
+    func refreshAll(
+        settingsTarget: SettingsTarget = .global,
+        providerTarget: ProviderCatalogTarget = .global
+    ) async {
+        async let sessionLoad = refreshSessions()
+        async let providerLoad: Bool = refreshProviders(target: providerTarget)
+        async let settingLoad: Bool = refreshSettings(target: settingsTarget)
+        async let deviceLoad: Void = refreshDevices()
+        _ = await (sessionLoad, providerLoad, settingLoad, deviceLoad)
+    }
+
+    @discardableResult
+    func refreshSessions() async -> SessionCatalogRefreshOutcome {
+        guard let key = currentCatalogLoadKey() else { return .retained }
+        if let task = catalogRefreshTask, catalogRefreshKey == key {
+            return await task.value
+        }
+        if catalogRefreshTask != nil { cancelCatalogRefresh() }
+        return await startCatalogRefresh(key: key).value
+    }
+
+    private func currentCatalogLoadKey() -> SessionCatalogLoadKey? {
+        guard sceneAllowsCatalogRefresh,
+              let admission = lifecycle.admission,
+              let connectionID = admission.connectionID,
+              let profileID = lifecycle.selectedProfileID else { return nil }
+        return SessionCatalogLoadKey(
+            profileID: profileID,
+            lifecycleGeneration: admission.generation,
+            connectionID: connectionID
+        )
+    }
+
+    @discardableResult
+    private func startCatalogRefresh(key: SessionCatalogLoadKey) -> Task<SessionCatalogRefreshOutcome, Never> {
+        catalogRefreshRequestGeneration &+= 1
+        let requestGeneration = catalogRefreshRequestGeneration
+        let task = Task<SessionCatalogRefreshOutcome, Never> { @MainActor [weak self] in
+            guard let self else { return SessionCatalogRefreshOutcome.retained }
+            let outcome = await self.runCatalogRefreshLease(key: key, requestGeneration: requestGeneration)
+            if self.catalogRefreshRequestGeneration == requestGeneration,
+               self.catalogRefreshKey == key {
+                let needsFollowUp = self.catalogDeferredFollowUpKey == key
+                self.catalogDeferredFollowUpKey = nil
+                self.catalogRefreshTask = nil
+                self.catalogRefreshKey = nil
+                if needsFollowUp, self.currentCatalogLoadKey() == key {
+                    _ = self.startCatalogRefresh(key: key)
                 }
-            } while cursor != nil
-            sessions = all
-            locallyCreatedUnindexedSessionIDs.subtract(all.map(\.id))
-            reconcileSelection()
-            saveCache()
-        } catch { surface(error) }
+            }
+            return outcome
+        }
+        catalogRefreshKey = key
+        catalogRefreshTask = task
+        return task
+    }
+
+    private func runCatalogRefreshLease(
+        key: SessionCatalogLoadKey,
+        requestGeneration: Int
+    ) async -> SessionCatalogRefreshOutcome {
+        var outcome: SessionCatalogRefreshOutcome = .retained
+        for traversal in 0..<2 {
+            let observedInvalidation = catalogInvalidationGeneration
+            outcome = await performCatalogTraversal(key: key, requestGeneration: requestGeneration)
+            guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration) else { return .retained }
+            if outcome == .transportFailure { return outcome }
+            let dirtied = catalogInvalidationGeneration > observedInvalidation
+            guard dirtied else { return outcome }
+            if traversal == 1 {
+                // Bound immediate catch-up under an event burst. Completion
+                // hands one dirty bit to a new shared lease rather than
+                // spinning forever inside this owner.
+                catalogDeferredFollowUpKey = key
+                return outcome
+            }
+        }
+        return outcome
+    }
+
+    private func performCatalogTraversal(
+        key: SessionCatalogLoadKey,
+        requestGeneration: Int
+    ) async -> SessionCatalogRefreshOutcome {
+        struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
+        struct Response: Decodable {
+            let sessions: [SessionSummary]
+            let nextCursor: String?
+            let listRevision: Int
+        }
+
+        for revisionAttempt in 0..<2 {
+            let loadAdmission = sessionCatalog.beginLoad(key: key)
+            var requestedContinuation = false
+            do {
+                let pageLimit = 500
+                let maximumPages = 50
+                let maximumItems = 25_000
+                var all: [SessionSummary] = []
+                var cursor: String?
+                var seenCursors = Set<String>()
+                var seenSessionIDs = Set<String>()
+                var expectedRevision: Int?
+                var revisionChanged = false
+                var pageCount = 0
+                repeat {
+                    guard pageCount < maximumPages else { return .retained }
+                    requestedContinuation = cursor != nil
+                    let response: Response = try await client.request(
+                        "session.list",
+                        Params(cursor: cursor, limit: pageLimit, scope: "user")
+                    )
+                    pageCount += 1
+                    guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
+                          sessionCatalog.admits(loadAdmission, key: key) else { return .retained }
+                    if let expectedRevision, expectedRevision != response.listRevision {
+                        revisionChanged = true
+                        break
+                    }
+                    expectedRevision = response.listRevision
+                    guard response.sessions.count <= pageLimit,
+                          all.count <= maximumItems - response.sessions.count,
+                          response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
+                        return .retained
+                    }
+                    all.append(contentsOf: response.sessions)
+                    cursor = response.nextCursor
+                    if let cursor, !seenCursors.insert(cursor).inserted { return .retained }
+                } while cursor != nil
+
+                if revisionChanged {
+                    if revisionAttempt == 0 { continue }
+                    return .retained
+                }
+                guard sessionCatalog.publishAuthoritative(all, admission: loadAdmission) else { return .retained }
+                reconcileSelection()
+                scheduleCacheCheckpoint()
+                return .published
+            } catch is CancellationError {
+                return .retained
+            } catch let failure as GatewayFailure
+                where requestedContinuation && failure.code == "invalid_request" && revisionAttempt == 0 {
+                guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
+                      sessionCatalog.admits(loadAdmission, key: key) else { return .retained }
+                continue
+            } catch {
+                guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
+                      sessionCatalog.admits(loadAdmission, key: key) else { return .retained }
+                return Self.catalogFailureOutcome(error)
+            }
+        }
+        return .retained
+    }
+
+    private func admitsCatalogRefresh(
+        key: SessionCatalogLoadKey,
+        requestGeneration: Int
+    ) -> Bool {
+        guard catalogRefreshRequestGeneration == requestGeneration,
+              catalogRefreshKey == key,
+              let admission = lifecycle.admission else { return false }
+        return admission.generation == key.lifecycleGeneration
+            && admission.connectionID == key.connectionID
+            && lifecycle.selectedProfileID == key.profileID
+    }
+
+    private static func catalogFailureOutcome(_ error: Error) -> SessionCatalogRefreshOutcome {
+        if error is CancellationError { return .retained }
+        if let failure = error as? GatewayFailure,
+           ["disconnected", "closed", "replaced", "timeout"].contains(failure.code) {
+            return .transportFailure
+        }
+        if error is URLError { return .transportFailure }
+        let cocoaError = error as NSError
+        if cocoaError.domain == NSPOSIXErrorDomain { return .transportFailure }
+        return .retained
+    }
+
+    private func cancelCatalogRefresh() {
+        catalogRefreshRequestGeneration &+= 1
+        catalogDeferredFollowUpKey = nil
+        catalogRefreshTask?.cancel()
+        catalogRefreshTask = nil
+        catalogRefreshKey = nil
     }
 
     func refreshDevices() async {
         struct Response: Decodable { let devices: [PairedDevice] }
+        deviceLoadGeneration &+= 1
+        let generation = deviceLoadGeneration
         do {
             let response: Response = try await client.request("device.list", EmptyParams())
-            pairedDevices = response.devices
-        } catch { surface(error) }
+            let admitted = try PairedDeviceCatalogPolicy.admit(response.devices)
+            guard deviceLoadGeneration == generation else { return }
+            pairedDevices = admitted
+        } catch {
+            guard deviceLoadGeneration == generation else { return }
+            surface(error)
+        }
     }
 
     func revokeDevice(_ id: String) async throws {
-        struct Params: Encodable { let deviceId: String; let commandId: String }
-        struct Response: Decodable { let revoked: Bool }
-        let response: Response = try await client.request(
-            "device.revoke",
-            Params(deviceId: id, commandId: UUID().uuidString)
-        )
+        struct Params: Codable { let deviceId: String; let commandId: String }
+        struct Response: Codable { let revoked: Bool }
+        let commandID = uuidSource.next().uuidString
+        let params = Params(deviceId: id, commandId: commandID)
+        let response: Response = try await mutationExecutor.perform(method: "device.revoke", commandID: commandID) {
+            try await client.request("device.revoke", params)
+        }
         if response.revoked {
             pairedDevices.removeAll { $0.id == id }
-            if let profile = profiles.selected, profile.deviceId == id {
-                profiles.remove(profile)
-                connectionState = .unpaired
-                await client.close()
+            if let profile = profiles.selected, profile.deviceId == id,
+               await lifecycle.forget(profile: profile) {
+                composerDrafts.removeProfile(profile.id)
+                await cache.remove(profileID: profile.id)
+                setupComplete = false
             }
         }
     }
 
     func inspectLegacyImport() async {
         struct Response: Decodable { let available: Bool; let importedCount: Int }
+        legacyImportLoadGeneration &+= 1
+        let generation = legacyImportLoadGeneration
         do {
             let response: Response = try await client.request("legacy.inspect", EmptyParams())
+            guard legacyImportLoadGeneration == generation else { return }
             legacyImportAvailable = response.available
             legacyImportedCount = response.importedCount
-        } catch { surface(error) }
+        } catch {
+            guard legacyImportLoadGeneration == generation else { return }
+            surface(error)
+        }
     }
 
     func importLegacySessions(port: Int = 9849) async throws {
-        struct Params: Encodable { let port: Int; let commandId: String }
-        struct Response: Decodable { let imported: Int; let skipped: Int }
-        let response: Response = try await client.request(
-            "legacy.import",
-            Params(port: port, commandId: UUID().uuidString),
-            timeout: .seconds(600)
-        )
+        struct Params: Codable { let port: Int; let commandId: String }
+        struct Response: Codable { let imported: Int; let skipped: Int }
+        let commandID = uuidSource.next().uuidString
+        let params = Params(port: port, commandId: commandID)
+        let response: Response = try await mutationExecutor.perform(method: "legacy.import", commandID: commandID) {
+            try await client.request("legacy.import", params, timeout: .seconds(600))
+        }
         legacyImportedCount += response.imported
-        notifications.append("Imported \(response.imported) legacy session\(response.imported == 1 ? "" : "s"); skipped \(response.skipped).")
+        postNotice("Imported \(response.imported) legacy session\(response.imported == 1 ? "" : "s"); skipped \(response.skipped).")
         await refreshSessions()
     }
 
-    func importSession(from url: URL, cwd: String) async throws {
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let data = try Data(contentsOf: url, options: .mappedIfSafe)
-        let uploadID = try await client.upload(name: url.lastPathComponent, mimeType: "application/x-ndjson", data: data)
-        struct Params: Codable { let uploadId, cwd, commandId: String }
-        struct Response: Decodable { let session: SessionSnapshot }
-        await closeCurrentSubscription()
-        let commandID = UUID().uuidString
-        let params = Params(uploadId: uploadID, cwd: cwd, commandId: commandID)
-        let response: Response = try await confirmedMutation(method: "session.import", commandId: commandID) {
-            try await client.request("session.import", params, timeout: .seconds(120))
-        }
-        selectedSessionID = response.session.sessionId
-        subscribedSessionID = response.session.sessionId
-        apply(response.session)
+    func importSession(from url: URL, cwd: String) async throws -> SessionNavigationRoute {
+        let imported = try await sessionImports.importSession(from: url, cwd: cwd)
         await refreshSessions()
+        try sessionImports.requireCurrent(imported)
+        return SessionNavigationRoute(
+            sessionID: imported.sessionID,
+            editorText: nil,
+            gatewayProfileID: imported.profileID,
+            gatewayLifecycleGeneration: imported.lifecycleGeneration
+        )
     }
 
-    func createSession(cwd: String) async throws {
-        struct Params: Codable { let cwd: String; let commandId: String }
-        struct Response: Decodable { let session: SessionSnapshot }
-        await closeCurrentSubscription()
-        let commandID = UUID().uuidString
-        let params = Params(cwd: cwd, commandId: commandID)
-        let response: Response = try await confirmedMutation(method: "session.create", commandId: commandID) {
-            try await client.request("session.create", params, timeout: .seconds(60))
-        }
-        snapshots[response.session.sessionId] = response.session
-        locallyCreatedUnindexedSessionIDs.insert(response.session.sessionId)
-        selectedSessionID = response.session.sessionId
-        subscribedSessionID = response.session.sessionId
+    func ownsNavigationRoute(_ route: SessionNavigationRoute) -> Bool {
+        guard let gatewayProfileID = route.gatewayProfileID else { return true }
+        guard profiles.selected?.id == gatewayProfileID,
+              let generation = route.gatewayLifecycleGeneration else { return false }
+        return lifecycle.admits(.init(generation: generation, connectionID: nil))
+    }
+
+    func createSession(cwd: String) async throws -> SessionNavigationRoute {
+        guard let admission = lifecycle.generationAdmission,
+              let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
+        let sessionID = try await sessionMutations.createSession(cwd: cwd)
+        try requireLifecycle(admission)
+        guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
         defaultWorkspace = cwd
         UserDefaults.standard.set(cwd, forKey: "defaultWorkspace.v1")
-        await refreshSessions()
+        return SessionNavigationRoute(
+            sessionID: sessionID,
+            editorText: nil,
+            gatewayProfileID: profileID,
+            gatewayLifecycleGeneration: admission.generation
+        )
     }
 
-    func openSession(_ id: String) async throws {
-        struct Params: Codable { let sessionId: String }
-        struct Response: Decodable { let session: SessionSnapshot }
-        if subscribedSessionID != id { await closeCurrentSubscription() }
-        selectedSessionID = id
-        let response: Response = try await client.request("session.open", Params(sessionId: id), timeout: .seconds(60))
-        subscribedSessionID = response.session.sessionId
-        apply(response.session)
-        async let providerRefresh: Void = refreshProviders()
-        async let commandRefresh: Void = loadCommands()
-        _ = await (providerRefresh, commandRefresh)
+    /// Starts a new mounted chat presentation. Unlike reconnect synchronization,
+    /// this always installs a fresh authoritative bounded tail and never carries
+    /// an explicitly paged prefix across navigation lifetimes.
+    func openSessionPresentation(
+        _ id: String,
+        composerScope suppliedScope: ComposerDraftScope? = nil
+    ) async throws -> Int {
+        guard let admission = lifecycle.generationAdmission,
+              let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
+        let scope = suppliedScope ?? composerDrafts.prepareDraft(
+            profileID: profileID,
+            sessionID: id,
+            initialText: nil
+        )
+        guard scope.profileID == profileID, scope.sessionID == id else { throw CancellationError() }
+        #if HOSTED_TEST
+        let hostedAdmission = hostedSessionOpenAdmissionOverride ?? true
+        hostedSessionOpenAdmissionOverride = nil
+        #else
+        let hostedAdmission = true
+        #endif
+        return try await composerDrafts.openMountedPresentation(
+            scope: scope,
+            lifecycleGeneration: admission.generation,
+            open: { try await sessionPresentation.open(id) },
+            finalAdmission: { _ in
+                try requireLifecycle(admission)
+                guard hostedAdmission,
+                      lifecycle.selectedProfileID == profileID else { throw CancellationError() }
+            },
+            revokePresentation: sessionPresentation.revokeIntake,
+            closePresentation: sessionPresentation.close
+        )
     }
 
-    func loadEarlierTranscript() async {
-        guard !loadingEarlierTranscript,
-              let sessionID = selectedSessionID,
-              let current = snapshots[sessionID],
-              let before = current.transcriptStart,
-              before > 0 else { return }
-        struct Params: Codable { let sessionId: String; let before: Int }
-        struct Response: Decodable { let items: [TranscriptItem]; let start: Int; let total: Int }
-        loadingEarlierTranscript = true
-        defer { loadingEarlierTranscript = false }
-        do {
-            let response: Response = try await client.request(
-                "session.transcript",
-                Params(sessionId: sessionID, before: before),
-                timeout: .seconds(60)
-            )
-            guard var snapshot = snapshots[sessionID], snapshot.runtimeGeneration == current.runtimeGeneration else { return }
-            let existingIDs = Set(snapshot.transcript.map(\.id))
-            snapshot.transcript = response.items.filter { !existingIDs.contains($0.id) } + snapshot.transcript
-            snapshot.transcriptStart = response.start
-            snapshot.transcriptTotal = response.total
-            snapshots[sessionID] = snapshot
-        } catch { surface(error) }
+    func closeSessionPresentation(_ id: String, generation: Int) async {
+        let target = SessionPresentationTarget(sessionID: id, generation: generation)
+        cancelExtensionEditorSynchronization(for: target)
+        composerDrafts.revoke(target)
+        await sessionPresentation.close(target)
     }
 
-    private func closeCurrentSubscription() async {
-        guard let sessionID = subscribedSessionID else { return }
-        struct Params: Codable { let sessionId: String }
-        struct Response: Decodable { let closed: Bool }
-        let _: Response? = try? await client.request("session.close", Params(sessionId: sessionID))
-        subscribedSessionID = nil
+    func loadEarlierTranscript(sessionID: String, presentationGeneration: Int) async {
+        await sessionPresentation.loadEarlier(
+            sessionID: sessionID,
+            presentationGeneration: presentationGeneration
+        )
     }
 
-    func send(_ text: String, behavior: String? = nil) async throws {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable {
-            let sessionId: String
-            let text: String
-            let uploadIds: [String]
-            let behavior: String?
-            let commandId: String
-        }
-        struct Response: Decodable { let operationId: String }
-        let commandID = UUID().uuidString
-        let params = Params(sessionId: sessionID, text: text, uploadIds: pendingAttachments.map(\.id), behavior: behavior, commandId: commandID)
-        let _: Response = try await confirmedMutation(method: "session.prompt", commandId: commandID) {
-            try await client.request("session.prompt", params, as: Response.self, timeout: .seconds(15))
-        }
-        pendingAttachments.removeAll()
+    func discardLoadedTranscriptHistory(
+        sessionID: String,
+        presentationGeneration: Int
+    ) {
+        sessionPresentation.discardLoadedTranscriptHistory(
+            sessionID: sessionID,
+            presentationGeneration: presentationGeneration
+        )
     }
 
-    func abort(kind: String = "agent") async {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId, kind, commandId: String }
-        struct Response: Decodable { let aborted: Bool }
-        do { let _: Response = try await client.request("session.abort", Params(sessionId: sessionID, kind: kind, commandId: UUID().uuidString), timeout: .seconds(30)) }
+    private func invalidateSessionConnectionOwnership() {
+        cancelAllExtensionEditorSynchronization()
+        chatMedia.removeAll()
+        sessionPresentation.retireConnection()
+    }
+
+    static func ownsPresentation(
+        mountedGeneration: Int?,
+        requestedGeneration: Int
+    ) -> Bool {
+        SessionPresentationStore.ownsPresentation(
+            mountedGeneration: mountedGeneration,
+            requestedGeneration: requestedGeneration
+        )
+    }
+
+    static func admitsPresentationIntake(
+        mountedGeneration: Int?,
+        requestedGeneration: Int,
+        isRevoked: Bool
+    ) -> Bool {
+        SessionPresentationStore.admitsPresentationIntake(
+            mountedGeneration: mountedGeneration,
+            requestedGeneration: requestedGeneration,
+            isRevoked: isRevoked
+        )
+    }
+
+    static func ownsSubscription(
+        sessionID: String,
+        subscribedSessionID: String?,
+        installedToken: String?,
+        requestedToken: String
+    ) -> Bool {
+        SessionPresentationStore.ownsSubscription(
+            sessionID: sessionID,
+            subscribedSessionID: subscribedSessionID,
+            installedToken: installedToken,
+            requestedToken: requestedToken
+        )
+    }
+
+    static func shouldClearSubscription(
+        installedToken: String?,
+        closingToken: String,
+        gatewayClosed: Bool
+    ) -> Bool {
+        SessionPresentationStore.shouldClearSubscription(
+            installedToken: installedToken,
+            closingToken: closingToken,
+            gatewayClosed: gatewayClosed
+        )
+    }
+
+    func sendSharedContent(
+        _ text: String,
+        target: SessionPresentationTarget
+    ) async throws {
+        guard ownsPresentation(target) else { throw CancellationError() }
+        try await sessionMutations.prompt(
+            text,
+            sessionID: target.sessionID,
+            uploadIDs: [],
+            behavior: nil
+        )
+    }
+
+    func sendComposer(
+        target: SessionPresentationTarget,
+        behavior: String? = nil,
+        canonicalTranscript: [TranscriptItem] = []
+    ) async throws {
+        try await composerDrafts.send(
+            target: target,
+            behavior: behavior,
+            canonicalTranscript: canonicalTranscript
+        )
+    }
+
+    func abort(sessionID: String, kind: String = "agent") async {
+        do { try await sessionMutations.abort(sessionID: sessionID, kind: kind) }
         catch { surface(error) }
     }
 
-    func clearQueue() async throws -> SessionSnapshot.QueuedMessages {
-        guard let sessionID = selectedSessionID else { return .init(steering: [], followUp: []) }
-        struct Params: Codable { let sessionId, commandId: String }
-        let cleared: SessionSnapshot.QueuedMessages = try await client.request("session.clearQueue", Params(sessionId: sessionID, commandId: UUID().uuidString))
-        if var snapshot = snapshots[sessionID] {
-            snapshot.queued = .init(steering: [], followUp: [])
-            snapshots[sessionID] = snapshot
-        }
+    func clearQueue(sessionID: String) async throws -> SessionSnapshot.QueuedMessages {
+        let cleared = try await sessionMutations.clearQueue(sessionID: sessionID)
+        sessionPresentation.clearConfirmedQueue(sessionID: sessionID)
         return cleared
     }
 
-    func executeBash(_ command: String, excludeFromContext: Bool = false) async throws {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId, command: String; let excludeFromContext: Bool; let commandId: String }
-        _ = try await client.requestValue(
-            "session.bash",
-            Params(sessionId: sessionID, command: command, excludeFromContext: excludeFromContext, commandId: UUID().uuidString),
-            timeout: .seconds(300)
+    func replaceQueue(
+        sessionID: String,
+        expectedRevision: Int,
+        items: [SessionSnapshot.QueuedMessage]
+    ) async throws {
+        try await sessionMutations.replaceQueue(
+            sessionID: sessionID,
+            expectedRevision: expectedRevision,
+            items: items
         )
     }
 
-    func setModel(_ model: ModelRef) async throws {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId, provider, modelId, commandId: String }
-        let _: MutationResponse = try await client.request("session.setModel", Params(sessionId: sessionID, provider: model.provider, modelId: model.id, commandId: UUID().uuidString))
+    func executeBash(_ command: String, sessionID: String, excludeFromContext: Bool = false) async throws {
+        try await sessionMutations.executeBash(
+            command,
+            sessionID: sessionID,
+            excludeFromContext: excludeFromContext
+        )
     }
 
-    func setThinking(_ level: String) async throws {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId, level, commandId: String }
-        let _: MutationResponse = try await client.request("session.setThinking", Params(sessionId: sessionID, level: level, commandId: UUID().uuidString))
+    func setModel(_ model: ModelRef, sessionID: String) async throws {
+        try await sessionMutations.setModel(model, sessionID: sessionID)
     }
 
-    func rename(_ name: String) async throws {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId, name, commandId: String }
-        let _: MutationResponse = try await client.request("session.rename", Params(sessionId: sessionID, name: name, commandId: UUID().uuidString))
+    func setThinking(_ level: String, sessionID: String) async throws {
+        try await sessionMutations.setThinking(level, sessionID: sessionID)
     }
 
-    func compact(instructions: String? = nil) async throws {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId: String; let instructions: String?; let commandId: String }
-        struct Response: Decodable { let compacted: Bool }
-        let _: Response = try await client.request("session.compact", Params(sessionId: sessionID, instructions: instructions, commandId: UUID().uuidString), timeout: .seconds(300))
+    func renameSession(_ sessionID: String, name: String) async throws {
+        try await sessionMutations.rename(sessionID, name: name)
     }
 
-    func setTools(_ tools: [String]) async throws {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId: String; let tools: [String]; let commandId: String }
-        let _: MutationResponse = try await client.request("session.setTools", Params(sessionId: sessionID, tools: tools, commandId: UUID().uuidString))
+    func compact(sessionID: String, instructions: String? = nil) async throws {
+        try await sessionMutations.compact(sessionID: sessionID, instructions: instructions)
     }
 
-    @discardableResult
-    func fork(entryID: String, position: String = "before") async throws -> String? {
-        guard let sessionID = selectedSessionID else { return nil }
-        struct Params: Codable { let sessionId, entryId, position, commandId: String }
-        struct Response: Decodable { let sessionId: String; let selectedText: String? }
-        let response: Response = try await client.request("session.fork", Params(sessionId: sessionID, entryId: entryID, position: position, commandId: UUID().uuidString), timeout: .seconds(120))
-        selectedSessionID = response.sessionId
-        subscribedSessionID = response.sessionId
-        try await openSession(response.sessionId)
-        if let selectedText = response.selectedText {
-            editorRequest = .init(sessionId: response.sessionId, revision: Int(Date.now.timeIntervalSince1970 * 1_000), action: .set, text: selectedText, fullText: selectedText)
-        }
+    func setTools(_ tools: [String], sessionID: String) async throws {
+        try await sessionMutations.setTools(tools, sessionID: sessionID)
+    }
+
+    func setExtensionToolsExpanded(
+        sessionID: String,
+        hostEpoch: String,
+        presentationRevision: Int,
+        expanded: Bool
+    ) async throws {
+        try await sessionMutations.setExtensionToolsExpanded(
+            sessionID: sessionID,
+            hostEpoch: hostEpoch,
+            presentationRevision: presentationRevision,
+            expanded: expanded
+        )
+    }
+
+    func fork(
+        sessionID: String,
+        entryID: String,
+        position: String = "before"
+    ) async throws -> SessionNavigationRoute {
+        let outcome = try await sessionMutations.fork(
+            sessionID: sessionID,
+            entryID: entryID,
+            position: position
+        )
         await refreshSessions()
-        return response.selectedText
+        return SessionNavigationRoute(
+            sessionID: outcome.sessionID,
+            editorText: outcome.selectedText
+        )
     }
 
     @discardableResult
-    func navigate(entryID: String, summarize: Bool, instructions: String? = nil, replaceInstructions: Bool = false, label: String? = nil) async throws -> String? {
-        guard let sessionID = selectedSessionID else { return nil }
-        struct Params: Codable {
-            let sessionId, entryId: String
-            let summarize: Bool
-            let instructions: String?
-            let replaceInstructions: Bool
-            let label: String?
-            let commandId: String
-        }
-        struct Response: Decodable { let editorText: String? }
-        let response: Response = try await client.request(
-            "session.navigate",
-            Params(sessionId: sessionID, entryId: entryID, summarize: summarize, instructions: instructions, replaceInstructions: replaceInstructions, label: label, commandId: UUID().uuidString),
-            timeout: .seconds(300)
+    func navigate(
+        sessionID: String,
+        entryID: String,
+        summarize: Bool,
+        instructions: String? = nil,
+        replaceInstructions: Bool = false,
+        label: String? = nil
+    ) async throws -> String? {
+        let editorTarget = presentationTarget(for: sessionID)
+        let editorText = try await sessionMutations.navigate(
+            sessionID: sessionID,
+            entryID: entryID,
+            summarize: summarize,
+            instructions: instructions,
+            replaceInstructions: replaceInstructions,
+            label: label
         )
-        if let editorText = response.editorText {
-            editorRequest = .init(sessionId: sessionID, revision: Int(Date.now.timeIntervalSince1970 * 1_000), action: .set, text: editorText, fullText: editorText)
+        if let editorText,
+           let editorTarget,
+           ownsPresentation(editorTarget) {
+            composerDrafts.publishEditorRequest(
+                ComposerEditorRequest(
+                    sessionID: sessionID,
+                    presentationGeneration: editorTarget.generation,
+                    revision: Int(Date.now.timeIntervalSince1970 * 1_000),
+                    action: .set,
+                    text: editorText,
+                    fullText: editorText
+                ),
+                target: editorTarget
+            )
         }
-        await loadTree()
-        return response.editorText
+        await loadTree(sessionID: sessionID)
+        return editorText
     }
 
-    func setLabel(entryID: String, label: String?) async throws {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId, entryId: String; let label: String?; let commandId: String }
-        let _: MutationResponse = try await client.request("session.label", Params(sessionId: sessionID, entryId: entryID, label: label, commandId: UUID().uuidString))
-        await loadTree()
+    func setLabel(sessionID: String, entryID: String, label: String?) async throws {
+        try await sessionMutations.setLabel(
+            sessionID: sessionID,
+            entryID: entryID,
+            label: label
+        )
+        await loadTree(sessionID: sessionID)
     }
 
-    func exportSession(format: String) async throws -> URL {
-        guard let sessionID = selectedSessionID else { throw GatewayFailure(code: "no_session", message: "Select a session first.", retryable: false, details: nil) }
+    func exportSession(sessionID: String, format: String) async throws -> URL {
+        guard let subscriptionToken = sessionPresentation.installedSubscriptionToken(for: sessionID) else {
+            throw GatewayFailure(code: "sync_failed", message: "Open the session before exporting it.", retryable: true, details: nil)
+        }
         struct Params: Codable { let sessionId, format: String }
         struct Response: Decodable { let blobId, name, mimeType: String }
         let response: Response = try await client.request("session.export", Params(sessionId: sessionID, format: format), timeout: .seconds(120))
-        let data = try await client.blob(id: response.blobId).0
-        let directory = FileManager.default.temporaryDirectory.appending(path: "TronExports", directoryHint: .isDirectory)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let destination = directory.appending(path: response.name, directoryHint: .notDirectory)
-        try data.write(to: destination, options: .atomic)
-        return destination
+        guard sessionPresentation.ownsInstalledSubscription(
+            sessionID: sessionID,
+            token: subscriptionToken
+        ) else { throw CancellationError() }
+        try Task.checkCancellation()
+        let stagedURL = try await client.blobFile(
+            id: response.blobId,
+            maximumBytes: SessionExportArtifactPolicy.maximumEncodedBytes
+        )
+        defer { BoundedHTTPFileStaging.shared.discard(stagedURL) }
+        guard sessionPresentation.ownsInstalledSubscription(
+            sessionID: sessionID,
+            token: subscriptionToken
+        ) else { throw CancellationError() }
+        try Task.checkCancellation()
+        let artifact = try await exportArtifacts.adopt(stagedURL, suggestedName: response.name)
+        guard !Task.isCancelled, sessionPresentation.ownsInstalledSubscription(
+            sessionID: sessionID,
+            token: subscriptionToken
+        ) else {
+            await exportArtifacts.discard(artifact)
+            throw CancellationError()
+        }
+        return artifact
+    }
+
+    func discardExportArtifact(_ artifact: URL) async {
+        await exportArtifacts.discard(artifact)
     }
 
     func deleteSession(_ id: String) async throws {
-        struct Params: Codable { let sessionId, commandId: String }
-        struct Response: Decodable { let deleted: Bool }
-        if subscribedSessionID == id { await closeCurrentSubscription() }
-        let _: Response = try await client.request("session.delete", Params(sessionId: id, commandId: UUID().uuidString), timeout: .seconds(60))
-        snapshots.removeValue(forKey: id)
-        locallyCreatedUnindexedSessionIDs.remove(id)
-        sessions.removeAll { $0.id == id }
-        if selectedSessionID == id { selectedSessionID = visibleSessions.first?.id }
-        saveCache()
+        await sessionPresentation.closeSubscriptionIfInstalled(sessionID: id)
+        try await sessionMutations.delete(sessionID: id)
+        sessionPresentation.remove(sessionID: id)
+        if let profileID = lifecycle.selectedProfileID {
+            composerDrafts.removeSession(profileID: profileID, sessionID: id)
+        }
+        sessionCatalog.remove(id)
+        scheduleCacheCheckpoint()
     }
 
-    func loadContext() async {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId: String }
-        do { context = try await client.requestValue("session.context", Params(sessionId: sessionID), timeout: .seconds(60)) }
-        catch { surface(error) }
+    func loadContext(sessionID: String) async {
+        await sessionPresentation.loadContext(sessionID: sessionID)
     }
 
-    func loadTree() async {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId: String }
-        do { sessionTree = try await client.request("session.tree", Params(sessionId: sessionID)) }
-        catch { surface(error) }
+    func loadTree(sessionID: String) async {
+        await sessionPresentation.loadTree(sessionID: sessionID)
     }
 
-    func loadCommands() async {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId: String }
-        struct Response: Decodable { let commands: [CommandInfo] }
-        do {
-            let response: Response = try await client.request("session.commands", Params(sessionId: sessionID))
-            commands = response.commands
-        } catch { surface(error) }
+    func loadCommands(sessionID: String) async {
+        await sessionPresentation.loadCommands(sessionID: sessionID)
     }
 
-    func loadResources() async {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId: String }
-        do { resources = try await client.requestValue("session.resources", Params(sessionId: sessionID), timeout: .seconds(60)) }
-        catch { surface(error) }
+    func loadResources(sessionID: String) async {
+        await sessionPresentation.loadResources(sessionID: sessionID)
     }
 
-    func reloadResources() async throws {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId, commandId: String }
-        struct Response: Decodable { let reloaded: Bool }
-        let _: Response = try await client.request("session.reloadResources", Params(sessionId: sessionID, commandId: UUID().uuidString), timeout: .seconds(120))
+    func reloadResources(sessionID: String) async throws {
+        try await sessionMutations.reloadResources(sessionID: sessionID)
     }
 
-    func archive(_ id: String) {
-        // Kept only for migration of previous local-hidden state. New UI uses
-        // canonical session deletion and labels it accurately.
-        hiddenSessionIDs.insert(id)
-        persistHidden()
-        if selectedSessionID == id { selectedSessionID = visibleSessions.first?.id }
-    }
-
-    func upload(name: String, mimeType: String, data: Data) async throws {
-        let id = try await client.upload(name: name, mimeType: mimeType, data: data)
-        pendingAttachments.append(PendingAttachment(id: id, name: name, mimeType: mimeType, size: data.count))
-    }
-
-    func removeAttachment(_ id: String) { pendingAttachments.removeAll { $0.id == id } }
-
-    func refreshProviders() async {
-        struct ProviderParams: Codable { let sessionId: String? }
-        struct ModelParams: Codable { let sessionId: String?; let cursor: String?; let limit: Int }
-        struct ProviderResponse: Decodable { let providers: [ProviderSummary] }
-        struct ModelResponse: Decodable { let models: [ModelSummary]; let nextCursor: String? }
-        do {
-            async let providerRequest: ProviderResponse = client.request("provider.list", ProviderParams(sessionId: selectedSessionID))
-            var catalog: [ModelSummary] = []
-            var cursor: String?
-            var seenCursors = Set<String>()
-            repeat {
-                let response: ModelResponse = try await client.request(
-                    "model.list",
-                    ModelParams(sessionId: selectedSessionID, cursor: cursor, limit: 500)
-                )
-                catalog.append(contentsOf: response.models)
-                cursor = response.nextCursor
-                if let cursor, !seenCursors.insert(cursor).inserted {
-                    throw GatewayFailure(
-                        code: "invalid_pagination",
-                        message: "Tron returned a repeated model cursor.",
-                        retryable: true,
-                        details: nil
-                    )
-                }
-            } while cursor != nil
-            providers = try await providerRequest.providers
-            models = catalog
-        } catch { surface(error) }
-    }
-
-    func beginAuth(providerID: String, authType: String) async throws {
-        struct Params: Codable { let providerId, authType: String; let sessionId: String? }
-        struct Response: Decodable { let operationId: String }
-        let response: Response = try await client.request("auth.begin", Params(providerId: providerID, authType: authType, sessionId: selectedSessionID), timeout: .seconds(15))
-        authEvent = .init(
-            operationId: response.operationId,
-            kind: .progress,
-            message: "Starting provider login…",
-            links: [],
-            url: nil,
-            instructions: nil,
-            userCode: nil,
-            verificationURL: nil,
-            intervalSeconds: nil,
-            expiresInSeconds: nil
+    func upload(
+        name: String,
+        mimeType: String,
+        data: Data,
+        target: SessionPresentationTarget
+    ) async throws {
+        try await composerDrafts.upload(
+            name: name,
+            mimeType: mimeType,
+            data: data,
+            target: target
         )
+    }
+
+    func uploadFile(
+        _ url: URL,
+        target: SessionPresentationTarget
+    ) async throws {
+        try await composerDrafts.uploadFile(url, target: target)
+    }
+
+    @discardableResult
+    func refreshProviders(target: ProviderCatalogTarget) async -> Bool {
+        await providerAuth.refreshCatalog(target: target)
+    }
+
+    func beginAuth(providerID: String, authType: String, target: ProviderCatalogTarget) async throws {
+        try await providerAuth.beginAuth(providerID: providerID, authType: authType, target: target)
     }
 
     func answerAuth(_ value: String) async throws {
-        guard let prompt = authPrompt else { return }
-        struct Params: Codable { let operationId, promptId, value: String }
-        struct Response: Decodable { let answered: Bool }
-        let _: Response = try await client.request("auth.respond", Params(operationId: prompt.operationId, promptId: prompt.id, value: value))
-        authPrompt = nil
+        try await providerAuth.answerAuth(value)
     }
 
     func cancelAuth(operationID: String? = nil) async {
-        guard let id = operationID ?? authPrompt?.operationId ?? authEvent?.operationId else { return }
-        struct Params: Codable { let operationId: String }
-        struct Response: Decodable { let cancelled: Bool }
-        let _: Response? = try? await client.request("auth.cancel", Params(operationId: id))
-        authPrompt = nil
-        authEvent = nil
+        await providerAuth.cancelAuth(operationID: operationID)
     }
 
-    func refreshModelCatalog(force: Bool = true) async throws {
-        struct Params: Codable { let force: Bool; let sessionId: String?; let commandId: String }
-        _ = try await client.requestValue("models.refresh", Params(force: force, sessionId: selectedSessionID, commandId: UUID().uuidString), timeout: .seconds(75))
-        await refreshProviders()
+    func refreshModelCatalog(target: ProviderCatalogTarget, force: Bool = true) async throws {
+        try await providerAuth.refreshModelCatalog(target: target, force: force)
     }
 
-    func logout(providerID: String) async throws {
-        struct Params: Codable { let providerId, commandId: String; let sessionId: String? }
-        struct Response: Decodable { let loggedOut: Bool }
-        let _: Response = try await client.request("auth.logout", Params(providerId: providerID, commandId: UUID().uuidString, sessionId: selectedSessionID), timeout: .seconds(60))
-        await refreshProviders()
+    func logout(providerID: String, target: ProviderCatalogTarget) async throws {
+        try await providerAuth.logout(providerID: providerID, target: target)
     }
 
-    func refreshSettings(cwd: String? = nil) async {
-        struct Params: Codable { let cwd: String? }
-        do { settings = try await client.requestValue("settings.get", Params(cwd: cwd ?? selectedSnapshot?.cwd)) }
-        catch { surface(error) }
+    @discardableResult
+    func refreshSettings(target: SettingsTarget) async -> Bool {
+        await settingsTrust.refreshSettings(target: target)
     }
 
-    func updateSettings(_ patch: JSONValue, scope: String = "global", cwd: String? = nil) async throws {
-        struct Params: Codable { let patch: JSONValue; let scope: String; let cwd: String?; let commandId: String }
-        settings = try await client.requestValue(
-            "settings.update",
-            Params(patch: patch, scope: scope, cwd: cwd ?? selectedSnapshot?.cwd, commandId: UUID().uuidString),
-            timeout: .seconds(60)
-        )
-        await refreshSettings(cwd: cwd)
+    func updateSettings(_ patch: JSONValue, target: SettingsTarget) async throws {
+        try await settingsTrust.updateSettings(patch, target: target)
     }
 
-    func inspectTrust(cwd: String) async throws -> JSONValue {
-        struct Params: Codable { let cwd: String }
-        return try await client.requestValue("trust.inspect", Params(cwd: cwd))
+    func inspectTrust(target: TrustTarget) async throws -> JSONValue {
+        try await settingsTrust.inspectTrust(target: target)
     }
 
-    func setTrust(cwd: String, decision: Bool?) async throws -> JSONValue {
-        struct Params: Codable { let cwd: String; let decision: Bool?; let commandId: String }
-        return try await client.requestValue("trust.set", Params(cwd: cwd, decision: decision, commandId: UUID().uuidString))
+    func setTrust(target: TrustTarget, decision: Bool?) async throws -> JSONValue {
+        try await settingsTrust.setTrust(target: target, decision: decision)
     }
 
-    func loadPackages(cwd: String? = nil) async {
-        struct Params: Codable { let cwd: String? }
-        do { packageState = try await client.request("packages.list", Params(cwd: cwd), timeout: .seconds(120)) }
-        catch { surface(error) }
+    func packageInventory(for target: PackageConfigurationTarget) -> PackageInventory? {
+        packageConfiguration.inventory(for: target)
     }
 
-    func checkPackageUpdates(cwd: String? = nil) async {
-        struct Params: Codable { let cwd: String? }
-        struct Response: Decodable { let updates: [PackageUpdate] }
+    func packageUpdates(for target: PackageConfigurationTarget) -> [PackageUpdate] {
+        packageConfiguration.updates(for: target)
+    }
+
+    func packageError(for target: PackageConfigurationTarget) -> String? {
+        packageConfiguration.error(for: target)
+    }
+
+    @discardableResult
+    func loadPackages(target: PackageConfigurationTarget, surfaceError: Bool = true) async -> Bool {
+        await packageConfiguration.load(target: target, surfaceError: surfaceError)
+    }
+
+    @discardableResult
+    func checkPackageUpdates(target: PackageConfigurationTarget, surfaceError: Bool = true) async -> Bool {
+        await packageConfiguration.checkUpdates(target: target, surfaceError: surfaceError)
+    }
+
+    func mutatePackage(
+        action: PackageMutationAction,
+        source: String?,
+        local: Bool,
+        target: PackageConfigurationTarget,
+        surfaceError: Bool = true
+    ) async throws {
+        guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
         do {
-            let response: Response = try await client.request("packages.checkUpdates", Params(cwd: cwd), timeout: .seconds(180))
-            packageUpdates = response.updates
-        } catch { surface(error) }
+            try await packageConfiguration.mutate(action, source: source, local: local, target: target, surfaceError: surfaceError)
+        } catch {
+            guard admitsLifecycle(admission) else { throw CancellationError() }
+            throw error
+        }
+        try requireLifecycle(admission)
     }
 
-    func mutatePackage(action: String, source: String?, local: Bool, cwd: String?) async throws {
-        struct Params: Codable { let source: String?; let local: Bool; let cwd: String?; let commandId: String }
-        _ = try await client.requestValue("packages.\(action)", Params(source: source, local: local, cwd: cwd, commandId: UUID().uuidString), timeout: .seconds(300))
-        await loadPackages(cwd: cwd)
+    func customModels(for target: CustomModelTarget) -> JSONValue? {
+        customModelConfiguration.models(for: target)
     }
 
-    func loadCustomModels() async {
-        do { customModels = try await client.requestValue("models.custom.get", EmptyParams()) }
-        catch { surface(error) }
+    @discardableResult
+    func loadCustomModels(target: CustomModelTarget) async -> Bool {
+        await customModelConfiguration.load(target: target)
     }
 
-    func replaceCustomModels(_ document: JSONValue) async throws {
-        let client = self.client
-        try await CustomModelDocumentWriter { method, params in
-            try await client.requestValue(method, params)
-        }.replace(document)
+    func replaceCustomModelsAndRestart(
+        _ document: JSONValue,
+        target: CustomModelTarget
+    ) async throws {
+        guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
+        try requireLifecycle(admission)
+        do {
+            try await customModelConfiguration.replace(document, target: target)
+        } catch {
+            guard admitsLifecycle(admission) else { throw CancellationError() }
+            throw error
+        }
+        try requireLifecycle(admission)
+        do {
+            try await restartGateway(admission: admission)
+        } catch {
+            guard admitsLifecycle(admission) else { throw CancellationError() }
+            throw error
+        }
+    }
+
+    nonisolated static func supportsSafeGatewayRestart(capabilities: [String]) -> Bool {
+        capabilities.contains("restart-drain.v1")
     }
 
     func restartGateway() async throws {
+        guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
+        do {
+            try await restartGateway(admission: admission)
+        } catch {
+            guard admitsLifecycle(admission) else { throw CancellationError() }
+            throw error
+        }
+    }
+
+    func requestGatewayRestart() async {
+        do { try await restartGateway() }
+        catch { surface(error) }
+    }
+
+    private func restartGateway(
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async throws {
+        try requireLifecycle(admission)
+        guard Self.supportsSafeGatewayRestart(capabilities: gatewayInfo?.capabilities ?? []) else {
+            throw GatewayFailure(
+                code: "unsupported",
+                message: "Update the Mac Gateway before restarting it from iPhone; this version cannot preserve accepted runs during restart.",
+                retryable: false,
+                details: nil
+            )
+        }
         struct Params: Codable { let commandId: String }
-        struct Response: Decodable { let restarting: Bool }
-        let _: Response = try await client.request("gateway.restart", Params(commandId: UUID().uuidString))
+        struct Response: Codable { let restarting: Bool; let scheduled: Bool; let activeSessionIds: [String] }
+        let commandID = uuidSource.next().uuidString
+        let response: Response
+        do {
+            response = try await mutationExecutor.perform(method: "gateway.restart", commandID: commandID) {
+                try await client.request("gateway.restart", Params(commandId: commandID))
+            }
+        } catch {
+            guard admitsLifecycle(admission) else { throw CancellationError() }
+            throw error
+        }
+        try requireLifecycle(admission)
+        if response.scheduled {
+            postNotice(
+                "Gateway restart scheduled after \(response.activeSessionIds.count) active agent run\(response.activeSessionIds.count == 1 ? "" : "s") finishes.",
+                replacing: .gatewayRestart
+            )
+        } else {
+            postNotice("Gateway is restarting. Tron will reconnect automatically.", replacing: .gatewayRestart)
+        }
     }
 
     func loadWorkspace(path: String? = nil) async throws {
         struct Params: Codable { let path: String? }
-        workspace = try await client.request("filesystem.list", Params(path: path), timeout: .seconds(30))
+        workspaceLoadGeneration &+= 1
+        let generation = workspaceLoadGeneration
+        let loaded: WorkspaceListing = try await client.request("filesystem.list", Params(path: path), timeout: .seconds(30))
+        guard workspaceLoadGeneration == generation else { return }
+        workspace = loaded
     }
 
     func createFolder(parent: String, name: String) async throws {
         struct Params: Codable { let parent, name, commandId: String }
-        struct Response: Decodable { let path: String }
-        let response: Response = try await client.request("filesystem.mkdir", Params(parent: parent, name: name, commandId: UUID().uuidString))
-        try await loadWorkspace(path: parent)
+        struct Response: Codable { let path: String }
+        let workspaceGeneration = workspaceLoadGeneration
+        let commandID = uuidSource.next().uuidString
+        let params = Params(parent: parent, name: name, commandId: commandID)
+        let response: Response = try await mutationExecutor.perform(method: "filesystem.mkdir", commandID: commandID) {
+            try await client.request("filesystem.mkdir", params)
+        }
+        if workspaceLoadGeneration == workspaceGeneration {
+            try await loadWorkspace(path: parent)
+        }
         defaultWorkspace = response.path
     }
 
-    func answerInteraction(_ interaction: ExtensionInteraction, value: JSONValue?, cancelled: Bool) async throws {
-        guard let sessionID = selectedSessionID else { return }
-        struct Params: Codable { let sessionId, interactionId: String; let value: JSONValue?; let cancelled: Bool; let commandId: String }
-        struct Response: Decodable { let answered: Bool }
-        let _: Response = try await client.request("extension.respond", Params(sessionId: sessionID, interactionId: interaction.id, value: value, cancelled: cancelled, commandId: UUID().uuidString))
+    private func cancelExtensionEditorSynchronization(for target: SessionPresentationIdentity) {
+        extensionEditorSyncTasks[target]?.cancel()
+        extensionEditorSyncTasks[target] = nil
+        extensionEditorPendingText[target] = nil
+        extensionEditorSyncGenerations[target] = nil
+        extensionEditorOperationReceipts[target] = nil
     }
 
-    func listTerminals() async throws -> [TerminalSummary] {
-        guard let sessionID = selectedSessionID else { return [] }
-        struct Params: Codable { let sessionId: String }
-        struct Response: Decodable { let terminals: [TerminalSummary] }
-        let response: Response = try await client.request("terminal.list", Params(sessionId: sessionID))
-        terminals = response.terminals
-        return response.terminals
+    private func cancelAllExtensionEditorSynchronization() {
+        for task in extensionEditorSyncTasks.values { task.cancel() }
+        extensionEditorSyncTasks.removeAll()
+        extensionEditorPendingText.removeAll()
+        extensionEditorSyncGenerations.removeAll()
+        extensionEditorOperationReceipts.removeAll()
     }
 
-    func openTerminal(columns: Int, rows: Int) async throws -> TerminalSummary {
-        guard let sessionID = selectedSessionID else { throw GatewayFailure(code: "no_session", message: "Select a session first.", retryable: false, details: nil) }
-        struct Params: Codable { let sessionId: String; let columns, rows: Int; let commandId: String }
-        struct Replay: Decodable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
-        struct Response: Decodable { let terminal: TerminalSummary; let replay: Replay }
-        let response: Response = try await client.request("terminal.open", Params(sessionId: sessionID, columns: columns, rows: rows, commandId: UUID().uuidString))
-        terminalChunks[response.terminal.id] = response.replay.chunks
-        return response.terminal
+    /// Coalesces native composer echoes into one target-scoped worker. A worker
+    /// never cancels after a request may have crossed the wire; later edits are
+    /// retained as the latest value and use the next authoritative revision.
+    func scheduleExtensionEditorUpdate(target: SessionPresentationIdentity, text: String) {
+        guard ownsPresentation(target),
+              let presentation = authoritativeSnapshot(for: target.sessionID)?.extensionPresentation,
+              !presentation.hostEpoch.isEmpty else { return }
+        extensionEditorPendingText[target] = text
+        guard extensionEditorSyncTasks[target] == nil else { return }
+        let generation = (extensionEditorSyncGenerations[target] ?? 0) + 1
+        extensionEditorSyncGenerations[target] = generation
+        extensionEditorSyncTasks[target] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                while !Task.isCancelled {
+                    try await Task.sleep(for: .milliseconds(150))
+                    guard self.ownsPresentation(target),
+                          let current = self.authoritativeSnapshot(for: target.sessionID)?.extensionPresentation,
+                          !current.hostEpoch.isEmpty,
+                          let pending = self.extensionEditorPendingText.removeValue(forKey: target) else { break }
+                    let operationID = self.uuidSource.next().uuidString
+                    var receipts = self.extensionEditorOperationReceipts[target] ?? []
+                    receipts.append(operationID)
+                    if receipts.count > 128 { receipts.removeFirst(receipts.count - 128) }
+                    self.extensionEditorOperationReceipts[target] = receipts
+                    let result = try await self.sessionMutations.updateExtensionEditor(
+                        sessionID: target.sessionID,
+                        hostEpoch: current.hostEpoch,
+                        baseRevision: current.semanticState.editorRevision,
+                        operationID: operationID,
+                        text: pending
+                    )
+                    guard self.ownsPresentation(target) else { break }
+                    if !result.applied {
+                        // With one serialized native writer, rejection proves a
+                        // newer extension-owned revision won. Its authoritative
+                        // directive is delivered through the presentation reducer
+                        // and existing use/keep arbiter; blindly retrying this
+                        // attempted value would either overwrite that directive or
+                        // spin against a revision the client has not installed yet.
+                        // A genuinely newer local edit remains in pendingText and
+                        // is handled after the directive settles.
+                    }
+                    // Any newer pending value, including an empty deletion, is
+                    // retained and sent by this same serialized worker.
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                // Transport failures are surfaced by the connection owner. Do
+                // not turn an expected editor race into a global alert.
+            }
+            if self.extensionEditorSyncGenerations[target] == generation {
+                self.extensionEditorSyncTasks[target] = nil
+                if self.extensionEditorPendingText[target] != nil { self.scheduleExtensionEditorUpdate(target: target, text: self.extensionEditorPendingText[target]!) }
+            }
+        }
     }
 
-    func attachTerminal(_ id: String, after: Int) async throws -> TerminalSummary {
-        struct Params: Codable { let terminalId: String; let afterSequence: Int }
-        struct Response: Decodable { let terminal: TerminalSummary; let chunks: [TerminalChunk]; let reset: Bool }
-        let response: Response = try await client.request("terminal.attach", Params(terminalId: id, afterSequence: after))
-        if response.reset { terminalChunks[id] = response.chunks }
-        else { terminalChunks[id, default: []].append(contentsOf: response.chunks) }
-        return response.terminal
+    func disposeExtensionEditorRequest(
+        _ request: ComposerEditorRequest,
+        disposition: ComposerEditorDisposition,
+        target: SessionPresentationIdentity
+    ) {
+        guard ownsPresentation(target) else { return }
+        composerDrafts.disposeEditorRequest(request, disposition: disposition, target: target)
+        if let scope = composerDrafts.scope(for: target) {
+            scheduleExtensionEditorUpdate(target: target, text: composerDrafts.text(for: scope))
+        }
     }
 
-    func detachTerminal(_ id: String) async {
-        struct Params: Codable { let terminalId: String }
-        struct Response: Decodable { let detached: Bool }
-        let _: Response? = try? await client.request("terminal.detach", Params(terminalId: id))
+    func answerInteraction(
+        _ interaction: ExtensionInteraction,
+        sessionID: String,
+        value: JSONValue?,
+        cancelled: Bool
+    ) async throws {
+        try await sessionMutations.answerInteraction(
+            interactionID: interaction.id,
+            hostEpoch: interaction.hostEpoch,
+            presentationRevision: interaction.presentationRevision,
+            sessionID: sessionID,
+            value: value,
+            cancelled: cancelled
+        )
     }
 
-    func writeTerminal(_ id: String, data: String) async throws {
-        struct Params: Codable { let terminalId, writeId, data, commandId: String }
-        struct Response: Decodable { let written: Bool }
-        let identity = UUID().uuidString
-        let _: Response = try await client.request("terminal.write", Params(terminalId: id, writeId: identity, data: data, commandId: identity))
+    func beginTerminalPresentation(sessionID: String) -> TerminalPresentationTarget {
+        terminal.beginPresentation(sessionID: sessionID)
     }
 
-    func resizeTerminal(_ id: String, columns: Int, rows: Int) async throws {
-        struct Params: Codable { let terminalId: String; let columns, rows: Int; let commandId: String }
-        struct Response: Decodable { let resized: Bool }
-        let _: Response = try await client.request("terminal.resize", Params(terminalId: id, columns: columns, rows: rows, commandId: UUID().uuidString))
+    func beginTerminalIntent(
+        for target: TerminalPresentationTarget
+    ) -> TerminalPresentationIntent? {
+        terminal.beginIntent(for: target)
     }
 
-    func terminateTerminal(_ id: String) async throws {
-        struct Params: Codable { let terminalId, commandId: String }
-        struct Response: Decodable { let terminated: Bool }
-        let _: Response = try await client.request("terminal.terminate", Params(terminalId: id, commandId: UUID().uuidString))
+    func closeTerminalPresentation(_ target: TerminalPresentationTarget) {
+        terminal.closePresentation(target)
+    }
+
+    func ownsTerminalIntent(_ intent: TerminalPresentationIntent) -> Bool {
+        terminal.owns(intent)
+    }
+
+    func terminalReplay(for terminalID: String) -> TerminalReplayProjection {
+        terminal.replay(for: terminalID)
+    }
+
+    func terminalHasExited(_ terminalID: String) -> Bool {
+        terminal.hasExited(terminalID)
+    }
+
+    func listTerminals(intent: TerminalPresentationIntent) async throws -> [TerminalSummary] {
+        try await terminal.list(intent: intent)
+    }
+
+    func openTerminal(
+        intent: TerminalPresentationIntent,
+        columns: Int,
+        rows: Int
+    ) async throws -> TerminalSummary {
+        try await terminal.open(intent: intent, columns: columns, rows: rows)
+    }
+
+    func attachTerminal(
+        _ id: String,
+        after: Int,
+        intent: TerminalPresentationIntent
+    ) async throws -> TerminalSummary {
+        try await terminal.attach(id, after: after, intent: intent)
+    }
+
+    func writeTerminal(
+        _ id: String,
+        data: String,
+        intent: TerminalPresentationIntent
+    ) async throws {
+        try await terminal.write(id, data: data, intent: intent)
+    }
+
+    func resizeTerminal(
+        _ id: String,
+        columns: Int,
+        rows: Int,
+        intent: TerminalPresentationIntent
+    ) async throws {
+        try await terminal.resize(
+            id,
+            columns: columns,
+            rows: rows,
+            intent: intent
+        )
+    }
+
+    func terminateTerminal(_ id: String, intent: TerminalPresentationIntent) async throws {
+        try await terminal.terminate(id, intent: intent)
     }
 
     func handle(_ event: GatewayEvent) async {
+        await handle(event, connectionID: nil)
+    }
+
+    private func handle(_ event: GatewayEvent, connectionID: Int?) async {
+        guard lifecycle.admitsEvent(connectionID: connectionID) else { return }
+        if event.topic.hasPrefix("session."), event.topic != "session.listChanged", event.topic != "session.summary" {
+            await sessionPresentation.admit(event)
+            return
+        }
+        await handleDeliveredEvent(event, connectionID: connectionID)
+    }
+
+    private func handleDeliveredEvent(_ event: GatewayEvent, connectionID: Int?) async {
         switch event.topic {
         case "transport.disconnected", "system.stopping":
-            subscribedSessionID = nil
-            connectionState = .reconnecting
-            reconnectTask?.cancel()
-            reconnectTask = nil
-            scheduleReconnect()
+            lifecycle.noteDisconnected(connectionID: connectionID)
+            invalidateSessionConnectionOwnership()
+            sessionCatalog.markDisconnected()
+            lifecycle.requestReconnect()
         case "transport.resyncRequired":
-            if let selectedSessionID { await requestResync(selectedSessionID) }
+            await sessionPresentation.handleResyncRequired(sessionID: event.sessionId)
+        case "session.summary":
+            if case .sessionSummary(let update) = event.preparation { apply(update) }
         case "session.listChanged":
-            refreshTask?.cancel()
-            refreshTask = Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(150))
-                await self?.refreshSessions()
-            }
-        case "session.snapshot":
-            if let snapshot = try? event.payload.decode(SessionSnapshot.self) { apply(snapshot) }
-        case "session.progress":
-            guard let (sessionID, envelope) = admitSessionEvent(event),
-                  let message = envelope.data.objectValue?["message"], message != .null,
-                  let item = try? message.decode(TranscriptItem.self),
-                  var snapshot = snapshots[sessionID] else { break }
-            snapshot.streaming = item
-            advance(&snapshot, envelope)
-            snapshots[sessionID] = snapshot
-        case "session.toolProgress":
-            guard let (sessionID, envelope) = admitSessionEvent(event),
-                  let tool = try? envelope.data.decode(ToolExecutionState.self),
-                  var snapshot = snapshots[sessionID] else { break }
-            if let index = snapshot.toolExecutions.firstIndex(where: { $0.toolCallId == tool.toolCallId }) {
-                snapshot.toolExecutions[index] = tool
-            } else {
-                snapshot.toolExecutions.append(tool)
-            }
-            advance(&snapshot, envelope)
-            snapshots[sessionID] = snapshot
-        case "session.interactions":
-            guard let (sessionID, envelope) = admitSessionEvent(event),
-                  let interactions = try? envelope.data.decode([ExtensionInteraction].self),
-                  var snapshot = snapshots[sessionID] else { break }
-            snapshot.extensionUI.pendingInteractions = interactions
-            advance(&snapshot, envelope)
-            snapshots[sessionID] = snapshot
-        case "session.status":
-            guard let (sessionID, envelope) = admitSessionEvent(event),
-                  let object = envelope.data.objectValue,
-                  let key = object["key"]?.stringValue,
-                  var snapshot = snapshots[sessionID] else { break }
-            if let text = object["text"]?.stringValue { snapshot.extensionUI.statuses[key] = text }
-            else { snapshot.extensionUI.statuses.removeValue(forKey: key) }
-            advance(&snapshot, envelope)
-            snapshots[sessionID] = snapshot
-        case "session.working":
-            guard let (sessionID, envelope) = admitSessionEvent(event),
-                  let object = envelope.data.objectValue,
-                  var snapshot = snapshots[sessionID] else { break }
-            if object.keys.contains("message") { snapshot.extensionUI.working.message = object["message"]?.stringValue }
-            if let visible = object["visible"]?.boolValue { snapshot.extensionUI.working.visible = visible }
-            advance(&snapshot, envelope)
-            snapshots[sessionID] = snapshot
-        case "session.thinkingLabel":
-            guard let (sessionID, envelope) = admitSessionEvent(event),
-                  var snapshot = snapshots[sessionID] else { break }
-            snapshot.extensionUI.hiddenThinkingLabel = envelope.data.objectValue?["label"]?.stringValue
-            advance(&snapshot, envelope)
-            snapshots[sessionID] = snapshot
-        case "session.widget":
-            guard let (sessionID, envelope) = admitSessionEvent(event),
-                  let object = envelope.data.objectValue,
-                  let key = object["key"]?.stringValue,
-                  var snapshot = snapshots[sessionID] else { break }
-            snapshot.extensionUI.widgets.removeAll { $0.key == key }
-            if object["lines"] != .null, let widget = try? envelope.data.decode(ExtensionWidget.self) {
-                snapshot.extensionUI.widgets.append(widget)
-            }
-            advance(&snapshot, envelope)
-            snapshots[sessionID] = snapshot
-        case "session.title":
-            guard let (sessionID, envelope) = admitSessionEvent(event),
-                  var snapshot = snapshots[sessionID] else { break }
-            snapshot.extensionUI.title = envelope.data.objectValue?["title"]?.stringValue
-            advance(&snapshot, envelope)
-            snapshots[sessionID] = snapshot
-        case "session.editorText":
-            guard let (sessionID, envelope) = admitSessionEvent(event),
-                  let object = envelope.data.objectValue,
-                  let rawAction = object["action"]?.stringValue,
-                  let action = EditorRequest.Action(rawValue: rawAction),
-                  let text = object["text"]?.stringValue,
-                  let fullText = object["fullText"]?.stringValue,
-                  let editorRevision = object["revision"]?.intValue,
-                  var snapshot = snapshots[sessionID] else { break }
-            snapshot.extensionUI.editorRevision = editorRevision
-            snapshot.extensionUI.editorText = fullText
-            editorRequest = .init(sessionId: sessionID, revision: editorRevision, action: action, text: text, fullText: fullText)
-            advance(&snapshot, envelope)
-            snapshots[sessionID] = snapshot
-        case "session.notification":
-            guard let (_, envelope) = admitSessionEvent(event) else { break }
-            if let message = envelope.data.objectValue?["message"]?.stringValue { notifications.append(message) }
-        case "session.operationFailed", "session.extensionError":
-            guard let (_, envelope) = admitSessionEvent(event) else { break }
-            if let message = envelope.data.objectValue?["message"]?.stringValue { lastError = message }
-            else if case .string(let message) = envelope.data { lastError = message }
-        case "session.compaction", "session.retry", "session.bashProgress":
-            _ = admitSessionEvent(event)
+            scheduleSessionListRefresh()
         case "auth.prompt":
-            parseAuthPrompt(event.payload)
+            providerAuth.handlePrompt(event.payload)
         case "auth.event":
-            parseAuthEvent(event.payload)
+            providerAuth.handleEvent(event.payload)
         case "auth.completed":
-            authPrompt = nil
-            authEvent = nil
-            await refreshProviders()
-            if event.payload.objectValue?["success"]?.boolValue == false {
-                lastError = event.payload.objectValue?["error"]?.stringValue
-            }
+            await providerAuth.handleCompletion(event.payload)
+        case "settings.changed":
+            settingsTrust.noteSettingsChanged()
+        case "trust.changed":
+            settingsTrust.noteTrustChanged()
+        case "providers.changed":
+            providerAuth.noteProvidersChanged()
+        case "packages.changed":
+            packageConfiguration.notePackagesChanged()
+        case "models.customChanged":
+            customModelConfiguration.noteCustomModelsChanged()
         case "packages.progress", "packages.completed":
-            notifications.append(event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…")
-        case "terminal.output":
-            if let object = event.payload.objectValue,
-               let terminalID = object["terminalId"]?.stringValue,
-               let sequence = object["sequence"]?.intValue,
-               let data = object["data"]?.stringValue {
-                terminalChunks[terminalID, default: []].append(TerminalChunk(sequence: sequence, data: data))
-                if terminalChunks[terminalID, default: []].count > 2_048 {
-                    terminalChunks[terminalID]?.removeFirst(terminalChunks[terminalID]!.count - 2_048)
-                }
-            }
-        case "terminal.exit":
-            if let id = event.payload.objectValue?["terminalId"]?.stringValue {
-                terminalExited.insert(id)
-                if let index = terminals.firstIndex(where: { $0.id == id }) {
-                    let current = terminals[index]
-                    terminals[index] = TerminalSummary(
-                        id: current.id,
-                        sessionId: current.sessionId,
-                        cwd: current.cwd,
-                        createdAt: current.createdAt,
-                        exitedAt: ISO8601DateFormatter().string(from: .now),
-                        exitCode: event.payload.objectValue?["exitCode"]?.intValue,
-                        sequence: current.sequence
-                    )
-                }
-            }
+            postNotice(
+                event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…",
+                replacing: .packageProgress
+            )
+        case "terminal.output", "terminal.exit":
+            guard let connectionID = gatewayConnectionID,
+                  case .terminalEvent(let terminalEvent) = event.preparation else { break }
+            terminal.admit(
+                terminalEvent,
+                connectionID: connectionID,
+                exitedAt: GatewayTimestamp.string(from: .now)
+            )
         default:
             break
         }
     }
 
-    private func admitSessionEvent(_ event: GatewayEvent) -> (String, SessionEventEnvelope)? {
-        guard let sessionID = event.sessionId,
-              let envelope = try? event.payload.decode(SessionEventEnvelope.self),
-              let snapshot = snapshots[sessionID] else { return nil }
-        guard envelope.runtimeGeneration == snapshot.runtimeGeneration else {
-            Task { await requestResync(sessionID) }
-            return nil
-        }
-        guard envelope.eventSequence > snapshot.eventSequence else { return nil }
-        guard envelope.eventSequence == snapshot.eventSequence + 1 else {
-            Task { await requestResync(sessionID) }
-            return nil
-        }
-        return (sessionID, envelope)
-    }
-
-    private func advance(_ snapshot: inout SessionSnapshot, _ envelope: SessionEventEnvelope) {
-        snapshot.eventSequence = envelope.eventSequence
-        snapshot.revision = max(snapshot.revision, envelope.revision)
-    }
-
-    private func requestResync(_ sessionID: String) async {
-        guard !resyncingSessionIDs.contains(sessionID) else { return }
-        resyncingSessionIDs.insert(sessionID)
-        defer { resyncingSessionIDs.remove(sessionID) }
-        do {
-            struct Params: Codable { let sessionId: String }
-            struct Response: Decodable { let session: SessionSnapshot }
-            let response: Response = try await client.request("session.open", Params(sessionId: sessionID), timeout: .seconds(60))
-            subscribedSessionID = sessionID
-            apply(response.session)
-        } catch { surface(error) }
-    }
-
-    private func parseAuthPrompt(_ payload: JSONValue) {
-        guard let root = payload.objectValue,
-              let operationID = root["operationId"]?.stringValue,
-              let promptID = root["promptId"]?.stringValue,
-              let prompt = root["prompt"]?.objectValue,
-              let rawKind = prompt["type"]?.stringValue,
-              let kind = AuthPromptState.Kind(rawValue: rawKind),
-              let message = prompt["message"]?.stringValue else { return }
-        let options = (prompt["options"].flatMap { value -> [JSONValue]? in
-            guard case .array(let array) = value else { return nil }; return array
-        } ?? []).compactMap { value -> AuthPromptState.Option? in
-            guard let item = value.objectValue, let id = item["id"]?.stringValue, let label = item["label"]?.stringValue else { return nil }
-            return .init(id: id, label: label, description: item["description"]?.stringValue)
-        }
-        authPrompt = AuthPromptState(
-            id: promptID,
-            operationId: operationID,
-            kind: kind,
-            message: message,
-            placeholder: prompt["placeholder"]?.stringValue,
-            options: options
+    static func installingSnapshot(
+        current: SessionSnapshot?,
+        authoritative: SessionSnapshot,
+        mode: SessionSnapshotInstallMode
+    ) -> SessionSnapshot {
+        SessionPresentationStore.installingSnapshot(
+            current: current,
+            authoritative: authoritative,
+            mode: mode
         )
     }
 
-    private func parseAuthEvent(_ payload: JSONValue) {
-        guard let root = payload.objectValue,
-              let operationID = root["operationId"]?.stringValue,
-              let event = root["event"]?.objectValue,
-              let rawKind = event["type"]?.stringValue,
-              let kind = AuthEventState.Kind(rawValue: rawKind) else { return }
-        let links: [AuthEventState.Link] = (event["links"]?.arrayValue ?? []).compactMap { value in
-            guard let object = value.objectValue,
-                  let rawURL = object["url"]?.stringValue,
-                  let url = URL(string: rawURL) else { return nil }
-            return .init(url: url, label: object["label"]?.stringValue)
-        }
-        authEvent = .init(
-            operationId: operationID,
-            kind: kind,
-            message: event["message"]?.stringValue,
-            links: links,
-            url: event["url"]?.stringValue.flatMap(URL.init(string:)),
-            instructions: event["instructions"]?.stringValue,
-            userCode: event["userCode"]?.stringValue,
-            verificationURL: event["verificationUri"]?.stringValue.flatMap(URL.init(string:)),
-            intervalSeconds: event["intervalSeconds"]?.intValue,
-            expiresInSeconds: event["expiresInSeconds"]?.intValue
+    static func mergingVisibleTranscript(
+        current: SessionSnapshot,
+        authoritative: SessionSnapshot
+    ) -> SessionSnapshot {
+        SessionPresentationStore.mergingVisibleTranscript(
+            current: current,
+            authoritative: authoritative
         )
     }
 
-    private func apply(_ snapshot: SessionSnapshot) {
-        if let current = snapshots[snapshot.sessionId],
-           current.runtimeGeneration == snapshot.runtimeGeneration,
-           snapshot.eventSequence < current.eventSequence {
+    private func apply(_ update: SessionSummaryUpdate) {
+        switch sessionCatalog.apply(update) {
+        case .stale:
             return
+        case .unknownSession:
+            scheduleSessionListRefresh()
+        case .updated:
+            scheduleCacheCheckpoint()
         }
-        snapshots[snapshot.sessionId] = snapshot
-        saveCache()
+    }
+
+    private func scheduleSessionListRefresh() {
+        catalogInvalidationGeneration &+= 1
+        guard catalogRefreshTask == nil,
+              let key = currentCatalogLoadKey() else { return }
+        _ = startCatalogRefresh(key: key)
+    }
+
+    private func clearLiveConnectionProjection() {
+        sessionCatchUpNoticeTask?.cancel()
+        sessionCatchUpNoticeTask = nil
+        noticeStore.removeAll()
+        sessionCatalog.markDisconnected()
     }
 
     private func reconcileSelection() {
         defaultWorkspace = UserDefaults.standard.string(forKey: "defaultWorkspace.v1")
-        loadHidden()
-        selectedSessionID = SessionSelectionPolicy.reconcile(
-            selected: selectedSessionID,
-            visibleIDs: Set(visibleSessions.map(\.id)),
-            locallyCreatedUnindexedIDs: locallyCreatedUnindexedSessionIDs,
-            firstVisibleID: visibleSessions.first?.id
-        )
     }
 
-    private var hiddenKey: String { "hiddenSessions.\(profiles.selected?.id ?? "none")" }
-    private func loadHidden() { hiddenSessionIDs = Set(UserDefaults.standard.stringArray(forKey: hiddenKey) ?? []) }
-    private func persistHidden() { UserDefaults.standard.set(Array(hiddenSessionIDs), forKey: hiddenKey) }
-
-    private func confirmedMutation<Response: Decodable>(
-        method: String,
-        commandId: String,
-        send: () async throws -> Response
-    ) async throws -> Response {
-        do { return try await send() }
-        catch let original as GatewayFailure where original.retryable || original.code == "timeout" || original.code == "disconnected" {
-            guard let status: CommandStatusResponse = try? await client.request(
-                "command.status",
-                CommandStatusParams(method: method, commandId: commandId)
-            ) else {
-                throw original
-            }
-            switch status.status {
-            case "completed":
-                guard let result = status.result else {
-                    throw GatewayFailure(code: "invalid_response", message: "The completed command did not include a result.", retryable: false, details: nil)
-                }
-                return try result.decode(Response.self)
-            case "missing":
-                return try await send()
-            default:
-                throw GatewayFailure(
-                    code: "outcome_unknown",
-                    message: "Tron accepted this command but its result is still uncertain. Refresh the session before trying again.",
-                    retryable: false,
-                    details: .object(["commandId": .string(commandId), "method": .string(method)])
-                )
-            }
+    private func measure<Value>(
+        _ operation: PerformanceOperation,
+        body: () async throws -> (Value, PerformanceMetrics)
+    ) async throws -> Value {
+        let interval = performanceSignposts.begin(operation)
+        do {
+            let (value, metrics) = try await body()
+            performanceSignposts.end(interval, result: .success, metrics: metrics)
+            return value
+        } catch {
+            let result = PerformanceResult.forFailure(error)
+            performanceSignposts.end(interval, result: result, metrics: .none)
+            throw error
         }
+    }
+
+    static let sessionCatchUpNotice = "Live session view is catching up; the run continues on your Mac."
+
+    static func shouldSurface(_ error: Error) -> Bool {
+        if error is CancellationError || error is GatewayPossiblySentError { return false }
+        if let failure = error as? GatewayFailure {
+            return !["disconnected", "closed", "replaced", "timeout", "event_overflow"].contains(failure.code)
+        }
+        if let urlError = error as? URLError {
+            return ![
+                .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
+                .dnsLookupFailed, .notConnectedToInternet, .secureConnectionFailed,
+                .cannotLoadFromNetwork, .backgroundSessionWasDisconnected,
+            ].contains(urlError.code)
+        }
+        let cocoaError = error as NSError
+        if cocoaError.domain == NSPOSIXErrorDomain {
+            // Connection aborted/reset, socket unavailable/timed out, and
+            // host/network down are transport lifecycle, not user actions.
+            return ![53, 54, 57, 60, 61, 64, 65].contains(cocoaError.code)
+        }
+        return true
     }
 
     private func surface(_ error: Error) {
-        if error is CancellationError { return }
+        guard Self.shouldSurface(error) else { return }
         lastError = error.localizedDescription
     }
 
-    private func loadCache(profileID: String) async {
+    private func loadCache(
+        profileID: String,
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async {
         let value = await cache.load(profileID: profileID)
-        sessions = value.sessions
-        snapshots = Dictionary(uniqueKeysWithValues: value.snapshots.map { ($0.sessionId, $0) })
+        guard admitsLifecycle(admission), profiles.selected?.id == profileID else { return }
+        sessionCatalog.installCached(value.sessions)
         reconcileSelection()
     }
 
-    private func saveCache() {
-        guard let id = profiles.selected?.id else { return }
-        let sessions = sessions
-        let values = Array(snapshots.values)
-        Task { await cache.save(profileID: id, sessions: sessions, snapshots: values) }
+    private func scheduleCacheCheckpoint() {
+        guard let profileID = profiles.selected?.id else { return }
+        cacheCheckpointGeneration &+= 1
+        pendingCacheCheckpoint = CacheCheckpoint(
+            profileID: profileID,
+            generation: cacheCheckpointGeneration,
+            sessions: sessions,
+            snapshots: sessionPresentation.disposableCacheSnapshot.map { [$0] } ?? []
+        )
+        guard cacheCheckpointTask == nil else { return }
+        cacheCheckpointTaskGeneration &+= 1
+        let taskGeneration = cacheCheckpointTaskGeneration
+        cacheCheckpointTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled, let checkpoint = self.pendingCacheCheckpoint {
+                self.pendingCacheCheckpoint = nil
+                await self.cache.save(
+                    profileID: checkpoint.profileID,
+                    generation: checkpoint.generation,
+                    sessions: checkpoint.sessions,
+                    snapshots: checkpoint.snapshots
+                )
+            }
+            if self.cacheCheckpointTaskGeneration == taskGeneration {
+                self.cacheCheckpointTask = nil
+            }
+        }
     }
 
-    private struct MutationResponse: Decodable {
-        let updated: Bool?
-        init(from decoder: Decoder) throws {
-            let container = try decoder.singleValueContainer()
-            let object = try container.decode([String: Bool].self)
-            updated = object.values.first
+    private func cancelCacheCheckpoints() {
+        cacheCheckpointTaskGeneration &+= 1
+        pendingCacheCheckpoint = nil
+        cacheCheckpointTask?.cancel()
+        cacheCheckpointTask = nil
+    }
+
+}
+
+extension AppModel: SessionPresentationStoreDelegate {
+    func sessionPresentationStoreDidRequestCatalogRefresh() {
+        scheduleSessionListRefresh()
+    }
+
+    func sessionPresentationStoreDidPublishEditorRequest(
+        target: SessionPresentationTarget,
+        action: SessionEditorAction,
+        text: String,
+        fullText: String,
+        revision: Int,
+        operationID: String?
+    ) {
+        guard ownsPresentation(target) else { return }
+        if action == .native {
+            if let operationID,
+               extensionEditorOperationReceipts[target]?.contains(operationID) == true {
+                extensionEditorOperationReceipts[target]?.removeAll { $0 == operationID }
+                return
+            }
+            if let scope = composerDrafts.scope(for: target), composerDrafts.text(for: scope) == fullText {
+                return
+            }
         }
+        composerDrafts.publishEditorRequest(
+            ComposerEditorRequest(
+                sessionID: target.sessionID,
+                presentationGeneration: target.generation,
+                revision: revision,
+                action: action,
+                text: text,
+                fullText: fullText
+            ),
+            target: target
+        )
+    }
+
+    func sessionPresentationStoreDidOpen(_ target: SessionPresentationTarget) {
+        _ = composerDrafts.mountPreparedPresentation(target)
+        Task { [weak self] in
+            guard let self else { return }
+            async let providerRefresh: Bool = self.refreshProviders(target: .session(id: target.sessionID))
+            async let commandRefresh: Void = self.loadCommands(sessionID: target.sessionID)
+            _ = await (providerRefresh, commandRefresh)
+        }
+    }
+
+    func sessionPresentationStorePostNotice(_ message: String, replacing key: GlobalNoticeKey?) {
+        postNotice(message, replacing: key)
+    }
+
+    func sessionPresentationStoreRemoveNotice(_ key: GlobalNoticeKey) {
+        removeNotice(key)
+    }
+
+    func sessionPresentationStoreSurface(_ error: Error) {
+        surface(error)
+    }
+
+    func sessionPresentationStoreCheckpointCache() {
+        scheduleCacheCheckpoint()
+    }
+}
+
+extension AppModel: SettingsTrustCoordinatorDelegate {
+    func settingsTrustCoordinatorSurface(_ error: Error) {
+        surface(error)
+    }
+}
+
+extension AppModel: ProviderAuthCoordinatorDelegate {
+    func providerAuthCoordinatorSurface(_ error: Error) {
+        surface(error)
+    }
+
+    func providerAuthCoordinatorSetCompletionError(_ message: String?) {
+        lastError = message
+    }
+}
+
+extension AppModel: PackageConfigurationCoordinatorDelegate {
+    func packageConfigurationCoordinatorSurface(_ error: Error) {
+        surface(error)
+    }
+}
+
+extension AppModel: CustomModelConfigurationCoordinatorDelegate {
+    func customModelConfigurationCoordinatorSurface(_ error: Error) {
+        surface(error)
+    }
+}
+
+extension AppModel: GatewayLifecycleProjectionDelegate {
+    func lifecycleLoadCache(
+        profileID: String,
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async {
+        await loadCache(profileID: profileID, admission: admission)
+    }
+
+    func lifecycleInvalidateSessionConnectionOwnership() {
+        invalidateSessionConnectionOwnership()
+    }
+
+    func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
+        guard admitsLifecycle(admission) else { return }
+        await refreshAll()
+    }
+
+    func lifecycleRestoreMountedPresentation(
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async {
+        guard admitsLifecycle(admission) else { return }
+        await restoreMountedPresentationAfterReconnect()
+    }
+
+    func lifecycleReattachTerminals(
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async {
+        await terminal.reattach(admission: admission)
+    }
+
+    func lifecycleReconcileForeground(
+        admission: GatewayLifecycleCoordinator.Admission
+    ) async throws {
+        try await client.ensureResponsive()
+        try requireLifecycle(admission)
+        async let catalog = refreshSessions()
+        await sessionPresentation.reconnectMountedPresentation()
+        await terminal.reattach(admission: admission)
+        _ = await catalog
+        try requireLifecycle(admission)
+    }
+
+    func lifecycleRetireProjection(final: Bool) async {
+        let catalog = catalogRefreshTask
+        let cacheCheckpoint = cacheCheckpointTask
+        let events = final ? eventTask : nil
+        let terminalRetirement = terminal.beginRetirement()
+        cancelCatalogRefresh()
+        cancelCacheCheckpoints()
+        if final {
+            events?.cancel()
+            eventTask = nil
+        }
+
+        invalidateProfileScopedLoads()
+        invalidateSessionConnectionOwnership()
+        clearGatewayProjection()
+
+        _ = await catalog?.value
+        await cacheCheckpoint?.value
+        await terminal.finishRetirement(terminalRetirement)
+        await events?.value
+    }
+
+    func lifecycleSurface(_ error: Error) {
+        surface(error)
     }
 }

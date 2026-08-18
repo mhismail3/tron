@@ -1,61 +1,51 @@
 import SwiftUI
 
-struct TranscriptRow: View {
-    @Environment(AppModel.self) private var model
+struct TranscriptRow: View, Equatable {
     let item: TranscriptItem
     var streaming = false
     var toolResults: [String: TranscriptItem] = [:]
     var rendersToolCalls = true
+    var projectedMessageParts: [ChatMessagePart]? = nil
+    var preparedText: ChatTextPreparationSnapshot = .empty
+    var showsMessageFooter = true
+    var hiddenThinkingLabel: String? = nil
 
     var body: some View {
-        VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 8) {
+        VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 4) {
             switch item.kind {
             case .message:
                 message
             case .bash:
-                ToolCard(title: item.command ?? "Shell", subtitle: item.cancelled == true ? "Cancelled" : "Exit \(item.exitCode.map(String.init) ?? "—")", content: item.output ?? "")
+                ToolCard(
+                    title: "bash",
+                    subtitle: item.cancelled == true ? "Cancelled" : "Exit \(item.exitCode.map(String.init) ?? "—")",
+                    content: item.output ?? "",
+                    request: .object(["command": .string(item.command ?? "")]),
+                    outputTruncated: item.truncated == true
+                )
             case .customMessage:
                 ToolCard(
                     title: item.customType ?? "Extension",
                     subtitle: "Extension message",
-                    content: item.text.isEmpty ? item.details?.prettyPrinted ?? "" : item.text,
-                    structured: item.details
+                    content: item.text,
+                    response: item.details,
+                    fallbackContent: item.text.isEmpty ? item.details : nil
                 )
             case .customEntry:
                 ToolCard(
                     title: item.customType ?? "Extension state",
                     subtitle: "Extension state",
-                    content: item.customData?.prettyPrinted ?? "",
-                    structured: item.customData
+                    content: "",
+                    response: item.customData,
+                    fallbackContent: item.customData
                 )
-            case .compaction:
-                SummaryCard(icon: "arrow.down.right.and.arrow.up.left", title: "Context compacted", text: item.summary ?? "", detail: item.tokensBefore.map { "\($0) tokens before compaction" })
-            case .branchSummary:
-                SummaryCard(icon: "arrow.triangle.branch", title: "Branch summary", text: item.summary ?? "", detail: nil)
-            case .modelChange:
-                TranscriptNotice(
-                    title: "Model changed",
-                    value: item.modelRef.map { "\($0.provider) / \($0.id)" } ?? "Changed",
-                    icon: "cpu",
-                    tint: .tronEmerald
-                )
-            case .thinkingChange:
-                TranscriptNotice(
-                    title: "Thinking changed",
-                    value: item.level?.capitalized ?? "Changed",
-                    icon: "brain",
-                    tint: .tronEmerald
-                )
-            case .label:
-                TranscriptNotice(
-                    title: item.label.map { "Bookmark: \($0)" } ?? "Bookmark removed",
-                    icon: "bookmark",
-                    tint: .tronSlate
-                )
+            case .compaction, .branchSummary, .modelChange, .thinkingChange, .label:
+                if let notification = ChatNotificationPresentation.canonical(item, globalOrdinal: nil) {
+                    ChatNotificationView(presentation: notification)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
-        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
     }
 
     @ViewBuilder private var message: some View {
@@ -63,481 +53,439 @@ struct TranscriptRow: View {
             ToolCard(
                 title: item.toolName ?? "Tool result",
                 subtitle: item.isError == true ? "Failed" : "Completed",
-                content: item.text.isEmpty ? item.details?.prettyPrinted ?? "" : item.text,
+                content: item.text,
                 error: item.isError == true,
-                structured: item.details
+                response: item.details,
+                fallbackContent: item.text.isEmpty ? item.details : nil
             )
         } else {
-            VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 8) {
-                ForEach(item.content ?? []) { part in
-                    switch part.type {
-                    case .text:
-                        if item.role == .user {
-                            Text(part.text ?? "").font(TronTypography.body).foregroundStyle(Color.userMessageText)
-                                .lineSpacing(4)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .multilineTextAlignment(.trailing)
-                                .frame(minHeight: 44, alignment: .topTrailing)
-                        } else {
-                            MarkdownText(text: part.text ?? "", streaming: streaming)
-                        }
-                    case .thinking:
-                        ThinkingBlock(text: part.text ?? "", label: model.selectedSnapshot?.extensionUI.hiddenThinkingLabel)
-                    case .image:
-                        if let id = part.blobId { TranscriptAttachmentChip(blobID: id) }
-                    case .toolCall:
-                        if rendersToolCalls {
-                            if let callID = part.toolCallId, let result = toolResults[callID] {
-                                ToolCard(
-                                    title: part.name ?? result.toolName ?? "Tool",
-                                    subtitle: result.isError == true ? "Failed" : "Completed",
-                                    content: result.text.isEmpty ? result.details?.prettyPrinted ?? "" : result.text,
-                                    error: result.isError == true,
-                                    structured: result.details
-                                )
+            VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 4) {
+                if !displayedAttachments.isEmpty {
+                    attachmentStrip
+                }
+                ForEach(displayedMessageParts) { presentation in
+                    switch presentation {
+                    case .thinking(let run):
+                        ThinkingBlock(
+                            segments: run.segments,
+                            preparedText: preparedText,
+                            label: hiddenThinkingLabel,
+                            animatesInsertion: streaming
+                        )
+                        // Keep the incremental visibility ledger attached to
+                        // the logical thinking run, not its position among
+                        // parts that may be added while the response streams.
+                        .id(run.id)
+                    case .content(let part):
+                        switch part.type {
+                        case .text:
+                            if part.attachment != nil {
+                                EmptyView() // Presented together above the prompt text.
+                            } else if item.role == .user {
+                                UserPromptText(text: part.text ?? "")
+                                    .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
+                                    .padding(.top, ChatPromptContainerStyle.topPadding)
+                                    .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
+                                    .modifier(UserPromptGlassModifier())
                             } else {
-                                ToolCard(
-                                    title: part.name ?? "Tool",
-                                    subtitle: "Invocation",
-                                    content: part.arguments?.prettyPrinted ?? "",
-                                    structured: part.arguments
+                                MarkdownText(
+                                    text: part.text ?? "",
+                                    document: preparedText.markdownDocument(
+                                        identity: part.id,
+                                        source: part.text ?? ""
+                                    ),
+                                    streaming: streaming
                                 )
+                            }
+                        case .thinking:
+                            EmptyView() // Adjacent thinking is projected as one run above.
+                        case .image:
+                            EmptyView() // Presented together above the prompt text.
+                        case .toolCall:
+                            if rendersToolCalls {
+                                if let callID = part.toolCallId, let result = toolResults[callID] {
+                                    ToolCard(
+                                        title: part.name ?? result.toolName ?? "Tool",
+                                        subtitle: result.isError == true ? "Failed" : "Completed",
+                                        content: result.text,
+                                        error: result.isError == true,
+                                        request: part.arguments,
+                                        response: result.details,
+                                        fallbackContent: result.text.isEmpty ? result.details : nil
+                                    )
+                                } else {
+                                    ToolCard(
+                                        title: part.name ?? "Tool",
+                                        subtitle: "Invocation",
+                                        content: "",
+                                        request: part.arguments,
+                                        fallbackContent: part.arguments
+                                    )
+                                }
                             }
                         }
                     }
                 }
-                if let error = item.errorMessage, !error.isEmpty {
+                if showsMessageFooter, let error = item.errorMessage, !error.isEmpty {
                     TranscriptNotice(
                         title: error,
                         icon: "exclamationmark.triangle.fill",
-                        tint: .tronError
+                        tone: .error,
+                        animatesEntrance: streaming
                     )
                 }
-                if item.role == .assistant,
-                   item.content?.contains(where: { $0.type == .text && !($0.text ?? "").isEmpty }) == true,
+                if showsMessageFooter,
+                   item.role == .assistant,
+                   displayedMessageParts.contains(where: { part in
+                       if case .content(let content) = part {
+                           return content.type == .text && !(content.text ?? "").isEmpty
+                       }
+                       return false
+                   }),
                    let provider = item.provider,
                    let modelName = item.modelId {
                     Text("\(provider) / \(modelName)").font(TronFont.mono(10)).foregroundStyle(Color.tronTextSecondary)
                 }
             }
-            .padding(.top, 4)
-            .padding(.horizontal, item.role == .user ? 0 : 4)
+            .padding(.horizontal, item.role == .user ? 0 : 2)
             .frame(
-                maxWidth: item.role == .user ? 520 : .infinity,
-                minHeight: 44,
+                maxWidth: .infinity,
                 alignment: item.role == .user ? .topTrailing : .topLeading
             )
         }
     }
 
-}
+    private var displayedMessageParts: [ChatMessagePart] {
+        projectedMessageParts ?? ChatTranscriptPresentation.messageParts(in: item)
+    }
 
-/// One visual language for transcript events that are not conversation turns.
-/// This deliberately covers configuration changes, errors, bookmarks, and
-/// extension status notices so small one-off labels cannot regress readability.
-struct TranscriptNotice: View {
-    let title: String
-    var value: String? = nil
-    let icon: String
-    let tint: Color
+    private var displayedAttachments: [ContentPart] {
+        displayedMessageParts.compactMap { part in
+            guard case .content(let content) = part,
+                  content.type == .image || content.attachment != nil else { return nil }
+            return content
+        }
+    }
 
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(tint)
-            Text(title)
-                .font(TronTypography.code(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(Color.tronTextSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let value {
-                Text(value)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                    .foregroundStyle(tint)
-                    .fixedSize(horizontal: false, vertical: true)
+    private var attachmentStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(displayedAttachments) { part in
+                    if part.type == .image, let id = part.blobId {
+                        TranscriptImageChip(blobID: id)
+                    } else if let attachment = part.attachment {
+                        TranscriptFileChip(
+                            name: attachment.name,
+                            mimeType: attachment.mimeType,
+                            size: attachment.size
+                        )
+                    }
+                }
             }
         }
-        .padding(.horizontal, 13)
-        .padding(.vertical, 9)
-        .background(tint.opacity(0.10), in: Capsule())
-        .overlay(Capsule().stroke(tint.opacity(0.30), lineWidth: 0.5))
-        .frame(maxWidth: .infinity, alignment: .center)
-        .accessibilityElement(children: .combine)
+        .scrollClipDisabled()
+        .defaultScrollAnchor(item.role == .user ? .trailing : .leading)
+        .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
+        .padding(.vertical, item.role == .user ? 3 : 0)
+        .accessibilityLabel("Prompt attachments")
+    }
+
+}
+
+struct UserPromptGlassModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(
+            cornerRadius: ChatPromptContainerStyle.cornerRadius,
+            style: .continuous
+        )
+        ViewThatFits(in: .horizontal) {
+            content
+                .fixedSize(horizontal: true, vertical: false)
+                .glassEffect(
+                    .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
+                    in: shape
+                )
+            content
+                .glassEffect(
+                    .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
+                    in: shape
+                )
+        }
+        .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
     }
 }
 
 private struct ThinkingBlock: View {
-    let text: String
+    let segments: [ChatThinkingSegment]
+    let preparedText: ChatTextPreparationSnapshot
     let label: String?
-    @State private var expanded = false
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let animatesInsertion: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var visibleSegmentIDs: Set<String>
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            if let label, !label.isEmpty { Text(label).font(TronFont.body(11, weight: .semibold)).foregroundStyle(.secondary) }
-            rendered(expanded ? normalized : preview)
-                .font(TronFont.body(12)).foregroundStyle(Color.tronTextSecondary).italic()
-                .lineLimit(expanded || dynamicTypeSize.isAccessibilitySize ? nil : 2).lineSpacing(1)
-                .accessibilityLabel(normalized)
-        }
-        .padding(.vertical, 4).padding(.horizontal, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .onTapGesture { withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) { expanded.toggle() } }
+    init(
+        segments: [ChatThinkingSegment],
+        preparedText: ChatTextPreparationSnapshot,
+        label: String?,
+        animatesInsertion: Bool
+    ) {
+        self.segments = segments
+        self.preparedText = preparedText
+        self.label = label
+        self.animatesInsertion = animatesInsertion
+        _visibleSegmentIDs = State(initialValue: animatesInsertion ? [] : Set(segments.map(\.id)))
     }
 
-    private func rendered(_ value: String) -> Text {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let label, !label.isEmpty {
+                Text(label)
+                    .font(TronFont.body(11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            paragraph
+                .font(TronFont.body(12))
+                .italic()
+                .lineSpacing(0)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibleParagraph)
+        .task(id: segments.map(\.id)) { await revealNewSegments() }
+    }
+
+    private var paragraph: Text {
+        segments.enumerated().reduce(Text("")) { paragraph, element in
+            let (index, segment) = element
+            let separator = index == 0 ? Text("") : Text(" ")
+            let renderedSegment = rendered(segment)
+                .foregroundColor(Color.tronTextSecondary.opacity(segmentOpacity(segment.id)))
+            return Text("\(paragraph)\(separator)\(renderedSegment)")
+        }
+    }
+
+    private func rendered(_ segment: ChatThinkingSegment) -> Text {
+        if let prepared = preparedText.thinkingInline(
+            identity: segment.id,
+            source: segment.text
+        ) {
+            if let attributed = prepared.attributedString { return Text(attributed) }
+            return Text(prepared.source)
+        }
         guard let attributed = try? AttributedString(
-            markdown: value,
+            markdown: segment.text,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) else { return Text(value) }
+        ) else { return Text(segment.text) }
         return Text(attributed)
     }
 
-    private var normalized: String {
-        text.replacingOccurrences(of: "\r\n", with: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    private var accessibleParagraph: String {
+        let paragraph = segments.map(\.text).joined(separator: " ")
+        guard let label, !label.isEmpty else { return paragraph }
+        return "\(label). \(paragraph)"
     }
-    private var preview: String { String(normalized.prefix(140)) }
+
+    private func segmentOpacity(_ id: String) -> Double {
+        !animatesInsertion || reduceMotion || visibleSegmentIDs.contains(id) ? 1 : 0
+    }
+
+    @MainActor private func revealNewSegments() async {
+        let currentIDs = Set(segments.map(\.id))
+        visibleSegmentIDs.formIntersection(currentIDs)
+        let hiddenIDs = segments.map(\.id).filter { !visibleSegmentIDs.contains($0) }
+        guard animatesInsertion, !reduceMotion else {
+            visibleSegmentIDs.formUnion(hiddenIDs)
+            return
+        }
+
+        for id in hiddenIDs {
+            guard !Task.isCancelled else { return }
+            await Task.yield()
+            withAnimation(.easeOut(duration: 0.28)) {
+                _ = visibleSegmentIDs.insert(id)
+            }
+            try? await Task.sleep(for: .milliseconds(80))
+        }
+    }
 }
 
 private struct MarkdownText: View {
     let text: String
+    let document: MarkdownPresentation.Document?
     let streaming: Bool
-    var body: some View { TronMarkdownView(text: text, streaming: streaming) }
-}
-
-struct ToolCard: View {
-    let title: String
-    let subtitle: String
-    let content: String
-    var error = false
-    var structured: JSONValue? = nil
-    @State private var detailPresentation: ToolDetailPresentation?
-
-    init(
-        title: String,
-        subtitle: String,
-        content: String,
-        error: Bool = false,
-        structured: JSONValue? = nil
-    ) {
-        self.title = title
-        self.subtitle = subtitle
-        self.content = content
-        self.error = error
-        self.structured = structured
-    }
-
-    init(data: ChatToolPresentation) {
-        self.init(
-            title: data.title,
-            subtitle: data.subtitle,
-            content: data.content,
-            error: data.error,
-            structured: data.structured
-        )
-    }
-
-    var body: some View {
-        Button { detailPresentation = ToolDetailPresentation() } label: {
-            HStack(spacing: 7) {
-                if subtitle == "Running" {
-                    ProgressView().controlSize(.small).tint(accent).frame(width: 18, height: 18)
-                } else {
-                    Image(systemName: icon).font(TronFont.body(10, weight: .semibold)).foregroundStyle(accent).frame(width: 18, height: 18)
-                }
-                Text(displayTitle).font(TronFont.body(12, weight: .bold)).foregroundStyle(accent).fixedSize(horizontal: false, vertical: true)
-                Text(subtitle.lowercased()).font(TronFont.mono(10, weight: .semibold)).foregroundStyle(accent).fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 9).padding(.vertical, 4)
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .glassEffect(
-                .regular.tint(surfaceAccent.opacity(0.26)).interactive(),
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
-            .accessibilityHidden(true)
-        }
-        .buttonStyle(.plain)
-        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .fixedSize(horizontal: false, vertical: true)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(displayTitle), \(subtitle)")
-        .accessibilityValue(title)
-        .contentTransition(.opacity)
-        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: subtitle)
-        .animation(.easeInOut(duration: 0.18), value: content)
-        .sheet(item: $detailPresentation) { _ in
-            NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        TronSettingsGroup("Outcome", accent: accent) {
-                            TronSettingsRow(icon: icon, title: subtitle, accent: accent) {
-                                if subtitle == "Running" { ProgressView().controlSize(.small).tint(accent) }
-                            }
-                        }
-
-                        if let structured {
-                            TronStructuredJSONView(value: structured, title: displayTitle, accent: accent)
-                        } else if content.isEmpty {
-                            TronSettingsGroup("Details", accent: accent) {
-                                TronSettingsRow(
-                                    icon: icon,
-                                    title: "No additional details",
-                                    subtitle: "The tool completed without displayable output.",
-                                    accent: accent
-                                )
-                            }
-                        } else {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(displayTitle == "Run command" ? "OUTPUT" : "DETAILS")
-                                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                                    .foregroundStyle(Color.tronTextMuted)
-                                if displayTitle == "Run command" {
-                                    ScrollView(.horizontal, showsIndicators: true) {
-                                        Text(content)
-                                            .font(TronTypography.codeContent)
-                                            .foregroundStyle(Color.tronTextSecondary)
-                                            .textSelection(.enabled)
-                                            .padding(14)
-                                            .fixedSize(horizontal: true, vertical: false)
-                                    }
-                                    .tronGlassSurface(accent: accent, tintOpacity: 0.08)
-                                } else {
-                                    TronMarkdownView(text: content, streaming: subtitle == "Running")
-                                        .padding(14)
-                                        .tronGlassSurface(accent: accent, tintOpacity: 0.08)
-                                }
-                            }
-                        }
-                    }
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-                .defaultScrollAnchor(.top)
-                .tronScrollEdgeChrome()
-                .navigationTitle("")
-                .toolbar {
-                    ToolbarItem(placement: .principal) { TronSheetTitle(title: displayTitle, accent: accent) }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { detailPresentation = nil } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
-                        }
-                        .accessibilityLabel("Done")
-                    }
-                }
-            }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
-            .tronPresentation()
-        }
-    }
-
-    private var accent: Color { error ? .tronError : .tronAccentText }
-    private var surfaceAccent: Color { error ? .tronError : subtitle == "Running" ? .tronAmber : .tronEmerald }
-    private var displayTitle: String {
-        switch title.lowercased() {
-        case "read": "Read file"
-        case "write": "Write file"
-        case "edit": "Edit file"
-        case "bash": "Run command"
-        case "grep": "Search text"
-        case "find": "Find files"
-        case "ls": "List files"
-        default: title
-        }
-    }
-    private var icon: String {
-        if error { return "exclamationmark.triangle.fill" }
-        return switch title.lowercased() {
-        case "read": "doc.text"
-        case "write": "square.and.pencil"
-        case "edit": "pencil.and.outline"
-        case "bash": "terminal"
-        case "grep": "text.magnifyingglass"
-        case "find": "doc.text.magnifyingglass"
-        case "ls": "folder"
-        default: "wrench.and.screwdriver"
-        }
-    }
-}
-
-struct ToolRunView: View {
-    let run: ChatToolRunPresentation
 
     @ViewBuilder var body: some View {
-        if let tool = run.tools.first, run.tools.count == 1 {
-            ToolCard(data: tool)
-        } else {
-            ToolRunChip(run: run)
-        }
+        if let document { TronMarkdownView(document: document, streaming: streaming) }
+        else { TronMarkdownView(text: text, streaming: streaming) }
     }
 }
 
-private struct ToolRunChip: View {
-    let run: ChatToolRunPresentation
-    @State private var showingDetails = false
-
-    private var accent: Color { run.failureCount > 0 ? .tronError : .tronAccentText }
-    private var surfaceAccent: Color { run.failureCount > 0 ? .tronError : .tronEmerald }
-
-    var body: some View {
-        Button { showingDetails = true } label: {
-            HStack(spacing: 7) {
-                if run.isRunning {
-                    ProgressView().controlSize(.small).tint(accent).frame(width: 18, height: 18)
-                } else {
-                    Image(systemName: run.failureCount > 0 ? "exclamationmark.triangle.fill" : "square.stack.3d.up")
-                        .font(TronFont.body(10, weight: .semibold))
-                        .foregroundStyle(accent)
-                        .frame(width: 18, height: 18)
-                }
-                Text(run.title)
-                    .font(TronFont.body(12, weight: .bold))
-                    .foregroundStyle(accent)
-                if let status = run.status {
-                    Text(status)
-                        .font(TronFont.mono(10, weight: .semibold))
-                        .foregroundStyle(accent.opacity(0.74))
-                }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-            .glassEffect(
-                .regular.tint(surfaceAccent.opacity(0.26)).interactive(),
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(run.title)\(run.status.map { ", \($0)" } ?? "")")
-        .sheet(isPresented: $showingDetails) {
-            NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(run.tools) { tool in
-                            ToolCard(data: tool)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
-                .defaultScrollAnchor(.top)
-                .tronScrollEdgeChrome()
-                .navigationTitle("")
-                .toolbar {
-                    ToolbarItem(placement: .principal) {
-                        TronSheetTitle(title: run.title, accent: surfaceAccent)
-                    }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { showingDetails = false } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
-                        }
-                        .accessibilityLabel("Done")
-                    }
-                }
-            }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
-            .tronPresentation()
-        }
+private struct TranscriptImageChip: View {
+    private struct LoadKey: Hashable {
+        let identity: ChatMediaIdentity?
+        let attempt: Int
     }
-}
 
-private struct ToolDetailPresentation: Identifiable {
-    let id = UUID()
-}
+    private struct PreviewRequest: Identifiable {
+        let identity: ChatMediaIdentity
+        let leaseID: UUID
+        let initialImage: UIImage
 
-private struct SummaryCard: View {
-    let icon, title, text: String
-    let detail: String?
-    var body: some View {
-        DisclosureGroup {
-            Text(text).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary).textSelection(.enabled).padding(.top, 8)
-        } label: {
-            Label(title, systemImage: icon).font(TronFont.body(13, weight: .semibold))
-        }
-        .padding(12).tronGlassSurface(accent: .tronSlate, cornerRadius: 14, tintOpacity: 0.10)
-        .overlay(alignment: .bottomTrailing) { if let detail { Text(detail).font(TronTypography.caption2).foregroundStyle(Color.tronTextMuted).padding(8) } }
+        var id: UUID { leaseID }
     }
-}
 
-private struct TranscriptAttachmentChip: View {
     @Environment(AppModel.self) private var model
     let blobID: String
-    @State private var image: UIImage?
-    @State private var showPreview = false
+    @State private var thumbnail: UIImage?
+    @State private var thumbnailIdentity: ChatMediaIdentity?
+    @State private var previewImage: UIImage?
+    @State private var previewRequest: PreviewRequest?
+    @State private var failedLoadKey: LoadKey?
+    @State private var loadAttempt = 0
+
+    private var identity: ChatMediaIdentity? {
+        model.chatMediaIdentity(blobID: blobID)
+    }
+
+    private var currentThumbnail: UIImage? {
+        thumbnailIdentity == identity ? thumbnail : nil
+    }
+
+    private var loadKey: LoadKey {
+        LoadKey(identity: identity, attempt: loadAttempt)
+    }
+
+    private var loadFailed: Bool {
+        failedLoadKey == loadKey
+    }
 
     var body: some View {
-        Button { showPreview = true } label: {
-            HStack(spacing: 7) {
-                if let image {
-                    Image(uiImage: image)
+        Button {
+            if let currentThumbnail, let identity {
+                previewImage = currentThumbnail
+                previewRequest = PreviewRequest(
+                    identity: identity,
+                    leaseID: UUID(),
+                    initialImage: currentThumbnail
+                )
+            } else if loadFailed {
+                loadAttempt &+= 1
+            }
+        } label: {
+            Group {
+                if let currentThumbnail {
+                    Image(uiImage: currentThumbnail)
                         .resizable()
                         .scaledToFill()
-                        .frame(width: 28, height: 28)
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                } else if loadFailed {
+                    ZStack {
+                        Color.tronBlue.opacity(0.10)
+                        Image(systemName: "arrow.clockwise")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronBlue)
+                    }
                 } else {
-                    ProgressView().controlSize(.mini).tint(.tronBlue).frame(width: 28, height: 28)
+                    ZStack {
+                        Color.tronBlue.opacity(0.10)
+                        ProgressView().controlSize(.mini).tint(.tronBlue)
+                    }
                 }
-                Text("Image attachment")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .medium))
-                    .foregroundStyle(Color.tronTextPrimary)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
+            .frame(width: 64, height: 64)
+            .clipped()
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronBlue.opacity(0.24)).interactive(), in: Capsule())
+        .glassEffect(
+            .regular.tint(Color.tronBlue.opacity(0.18)),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .trailing)))
-        .task {
-            guard image == nil,
-                  let value = try? await model.client.blob(id: blobID),
-                  let loaded = UIImage(data: value.0) else { return }
-            image = loaded
-        }
-        .sheet(isPresented: $showPreview) {
-            NavigationStack {
-                Group {
-                    if let image {
-                        ZoomableAttachmentImage(image: image)
-                    } else {
-                        TronLoadingState(label: "Loading image…")
-                    }
-                }
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .principal) { TronSheetTitle(title: "Attachment", accent: .tronBlue) }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button { showPreview = false } label: {
-                            Image(systemName: "checkmark")
-                                .font(TronTypography.buttonSM)
-                                .foregroundStyle(Color.tronEmerald)
-                        }
-                        .accessibilityLabel("Done")
-                    }
-                }
+        .accessibilityLabel(loadFailed ? "Image attachment unavailable, retry" : "Image attachment")
+        .task(id: loadKey) {
+            let requestedKey = loadKey
+            guard let identity = requestedKey.identity else {
+                failedLoadKey = requestedKey
+                return
             }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
-            .tint(Color.tronEmerald)
+            guard thumbnailIdentity != identity || thumbnail == nil else { return }
+            do {
+                let loaded = try await model.chatMedia.thumbnail(for: identity)
+                guard !Task.isCancelled, self.identity == identity else { return }
+                thumbnail = loaded
+                thumbnailIdentity = identity
+                if failedLoadKey == requestedKey { failedLoadKey = nil }
+            } catch {
+                guard !Task.isCancelled, loadKey == requestedKey else { return }
+                failedLoadKey = requestedKey
+            }
+        }
+        .onChange(of: identity) { _, _ in
+            previewImage = nil
+            previewRequest = nil
+        }
+        .accessibilityHint(currentThumbnail == nil ? "Loads the unavailable image again" : "Opens a photo preview")
+        .sheet(item: $previewRequest) { request in
+            AttachmentImagePreviewSheet(image: previewImage ?? request.initialImage)
+                .task(id: request.id) {
+                    guard let full = try? await model.chatMedia.fullPreview(
+                        for: request.identity,
+                        leaseID: request.leaseID
+                    ), !Task.isCancelled,
+                       previewRequest?.id == request.id,
+                       self.identity == request.identity else { return }
+                    previewImage = full
+                }
+                .onDisappear {
+                    model.chatMedia.cancelFullPreview(
+                        for: request.identity,
+                        leaseID: request.leaseID
+                    )
+                    if previewRequest?.id == request.id { previewRequest = nil }
+                    previewImage = nil
+                }
         }
     }
 }
 
-private struct ZoomableAttachmentImage: View {
-    let image: UIImage
+struct TranscriptFileChip: View {
+    let name: String
+    let mimeType: String
+    let size: Int?
+
     var body: some View {
-        ScrollView([.horizontal, .vertical]) {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFit()
-                .padding(16)
+        HStack(spacing: 9) {
+            Image(systemName: "doc.text.fill")
+                .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
+                .foregroundStyle(Color.tronBlue)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(detail)
+                    .font(TronTypography.code(size: TronTypography.sizeCaption))
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .lineLimit(1)
+            }
         }
-        .tronScrollEdgeChrome()
+        .padding(.horizontal, 11)
+        .frame(width: 176, height: 64, alignment: .leading)
+        .glassEffect(
+            .regular.tint(Color.tronBlue.opacity(0.18)),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("File attachment, \(name), \(detail)")
+    }
+
+    private var detail: String {
+        let kind = mimeType.split(separator: "/").last.map(String.init)?.uppercased() ?? "FILE"
+        guard let size else { return kind }
+        return "\(kind) · \(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))"
     }
 }

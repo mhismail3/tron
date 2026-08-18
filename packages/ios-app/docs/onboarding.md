@@ -15,10 +15,14 @@ hidden while the native upward sheet gesture remains available.
 4. **Pair Mac** scans or enters
    `tron://pair?host=<tailscale>&port=<port>&code=<one-time>&label=<mac>`.
    iOS exchanges the short-lived code at `POST /v1/pair`; the returned device
-   token goes directly to Keychain.
-5. **Workspace** chooses a Mac directory. If executable project resources
-   require a decision, onboarding presents explicit trust controls and states
-   that trust is not a sandbox.
+   token goes directly to Keychain. Exactly one pairing attempt owns enrollment:
+   a newer invitation supersedes the older attempt, and forgetting or switching
+   Macs invalidates pending enrollment before profile metadata, Keychain, or a
+   Gateway connection can be started from its late HTTP result.
+5. **Workspace** chooses a Mac directory. Every visible folder row uses its full
+   glass container as the selection target, not only the icon or label. If
+   executable project resources require a decision, onboarding presents explicit
+   trust controls and states that trust is not a sandbox.
 6. **Anthropic** presents its runtime-reported authentication methods when the
    current runtime enables it.
 7. **OpenAI** does the same without assuming one credential type.
@@ -37,7 +41,8 @@ If setup is interrupted after pairing, the Keychain-backed profile remains and
 the setup sheet resumes at workspace selection. Losing or revoking the device
 token requires a fresh one-time invitation from the Tron menu bar on the Mac.
 Pairing validation errors belong to the sheet so presenting an alert never
-tears down first-run state.
+tears down first-run state. Cancellation caused by supersession or teardown is
+silent; transport, status, and decoding failures remain visible there.
 
 Every onboarding page uses the same app-wide presentation primitives as chat
 and settings: selected-family semantic typography, emerald glass action and

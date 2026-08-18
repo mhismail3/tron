@@ -34,6 +34,7 @@ struct ProviderAuthSheet: View {
         }
         .tronPresentation()
         .tronScreenBackground()
+        .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled()

@@ -15,6 +15,13 @@ export function string(value: unknown, label: string, options: { min?: number; m
   return trimmed;
 }
 
+/** Bounded text payload that may intentionally be empty or whitespace-only. */
+export function text(value: unknown, label: string, max = 4096): string {
+  if (typeof value !== "string") throw new GatewayError("invalid_request", `${label} must be a string`);
+  if (value.length > max) throw new GatewayError("invalid_request", `${label} is too long`);
+  return value;
+}
+
 export function optionalString(value: unknown, label: string, max = 4096): string | undefined {
   if (value === undefined || value === null) return undefined;
   return string(value, label, { max });

@@ -8,21 +8,30 @@ struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
     let machineId: String
     var deviceId: String? = nil
 
-    var httpBaseURL: URL {
+    var hasValidEndpoint: Bool {
+        PairingInvitationParser.canonicalHost(host) != nil
+            && (1...65_535).contains(port)
+            && httpURL() != nil
+            && socketURL != nil
+    }
+
+    func httpURL(path: String = "", queryItems: [URLQueryItem] = []) -> URL? {
         var components = URLComponents()
         components.scheme = "http"
         components.host = host
         components.port = port
-        return components.url!
+        components.path = path
+        components.queryItems = queryItems.isEmpty ? nil : queryItems
+        return components.url
     }
 
-    var socketURL: URL {
+    var socketURL: URL? {
         var components = URLComponents()
         components.scheme = "ws"
         components.host = host
         components.port = port
         components.path = "/v1/socket"
-        return components.url!
+        return components.url
     }
 }
 
@@ -38,9 +47,12 @@ enum PairingInvitationParser {
     static func parse(_ url: URL) -> PairingInvitation? {
         guard url.scheme == "tron", url.host == "pair",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
-        let values = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).compactMap { item in
-            item.value.map { (item.name, $0) }
-        })
+        var values: [String: String] = [:]
+        var names = Set<String>()
+        for item in components.queryItems ?? [] {
+            guard names.insert(item.name).inserted, let value = item.value else { return nil }
+            values[item.name] = value
+        }
         guard let host = canonicalHost(values["host"]),
               let portText = values["port"], let port = Int(portText), (1...65_535).contains(port),
               let code = values["code"]?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -81,8 +93,25 @@ struct PairingResponse: Decodable, Sendable {
     let machineName: String
 }
 
-enum GatewayPairer {
-    static func pair(_ invitation: PairingInvitation, deviceName: String) async throws -> (GatewayProfile, String) {
+enum GatewayPairingPolicy {
+    static let maximumResponseBytes = 64 * 1_024
+}
+
+struct GatewayPairer: Sendable {
+    private struct PairingRequest: Encodable {
+        let code: String
+        let deviceName: String
+    }
+
+    private struct PairingFailureEnvelope: Decodable { let error: GatewayFailure }
+
+    private let transport: HTTPDataTransport
+
+    init(transport: HTTPDataTransport = .urlSession) {
+        self.transport = transport
+    }
+
+    func pair(_ invitation: PairingInvitation, deviceName: String) async throws -> (GatewayProfile, String) {
         var components = URLComponents()
         components.scheme = "http"
         components.host = invitation.host
@@ -92,11 +121,21 @@ enum GatewayPairer {
         var request = URLRequest(url: url, timeoutInterval: 15)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["code": invitation.code, "deviceName": deviceName])
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        request.httpBody = try encoder.encode(PairingRequest(code: invitation.code, deviceName: deviceName))
+        let (data, response) = try await transport.data(for: request)
+        guard data.count <= GatewayPairingPolicy.maximumResponseBytes else {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+        guard response.statusCode == 200 else {
             let failure = try? JSONDecoder.gateway.decode(PairingFailureEnvelope.self, from: data)
-            throw failure?.error ?? GatewayFailure(code: "pairing_failed", message: "The Mac rejected this pairing code.", retryable: false, details: nil)
+            throw failure?.error ?? GatewayFailure(
+                code: "pairing_failed",
+                message: "The Mac rejected this pairing code.",
+                retryable: false,
+                details: nil
+            )
         }
         let paired = try JSONDecoder.gateway.decode(PairingResponse.self, from: data)
         let profile = GatewayProfile(
@@ -109,6 +148,4 @@ enum GatewayPairer {
         )
         return (profile, paired.token)
     }
-
-    private struct PairingFailureEnvelope: Decodable { let error: GatewayFailure }
 }

@@ -18,6 +18,10 @@ struct PairingInvitationParserTests {
         "tron://pair?host=user@host&port=9847&code=ABCDEFGH",
         "tron://pair?host=host/path&port=9847&code=ABCDEFGH",
         "tron://pair?host=host&port=0&code=ABCDEFGH",
+        "tron://pair?host=host&host=other&port=9847&code=ABCDEFGH",
+        "tron://pair?host=host&port=9847&port=9848&code=ABCDEFGH",
+        "tron://pair?host=host&port=9847&code=ABCDEFGH&code=IJKLMNOP",
+        "tron://pair?host=host&port=9847&code=ABCDEFGH&label=One&label=Two",
         "tron://pair?host=host&port=9847&code=short",
     ])
     func rejectsMalformed(_ raw: String) {

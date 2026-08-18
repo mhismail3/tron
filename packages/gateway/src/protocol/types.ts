@@ -1,4 +1,4 @@
-// Tron protocol v2 is an intentionally small, versioned mobile contract. Pi
+// Tron protocol v3 is an intentionally small, versioned mobile contract. Pi
 // objects must be projected into these bounded values rather than serialized
 // directly; Pi JSONL and configuration files remain canonical.
 export type JsonPrimitive = string | number | boolean | null;
@@ -10,21 +10,36 @@ export interface ModelRef {
 }
 
 export type SessionPhase = "idle" | "running" | "compacting" | "retrying" | "interrupted";
+export type SessionKind = "user" | "subagent";
 
 export interface SessionSummary {
   id: string;
   name?: string;
   cwd: string;
+  kind: SessionKind;
   parentSessionId?: string;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
   firstMessage: string;
   phase: SessionPhase;
+  summaryRevision: number;
+}
+
+/** Bounded global projection used to update dashboard rows without subscribing
+ * every client to every full session transcript. */
+export interface SessionSummaryUpdate {
+  sessionId: string;
+  summaryRevision: number;
+  phase: SessionPhase;
+  name?: string;
+  updatedAt: string;
+  messageCount: number;
+  firstMessage: string;
 }
 
 export type ContentPart =
-  | { id: string; type: "text"; text: string }
+  | { id: string; type: "text"; text: string; attachment?: { name: string; mimeType: string; size: number } }
   | { id: string; type: "thinking"; text: string; redacted?: boolean }
   | { id: string; type: "image"; mimeType: string; blobId: string }
   | { id: string; type: "toolCall"; toolCallId: string; name: string; arguments: JsonValue };
@@ -49,6 +64,15 @@ export type TranscriptItem =
       isError?: boolean;
       details?: JsonValue;
       usage?: JsonValue;
+      /** Exact runtime timing when the owning Gateway observed this call. Older
+       * canonical entries may omit it and clients derive an observed interval. */
+      startedAt?: string;
+      completedAt?: string;
+      durationMs?: number;
+      lastProgressAt?: string;
+      progressSequence?: number;
+      /** Disposable provenance derived from public Pi sourceInfo; absent means unknown/ambiguous. */
+      extensionOrigin?: ExtensionToolOrigin | undefined;
     }
   | TranscriptBase & {
       kind: "bash";
@@ -93,16 +117,33 @@ export type TranscriptItem =
       label?: string;
     };
 
+export interface ExtensionToolOrigin {
+  /** Public Pi source identity; package and extension names are intentionally not interpreted by Tron. */
+  source: string;
+}
+
 export interface ToolExecutionState {
   toolCallId: string;
   toolName: string;
+  /** Monotonic within one active run; authoritative tie-breaker for parallel calls. */
+  order: number;
   status: "running" | "completed" | "failed";
   arguments: JsonValue;
   partialResult?: JsonValue;
   result?: JsonValue;
+  /** Bounded text extracted from Pi's current tool result for immediate audit. */
+  output?: string;
+  outputTruncated?: boolean;
   isError: boolean;
   startedAt: string;
   updatedAt: string;
+  lastProgressAt: string;
+  completedAt?: string;
+  durationMs?: number;
+  /** Monotonic per call; authoritative even when wall-clock timestamps collide. */
+  progressSequence: number;
+  /** Disposable provenance derived from public Pi sourceInfo; absent means unknown/ambiguous. */
+  extensionOrigin?: ExtensionToolOrigin | undefined;
 }
 
 export interface RetryState {
@@ -115,13 +156,40 @@ export interface RetryState {
 
 export interface SessionOperationState {
   id?: string;
-  kind: "prompt" | "compaction" | "branchSummary" | "bash" | "retry";
+  kind: "prompt" | "command" | "compaction" | "branchSummary" | "bash" | "retry";
   startedAt: string;
   reason?: string;
 }
 
+export interface ExtensionQuestionnaireOption {
+  label: string;
+  description?: string;
+  preview?: string;
+}
+
+export interface ExtensionQuestionnaireDescriptor {
+  version: 1;
+  question: string;
+  context?: string;
+  options: ExtensionQuestionnaireOption[];
+  allowMultiple: boolean;
+  allowFreeform: boolean;
+}
+
+export interface ExtensionQuestionnaireSelection {
+  option: number;
+  comment?: string;
+}
+
+export interface ExtensionQuestionnaireAnswer {
+  selections: ExtensionQuestionnaireSelection[];
+  freeform?: string;
+}
+
 export type ExtensionInteraction = {
   id: string;
+  hostEpoch: string;
+  presentationRevision: number;
   method: "select" | "confirm" | "input" | "editor";
   title: string;
   message?: string;
@@ -129,23 +197,138 @@ export type ExtensionInteraction = {
   placeholder?: string;
   prefill?: string;
   expiresAt?: string;
+  /** Additive descriptor; old clients ignore it and answer the primitive dialog. */
+  questionnaire?: ExtensionQuestionnaireDescriptor;
 };
+
+export interface ExtensionOwner {
+  id: string;
+  title: string;
+  source: string;
+}
 
 export interface ExtensionWidget {
   key: string;
+  revision: number;
   lines: string[];
   placement: "aboveEditor" | "belowEditor";
+  owner?: ExtensionOwner;
 }
 
-export interface ExtensionUIState {
+export interface ExtensionPresentationDiagnostic {
+  code: string;
+  message: string;
+}
+
+export interface ExtensionFrameStyle {
+  bold?: true;
+  dim?: true;
+  italic?: true;
+  underline?: true;
+  inverse?: true;
+  strike?: true;
+  foreground?: string;
+  background?: string;
+  link?: string;
+}
+
+export interface ExtensionFrameRun { text: string; style: ExtensionFrameStyle }
+export interface ExtensionFrameLine { plainText: string; runs: ExtensionFrameRun[] }
+export interface ExtensionFrameCursor { row: number; column: number }
+export interface ExtensionFrame {
+  width: number;
+  height: number;
+  lines: ExtensionFrameLine[];
+  plainText: string;
+  cursor?: ExtensionFrameCursor;
+}
+
+export type ExtensionSurfaceKind = "header" | "footer" | "widget" | "custom" | "overlay"
+  | "editor" | "toolRenderer" | "messageRenderer" | "entryRenderer" | "markdown" | "unknown";
+export type ExtensionSurfacePlacement = "header" | "footer" | "aboveEditor" | "belowEditor"
+  | "transcript" | "overlay" | "fullscreen";
+export interface ExtensionSurface {
+  id: string;
+  kind: ExtensionSurfaceKind;
+  placement: ExtensionSurfacePlacement;
+  lifecycle: "retained" | "blocking" | "transient" | "restored";
+  targetId?: string;
+  provenance?: { source?: string; path?: string };
+  revision: number;
+  focused: boolean;
+  inputMode: "none" | "keys" | "textAndKeys";
+  frame: ExtensionFrame;
+}
+
+export interface ExtensionInputLease {
+  id: string;
+  connectionId: string;
+  surfaceId: string;
+  surfaceRevision: number;
+  acquiredAt: string;
+}
+
+export interface ExtensionSemanticState {
   statuses: Record<string, string>;
-  working: { message?: string; visible: boolean };
+  statusOwners: Record<string, ExtensionOwner>;
+  working: {
+    message?: string;
+    visible: boolean;
+    indicator: { kind: "default" | "hidden" | "static" | "animated"; frames: string[]; intervalMs?: number };
+  };
   hiddenThinkingLabel?: string;
   widgets: ExtensionWidget[];
   title?: string;
+  toolsExpanded: boolean;
   editorRevision: number;
   editorText: string;
+}
+
+/** Versioned, bounded, disposable projection of one live Pi extension-host epoch. */
+export interface ExtensionPresentationState {
+  version: 2;
+  hostEpoch: string;
+  revision: number;
+  capabilities: string[];
+  diagnostics: ExtensionPresentationDiagnostic[];
+  semanticState: ExtensionSemanticState;
+  surfaces: ExtensionSurface[];
   pendingInteractions: ExtensionInteraction[];
+  inputLease?: ExtensionInputLease;
+  projection?: {
+    complete: boolean;
+    omitted: string[];
+    omittedSurfaces?: Array<{ id: string; revision: number }>;
+  };
+}
+
+export interface ExtensionSemanticPatch {
+  statuses?: Record<string, string>;
+  statusOwners?: Record<string, ExtensionOwner>;
+  working?: ExtensionSemanticState["working"];
+  hiddenThinkingLabel?: string | null;
+  widgets?: ExtensionWidget[];
+  title?: string | null;
+  toolsExpanded?: boolean;
+  editorRevision?: number;
+  editorText?: string;
+  editorAction?: "set" | "paste" | "native";
+  editorDelta?: string;
+  editorOperationId?: string;
+}
+
+export interface ExtensionPresentationMutation {
+  version: 2;
+  hostEpoch: string;
+  revision: number;
+  semantic?: ExtensionSemanticPatch;
+  interactionList?: ExtensionInteraction[];
+  surfaceUpserts?: ExtensionSurface[];
+  surfaceRemovals?: string[];
+  inputLease?: ExtensionInputLease | null;
+  capabilities?: string[];
+  diagnostics?: ExtensionPresentationDiagnostic[];
+  notification?: { message: string; type: "info" | "warning" | "error" };
 }
 
 export interface SessionStats {
@@ -155,7 +338,15 @@ export interface SessionStats {
   toolResults: number;
   totalMessages: number;
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+  latestCacheHitRate?: number;
   cost: number;
+}
+
+export interface QueuedMessageState {
+  id: string;
+  behavior: "steer" | "followUp";
+  text: string;
+  attachmentCount: number;
 }
 
 export interface SessionSnapshot {
@@ -172,16 +363,25 @@ export interface SessionSnapshot {
   availableThinkingLevels: string[];
   contextUsage?: { tokens: number | null; contextWindow: number; percent: number | null };
   stats: SessionStats;
+  /** Legacy Pi queue projection retained for rolling protocol compatibility. */
   queued: { steering: string[]; followUp: string[] };
+  queueRevision?: number;
+  queuedItems?: QueuedMessageState[];
+  /** Gateway-owned manual compaction waiting for the active run to settle. */
+  compactionQueued?: boolean;
+  /** Effective runtime setting; optional for rolling protocol compatibility. */
+  automaticCompactionEnabled?: boolean;
   transcript: TranscriptItem[];
   transcriptStart: number;
   transcriptTotal: number;
   streaming?: TranscriptItem;
   leafEntryId?: string;
   operation?: SessionOperationState;
+  /** Exact Pi extension command handler currently admitted, independent of foreground agent work. */
+  extensionCommand?: SessionOperationState;
   retry?: RetryState;
   toolExecutions: ToolExecutionState[];
-  extensionUI: ExtensionUIState;
+  extensionPresentation: ExtensionPresentationState;
   diagnostics: Array<{ type: string; message: string }>;
 }
 
@@ -192,8 +392,10 @@ export interface SessionTreeNode {
   kind: TranscriptItem["kind"] | "sessionInfo";
   label?: string;
   preview: string;
-  item?: TranscriptItem;
-  children: SessionTreeNode[];
+  role?: "user" | "assistant" | "toolResult";
+  depth: number;
+  childCount: number;
+  isCurrentPath: boolean;
 }
 
 export interface CommandInfo {

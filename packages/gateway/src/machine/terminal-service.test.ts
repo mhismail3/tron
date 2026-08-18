@@ -13,6 +13,8 @@ describe("TerminalService", () => {
     const events: Array<{ topic: string; payload: unknown }> = [];
     const service = new TerminalService(64_000, (_id, topic, payload) => events.push({ topic, payload }));
     const terminal = service.open("session", cwd, 80, 24);
+    expect(service.belongsToSession(terminal.id, "session")).toBe(true);
+    expect(service.belongsToSession(terminal.id, "other-session")).toBe(false);
     service.write(terminal.id, "write", "printf TRON_TERMINAL_OK\\n");
 
     for (let attempt = 0; attempt < 20 && !JSON.stringify(events).includes("TRON_TERMINAL_OK"); attempt += 1) {
@@ -20,7 +22,9 @@ describe("TerminalService", () => {
     }
     const replay = service.attach(terminal.id, 0);
     expect(replay.chunks.map((chunk) => chunk.data).join("")).toContain("TRON_TERMINAL_OK");
-    service.terminate(terminal.id);
+    await service.terminate(terminal.id);
+    expect(service.activeTerminalIds()).not.toContain(terminal.id);
+    expect(events.some(({ topic }) => topic === "terminal.exit")).toBe(true);
     service.dispose();
   });
 
