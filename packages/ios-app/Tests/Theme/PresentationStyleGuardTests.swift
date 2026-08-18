@@ -769,6 +769,7 @@ struct PresentationStyleGuardTests {
         #expect(providerEditor.contains("editorSectionHeader(\n                    \"Connection\""))
         #expect(providerEditor.contains("editorSectionHeader(\n                    \"Models\""))
         #expect(providerEditor.contains("editorSectionHeader(\n                    \"Protocol\""))
+        #expect(!providerEditor.contains("Identify the provider and choose the endpoint."))
         #expect(providerEditor.contains("dense: true"))
         #expect(providerEditor.contains("surfaceTint: Color.tronEmerald.opacity(0.14)"))
         #expect(providerEditor.contains("TronValueRow(icon: \"network\", title: \"API format\""))

@@ -226,10 +226,7 @@ struct CustomModelsSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 8) {
-                    editorSectionHeader(
-                        "Connection",
-                        detail: "Identify the provider and choose the endpoint."
-                    )
+                    editorSectionHeader("Connection")
                     fieldLabel("Provider identifier")
                     TextField("ollama", text: provider.identifier)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
@@ -297,16 +294,18 @@ struct CustomModelsSettingsView: View {
         }
     }
 
-    private func editorSectionHeader(_ title: String, detail: String) -> some View {
+    private func editorSectionHeader(_ title: String, detail: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: TronSpacing.xs) {
             Text(title)
                 .font(TronTypography.sheetSectionHeader)
                 .foregroundStyle(Color.tronTextPrimary)
                 .accessibilityAddTraits(.isHeader)
-            Text(detail)
-                .font(TronTypography.caption)
-                .foregroundStyle(Color.tronTextMuted)
-                .fixedSize(horizontal: false, vertical: true)
+            if let detail {
+                Text(detail)
+                    .font(TronTypography.caption)
+                    .foregroundStyle(Color.tronTextMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
