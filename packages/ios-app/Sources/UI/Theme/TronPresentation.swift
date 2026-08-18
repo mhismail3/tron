@@ -511,6 +511,7 @@ struct TronSaveToolbarButton: View {
                 Text(isSaving ? "Saving…" : "Save")
             }
             .tronToolbarAction()
+            .foregroundStyle(isEnabled && !isSaving ? Color.tronEmerald : Color.tronTextMuted)
         }
         .disabled(isSaving || !isEnabled)
         .accessibilityLabel(isSaving ? "Saving" : "Save")
