@@ -76,9 +76,12 @@ enum PackageCatalogPolicy {
     static let maximumPackages = 256
     static let maximumUpdates = 256
     static let maximumStringBytes = 8_192
+    static let maximumEncodedBytes = 768 * 1_024
 
     static func admit(_ inventory: PackageInventory) throws -> PackageInventory {
-        guard inventory.packages.count <= maximumPackages else { throw invalidCatalog() }
+        guard inventory.packages.count <= maximumPackages else {
+            throw invalidCatalog("it contains more than \(maximumPackages) packages")
+        }
         var identities = Set<String>()
         identities.reserveCapacity(inventory.packages.count)
         for package in inventory.packages {
@@ -87,18 +90,20 @@ enum PackageCatalogPolicy {
                   package.id.utf8.count <= maximumStringBytes,
                   package.installedPath.map({ $0.utf8.count <= maximumStringBytes }) ?? true,
                   identities.insert(package.id).inserted else {
-                throw invalidCatalog()
+                throw invalidCatalog("a package entry is empty, oversized, or duplicated")
             }
         }
         try validateResources(inventory.resources)
-        guard let encoded = try? JSONEncoder().encode(inventory), encoded.count <= 768 * 1_024 else {
-            throw invalidCatalog()
+        guard let encoded = try? JSONEncoder().encode(inventory), encoded.count <= maximumEncodedBytes else {
+            throw invalidCatalog("it exceeds the \(maximumEncodedBytes / 1_024) KiB response limit")
         }
         return inventory
     }
 
     static func admit(_ updates: [PackageUpdate]) throws -> [PackageUpdate] {
-        guard updates.count <= maximumUpdates else { throw invalidCatalog() }
+        guard updates.count <= maximumUpdates else {
+            throw invalidCatalog("it contains more than \(maximumUpdates) updates")
+        }
         var identities = Set<String>()
         identities.reserveCapacity(updates.count)
         for update in updates {
@@ -110,12 +115,12 @@ enum PackageCatalogPolicy {
                   !update.type.isEmpty,
                   update.type.utf8.count <= maximumStringBytes,
                   identities.insert(update.id).inserted else {
-                throw invalidCatalog()
+                throw invalidCatalog("an update entry is empty, oversized, or duplicated")
             }
         }
         guard let encoded = try? JSONEncoder().encode(UpdateEnvelope(updates: updates)),
-              encoded.count <= 768 * 1_024 else {
-            throw invalidCatalog()
+              encoded.count <= maximumEncodedBytes else {
+            throw invalidCatalog("it exceeds the \(maximumEncodedBytes / 1_024) KiB response limit")
         }
         return updates
     }
@@ -124,11 +129,11 @@ enum PackageCatalogPolicy {
         // The Gateway may add projected resource categories over time. Validate
         // every category this client consumes, but do not reject additive keys.
         guard case .object(let root) = resources else {
-            throw invalidCatalog()
+            throw invalidCatalog("its resource projection is not an object")
         }
         for kind in ["extensions", "skills", "prompts", "themes"] {
             guard case .array(let values)? = root[kind], values.count <= 1_000 else {
-                throw invalidCatalog()
+                throw invalidCatalog("its \(kind) resources are missing or exceed 1,000 items")
             }
             var paths = Set<String>()
             paths.reserveCapacity(values.count)
@@ -137,30 +142,42 @@ enum PackageCatalogPolicy {
                       case .string(let path)? = item["path"],
                       !path.isEmpty,
                       path.utf8.count <= maximumStringBytes,
-                      case .bool? = item["enabled"],
                       case .object(let metadata)? = item["metadata"],
                       case .string(let source)? = metadata["source"],
                       !source.isEmpty,
                       source.utf8.count <= maximumStringBytes,
-                      case .string(let scope)? = metadata["scope"],
-                      ["user", "project", "temporary"].contains(scope),
-                      case .string(let origin)? = metadata["origin"],
-                      ["package", "top-level"].contains(origin),
-                      metadata["baseDir"].map({ value in
-                          if case .string(let path) = value { return path.utf8.count <= maximumStringBytes }
-                          return false
-                      }) ?? true,
                       paths.insert(path).inserted else {
-                    throw invalidCatalog()
+                    throw invalidCatalog("a \(kind) resource entry is malformed, oversized, or duplicated")
+                }
+                // Resource metadata is a Gateway projection. Keep its
+                // structural/string bounds, but do not reject newer scope or
+                // origin values that this client only displays as raw JSON.
+                if let enabled = item["enabled"] {
+                    guard case .bool = enabled else {
+                        throw invalidCatalog("a \(kind) resource enabled flag is malformed")
+                    }
+                }
+                for key in ["scope", "origin"] {
+                    if let value = metadata[key] {
+                        guard case .string(let value) = value,
+                              value.utf8.count <= maximumStringBytes else {
+                            throw invalidCatalog("a \(kind) resource metadata value is malformed or oversized")
+                        }
+                    }
+                }
+                if let baseDir = metadata["baseDir"] {
+                    guard baseDir == .null || (baseDir.stringValue?.utf8.count ?? .max) <= maximumStringBytes else {
+                        throw invalidCatalog("a \(kind) resource base directory is malformed or oversized")
+                    }
                 }
             }
         }
     }
 
-    private static func invalidCatalog() -> GatewayFailure {
+    private static func invalidCatalog(_ reason: String) -> GatewayFailure {
         GatewayFailure(
             code: "invalid_response",
-            message: "The package catalog from the Mac is invalid or too large.",
+            message: "The package catalog from the Mac was rejected: \(reason).",
             retryable: true,
             details: nil
         )

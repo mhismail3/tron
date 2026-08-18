@@ -153,6 +153,10 @@ struct PresentationStyleGuardTests {
                 !source.contains("ToolbarItem(placement: .cancellationAction)"),
                 "\(url.lastPathComponent) contains a top-left sheet dismissal"
             )
+            #expect(
+                !source.contains(".confirmationDialog("),
+                "\(url.lastPathComponent) uses an anchored confirmation instead of a full Tron sheet"
+            )
             let allowedNavigationChevrons = url.lastPathComponent == "OnboardingView.swift"
                 || url.lastPathComponent == "AuthPromptSheet.swift"
                 || url.lastPathComponent == "RuntimeBehaviorSettingsView.swift"

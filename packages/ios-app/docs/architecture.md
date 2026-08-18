@@ -964,7 +964,10 @@ optional discovery paths from advanced Mac runtime overrides and explains each
 setting before editing it. Session storage is gateway-owned and is not exposed as
 a backing-runtime location override. Package catalog admission failures remain
 local to the Packages sheet, preserving the sheet while presenting a bounded retry
-state instead of routing a projection error through the global alert.
+state instead of routing a projection error through the global alert. The iOS
+projection validates bounded structure and paths while tolerating additive resource
+categories and future metadata scope/origin values; its rejection copy identifies
+whether the response exceeded the 768 KiB bound or failed structural admission.
 Deep session history is projected as a bounded flat outline with depth, branch,
 and current-path metadata so large canonical sessions neither overflow the
 gateway stack nor exceed the mobile frame. The single History sheet explains Timeline,

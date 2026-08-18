@@ -240,27 +240,30 @@ struct ChatView: View {
                 photoImportTarget = nil
             }
         }
-        .confirmationDialog(ComposerEditorRequestPolicy.confirmationTitle, isPresented: Binding(
-            get: { initialModelSettled && routedEditorRequest != nil },
-            set: { isPresented in
-                guard !isPresented,
+        .sheet(item: Binding(
+            get: { initialModelSettled ? routedEditorRequest : nil },
+            set: { presented in
+                guard presented == nil,
                       let request = routedEditorRequest,
                       let target = presentationTarget else { return }
                 model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
             }
-        )) {
-            Button(ComposerEditorRequestPolicy.useActionTitle) {
-                guard let request = routedEditorRequest,
-                      let target = presentationTarget else { return }
-                model.disposeExtensionEditorRequest(request, disposition: .use, target: target)
-            }
-            Button(ComposerEditorRequestPolicy.keepActionTitle, role: .cancel) {
-                guard let request = routedEditorRequest,
-                      let target = presentationTarget else { return }
-                model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
-            }
-        } message: {
-            Text(ComposerEditorRequestPolicy.confirmationMessage)
+        )) { request in
+            TronConfirmationSheet(
+                title: ComposerEditorRequestPolicy.confirmationTitle,
+                message: ComposerEditorRequestPolicy.confirmationMessage,
+                confirmTitle: ComposerEditorRequestPolicy.useActionTitle,
+                secondaryTitle: ComposerEditorRequestPolicy.keepActionTitle,
+                icon: "square.and.pencil",
+                onConfirm: {
+                    guard let target = presentationTarget else { return }
+                    model.disposeExtensionEditorRequest(request, disposition: .use, target: target)
+                },
+                onSecondary: {
+                    guard let target = presentationTarget else { return }
+                    model.disposeExtensionEditorRequest(request, disposition: .keep, target: target)
+                }
+            )
         }
         .task(id: sessionID) { await beginOpeningPresentation() }
         .onChange(of: pendingInteractionScopes, initial: true) { _, scopes in
