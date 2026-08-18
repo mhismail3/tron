@@ -104,6 +104,7 @@ interface Connection {
   // Reserved before asynchronous service invocation so overlapping opens for
   // the same connection/session are rejected deterministically.
   pendingSessionOpens: Map<string, string>;
+  outboundFrames: number;
   helloTimer: NodeJS.Timeout;
 }
 
@@ -197,6 +198,8 @@ export class GatewayServer {
       maximumConnections?: number;
       maximumConnectionsPerIdentity?: number;
       maximumSubscriptionsPerConnection?: number;
+      maximumOutboundFrames?: number;
+      maximumOutboundBytes?: number;
       synchronizationTimeoutMs?: number;
       devices: DeviceStore;
       uploads: UploadStore;
@@ -418,6 +421,7 @@ export class GatewayServer {
       synchronizations: new Map(),
       subscriptionTokens: new Map(),
       pendingSessionOpens: new Map(),
+      outboundFrames: 0,
       helloTimer: setTimeout(() => socket.close(1008, "hello required"), 5_000),
     };
     this.clients.set(connection.id, connection);
@@ -793,14 +797,27 @@ export class GatewayServer {
     try {
       const direct = JSON.stringify(value);
       if (direct === undefined) return "failed";
-      if (Buffer.byteLength(direct, "utf8") <= this.options.maxFrameBytes) {
-        connection.socket.send(direct);
-        return "sent";
-      }
-      const encoded = encodeOutboundFrame(value, this.options.maxFrameBytes);
+      const encoded = Buffer.byteLength(direct, "utf8") <= this.options.maxFrameBytes
+        ? direct
+        : encodeOutboundFrame(value, this.options.maxFrameBytes);
       if (!encoded) return "failed";
-      connection.socket.send(encoded);
-      return "fallback";
+
+      const bytes = Buffer.byteLength(encoded, "utf8");
+      const maximumFrames = this.options.maximumOutboundFrames ?? 32;
+      const maximumBytes = this.options.maximumOutboundBytes ?? 2 * 1_048_576;
+      if (connection.outboundFrames >= maximumFrames
+        || bytes > maximumBytes
+        || connection.socket.bufferedAmount > maximumBytes - bytes) {
+        // Never silently drop a sequenced live event. Force the established
+        // reconnect/snapshot path when this client cannot drain its stream.
+        connection.socket.close(1013, "client outbound capacity exceeded");
+        return "failed";
+      }
+      connection.outboundFrames += 1;
+      connection.socket.send(encoded, () => {
+        connection.outboundFrames = Math.max(0, connection.outboundFrames - 1);
+      });
+      return encoded === direct ? "sent" : "fallback";
     } catch {
       // Broadcast payloads are supplied by runtime projections. A malformed
       // value must not escape the broadcast loop or take down the Gateway.

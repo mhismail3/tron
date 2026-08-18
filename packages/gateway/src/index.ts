@@ -145,6 +145,8 @@ transport = new GatewayServer({
   maximumConnections: config.maxConnections,
   maximumConnectionsPerIdentity: config.maxConnectionsPerIdentity,
   maximumSubscriptionsPerConnection: config.maxSubscriptionsPerConnection,
+  maximumOutboundFrames: config.maxOutboundFrames,
+  maximumOutboundBytes: config.maxOutboundBytes,
   devices,
   uploads,
   sessions,
