@@ -25,6 +25,12 @@ export interface CompletedSessionSync {
   overflowed: boolean;
 }
 
+/** Per-connection admission for bytes retained by concurrent quarantines. */
+export interface SessionSynchronizationByteBudget {
+  reserve(bytes: number): boolean;
+  release(bytes: number): void;
+}
+
 export const MAX_BUFFERED_SYNC_EVENTS = 1_024;
 /**
  * One synchronization quarantine may retain at most one default transport
@@ -59,6 +65,8 @@ function sequence(event: BufferedSessionEvent): SessionSyncBaseline | undefined 
 export class SessionSyncBarrier {
   private synchronization: Synchronization | undefined;
 
+  constructor(private readonly byteBudget?: SessionSynchronizationByteBudget) {}
+
   begin(requestId: string): void {
     if (this.synchronization) throw new Error("session synchronization is already in progress");
     this.synchronization = { requestId, events: [], bufferedBytes: 0, overflowed: false };
@@ -82,9 +90,9 @@ export class SessionSyncBarrier {
     if (bytes === undefined
         || bytes > MAX_BUFFERED_SYNC_BYTES
         || synchronization.events.length >= MAX_BUFFERED_SYNC_EVENTS
-        || synchronization.bufferedBytes > MAX_BUFFERED_SYNC_BYTES - bytes) {
-      synchronization.events.length = 0;
-      synchronization.bufferedBytes = 0;
+        || synchronization.bufferedBytes > MAX_BUFFERED_SYNC_BYTES - bytes
+        || (this.byteBudget !== undefined && !this.byteBudget.reserve(bytes))) {
+      this.discard(synchronization);
       synchronization.overflowed = true;
       return undefined;
     }
@@ -95,7 +103,9 @@ export class SessionSyncBarrier {
 
   /** Replace an overflowed quarantine with a bounded recovery quarantine. */
   beginRecovery(requestId: string): boolean {
-    if (!this.isOverflowed(requestId)) return false;
+    const synchronization = this.synchronization;
+    if (!synchronization || synchronization.requestId !== requestId || !synchronization.overflowed) return false;
+    this.discard(synchronization);
     this.synchronization = { requestId, events: [], bufferedBytes: 0, overflowed: false };
     return true;
   }
@@ -110,8 +120,7 @@ export class SessionSyncBarrier {
   abort(requestId: string): boolean {
     const synchronization = this.synchronization;
     if (!synchronization || synchronization.requestId !== requestId) return false;
-    synchronization.events.length = 0;
-    synchronization.bufferedBytes = 0;
+    this.discard(synchronization);
     this.synchronization = undefined;
     return true;
   }
@@ -119,11 +128,14 @@ export class SessionSyncBarrier {
   commit(requestId: string): CompletedSessionSync {
     const synchronization = this.take(requestId);
     if (synchronization.overflowed) {
-      synchronization.events.length = 0;
-      synchronization.bufferedBytes = 0;
+      this.discard(synchronization);
       return { events: [], overflowed: true };
     }
-    if (!synchronization.baseline) throw new Error("session synchronization baseline was not established");
+    if (!synchronization.baseline) {
+      this.discard(synchronization);
+      throw new Error("session synchronization baseline was not established");
+    }
+    this.releaseBytes(synchronization);
     const baseline = synchronization.baseline;
     return {
       events: synchronization.events.filter((event) => {
@@ -142,7 +154,17 @@ export class SessionSyncBarrier {
       throw new Error("session synchronization transaction does not match");
     }
     this.synchronization = undefined;
-    synchronization.bufferedBytes = 0;
     return synchronization;
+  }
+
+  private discard(synchronization: Synchronization): void {
+    synchronization.events.length = 0;
+    this.releaseBytes(synchronization);
+  }
+
+  private releaseBytes(synchronization: Synchronization): void {
+    if (synchronization.bufferedBytes === 0) return;
+    this.byteBudget?.release(synchronization.bufferedBytes);
+    synchronization.bufferedBytes = 0;
   }
 }

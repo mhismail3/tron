@@ -132,6 +132,48 @@ describe("atomic session synchronization barrier", () => {
     expect(barrier.isOverflowed("recovery")).toBe(false);
   });
 
+  it("releases per-connection admission exactly on commit, overflow, recovery, and abort", () => {
+    let retained = 0;
+    const budget = {
+      reserve: (bytes: number) => {
+        if (retained + bytes > 1_000) return false;
+        retained += bytes;
+        return true;
+      },
+      release: (bytes: number) => { retained -= bytes; },
+    };
+    const first = new SessionSyncBarrier(budget);
+    const second = new SessionSyncBarrier(budget);
+    const admitted = eventWithData("x".repeat(500));
+    first.begin("first");
+    first.establish(snapshot(0));
+    first.offer(admitted);
+    expect(retained).toBe(Buffer.byteLength(JSON.stringify(admitted), "utf8"));
+    second.begin("second");
+    second.establish(snapshot(0));
+    second.offer(admitted);
+    expect(second.isOverflowed("second")).toBe(true);
+    expect(retained).toBe(Buffer.byteLength(JSON.stringify(admitted), "utf8"));
+    expect(second.beginRecovery("second")).toBe(true);
+    expect(retained).toBe(Buffer.byteLength(JSON.stringify(admitted), "utf8"));
+    expect(first.commit("first").overflowed).toBe(false);
+    expect(retained).toBe(0);
+    second.offer(admitted);
+    expect(retained).toBe(Buffer.byteLength(JSON.stringify(admitted), "utf8"));
+    expect(second.abort("second")).toBe(true);
+    expect(retained).toBe(0);
+
+    // A denied later offer drops and refunds bytes already held by its own
+    // quarantine before it transitions to deterministic overflow recovery.
+    first.begin("overflow");
+    first.establish(snapshot(0));
+    first.offer(eventWithData("small"));
+    expect(retained).toBeGreaterThan(0);
+    first.offer(eventWithData("x".repeat(1_000), 2));
+    expect(first.commit("overflow")).toEqual({ events: [], overflowed: true });
+    expect(retained).toBe(0);
+  });
+
   it("resets byte accounting after commit and abort", () => {
     const barrier = new SessionSyncBarrier();
     const boundary = eventExactlyBytes(MAX_BUFFERED_SYNC_BYTES);

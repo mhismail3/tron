@@ -429,3 +429,128 @@ describe("synchronization catch-up overflow recovery", () => {
     socket.close();
   });
 });
+
+describe("connection-wide synchronization ownership", () => {
+  it("bounds concurrent quarantine bytes, releases them after every sync, and carries ownership across a rekey", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-sync-ownership-"));
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const address = probe.address();
+    if (!address || typeof address === "string") throw new Error("probe did not bind");
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+    let gateway!: GatewayServer;
+    const service = {
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
+      terminalBelongsToSession: (terminalId: string, sessionId: string) => terminalId === "terminal-before" && sessionId === "before",
+      releaseClient: vi.fn(),
+      recoverySnapshot: async (sessionId: string) => ({ sessionId, runtimeGeneration: `generation-${sessionId}`, eventSequence: 99, revision: 99 }),
+      invoke: async (context: any, method: string, params: any) => {
+        const sessionId = params.sessionId as string;
+        if (method === "session.open") {
+          const syncToken = context.beginSynchronization(sessionId);
+          const session = { sessionId, runtimeGeneration: `generation-${sessionId}`, eventSequence: 1, revision: 1 };
+          context.establishSynchronization(sessionId, session);
+          return { session, syncToken, subscriptionToken: syncToken };
+        }
+        if (method === "session.sync") {
+          context.completeSynchronization(sessionId, params.syncToken);
+          return { synchronized: true };
+        }
+        if (method === "session.close") return { closed: context.unsubscribe(sessionId, params.subscriptionToken) };
+        if (method === "terminal.attach") {
+          context.attachTerminal(params.terminalId);
+          return { attached: true };
+        }
+        if (method === "session.fork") {
+          const nextSessionId = sessionId === "before" ? "after" : `${sessionId}-after`;
+          gateway.rekeySession(sessionId, nextSessionId);
+          return { sessionId: nextSessionId };
+        }
+        throw new Error(`unexpected method ${method}`);
+      },
+    };
+    const sessions = { subscribe: vi.fn(), unsubscribe: vi.fn(), unsubscribeClient: vi.fn() };
+    gateway = new GatewayServer({
+      host: "127.0.0.1", port: address.port, maxFrameBytes: 1_048_576,
+      maximumSynchronizationBytes: 1_000,
+      devices, uploads: {} as any, sessions: sessions as any, auth: { cancelClient: vi.fn() } as any,
+      service: service as any, logger: { log: vi.fn() } as any,
+    });
+    await gateway.listen();
+    cleanups.push(async () => { await gateway.close(); });
+
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    const frames: any[] = [];
+    socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 3 }));
+    const waitFor = async (predicate: () => boolean) => {
+      const deadline = Date.now() + 5_000;
+      while (!predicate()) {
+        if (Date.now() >= deadline) throw new Error("frame timed out");
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    };
+    await waitFor(() => frames.some((frame) => frame.type === "hello"));
+    const request = async (id: string, method: string, sessionId: string, extra: Record<string, unknown> = {}) => {
+      socket.send(JSON.stringify({ type: "request", id, method, params: { sessionId, ...extra } }));
+      await waitFor(() => frames.some((frame) => frame.id === id));
+      return frames.find((frame) => frame.id === id);
+    };
+    const event = (sessionId: string, sequence: number) => ({
+      runtimeGeneration: `generation-${sessionId}`, eventSequence: sequence, revision: sequence,
+      data: "x".repeat(500),
+    });
+
+    const openedA = await request("open-a", "session.open", "a");
+    gateway.broadcastSession("a", "session.progress", event("a", 2) as any);
+    const openedB = await request("open-b", "session.open", "b");
+    gateway.broadcastSession("b", "session.progress", event("b", 2) as any);
+    await request("sync-b", "session.sync", "b", { syncToken: openedB.result.syncToken });
+    await waitFor(() => frames.some((frame) => frame.topic === "session.rebaseline" && frame.sessionId === "b"));
+    expect(frames.filter((frame) => frame.topic === "transport.resyncRequired" && frame.sessionId === "b")).toHaveLength(0);
+    await request("sync-a", "session.sync", "a", { syncToken: openedA.result.syncToken });
+    await waitFor(() => frames.some((frame) => frame.topic === "session.progress" && frame.sessionId === "a"));
+
+    // The first commit releases its exact admission, so a new same-sized
+    // quarantine succeeds instead of inheriting b's aggregate overflow.
+    const openedC = await request("open-c", "session.open", "c");
+    gateway.broadcastSession("c", "session.progress", event("c", 2) as any);
+    await request("sync-c", "session.sync", "c", { syncToken: openedC.result.syncToken });
+    await waitFor(() => frames.some((frame) => frame.topic === "session.progress" && frame.sessionId === "c"));
+    expect(frames.some((frame) => frame.topic === "session.rebaseline" && frame.sessionId === "c")).toBe(false);
+
+    const openedBefore = await request("open-before", "session.open", "before");
+    await request("sync-before", "session.sync", "before", { syncToken: openedBefore.result.syncToken });
+    await request("attach-before", "terminal.attach", "before", { terminalId: "terminal-before" });
+    await request("fork", "session.fork", "before", { commandId: "command-fork" });
+    const afterEvents = frames.length;
+    gateway.broadcastSession("before", "session.progress", event("before", 2) as any);
+    gateway.broadcastSession("after", "session.progress", event("after", 2) as any);
+    gateway.broadcastTerminal("terminal-before", "terminal.output", { data: "must be detached" } as any);
+    await waitFor(() => frames.slice(afterEvents).some((frame) => frame.topic === "session.progress" && frame.sessionId === "after"));
+    expect(frames.slice(afterEvents).filter((frame) => frame.topic === "session.progress").map((frame) => frame.sessionId)).toEqual(["after"]);
+    expect(frames.slice(afterEvents).some((frame) => frame.topic === "terminal.output")).toBe(false);
+    const closed = await request("close-after", "session.close", "after", { subscriptionToken: openedBefore.result.subscriptionToken });
+    expect(closed.result).toEqual({ closed: true });
+    const closedEvents = frames.length;
+    gateway.broadcastSession("after", "session.progress", event("after", 3) as any);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(frames.slice(closedEvents).some((frame) => frame.sessionId === "after" && frame.topic === "session.progress")).toBe(false);
+
+    // Forking between open and sync moves the in-flight barrier and token;
+    // the carried former ID still commits exactly once to the new session.
+    const openedPending = await request("open-pending", "session.open", "pending");
+    await request("fork-pending", "session.fork", "pending", { commandId: "command-fork-pending" });
+    const pendingStart = frames.length;
+    gateway.broadcastSession("pending-after", "session.progress", event("pending-after", 2) as any);
+    await request("sync-pending", "session.sync", "pending", { syncToken: openedPending.result.syncToken });
+    await waitFor(() => frames.slice(pendingStart).some((frame) => frame.topic === "session.progress" && frame.sessionId === "pending-after"));
+    expect(frames.slice(pendingStart).filter((frame) => frame.topic === "session.progress" && frame.sessionId === "pending-after")).toHaveLength(1);
+    socket.close();
+  });
+});

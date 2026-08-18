@@ -2510,6 +2510,7 @@ export default function (pi) {
       return runtime;
     };
     faux.setResponses([fauxAssistantMessage("done")]);
+    const rekeys: Array<[string, string]> = [];
     const registry = new RuntimeRegistry({
       agentDir,
       tronHome: join(root, "tron"),
@@ -2519,6 +2520,7 @@ export default function (pi) {
       broadcast: () => {},
       sessionSummaryChanged: () => {},
       sessionListChanged: () => {},
+      sessionRekeyed: (previousId, nextId) => rekeys.push([previousId, nextId]),
     });
     registries.push(registry);
     await registry.initialize();
@@ -2533,6 +2535,7 @@ export default function (pi) {
 
     const fork = await slot.fork(userEntry!.id, "at");
     expect(fork.sessionId).not.toBe(original);
+    expect(rekeys).toEqual([[original, fork.sessionId]]);
     expect((await registry.acquire(fork.sessionId)).id).toBe(fork.sessionId);
   });
 

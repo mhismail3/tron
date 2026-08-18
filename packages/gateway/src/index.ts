@@ -69,6 +69,7 @@ const sessions = new RuntimeRegistry({
   broadcast: (sessionId, topic, payload) => transport?.broadcastSession(sessionId, topic, payload),
   sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),
   sessionListChanged: () => transport?.notifySessionListChanged(),
+  sessionRekeyed: (previousId, nextId) => transport?.rekeySession(previousId, nextId),
 });
 await sessions.initialize();
 
@@ -148,6 +149,7 @@ transport = new GatewayServer({
   maximumSubscriptionsPerConnection: config.maxSubscriptionsPerConnection,
   maximumOutboundFrames: config.maxOutboundFrames,
   maximumOutboundBytes: config.maxOutboundBytes,
+  maximumSynchronizationBytes: config.maxSynchronizationBytes,
   devices,
   uploads,
   sessions,

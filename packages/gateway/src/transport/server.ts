@@ -20,6 +20,8 @@ export interface ActiveSessionSynchronization {
   timeout: NodeJS.Timeout;
   requestId: string;
   subscriptionToken: string;
+  /** Updated if its canonical session forks while acknowledgement is pending. */
+  sessionId: string;
 }
 
 interface SynchronizationCompletion {
@@ -101,6 +103,10 @@ interface Connection {
   inFlight: Set<string>;
   synchronizations: Map<string, ActiveSessionSynchronization>;
   subscriptionTokens: Map<string, string>;
+  // A fork may occur after session.open but before session.sync. Retain the
+  // former ID only while its carried subscription remains current.
+  rekeyedSessionIds: Map<string, string>;
+  synchronizationBytes: number;
   // Reserved before asynchronous service invocation so overlapping opens for
   // the same connection/session are rejected deterministically.
   pendingSessionOpens: Map<string, string>;
@@ -200,6 +206,7 @@ export class GatewayServer {
       maximumSubscriptionsPerConnection?: number;
       maximumOutboundFrames?: number;
       maximumOutboundBytes?: number;
+      maximumSynchronizationBytes?: number;
       synchronizationTimeoutMs?: number;
       devices: DeviceStore;
       uploads: UploadStore;
@@ -242,6 +249,52 @@ export class GatewayServer {
       throw error;
     }
     this.options.logger.log("info", `Gateway listening on ${this.options.host}:${this.options.port}`);
+  }
+
+  /** Move connection-local ownership with the registry's canonical rekey. */
+  rekeySession(previousSessionId: string, nextSessionId: string): void {
+    if (previousSessionId === nextSessionId) return;
+    for (const connection of this.clients.values()) {
+      const sourceSynchronization = connection.synchronizations.get(previousSessionId);
+      const sourceToken = connection.subscriptionTokens.get(previousSessionId);
+      const sourceSubscribed = connection.subscriptions.has(previousSessionId);
+      if (!sourceSynchronization && sourceToken === undefined && !sourceSubscribed) continue;
+
+      // A destination owner can only be stale here: RuntimeRegistry prevents
+      // two live slots from owning the replacement ID. Retire it locally
+      // without unsubscribing the merged registry subscriber set.
+      const destinationSynchronization = connection.synchronizations.get(nextSessionId);
+      if (destinationSynchronization && destinationSynchronization !== sourceSynchronization) {
+        clearTimeout(destinationSynchronization.timeout);
+        destinationSynchronization.barrier.abort(destinationSynchronization.requestId);
+        connection.synchronizations.delete(nextSessionId);
+      }
+      connection.subscriptionTokens.delete(nextSessionId);
+      releaseSessionTerminals(
+        connection.terminals,
+        nextSessionId,
+        (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
+      );
+
+      connection.subscriptions.delete(previousSessionId);
+      connection.subscriptionTokens.delete(previousSessionId);
+      connection.synchronizations.delete(previousSessionId);
+      releaseSessionTerminals(
+        connection.terminals,
+        previousSessionId,
+        (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
+      );
+      connection.subscriptions.add(nextSessionId);
+      if (sourceToken !== undefined) connection.subscriptionTokens.set(nextSessionId, sourceToken);
+      if (sourceSynchronization) {
+        sourceSynchronization.sessionId = nextSessionId;
+        connection.synchronizations.set(nextSessionId, sourceSynchronization);
+      }
+      for (const [former, current] of connection.rekeyedSessionIds) {
+        if (current === previousSessionId) connection.rekeyedSessionIds.set(former, nextSessionId);
+      }
+      connection.rekeyedSessionIds.set(previousSessionId, nextSessionId);
+    }
   }
 
   broadcastSession(sessionId: string, topic: string, payload: JsonValue): void {
@@ -430,6 +483,8 @@ export class GatewayServer {
       inFlight: new Set(),
       synchronizations: new Map(),
       subscriptionTokens: new Map(),
+      rekeyedSessionIds: new Map(),
+      synchronizationBytes: 0,
       pendingSessionOpens: new Map(),
       outboundFrames: 0,
       helloTimer: setTimeout(() => socket.close(1008, "hello required"), 5_000),
@@ -507,7 +562,24 @@ export class GatewayServer {
     const synchronizationOwners: SynchronizationOwner[] = [];
     const synchronizationCompletions: SynchronizationCompletion[] = [];
     let responseAttempted = false;
+    const resolveSessionId = (sessionId: string): string => {
+      const seen = new Set<string>();
+      let current = sessionId;
+      while (!seen.has(current)) {
+        seen.add(current);
+        const replacement = connection.rekeyedSessionIds.get(current);
+        if (replacement === undefined) return current;
+        current = replacement;
+      }
+      return sessionId;
+    };
+    const clearRekeyedSessionIds = (sessionId: string): void => {
+      for (const [former, current] of connection.rekeyedSessionIds) {
+        if (former === sessionId || current === sessionId) connection.rekeyedSessionIds.delete(former);
+      }
+    };
     const revokeSynchronization = (sessionId: string, synchronization: ActiveSessionSynchronization): boolean => {
+      sessionId = resolveSessionId(sessionId);
       // A later session.open may have replaced this request's owner. In that
       // case, only the current token may revoke the runtime subscription.
       if (connection.synchronizations.get(sessionId) !== synchronization
@@ -515,6 +587,7 @@ export class GatewayServer {
       synchronization.barrier.abort(synchronization.requestId);
       connection.subscriptionTokens.delete(sessionId);
       connection.subscriptions.delete(sessionId);
+      clearRekeyedSessionIds(sessionId);
       releaseSessionTerminals(
         connection.terminals,
         sessionId,
@@ -524,6 +597,7 @@ export class GatewayServer {
       return true;
     };
     const revokeSubscription = (sessionId: string, token: string): boolean => {
+      sessionId = resolveSessionId(sessionId);
       const synchronization = connection.synchronizations.get(sessionId);
       if (synchronization && synchronization.subscriptionToken === token) {
         clearTimeout(synchronization.timeout);
@@ -534,6 +608,7 @@ export class GatewayServer {
       if (connection.subscriptionTokens.get(sessionId) !== token) return false;
       connection.subscriptionTokens.delete(sessionId);
       connection.subscriptions.delete(sessionId);
+      clearRekeyedSessionIds(sessionId);
       releaseSessionTerminals(
         connection.terminals,
         sessionId,
@@ -591,22 +666,34 @@ export class GatewayServer {
           this.options.sessions.subscribe(connection.id, sessionId);
           const syncToken = randomUUID();
           connection.subscriptionTokens.set(sessionId, syncToken);
-          const barrier = new SessionSyncBarrier();
+          const maximumSynchronizationBytes = this.options.maximumSynchronizationBytes ?? 2 * 1_048_576;
+          const barrier = new SessionSyncBarrier({
+            reserve: (bytes) => {
+              if (bytes > maximumSynchronizationBytes - connection.synchronizationBytes) return false;
+              connection.synchronizationBytes += bytes;
+              return true;
+            },
+            release: (bytes) => {
+              connection.synchronizationBytes = Math.max(0, connection.synchronizationBytes - bytes);
+            },
+          });
           barrier.begin(syncToken);
+          let installed!: ActiveSessionSynchronization;
           const timeout = setTimeout(() => {
-            const active = connection.synchronizations.get(sessionId);
-            if (active?.barrier !== barrier) return;
-            revokeSynchronization(sessionId, active);
-            connection.synchronizations.delete(sessionId);
+            const active = connection.synchronizations.get(installed.sessionId);
+            if (active !== installed) return;
+            revokeSynchronization(installed.sessionId, active);
+            connection.synchronizations.delete(installed.sessionId);
             this.send(connection, {
               type: "event",
               topic: "transport.resyncRequired",
-              sessionId,
+              sessionId: installed.sessionId,
               payload: { reason: "subscription synchronization timed out" },
             });
           }, this.options.synchronizationTimeoutMs ?? 30_000);
           timeout.unref();
-          connection.synchronizations.set(sessionId, { barrier, timeout, requestId, subscriptionToken: syncToken });
+          installed = { barrier, timeout, requestId, subscriptionToken: syncToken, sessionId };
+          connection.synchronizations.set(sessionId, installed);
           synchronizationOwners.push({
             sessionId,
             syncToken,
@@ -616,6 +703,7 @@ export class GatewayServer {
           return syncToken;
         },
         establishSynchronization: (sessionId, snapshot) => {
+          sessionId = resolveSessionId(sessionId);
           const active = connection.synchronizations.get(sessionId);
           if (!active || active.requestId !== requestId) {
             throw new GatewayError("conflict", "Session synchronization is owned by another request", true);
@@ -623,6 +711,7 @@ export class GatewayServer {
           active.barrier.establish(snapshot);
         },
         completeSynchronization: (sessionId, syncToken) => {
+          sessionId = resolveSessionId(sessionId);
           const active = connection.synchronizations.get(sessionId);
           if (!active || active.subscriptionToken !== syncToken) {
             throw new GatewayError("conflict", "Session synchronization is no longer owned by this token", true);
@@ -638,6 +727,7 @@ export class GatewayServer {
           });
         },
         unsubscribe: (sessionId, subscriptionToken) => {
+          sessionId = resolveSessionId(sessionId);
           if (subscriptionToken !== undefined) return revokeSubscription(sessionId, subscriptionToken);
           const synchronization = connection.synchronizations.get(sessionId);
           if (synchronization) {
@@ -672,7 +762,7 @@ export class GatewayServer {
       // not publish an orphan successful response/token after its barrier was
       // revoked.
       for (const owner of synchronizationOwners) {
-        const active = connection.synchronizations.get(owner.sessionId);
+        const active = connection.synchronizations.get(resolveSessionId(owner.sessionId));
         if (!active
             || active.requestId !== owner.requestId
             || active.subscriptionToken !== owner.subscriptionToken) {
@@ -683,7 +773,7 @@ export class GatewayServer {
       // request+token exact; this prevents a stale request from ever sending a
       // successful response which it can no longer commit.
       for (const completion of synchronizationCompletions) {
-        const active = connection.synchronizations.get(completion.sessionId);
+        const active = connection.synchronizations.get(resolveSessionId(completion.sessionId));
         if (!active
             || active.requestId !== completion.requestId
             || active.subscriptionToken !== completion.subscriptionToken
@@ -708,6 +798,7 @@ export class GatewayServer {
       // this block is synchronous, no newer broadcast can overtake the buffered
       // catch-up on the WebSocket. Re-check exact ownership before committing.
       if (responseSentIntact) for (const completion of synchronizationCompletions) {
+        completion.sessionId = resolveSessionId(completion.sessionId);
         const active = connection.synchronizations.get(completion.sessionId);
         if (!active
             || active.requestId !== completion.requestId

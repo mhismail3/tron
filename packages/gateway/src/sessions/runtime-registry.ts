@@ -100,6 +100,7 @@ export class RuntimeRegistry {
       broadcast: SessionBroadcast;
       sessionSummaryChanged: (summary: SessionSummaryUpdate) => void;
       sessionListChanged: () => void;
+      sessionRekeyed?: (previousId: string, nextId: string) => void;
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
     },
   ) {
@@ -170,8 +171,14 @@ export class RuntimeRegistry {
         const subscribers = this.subscribers.get(previousId);
         if (subscribers) {
           this.subscribers.delete(previousId);
-          this.subscribers.set(nextId, subscribers);
+          const destinationSubscribers = this.subscribers.get(nextId);
+          if (destinationSubscribers) {
+            for (const clientId of subscribers) destinationSubscribers.add(clientId);
+          } else {
+            this.subscribers.set(nextId, subscribers);
+          }
         }
+        this.options.sessionRekeyed?.(previousId, nextId);
         this.invalidateCatalogAcquisition();
         this.revision += 1;
         this.options.sessionListChanged();
