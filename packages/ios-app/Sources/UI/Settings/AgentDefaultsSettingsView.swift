@@ -151,6 +151,10 @@ struct AgentDefaultsSettingsView: View {
 
     private func refresh() async {
         guard let target = settingsTarget else { return }
+        // Establish a clean local snapshot before the first async response. If the
+        // user edits while the response is in flight, update() marks the draft dirty
+        // and the late response is correctly rejected.
+        _ = drafts.install(draft, for: target)
         let requestedCatalogTarget = catalogTarget
         async let settingsReady = model.refreshSettings(target: target)
         async let catalogReady = model.refreshProviders(target: requestedCatalogTarget)

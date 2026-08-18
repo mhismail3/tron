@@ -264,8 +264,11 @@ struct RuntimeBehaviorSettingsView: View {
     }
 
     private func load() async {
-        guard let target = settingsTarget,
-              await model.refreshSettings(target: target),
+        guard let target = settingsTarget else { return }
+        // Keep the toolbar disabled while the initial response is pending, but
+        // preserve any edit that arrives before that response.
+        _ = drafts.install(draft, for: target)
+        guard await model.refreshSettings(target: target),
               target == settingsTarget,
               let loaded = projectionDraft(target: target),
               drafts.install(loaded, for: target) else { return }
