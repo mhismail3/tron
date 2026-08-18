@@ -560,6 +560,23 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.hostedDirectTailReturnArmed)
     }
 
+    @Test("upward interaction publishes catch-up immediately")
+    func upwardInteractionPublishesCatchUpImmediately() {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
+        let firstUpwardSample = ChatTranscriptGeometry(
+            offsetY: 550,
+            contentHeight: 1_000,
+            containerHeight: 400
+        )
+
+        coordinator.geometryChanged(previous: bottom, current: firstUpwardSample)
+
+        #expect(coordinator.isUserInteracting)
+        #expect(coordinator.userScrolledAway)
+        #expect(coordinator.shouldShowCatchUpButton)
+    }
+
     @Test("geometry and native ownership callback permutations both detach")
     func callbackOrdering() {
         let nativeFirst = ChatScrollCoordinator()

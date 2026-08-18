@@ -413,6 +413,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Onboarding/SetupComponents.swift"),
             encoding: .utf8
         )
+        let globalSheets = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Components/GlobalSheets.swift"),
+            encoding: .utf8
+        )
         let appearance = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/AppearanceSettingsView.swift"),
             encoding: .utf8
@@ -480,6 +484,9 @@ struct PresentationStyleGuardTests {
         #expect(!settings.contains("Import Legacy Sessions"))
         #expect(providerSettings.contains(".providerAuthPresenter()"))
         #expect(providerSettings.contains("currently visible provider"))
+        #expect(globalSheets.contains("@State private var presentedOperationID: String?"))
+        #expect(globalSheets.contains("cancelAuth(operationID: closingOperationID)"))
+        #expect(!globalSheets.contains("Task { await model.cancelAuth() }"))
         #expect(providers.contains("Button(\"Log Out\", systemImage: \"rectangle.portrait.and.arrow.right\", role: .destructive)"))
         #expect(providers.contains("Image(systemName: \"ellipsis\")"))
         #expect(providers.contains("return \"Connected - "))

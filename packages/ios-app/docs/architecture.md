@@ -264,7 +264,9 @@ auth prompt/event parsing, and operation-to-target retention through completion 
 cancellation. Because provider login can synchronously emit presentation or completion events
 before `auth.begin` returns, a four-operation, 64-element, 16 KiB pre-response quarantine promotes only the
 newest admitted operation and is synchronously revoked on failure, cancellation, or profile
-retirement. Provider and model pages publish as one atomic catalog. Provider projection rejects
+retirement. Prompt submission is single-flight on iOS, and the Gateway treats bounded late
+auth acknowledgements as idempotent no-ops so completion/response reordering cannot surface a
+misleading operation-not-found error. Provider and model pages publish as one atomic catalog. Provider projection rejects
 more than 1,000 rows, 4 MiB of strings, or duplicate IDs. Model projection rejects repeated cursors,
 more than 50 pages, 25,000 models, 16 MiB of retained strings, pages above the requested 500 rows,
 and duplicate compound identities. Gateway cursors bind offsets to an exact whole-catalog fingerprint,

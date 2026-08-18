@@ -291,7 +291,8 @@ client. Each operation has a 15-minute Gateway-owned lifetime, so providers that
 ignore abort cannot retain broker capacity; completion, failure, cancellation,
 disconnect, and timeout retire exactly once. Provider prompt/event projections
 are limited to 128 KiB before broadcast, and late callbacks from retired operations
-are inert.
+are inert. A bounded one-minute tombstone window makes duplicate or reordered
+`auth.respond`/`auth.cancel` requests harmless without retaining prompt values.
 `session.list` and `model.list` are cursor-paginated so Pi catalogs remain
 complete without exceeding bounded gateway frames. Workspace browsing streams directory entries
 from an identity-checked directory handle and fails visibly, without returning a partial listing,

@@ -552,6 +552,24 @@ struct ProviderAuthCoordinatorTests {
         }
     }
 
+    @Test("late duplicate prompt acknowledgements clear only the admitted prompt")
+    func latePromptAcknowledgementIsHarmless() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            harness.owner.installHostedAuthOperation("operation", target: .global)
+            harness.owner.handlePrompt(promptPayload(operation: "operation", prompt: "prompt"))
+
+            let answer = Task { try await harness.owner.answerAuth("secret") }
+            try await harness.socket.waitUntilSent(count: 2)
+            let request = try request(await harness.socket.sentFrames()[1])
+            await harness.socket.enqueue(response(id: request.id, result: .object(["answered": .bool(false)])))
+            try await answer.value
+
+            #expect(harness.owner.prompt == nil)
+            await harness.client.close()
+        }
+    }
+
     @Test("older completion refreshes only its retained target and preserves newer auth state")
     func olderCompletionCannotRefreshNewerTarget() async throws {
         try await runScenario {

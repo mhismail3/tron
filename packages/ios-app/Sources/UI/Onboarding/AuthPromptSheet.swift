@@ -115,10 +115,12 @@ private struct AuthPromptContent: View {
     }
 
     private func submit(_ response: String) {
+        guard !submitting else { return }
         submitting = true
         Task {
             defer { submitting = false }
             do { try await model.answerAuth(response) }
+            catch is CancellationError { }
             catch { model.lastError = error.localizedDescription }
         }
     }
