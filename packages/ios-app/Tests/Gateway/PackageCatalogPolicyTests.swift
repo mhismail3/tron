@@ -24,6 +24,16 @@ struct PackageCatalogPolicyTests {
             resources: emptyResources
         )
         #expect(try PackageCatalogPolicy.admit(inventory) == inventory)
+
+        let additiveResources = JSONValue.object([
+            "extensions": .array([]),
+            "skills": .array([]),
+            "prompts": .array([]),
+            "themes": .array([]),
+            "futureCategory": .array([.object(["path": .string("/future")])]),
+        ])
+        #expect(try PackageCatalogPolicy.admit(PackageInventory(packages: [], resources: additiveResources)).resources == additiveResources)
+
         let updates = [PackageUpdate(
             source: "package",
             displayName: "Package",

@@ -95,6 +95,7 @@ struct PackageConfigurationCoordinatorTests {
             await harness.socket.enqueue(failure(id: newerRequest.id, message: "admitted"))
             #expect(!(await newer.value))
             #expect(delegate.messages == ["admitted"])
+            #expect(harness.owner.error(for: .global) == "admitted")
 
             let pending = Task { await harness.owner.load(target: .global) }
             try await harness.socket.waitUntilSent(count: 4)
@@ -105,6 +106,23 @@ struct PackageConfigurationCoordinatorTests {
             await harness.socket.enqueue(response(id: pendingRequest.id, result: inventory("late")))
             #expect(!(await pending.value))
             #expect(harness.owner.inventory(for: .global) == nil)
+            await harness.client.close()
+        }
+    }
+
+    @Test("local package errors remain available without global presentation")
+    func localPackageErrors() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            let delegate = ErrorDelegate()
+            harness.owner.delegate = delegate
+            let pending = Task { await harness.owner.load(target: .global, surfaceError: false) }
+            try await harness.socket.waitUntilSent(count: 2)
+            let requestValue = try request(await harness.socket.sentFrames()[1])
+            await harness.socket.enqueue(failure(id: requestValue.id, message: "local failure"))
+            #expect(!(await pending.value))
+            #expect(harness.owner.error(for: .global) == "local failure")
+            #expect(delegate.messages.isEmpty)
             await harness.client.close()
         }
     }

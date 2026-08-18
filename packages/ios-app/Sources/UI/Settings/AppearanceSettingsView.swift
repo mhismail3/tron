@@ -8,24 +8,16 @@ struct AppearanceSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 20) {
                 TronSettingsGroup("Color Mode") {
-                    VStack(spacing: 0) {
-                        ForEach(Array(AppearanceMode.allCases.enumerated()), id: \.element.id) { index, mode in
-                            if index > 0 { TronSettingsDivider() }
-                            Button { appearance.mode = mode } label: {
-                                TronSettingsRow(icon: mode.icon, title: mode.label) {
-                                    if appearance.mode == mode {
-                                        Image(systemName: "checkmark")
-                                            .font(TronTypography.buttonSM)
-                                            .foregroundStyle(Color.tronAccentText)
-                                    }
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(mode.label)
-                            .accessibilityValue(appearance.mode == mode ? "Selected" : "")
+                    Picker("Color Mode", selection: $appearance.mode) {
+                        ForEach(AppearanceMode.allCases) { mode in
+                            Label(mode.label, systemImage: mode.icon)
+                                .tag(mode)
                         }
                     }
+                    .pickerStyle(.segmented)
+                    .tint(Color.tronEmerald)
+                    .padding(14)
+                    .accessibilityLabel("Color Mode")
                 }
 
                 TronSettingsGroup("Text Font", accent: .tronPurple) {
@@ -35,16 +27,11 @@ struct AppearanceSettingsView: View {
                         } label: {
                             TronSettingsRow(icon: "textformat", title: "Font", subtitle: fonts.selectedFamily.displayName, accent: .tronPurple)
                         }
-                        TronSettingsDivider(accent: .tronPurple)
-                        Text("The quick brown fox jumps over the lazy dog.")
-                            .font(TronFont.body(16))
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(14)
                         if fonts.selectedFamily.isVariable {
                             TronSettingsDivider(accent: .tronPurple)
                             axisSlider(
                                 "Text weight",
+                                icon: "textformat.size",
                                 value: axisBinding(fonts.selectedFamily, .weight),
                                 range: fonts.selectedFamily.weightRange,
                                 minimum: "Light",
@@ -55,12 +42,19 @@ struct AppearanceSettingsView: View {
                             TronSettingsDivider(accent: .tronPurple)
                             axisSlider(
                                 axis.displayName,
+                                icon: "slider.horizontal.3",
                                 value: axisBinding(fonts.selectedFamily, axis),
                                 range: axis.range(for: fonts.selectedFamily),
                                 minimum: axis.minLabel,
                                 maximum: axis.maxLabel
                             )
                         }
+                        TronSettingsDivider(accent: .tronPurple)
+                        Text("The quick brown fox jumps over the lazy dog.")
+                            .font(TronFont.body(16))
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(14)
                     }
                 }
 
@@ -71,6 +65,28 @@ struct AppearanceSettingsView: View {
                         } label: {
                             TronSettingsRow(icon: "curlybraces", title: "Font", subtitle: fonts.selectedMonoFamily.displayName, accent: .tronCyan)
                         }
+                        if fonts.selectedMonoFamily.isVariable {
+                            TronSettingsDivider(accent: .tronCyan)
+                            axisSlider(
+                                "Code weight",
+                                icon: "textformat.size",
+                                value: axisBinding(fonts.selectedMonoFamily, .weight),
+                                range: fonts.selectedMonoFamily.weightRange,
+                                minimum: "Light",
+                                maximum: "Heavy"
+                            )
+                        }
+                        ForEach(fonts.selectedMonoFamily.customAxes.filter { !$0.isAutomatic && $0 != .weight }) { axis in
+                            TronSettingsDivider(accent: .tronCyan)
+                            axisSlider(
+                                axis.displayName,
+                                icon: "slider.horizontal.3",
+                                value: axisBinding(fonts.selectedMonoFamily, axis),
+                                range: axis.range(for: fonts.selectedMonoFamily),
+                                minimum: axis.minLabel,
+                                maximum: axis.maxLabel
+                            )
+                        }
                         TronSettingsDivider(accent: .tronCyan)
                         Text("let result = await tron.run()")
                             .font(TronFont.mono(14))
@@ -78,16 +94,6 @@ struct AppearanceSettingsView: View {
                             .textSelection(.enabled)
                             .frame(minHeight: 44, alignment: .leading)
                             .padding(14)
-                        if fonts.selectedMonoFamily.isVariable {
-                            TronSettingsDivider(accent: .tronCyan)
-                            axisSlider(
-                                "Code weight",
-                                value: axisBinding(fonts.selectedMonoFamily, .weight),
-                                range: fonts.selectedMonoFamily.weightRange,
-                                minimum: "Light",
-                                maximum: "Heavy"
-                            )
-                        }
                     }
                 }
 
@@ -109,13 +115,14 @@ struct AppearanceSettingsView: View {
 
     private func axisSlider(
         _ title: String,
+        icon: String,
         value: Binding<Double>,
         range: ClosedRange<Double>,
         minimum: String,
         maximum: String
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title)
+            Label(title, systemImage: icon)
                 .font(TronTypography.bodySM)
                 .foregroundStyle(Color.tronTextPrimary)
             Slider(value: value, in: range) {
@@ -125,8 +132,10 @@ struct AppearanceSettingsView: View {
             } maximumValueLabel: {
                 Text(maximum).font(TronTypography.caption)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func axisBinding(_ family: FontFamily, _ axis: FontAxis) -> Binding<Double> {

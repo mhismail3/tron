@@ -53,6 +53,7 @@ final class PackageConfigurationCoordinator {
     private var loadGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
     private var updateGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
     private var mutationGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
+    private var errorByTarget: [PackageConfigurationTarget: String] = [:]
     private var profileGeneration = 0
 
     private(set) var invalidationGeneration = 0
@@ -75,14 +76,19 @@ final class PackageConfigurationCoordinator {
         updatesByTarget[target] ?? []
     }
 
+    func error(for target: PackageConfigurationTarget) -> String? {
+        errorByTarget[target]
+    }
+
     @discardableResult
-    func load(target: PackageConfigurationTarget) async -> Bool {
-        await load(target: target, requiring: nil)
+    func load(target: PackageConfigurationTarget, surfaceError: Bool = true) async -> Bool {
+        await load(target: target, requiring: nil, surfaceError: surfaceError)
     }
 
     private func load(
         target: PackageConfigurationTarget,
-        requiring mutationAdmission: TargetAdmission?
+        requiring mutationAdmission: TargetAdmission?,
+        surfaceError: Bool
     ) async -> Bool {
         let admission = beginAdmission(target: target, generations: &loadGenerationByTarget)
         do {
@@ -97,19 +103,21 @@ final class PackageConfigurationCoordinator {
             }
             let admitted = try PackageCatalogPolicy.admit(inventory)
             inventoryByTarget[target] = admitted
+            errorByTarget[target] = nil
             return true
         } catch {
             guard admits(admission, generations: loadGenerationByTarget),
                   mutationAdmission.map({ admits($0, generations: mutationGenerationByTarget) }) ?? true else {
                 return false
             }
-            delegate?.packageConfigurationCoordinatorSurface(error)
+            errorByTarget[target] = error.localizedDescription
+            if surfaceError { delegate?.packageConfigurationCoordinatorSurface(error) }
             return false
         }
     }
 
     @discardableResult
-    func checkUpdates(target: PackageConfigurationTarget) async -> Bool {
+    func checkUpdates(target: PackageConfigurationTarget, surfaceError: Bool = true) async -> Bool {
         let admission = beginAdmission(target: target, generations: &updateGenerationByTarget)
         do {
             let response: UpdateResponse = try await client.request(
@@ -120,10 +128,12 @@ final class PackageConfigurationCoordinator {
             guard admits(admission, generations: updateGenerationByTarget) else { return false }
             let admitted = try PackageCatalogPolicy.admit(response.updates)
             updatesByTarget[target] = admitted
+            errorByTarget[target] = nil
             return true
         } catch {
             guard admits(admission, generations: updateGenerationByTarget) else { return false }
-            delegate?.packageConfigurationCoordinatorSurface(error)
+            errorByTarget[target] = error.localizedDescription
+            if surfaceError { delegate?.packageConfigurationCoordinatorSurface(error) }
             return false
         }
     }
@@ -132,7 +142,8 @@ final class PackageConfigurationCoordinator {
         _ action: PackageMutationAction,
         source: String?,
         local: Bool,
-        target: PackageConfigurationTarget
+        target: PackageConfigurationTarget,
+        surfaceError: Bool = true
     ) async throws {
         let admission = beginAdmission(target: target, generations: &mutationGenerationByTarget)
         let method = "packages.\(action.rawValue)"
@@ -165,8 +176,16 @@ final class PackageConfigurationCoordinator {
             break
         }
 
-        _ = await load(target: target, requiring: admission)
+        let reloaded = await load(target: target, requiring: admission, surfaceError: surfaceError)
         try require(admission, generations: mutationGenerationByTarget)
+        if !reloaded, !surfaceError {
+            throw GatewayFailure(
+                code: "invalid_response",
+                message: errorByTarget[target] ?? "The package catalog is unavailable. Try again.",
+                retryable: true,
+                details: nil
+            )
+        }
     }
 
     func notePackagesChanged() {
@@ -182,6 +201,7 @@ final class PackageConfigurationCoordinator {
         mutationGenerationByTarget = mutationGenerationByTarget.mapValues { $0 &+ 1 }
         inventoryByTarget.removeAll()
         updatesByTarget.removeAll()
+        errorByTarget.removeAll()
     }
 
     private func beginAdmission(

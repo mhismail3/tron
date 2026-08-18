@@ -782,8 +782,10 @@ presenting backing-process sessions as user sessions. Modal detail flows dismiss
 with the native top-right check action; top-left dismissal controls are reserved
 for navigation, not app-owned sheets. Settings containers and their nested font
 or model choices disclose as progressively stacked sub-sheets rather than
-horizontal navigation pushes; connected-provider logout lives in the provider
-row's compact action menu while connection is a plain trailing affordance. Import
+horizontal navigation pushes; Appearance uses a segmented color-mode selector and
+keeps font axes directly beneath each font choice before its preview. Connected-provider
+logout lives in the provider row's compact action menu while connection is a plain
+trailing affordance. Import
 is owned by one progressive Import sheet, including canonical session-file import
 and the bounded legacy migration path. The chat composer remains visually floating without an
 opaque footer, but structurally reserves the transcript's bottom safe area. Its UIKit
@@ -953,7 +955,9 @@ positional “Item” labels. Reload is owned by that sheet and publishes visibl
 Resource Locations separates
 optional discovery paths from advanced Mac runtime overrides and explains each
 setting before editing it. Session storage is gateway-owned and is not exposed as
-a backing-runtime location override.
+a backing-runtime location override. Package catalog admission failures remain
+local to the Packages sheet, preserving the sheet while presenting a bounded retry
+state instead of routing a projection error through the global alert.
 Deep session history is projected as a bounded flat outline with depth, branch,
 and current-path metadata so large canonical sessions neither overflow the
 gateway stack nor exceed the mobile frame. The single History sheet explains Timeline,

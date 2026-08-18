@@ -1375,25 +1375,30 @@ final class AppModel {
         packageConfiguration.updates(for: target)
     }
 
-    @discardableResult
-    func loadPackages(target: PackageConfigurationTarget) async -> Bool {
-        await packageConfiguration.load(target: target)
+    func packageError(for target: PackageConfigurationTarget) -> String? {
+        packageConfiguration.error(for: target)
     }
 
     @discardableResult
-    func checkPackageUpdates(target: PackageConfigurationTarget) async -> Bool {
-        await packageConfiguration.checkUpdates(target: target)
+    func loadPackages(target: PackageConfigurationTarget, surfaceError: Bool = true) async -> Bool {
+        await packageConfiguration.load(target: target, surfaceError: surfaceError)
+    }
+
+    @discardableResult
+    func checkPackageUpdates(target: PackageConfigurationTarget, surfaceError: Bool = true) async -> Bool {
+        await packageConfiguration.checkUpdates(target: target, surfaceError: surfaceError)
     }
 
     func mutatePackage(
         action: PackageMutationAction,
         source: String?,
         local: Bool,
-        target: PackageConfigurationTarget
+        target: PackageConfigurationTarget,
+        surfaceError: Bool = true
     ) async throws {
         guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
         do {
-            try await packageConfiguration.mutate(action, source: source, local: local, target: target)
+            try await packageConfiguration.mutate(action, source: source, local: local, target: target, surfaceError: surfaceError)
         } catch {
             guard admitsLifecycle(admission) else { throw CancellationError() }
             throw error

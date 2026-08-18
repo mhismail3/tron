@@ -26,10 +26,25 @@ struct PackagesSettingsView: View {
     @State private var workingSources: Set<String> = []
     @State private var checking = false
     @State private var reloading = false
+    @State private var packageError: String?
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
+                if let packageError {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(packageError, systemImage: "exclamationmark.triangle")
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Retry", action: reload)
+                            .buttonStyle(TronRowButtonStyle(accent: .tronAmber))
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.09)
+                }
+
                 TronSettingsGroup("Installed") {
                     if let packages = inventory?.packages, !packages.isEmpty {
                         VStack(spacing: 0) {
@@ -38,7 +53,7 @@ struct PackagesSettingsView: View {
                                 packageRow(package)
                             }
                         }
-                    } else {
+                    } else if packageError == nil {
                         VStack(spacing: 10) {
                             Image(systemName: "shippingbox").font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
                             Text("No packages configured").font(TronTypography.headline)
@@ -55,7 +70,12 @@ struct PackagesSettingsView: View {
                     VStack(spacing: 0) {
                         Button {
                             checking = true
-                            Task { await model.checkPackageUpdates(target: target); checking = false }
+                            Task {
+                                let loaded = await model.checkPackageUpdates(target: target, surfaceError: false)
+                                if loaded { packageError = nil }
+                                else { packageError = model.packageError(for: target) ?? "Package updates are unavailable. Try again." }
+                                checking = false
+                            }
                         } label: {
                             TronValueRow(icon: "arrow.clockwise", title: checking ? "Checking…" : "Check for Updates", accent: .tronCyan) {
                                 if checking { ProgressView().controlSize(.small) }
@@ -67,8 +87,16 @@ struct PackagesSettingsView: View {
                             TronSettingsDivider(accent: .tronCyan)
                             Button("Update All") {
                                 Task {
-                                    do { try await model.mutatePackage(action: .update, source: nil, local: false, target: target) }
-                                    catch { model.presentConfigurationActionError(error) }
+                                    do {
+                                        try await model.mutatePackage(
+                                            action: .update,
+                                            source: nil,
+                                            local: false,
+                                            target: target,
+                                            surfaceError: false
+                                        )
+                                        packageError = nil
+                                    } catch { packageError = error.localizedDescription }
                                 }
                             }
                             .buttonStyle(TronActionButtonStyle(role: .primary))
@@ -128,7 +156,9 @@ struct PackagesSettingsView: View {
             }
         }
         .task(id: PackageLoadID(target: target, invalidationGeneration: model.packageInvalidationGeneration)) {
-            await model.loadPackages(target: target)
+            let loaded = await model.loadPackages(target: target, surfaceError: false)
+            if loaded { packageError = nil }
+            else { packageError = model.packageError(for: target) ?? "The package catalog is unavailable. Try again." }
         }
         .confirmationDialog(
             "Remove this package?",
@@ -144,7 +174,9 @@ struct PackagesSettingsView: View {
         reloading = true
         Task {
             defer { reloading = false }
-            await model.loadPackages(target: target)
+            let loaded = await model.loadPackages(target: target, surfaceError: false)
+            if loaded { packageError = nil }
+            else { packageError = model.packageError(for: target) ?? "The package catalog is unavailable. Try again." }
         }
     }
 
@@ -177,9 +209,16 @@ struct PackagesSettingsView: View {
         Task {
             defer { workingSources.remove(identity) }
             do {
-                try await model.mutatePackage(action: .install, source: value, local: local, target: target)
+                try await model.mutatePackage(
+                    action: .install,
+                    source: value,
+                    local: local,
+                    target: target,
+                    surfaceError: false
+                )
                 source = ""
-            } catch { model.presentConfigurationActionError(error) }
+                packageError = nil
+            } catch { packageError = error.localizedDescription }
         }
     }
 
@@ -187,8 +226,16 @@ struct PackagesSettingsView: View {
         workingSources.insert(package.id)
         Task {
             defer { workingSources.remove(package.id) }
-            do { try await model.mutatePackage(action: .update, source: package.source, local: package.scope == .project, target: target) }
-            catch { model.presentConfigurationActionError(error) }
+            do {
+                try await model.mutatePackage(
+                    action: .update,
+                    source: package.source,
+                    local: package.scope == .project,
+                    target: target,
+                    surfaceError: false
+                )
+                packageError = nil
+            } catch { packageError = error.localizedDescription }
         }
     }
 
@@ -197,8 +244,16 @@ struct PackagesSettingsView: View {
         packageToRemove = nil
         Task {
             defer { workingSources.remove(package.id) }
-            do { try await model.mutatePackage(action: .remove, source: package.source, local: package.scope == .project, target: target) }
-            catch { model.presentConfigurationActionError(error) }
+            do {
+                try await model.mutatePackage(
+                    action: .remove,
+                    source: package.source,
+                    local: package.scope == .project,
+                    target: target,
+                    surfaceError: false
+                )
+                packageError = nil
+            } catch { packageError = error.localizedDescription }
         }
     }
 }

@@ -121,8 +121,9 @@ enum PackageCatalogPolicy {
     }
 
     private static func validateResources(_ resources: JSONValue) throws {
-        guard case .object(let root) = resources,
-              Set(root.keys) == Set(["extensions", "skills", "prompts", "themes"]) else {
+        // The Gateway may add projected resource categories over time. Validate
+        // every category this client consumes, but do not reject additive keys.
+        guard case .object(let root) = resources else {
             throw invalidCatalog()
         }
         for kind in ["extensions", "skills", "prompts", "themes"] {
