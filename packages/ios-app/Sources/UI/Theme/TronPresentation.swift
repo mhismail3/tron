@@ -46,6 +46,10 @@ enum TronTypography {
     static var buttonSM: Font { sans(size: sizeBody, weight: .semibold) }
     static var codeBlock: Font { code(size: sizeBodyLG) }
     static var codeContent: Font { code(size: sizeBody2) }
+    /// Slightly larger numeric values remain legible beside dense settings rows.
+    static var numericValue: Font { code(size: sizeBody3) }
+    /// Shared readable scale for selectable raw JSON protocol evidence.
+    static var codeJSON: Font { code(size: sizeBody3) }
 }
 
 // MARK: - App-wide surface policy
@@ -306,11 +310,12 @@ private struct TronFieldSurfaceModifier: ViewModifier {
 private struct TronInlineFieldModifier: ViewModifier {
     let composer: Bool
     let monospaced: Bool
+    let numeric: Bool
 
     func body(content: Content) -> some View {
         content
             .textFieldStyle(.plain)
-            .font(composer ? TronTypography.input : monospaced ? TronTypography.codeContent : TronTypography.bodySM)
+            .font(composer ? TronTypography.input : numeric ? TronTypography.numericValue : monospaced ? TronTypography.codeContent : TronTypography.bodySM)
             .foregroundStyle(composer ? Color.tronEmerald : Color.tronTextPrimary)
             .tint(Color.tronEmerald)
     }
@@ -362,8 +367,8 @@ extension View {
 
     /// Text input whose material is owned by a surrounding historical glass
     /// row/composer. This prevents nested field containers.
-    func tronInlineField(composer: Bool = false, monospaced: Bool = false) -> some View {
-        modifier(TronInlineFieldModifier(composer: composer, monospaced: monospaced))
+    func tronInlineField(composer: Bool = false, monospaced: Bool = false, numeric: Bool = false) -> some View {
+        modifier(TronInlineFieldModifier(composer: composer, monospaced: monospaced, numeric: numeric))
     }
 
     func tronTextEditor(monospaced: Bool = false) -> some View {
@@ -506,8 +511,11 @@ struct TronSaveToolbarButton: View {
                 Text(isSaving ? "Saving…" : "Save")
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
             }
-            .foregroundStyle(isEnabled ? Color.tronEmerald : Color.tronTextMuted)
+            .foregroundStyle(isEnabled ? Color.tronAccentText : Color.tronTextMuted)
         }
+        .tint(Color.tronEmerald)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.capsule)
         .disabled(isSaving || !isEnabled)
         .accessibilityLabel(isSaving ? "Saving" : "Save")
         .accessibilityValue(isSaving ? "In progress" : isEnabled ? "Available" : "No changes")

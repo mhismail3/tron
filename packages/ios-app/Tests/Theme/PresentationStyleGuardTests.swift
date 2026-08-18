@@ -437,11 +437,24 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/CustomModelsSettingsView.swift"),
             encoding: .utf8
         )
+        let trust = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/TrustSettingsView.swift"),
+            encoding: .utf8
+        )
+        let presentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Theme/TronPresentation.swift"),
+            encoding: .utf8
+        )
+        let structuredJSON = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Components/StructuredJSONView.swift"),
+            encoding: .utf8
+        )
         #expect(!settings.contains("NavigationLink"))
         #expect(settings.contains("struct TronProgressiveSheetLink"))
         #expect(!settings.contains("struct AppearanceSettingsView"))
         #expect(appearance.contains("struct AppearanceSettingsView"))
         #expect(appearance.contains("TronSegmentedControl"))
+        #expect(!appearance.contains("TronSettingsGroup(\"Color Mode\""))
         #expect(!appearance.contains(".pickerStyle(.segmented)"))
         #expect(appearance.contains("icon: \"textformat.size\""))
         #expect(appearance.contains("icon: \"slider.horizontal.3\""))
@@ -473,19 +486,34 @@ struct PresentationStyleGuardTests {
         #expect(!providers.contains("Label(\"Connected\""))
         #expect(providers.contains(".lineLimit(1)"))
         #expect(!providers.contains("glassEffect"))
+        #expect(defaults.contains("TronInlineMenu(draft.trust.capitalized"))
+        #expect(!defaults.contains("Menu {"))
         #expect(defaults.contains("TronSaveToolbarButton"))
         #expect(defaults.contains("isEnabled: hasUnsavedChanges"))
         #expect(!defaults.contains("Save Defaults"))
         #expect(runtime.contains("TronSaveToolbarButton"))
         #expect(runtime.contains("isEnabled: hasUnsavedChanges"))
+        #expect(runtime.contains(".padding(.horizontal, 14)"))
+        #expect(runtime.contains(".padding(.bottom, 12)"))
+        #expect(runtime.contains("TronInlineField(numeric: true)"))
         #expect(!runtime.contains("Save Runtime Settings"))
         #expect(resources.contains("TronSaveToolbarButton"))
         #expect(resources.contains("isEnabled: hasUnsavedChanges"))
+        #expect(resources.contains("pathEditor(value)"))
+        #expect(resources.contains(".multilineTextAlignment(.leading)"))
+        #expect(resources.contains("minHeight: value.acceptsMultipleLines ? 120 : 52"))
         #expect(!resources.contains("Save Changes"))
         #expect(customModels.contains("TronSaveToolbarButton"))
         #expect(customModels.contains("isEnabled: canSave"))
         #expect(!customModels.contains("Save and Restart"))
         #expect(connections.contains("Button(importing ? \"Importing…\" : \"Import Legacy Sessions\")"))
+        #expect(trust.contains("summary.stateIcon"))
+        #expect(trust.contains("frame(width: 38, height: 38)"))
+        #expect(presentation.contains(".buttonStyle(.glass)"))
+        #expect(presentation.contains(".buttonBorderShape(.capsule)"))
+        #expect(presentation.contains("static var numericValue"))
+        #expect(presentation.contains("static var codeJSON"))
+        #expect(structuredJSON.contains("TronTypography.codeJSON"))
     }
 
     @Test("project resources and diagnostics use readable bounded presentations")
