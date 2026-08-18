@@ -56,15 +56,16 @@ struct SessionShellView: View {
             })
             .presentationDragIndicator(.hidden)
         }
-        .confirmationDialog(
-            "Delete \(sessionToDelete?.title ?? "this session")?",
-            isPresented: deleteConfirmationPresented,
-            presenting: sessionToDelete,
-            actions: deleteConfirmationActions,
-            message: { _ in
-                Text("This removes the canonical session from the Mac and cannot be undone.")
-            }
-        )
+        .sheet(item: $sessionToDelete) { session in
+            TronConfirmationSheet(
+                title: "Delete \(session.title)?",
+                message: "This removes the canonical session from the Mac and cannot be undone.",
+                confirmTitle: "Delete Session",
+                destructive: true,
+                icon: "trash",
+                onConfirm: { delete(session) }
+            )
+        }
         .alert("Rename Session", isPresented: renameConfirmationPresented, presenting: sessionToRename) { session in
             TextField("Session name", text: $renameName)
             Button("Save") { rename(session) }
@@ -187,13 +188,6 @@ struct SessionShellView: View {
         }
     }
 
-    private var deleteConfirmationPresented: Binding<Bool> {
-        Binding(
-            get: { sessionToDelete != nil },
-            set: { if !$0 { sessionToDelete = nil } }
-        )
-    }
-
     private var renameConfirmationPresented: Binding<Bool> {
         Binding(
             get: { sessionToRename != nil },
@@ -216,14 +210,11 @@ struct SessionShellView: View {
         }
     }
 
-    @ViewBuilder
-    private func deleteConfirmationActions(_ session: SessionSummary) -> some View {
-        Button("Delete Session", role: .destructive) {
-            Task {
-                do { try await model.deleteSession(session.id) }
-                catch { model.lastError = error.localizedDescription }
-                sessionToDelete = nil
-            }
+    private func delete(_ session: SessionSummary) {
+        Task {
+            do { try await model.deleteSession(session.id) }
+            catch { model.lastError = error.localizedDescription }
+            sessionToDelete = nil
         }
     }
 

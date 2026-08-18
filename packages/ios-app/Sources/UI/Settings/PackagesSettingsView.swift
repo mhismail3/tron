@@ -160,13 +160,16 @@ struct PackagesSettingsView: View {
             if loaded { packageError = nil }
             else { packageError = model.packageError(for: target) ?? "The package catalog is unavailable. Try again." }
         }
-        .confirmationDialog(
-            "Remove this package?",
-            isPresented: Binding(get: { packageToRemove != nil }, set: { if !$0 { packageToRemove = nil } }),
-            presenting: packageToRemove
-        ) { package in
-            Button("Remove Package", role: .destructive) { remove(package) }
-        } message: { package in Text(package.source) }
+        .sheet(item: $packageToRemove) { package in
+            TronConfirmationSheet(
+                title: "Remove this package?",
+                message: package.source,
+                confirmTitle: "Remove Package",
+                destructive: true,
+                icon: "shippingbox.and.arrow.down",
+                onConfirm: { remove(package) }
+            )
+        }
     }
 
     private func reload() {

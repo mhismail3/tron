@@ -34,6 +34,24 @@ struct PackageCatalogPolicyTests {
         ])
         #expect(try PackageCatalogPolicy.admit(PackageInventory(packages: [], resources: additiveResources)).resources == additiveResources)
 
+        let futureResource = JSONValue.object([
+            "path": .string("/future-resource"),
+            "enabled": .bool(true),
+            "metadata": .object([
+                "source": .string("future-package"),
+                "scope": .string("workspace"),
+                "origin": .string("generated"),
+                "baseDir": .null,
+            ]),
+        ])
+        let futureMetadataResources = JSONValue.object([
+            "extensions": .array([futureResource]),
+            "skills": .array([]),
+            "prompts": .array([]),
+            "themes": .array([]),
+        ])
+        #expect(try PackageCatalogPolicy.admit(PackageInventory(packages: [], resources: futureMetadataResources)).resources == futureMetadataResources)
+
         let updates = [PackageUpdate(
             source: "package",
             displayName: "Package",

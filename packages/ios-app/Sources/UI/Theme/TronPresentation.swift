@@ -495,6 +495,89 @@ struct TronSheetTitle: View {
     }
 }
 
+struct TronConfirmationSheet: View {
+    let title: String
+    let message: String
+    let confirmTitle: String
+    let destructive: Bool
+    let secondaryTitle: String?
+    let onConfirm: () -> Void
+    let onSecondary: (() -> Void)?
+    let icon: String
+
+    @Environment(\.dismiss) private var dismiss
+
+    init(
+        title: String,
+        message: String,
+        confirmTitle: String,
+        destructive: Bool = false,
+        secondaryTitle: String? = nil,
+        icon: String = "exclamationmark.triangle.fill",
+        onConfirm: @escaping () -> Void,
+        onSecondary: (() -> Void)? = nil
+    ) {
+        self.title = title
+        self.message = message
+        self.confirmTitle = confirmTitle
+        self.destructive = destructive
+        self.secondaryTitle = secondaryTitle
+        self.icon = icon
+        self.onConfirm = onConfirm
+        self.onSecondary = onSecondary
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 20) {
+                    Label(title, systemImage: icon)
+                        .font(TronTypography.largeTitle)
+                        .foregroundStyle(accent)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(message)
+                        .font(TronTypography.body)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(spacing: 12) {
+                        Button(confirmTitle, role: destructive ? .destructive : nil) {
+                            dismiss()
+                            onConfirm()
+                        }
+                        .buttonStyle(TronActionButtonStyle(role: destructive ? .destructive : .primary))
+                        if let secondaryTitle, let onSecondary {
+                            Button(secondaryTitle) {
+                                dismiss()
+                                onSecondary()
+                            }
+                            .buttonStyle(TronActionButtonStyle(role: .standard))
+                        }
+                    }
+                    Spacer(minLength: 180)
+                }
+                .padding(20)
+            }
+            .tronScrollEdgeChrome()
+            .tronNavigationTitle(title, accent: accent)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "xmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronTextMuted)
+                    }
+                    .accessibilityLabel("Cancel")
+                }
+            }
+        }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.large])
+        .presentationDragIndicator(.hidden)
+    }
+
+    private var accent: Color { destructive ? .tronError : .tronEmerald }
+}
+
 struct TronSaveToolbarButton: View {
     let isSaving: Bool
     let isEnabled: Bool

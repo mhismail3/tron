@@ -123,9 +123,16 @@ struct GatewayDiagnosticsView: View {
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.hidden)
         }
-        .confirmationDialog("Restart Tron Gateway?", isPresented: $confirmingRestart) {
-            Button("Restart", role: .destructive) { Task { await model.requestGatewayRestart() } }
-        } message: { Text("Accepted agent runs finish before Tron restarts. Active terminal sessions must be closed first; the app reconnects automatically.") }
+        .sheet(isPresented: $confirmingRestart) {
+            TronConfirmationSheet(
+                title: "Restart Tron Gateway?",
+                message: "Accepted agent runs finish before Tron restarts. Active terminal sessions must be closed first; the app reconnects automatically.",
+                confirmTitle: "Restart",
+                destructive: true,
+                icon: "arrow.clockwise",
+                onConfirm: { Task { await model.requestGatewayRestart() } }
+            )
+        }
     }
 
     private var statusLabel: String {
