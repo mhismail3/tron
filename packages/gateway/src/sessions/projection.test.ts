@@ -2,13 +2,15 @@ import { describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { BlobStore } from "./blob-store.js";
-import type { SessionSnapshot } from "../protocol/types.js";
+import type { SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import {
   admitCommandCatalog,
+  boundStreamingProgressItem,
   COMMAND_CATALOG_BYTES,
   COMMAND_CATALOG_ITEMS,
   COMMAND_CATALOG_STRING_BYTES,
   fitSessionSnapshot,
+  STREAMING_PROGRESS_BYTES,
   projectJson,
   projectMessage,
   projectToolOutput,
@@ -498,5 +500,69 @@ describe("transcript projection", () => {
     expect(page.end).toBe(1_200);
     expect(page.start).toBe(page.end - page.items.length);
     expect(safeJson(page)).toEqual(page);
+  });
+});
+
+describe("streaming progress bounds", () => {
+  const streamingItem = (parts: Array<{ type: "text" | "thinking"; text: string }>): TranscriptItem => ({
+    id: "streaming",
+    parentId: null,
+    timestamp: "2026-01-01T00:00:00Z",
+    kind: "message",
+    role: "assistant",
+    content: parts.map((part, index) => ({ id: `streaming:${index}`, ...part })),
+  });
+  const frameBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+
+  it("returns an item inside the budget unchanged", () => {
+    const item = streamingItem([{ type: "text", text: "short live answer" }]);
+    expect(boundStreamingProgressItem(item)).toBe(item);
+  });
+
+  it("keeps whole trailing parts and tail-trims only the oldest kept part", () => {
+    const tail = "final streamed sentence";
+    const item = streamingItem([
+      { type: "thinking", text: "t".repeat(STREAMING_PROGRESS_BYTES) },
+      { type: "text", text: "x".repeat(STREAMING_PROGRESS_BYTES) },
+      { type: "text", text: tail },
+    ]);
+    const bounded = boundStreamingProgressItem(item);
+    expect(frameBytes(bounded)).toBeLessThanOrEqual(STREAMING_PROGRESS_BYTES);
+    expect(bounded).toMatchObject({ id: "streaming", kind: "message", role: "assistant" });
+    if (bounded.kind !== "message") throw new Error("expected message");
+    expect(bounded.content.at(-1)).toMatchObject({ id: "streaming:2", type: "text", text: tail });
+    const trimmed = bounded.content[0]!;
+    if (trimmed.type !== "text") throw new Error("expected trimmed text part");
+    expect(trimmed.text.startsWith("…")).toBe(true);
+    expect(trimmed.text.endsWith("x".repeat(64))).toBe(true);
+    expect(bounded.content.some((part) => part.id === "streaming:0")).toBe(false);
+  });
+
+  it("bounds one oversized part to a marked tail", () => {
+    const body = "y".repeat(STREAMING_PROGRESS_BYTES * 4);
+    const item = streamingItem([{ type: "text", text: body }]);
+    const bounded = boundStreamingProgressItem(item);
+    expect(frameBytes(bounded)).toBeLessThanOrEqual(STREAMING_PROGRESS_BYTES);
+    if (bounded.kind !== "message") throw new Error("expected message");
+    expect(bounded.content).toHaveLength(1);
+    const part = bounded.content[0]!;
+    if (part.type !== "text") throw new Error("expected text part");
+    expect(part.text.startsWith("…")).toBe(true);
+    expect(body.endsWith(part.text.slice(1))).toBe(true);
+  });
+
+  it("never emits an empty live frame", () => {
+    const item: TranscriptItem = {
+      id: "streaming",
+      parentId: null,
+      timestamp: "2026-01-01T00:00:00Z",
+      kind: "message",
+      role: "assistant",
+      content: [{ id: "streaming:0", type: "toolCall", toolCallId: "call", name: "bash", arguments: { command: "x".repeat(STREAMING_PROGRESS_BYTES * 4) } }],
+    };
+    const bounded = boundStreamingProgressItem(item);
+    if (bounded.kind !== "message") throw new Error("expected message");
+    expect(bounded.content.length).toBeGreaterThan(0);
+    expect(frameBytes(bounded)).toBeLessThanOrEqual(Math.max(STREAMING_PROGRESS_BYTES, frameBytes(item)));
   });
 });

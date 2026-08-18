@@ -37,6 +37,7 @@ import { ExtensionLifecycleCoordinator } from "./extension-lifecycle-coordinator
 import { RemotePiExtensionHost } from "../extensions/host/remote-pi-extension-host.js";
 import {
   admitCommandCatalog,
+  boundStreamingProgressItem,
   fitSessionSnapshot,
   projectJson,
   projectMessage,
@@ -72,6 +73,15 @@ type PendingManualCompaction = {
 const MAXIMUM_QUEUED_MESSAGES = 32;
 const MAXIMUM_QUEUED_MESSAGE_BYTES = 64 * 1_024;
 const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
+/**
+ * Streaming progress events republish the cumulative live message. Emitting
+ * one per SDK update multiplies that payload across every subscribed mobile
+ * connection and can overrun the synchronization quarantine during catch-up.
+ * Coalescing keeps the first update immediate and republishes only the latest
+ * cumulative state per window; intermediate frames are presentation-identical
+ * because each payload fully replaces the client's streaming bubble.
+ */
+const STREAMING_PROGRESS_FLUSH_MS = 150;
 
 function boundedSummaryText(value: string, maximumBytes = 1_024): string {
   const encoded = Buffer.from(value);
@@ -117,6 +127,8 @@ export class RuntimeSlot {
   private phase: SessionPhase;
   private disposed = false;
   private snapshotTimer: NodeJS.Timeout | undefined;
+  private progressFlushTimer: NodeJS.Timeout | undefined;
+  private pendingProgress: JsonValue | undefined;
   private activityHeartbeat: NodeJS.Timeout | undefined;
   private readonly toolProgressTimers = new Map<string, NodeJS.Timeout>();
   private readonly toolProgressPublishedAt = new Map<string, number>();
@@ -426,6 +438,24 @@ export class RuntimeSlot {
     });
   }
 
+  private emitProgress(data: JsonValue): void {
+    this.pendingProgress = data;
+    if (this.progressFlushTimer !== undefined) return;
+    this.progressFlushTimer = setTimeout(() => {
+      this.progressFlushTimer = undefined;
+      this.flushPendingProgress();
+    }, STREAMING_PROGRESS_FLUSH_MS);
+    this.progressFlushTimer.unref();
+    this.flushPendingProgress();
+  }
+
+  private flushPendingProgress(): void {
+    if (this.pendingProgress === undefined) return;
+    const pending = this.pendingProgress;
+    this.pendingProgress = undefined;
+    this.emit("session.progress", pending);
+  }
+
   private summary(): SessionSummaryUpdate {
     if (this.summaryContentDirty || !this.cachedSummaryContent) {
       const entries = this.sessionManager.getEntries();
@@ -581,7 +611,9 @@ export class RuntimeSlot {
         if (!this.hasActiveAgentRun) break;
         this.ensureAgentProjection();
         const message = projectMessage("streaming", null, new Date().toISOString(), event.message, this.dependencies.blobs);
-        this.emit("session.progress", safeJson({ message }));
+        this.emitProgress(safeJson({
+          message: message === undefined ? undefined : boundStreamingProgressItem(message),
+        }));
         break;
       }
       case "tool_execution_start": {
@@ -981,6 +1013,9 @@ export class RuntimeSlot {
 
   publishSnapshot(): void {
     if (this.disposed || this.trustReloadPending) return;
+    // A coalesced streaming frame must not overtake the state transition this
+    // snapshot publishes.
+    this.flushPendingProgress();
     this.eventSequence += 1;
     this.hooks.broadcast(this.id, "session.snapshot", this.snapshot(this.eventSequence) as unknown as JsonValue);
     const summary = this.summary();
@@ -1776,6 +1811,9 @@ export class RuntimeSlot {
 
   private async disposeRuntime(): Promise<void> {
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
+    if (this.progressFlushTimer) clearTimeout(this.progressFlushTimer);
+    this.progressFlushTimer = undefined;
+    this.pendingProgress = undefined;
     this.stopActivityHeartbeat();
     this.clearToolProgressTimers();
     this.unsubscribe?.();

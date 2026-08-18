@@ -18,7 +18,7 @@ import type { AuthBroker } from "../admin/auth-broker.js";
 import type { LegacyImportService } from "../admin/legacy-import-service.js";
 import type { GatewayLogger } from "./logger.js";
 import type { CommandReceiptStore } from "./command-receipts.js";
-import { safeJson } from "../sessions/projection.js";
+import { fitSessionSnapshot, safeJson } from "../sessions/projection.js";
 import { ModelCatalogPager } from "./model-pagination.js";
 import { SessionListPaginationStore } from "./session-list-pagination.js";
 
@@ -77,6 +77,21 @@ export class GatewayService {
 
   releaseClient(clientID: string): void {
     this.sessionListPages.releaseClient(clientID);
+  }
+
+  /**
+   * Authoritative re-baseline for a subscriber whose synchronization
+   * quarantine overflowed while its open handshake completed. A fresh fitted
+   * snapshot converges the client without another full open handshake; clients
+   * that cannot admit a re-baseline fall back to their ordinary resync path.
+   */
+  async recoverySnapshot(sessionId: string): Promise<import("../protocol/types.js").SessionSnapshot | undefined> {
+    try {
+      const slot = await this.dependencies.sessions.acquire(sessionId);
+      return fitSessionSnapshot(slot.snapshot());
+    } catch {
+      return undefined;
+    }
   }
 
   info(): JsonValue {

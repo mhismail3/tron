@@ -256,7 +256,11 @@ struct ChatView: View {
         }
         .onChange(of: transcriptProjectionSource, initial: true) { _, source in
             guard let currentSource = transcriptProjectionSource else {
-                transcriptPresentation.reset()
+                // A recycled same-session owner can briefly have no exact
+                // generation while the retained canonical snapshot is still
+                // valid. Keep the mounted projection until its replacement
+                // installs; only a genuinely absent session clears the view.
+                if selectedAuthoritativeSnapshot == nil { transcriptPresentation.reset() }
                 return
             }
             // Ignore a callback captured before opening installed its mounted
@@ -264,6 +268,12 @@ struct ChatView: View {
             guard source == currentSource,
                   let snapshot = selectedAuthoritativeSnapshot,
                   snapshot.sessionId == currentSource.sessionID else { return }
+            if let target = presentationTarget {
+                model.composerDrafts.reconcileSubmission(
+                    target: target,
+                    canonicalTranscript: snapshot.transcript
+                )
+            }
             // Prepend owns its exact page projection/layout-epoch transaction.
             guard !scrollCoordinator.isPrependingHistory else { return }
             let installedBeforeSubmission = transcriptPresentation.installed
@@ -360,6 +370,20 @@ struct ChatView: View {
                                     )
                                     .equatable()
                                 }
+                            }
+                        }
+                        if let outgoing = outgoingSubmissionPresentation {
+                            stableTranscriptRow(
+                                id: outgoing.id,
+                                installedTag: nil,
+                                entranceState: .none
+                            ) {
+                                ChatOutgoingSubmissionRow(
+                                    presentation: outgoing,
+                                    attachments: pendingAttachments.filter {
+                                        outgoing.attachmentIDs.contains($0.id)
+                                    }
+                                )
                             }
                         }
                         queuedMessageRows(installed)
@@ -698,6 +722,19 @@ struct ChatView: View {
         presentationTarget.map(model.composerDrafts.isSending(target:)) ?? false
     }
 
+    private var outgoingSubmissionPresentation: ChatOutgoingSubmissionPresentation? {
+        guard let target = presentationTarget,
+              let snapshot = model.composerDrafts.outgoingSubmission(for: target) else { return nil }
+        return ChatOutgoingSubmissionPresentation(
+            snapshot: snapshot,
+            transportActive: model.composerDrafts.isSending(target: target)
+        )
+    }
+
+    private var submissionPending: Bool {
+        presentationTarget.map(model.composerDrafts.hasPendingSubmission(target:)) ?? false
+    }
+
     private var responseState: ChatResponseState? {
         selectedAuthoritativeSnapshot.map(ChatResponseState.init)
     }
@@ -772,9 +809,13 @@ struct ChatView: View {
         #endif
         openingTask?.cancel()
         performanceTracker.discardScroll()
-        modelPresentationGeneration = nil
-        transcriptPresentation.reset()
-        let epoch = openPresentation.begin()
+        let retainsVisiblePresentation = modelPresentationGeneration != nil
+            && selectedAuthoritativeSnapshot?.sessionId == sessionID
+        if !retainsVisiblePresentation {
+            modelPresentationGeneration = nil
+            transcriptPresentation.reset()
+        }
+        let epoch = openPresentation.begin(retainingVisiblePresentation: retainsVisiblePresentation)
         scrollCoordinator.resetForPresentation(epoch)
         let task = Task { @MainActor in
             let interval = performanceSignposts.begin(.firstReadyFrame)
@@ -809,6 +850,19 @@ struct ChatView: View {
                 let installed = try await installCurrentTranscriptProjection(
                     presentationGeneration: generation
                 )
+                if retainsVisiblePresentation {
+                    guard !Task.isCancelled,
+                          transcriptProjectionSource == installed.tag,
+                          openPresentation.epoch == epoch,
+                          openPresentation.phase == .ready else {
+                        performanceSignposts.end(interval, result: .discarded, metrics: .none)
+                        await model.closeSessionPresentation(sessionID, generation: generation)
+                        return
+                    }
+                    openedGeneration = nil
+                    _ = await completeFirstReadyFrame(interval, epoch: epoch)
+                    return
+                }
                 guard !Task.isCancelled,
                       transcriptProjectionSource == installed.tag,
                       openPresentation.installAuthoritativeBaseline(sessionID: sessionID, epoch: epoch) else {
@@ -1329,7 +1383,7 @@ struct ChatView: View {
             if let composerTrailingMode {
                 ComposerTrailingButton(
                     mode: composerTrailingMode,
-                    isDisabled: sending || !isTranscriptReady,
+                    isDisabled: sending || submissionPending || !isTranscriptReady,
                     isSending: sending,
                     offersQueueChoices: selectedAuthoritativeSnapshot?.phase.isActive == true,
                     onSend: { behavior in Task { await send(behavior: behavior) } },
@@ -1630,7 +1684,11 @@ struct ChatView: View {
             UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         }
         do {
-            try await model.sendComposer(target: target, behavior: behavior)
+            try await model.sendComposer(
+                target: target,
+                behavior: behavior,
+                canonicalTranscript: selectedAuthoritativeSnapshot?.transcript ?? []
+            )
             if selectedAuthoritativeSnapshot?.extensionPresentation.hostEpoch.isEmpty == false {
                 model.scheduleExtensionEditorUpdate(target: target, text: "")
             }

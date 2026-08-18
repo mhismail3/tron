@@ -17,6 +17,14 @@ export const TRANSCRIPT_PAGE_BYTES = 600_000;
 export const TRANSCRIPT_PAGE_ITEMS = 512;
 /** Leaves headroom for the response/event envelope under the 1 MiB socket cap. */
 export const SESSION_SNAPSHOT_BYTES = 800_000;
+/**
+ * Upper bound for one live streaming progress frame. Progress events republish
+ * the cumulative streaming message, so an unbounded message amplifies every
+ * token into a full-payload frame and can overrun the synchronization
+ * quarantine during catch-up. The settled canonical message always pages
+ * through transcript projection; only the transient live tail is trimmed here.
+ */
+export const STREAMING_PROGRESS_BYTES = 24_000;
 
 function boundedText(value: string): string {
   return value.length <= MAX_TEXT ? value : `${value.slice(0, MAX_TEXT)}\n… output truncated by gateway`;
@@ -125,6 +133,43 @@ export function projectJson(value: unknown, maximumBytes = MAX_PROJECTED_JSON_BY
     truncated: true,
     preview: `${utf8Prefix(encoded, previewBytes)}…`,
   };
+}
+
+/**
+ * Bounds one live streaming progress item for the wire without touching Pi's
+ * canonical state. Trailing parts survive whole; only the oldest kept text or
+ * thinking part is tail-trimmed with an explicit ellipsis marker. Clients
+ * replace their transient streaming bubble with each event, so a bounded tail
+ * is always superseded by the canonical settled message.
+ */
+export function boundStreamingProgressItem(
+  item: TranscriptItem,
+  maximumBytes = STREAMING_PROGRESS_BYTES,
+): TranscriptItem {
+  if (frameBytes(item) <= maximumBytes) return item;
+  if (item.kind !== "message") return item;
+  const envelopeBytes = frameBytes({ ...item, content: [] });
+  const kept: ContentPart[] = [];
+  let bytes = envelopeBytes;
+  for (let index = item.content.length - 1; index >= 0; index -= 1) {
+    const part = item.content[index]!;
+    const partBytes = frameBytes(part) + 1;
+    if (bytes + partBytes <= maximumBytes) {
+      kept.unshift(part);
+      bytes += partBytes;
+      continue;
+    }
+    if (part.type === "text" || part.type === "thinking") {
+      const marker = "…";
+      const available = maximumBytes - bytes - Buffer.byteLength(marker) - 64;
+      if (available > 256) kept.unshift({ ...part, text: `${marker}${utf8Suffix(part.text, available)}` });
+    }
+    break;
+  }
+  if (kept.length === 0) {
+    kept.push({ id: `${item.id}:truncated`, type: "text", text: "…" });
+  }
+  return { ...item, content: kept };
 }
 
 function frameBytes(value: unknown): number {

@@ -1095,9 +1095,14 @@ final class AppModel {
 
     func sendComposer(
         target: SessionPresentationTarget,
-        behavior: String? = nil
+        behavior: String? = nil,
+        canonicalTranscript: [TranscriptItem] = []
     ) async throws {
-        try await composerDrafts.send(target: target, behavior: behavior)
+        try await composerDrafts.send(
+            target: target,
+            behavior: behavior,
+            canonicalTranscript: canonicalTranscript
+        )
     }
 
     func abort(sessionID: String, kind: String = "agent") async {

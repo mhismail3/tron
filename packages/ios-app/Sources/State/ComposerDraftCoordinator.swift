@@ -81,6 +81,12 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let outgoingText: String
     let attachmentIDs: [String]
     let behavior: String?
+
+    /// Stable only for the owning presentation and draft revision. This is a
+    /// presentation identity, never a transcript/event ID.
+    var presentationID: String {
+        "outgoing-submission:\(target.sessionID):\(target.generation):\(textRevision)"
+    }
 }
 
 typealias ComposerUploadOperation = @MainActor @Sendable (
@@ -180,11 +186,19 @@ final class ComposerDraftCoordinator {
         let bytes: Int
     }
 
+    private enum SubmissionTransportState: Equatable {
+        case sending
+        case accepted
+    }
+
     private struct SubmissionAdmission: Equatable {
         let id: UInt64
         let snapshot: ComposerSubmissionSnapshot
         let submittedAttachments: [PendingAttachment]
+        let baselineTranscriptIDs: Set<String>
         let lifecycleGeneration: Int
+        var transportState: SubmissionTransportState
+        var canonicalObserved: Bool
     }
 
     private let uploadOperation: ComposerUploadOperation
@@ -341,7 +355,43 @@ final class ComposerDraftCoordinator {
 
     func isSending(target: SessionPresentationIdentity) -> Bool {
         guard admits(target) else { return false }
-        return submissionByTarget[target] != nil
+        return submissionByTarget[target]?.transportState == .sending
+    }
+
+    /// The outgoing row is intentionally separate from canonical transcript
+    /// projection. It remains visible after transport acknowledgement until a
+    /// matching canonical user message is observed for this exact target.
+    func outgoingSubmission(for target: SessionPresentationIdentity) -> ComposerSubmissionSnapshot? {
+        guard admits(target) else { return nil }
+        return submissionByTarget[target]?.snapshot
+    }
+
+    func hasPendingSubmission(target: SessionPresentationIdentity) -> Bool {
+        outgoingSubmission(for: target) != nil
+    }
+
+    /// Reconciles exactly once against authoritative user-message state. A
+    /// transport acknowledgement alone is not enough: canonical JSONL/events
+    /// remain the sole source of transcript truth.
+    func reconcileSubmission(
+        target: SessionPresentationIdentity,
+        canonicalTranscript: [TranscriptItem]
+    ) {
+        guard admits(target), var admission = submissionByTarget[target] else { return }
+        guard canonicalTranscript.contains(where: {
+            Self.canonicalUserMessage(
+                $0,
+                matches: admission.snapshot,
+                submittedAttachments: admission.submittedAttachments,
+                baselineTranscriptIDs: admission.baselineTranscriptIDs
+            )
+        }) else { return }
+        admission.canonicalObserved = true
+        if admission.transportState == .accepted {
+            finishSubmission(admission)
+        } else {
+            submissionByTarget[target] = admission
+        }
     }
 
     func submissionSnapshot(for target: SessionPresentationIdentity) -> ComposerSubmissionSnapshot? {
@@ -497,8 +547,16 @@ final class ComposerDraftCoordinator {
         attachmentsByTarget[target] = attachments.isEmpty ? nil : attachments
     }
 
-    func send(target: SessionPresentationIdentity, behavior: String?) async throws {
-        let admission = try beginSubmission(target: target, behavior: behavior)
+    func send(
+        target: SessionPresentationIdentity,
+        behavior: String?,
+        canonicalTranscript: [TranscriptItem] = []
+    ) async throws {
+        let admission = try beginSubmission(
+            target: target,
+            behavior: behavior,
+            canonicalTranscript: canonicalTranscript
+        )
         do {
             try await sendOperation(
                 admission.snapshot.outgoingText,
@@ -508,11 +566,15 @@ final class ComposerDraftCoordinator {
             )
         } catch {
             try require(admission)
-            restoreSubmission(admission)
+            if Self.isPossiblySent(error) {
+                markTransportAccepted(admission)
+            } else {
+                restoreSubmission(admission)
+            }
             throw error
         }
         try require(admission)
-        finishSubmission(admission)
+        markTransportAccepted(admission)
     }
 
     /// Installs a target-routed editor request. Empty drafts accept immediately;
@@ -611,7 +673,8 @@ final class ComposerDraftCoordinator {
 
     private func beginSubmission(
         target: SessionPresentationIdentity,
-        behavior: String?
+        behavior: String?,
+        canonicalTranscript: [TranscriptItem]
     ) throws -> SubmissionAdmission {
         guard let lease, admits(target), submissionByTarget[target] == nil else {
             throw CancellationError()
@@ -634,7 +697,10 @@ final class ComposerDraftCoordinator {
             id: sequence,
             snapshot: snapshot,
             submittedAttachments: submittedAttachments,
-            lifecycleGeneration: lease.lifecycleGeneration
+            baselineTranscriptIDs: Set(canonicalTranscript.map(\.id)),
+            lifecycleGeneration: lease.lifecycleGeneration,
+            transportState: .sending,
+            canonicalObserved: false
         )
         submissionByTarget[target] = admission
         setText("", for: scope)
@@ -642,7 +708,7 @@ final class ComposerDraftCoordinator {
     }
 
     private func require(_ admission: SubmissionAdmission) throws {
-        guard submissionByTarget[admission.snapshot.target] == admission,
+        guard submissionByTarget[admission.snapshot.target]?.id == admission.id,
               admits(admission.snapshot.target),
               lease?.lifecycleGeneration == admission.lifecycleGeneration else {
             throw CancellationError()
@@ -650,30 +716,90 @@ final class ComposerDraftCoordinator {
     }
 
     private func restoreSubmission(_ admission: SubmissionAdmission) {
-        guard submissionByTarget[admission.snapshot.target] == admission,
+        guard let currentAdmission = submissionByTarget[admission.snapshot.target],
+              currentAdmission.id == admission.id,
               let scope = lease?.scope else { return }
+        // A canonical event wins even if a late transport failure races it. A
+        // definitive rejection without canonical evidence is the only path
+        // that restores the draft and submitted attachments.
+        guard !currentAdmission.canonicalObserved else {
+            finishSubmission(currentAdmission)
+            return
+        }
         let current = text(for: scope)
         setText(
             ComposerDraftTextPolicy.restoredDraft(
-                outgoing: admission.snapshot.outgoingText,
+                outgoing: currentAdmission.snapshot.outgoingText,
                 currentDraft: current
             ),
             for: scope
         )
-        let submittedIDs = Set(admission.snapshot.attachmentIDs)
-        let newerAttachments = (attachmentsByTarget[admission.snapshot.target] ?? [])
+        let submittedIDs = Set(currentAdmission.snapshot.attachmentIDs)
+        let newerAttachments = (attachmentsByTarget[currentAdmission.snapshot.target] ?? [])
             .filter { !submittedIDs.contains($0.id) }
-        attachmentsByTarget[admission.snapshot.target] = admission.submittedAttachments + newerAttachments
-        submissionByTarget[admission.snapshot.target] = nil
+        attachmentsByTarget[currentAdmission.snapshot.target] = currentAdmission.submittedAttachments + newerAttachments
+        submissionByTarget[currentAdmission.snapshot.target] = nil
+    }
+
+    private func markTransportAccepted(_ admission: SubmissionAdmission) {
+        guard var accepted = submissionByTarget[admission.snapshot.target],
+              accepted.id == admission.id else { return }
+        accepted.transportState = .accepted
+        // Keep the exact captured IDs addressable by the ephemeral row even if
+        // the user edited the staged attachment strip while transport awaited
+        // acknowledgement. They are removed only at canonical reconciliation.
+        let retained = attachmentsByTarget[admission.snapshot.target] ?? []
+        let retainedIDs = Set(retained.map(\.id))
+        let captured = admission.submittedAttachments.filter { !retainedIDs.contains($0.id) }
+        attachmentsByTarget[admission.snapshot.target] = captured + retained
+        if accepted.canonicalObserved {
+            finishSubmission(accepted)
+        } else {
+            submissionByTarget[admission.snapshot.target] = accepted
+        }
     }
 
     private func finishSubmission(_ admission: SubmissionAdmission) {
         let target = admission.snapshot.target
-        guard submissionByTarget[target] == admission else { return }
-        let submitted = Set(admission.snapshot.attachmentIDs)
+        guard let current = submissionByTarget[target], current.id == admission.id else { return }
+        let submitted = Set(current.snapshot.attachmentIDs)
         attachmentsByTarget[target]?.removeAll { submitted.contains($0.id) }
         if attachmentsByTarget[target]?.isEmpty == true { attachmentsByTarget[target] = nil }
         submissionByTarget[target] = nil
+    }
+
+    private static func isPossiblySent(_ error: Error) -> Bool {
+        if error is GatewayPossiblySentError { return true }
+        return (error as? GatewayFailure)?.code == "outcome_unknown"
+    }
+
+    private static func canonicalUserMessage(
+        _ item: TranscriptItem,
+        matches snapshot: ComposerSubmissionSnapshot,
+        submittedAttachments: [PendingAttachment],
+        baselineTranscriptIDs: Set<String>
+    ) -> Bool {
+        guard item.kind == .message, item.role == .user,
+              !baselineTranscriptIDs.contains(item.id) else { return false }
+        let text = (item.content ?? []).compactMap { part -> String? in
+            guard part.type == .text, part.attachment == nil else { return nil }
+            return part.text
+        }.joined()
+        guard text == snapshot.outgoingText else { return false }
+        guard !submittedAttachments.isEmpty else { return true }
+
+        let contents = item.content ?? []
+        return submittedAttachments.allSatisfy { attachment in
+            if contents.contains(where: { $0.blobId == attachment.id }) { return true }
+            // Non-image uploads are represented by the canonical user text
+            // part's truthful attachment metadata, not by a blob ID.
+            return contents.contains(where: {
+                guard let metadata = $0.attachment else { return false }
+                return metadata.name == attachment.name
+                    && metadata.mimeType == attachment.mimeType
+                    && metadata.size == attachment.size
+            })
+        }
     }
 
     private func apply(_ request: ComposerEditorRequest, to scope: ComposerDraftScope) {

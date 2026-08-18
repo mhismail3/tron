@@ -203,3 +203,131 @@ describe("two-phase session synchronization protocol", () => {
     socket.close();
   });
 });
+
+describe("synchronization catch-up overflow recovery", () => {
+  it("converges an overflowed catch-up with the authoritative snapshot and falls back to resyncRequired", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-sync-overflow-"));
+    const devices = new DeviceStore(root, "machine");
+    await devices.initialize();
+    const token = JSON.parse(await (await import("node:fs/promises")).readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
+    const probe = createServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const address = probe.address();
+    if (!address || typeof address === "string") throw new Error("probe did not bind");
+    const port = address.port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+
+    let gateway!: GatewayServer;
+    const service = {
+      info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
+      terminalBelongsToSession: () => false,
+      releaseClient: vi.fn(),
+      recoverySnapshot: async (sessionId: string) => sessionId === "gone"
+        ? undefined
+        : { sessionId, runtimeGeneration: `generation-${sessionId}`, eventSequence: 99, revision: 99 },
+      invoke: async (context: any, method: string, params: any) => {
+        const sessionId = params.sessionId as string;
+        if (method === "session.open") {
+          const syncToken = context.beginSynchronization(sessionId);
+          if (sessionId === "ordered") {
+            // In-window events quarantine and flush exactly once after the ack.
+            gateway.broadcastSession(sessionId, "session.progress", {
+              runtimeGeneration: `generation-${sessionId}`,
+              eventSequence: 2,
+              revision: 2,
+              data: { message: "buffered" },
+            } as any);
+          } else {
+            // One frame larger than the quarantine byte budget forces overflow.
+            gateway.broadcastSession(sessionId, "session.progress", {
+              runtimeGeneration: `generation-${sessionId}`,
+              eventSequence: 2,
+              revision: 2,
+              data: { message: "x".repeat(1_100_000) },
+            } as any);
+          }
+          const snapshot = { sessionId, runtimeGeneration: `generation-${sessionId}`, eventSequence: 1, revision: 1 };
+          context.establishSynchronization(sessionId, snapshot);
+          return { session: snapshot, syncToken, subscriptionToken: syncToken };
+        }
+        if (method === "session.sync") {
+          context.completeSynchronization(sessionId, params.syncToken as string);
+          return { synchronized: true };
+        }
+        throw new Error(`unexpected method ${method}`);
+      },
+    };
+    const sessions = {
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+      unsubscribeClient: vi.fn(),
+    };
+    gateway = new GatewayServer({
+      host: "127.0.0.1",
+      port,
+      maxFrameBytes: 1_048_576,
+      devices,
+      uploads: {} as any,
+      sessions: sessions as any,
+      auth: { cancelClient: vi.fn() } as any,
+      service: service as any,
+      logger: { log: vi.fn() } as any,
+    });
+    await gateway.listen();
+    cleanups.push(async () => { await gateway.close(); });
+
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    const frames: any[] = [];
+    socket.on("message", (raw) => frames.push(JSON.parse(raw.toString())));
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
+    socket.send(JSON.stringify({ type: "hello", protocolVersion: 3 }));
+    while (!frames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
+
+    const openAndSync = async (idPrefix: string, sessionId: string) => {
+      socket.send(JSON.stringify({ type: "request", id: `${idPrefix}-open`, method: "session.open", params: { sessionId } }));
+      while (!frames.some((frame) => frame.id === `${idPrefix}-open`)) await new Promise((resolve) => setTimeout(resolve, 1));
+      const opened = frames.find((frame) => frame.id === `${idPrefix}-open`);
+      expect(opened.ok).toBe(true);
+      socket.send(JSON.stringify({ type: "request", id: `${idPrefix}-sync`, method: "session.sync", params: { sessionId, syncToken: opened.result.syncToken } }));
+      while (!frames.some((frame) => frame.id === `${idPrefix}-sync`)) await new Promise((resolve) => setTimeout(resolve, 1));
+    };
+
+    await openAndSync("ordered", "ordered");
+    const orderedDeadline = Date.now() + 5_000;
+    while (!frames.some((frame) => frame.topic === "session.progress")) {
+      if (Date.now() >= orderedDeadline) throw new Error("quarantined flush timed out");
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    const progressFrames = frames.filter((frame) => frame.topic === "session.progress");
+    expect(progressFrames).toHaveLength(1);
+    expect(progressFrames[0].payload).toMatchObject({ eventSequence: 2, data: { message: "buffered" } });
+    expect(frames.findIndex((frame) => frame.id === "ordered-sync"))
+      .toBeLessThan(frames.findIndex((frame) => frame.topic === "session.progress"));
+
+    await openAndSync("recover", "live");
+    const deadline = Date.now() + 5_000;
+    while (!frames.some((frame) => frame.topic === "session.rebaseline")) {
+      if (Date.now() >= deadline) throw new Error("recovery snapshot timed out");
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    const recovery = frames.find((frame) => frame.topic === "session.rebaseline");
+    expect(recovery.sessionId).toBe("live");
+    expect(recovery.payload).toMatchObject({
+      reason: "subscription catch-up overflow",
+      snapshot: { sessionId: "live", runtimeGeneration: "generation-live", eventSequence: 99 },
+    });
+    expect(frames.some((frame) => frame.topic === "transport.resyncRequired")).toBe(false);
+    const syncIndex = frames.findIndex((frame) => frame.id === "recover-sync");
+    expect(frames.findIndex((frame) => frame.topic === "session.rebaseline")).toBeGreaterThan(syncIndex);
+
+    await openAndSync("missing", "gone");
+    while (!frames.some((frame) => frame.topic === "transport.resyncRequired")) {
+      if (Date.now() >= deadline) throw new Error("resyncRequired timed out");
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    const resync = frames.find((frame) => frame.topic === "transport.resyncRequired");
+    expect(resync.sessionId).toBe("gone");
+    expect(resync.payload).toMatchObject({ reason: "subscription catch-up overflow" });
+    socket.close();
+  });
+});

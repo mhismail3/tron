@@ -11,7 +11,7 @@ struct ExtensionActivityPill: View {
             HStack(spacing: 6) {
                 Image(systemName: group.isWidgetGroup ? "rectangle.3.group" : "sparkles")
                 Text(group.label).lineLimit(1).truncationMode(.tail)
-                if group.items.count > 1 { Text("\(group.items.count)").font(TronTypography.code(size: TronTypography.sizeCaption)) }
+                if group.items.count > 1 { Text("\(group.items.count)").font(TronTypography.caption) }
             }
             .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
             .foregroundStyle(Color.tronEmerald)
@@ -97,7 +97,7 @@ struct ExtensionDetailsSheet: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(statuses) { status in
                     HStack(alignment: .top, spacing: TronSpacing.sm) {
-                        Text(status.displayKey).font(TronTypography.code(size: TronTypography.sizeCaption)).foregroundStyle(Color.tronTextMuted).frame(minWidth: 70, alignment: .leading)
+                        Text(status.displayKey).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted).frame(minWidth: 70, alignment: .leading)
                         Text(status.value).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     }.padding(.vertical, 8).accessibilityElement(children: .combine).accessibilityLabel("\(status.key): \(status.value)")
                 }
@@ -112,7 +112,7 @@ struct ExtensionDetailsSheet: View {
                     HStack(spacing: 10) {
                         Image(systemName: service.error ? "exclamationmark.triangle.fill" : (service.status == "Running" ? "circle.dotted" : "checkmark.circle")).foregroundStyle(service.error ? Color.tronError : Color.tronTeal)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(service.title).font(TronTypography.code(size: TronTypography.sizeCaption)).foregroundStyle(Color.tronTextPrimary).lineLimit(1)
+                            Text(service.title).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).lineLimit(1)
                             Text("\(service.status) · \(service.source)").font(TronTypography.caption).foregroundStyle(Color.tronTextMuted)
                         }
                         Spacer(minLength: 0)
@@ -169,7 +169,7 @@ struct ExtensionWidgetView: View {
     var onToggleExpanded: (() -> Void)? = nil
 
     private var lines: [String] { widget.lines.map(NativeExtensionText.clean).filter { !$0.isEmpty } }
-    private var nativeLabel: String { lines.first ?? widget.key }
+    private var nativeLabel: String { "Extension widget" }
     private var hasDetail: Bool { widget.lines.contains { NativeExtensionText.isDetailHint($0) } }
 
     var body: some View {
@@ -185,12 +185,20 @@ struct ExtensionWidgetView: View {
                 }
             }
             ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                Text(line).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                nativeRow(line)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading).padding(14)
-        .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.10)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain).accessibilityIdentifier("extension-widget-\(widget.key)")
+    }
+
+    private func nativeRow(_ line: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "circle.fill").font(.system(size: 5)).foregroundStyle(Color.tronCyan).padding(.top, 7)
+            Text(line).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 7)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -199,10 +207,10 @@ struct ExtensionSurfaceWidgetView: View {
     var isExpanded = false
     var onToggleExpanded: (() -> Void)? = nil
     private var nativeLabel: String {
-        let source = surface.provenance?.source?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return source.flatMap { $0.isEmpty ? nil : $0 }
-            ?? surface.frame.lines.map { NativeExtensionText.clean($0.plainText) }.first(where: { !$0.isEmpty })
-            ?? "Extension widget"
+        guard let source = ChatExtensionWidgetPolicy.admittedSource(surface.provenance?.source) else {
+            return "Extension widget"
+        }
+        return ChatExtensionWidgetPolicy.bounded(ChatExtensionWidgetPolicy.humanizedSource(source), maximum: 64)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -215,7 +223,7 @@ struct ExtensionSurfaceWidgetView: View {
             }
             ExtensionFrameView(frame: surface.frame)
         }
-        .padding(14).tronGlassSurface(accent: .tronCyan, tintOpacity: 0.10)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("extension-surface-widget-\(surface.id)")
     }
 }
@@ -238,5 +246,12 @@ enum NativeExtensionText {
     static func clean(_ raw: String) -> String {
         guard !isDetailHint(raw) else { return "" }
         return raw.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func safeURL(_ raw: String) -> URL? {
+        guard let url = URL(string: raw), let scheme = url.scheme?.lowercased(),
+              ["http", "https", "mailto"].contains(scheme) else { return nil }
+        if scheme == "http" || scheme == "https" { return url.host == nil ? nil : url }
+        return url
     }
 }

@@ -59,98 +59,52 @@ enum ExtensionFrameColorPolicy {
     }
 }
 
-private struct ExtensionFrameLineLayout: Layout {
-    let spacing: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? subviews.reduce(CGFloat.zero) { $0 + $1.sizeThatFits(.unspecified).width }
-        var rowWidth: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        var totalHeight: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if rowWidth > 0, rowWidth + spacing + size.width > width {
-                totalHeight += rowHeight + spacing
-                rowWidth = 0
-                rowHeight = 0
-            }
-            rowWidth += (rowWidth > 0 ? spacing : 0) + min(size.width, width)
-            rowHeight = max(rowHeight, size.height)
-        }
-        totalHeight += rowHeight
-        return CGSize(width: width, height: totalHeight)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX
-        var y = bounds.minY
-        var rowHeight: CGFloat = 0
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if x > bounds.minX, x + size.width > bounds.maxX {
-                x = bounds.minX
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: min(size.width, bounds.width), height: size.height))
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
-    }
-}
-
-/// Renders an already-admitted extension frame without interpreting package
-/// identity or terminal control sequences. Interactive surface kinds are
-/// deliberately excluded from this first native pass.
 struct ExtensionFrameView: View {
     let frame: ExtensionFrame
-    @Environment(\.colorScheme) private var colorScheme
 
-    private var nativeBackground: String { colorScheme == .dark ? "090A0C" : "F7F8FA" }
-    private var nativeForeground: String { colorScheme == .dark ? "F8FAFC" : "111827" }
+    private var rows: [ExtensionFrameLine] {
+        frame.lines.filter { !NativeExtensionText.isDetailHint($0.plainText) && !NativeExtensionText.clean($0.plainText).isEmpty }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(frame.lines.enumerated()), id: \.offset) { _, line in
-                if !NativeExtensionText.isDetailHint(line.plainText) { lineView(line) }
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, line in
+                row(line)
             }
         }
-        .font(TronTypography.bodySM)
-        .textSelection(.enabled)
-        .accessibilityElement(children: .contain)
-        .accessibilityValue(Text(frame.lines.filter { !NativeExtensionText.isDetailHint($0.plainText) }.map { NativeExtensionText.clean($0.plainText) }.joined(separator: "\n")))
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityValue(Text(rows.map { NativeExtensionText.clean($0.plainText) }.joined(separator: "\n")))
     }
 
-    private func lineView(_ line: ExtensionFrameLine) -> some View {
-        ExtensionFrameLineLayout(spacing: 0) {
-            ForEach(Array(line.runs.enumerated()), id: \.offset) { _, run in
-                styledText(run)
+    private func row(_ line: ExtensionFrameLine) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 5))
+                .foregroundStyle(Color.tronCyan)
+                .padding(.top, 7)
+            Text(nativeText(for: line))
+                .font(TronTypography.bodySM)
+                .foregroundStyle(Color.tronTextPrimary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 7)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func nativeText(for line: ExtensionFrameLine) -> AttributedString {
+        var result = AttributedString()
+        for run in line.runs {
+            var segment = AttributedString(run.text)
+            if let rawLink = run.style.link, let url = NativeExtensionText.safeURL(rawLink) {
+                segment.link = url
             }
+            result += segment
         }
-    }
-
-    private func styledText(_ run: ExtensionFrameRun) -> AnyView {
-        let style = run.style
-        let colors = ExtensionFrameColorPolicy.resolvedColors(
-            foreground: style.foreground,
-            background: style.background,
-            inverse: style.inverse == true,
-            nativeForeground: nativeForeground,
-            nativeBackground: nativeBackground,
-            fallbackBackground: colorScheme == .dark ? "16181D" : "FFFFFF"
-        )
-        var content = AnyView(Text(run.text).foregroundColor(Color(hex: colors.foreground)))
-        if style.bold == true { content = AnyView(content.bold()) }
-        if style.italic == true { content = AnyView(content.italic()) }
-        if style.underline == true { content = AnyView(content.underline()) }
-        if style.strike == true { content = AnyView(content.strikethrough()) }
-        // Dim is intentionally not represented with opacity: it can reduce an
-        // otherwise admitted 4.5:1 pair below accessible contrast.
-        content = AnyView(content.background(Color(hex: colors.background)))
-        if let link = style.link, let url = URL(string: link), ["http", "https", "mailto"].contains(url.scheme?.lowercased()) {
-            content = AnyView(Link(destination: url) { content }.accessibilityLabel("Link: \(run.text)"))
+        if result.characters.isEmpty {
+            result = AttributedString(NativeExtensionText.clean(line.plainText))
         }
-        return content
+        return result
     }
 }

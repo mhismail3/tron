@@ -70,6 +70,7 @@ final class SessionPresentationStore {
     private var subscribedSessionID: String?
     private var subscriptionToken: String?
     private var subscriptionTarget: SessionPresentationIdentity?
+    private var pendingRebaselines: [String: SessionSnapshot] = [:]
     private let synchronization = SessionSynchronizationCoordinator()
     private var deferredEffectsByTarget: [SessionPresentationIdentity: [ReducerEffect]] = [:]
 
@@ -176,7 +177,12 @@ final class SessionPresentationStore {
             generation: nextPresentationGeneration
         )
         pendingTarget = requested
-        isAuthoritative = false
+        // A same-session mounted snapshot remains truthful while a replacement
+        // owner reconnects. New sessions have no retained chat to preserve.
+        let retainsMountedChat = isAuthoritative
+            && target?.sessionID == sessionID
+            && snapshot?.sessionId == sessionID
+        if !retainsMountedChat { isAuthoritative = false }
         var didOpen = false
         defer {
             if !didOpen {
@@ -347,10 +353,18 @@ final class SessionPresentationStore {
     func retireConnection() {
         connectionGeneration &+= 1
         deferredEffectsByTarget.removeAll()
+        pendingRebaselines.removeAll()
         subscribedSessionID = nil
         subscriptionToken = nil
         subscriptionTarget = nil
         synchronization.reset()
+        // Keep the last-good snapshot authoritative for the mounted chat, but
+        // advance its presentation generation so the retained projection is
+        // immediately observable and can accept the next reconnect owner.
+        if mountedTarget != nil, snapshot != nil {
+            advanceChatProjection(canonical: false)
+        }
+        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
     }
 
     func clearProfile() {
@@ -396,6 +410,24 @@ final class SessionPresentationStore {
     }
 
     func admit(_ event: GatewayEvent) async {
+        if event.topic == "session.rebaseline" {
+            guard case .sessionRebaseline(let authoritative) = event.preparation,
+                  event.sessionId == authoritative.sessionId,
+                  ownsLiveSnapshotEvent(sessionID: authoritative.sessionId)
+                    || ownsPendingSynchronization(sessionID: authoritative.sessionId) else { return }
+            if !hasInstalledSubscription(for: authoritative.sessionId) {
+                pendingRebaselines[authoritative.sessionId] = authoritative
+                return
+            }
+            snapshot = authoritative
+            authoritativeTailSnapshot = authoritative
+            hasLoadedTranscriptHistory = false
+            advanceChatProjection(canonical: true)
+            isAuthoritative = mountedTarget?.sessionID == authoritative.sessionId
+            delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+            delegate?.sessionPresentationStoreCheckpointCache()
+            return
+        }
         switch synchronization.admit(event) {
         case .deliver(let event):
             guard admitsSequencedEvent(event) else { return }
@@ -652,6 +684,7 @@ final class SessionPresentationStore {
                 _ = await lease.sharedValue()
             case .leader:
                 synchronization.prepareLeaderAttempt(lease)
+                pendingRebaselines[sessionID] = nil
                 return await performSynchronization(sessionID: sessionID, lease: lease, operation: operation)
             }
         }
@@ -716,10 +749,19 @@ final class SessionPresentationStore {
                 ) && synchronizationTarget(for: lease.intent, sessionID: sessionID) != nil
                 synchronization.complete(lease, outcome: false)
                 guard ownsNotice else { return false }
-                if showCatchUpNotice {
-                    delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
-                } else {
+                switch lease.intent {
+                case .reconnect:
+                    // A mounted chat has a retained authoritative snapshot. Do
+                    // not replace its truthful native state with a global capsule
+                    // while the connection owner is being recycled.
+                    if snapshot != nil { advanceChatProjection(canonical: false) }
                     delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+                case .presentation:
+                    if showCatchUpNotice {
+                        delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
+                    } else {
+                        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+                    }
                 }
                 return false
             }
@@ -732,7 +774,13 @@ final class SessionPresentationStore {
         ) && synchronizationTarget(for: lease.intent, sessionID: sessionID) != nil
         synchronization.complete(lease, outcome: false)
         if ownsNotice {
-            delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
+            switch lease.intent {
+            case .reconnect:
+                if snapshot != nil { advanceChatProjection(canonical: false) }
+                delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+            case .presentation:
+                delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
+            }
         }
         return false
     }
@@ -787,6 +835,7 @@ final class SessionPresentationStore {
                 return .failed(showCatchUpNotice: false)
             }
 
+            let authoritativeResponse = pendingRebaselines.removeValue(forKey: sessionID) ?? response.session
             let mode: SessionSnapshotInstallationMode
             switch lease.intent {
             case .presentation:
@@ -798,12 +847,12 @@ final class SessionPresentationStore {
             let visibleCurrent = hasLoadedTranscriptHistory ? snapshot : nil
             var installed = Self.installingSnapshot(
                 current: visibleCurrent,
-                authoritative: response.session,
+                authoritative: authoritativeResponse,
                 mode: mode
             )
             var installedTail = Self.installingAuthoritativeTail(
                 current: authoritativeTailSnapshot,
-                authoritative: response.session,
+                authoritative: authoritativeResponse,
                 mode: mode
             )
             var replayEffects: [ReducerEffect] = []
@@ -1287,6 +1336,12 @@ final class SessionPresentationStore {
             if !synchronization.markRetryRequired(sessionID: sessionID) { return sessionID }
         }
         return nil
+    }
+
+    private func ownsPendingSynchronization(sessionID: String) -> Bool {
+        synchronization.intent(sessionID: sessionID).map {
+            ownsSynchronizationIntent($0, sessionID: sessionID)
+        } ?? false
     }
 
     private func ownsLiveSnapshotEvent(sessionID: String) -> Bool {

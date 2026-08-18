@@ -375,8 +375,96 @@ struct ComposerDraftCoordinatorTests {
             harness.completeSend(index: 0, result: .success(()))
             try await valueOfOwnedTask(sending)
             #expect(harness.coordinator.text(for: scope) == "newer")
-            #expect(harness.coordinator.pendingAttachments(for: target).map(\.id) == ["c"])
+            #expect(harness.coordinator.pendingAttachments(for: target).map(\.id) == ["a", "b", "c"])
+            #expect(harness.coordinator.outgoingSubmission(for: target)?.outgoingText == "outgoing")
             #expect(!harness.coordinator.isSending(target: target))
+
+            let canonical = TranscriptItem.message(MessageTranscriptItem(
+                id: "canonical-user", parentId: nil, timestamp: "2025-01-01T00:00:00Z",
+                kind: .message, role: .user,
+                content: [
+                    ContentPart(id: "text", type: .text, text: "outgoing", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "a", type: .image, text: nil, attachment: nil, redacted: nil, mimeType: "image/jpeg", blobId: "a", toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "b", type: .image, text: nil, attachment: nil, redacted: nil, mimeType: "image/jpeg", blobId: "b", toolCallId: nil, name: nil, arguments: nil),
+                ],
+                provider: nil, modelId: nil, stopReason: nil, errorMessage: nil, toolCallId: nil,
+                toolName: nil, isError: nil, details: nil, usage: nil, startedAt: nil,
+                completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil
+            ))
+            harness.coordinator.reconcileSubmission(target: target, canonicalTranscript: [canonical])
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+            #expect(harness.coordinator.pendingAttachments(for: target).map(\.id) == ["c"])
+        }
+    }
+
+    @Test("reconciliation ignores historical identical user messages")
+    func reconciliationRequiresPostSubmissionCanonicalEntry() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 41)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "same"
+            )
+            func user(_ id: String) -> TranscriptItem {
+                .message(MessageTranscriptItem(
+                    id: id, parentId: nil, timestamp: "2025-01-01T00:00:00Z",
+                    kind: .message, role: .user,
+                    content: [ContentPart(id: "text", type: .text, text: "same", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil)],
+                    provider: nil, modelId: nil, stopReason: nil, errorMessage: nil, toolCallId: nil,
+                    toolName: nil, isError: nil, details: nil, usage: nil, startedAt: nil,
+                    completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil
+                ))
+            }
+            let historical = user("historical")
+            let sending = Task {
+                try await harness.coordinator.send(
+                    target: target, behavior: nil, canonicalTranscript: [historical]
+                )
+            }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            harness.coordinator.reconcileSubmission(target: target, canonicalTranscript: [historical])
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [historical, user("new")]
+            )
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+        }
+    }
+
+    @Test("non-image canonical attachment metadata reconciles without a text blob ID")
+    func nonImageAttachmentReconciliation() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 42)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "notes"
+            )
+            harness.coordinator.installHostedAttachment(
+                .init(id: "upload", name: "notes.txt", mimeType: "text/plain", size: 5, previewData: nil),
+                target: target
+            )
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            let canonical = TranscriptItem.message(MessageTranscriptItem(
+                id: "canonical", parentId: nil, timestamp: "2025-01-01T00:00:00Z",
+                kind: .message, role: .user,
+                content: [
+                    ContentPart(id: "text", type: .text, text: "notes", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "name", type: .text, text: "notes.txt", attachment: .init(name: "notes.txt", mimeType: "text/plain", size: 5), redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
+                ],
+                provider: nil, modelId: nil, stopReason: nil, errorMessage: nil, toolCallId: nil,
+                toolName: nil, isError: nil, details: nil, usage: nil, startedAt: nil,
+                completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil
+            ))
+            harness.coordinator.reconcileSubmission(target: target, canonicalTranscript: [canonical])
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
         }
     }
 
@@ -420,10 +508,19 @@ struct ComposerDraftCoordinatorTests {
                 } catch is ComposerSyntheticError {
                     #expect(!isUncertain)
                 }
-                #expect(harness.coordinator.text(for: scope) == "outgoing\nnewer")
-                #expect(harness.coordinator.pendingAttachments(for: target).map(\.id) == [
-                    "upload", "newer-upload",
-                ])
+                if isUncertain {
+                    #expect(harness.coordinator.text(for: scope) == "newer")
+                    #expect(harness.coordinator.outgoingSubmission(for: target)?.outgoingText == "outgoing")
+                    #expect(harness.coordinator.pendingAttachments(for: target).map(\.id) == [
+                        "upload", "newer-upload",
+                    ])
+                } else {
+                    #expect(harness.coordinator.text(for: scope) == "outgoing\nnewer")
+                    #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+                    #expect(harness.coordinator.pendingAttachments(for: target).map(\.id) == [
+                        "upload", "newer-upload",
+                    ])
+                }
             }
 
             let cancelledHarness = ComposerHarness()

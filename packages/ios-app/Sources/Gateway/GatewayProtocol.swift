@@ -71,6 +71,7 @@ enum GatewayEventPreparation: Sendable, Equatable {
     case none
     case sessionSummary(SessionSummaryUpdate)
     case sessionSnapshot(SessionSnapshot)
+    case sessionRebaseline(SessionSnapshot)
     case sessionEvent(PreparedSessionEvent)
     case terminalEvent(PreparedTerminalEvent)
 }
@@ -119,7 +120,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
 
     var sessionCursor: GatewayEventCursor? {
         switch preparation {
-        case .sessionSnapshot(let snapshot):
+        case .sessionSnapshot(let snapshot), .sessionRebaseline(let snapshot):
             return .init(
                 runtimeGeneration: snapshot.runtimeGeneration,
                 eventSequence: snapshot.eventSequence
@@ -136,7 +137,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
 
     var isConsumableSessionReplay: Bool {
         switch preparation {
-        case .sessionSnapshot(let snapshot):
+        case .sessionSnapshot(let snapshot), .sessionRebaseline(let snapshot):
             return sessionId != nil && sessionId == snapshot.sessionId
         case .sessionEvent(let event):
             if case .invalid = event.data { return false }
@@ -156,6 +157,11 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             guard let snapshot = try? SessionSnapshot(from: decoder),
                   ExtensionPresentationPolicy.admit(snapshot.extensionPresentation) else { return .none }
             return .sessionSnapshot(snapshot)
+        case "session.rebaseline":
+            struct Payload: Decodable { let snapshot: SessionSnapshot }
+            guard let payload = try? Payload(from: decoder),
+                  ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation) else { return .none }
+            return .sessionRebaseline(payload.snapshot)
         case "terminal.output":
             return (try? PreparedTerminalOutputEvent(from: decoder))
                 .map { .terminalEvent(.output($0)) } ?? .none
@@ -212,6 +218,11 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             guard let snapshot = try? payload.decode(SessionSnapshot.self),
                   ExtensionPresentationPolicy.admit(snapshot.extensionPresentation) else { return .none }
             return .sessionSnapshot(snapshot)
+        case "session.rebaseline":
+            struct Payload: Decodable { let snapshot: SessionSnapshot }
+            guard let payload = try? payload.decode(Payload.self),
+                  ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation) else { return .none }
+            return .sessionRebaseline(payload.snapshot)
         case "terminal.output":
             return (try? payload.decode(PreparedTerminalOutputEvent.self))
                 .map { .terminalEvent(.output($0)) } ?? .none

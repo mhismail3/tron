@@ -235,7 +235,12 @@ export class GatewayServer {
     const event: BufferedSessionEvent = { type: "event", topic, sessionId, payload };
     for (const client of this.clients.values()) {
       if (!client.ready || !client.subscriptions.has(sessionId)) continue;
-      const deliverable = client.synchronizations.get(sessionId)?.barrier.offer(event) ?? event;
+      // While a synchronization quarantine owns this session's catch-up, its
+      // barrier is the only delivery path: the event is flushed exactly once
+      // after the acknowledgement. Sending it here as well would deliver every
+      // in-window event twice and break the client's contiguous replay.
+      const barrier = client.synchronizations.get(sessionId)?.barrier;
+      const deliverable = barrier ? barrier.offer(event) : event;
       if (deliverable) this.send(client, deliverable);
     }
   }
@@ -623,12 +628,46 @@ export class GatewayServer {
         clearTimeout(active.timeout);
         connection.synchronizations.delete(completion.sessionId);
         if (completed.overflowed) {
-          this.send(connection, {
-            type: "event",
-            topic: "transport.resyncRequired",
-            sessionId: completion.sessionId,
-            payload: { reason: "subscription catch-up overflow" },
-          });
+          // The quarantined catch-up was dropped under load. Replaying nothing
+          // would force the client through another full open handshake that
+          // can overflow again under the same flood, so converge it directly
+          // with the authoritative snapshot instead. If the session is gone or
+          // the fitted snapshot cannot be framed, send() degrades to the
+          // legacy resyncRequired signal and the client resynchronizes.
+          const recoveryToken = connection.subscriptionTokens.get(completion.sessionId);
+          const recovery = recoveryToken === completion.subscriptionToken
+            ? await this.options.service.recoverySnapshot(completion.sessionId)
+            : undefined;
+          // The recovery read is suspended; a close/replacement may have
+          // revoked this subscriber in the meantime. Stale recovery is ignored
+          // rather than projected into the replacement owner.
+          if (connection.subscriptionTokens.get(completion.sessionId) !== completion.subscriptionToken) continue;
+          if (recovery === undefined) {
+            this.send(connection, {
+              type: "event",
+              topic: "transport.resyncRequired",
+              sessionId: completion.sessionId,
+              payload: { reason: "subscription catch-up overflow" },
+            });
+          } else {
+            const recoverySent = this.send(connection, {
+              type: "event",
+              topic: "session.rebaseline",
+              sessionId: completion.sessionId,
+              payload: {
+                reason: "subscription catch-up overflow",
+                snapshot: recovery as unknown as JsonValue,
+              },
+            });
+            if (!recoverySent) {
+              this.send(connection, {
+                type: "event",
+                topic: "transport.resyncRequired",
+                sessionId: completion.sessionId,
+                payload: { reason: "subscription catch-up overflow" },
+              });
+            }
+          }
         } else {
           for (const event of completed.events) this.send(connection, event);
         }

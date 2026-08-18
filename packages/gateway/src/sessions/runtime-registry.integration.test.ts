@@ -1216,6 +1216,67 @@ export default function (pi) {
     expect(snapshots.some((snapshot) => snapshot.phase === "running" && snapshot.operation)).toBe(true);
   });
 
+  it("coalesces streaming progress frames while keeping the event stream contiguous and complete", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-streaming-coalesce-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    // Deterministic 4-character chunks at 100 tokens/second stream ~240 SDK
+    // updates over ~2.4 seconds. Uncoalesced, every update would republish the
+    // cumulative message to each subscriber.
+    const text = "streaming chunk ".repeat(60);
+    const faux = fauxProvider({ provider: "tron-streaming-coalesce", tokensPerSecond: 100, tokenSize: { min: 1, max: 1 } });
+    const createModels = async () => {
+      const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+      runtime.registerNativeProvider(faux.provider);
+      return runtime;
+    };
+    faux.setResponses([fauxAssistantMessage(text)]);
+    const events: Array<{ topic: string; payload: { eventSequence?: number; data?: any } }> = [];
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: createModels,
+      trust: new TrustService(agentDir),
+      broadcast: (_sessionId, topic, payload) => events.push({ topic, payload: payload as { eventSequence?: number; data?: any } }),
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const slot = await registry.create(cwd);
+    const model = faux.getModel();
+    await slot.setModel(model.provider, model.id);
+    await slot.prompt("stream");
+    await waitUntil(() => !slot.isBusy);
+
+    const progress = events.filter((event) => event.topic === "session.progress");
+    expect(progress.length).toBeGreaterThanOrEqual(2);
+    expect(progress.length).toBeLessThanOrEqual(40);
+
+    // Coalescing must never reorder or gap the sequenced event stream.
+    const sequenced = events.filter((event) => typeof event.payload.eventSequence === "number");
+    for (let index = 1; index < sequenced.length; index += 1) {
+      expect(sequenced[index]!.payload.eventSequence).toBe(sequenced[index - 1]!.payload.eventSequence! + 1);
+    }
+
+    // The last live frame carries the complete cumulative message and the
+    // settled canonical transcript keeps the full text.
+    const lastMessage = progress.at(-1)!.payload.data?.message;
+    const lastText = (lastMessage?.content ?? []).filter((part: any) => part.type === "text").map((part: any) => part.text).join("");
+    expect(lastText.trimEnd().endsWith("streaming chunk")).toBe(true);
+    const transcriptText = slot.snapshot().transcript
+      .filter((item) => item.kind === "message")
+      .flatMap((item) => item.kind === "message" ? item.content : [])
+      .filter((part) => part.type === "text")
+      .map((part) => part.type === "text" ? part.text : "")
+      .join("");
+    expect(transcriptText).toContain(text.trimEnd());
+  });
+
   it("keeps async input preflight alive and settles accepted handled input exactly once", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-input-handled-preflight-"));
     const agentDir = join(root, "agent");

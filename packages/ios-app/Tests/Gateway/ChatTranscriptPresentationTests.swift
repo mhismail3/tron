@@ -128,6 +128,38 @@ struct ChatTranscriptPresentationTests {
         #expect(ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation).first?.id == "activity")
     }
 
+    @Test("semantic and surface representations share one canonical widget group")
+    func semanticSurfaceRepresentationsDeduplicate() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.extensionPresentation.semanticState.widgets = [
+            ExtensionWidget(key: "goal", lines: ["Goal content"], placement: .belowEditor),
+            ExtensionWidget(key: "subagent", lines: ["Subagent content"], placement: .belowEditor)
+        ]
+        let encoded = Data("subagent".utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let frame = ExtensionFrame(width: 8, height: 1, lines: [ExtensionFrameLine(plainText: "Surface content", runs: [ExtensionFrameRun(text: "Surface content", style: ExtensionFrameStyle())])], plainText: "Surface content")
+        snapshot.extensionPresentation.surfaces = [ExtensionSurface(id: "mounted:\(encoded)", kind: .widget, placement: .belowEditor, lifecycle: .retained, targetId: nil, provenance: nil, revision: 1, focused: false, inputMode: .none, frame: frame)]
+        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation)
+        #expect(groups.map(\.id) == ["semantic:goal", "semantic:subagent"])
+        #expect(groups.first(where: { $0.id == "semantic:subagent" })?.items.count == 2)
+        #expect(ChatExtensionWidgetPolicy.canonicalWidgetKey(for: "mounted:\(encoded)") == "subagent")
+    }
+
+    @Test("source labels are bounded provenance labels and unmatched activity remains fallback")
+    func extensionLabelsUseProvenance() throws {
+        var snapshot = try fixture(transcript: "[]")
+        let frame = ExtensionFrame(width: 4, height: 1, lines: [ExtensionFrameLine(plainText: "content-derived title", runs: [])], plainText: "content-derived title")
+        snapshot.extensionPresentation.surfaces = [ExtensionSurface(id: "unrelated", kind: .widget, placement: .belowEditor, lifecycle: .retained, targetId: nil, provenance: .init(source: "example-extension_source", path: nil), revision: 1, focused: false, inputMode: .none, frame: frame)]
+        snapshot.extensionPresentation.semanticState.statuses = ["other": "Unmatched"]
+        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation)
+        #expect(groups.first(where: { $0.id == "source:example-extension_source" })?.label == "Example Extension Source")
+        #expect(groups.first(where: { $0.id == "source:example-extension_source" })?.label != "content-derived title")
+        #expect(groups.first(where: { $0.id == "activity" })?.label == "Extension activity")
+        #expect(groups.first(where: { $0.id == "source:example-extension_source" })?.label.count == 24)
+    }
+
     @Test("native extension text strips complete terminal navigation hints only")
     func nativeExtensionTextStripsTerminalChrome() {
         #expect(NativeExtensionText.isDetailHint("Press ↓/← to inspect") == true)

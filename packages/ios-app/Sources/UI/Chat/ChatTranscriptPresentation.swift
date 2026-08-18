@@ -99,9 +99,9 @@ struct ExtensionActivitySummary: Hashable, Sendable {
     var totalCount: Int { statusCount + widgetCount + serviceCount }
 }
 
-/// A separately addressable native extension affordance. Semantic widgets have
-/// no public provenance field, so each widget is conservatively kept opaque;
-/// rendered surfaces with the same explicit public source may share a group.
+/// A separately addressable native extension affordance. Group identity comes
+/// only from admitted public identity: semantic widget keys, decoded host
+/// surface identity, or explicit surface provenance.
 struct ExtensionWidgetGroup: Identifiable, Hashable, Sendable {
     let id: String
     let label: String
@@ -167,61 +167,99 @@ enum ChatExtensionWidgetPolicy {
         let statuses = admittedStatuses(presentation.semanticState.statuses)
         let services = serviceItems(executions)
         var matchedStatusKeys = Set<String>()
-        var semantic = presentation.semanticState.widgets
-            .sorted { lhs, rhs in
-                if lhs.placement != rhs.placement { return lhs.placement.rawValue < rhs.placement.rawValue }
-                return lhs.key < rhs.key
-            }
-            .map { widget in
-                let exactStatus = statuses.first(where: { $0.key == widget.key })
-                if let exactStatus { matchedStatusKeys.insert(exactStatus.key) }
-                let contentLabel = widget.lines
-                    .map(NativeExtensionText.clean)
-                    .first { !$0.isEmpty && !NativeExtensionText.isDetailHint($0) }
-                let label = exactStatus?.value ?? contentLabel ?? widget.key
-                return ExtensionWidgetGroup(
-                    id: "semantic:\(widget.key)",
-                    label: bounded(label, maximum: 64),
-                    items: [ChatExtensionWidgetItem(id: "semantic-widget:\(widget.key)", content: .semantic(widget))],
-                    statuses: exactStatus.map { [$0] } ?? [], services: []
-                )
-            }
+        var matchedServiceIDs = Set<String>()
+        var groups: [String: ExtensionWidgetGroup] = [:]
+
+        // Semantic widgets have no provenance of their own. Their canonical key
+        // is therefore the only safe identity and their label stays generic.
+        for widget in presentation.semanticState.widgets.sorted(by: { lhs, rhs in
+            if lhs.placement != rhs.placement { return lhs.placement.rawValue < rhs.placement.rawValue }
+            return lhs.key < rhs.key
+        }) {
+            let status = statuses.first(where: { $0.key == widget.key })
+            if let status { matchedStatusKeys.insert(status.key) }
+            groups["semantic:\(widget.key)"] = ExtensionWidgetGroup(
+                id: "semantic:\(widget.key)",
+                label: "Extension widget",
+                items: [ChatExtensionWidgetItem(id: "semantic-widget:\(widget.key)", content: .semantic(widget))],
+                statuses: status.map { [$0] } ?? [],
+                services: []
+            )
+        }
+
         let surfaces = visibleSurfaces(presentation.surfaces, placement: .aboveEditor)
             + visibleSurfaces(presentation.surfaces, placement: .belowEditor)
-        let groupedSurfaces = Dictionary(grouping: surfaces) { surface in
-            surface.provenance?.source.map { "source:\($0)" } ?? "surface:\(surface.id)"
-        }
-        var matchedServiceIDs = Set<String>()
-        var surfaceGroups = groupedSurfaces.map { key, group in
-            let ordered = group.sorted { $0.id < $1.id }
-            let source = ordered.first?.provenance?.source?.trimmingCharacters(in: .whitespacesAndNewlines)
+        for surface in surfaces.sorted(by: { $0.id < $1.id }) {
+            let source = admittedSource(surface.provenance?.source)
+            let canonicalKey = canonicalWidgetKey(for: surface.id)
+            let semanticID = canonicalKey.map { "semantic:\($0)" }
+            let groupID: String
+            if let semanticID, groups[semanticID] != nil {
+                // The host's surface ID is a lossless representation of the
+                // semantic widget key. Merge the two representations rather
+                // than exposing two composer affordances.
+                groupID = semanticID
+            } else if let source {
+                groupID = "source:\(source)"
+            } else {
+                groupID = "surface:\(surface.id)"
+            }
+
+            let status = canonicalKey.flatMap { key in statuses.first(where: { $0.key == key }) }
+            if let status { matchedStatusKeys.insert(status.key) }
             let exactServices = source.map { source in services.filter { $0.source == source } } ?? []
-            exactServices.forEach { matchedServiceIDs.insert($0.id) }
-            let contentLabel = ordered
-                .flatMap { $0.frame.lines.map(\.plainText) }
-                .map(NativeExtensionText.clean)
-                .first { !$0.isEmpty && !NativeExtensionText.isDetailHint($0) }
-            let label = source.flatMap { $0.isEmpty ? nil : $0 } ?? contentLabel ?? "Extension widget"
-            return ExtensionWidgetGroup(
-                id: key,
+            let ownedServices = exactServices.filter { !matchedServiceIDs.contains($0.id) }
+            ownedServices.forEach { matchedServiceIDs.insert($0.id) }
+            let existing = groups[groupID]
+            let label = source.map(humanizedSource) ?? existing?.label ?? "Extension widget"
+            groups[groupID] = ExtensionWidgetGroup(
+                id: groupID,
                 label: bounded(label, maximum: 64),
-                items: ordered.map { ChatExtensionWidgetItem(id: "surface-widget:\($0.id)", content: .surface($0)) },
-                statuses: [], services: exactServices
+                items: (existing?.items ?? []) + [ChatExtensionWidgetItem(id: "surface-widget:\(surface.id)", content: .surface(surface))],
+                statuses: existing?.statuses ?? status.map { [$0] } ?? [],
+                services: (existing?.services ?? []) + ownedServices
             )
-        }.sorted { $0.id < $1.id }
+        }
+
         let unmatchedStatuses = statuses.filter { !matchedStatusKeys.contains($0.key) }
         let unmatchedServices = services.filter { !matchedServiceIDs.contains($0.id) }
-        if !unmatchedStatuses.isEmpty || !unmatchedServices.isEmpty || (semantic.isEmpty && surfaceGroups.isEmpty && (!statuses.isEmpty || !services.isEmpty)) {
-            let fallback = ExtensionWidgetGroup(
+        if !unmatchedStatuses.isEmpty || !unmatchedServices.isEmpty {
+            groups["activity"] = ExtensionWidgetGroup(
                 id: "activity",
                 label: "Extension activity",
                 items: [],
                 statuses: unmatchedStatuses,
                 services: unmatchedServices
             )
-            if !fallback.statuses.isEmpty || !fallback.services.isEmpty { surfaceGroups.append(fallback) }
         }
-        return (semantic + surfaceGroups).sorted { $0.id < $1.id }
+        return groups.values.sorted { $0.id < $1.id }
+    }
+
+    /// Reverses the host's opaque widget surface identity without relying on a
+    /// package, widget name, or content convention. Any non-canonical ID fails
+    /// closed and remains independently addressable.
+    static func canonicalWidgetKey(for surfaceID: String) -> String? {
+        guard let encoded = surfaceID.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).dropFirst().first,
+              !encoded.isEmpty else { return nil }
+        let normalized = String(encoded).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        let padded = normalized + String(repeating: "=", count: (4 - normalized.count % 4) % 4)
+        guard let data = Data(base64Encoded: padded), let key = String(data: data, encoding: .utf8), !key.isEmpty else { return nil }
+        return key
+    }
+
+    static func admittedSource(_ source: String?) -> String? {
+        guard let source else { return nil }
+        let clean = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        return clean.isEmpty ? nil : clean
+    }
+
+    static func humanizedSource(_ source: String) -> String {
+        let words = source.split { !$0.isLetter && !$0.isNumber }
+        guard !words.isEmpty else { return "Extension widget" }
+        return words.map { word in
+            let value = String(word)
+            return value.prefix(1).uppercased() + value.dropFirst()
+        }.joined(separator: " ")
     }
 
     static func summary(_ presentation: ExtensionPresentationState, executions: [ToolExecutionState] = []) -> ExtensionActivitySummary? {
@@ -274,6 +312,23 @@ enum ChatExtensionWidgetPolicy {
         let remote = visibleSurfaces(surfaces, placement: remotePlacement)
             .map { ChatExtensionWidgetItem(id: "surface-widget:\($0.id)", content: .surface($0)) }
         return (semantic + remote).sorted { $0.id < $1.id }
+    }
+}
+
+/// Exact-target presentation-only outgoing state. This is never inserted into
+/// the canonical transcript or JSONL; it disappears only after canonical user
+/// message reconciliation (or a definitive rejection).
+struct ChatOutgoingSubmissionPresentation: Equatable, Identifiable, Sendable {
+    let id: String
+    let text: String
+    let attachmentIDs: [String]
+    let transportActive: Bool
+
+    init(snapshot: ComposerSubmissionSnapshot, transportActive: Bool) {
+        id = snapshot.presentationID
+        text = snapshot.outgoingText
+        attachmentIDs = snapshot.attachmentIDs
+        self.transportActive = transportActive
     }
 }
 
@@ -410,9 +465,9 @@ struct ChatOpenPresentationState: Equatable {
     private(set) var epoch: Int = 0
     private(set) var phase: ChatOpenPresentationPhase = .opening
 
-    mutating func begin() -> Int {
+    mutating func begin(retainingVisiblePresentation: Bool = false) -> Int {
         epoch &+= 1
-        phase = .opening
+        phase = retainingVisiblePresentation ? .ready : .opening
         return epoch
     }
 

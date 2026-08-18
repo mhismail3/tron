@@ -92,8 +92,10 @@ struct SessionPresentationStoreTests {
         )
         store.installHostedAuthoritativeSnapshot(snapshot)
         let target = try #require(store.mountedTarget)
+        let timelineBeforeRetirement = store.chatTimelineGeneration
         store.retireConnection()
         #expect(store.mountedTarget == target)
+        #expect(store.chatTimelineGeneration > timelineBeforeRetirement)
         #expect(store.authoritativeSnapshot(for: snapshot.sessionId) == snapshot)
         #expect(!store.hasInstalledSubscription(for: snapshot.sessionId))
 
@@ -101,6 +103,43 @@ struct SessionPresentationStoreTests {
         #expect(store.mountedTarget == nil)
         #expect(store.snapshot == nil)
         #expect(store.authoritativeSnapshot(for: snapshot.sessionId) == nil)
+    }
+
+    @Test("overflow rebaseline installs only for the mounted subscription owner")
+    func overflowRebaselineInstallsFreshAuthority() async throws {
+        let snapshot = try SessionScenarioBuilder(seed: 84).openingTail(targetEncodedBytes: 4_096)
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedSubscription(snapshot: snapshot, token: "token")
+        var recovery = snapshot
+        recovery.eventSequence += 10
+        recovery.revision += 10
+        await store.admit(GatewayEvent(
+            type: "event",
+            topic: "session.rebaseline",
+            sessionId: snapshot.sessionId,
+            payload: .object([
+                "reason": .string("subscription catch-up overflow"),
+                "snapshot": try JSONValue.encode(recovery),
+            ])
+        ))
+        #expect(store.authoritativeSnapshot(for: snapshot.sessionId) == recovery)
+
+        store.retireConnection()
+        var ignored = recovery
+        ignored.eventSequence += 10
+        await store.admit(GatewayEvent(
+            type: "event",
+            topic: "session.rebaseline",
+            sessionId: snapshot.sessionId,
+            payload: .object([
+                "reason": .string("subscription catch-up overflow"),
+                "snapshot": try JSONValue.encode(ignored),
+            ])
+        ))
+        #expect(store.snapshot == recovery)
     }
 
     @Test("stale open response after connection retirement preserves the newer subscription")

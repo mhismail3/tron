@@ -231,9 +231,11 @@ work. Reconnect identity comes from the mounted presentation generation, never m
 selection. During an attempt, iOS quarantines that session's events, discards those covered by the new
 baseline, validates contiguity, and publishes the baseline plus drained suffix in one MainActor turn
 before completing all waiters. Retry and fresh-install invalidation stay in the same owner; one bounded
-three-attempt loop replaces recursive resynchronization. Outside that explicit install,
-a full `session.snapshot` hint requires the current subscription plus either mounted
-authority or its active synchronization lease, the same runtime generation, and exactly
+three-attempt loop replaces recursive resynchronization. A synchronization-quarantine overflow uses the
+ownership-scoped `session.rebaseline` event, whose fitted snapshot is installed as a fresh authoritative baseline
+without another open handshake; stale/revoked owners ignore it and no fitted baseline retains the
+`transport.resyncRequired` fallback. Outside that explicit install, a full `session.snapshot` hint requires the
+current subscription plus either mounted authority or its active synchronization lease, the same runtime generation, and exactly
 the next event sequence. Equal/lower cursors are discarded without merge, summary write,
 or cache save; gaps, runtime replacement, and missing baselines converge through another
 authoritative open. Missing live authority and route/payload mismatch are discarded without
@@ -328,8 +330,10 @@ explicit preview sheet, which installs the thumbnail immediately and prepares at
 off-main through the same cancellation-aware media preparation slot before publication. HTTP response bodies
 have a separate 64 KiB ceiling and must return on the captured connection epoch. Uploads are independent, so
 completion order—not newest-request arbitration—orders staged IDs. A confirmed prompt removes only the IDs
-captured by its submission and never clears newer text or attachments; failure or uncertain receipt resolution
-retains those IDs and restores outgoing text before newer input. Retired completions publish neither restoration
+captured by its submission and never clears newer text or attachments. Admission installs one exact-target,
+bounded outgoing presentation row immediately; it is not a TranscriptItem and remains until matching canonical
+user-message state is observed. Definitive rejection restores outgoing text before newer input, while a possibly-sent
+transport outcome retains the row and captured IDs without replay. Retired completions publish neither restoration
 nor errors. Extension editor requests auto-apply only to an empty exact draft; nonempty drafts require the
 existing explicit Use/Keep disposition. Route-provided initial editor text seeds only an absent exact
 profile/session draft; reopen and repeated preparation cannot overwrite retained edits. `SessionShellView`
@@ -440,14 +444,15 @@ lower/reordered revision, malformed mutation, or epoch mismatch. Fitted snapshot
 surface ID/revision baselines and leased/actionable state so later exact-next full frames converge; a complete
 snapshot replaces the whole projection. Unknown surface kinds decode to a readable plain-text fallback; malformed upserts never erase an existing
 surface, and removal is an explicit ID list. Native rendering admits only read-only widget surfaces through deterministic, horizontally-scrolling
-composer pills (one opaque pill per semantic widget; explicitly matching public surface provenance may
-share a pill); tapping a pill opens a bounded native detail sheet scoped to that group. The sheet
-translates terminal-only hints into native disclosure controls and uses the public tools-expanded
-mutation with exact epoch/revision/command ownership to rerender retained surfaces. Frame runs use a
-wrapping native flow layout rather than a horizontal terminal viewport, preserving admitted safe links. Status/service-only
-activity uses one conservative fallback pill. Custom, overlay, editor, tool, message, and entry surfaces
-remain deferred. Unknown or ambiguous provenance fails open to separate opaque groups, and the UI never
-inspects package names or extension-owned keys. Offline cache strips all surfaces,
+composer pills (one opaque pill per canonical widget identity; semantic widgets merge with their
+host surface representation when its public surface ID decodes to the same key, while explicit provenance
+provides source grouping and labels); tapping a pill opens a bounded native detail sheet scoped to that group.
+The sheet translates terminal-only hints into native disclosure controls and uses the public tools-expanded
+mutation with exact epoch/revision/command ownership to rerender retained surfaces. Frame runs render as
+wrapping native information rows rather than a terminal viewport or per-run backgrounds, preserving only
+admitted safe links. Status/service-only activity uses one conservative fallback pill. Custom, overlay,
+editor, tool, message, and entry surfaces remain deferred. Unknown or ambiguous provenance fails open to
+separate opaque groups, and the UI never inspects package names or extension-owned keys. Offline cache strips all surfaces,
 interactions, lease/focus, capabilities/diagnostics, and ephemeral semantic values.
 Native safe-area layout therefore pushes the transcript exactly once and reverses naturally when
 the keyboard or composer contracts. One geometry observation of the complete composer—not
