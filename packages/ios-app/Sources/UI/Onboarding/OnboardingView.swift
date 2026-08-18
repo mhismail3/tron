@@ -93,7 +93,6 @@ struct OnboardingView: View {
                         .padding(.bottom, 10)
                 }
             }
-            .tronTopBlurSurface()
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
