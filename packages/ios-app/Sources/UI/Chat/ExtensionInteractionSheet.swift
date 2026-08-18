@@ -9,6 +9,7 @@ struct ExtensionInteractionSheet: View {
     let sessionID: String
     let interaction: ExtensionInteraction
     let onResolved: () -> Void
+    let onLocallyClosed: () -> Void
     @State private var text = ""
     @State private var selectedOption: String?
     @State private var confirmValue: Bool?
@@ -23,7 +24,7 @@ struct ExtensionInteractionSheet: View {
     }
 
     private var canSubmit: Bool {
-        guard !isExpired else { return false }
+        guard !isExpired, responseValidationMessage == nil else { return false }
         return switch interaction.method {
         case .select: selectedOption != nil
         case .confirm: confirmValue != nil
@@ -44,6 +45,12 @@ struct ExtensionInteractionSheet: View {
                             .foregroundStyle(Color.tronError)
                             .accessibilityLabel("Could not submit: \(submissionError)")
                     }
+                    if let responseValidationMessage {
+                        Label(responseValidationMessage, systemImage: "exclamationmark.triangle.fill")
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronError)
+                            .accessibilityLabel(responseValidationMessage)
+                    }
                 }
                 .padding(20)
             }
@@ -56,8 +63,8 @@ struct ExtensionInteractionSheet: View {
                             .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                             .foregroundStyle(Color.tronTextMuted)
                     }
-                    .accessibilityLabel(isExpired ? "Question expired" : "Cancel question")
-                    .disabled(submitting || isExpired)
+                    .accessibilityLabel(isExpired ? "Close expired question" : "Cancel question")
+                    .disabled(submitting)
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Question")
@@ -84,7 +91,7 @@ struct ExtensionInteractionSheet: View {
         .presentationDragIndicator(.hidden)
         .interactiveDismissDisabled()
         .onAppear { resetState() }
-        .onChange(of: interaction.id) { _, _ in resetState() }
+        .onChange(of: interactionScope) { _, _ in resetState() }
         .task(id: interaction.id) {
             while !Task.isCancelled {
                 currentDate = Date()
@@ -191,6 +198,10 @@ struct ExtensionInteractionSheet: View {
         .accessibilityLabel(label)
     }
 
+    private var interactionScope: String {
+        "\(interaction.id)|\(interaction.hostEpoch)|\(interaction.presentationRevision)"
+    }
+
     private func resetState() {
         text = interaction.prefill ?? ""
         selectedOption = nil
@@ -211,8 +222,14 @@ struct ExtensionInteractionSheet: View {
         respond(value: value, cancelled: false)
     }
 
+    private var responseValidationMessage: String? {
+        guard interaction.method == .input || interaction.method == .editor else { return nil }
+        return ExtensionInteractionResponsePolicy.primitiveTextError(text)
+    }
+
     private func cancel() {
-        guard !submitting, !isExpired else { return }
+        guard !submitting else { return }
+        if isExpired { onLocallyClosed(); dismiss(); return }
         respond(value: nil, cancelled: true)
     }
 

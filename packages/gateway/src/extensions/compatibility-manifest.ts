@@ -24,6 +24,10 @@ const entry = (classification: HostClassification, capability: string, limitatio
   classification, capability, ...(limitation ? { limitation } : {}),
 });
 
+export const extensionToolAdapterCompatibility = {
+  pi9AskQuestionnaire: entry("native-semantic", "questionnaire.v1", "Explicitly identified npm:@pi9/ask contract; older clients use the primitive RPC fallback."),
+} as const;
+
 export const extensionPresentationCompatibility = {
   select: entry("native-semantic", "dialogs.select"), confirm: entry("native-semantic", "dialogs.confirm"),
   input: entry("native-semantic", "dialogs.input"), editor: entry("native-semantic", "dialogs.editor"),

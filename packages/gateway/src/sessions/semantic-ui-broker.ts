@@ -6,7 +6,14 @@ import {
   type WorkingIndicatorOptions,
 } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
-import type { ExtensionInteraction, ExtensionSemanticState, ExtensionWidget } from "../protocol/types.js";
+import type {
+  ExtensionInteraction,
+  ExtensionQuestionnaireAnswer,
+  ExtensionQuestionnaireDescriptor,
+  ExtensionSemanticState,
+  ExtensionWidget,
+} from "../protocol/types.js";
+import { TRON_QUESTIONNAIRE_REQUEST } from "./extension-adapter-contract.js";
 import { ExtensionPresentationStore } from "../extensions/host/extension-presentation-store.js";
 import { stripTerminalControls } from "../extensions/host/terminal-sanitizer.js";
 import { currentExtensionOwner } from "../extensions/owner-attribution.js";
@@ -53,6 +60,8 @@ const MAX_KEY_BYTES = 256;
 const MAX_TITLE_BYTES = 4 * 1_024;
 const MAX_MESSAGE_BYTES = 32 * 1_024;
 const MAX_OPTION_BYTES = 2 * 1_024;
+const MAX_RESPONSE_BYTES = 192 * 1_024;
+const MAX_COMMENT_BYTES = 4 * 1_024;
 const MAX_STATUS_BYTES = 4 * 1_024;
 const MAX_WORKING_BYTES = 8 * 1_024;
 const MAX_NOTIFICATION_BYTES = 32 * 1_024;
@@ -109,15 +118,65 @@ export class SemanticUIBroker {
       throw new GatewayError("conflict", "Extension interaction scope is stale; refresh the session", true);
     }
     if (!cancelled) {
-      const valid = pending.wire.method === "confirm"
-        ? typeof value === "boolean"
-        : pending.wire.method === "select"
-          ? typeof value === "string" && pending.wire.options?.includes(value) === true
-          : typeof value === "string";
+      const valid = pending.wire.questionnaire
+        ? isQuestionnaireAnswer(value, pending.wire.questionnaire)
+          || (pending.wire.method === "input"
+            ? typeof value === "string"
+            : typeof value === "string" && pending.wire.options?.includes(value) === true)
+        : pending.wire.method === "confirm"
+          ? typeof value === "boolean"
+          : pending.wire.method === "select"
+            ? typeof value === "string" && pending.wire.options?.includes(value) === true
+            : typeof value === "string";
       if (!valid) throw new GatewayError("invalid_request", "Extension interaction response is invalid");
+      if (typeof value === "string" && Buffer.byteLength(value) > MAX_RESPONSE_BYTES) {
+        throw new GatewayError("invalid_request", "Extension interaction response exceeds its bounded capacity");
+      }
     }
     this.finish(pending);
     if (cancelled) pending.resolve(undefined); else pending.resolve(value);
+  }
+
+  requestQuestionnaire(input: {
+    title: string;
+    method?: "select" | "input";
+    primitiveOptions?: string[];
+    placeholder?: string;
+    question: string;
+    context?: string;
+    options: ExtensionQuestionnaireDescriptor["options"];
+    allowMultiple: boolean;
+    allowFreeform: boolean;
+    signal?: AbortSignal;
+    timeout?: number;
+  }): Promise<unknown> {
+    const descriptor: ExtensionQuestionnaireDescriptor = {
+      version: 1,
+      question: stripTerminalPresentation(input.question),
+      ...(input.context === undefined ? {} : { context: stripTerminalPresentation(input.context) }),
+      options: input.options.map((option) => ({
+        label: stripTerminalPresentation(option.label),
+        ...(option.description === undefined ? {} : { description: stripTerminalPresentation(option.description) }),
+        ...(option.preview === undefined ? {} : { preview: stripTerminalPresentation(option.preview) }),
+      })),
+      allowMultiple: input.allowMultiple,
+      allowFreeform: input.allowFreeform,
+    };
+    const method = input.method ?? "select";
+    const primitiveOptions = input.primitiveOptions ?? (method === "select"
+      ? input.options.map((option, index) => `${index + 1}. ${option.label}${option.description ? ` — ${option.description}` : ""}`)
+        .concat(input.allowFreeform ? [`${input.options.length + 1}. Type a response…`] : [])
+      : undefined);
+    if (method === "select" && (!primitiveOptions || primitiveOptions.length === 0)) {
+      return Promise.reject(new GatewayError("conflict", "Extension questionnaire select options are invalid"));
+    }
+    return this.request({
+      method,
+      title: input.title,
+      ...(primitiveOptions === undefined ? {} : { options: primitiveOptions }),
+      ...(input.placeholder === undefined ? {} : { placeholder: input.placeholder }),
+      questionnaire: descriptor,
+    }, input).then((value) => value);
   }
 
   updateEditor(hostEpoch: string, baseRevision: number, operationId: string, text: string): { revision: number; text: string; applied: boolean } {
@@ -227,7 +286,7 @@ export class SemanticUIBroker {
 
   context(): ExtensionUIContext {
     const broker = this;
-    return {
+    const context: ExtensionUIContext = {
       async select(title, options, opts) {
         const result = await broker.request({ method: "select", title, options }, opts);
         return typeof result === "string" && options.includes(result) ? result : undefined;
@@ -330,5 +389,28 @@ export class SemanticUIBroker {
       getToolsExpanded() { broker.assertActive(); return broker.semantic().toolsExpanded; },
       setToolsExpanded(expanded) { broker.assertActive(); if (typeof expanded !== "boolean") throw new GatewayError("conflict", "Extension UI tool expansion is invalid"); broker.mutate((state) => { state.toolsExpanded = expanded; }); },
     };
+    (context as ExtensionUIContext & { [TRON_QUESTIONNAIRE_REQUEST]: typeof broker.requestQuestionnaire })[TRON_QUESTIONNAIRE_REQUEST] = broker.requestQuestionnaire.bind(broker);
+    return context;
   }
+}
+
+function isQuestionnaireAnswer(value: unknown, descriptor: ExtensionQuestionnaireDescriptor): value is ExtensionQuestionnaireAnswer {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const answer = value as ExtensionQuestionnaireAnswer;
+  if (Object.keys(answer).some((key) => key !== "selections" && key !== "freeform")) return false;
+  if (!Array.isArray(answer.selections) || answer.selections.length > descriptor.options.length
+    || (!descriptor.allowMultiple && answer.selections.length > 1)
+    || (!descriptor.allowMultiple && answer.selections.length > 0 && answer.freeform !== undefined)
+    || (answer.freeform !== undefined && (!descriptor.allowFreeform || typeof answer.freeform !== "string"))) return false;
+  if (answer.freeform !== undefined && Buffer.byteLength(answer.freeform) > MAX_RESPONSE_BYTES) return false;
+  if (Buffer.byteLength(JSON.stringify(answer), "utf8") > MAX_RESPONSE_BYTES) return false;
+  const seen = new Set<number>();
+  return answer.selections.every((selection) => {
+    if (!selection || typeof selection !== "object"
+      || Object.keys(selection).some((key) => key !== "option" && key !== "comment")
+      || !Number.isSafeInteger(selection.option) || selection.option < 0
+      || selection.option >= descriptor.options.length || seen.has(selection.option)) return false;
+    seen.add(selection.option);
+    return selection.comment === undefined || (typeof selection.comment === "string" && Buffer.byteLength(selection.comment) <= MAX_COMMENT_BYTES);
+  });
 }

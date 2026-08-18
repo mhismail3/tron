@@ -8,6 +8,67 @@ function brokerWith(broadcast: (topic: string, payload: JsonValue) => void = () 
 }
 
 describe("SemanticUIBroker", () => {
+  it("admits structured questionnaire answers and keeps primitive fallback valid", async () => {
+    const broker = brokerWith(() => {});
+    const pending = broker.requestQuestionnaire({
+      title: "Pick", question: "Pick one", options: [{ label: "One", preview: "**one**" }, { label: "Two" }],
+      allowMultiple: false, allowFreeform: true,
+    });
+    const interaction = broker.interactions()[0]!;
+    expect(interaction.questionnaire?.version).toBe(1);
+    broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision,
+      { selections: [{ option: 1, comment: "reason" }] }, false);
+    await expect(pending).resolves.toEqual({ selections: [{ option: 1, comment: "reason" }] });
+
+    const legacy = broker.requestQuestionnaire({
+      title: "Pick", question: "Pick one", options: [{ label: "One" }], allowMultiple: false, allowFreeform: false,
+    });
+    const fallback = broker.interactions()[0]!;
+    broker.respond(fallback.id, fallback.hostEpoch, fallback.presentationRevision, "1. One", false);
+    await expect(legacy).resolves.toBe("1. One");
+  });
+
+  it("rejects invalid questionnaire answers without removing the pending request", async () => {
+    const broker = brokerWith(() => {});
+    const pending = broker.requestQuestionnaire({
+      title: "Pick", question: "Pick", options: [{ label: "One" }], allowMultiple: false, allowFreeform: false,
+    });
+    const interaction = broker.interactions()[0]!;
+    expect(() => broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision,
+      { selections: [{ option: 4 }] }, false)).toThrow(expect.objectContaining({ code: "invalid_request" }));
+    expect(() => broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision,
+      { selections: [{ option: 0 }], freeform: "conflicting" }, false)).toThrow(expect.objectContaining({ code: "invalid_request" }));
+    expect(broker.interactions()).toHaveLength(1);
+    broker.cancelAll();
+    await expect(pending).rejects.toMatchObject({ code: "cancelled" });
+  });
+
+  it("preserves the first primitive input shape for multi-select fallback", async () => {
+    const broker = brokerWith(() => {});
+    const pending = broker.requestQuestionnaire({ method: "input", title: "Choose", primitiveOptions: undefined, placeholder: "placeholder", question: "Choose", options: [{ label: "One" }], allowMultiple: true, allowFreeform: false });
+    const interaction = broker.interactions()[0]!;
+    expect(interaction.method).toBe("input");
+    expect(interaction.options).toBeUndefined();
+    broker.respond(interaction.id, interaction.hostEpoch, interaction.presentationRevision, "1", false);
+    await expect(pending).resolves.toBe("1");
+  });
+
+  it("enforces the conditional 63/64 structured option boundary", async () => {
+    const broker = brokerWith(() => {});
+    const options = (count: number) => Array.from({ length: count }, (_, index) => ({ label: `Option ${index}` }));
+    const sixtyThree = broker.requestQuestionnaire({ title: "Pick", question: "Pick", options: options(63), allowMultiple: false, allowFreeform: true });
+    expect(broker.interactions()[0]?.options).toHaveLength(64);
+    broker.cancelAll();
+    await expect(sixtyThree).rejects.toMatchObject({ code: "cancelled" });
+    await expect(broker.requestQuestionnaire({ title: "Pick", question: "Pick", options: options(64), allowMultiple: false, allowFreeform: true }))
+      .rejects.toMatchObject({ code: "conflict" });
+    broker.cancelAll();
+    const sixtyFour = broker.requestQuestionnaire({ title: "Pick", question: "Pick", options: options(64), allowMultiple: false, allowFreeform: false });
+    expect(broker.interactions()[0]?.options).toHaveLength(64);
+    broker.cancelAll();
+    await expect(sixtyFour).rejects.toMatchObject({ code: "cancelled" });
+  });
+
   it("survives client churn until a response arrives", async () => {
     const broker = brokerWith(() => {});
     const result = broker.context().select("Choose", ["one", "two"]);

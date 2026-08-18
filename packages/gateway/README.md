@@ -136,7 +136,18 @@ The embedded runtime's active-run flag outranks an older settlement callback whe
 an extension completion immediately triggers a continuation, so phase, operation,
 and Stop controls cannot become idle while a newer turn is executing. Extension
 commands are resolved before ordinary streaming rejection and still execute through
-Pi's prompt path. A per-bind host epoch and monotonic presentation revision scope
+Pi's prompt path. The explicit extension adapter registry identifies the installed
+`@pi9/ask` package only by package source metadata and its public parameter shape.
+Its original execute function, result formatting/events, timeout signal, and replay
+behavior remain authoritative; a scoped UI proxy admits one additive questionnaire
+v1 descriptor on a primitive select/input interaction. Capable clients submit
+bounded structured selections, comments, and freeform text through the existing
+response mutation (single-select allows 64 options without freeform or 63 with the
+legacy Type-a-response choice; multi-select/input allows 64; 2 KiB labels/descriptions;
+32 KiB previews/context; 192 KiB interaction/response envelope), while older clients continue the original
+sequential primitive RPC fallback. Arbitrary custom/overlay TUI is not inferred or
+remotely executed.
+A per-bind host epoch and monotonic presentation revision scope
 all retained semantic state and actionable responses; reload/replacement retires
 captured callbacks instead of letting them mutate the replacement host. The lifecycle coordinator counts prompt preflights, command handlers, interactions,
 foreground agent/retry/compaction/bash/queue work, and deferred session-scoped
@@ -208,7 +219,7 @@ deferred.
 
 Live tool projections may carry an optional extension provenance record derived from the public Pi tool `sourceInfo` and the loaded extension inventory. The Gateway emits that record only when exactly one extension owns the tool and the source path agrees; unknown or ambiguous ownership omits provenance and fails open to the ordinary tool projection. This metadata is disposable presentation state and never modifies Pi JSONL.
 
-Extension callbacks are wrapped through the public `DefaultResourceLoaderOptions.extensionsOverride` seam on every load and reload. An AsyncLocalStorage owner (`resolvedPath`, a generic humanized source/path title, and exact `sourceInfo.source`) follows handlers, tools, commands, renderers, promises, and timers. The semantic broker records optional widget owners and per-key status owners; rendered component surfaces retain only exact source provenance. Unattributed calls remain ownerless rather than being guessed, and protocol owner records are bounded at the store and native admission boundary.
+Extension callbacks are wrapped through the public `DefaultResourceLoaderOptions.extensionsOverride` seam on every load and reload. An AsyncLocalStorage owner (an opaque SHA-256 identity derived from stable source/path provenance, a generic humanized title, and exact `sourceInfo.source`) follows handlers, tools, commands, renderers, promises, and timers. Raw extension paths never enter owner IDs. The semantic broker records optional widget owners and per-key status owners; rendered component surfaces retain only exact source provenance. Unattributed calls remain ownerless rather than being guessed, and protocol owner records are bounded at the store and native admission boundary.
 
 Parallel tool events carry a monotonic per-run ordinal; each call additionally has
 a monotonic progress sequence, bounded display-safe live-output tail, runtime start,

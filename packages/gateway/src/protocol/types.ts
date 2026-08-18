@@ -161,6 +161,31 @@ export interface SessionOperationState {
   reason?: string;
 }
 
+export interface ExtensionQuestionnaireOption {
+  label: string;
+  description?: string;
+  preview?: string;
+}
+
+export interface ExtensionQuestionnaireDescriptor {
+  version: 1;
+  question: string;
+  context?: string;
+  options: ExtensionQuestionnaireOption[];
+  allowMultiple: boolean;
+  allowFreeform: boolean;
+}
+
+export interface ExtensionQuestionnaireSelection {
+  option: number;
+  comment?: string;
+}
+
+export interface ExtensionQuestionnaireAnswer {
+  selections: ExtensionQuestionnaireSelection[];
+  freeform?: string;
+}
+
 export type ExtensionInteraction = {
   id: string;
   hostEpoch: string;
@@ -172,6 +197,8 @@ export type ExtensionInteraction = {
   placeholder?: string;
   prefill?: string;
   expiresAt?: string;
+  /** Additive descriptor; old clients ignore it and answer the primitive dialog. */
+  questionnaire?: ExtensionQuestionnaireDescriptor;
 };
 
 export interface ExtensionOwner {

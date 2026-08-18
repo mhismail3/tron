@@ -22,11 +22,12 @@ describe("extension owner attribution", () => {
     const result = attributeExtensions({ extensions: [extension as any], errors: [], runtime: {} as any });
     await result.extensions[0]!.handlers.get("session_start")![0]!();
     await result.extensions[0]!.tools.get("subagent")!.definition.execute("id", {}, undefined, undefined, {} as any);
-    expect(seen).toEqual([
-      { id: "/extensions/subagents.ts", title: "Subagents", source: "project" },
-      { id: "/extensions/subagents.ts", title: "Subagents", source: "project" },
-      { id: "/extensions/subagents.ts", title: "Subagents", source: "project" },
-    ]);
+    expect(seen).toHaveLength(3);
+    expect(seen.every((owner) => (owner as { id: string }).id === (seen[0] as { id: string }).id)).toBe(true);
+    expect(seen.every((owner) => (owner as { id: string }).id.startsWith("extension:"))).toBe(true);
+    expect(JSON.stringify(seen)).not.toContain("/extensions/subagents.ts");
+    expect(seen.every((owner) => (owner as { title: string; source: string }).title === "Subagents"
+      && (owner as { source: string }).source === "project")).toBe(true);
     expect(currentExtensionOwner()).toBeUndefined();
   });
 });

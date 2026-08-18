@@ -4,6 +4,7 @@ import { GatewayError } from "../../errors.js";
 import type {
   ExtensionInputLease,
   ExtensionInteraction,
+  ExtensionQuestionnaireDescriptor,
   ExtensionPresentationDiagnostic,
   ExtensionPresentationMutation,
   ExtensionPresentationState,
@@ -36,6 +37,8 @@ const MAX_KEY_BYTES = 256;
 const MAX_TITLE_BYTES = 4 * 1_024;
 const MAX_MESSAGE_BYTES = 32 * 1_024;
 const MAX_OPTION_BYTES = 2 * 1_024;
+const MAX_QUESTIONNAIRE_OPTIONS = 64;
+const MAX_QUESTIONNAIRE_PREVIEW_BYTES = 32 * 1_024;
 const MAX_STATUS_BYTES = 4 * 1_024;
 const MAX_WORKING_BYTES = 8 * 1_024;
 const MAX_WIDGET_LINE_BYTES = 512;
@@ -77,6 +80,23 @@ function hasUnsafeControl(value: string, preserveNewlines = false): boolean {
 }
 function boundedSafe(value: unknown, maximum: number, preserveNewlines = false): boolean {
   return typeof value === "string" && bytes(value) <= maximum && !hasUnsafeControl(value, preserveNewlines);
+}
+function validQuestionnaire(value: unknown): value is ExtensionQuestionnaireDescriptor {
+  if (!value || typeof value !== "object") return false;
+  const q = value as ExtensionQuestionnaireDescriptor;
+  if (q.version !== 1 || typeof q.question !== "string" || q.question.length === 0 || !boundedSafe(q.question, MAX_MESSAGE_BYTES, true)
+    || (q.context !== undefined && !boundedSafe(q.context, MAX_MESSAGE_BYTES, true))
+    || !Array.isArray(q.options) || q.options.length === 0 || q.options.length > MAX_QUESTIONNAIRE_OPTIONS
+    || typeof q.allowMultiple !== "boolean" || typeof q.allowFreeform !== "boolean") return false;
+  const labels = new Set<string>();
+  return q.options.every((option) => {
+    if (!option || typeof option !== "object") return false;
+    const item = option as ExtensionQuestionnaireDescriptor["options"][number];
+    if (!boundedSafe(item.label, MAX_OPTION_BYTES) || item.label.length === 0 || !labels.add(item.label)
+      || (item.description !== undefined && !boundedSafe(item.description, MAX_OPTION_BYTES, true))
+      || (item.preview !== undefined && !boundedSafe(item.preview, MAX_QUESTIONNAIRE_PREVIEW_BYTES, true))) return false;
+    return true;
+  });
 }
 function validLink(value: string): boolean {
   if (value.length > 2_048 || hasUnsafeControl(value)) return false;
@@ -344,13 +364,18 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
       || draft.pendingInteractions.some((item) => typeof item !== "object" || item === null || item.id.length === 0 || item.hostEpoch !== this.hostEpoch || item.presentationRevision < 1
         || item.presentationRevision > this.revision + 1 || !boundedSafe(item.id, MAX_ID_BYTES)
         || !["select", "confirm", "input", "editor"].includes(item.method)
-        || !boundedSafe(item.title, MAX_TITLE_BYTES) || (item.message !== undefined && !boundedSafe(item.message, MAX_MESSAGE_BYTES, true))
+        || !boundedSafe(item.title, MAX_TITLE_BYTES, true) || (item.message !== undefined && !boundedSafe(item.message, MAX_MESSAGE_BYTES, true))
         || (item.placeholder !== undefined && !boundedSafe(item.placeholder, MAX_TITLE_BYTES))
         || (item.prefill !== undefined && !boundedSafe(item.prefill, MAX_EDITOR_DIRECTIVE_BYTES, true))
         || (item.expiresAt !== undefined && (!boundedSafe(item.expiresAt, MAX_ID_BYTES) || Number.isNaN(Date.parse(item.expiresAt))))
-        || (item.method === "select" && item.options === undefined)
+        || (item.method === "select" && (item.options === undefined || item.options.length === 0))
         || (item.options !== undefined && (item.method !== "select" || item.options.length > EXTENSION_MAX_SELECT_OPTIONS
+          || new Set(item.options).size !== item.options.length
           || item.options.some((option) => !boundedSafe(option, MAX_OPTION_BYTES))))
+        || (item.questionnaire !== undefined && (!validQuestionnaire(item.questionnaire)
+          || (item.method !== "select" && item.method !== "input")
+          || (item.method === "select" && item.options?.length !== item.questionnaire.options.length + (item.questionnaire.allowFreeform ? 1 : 0))
+          || (item.method === "input" && item.options !== undefined)))
         || bytes(item) > MAX_INTERACTION_BYTES)) {
       throw new GatewayError("conflict", "Extension interactions are invalid");
     }

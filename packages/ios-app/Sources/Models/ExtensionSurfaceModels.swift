@@ -38,6 +38,92 @@ private extension KeyedDecodingContainer {
         guard contains(key), try !decodeNil(forKey: key) else { return nil }
         return try decodeBoundedStringDictionary(forKey: key, maximum: maximum)
     }
+
+    func decodeBoundedString(forKey key: Key, maximumBytes: Int) throws -> String {
+        let value = try decode(String.self, forKey: key)
+        guard value.utf8.count <= maximumBytes else {
+            throw DecodingError.dataCorruptedError(forKey: key, in: self, debugDescription: "Extension string exceeds its bounded capacity")
+        }
+        return value
+    }
+
+    func decodeBoundedStringIfPresent(forKey key: Key, maximumBytes: Int) throws -> String? {
+        guard contains(key), try !decodeNil(forKey: key) else { return nil }
+        return try decodeBoundedString(forKey: key, maximumBytes: maximumBytes)
+    }
+}
+
+struct ExtensionQuestionnaireOption: Codable, Hashable, Sendable {
+    let label: String
+    let description: String?
+    let preview: String?
+
+    private enum CodingKeys: String, CodingKey { case label, description, preview }
+    init(label: String, description: String?, preview: String?) {
+        self.label = label; self.description = description; self.preview = preview
+    }
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        label = try container.decodeBoundedString(forKey: .label, maximumBytes: 2 * 1_024)
+        description = try container.decodeBoundedStringIfPresent(forKey: .description, maximumBytes: 2 * 1_024)
+        preview = try container.decodeBoundedStringIfPresent(forKey: .preview, maximumBytes: 32 * 1_024)
+    }
+}
+
+struct ExtensionQuestionnaireDescriptor: Codable, Hashable, Sendable {
+    let version: Int
+    let question: String
+    let context: String?
+    let options: [ExtensionQuestionnaireOption]
+    let allowMultiple: Bool
+    let allowFreeform: Bool
+
+    private enum CodingKeys: String, CodingKey { case version, question, context, options, allowMultiple, allowFreeform }
+    init(version: Int, question: String, context: String?, options: [ExtensionQuestionnaireOption], allowMultiple: Bool, allowFreeform: Bool) {
+        self.version = version; self.question = question; self.context = context; self.options = options
+        self.allowMultiple = allowMultiple; self.allowFreeform = allowFreeform
+    }
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        question = try container.decodeBoundedString(forKey: .question, maximumBytes: 32 * 1_024)
+        context = try container.decodeBoundedStringIfPresent(forKey: .context, maximumBytes: 32 * 1_024)
+        options = try container.decodeBoundedArray(ExtensionQuestionnaireOption.self, forKey: .options, maximum: 64)
+        allowMultiple = try container.decode(Bool.self, forKey: .allowMultiple)
+        allowFreeform = try container.decode(Bool.self, forKey: .allowFreeform)
+    }
+}
+
+struct ExtensionQuestionnaireSelection: Codable, Hashable, Sendable {
+    let option: Int
+    let comment: String?
+}
+
+struct ExtensionQuestionnaireAnswer: Codable, Hashable, Sendable {
+    let selections: [ExtensionQuestionnaireSelection]
+    let freeform: String?
+}
+
+enum ExtensionInteractionResponsePolicy {
+    static let maximumResponseBytes = 192 * 1_024
+    static let maximumCommentBytes = 4 * 1_024
+
+    static func primitiveTextError(_ text: String) -> String? {
+        text.utf8.count <= maximumResponseBytes ? nil : "Response is too large (maximum 192 KiB)."
+    }
+
+    static func questionnaireError(_ answer: ExtensionQuestionnaireAnswer) -> String? {
+        if answer.selections.contains(where: { $0.comment?.utf8.count ?? 0 > maximumCommentBytes }) {
+            return "A comment is too large (maximum 4 KiB)."
+        }
+        if answer.freeform?.utf8.count ?? 0 > maximumResponseBytes {
+            return "The custom response is too large (maximum 192 KiB)."
+        }
+        guard let encoded = try? JSONEncoder.gateway.encode(answer), encoded.count <= maximumResponseBytes else {
+            return "The answer is too large (maximum 192 KiB)."
+        }
+        return nil
+    }
 }
 
 struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
@@ -52,12 +138,13 @@ struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
     let placeholder: String?
     let prefill: String?
     let expiresAt: String?
+    let questionnaire: ExtensionQuestionnaireDescriptor?
 
-    init(id: String, hostEpoch: String, presentationRevision: Int, method: Method, title: String, message: String? = nil, options: [String]? = nil, placeholder: String? = nil, prefill: String? = nil, expiresAt: String? = nil) {
+    init(id: String, hostEpoch: String, presentationRevision: Int, method: Method, title: String, message: String? = nil, options: [String]? = nil, placeholder: String? = nil, prefill: String? = nil, expiresAt: String? = nil, questionnaire: ExtensionQuestionnaireDescriptor? = nil) {
         self.id = id; self.hostEpoch = hostEpoch; self.presentationRevision = presentationRevision; self.method = method
-        self.title = title; self.message = message; self.options = options; self.placeholder = placeholder; self.prefill = prefill; self.expiresAt = expiresAt
+        self.title = title; self.message = message; self.options = options; self.placeholder = placeholder; self.prefill = prefill; self.expiresAt = expiresAt; self.questionnaire = questionnaire
     }
-    private enum CodingKeys: String, CodingKey { case id, hostEpoch, presentationRevision, method, title, message, options, placeholder, prefill, expiresAt }
+    private enum CodingKeys: String, CodingKey { case id, hostEpoch, presentationRevision, method, title, message, options, placeholder, prefill, expiresAt, questionnaire }
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -70,6 +157,7 @@ struct ExtensionInteraction: Codable, Hashable, Identifiable, Sendable {
         placeholder = try container.decodeIfPresent(String.self, forKey: .placeholder)
         prefill = try container.decodeIfPresent(String.self, forKey: .prefill)
         expiresAt = try container.decodeIfPresent(String.self, forKey: .expiresAt)
+        questionnaire = try container.decodeIfPresent(ExtensionQuestionnaireDescriptor.self, forKey: .questionnaire)
     }
 }
 
@@ -466,15 +554,41 @@ enum ExtensionPresentationPolicy {
     private static func admit(_ interaction: ExtensionInteraction, hostEpoch: String, maximumRevision: Int) -> Bool {
         guard interaction.hostEpoch == hostEpoch, interaction.presentationRevision > 0,
               interaction.presentationRevision <= maximumRevision,
-              boundedSafe(interaction.id, 512), boundedSafe(interaction.title, 4 * 1_024),
+              boundedSafe(interaction.id, 512), boundedSafe(interaction.title, 4 * 1_024, newlines: true),
               interaction.message.map({ boundedSafe($0, 32 * 1_024, newlines: true) }) ?? true,
               interaction.placeholder.map({ boundedSafe($0, 4 * 1_024) }) ?? true,
               interaction.prefill.map({ boundedSafe($0, 192 * 1_024, newlines: true) }) ?? true,
-              (interaction.method != .select || interaction.options != nil),
+              interaction.expiresAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true,
+              (interaction.method != .select || (interaction.options?.isEmpty == false)),
               interaction.options.map({ options in
-                  interaction.method == .select && options.count <= 64 && options.allSatisfy({ boundedSafe($0, 2 * 1_024) })
+                  interaction.method == .select && options.count <= 64 && Set(options).count == options.count
+                    && options.allSatisfy({ boundedSafe($0, 2 * 1_024) })
+              }) ?? true,
+              interaction.questionnaire.map(admitQuestionnaire) ?? true,
+              interaction.questionnaire.map({ questionnaire in
+                  switch interaction.method {
+                  case .select:
+                      return questionnaire.options.count <= (questionnaire.allowFreeform ? 63 : 64)
+                          && interaction.options?.count == questionnaire.options.count + (questionnaire.allowFreeform ? 1 : 0)
+                  case .input:
+                      return interaction.options == nil
+                  case .confirm, .editor:
+                      return false
+                  }
               }) ?? true else { return false }
         return (try? JSONEncoder.gateway.encode(interaction).count).map { $0 <= 192 * 1_024 } ?? false
+    }
+
+    private static func admitQuestionnaire(_ descriptor: ExtensionQuestionnaireDescriptor) -> Bool {
+        guard descriptor.version == 1, !descriptor.question.isEmpty, boundedSafe(descriptor.question, 32 * 1_024, newlines: true),
+              descriptor.context.map({ boundedSafe($0, 32 * 1_024, newlines: true) }) ?? true,
+              !descriptor.options.isEmpty, descriptor.options.count <= 64,
+              descriptor.options.map(\.label).count == Set(descriptor.options.map(\.label)).count else { return false }
+        return descriptor.options.allSatisfy { option in
+            !option.label.isEmpty && boundedSafe(option.label, 2 * 1_024)
+                && (option.description.map({ boundedSafe($0, 2 * 1_024, newlines: true) }) ?? true)
+                && (option.preview.map({ boundedSafe($0, 32 * 1_024, newlines: true) }) ?? true)
+        }
     }
 
     static func admit(_ surface: ExtensionSurface) -> Bool {

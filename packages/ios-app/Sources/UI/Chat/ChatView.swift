@@ -184,13 +184,29 @@ struct ChatView: View {
             ExtensionDetailsSheet(sessionID: sessionID, groupID: extensionDetailsGroupID)
         }
         .sheet(item: interactionBinding) { interaction in
-            ExtensionInteractionSheet(
-                sessionID: sessionID,
-                interaction: interaction,
-                onResolved: {
-                    suppressedInteractionScope = ExtensionInteractionScope(interaction)
-                }
-            )
+            if interaction.questionnaire != nil {
+                ExtensionQuestionnaireSheet(
+                    sessionID: sessionID,
+                    interaction: interaction,
+                    onResolved: {
+                        suppressedInteractionScope = ExtensionInteractionScope(interaction)
+                    },
+                    onLocallyClosed: {
+                        suppressedInteractionScope = ExtensionInteractionScope(interaction)
+                    }
+                )
+            } else {
+                ExtensionInteractionSheet(
+                    sessionID: sessionID,
+                    interaction: interaction,
+                    onResolved: {
+                        suppressedInteractionScope = ExtensionInteractionScope(interaction)
+                    },
+                    onLocallyClosed: {
+                        suppressedInteractionScope = ExtensionInteractionScope(interaction)
+                    }
+                )
+            }
         }
         .fileImporter(
             isPresented: attachmentPresentationBinding(for: .files),

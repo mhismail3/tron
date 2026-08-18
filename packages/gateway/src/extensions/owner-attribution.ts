@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash } from "node:crypto";
 import { basename, extname } from "node:path";
 import type { Extension, LoadExtensionsResult, RegisteredCommand, RegisteredTool, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { adaptedToolDefinition } from "./extension-adapters.js";
 import type { ExtensionOwner } from "../protocol/types.js";
 
 /** The owner is intentionally opaque to extension code and is only readable by
@@ -19,7 +21,10 @@ function humanizedDisplayName(extension: Extension): string {
 }
 
 function ownerFor(extension: Extension): ExtensionOwner {
-  return { id: extension.resolvedPath, title: humanizedDisplayName(extension), source: extension.sourceInfo.source };
+  const source = extension.sourceInfo.source;
+  const identity = `${source}\0${extension.resolvedPath}`;
+  const id = `extension:${createHash("sha256").update(identity).digest("base64url")}`;
+  return { id, title: humanizedDisplayName(extension), source };
 }
 
 function owned<T extends (...args: any[]) => any>(fn: T, owner: ExtensionOwner): T {
@@ -41,7 +46,7 @@ export function attributeExtensions(base: LoadExtensionsResult): LoadExtensionsR
         ...registered,
         definition: {
           ...definition,
-          execute: owned(definition.execute, owner),
+          execute: owned(adaptedToolDefinition(extension, name, definition).execute, owner),
           ...(definition.prepareArguments ? { prepareArguments: owned(definition.prepareArguments, owner) } : {}),
           ...(definition.renderCall ? { renderCall: owned(definition.renderCall, owner) } : {}),
           ...(definition.renderResult ? { renderResult: owned(definition.renderResult, owner) } : {}),
