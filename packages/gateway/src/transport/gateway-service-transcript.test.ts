@@ -123,6 +123,7 @@ describe("session transcript paging", () => {
     ) => operation());
     const remove = vi.fn(async () => { throw new Error("cleanup failed"); });
     const removeSession = vi.fn(async () => { throw new Error("cleanup failed"); });
+    const sessionDeleted = vi.fn();
     const service = new GatewayService({
       sessions: {
         importFromJsonl: async () => ({ id: "imported" }),
@@ -134,6 +135,7 @@ describe("session transcript paging", () => {
         removeSession,
       },
       receipts: { execute },
+      sessionDeleted,
     } as unknown as GatewayServiceDependencies);
 
     await expect(service.invoke(client, "session.import", {
@@ -146,6 +148,7 @@ describe("session transcript paging", () => {
       commandId: "command-2",
     })).resolves.toEqual({ deleted: true });
     expect(remove).toHaveBeenCalled();
+    expect(sessionDeleted).toHaveBeenCalledWith("deleted");
     expect(removeSession).toHaveBeenCalledWith("deleted");
   });
 

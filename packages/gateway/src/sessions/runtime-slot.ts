@@ -1754,7 +1754,28 @@ export class RuntimeSlot {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     if (this.isBusy || this.trustReloadPending) throw new GatewayError("busy", "Cannot dispose a busy session runtime");
-    await this.disposeRuntime();
+    await this.disposeIf(() => true);
+  }
+
+  /**
+   * Disposes an idle slot only if its registry reservation is still current
+   * after any preceding lane work settles. This is the handoff point that lets
+   * a newly acquired or subscribed session cancel idle eviction safely.
+   */
+  async disposeIf(shouldDispose: () => boolean): Promise<boolean> {
+    if (this.disposed) return false;
+    return this.lane.run(async () => {
+      if (this.disposed || !shouldDispose()) return false;
+      if (this.isBusy || this.trustReloadPending) {
+        throw new GatewayError("busy", "Cannot dispose a busy session runtime");
+      }
+      await this.disposeRuntime();
+      return true;
+    });
+  }
+
+  get isDisposed(): boolean {
+    return this.disposed;
   }
 
   async shutdown(): Promise<void> {

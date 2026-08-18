@@ -58,6 +58,12 @@ interface CatalogAcquisitionAdmission extends CatalogAcquisitionResolution {
   invalidationGeneration: number;
 }
 
+interface IdleEviction {
+  slot: RuntimeSlot;
+  committed: boolean;
+  completion?: Promise<boolean>;
+}
+
 export class RuntimeRegistry {
   private readonly slots = new Map<string, RuntimeSlot>();
   private readonly mutex = new AsyncMutex();
@@ -67,6 +73,10 @@ export class RuntimeRegistry {
   private readonly markers: RunMarkerStore;
   private interrupted = new Set<string>();
   private readonly subscribers = new Map<string, Set<string>>();
+  // A reservation is intentionally separate from slot ownership. Acquiring or
+  // subscribing cancels it before RuntimeSlot crosses its lane-protected
+  // disposal boundary, so an idle scan cannot retire a newly live session.
+  private readonly idleEvictions = new Map<string, IdleEviction>();
   private readonly summaryRevisions = new Map<string, number>();
   private readonly latestSummaries = new Map<string, SessionSummaryUpdate>();
   private ambiguousSessionIds = new Set<string>();
@@ -137,6 +147,7 @@ export class RuntimeRegistry {
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
       closed: (sessionId: string, slot: RuntimeSlot) => {
         if (this.slots.get(sessionId) === slot) this.slots.delete(sessionId);
+        this.cancelIdleEviction(sessionId, slot);
         this.interrupted.delete(sessionId);
         this.subscribers.delete(sessionId);
         this.latestSummaries.delete(sessionId);
@@ -799,14 +810,20 @@ export class RuntimeRegistry {
   async acquire(sessionId: string): Promise<RuntimeSlot> {
     this.assertSlotAdmissionOpen();
     const existing = this.slots.get(sessionId);
-    if (existing && !this.ambiguousSessionIds.has(sessionId)) {
+    if (existing && !existing.isDisposed && !this.ambiguousSessionIds.has(sessionId)) {
+      const eviction = this.idleEvictions.get(sessionId);
+      if (eviction?.slot === existing && eviction.committed && eviction.completion) {
+        await eviction.completion;
+        return this.acquire(sessionId);
+      }
+      this.cancelIdleEviction(sessionId, existing);
       existing.touch();
       return existing;
     }
     const acquisition = await this.catalogAcquisition();
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     const entry = acquisition.entriesByID.get(sessionId);
-    if (existing) {
+    if (existing && !existing.isDisposed) {
       if (entry?.structuralSubagent) {
         throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
       }
@@ -819,8 +836,18 @@ export class RuntimeRegistry {
     }
     return this.mutex.run(async () => {
       this.assertSlotAdmissionOpen();
-      const raced = this.slots.get(sessionId);
+      let raced = this.slots.get(sessionId);
+      if (raced?.isDisposed) {
+        if (this.slots.get(sessionId) === raced) this.slots.delete(sessionId);
+        raced = undefined;
+      }
       if (raced && !this.ambiguousSessionIds.has(sessionId)) {
+        const eviction = this.idleEvictions.get(sessionId);
+        if (eviction?.slot === raced && eviction.committed && eviction.completion) {
+          await eviction.completion;
+          return this.acquire(sessionId);
+        }
+        this.cancelIdleEviction(sessionId, raced);
         raced.touch();
         return raced;
       }
@@ -830,6 +857,7 @@ export class RuntimeRegistry {
         if (current.entriesByID.get(sessionId)?.structuralSubagent) {
           throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
         }
+        this.cancelIdleEviction(sessionId, raced);
         raced.touch();
         return raced;
       }
@@ -979,6 +1007,7 @@ export class RuntimeRegistry {
       }
       const info = catalog.infos.find((candidate) => candidate.id === sessionId);
       if (!info) throw new GatewayError("not_found", "Tron session was removed before it could be deleted");
+      this.cancelIdleEviction(sessionId, slot);
       if (slot) await slot.dispose();
       this.slots.delete(sessionId);
       this.subscribers.delete(sessionId);
@@ -1013,6 +1042,7 @@ export class RuntimeRegistry {
   }
 
   subscribe(clientId: string, sessionId: string): void {
+    this.cancelIdleEviction(sessionId, this.slots.get(sessionId));
     const clients = this.subscribers.get(sessionId) ?? new Set<string>();
     clients.add(clientId);
     this.subscribers.set(sessionId, clients);
@@ -1035,15 +1065,45 @@ export class RuntimeRegistry {
     return this.subscribers.get(sessionId)?.has(clientId) ?? false;
   }
 
+  private cancelIdleEviction(sessionId: string, slot: RuntimeSlot | undefined): void {
+    const eviction = this.idleEvictions.get(sessionId);
+    if (slot && eviction?.slot === slot && !eviction.committed) this.idleEvictions.delete(sessionId);
+  }
+
+  private isIdleEvictionEligible(sessionId: string, slot: RuntimeSlot, cutoff: number): boolean {
+    return this.slots.get(sessionId) === slot
+      && !slot.isDisposed
+      && !slot.isEvictionProtected
+      && slot.touchedAt < cutoff
+      && (this.subscribers.get(sessionId)?.size ?? 0) === 0;
+  }
+
   private async evictIdle(): Promise<void> {
     const cutoff = Date.now() - this.options.idleRuntimeMs;
     for (const [id, slot] of this.slots) {
-      if (slot.isEvictionProtected || slot.touchedAt >= cutoff || (this.subscribers.get(id)?.size ?? 0) > 0) continue;
+      const selected = await this.mutex.run(() => {
+        if (!this.isIdleEvictionEligible(id, slot, cutoff)) return false;
+        this.idleEvictions.set(id, { slot, committed: false });
+        return true;
+      });
+      if (!selected) continue;
       try {
-        await slot.dispose();
-        this.slots.delete(id);
+        const eviction = this.idleEvictions.get(id);
+        if (eviction?.slot !== slot) continue;
+        const disposal = slot.disposeIf(() => {
+          if (this.idleEvictions.get(id) !== eviction || !this.isIdleEvictionEligible(id, slot, cutoff)) return false;
+          eviction.committed = true;
+          return true;
+        });
+        eviction.completion = disposal;
+        const disposed = await disposal;
+        if (disposed && this.slots.get(id) === slot && this.idleEvictions.get(id) === eviction) {
+          this.slots.delete(id);
+        }
       } catch {
         // A slot may have become busy after the eligibility check; retain it.
+      } finally {
+        if (this.idleEvictions.get(id)?.slot === slot) this.idleEvictions.delete(id);
       }
     }
     this.blobs.prune();

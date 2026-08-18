@@ -136,6 +136,7 @@ const service = new GatewayService({
   // restart drains accepted agent work before using the deliberate restart code.
   requestRestart,
   deviceRevoked: (deviceId) => transport?.disconnectDevice(deviceId),
+  sessionDeleted: (sessionId) => transport?.revokeSessionTerminals(sessionId),
   broadcast: (topic, payload) => transport?.broadcast(topic, payload),
 });
 transport = new GatewayServer({

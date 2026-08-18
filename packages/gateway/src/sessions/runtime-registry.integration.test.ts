@@ -2535,4 +2535,36 @@ export default function (pi) {
     expect(fork.sessionId).not.toBe(original);
     expect((await registry.acquire(fork.sessionId)).id).toBe(fork.sessionId);
   });
+
+  it("cancels an idle eviction when a selected slot is acquired or subscribed before disposal", async () => {
+    const { manager, registry } = await coldFixture("idle-eviction-acquire-subscribe");
+    const sessionId = manager.getSessionId();
+    const slot = await registry.acquire(sessionId);
+    vi.spyOn(slot, "touchedAt", "get").mockReturnValue(0);
+
+    let releaseLane!: () => void;
+    let laneEntered!: () => void;
+    const laneHeld = new Promise<void>((resolve) => { releaseLane = resolve; });
+    const laneEnteredPromise = new Promise<void>((resolve) => { laneEntered = resolve; });
+    const lane = (slot as unknown as { lane: { run: (operation: () => Promise<void>) => Promise<void> } }).lane;
+    const blockedLane = lane.run(async () => {
+      laneEntered();
+      await laneHeld;
+    });
+    await laneEnteredPromise;
+
+    const eviction = (registry as unknown as { evictIdle: () => Promise<void> }).evictIdle();
+    await waitUntil(() => (registry as unknown as { idleEvictions: Map<string, { slot: unknown }> }).idleEvictions.get(sessionId)?.slot === slot);
+
+    const [acquired] = await Promise.all([
+      registry.acquire(sessionId),
+      Promise.resolve().then(() => registry.subscribe("race-client", sessionId)),
+    ]);
+    releaseLane();
+    await Promise.all([blockedLane, eviction]);
+
+    expect(acquired).toBe(slot);
+    expect(await registry.acquire(sessionId)).toBe(slot);
+    expect(registry.isSubscribed("race-client", sessionId)).toBe(true);
+  });
 });

@@ -275,6 +275,16 @@ export class GatewayServer {
     }
   }
 
+  revokeSessionTerminals(sessionId: string): void {
+    for (const client of this.clients.values()) {
+      releaseSessionTerminals(
+        client.terminals,
+        sessionId,
+        (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
+      );
+    }
+  }
+
   notifySessionListChanged(): void {
     this.broadcast("session.listChanged", {});
   }

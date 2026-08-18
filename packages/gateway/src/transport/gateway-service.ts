@@ -65,6 +65,7 @@ export interface GatewayServiceDependencies {
   receipts: CommandReceiptStore;
   requestRestart: () => void;
   deviceRevoked: (deviceId: string) => void;
+  sessionDeleted: (sessionId: string) => void;
   broadcast: (topic: string, payload: JsonValue) => void;
 }
 
@@ -229,6 +230,7 @@ export class GatewayService {
           const sessionId = string(params.sessionId, "sessionId", { max: 200 });
           client.unsubscribe(sessionId);
           await this.dependencies.sessions.delete(sessionId);
+          this.dependencies.sessionDeleted(sessionId);
           await this.dependencies.uploads.removeSession(sessionId).catch(() => {});
           return { deleted: true };
         });
