@@ -70,6 +70,7 @@ const sessions = new RuntimeRegistry({
   sessionSummaryChanged: (summary) => transport?.broadcast("session.summary", summary as unknown as JsonValue),
   sessionListChanged: () => transport?.notifySessionListChanged(),
   sessionRekeyed: (previousId, nextId) => transport?.rekeySession(previousId, nextId),
+  sessionClosed: (sessionId) => transport?.revokeSessionTerminals(sessionId),
 });
 await sessions.initialize();
 

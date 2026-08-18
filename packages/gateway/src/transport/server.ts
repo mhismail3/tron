@@ -15,6 +15,10 @@ import { GatewayService, type ClientContext } from "./gateway-service.js";
 import { MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { SessionSyncBarrier, type BufferedSessionEvent } from "./session-sync.js";
 
+// Retain only recent former IDs while an active subscription is rekeyed. Older
+// IDs are stale control paths and may safely require a fresh session.open.
+export const MAXIMUM_REKEYED_SESSION_IDS = 64;
+
 export interface ActiveSessionSynchronization {
   barrier: SessionSyncBarrier;
   timeout: NodeJS.Timeout;
@@ -294,6 +298,11 @@ export class GatewayServer {
         if (current === previousSessionId) connection.rekeyedSessionIds.set(former, nextSessionId);
       }
       connection.rekeyedSessionIds.set(previousSessionId, nextSessionId);
+      while (connection.rekeyedSessionIds.size > MAXIMUM_REKEYED_SESSION_IDS) {
+        const oldest = connection.rekeyedSessionIds.keys().next().value;
+        if (oldest === undefined) break;
+        connection.rekeyedSessionIds.delete(oldest);
+      }
     }
   }
 

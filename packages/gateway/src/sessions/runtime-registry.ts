@@ -101,6 +101,7 @@ export class RuntimeRegistry {
       sessionSummaryChanged: (summary: SessionSummaryUpdate) => void;
       sessionListChanged: () => void;
       sessionRekeyed?: (previousId: string, nextId: string) => void;
+      sessionClosed?: (sessionId: string) => void;
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
     },
   ) {
@@ -155,6 +156,7 @@ export class RuntimeRegistry {
         this.invalidateCatalogAcquisition();
         this.revision += 1;
         this.options.sessionListChanged();
+        this.options.sessionClosed?.(sessionId);
       },
       rekey: (previousId: string, nextId: string, slot: RuntimeSlot) => {
         const existing = this.slots.get(nextId);
@@ -922,6 +924,7 @@ export class RuntimeRegistry {
       if (this.trustReloadProjects.has(trust.cwd)) {
         throw new GatewayError("busy", "Project trust is being reconfigured", true);
       }
+      this.requireLiveSlotCapacity();
       const manager = SessionManager.inMemory(trust.cwd);
       const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false);
       this.slots.set(slot.id, slot);

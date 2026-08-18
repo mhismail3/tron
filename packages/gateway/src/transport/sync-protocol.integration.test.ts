@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { createServer } from "node:http";
 import WebSocket, { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GatewayServer } from "./server.js";
+import { GatewayServer, MAXIMUM_REKEYED_SESSION_IDS } from "./server.js";
 import { DeviceStore } from "../security/device-store.js";
 import { SessionSyncBarrier } from "./session-sync.js";
 
@@ -535,12 +535,29 @@ describe("connection-wide synchronization ownership", () => {
     await waitFor(() => frames.slice(afterEvents).some((frame) => frame.topic === "session.progress" && frame.sessionId === "after"));
     expect(frames.slice(afterEvents).filter((frame) => frame.topic === "session.progress").map((frame) => frame.sessionId)).toEqual(["after"]);
     expect(frames.slice(afterEvents).some((frame) => frame.topic === "terminal.output")).toBe(false);
-    const closed = await request("close-after", "session.close", "after", { subscriptionToken: openedBefore.result.subscriptionToken });
+
+    // Repeated forks retain only a bounded recent alias window. The immediate
+    // predecessor must still route close controls to the current runtime.
+    let currentSessionId = "after";
+    let previousSessionId = "before";
+    for (let index = 0; index <= MAXIMUM_REKEYED_SESSION_IDS; index += 1) {
+      previousSessionId = currentSessionId;
+      const forked = await request(`fork-${index}`, "session.fork", currentSessionId, { commandId: `command-fork-${index}` });
+      currentSessionId = forked.result.sessionId;
+    }
+    const connection = [...(gateway as unknown as {
+      clients: Map<string, { rekeyedSessionIds: Map<string, string> }>;
+    }).clients.values()][0]!;
+    expect(connection.rekeyedSessionIds.size).toBeLessThanOrEqual(MAXIMUM_REKEYED_SESSION_IDS);
+    const repeatedForkEvents = frames.length;
+    gateway.broadcastSession(currentSessionId, "session.progress", event(currentSessionId, 3) as any);
+    await waitFor(() => frames.slice(repeatedForkEvents).some((frame) => frame.topic === "session.progress" && frame.sessionId === currentSessionId));
+    const closed = await request("close-current-rekey", "session.close", previousSessionId, { subscriptionToken: openedBefore.result.subscriptionToken });
     expect(closed.result).toEqual({ closed: true });
     const closedEvents = frames.length;
-    gateway.broadcastSession("after", "session.progress", event("after", 3) as any);
+    gateway.broadcastSession(currentSessionId, "session.progress", event(currentSessionId, 4) as any);
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(frames.slice(closedEvents).some((frame) => frame.sessionId === "after" && frame.topic === "session.progress")).toBe(false);
+    expect(frames.slice(closedEvents).some((frame) => frame.sessionId === currentSessionId && frame.topic === "session.progress")).toBe(false);
 
     // Forking between open and sync moves the in-flight barrier and token;
     // the carried former ID still commits exactly once to the new session.

@@ -21,7 +21,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
   const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
   const registries: RuntimeRegistry[] = [];
 
-  async function coldFixture(label: string, options: { nested?: boolean; name?: string } = {}) {
+  async function coldFixture(label: string, options: { nested?: boolean; name?: string; maximumLiveRuntimes?: number } = {}) {
     const root = await mkdtemp(join(tmpdir(), `tron-cold-acquire-${label}-`));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
@@ -38,6 +38,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       agentDir,
       tronHome: join(root, "tron"),
       idleRuntimeMs: 60_000,
+      maximumLiveRuntimes: options.maximumLiveRuntimes,
       modelRuntimeFactory: runtimeFactory,
       trust: new TrustService(agentDir),
       broadcast: () => {},
@@ -2537,6 +2538,16 @@ export default function (pi) {
     expect(fork.sessionId).not.toBe(original);
     expect(rekeys).toEqual([[original, fork.sessionId]]);
     expect((await registry.acquire(fork.sessionId)).id).toBe(fork.sessionId);
+  });
+
+  it("rejects imports when live runtime capacity is full", async () => {
+    const { root, cwd, registry } = await coldFixture("import-capacity", { maximumLiveRuntimes: 1 });
+    await registry.create(cwd);
+
+    await expect(registry.importFromJsonl(join(root, "import.jsonl"), cwd)).rejects.toMatchObject({
+      code: "busy",
+      retryable: true,
+    });
   });
 
   it("cancels an idle eviction when a selected slot is acquired or subscribed before disposal", async () => {
