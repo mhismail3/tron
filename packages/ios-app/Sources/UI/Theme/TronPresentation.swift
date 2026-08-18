@@ -509,13 +509,9 @@ struct TronSaveToolbarButton: View {
                         .tint(Color.tronEmerald)
                 }
                 Text(isSaving ? "Saving…" : "Save")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
             }
-            .foregroundStyle(isEnabled ? Color.tronAccentText : Color.tronTextMuted)
+            .tronToolbarAction()
         }
-        .tint(Color.tronEmerald)
-        .buttonStyle(.glass)
-        .buttonBorderShape(.capsule)
         .disabled(isSaving || !isEnabled)
         .accessibilityLabel(isSaving ? "Saving" : "Save")
         .accessibilityValue(isSaving ? "In progress" : isEnabled ? "Available" : "No changes")

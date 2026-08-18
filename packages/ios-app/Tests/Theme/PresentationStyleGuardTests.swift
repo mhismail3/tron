@@ -509,8 +509,11 @@ struct PresentationStyleGuardTests {
         #expect(connections.contains("Button(importing ? \"Importing…\" : \"Import Legacy Sessions\")"))
         #expect(trust.contains("summary.stateIcon"))
         #expect(trust.contains("frame(width: 38, height: 38)"))
-        #expect(presentation.contains(".buttonStyle(.glass)"))
-        #expect(presentation.contains(".buttonBorderShape(.capsule)"))
+        let saveToolbarButton = (presentation.components(separatedBy: "struct TronSaveToolbarButton").dropFirst().first ?? "")
+            .components(separatedBy: "struct TronReloadToolbarButton").first ?? ""
+        #expect(saveToolbarButton.contains(".tronToolbarAction()"))
+        #expect(!saveToolbarButton.contains(".buttonStyle(.glass)"))
+        #expect(!saveToolbarButton.contains(".buttonBorderShape(.capsule)"))
         #expect(presentation.contains("static var numericValue"))
         #expect(presentation.contains("static var codeJSON"))
         #expect(structuredJSON.contains("TronTypography.codeJSON"))
