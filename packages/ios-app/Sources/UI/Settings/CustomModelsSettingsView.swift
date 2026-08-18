@@ -224,64 +224,70 @@ struct CustomModelsSettingsView: View {
 
     private func providerEditorSheet(_ provider: Binding<CustomModelProviderDraft>) -> some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 18) {
-                editorSectionHeader(
-                    "Connection",
-                    detail: "Identify the provider and choose the endpoint."
-                )
-                fieldLabel("Provider identifier")
-                TextField("ollama", text: provider.identifier)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .tronField(
-                        monospaced: true,
-                        compact: true,
-                        dense: true,
-                        surfaceTint: Color.tronEmerald.opacity(0.14),
-                        border: Color.tronEmerald.opacity(0.42)
+            LazyVStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    editorSectionHeader(
+                        "Connection",
+                        detail: "Identify the provider and choose the endpoint."
                     )
-                fieldLabel("Base URL")
-                TextField("https://example.com/v1", text: provider.baseURL)
-                    .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .tronField(
-                        monospaced: true,
-                        compact: true,
-                        dense: true,
-                        surfaceTint: Color.tronEmerald.opacity(0.14),
-                        border: Color.tronEmerald.opacity(0.42)
-                    )
-
-                editorSectionHeader(
-                    "Models",
-                    detail: "Add one model ID per line. These names appear in model selection."
-                )
-                TextField("llama3:8b", text: provider.models, axis: .vertical)
-                    .lineLimit(2...8)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .tronField(
-                        monospaced: true,
-                        compact: true,
-                        dense: true,
-                        surfaceTint: Color.tronEmerald.opacity(0.14),
-                        border: Color.tronEmerald.opacity(0.42)
-                    )
-
-                editorSectionHeader(
-                    "Protocol",
-                    detail: "Choose the protocol used by this endpoint."
-                )
-                TronValueRow(icon: "network", title: "API format", accent: .tronEmerald) {
-                    TronInlineMenu(apiTitle(provider.wrappedValue.api), accent: .tronEmerald) {
-                        Button("Inherited / per model") { provider.wrappedValue.api = "" }
-                        Button("OpenAI Chat Completions") { provider.wrappedValue.api = "openai-completions" }
-                        Button("OpenAI Responses") { provider.wrappedValue.api = "openai-responses" }
-                        Button("Anthropic Messages") { provider.wrappedValue.api = "anthropic-messages" }
-                        Button("Google Generative AI") { provider.wrappedValue.api = "google-generative-ai" }
-                    }
+                    fieldLabel("Provider identifier")
+                    TextField("ollama", text: provider.identifier)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .tronField(
+                            monospaced: true,
+                            compact: true,
+                            dense: true,
+                            surfaceTint: Color.tronEmerald.opacity(0.14),
+                            border: Color.tronEmerald.opacity(0.42)
+                        )
+                    fieldLabel("Base URL")
+                    TextField("https://example.com/v1", text: provider.baseURL)
+                        .keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .tronField(
+                            monospaced: true,
+                            compact: true,
+                            dense: true,
+                            surfaceTint: Color.tronEmerald.opacity(0.14),
+                            border: Color.tronEmerald.opacity(0.42)
+                        )
                 }
-                .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    editorSectionHeader(
+                        "Models",
+                        detail: "Add one model ID per line. These names appear in model selection."
+                    )
+                    TextField("llama3:8b", text: provider.models, axis: .vertical)
+                        .lineLimit(2...8)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .tronField(
+                            monospaced: true,
+                            compact: true,
+                            dense: true,
+                            surfaceTint: Color.tronEmerald.opacity(0.14),
+                            border: Color.tronEmerald.opacity(0.42)
+                        )
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    editorSectionHeader(
+                        "Protocol",
+                        detail: "Choose the protocol used by this endpoint."
+                    )
+                    TronValueRow(icon: "network", title: "API format", accent: .tronEmerald) {
+                        TronInlineMenu(apiTitle(provider.wrappedValue.api), accent: .tronEmerald) {
+                            Button("Inherited / per model") { provider.wrappedValue.api = "" }
+                            Button("OpenAI Chat Completions") { provider.wrappedValue.api = "openai-completions" }
+                            Button("OpenAI Responses") { provider.wrappedValue.api = "openai-responses" }
+                            Button("Anthropic Messages") { provider.wrappedValue.api = "anthropic-messages" }
+                            Button("Google Generative AI") { provider.wrappedValue.api = "google-generative-ai" }
+                        }
+                    }
+                    .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle(provider.wrappedValue.identifier.isEmpty ? "New Provider" : provider.wrappedValue.identifier)
