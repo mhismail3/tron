@@ -29,6 +29,8 @@ interface SynchronizationCompletion {
   subscriptionToken: string;
 }
 
+type SynchronizationOwner = SynchronizationCompletion;
+
 export function existingSessionOpenOwner(
   pendingSessionOpens: ReadonlyMap<string, string>,
   synchronizations: ReadonlyMap<string, ActiveSessionSynchronization>,
@@ -93,6 +95,7 @@ interface Connection {
   socket: WebSocket;
   alive: boolean;
   ready: boolean;
+  presentationOnly: boolean;
   subscriptions: Set<string>;
   terminals: Set<string>;
   inFlight: Set<string>;
@@ -191,6 +194,7 @@ export class GatewayServer {
       host: string;
       port: number;
       maxFrameBytes: number;
+      synchronizationTimeoutMs?: number;
       devices: DeviceStore;
       uploads: UploadStore;
       sessions: RuntimeRegistry;
@@ -395,6 +399,7 @@ export class GatewayServer {
       socket,
       alive: true,
       ready: false,
+      presentationOnly: false,
       subscriptions: new Set(),
       terminals: new Set(),
       inFlight: new Set(),
@@ -428,6 +433,7 @@ export class GatewayServer {
       const protocol = frame.protocolVersion as number;
       if (protocol < MIN_PROTOCOL_VERSION || protocol > PROTOCOL_VERSION) return connection.socket.close(1008, "protocol version mismatch");
       connection.ready = true;
+      connection.presentationOnly = (frame as Record<string, unknown>).clientRole === "mobile";
       clearTimeout(connection.helloTimer);
       this.send(connection, { type: "hello", ...this.options.service.info() as Record<string, JsonValue> });
       return;
@@ -472,6 +478,7 @@ export class GatewayServer {
     }
     connection.inFlight.add(frame.id);
     const requestId = frame.id;
+    const synchronizationOwners: SynchronizationOwner[] = [];
     const synchronizationCompletions: SynchronizationCompletion[] = [];
     let responseAttempted = false;
     const revokeSynchronization = (sessionId: string, synchronization: ActiveSessionSynchronization): boolean => {
@@ -509,12 +516,32 @@ export class GatewayServer {
       this.options.sessions.unsubscribe(connection.id, sessionId);
       return true;
     };
+    const revokePresentationOwners = (exceptSessionID: string): void => {
+      for (const [sessionId, synchronization] of [...connection.synchronizations]) {
+        if (sessionId === exceptSessionID) continue;
+        clearTimeout(synchronization.timeout);
+        if (revokeSynchronization(sessionId, synchronization)) {
+          connection.synchronizations.delete(sessionId);
+        }
+      }
+      for (const [sessionId, token] of [...connection.subscriptionTokens]) {
+        if (sessionId !== exceptSessionID) revokeSubscription(sessionId, token);
+      }
+      for (const [sessionId] of [...connection.pendingSessionOpens]) {
+        if (sessionId !== exceptSessionID) connection.pendingSessionOpens.delete(sessionId);
+      }
+    };
     try {
       const context: ClientContext = {
         id: connection.id,
         identity: connection.identity,
         isLocal: connection.isLocal,
         beginSynchronization: (sessionId) => {
+          if (connection.presentationOnly
+              && connection.pendingSessionOpens.get(sessionId) !== requestId) {
+            throw new GatewayError("conflict", "This mobile presentation open was retired", true);
+          }
+          if (connection.presentationOnly) revokePresentationOwners(sessionId);
           if (connection.synchronizations.has(sessionId)) {
             // A genuinely overlapping in-flight open is a race the protocol
             // must reject; only the current owner may proceed.
@@ -547,9 +574,15 @@ export class GatewayServer {
               sessionId,
               payload: { reason: "subscription synchronization timed out" },
             });
-          }, 30_000);
+          }, this.options.synchronizationTimeoutMs ?? 30_000);
           timeout.unref();
           connection.synchronizations.set(sessionId, { barrier, timeout, requestId, subscriptionToken: syncToken });
+          synchronizationOwners.push({
+            sessionId,
+            syncToken,
+            requestId,
+            subscriptionToken: syncToken,
+          });
           return syncToken;
         },
         establishSynchronization: (sessionId, snapshot) => {
@@ -604,6 +637,18 @@ export class GatewayServer {
         ownsTerminal: (terminalId) => connection.terminals.has(terminalId),
       };
       const result = await this.options.service.invoke(context, frame.method, frame.params ?? {});
+      // Validate every synchronization created by this request before writing
+      // the response. A timed-out open may have no completion at all; it must
+      // not publish an orphan successful response/token after its barrier was
+      // revoked.
+      for (const owner of synchronizationOwners) {
+        const active = connection.synchronizations.get(owner.sessionId);
+        if (!active
+            || active.requestId !== owner.requestId
+            || active.subscriptionToken !== owner.subscriptionToken) {
+          throw new GatewayError("conflict", "Session synchronization ownership changed before acknowledgement", true);
+        }
+      }
       // Validate every completion before writing the response. The checks are
       // request+token exact; this prevents a stale request from ever sending a
       // successful response which it can no longer commit.
@@ -638,51 +683,66 @@ export class GatewayServer {
             || active.requestId !== completion.requestId
             || active.subscriptionToken !== completion.subscriptionToken
             || completion.syncToken !== active.subscriptionToken) continue;
-        const completed = active.barrier.commit(completion.syncToken);
-        clearTimeout(active.timeout);
-        connection.synchronizations.delete(completion.sessionId);
-        if (completed.overflowed) {
-          // The quarantined catch-up was dropped under load. Replaying nothing
-          // would force the client through another full open handshake that
-          // can overflow again under the same flood, so converge it directly
-          // with the authoritative snapshot instead. If the session is gone or
-          // the fitted snapshot cannot be framed, send() degrades to the
-          // legacy resyncRequired signal and the client resynchronizes.
+        if (active.barrier.isOverflowed(completion.syncToken)) {
+          // Replace the overflowed quarantine before awaiting recovery. Events
+          // arriving during the snapshot read must be retained for the fresh
+          // recovery baseline, not discarded by the old overflow flag.
+          if (!active.barrier.beginRecovery(completion.syncToken)) continue;
           const recoveryToken = connection.subscriptionTokens.get(completion.sessionId);
           const recovery = recoveryToken === completion.subscriptionToken
             ? await this.options.service.recoverySnapshot(completion.sessionId)
             : undefined;
-          // The recovery read is suspended; a close/replacement may have
-          // revoked this subscriber in the meantime. Stale recovery is ignored
-          // rather than projected into the replacement owner.
-          if (connection.subscriptionTokens.get(completion.sessionId) !== completion.subscriptionToken) continue;
+          const stillOwned = connection.synchronizations.get(completion.sessionId) === active
+            && connection.subscriptionTokens.get(completion.sessionId) === completion.subscriptionToken;
+          if (!stillOwned) continue;
+
+          const sendResyncRequired = () => this.send(connection, {
+            type: "event",
+            topic: "transport.resyncRequired",
+            sessionId: completion.sessionId,
+            payload: { reason: "subscription catch-up overflow" },
+          });
           if (recovery === undefined) {
-            this.send(connection, {
-              type: "event",
-              topic: "transport.resyncRequired",
-              sessionId: completion.sessionId,
-              payload: { reason: "subscription catch-up overflow" },
-            });
-          } else {
-            const recoverySent = this.send(connection, {
-              type: "event",
-              topic: "session.rebaseline",
-              sessionId: completion.sessionId,
-              payload: {
-                reason: "subscription catch-up overflow",
-                snapshot: recovery as unknown as JsonValue,
-              },
-            });
-            if (!recoverySent) {
-              this.send(connection, {
-                type: "event",
-                topic: "transport.resyncRequired",
-                sessionId: completion.sessionId,
-                payload: { reason: "subscription catch-up overflow" },
-              });
-            }
+            active.barrier.abort(completion.syncToken);
+            clearTimeout(active.timeout);
+            connection.synchronizations.delete(completion.sessionId);
+            sendResyncRequired();
+            continue;
+          }
+
+          active.barrier.establish(recovery);
+          const recovered = active.barrier.commit(completion.syncToken);
+          clearTimeout(active.timeout);
+          connection.synchronizations.delete(completion.sessionId);
+          if (recovered.overflowed) {
+            // The recovery quarantine overflowed too; no snapshot or suffix is
+            // trustworthy enough to publish.
+            sendResyncRequired();
+            continue;
+          }
+
+          // `fallback` means encodeOutboundFrame already emitted the compact
+          // resync replacement. Do not emit a duplicate or flush a suffix that
+          // has no corresponding published baseline.
+          const recoveryOutcome = this.sendOutcome(connection, {
+            type: "event",
+            topic: "session.rebaseline",
+            sessionId: completion.sessionId,
+            payload: {
+              reason: "subscription catch-up overflow",
+              subscriptionToken: completion.subscriptionToken,
+              snapshot: recovery as unknown as JsonValue,
+            },
+          });
+          if (recoveryOutcome === "sent") {
+            for (const event of recovered.events) this.send(connection, event);
+          } else if (recoveryOutcome === "failed") {
+            sendResyncRequired();
           }
         } else {
+          const completed = active.barrier.commit(completion.syncToken);
+          clearTimeout(active.timeout);
+          connection.synchronizations.delete(completion.sessionId);
           for (const event of completed.events) this.send(connection, event);
         }
       }
@@ -709,22 +769,26 @@ export class GatewayServer {
   }
 
   private send(connection: Connection, value: unknown): boolean {
-    if (connection.socket.readyState !== WebSocket.OPEN) return false;
+    return this.sendOutcome(connection, value) === "sent";
+  }
+
+  private sendOutcome(connection: Connection, value: unknown): "sent" | "fallback" | "failed" {
+    if (connection.socket.readyState !== WebSocket.OPEN) return "failed";
     try {
       const direct = JSON.stringify(value);
-      if (direct === undefined) return false;
+      if (direct === undefined) return "failed";
       if (Buffer.byteLength(direct, "utf8") <= this.options.maxFrameBytes) {
         connection.socket.send(direct);
-        return true;
+        return "sent";
       }
       const encoded = encodeOutboundFrame(value, this.options.maxFrameBytes);
-      if (!encoded) return false;
+      if (!encoded) return "failed";
       connection.socket.send(encoded);
-      return false;
+      return "fallback";
     } catch {
       // Broadcast payloads are supplied by runtime projections. A malformed
       // value must not escape the broadcast loop or take down the Gateway.
-      return false;
+      return "failed";
     }
   }
 

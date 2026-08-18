@@ -118,3 +118,22 @@ extension ChatContentEntranceTransform.Anchor {
         }
     }
 }
+
+/// Transcript projection is published in complete snapshots while streaming.
+/// Those updates must not inherit an unrelated scroll/composer transaction and
+/// replay an opacity or layout animation over content that is already visible.
+/// Insertions still animate through `ChatTranscriptEntranceRow`; this modifier
+/// only makes updates to an installed row transaction-stable.
+private struct ChatStableTranscriptUpdateModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content.transaction { transaction in
+            transaction.animation = nil
+        }
+    }
+}
+
+extension View {
+    func chatStableTranscriptUpdates() -> some View {
+        modifier(ChatStableTranscriptUpdateModifier())
+    }
+}

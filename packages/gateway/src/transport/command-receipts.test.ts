@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -110,6 +110,47 @@ describe("CommandReceiptStore", () => {
       .rejects.toMatchObject({ code: "busy", retryable: true });
     expect(rejected).not.toHaveBeenCalled();
     expect(await receiptFiles(root)).toHaveLength(1);
+  });
+
+  it("removes only owned interrupted receipt writes before capacity admission", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-receipts-temporary-"));
+    const directory = join(root, "gateway", "command-receipts");
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, `${"a".repeat(43)}.json.123.123456789abc.tmp`), "interrupted write");
+    const store = new CommandReceiptStore(root, atomicWriteJson, {
+      maximumEntries: 1,
+      maximumAggregateBytes: 2 * 1_048_576,
+    });
+
+    await expect(store.execute("device", "session.prompt", "first-command", async () => ({ accepted: true })))
+      .resolves.toEqual({ accepted: true });
+    expect(await receiptFiles(root)).toHaveLength(1);
+  });
+
+  it("expires completed editor updates quickly without shortening other receipt retention", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-receipts-editor-expiry-"));
+    const store = new CommandReceiptStore(root, atomicWriteJson, {
+      maximumEntries: 2,
+      maximumAggregateBytes: 2 * 1_048_576,
+    });
+    await store.execute("device", "extension.editor.update", "editor-command-one", async () => ({ revision: 1 }));
+    await store.execute("device", "session.prompt", "prompt-command-one", async () => ({ accepted: true }));
+    const paths = await receiptFiles(root);
+    const editorReceiptPath = (await Promise.all(paths.map(async (path) => ({
+      path,
+      receipt: JSON.parse(await readFile(path, "utf8")),
+    })))).find(({ receipt }) => receipt.commandId === "editor-command-one")!.path;
+    const editorReceipt = JSON.parse(await readFile(editorReceiptPath, "utf8"));
+    editorReceipt.createdAt = new Date(Date.now() - 11 * 60_000).toISOString();
+    await writeFile(editorReceiptPath, JSON.stringify(editorReceipt));
+
+    const execute = vi.fn(async () => ({ revision: 2 }));
+    await expect(store.execute("device", "extension.editor.update", "editor-command-two", execute))
+      .resolves.toEqual({ revision: 2 });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(await receiptFiles(root)).toHaveLength(2);
+    await expect(store.status("device", "session.prompt", "prompt-command-one"))
+      .resolves.toMatchObject({ status: "completed" });
   });
 
   it("reserves aggregate completion capacity before executing a mutation", async () => {

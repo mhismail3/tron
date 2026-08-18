@@ -70,7 +70,8 @@ final class SessionPresentationStore {
     private var subscribedSessionID: String?
     private var subscriptionToken: String?
     private var subscriptionTarget: SessionPresentationIdentity?
-    private var pendingRebaselines: [String: SessionSnapshot] = [:]
+    private var pendingSubscriptionTokens: [String: String] = [:]
+    private var pendingRebaselines: [String: PreparedSessionRebaseline] = [:]
     private let synchronization = SessionSynchronizationCoordinator()
     private var deferredEffectsByTarget: [SessionPresentationIdentity: [ReducerEffect]] = [:]
 
@@ -209,8 +210,19 @@ final class SessionPresentationStore {
         guard pendingTarget == requested,
               synchronized,
               subscribedSessionID == sessionID,
-              subscriptionTarget == requested else {
+              let installedTarget = subscriptionTarget,
+              installedTarget.sessionID == sessionID else {
             throw GatewayFailure(code: "sync_failed", message: "Tron could not synchronize this session.", retryable: true, details: nil)
+        }
+        // A lifecycle reconnect may have become the synchronization leader just
+        // before this visible route began opening. Transfer that completed
+        // subscription to the pending presentation instead of issuing a second
+        // session.open or treating the ownership handoff as unavailable.
+        if installedTarget != requested {
+            guard installedTarget == target, isAuthoritative else {
+                throw GatewayFailure(code: "sync_failed", message: "Tron could not synchronize this session.", retryable: true, details: nil)
+            }
+            subscriptionTarget = requested
         }
         target = requested
         pendingTarget = nil
@@ -354,6 +366,7 @@ final class SessionPresentationStore {
         connectionGeneration &+= 1
         deferredEffectsByTarget.removeAll()
         pendingRebaselines.removeAll()
+        pendingSubscriptionTokens.removeAll()
         subscribedSessionID = nil
         subscriptionToken = nil
         subscriptionTarget = nil
@@ -411,12 +424,21 @@ final class SessionPresentationStore {
 
     func admit(_ event: GatewayEvent) async {
         if event.topic == "session.rebaseline" {
-            guard case .sessionRebaseline(let authoritative) = event.preparation,
-                  event.sessionId == authoritative.sessionId,
-                  ownsLiveSnapshotEvent(sessionID: authoritative.sessionId)
-                    || ownsPendingSynchronization(sessionID: authoritative.sessionId) else { return }
+            guard case .sessionRebaseline(let rebaseline) = event.preparation,
+                  event.sessionId == rebaseline.snapshot.sessionId,
+                  ownsExactRebaselineOwner(
+                    sessionID: rebaseline.snapshot.sessionId,
+                    subscriptionToken: rebaseline.subscriptionToken
+                  ) else { return }
+            let authoritative = rebaseline.snapshot
+            // Rebaseline frames are authoritative only within their runtime
+            // generation. A delayed recovery from the same generation must not
+            // regress or duplicate a newer cursor.
+            guard admitsRebaseline(authoritative, strictlyNewer: true) else { return }
             if !hasInstalledSubscription(for: authoritative.sessionId) {
-                pendingRebaselines[authoritative.sessionId] = authoritative
+                if let pending = pendingRebaselines[authoritative.sessionId],
+                   !isNewer(authoritative, than: pending.snapshot) { return }
+                pendingRebaselines[authoritative.sessionId] = rebaseline
                 return
             }
             snapshot = authoritative
@@ -531,6 +553,26 @@ final class SessionPresentationStore {
         }
     }
 
+    private func ownsExactRebaselineOwner(sessionID: String, subscriptionToken: String) -> Bool {
+        if hasInstalledSubscription(for: sessionID) {
+            return self.subscriptionToken == subscriptionToken
+        }
+        return pendingSubscriptionTokens[sessionID] == subscriptionToken
+    }
+
+    private func admitsRebaseline(_ incoming: SessionSnapshot, strictlyNewer: Bool) -> Bool {
+        guard let current = snapshot, current.sessionId == incoming.sessionId else { return true }
+        guard current.runtimeGeneration == incoming.runtimeGeneration else { return true }
+        return strictlyNewer
+            ? incoming.eventSequence > current.eventSequence
+            : incoming.eventSequence >= current.eventSequence
+    }
+
+    private func isNewer(_ incoming: SessionSnapshot, than current: SessionSnapshot) -> Bool {
+        incoming.runtimeGeneration != current.runtimeGeneration
+            || incoming.eventSequence > current.eventSequence
+    }
+
     private func admitsSequencedEvent(_ event: GatewayEvent) -> Bool {
         guard let sessionID = event.sessionId,
               let target = mountedTarget,
@@ -618,6 +660,7 @@ final class SessionPresentationStore {
         // A retired connection's Gateway subscription is revoked with its
         // socket. Never send that stale token through a newer connection.
         guard connectionGeneration == expectedConnectionGeneration else { return }
+        if pendingSubscriptionTokens[sessionID] == token { pendingSubscriptionTokens[sessionID] = nil }
         struct Params: Codable { let sessionId, subscriptionToken: String }
         struct Response: Decodable { let closed: Bool }
         let _: Response? = try? await client.request(
@@ -666,6 +709,7 @@ final class SessionPresentationStore {
         operation: PerformanceOperation = .sessionSync
     ) async -> Bool {
         let intent: SessionSynchronizationCoordinator.Intent
+        let initialConnectionGeneration = connectionGeneration
         if replacingVisibleTranscript {
             guard let presentationGeneration else { return false }
             intent = .presentation(generation: presentationGeneration)
@@ -681,7 +725,13 @@ final class SessionPresentationStore {
             case .join:
                 return await lease.sharedValue()
             case .retryAfterCurrent:
-                _ = await lease.sharedValue()
+                // A visible presentation and lifecycle reconnect are two views
+                // of the same per-session authority. The current leader owns
+                // the open/ack/replay transaction. If that owner was retired by
+                // a connection epoch handoff, retry under the fresh owner
+                // rather than surfacing a transient false result to ChatView.
+                let shared = await lease.sharedValue()
+                if shared || connectionGeneration == initialConnectionGeneration { return shared }
             case .leader:
                 synchronization.prepareLeaderAttempt(lease)
                 pendingRebaselines[sessionID] = nil
@@ -805,6 +855,7 @@ final class SessionPresentationStore {
                 timeout: .seconds(60)
             )
             provisionalToken = response.subscriptionToken
+            pendingSubscriptionTokens[sessionID] = response.subscriptionToken
             guard ownsSynchronizationAttempt(
                 lease,
                 sessionID: sessionID,
@@ -835,7 +886,14 @@ final class SessionPresentationStore {
                 return .failed(showCatchUpNotice: false)
             }
 
-            let authoritativeResponse = pendingRebaselines.removeValue(forKey: sessionID) ?? response.session
+            let pendingRebaseline = pendingRebaselines.removeValue(forKey: sessionID)
+            let authoritativeResponse: SessionSnapshot
+            if let pendingRebaseline,
+               isNewer(pendingRebaseline.snapshot, than: response.session) {
+                authoritativeResponse = pendingRebaseline.snapshot
+            } else {
+                authoritativeResponse = response.session
+            }
             let mode: SessionSnapshotInstallationMode
             switch lease.intent {
             case .presentation:
@@ -932,6 +990,7 @@ final class SessionPresentationStore {
             let replacedRuntime = prepareSecondaryProjectionForRuntimeInstallation(installed)
             subscribedSessionID = sessionID
             subscriptionToken = response.subscriptionToken
+            pendingSubscriptionTokens[sessionID] = nil
             subscriptionTarget = installedTarget
             snapshot = installed
             authoritativeTailSnapshot = installedTail

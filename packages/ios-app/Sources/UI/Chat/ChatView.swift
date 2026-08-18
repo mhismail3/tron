@@ -1,5 +1,6 @@
 import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 enum ChatComposerLayoutSignalPolicy {
     static func shouldSignal(previous: CGFloat, current: CGFloat) -> Bool {
@@ -370,6 +371,7 @@ struct ChatView: View {
                                         }
                                     )
                                     .equatable()
+                                    .chatStableTranscriptUpdates()
                                 }
                             }
                         }
@@ -379,12 +381,16 @@ struct ChatView: View {
                                 installedTag: nil,
                                 entranceState: .none
                             ) {
-                                ChatOutgoingSubmissionRow(
-                                    presentation: outgoing,
-                                    attachments: pendingAttachments.filter {
-                                        outgoing.attachmentIDs.contains($0.id)
-                                    }
-                                )
+                                ChatOutgoingSubmissionEntranceRow(
+                                    reduceMotion: reduceMotion
+                                ) {
+                                    ChatOutgoingSubmissionRow(
+                                        presentation: outgoing,
+                                        attachments: pendingAttachments.filter {
+                                            outgoing.attachmentIDs.contains($0.id)
+                                        }
+                                    )
+                                }
                             }
                         }
                         queuedMessageRows(installed)
@@ -1729,9 +1735,11 @@ struct ChatView: View {
                     continue
                 }
                 guard !Task.isCancelled, presentationTarget == target else { return }
+                let mimeType = item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg"
+                let filename = "photo.\(UTType(mimeType: mimeType)?.preferredFilenameExtension ?? "jpg")"
                 try await model.upload(
-                    name: "photo.jpg",
-                    mimeType: item.supportedContentTypes.first?.preferredMIMEType ?? "image/jpeg",
+                    name: filename,
+                    mimeType: mimeType,
                     data: data,
                     target: target
                 )

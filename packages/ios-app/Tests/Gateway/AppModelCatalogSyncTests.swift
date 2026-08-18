@@ -187,15 +187,16 @@ struct AppModelCatalogSyncTests {
         }
     }
 
-    @Test("background cancellation keeps the socket and foreground owns a fresh catalog pass")
+    @Test("background retirement closes the socket and foreground owns one fresh catalog pass")
     func backgroundForegroundConvergesOnOneSocket() async throws {
-        try await withHarness { harness in
+        try await withHarness(sockets: [ScriptedGatewaySocket(), ScriptedGatewaySocket()]) { harness in
             let backgrounded = harness.model.becameActive()
             let stale = try await request(harness.socket, index: 1)
             #expect(stale.method == "session.list")
 
             harness.model.enteredBackground()
             await backgrounded?.value
+            #expect(await harness.socket.closed())
             await harness.model.handle(GatewayEvent(
                 type: "event",
                 topic: "session.listChanged",
@@ -205,9 +206,11 @@ struct AppModelCatalogSyncTests {
             #expect(await harness.socket.sentFrames().count == 2)
 
             let foreground = harness.model.becameActive()
-            let current = try await request(harness.socket, index: 2)
+            let replacement = try #require(harness.sockets.dropFirst().first)
+            await replacement.enqueue(helloFrame())
+            let current = try await request(replacement, index: 0)
             #expect(current.method == "session.list")
-            await harness.socket.enqueue(response(
+            await replacement.enqueue(response(
                 id: current.id,
                 sessions: [summary(id: "foreground", revision: 1, phase: .running)],
                 listRevision: 2
@@ -253,10 +256,11 @@ struct AppModelCatalogSyncTests {
     }
 
     private func withHarness(
+        sockets: [ScriptedGatewaySocket] = [ScriptedGatewaySocket()],
         operation: @escaping @MainActor @Sendable (Harness) async throws -> Void
     ) async throws {
-        let socket = ScriptedGatewaySocket()
-        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        let socket = try #require(sockets.first)
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: sockets).factory)
         let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
         let model = AppModel(client: client, cache: SnapshotCache(root: root))
         let profile = GatewayProfile(
@@ -265,7 +269,7 @@ struct AppModelCatalogSyncTests {
         )
         await socket.enqueue(helloFrame())
         try await model.connectHostedGateway(profile: profile, token: "token")
-        let harness = Harness(socket: socket, client: client, model: model, root: root)
+        let harness = Harness(socket: socket, sockets: sockets, client: client, model: model, root: root)
         do {
             try await withTestWatchdog {
                 try await operation(harness)
@@ -343,6 +347,7 @@ struct AppModelCatalogSyncTests {
 
     private struct Harness {
         let socket: ScriptedGatewaySocket
+        let sockets: [ScriptedGatewaySocket]
         let client: GatewayClient
         let model: AppModel
         let root: URL

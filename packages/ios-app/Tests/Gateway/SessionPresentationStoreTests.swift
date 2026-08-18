@@ -122,7 +122,37 @@ struct SessionPresentationStoreTests {
             sessionId: snapshot.sessionId,
             payload: .object([
                 "reason": .string("subscription catch-up overflow"),
+                "subscriptionToken": .string("token"),
                 "snapshot": try JSONValue.encode(recovery),
+            ])
+        ))
+        #expect(store.authoritativeSnapshot(for: snapshot.sessionId) == recovery)
+
+        var stale = recovery
+        stale.eventSequence -= 1
+        stale.revision -= 1
+        await store.admit(GatewayEvent(
+            type: "event",
+            topic: "session.rebaseline",
+            sessionId: snapshot.sessionId,
+            payload: .object([
+                "reason": .string("delayed recovery"),
+                "subscriptionToken": .string("token"),
+                "snapshot": try JSONValue.encode(stale),
+            ])
+        ))
+        #expect(store.authoritativeSnapshot(for: snapshot.sessionId) == recovery)
+
+        var oldToken = recovery
+        oldToken.eventSequence += 20
+        await store.admit(GatewayEvent(
+            type: "event",
+            topic: "session.rebaseline",
+            sessionId: snapshot.sessionId,
+            payload: .object([
+                "reason": .string("old token"),
+                "subscriptionToken": .string("old-token"),
+                "snapshot": try JSONValue.encode(oldToken),
             ])
         ))
         #expect(store.authoritativeSnapshot(for: snapshot.sessionId) == recovery)
@@ -136,6 +166,7 @@ struct SessionPresentationStoreTests {
             sessionId: snapshot.sessionId,
             payload: .object([
                 "reason": .string("subscription catch-up overflow"),
+                "subscriptionToken": .string("token"),
                 "snapshot": try JSONValue.encode(ignored),
             ])
         ))

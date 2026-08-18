@@ -30,15 +30,34 @@ enum TronTopBlurStyle {
 
 struct TronTopBlurOverlay: View {
     let style: TronTopBlurStyle
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ChatTopVariableBlur(maxBlurRadius: style.radius)
-            .frame(maxWidth: .infinity)
-            .frame(height: style.height)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .ignoresSafeArea(edges: .top)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        ZStack {
+            // Keep the native/variable backdrop blur unchanged. Dark mode gets
+            // only a black tint over that blur so the material stays soft
+            // without the regular UIBlurEffect's gray lift.
+            ChatTopVariableBlur(maxBlurRadius: style.radius)
+            if colorScheme == .dark {
+                LinearGradient(
+                    colors: [
+                        Color.black.opacity(0.28),
+                        Color.black.opacity(0.24),
+                        Color.black.opacity(0.14),
+                        Color.black.opacity(0.04),
+                        Color.clear,
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: style.height)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

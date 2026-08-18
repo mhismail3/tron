@@ -119,6 +119,19 @@ describe("atomic session synchronization barrier", () => {
     expect(barrier.commit("next-request")).toEqual({ events: [], overflowed: true });
   });
 
+  it("keeps an overflow barrier installed while recovery is being framed", () => {
+    const barrier = new SessionSyncBarrier();
+    barrier.begin("recovery");
+    barrier.establish(snapshot(0));
+    for (let sequence = 1; sequence <= MAX_BUFFERED_SYNC_EVENTS + 1; sequence += 1) barrier.offer(event(sequence));
+    expect(barrier.isOverflowed("recovery")).toBe(true);
+    expect(barrier.beginRecovery("recovery")).toBe(true);
+    barrier.establish(snapshot(100));
+    expect(barrier.offer(event(101))).toBeUndefined();
+    expect(barrier.commit("recovery")).toEqual({ events: [event(101)], overflowed: false });
+    expect(barrier.isOverflowed("recovery")).toBe(false);
+  });
+
   it("resets byte accounting after commit and abort", () => {
     const barrier = new SessionSyncBarrier();
     const boundary = eventExactlyBytes(MAX_BUFFERED_SYNC_BYTES);

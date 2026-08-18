@@ -13,6 +13,101 @@ enum GatewayUploadPolicy {
     static let maximumResponseBytes = 64 * 1_024
 }
 
+private actor GatewayEventHub {
+    private let maximumBufferedEvents: Int
+    private var buffered: [GatewayEventDelivery] = []
+    private var waiter: CheckedContinuation<GatewayEventDelivery?, Never>?
+    private var finished = false
+
+    init(maximumBufferedEvents: Int = 512) {
+        self.maximumBufferedEvents = maximumBufferedEvents
+    }
+
+    func next() async -> GatewayEventDelivery? {
+        if let first = buffered.first {
+            buffered.removeFirst()
+            return first
+        }
+        if finished || Task.isCancelled { return nil }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if let first = buffered.first {
+                    buffered.removeFirst()
+                    continuation.resume(returning: first)
+                } else if finished || Task.isCancelled {
+                    continuation.resume(returning: nil)
+                } else {
+                    waiter = continuation
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter() }
+        }
+    }
+
+    /// Returns true when an older delivery was discarded. The caller must
+    /// replace its connection and rebaseline rather than continue on a gap.
+    func yield(_ delivery: GatewayEventDelivery) -> Bool {
+        if let waiter {
+            self.waiter = nil
+            waiter.resume(returning: delivery)
+            return false
+        }
+        guard !finished else { return false }
+        if let key = coalescingKey(for: delivery),
+           let index = buffered.lastIndex(where: { coalescingKey(for: $0) == key }) {
+            buffered[index] = delivery
+            return false
+        }
+        let dropped = buffered.count >= maximumBufferedEvents
+        if dropped { buffered.removeFirst() }
+        buffered.append(delivery)
+        return dropped
+    }
+
+    private func coalescingKey(for delivery: GatewayEventDelivery) -> String? {
+        switch delivery.event.preparation {
+        case .sessionSummary(let update): return "summary:\(update.sessionId)"
+        case .none where delivery.event.topic == "session.listChanged": return "listChanged"
+        default: return nil
+        }
+    }
+
+    func reset(connectionID: Int) {
+        buffered.removeAll { $0.connectionID == connectionID }
+    }
+
+    func finish() {
+        finished = true
+        buffered.removeAll(keepingCapacity: false)
+        waiter?.resume(returning: nil)
+        waiter = nil
+    }
+
+    private func cancelWaiter() {
+        waiter?.resume(returning: nil)
+        waiter = nil
+    }
+}
+
+struct GatewayEventStream: AsyncSequence, Sendable {
+    typealias Element = GatewayEventDelivery
+
+    fileprivate let hub: GatewayEventHub
+
+    struct AsyncIterator: AsyncIteratorProtocol {
+        fileprivate let hub: GatewayEventHub
+
+        mutating func next() async -> GatewayEventDelivery? {
+            await hub.next()
+        }
+    }
+
+    func makeAsyncIterator() -> AsyncIterator {
+        AsyncIterator(hub: hub)
+    }
+}
+
 actor GatewayClient {
     private struct PendingRequest {
         let continuation: CheckedContinuation<JSONValue, Error>
@@ -32,8 +127,8 @@ actor GatewayClient {
         var info: GatewayInfo?
     }
 
-    nonisolated let events: AsyncStream<GatewayEventDelivery>
-    private let eventContinuation: AsyncStream<GatewayEventDelivery>.Continuation
+    nonisolated let events: GatewayEventStream
+    private let eventHub: GatewayEventHub
     private let socketFactory: GatewaySocketFactory
     private let clock: MonotonicClock
     private let uuidSource: UUIDSource
@@ -67,13 +162,14 @@ actor GatewayClient {
         self.boundedHTTPUploadTransport = boundedHTTPUploadTransport
         self.boundedHTTPFileTransport = boundedHTTPFileTransport
         self.performanceSignposts = performanceSignposts
-        var continuation: AsyncStream<GatewayEventDelivery>.Continuation!
-        events = AsyncStream(bufferingPolicy: .bufferingNewest(512)) { continuation = $0 }
-        eventContinuation = continuation
+        let eventHub = GatewayEventHub()
+        self.eventHub = eventHub
+        events = GatewayEventStream(hub: eventHub)
     }
 
     deinit {
-        eventContinuation.finish()
+        let eventHub = self.eventHub
+        Task { await eventHub.finish() }
         connection?.receiveTask?.cancel()
         connection?.livenessTask?.cancel()
         if let socket = connection?.socket {
@@ -136,6 +232,7 @@ actor GatewayClient {
                 "type": .string("hello"),
                 "protocolVersion": .number(3),
                 "clientId": .string(uuidSource.next().uuidString),
+                "clientRole": .string("mobile"),
             ])
             try await socket.send(JSONEncoder.gateway.encode(hello))
             try requireEpoch(epochID)
@@ -179,13 +276,37 @@ actor GatewayClient {
         startLivenessWait(epochID: connectionID)
     }
 
+    /// Retires only the transport epoch while preserving the selected profile
+    /// credentials for the next foreground reconnect. Background suspension is
+    /// an intentional transport boundary, not a live subscription interval.
+    func retireForBackground() async {
+        generation &+= 1
+        let retiredConnectionID = connection?.id
+        await detachConnection(
+            reason: GatewayFailure(code: "backgrounded", message: "Connection retired while the app was backgrounded.", retryable: true, details: nil)
+        )
+        if let retiredConnectionID { await eventHub.reset(connectionID: retiredConnectionID) }
+    }
+
+    func closeIfCurrent(connectionID: Int) async {
+        guard connection?.id == connectionID else { return }
+        generation &+= 1
+        await detachConnection(
+            epochID: connectionID,
+            reason: GatewayFailure(code: "retired", message: "Connection ownership was retired.", retryable: true, details: nil)
+        )
+        await eventHub.reset(connectionID: connectionID)
+    }
+
     func close() async {
         generation &+= 1
         profile = nil
         token = nil
+        let retiredConnectionID = connection?.id
         await detachConnection(
             reason: GatewayFailure(code: "closed", message: "Connection closed", retryable: true, details: nil)
         )
+        if let retiredConnectionID { await eventHub.reset(connectionID: retiredConnectionID) }
     }
 
     func ensureResponsive(maximumSilence: Duration = .seconds(35)) async throws {
@@ -335,6 +456,7 @@ actor GatewayClient {
         try requireUploadSize(data.count)
         let context = try uploadContext(name: name, mimeType: mimeType)
         var request = context.request
+        request.setValue(String(data.count), forHTTPHeaderField: "Content-Length")
         request.httpBody = data
         let (responseData, http) = try await boundedHTTPDataTransport.data(
             for: request,
@@ -344,7 +466,10 @@ actor GatewayClient {
             responseData,
             http: http,
             context: context,
-            requireConnectionEpoch: true
+            // The upload is an independently staged HTTP resource. A WebSocket
+            // reconnect while the bytes are in flight must not discard a
+            // successful photo upload or turn it into a misleading failure.
+            requireConnectionEpoch: false
         )
     }
 
@@ -410,11 +535,28 @@ actor GatewayClient {
         requireConnectionEpoch: Bool
     ) throws -> String {
         if requireConnectionEpoch { try requireEpoch(context.connectionID) }
-        guard profile?.id == context.profileID, http.statusCode == 201 else {
-            throw GatewayFailure(code: "upload_failed", message: "The attachment could not be uploaded.", retryable: true, details: nil)
+        guard profile?.id == context.profileID else { throw CancellationError() }
+        guard http.statusCode == 201 else {
+            struct FailureEnvelope: Decodable { let error: GatewayFailure }
+            if let failure = try? JSONDecoder.gateway.decode(FailureEnvelope.self, from: data).error {
+                throw failure
+            }
+            let retryable = http.statusCode == 408 || http.statusCode == 429 || http.statusCode >= 500
+            throw GatewayFailure(
+                code: "upload_failed",
+                message: "Attachment upload failed (HTTP \(http.statusCode)).",
+                retryable: retryable,
+                details: nil
+            )
         }
         struct Envelope: Decodable { struct Upload: Decodable { let id: String }; let upload: Upload }
-        return try JSONDecoder.gateway.decode(Envelope.self, from: data).upload.id
+        do {
+            let id = try JSONDecoder.gateway.decode(Envelope.self, from: data).upload.id
+            guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "Upload response did not contain an ID")) }
+            return id
+        } catch {
+            throw GatewayFailure(code: "upload_failed", message: "The Gateway returned an invalid attachment response.", retryable: true, details: nil)
+        }
     }
 
     func blob(id: String, maximumBytes: Int) async throws -> (Data, String) {
@@ -580,7 +722,8 @@ actor GatewayClient {
 
     private func disconnectEpoch(epochID: Int, failure: GatewayFailure) async {
         guard await detachConnection(epochID: epochID, reason: failure) else { return }
-        eventContinuation.yield(GatewayEventDelivery(
+        await eventHub.reset(connectionID: epochID)
+        _ = await eventHub.yield(GatewayEventDelivery(
             connectionID: epochID,
             event: GatewayEvent(
                 type: "event",
@@ -609,7 +752,7 @@ actor GatewayClient {
                 ))
             }
         case .event(let event):
-            if case .dropped = eventContinuation.yield(GatewayEventDelivery(
+            if await eventHub.yield(GatewayEventDelivery(
                 connectionID: epochID,
                 event: event
             )) {

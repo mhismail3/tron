@@ -13,7 +13,6 @@ struct ToolCard: View {
     var onOpenDetails: ((String) -> Void)? = nil
     @State private var detailPresentation: ToolDetailRoute?
     @State private var detailDetent: PresentationDetent = .medium
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
         title: String,
@@ -97,8 +96,6 @@ struct ToolCard: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(title)
-        .contentTransition(.opacity)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: visualState)
         .toolDetailSheet(
             route: $detailPresentation,
             detent: $detailDetent,
@@ -130,18 +127,6 @@ struct ToolCard: View {
         let duration = timing?.elapsedMilliseconds().map(ToolTiming.format(milliseconds:))
         return [displayTitle, subtitle, duration].compactMap { $0 }.joined(separator: ", ")
     }
-    private var visualState: ChatCompactPillVisualState {
-        .init(
-            id: timing?.id ?? title,
-            title: displayTitle,
-            detail: subtitle.lowercased(),
-            icon: icon,
-            tone: tone,
-            material: .glass,
-            showsProgress: subtitle == "Running",
-            durationMilliseconds: timing?.isRunning == false ? timing?.durationMs : nil
-        )
-    }
     private var tone: ChatNotificationTone {
         if error { return .error }
         return subtitle == "Running" ? .warning : .accent
@@ -163,7 +148,6 @@ struct ToolRunView: View {
     @State private var resolvedDetail: ChatToolPresentation?
     @State private var resolvedGroup: [ChatToolPresentation]?
     @State private var detailDetent: PresentationDetent = .medium
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -174,16 +158,13 @@ struct ToolRunView: View {
                     resolvedDetail = detail
                     detailRoute = ToolDetailRoute(toolID: toolID)
                 }
-                .transition(toolRunTransition)
             } else {
                 ToolRunChip(run: run) {
                     guard let details = resolveDetails(run.tools.map(\.id), installationTag) else { return }
                     resolvedGroup = details
                 }
-                .transition(toolRunTransition)
             }
         }
-        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: run.tools.count == 1)
         .toolDetailSheet(
             route: $detailRoute,
             detent: $detailDetent,
@@ -216,16 +197,11 @@ struct ToolRunView: View {
             resolvedGroup = resolveDetails(run.tools.map(\.id), tag)
         }
     }
-
-    private var toolRunTransition: AnyTransition {
-        reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.985, anchor: .leading))
-    }
 }
 
 private struct ToolRunChip: View {
     let run: ChatToolRunPresentation
     let onOpenDetails: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var tone: ChatNotificationTone {
         if run.failureCount > 0 { return .error }
@@ -249,8 +225,6 @@ private struct ToolRunChip: View {
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
-        .contentTransition(.opacity)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: visualState)
         .accessibilityLabel(runAccessibilityLabel)
     }
 
@@ -259,21 +233,6 @@ private struct ToolRunChip: View {
         return [run.title, run.status, duration].compactMap { $0 }.joined(separator: ", ")
     }
 
-    private var visualState: ChatCompactPillVisualState {
-        .init(
-            id: run.id,
-            title: run.title,
-            detail: run.status,
-            icon: run.failureCount > 0
-                ? "exclamationmark.triangle.fill" : "square.stack.3d.up",
-            tone: tone,
-            material: .glass,
-            showsProgress: run.isRunning,
-            count: run.tools.count,
-            durationMilliseconds: run.isRunning
-                ? nil : run.tools.compactMap(\.durationMs).max()
-        )
-    }
 }
 
 private struct ToolRunDetailSheet: View {

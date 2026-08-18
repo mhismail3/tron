@@ -45,6 +45,11 @@ struct PreparedSessionEvent: Sendable, Equatable {
     let data: PreparedSessionEventData
 }
 
+struct PreparedSessionRebaseline: Sendable, Equatable {
+    let snapshot: SessionSnapshot
+    let subscriptionToken: String
+}
+
 struct GatewayEventCursor: Sendable, Equatable {
     let runtimeGeneration: String
     let eventSequence: Int
@@ -71,7 +76,7 @@ enum GatewayEventPreparation: Sendable, Equatable {
     case none
     case sessionSummary(SessionSummaryUpdate)
     case sessionSnapshot(SessionSnapshot)
-    case sessionRebaseline(SessionSnapshot)
+    case sessionRebaseline(PreparedSessionRebaseline)
     case sessionEvent(PreparedSessionEvent)
     case terminalEvent(PreparedTerminalEvent)
 }
@@ -120,10 +125,15 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
 
     var sessionCursor: GatewayEventCursor? {
         switch preparation {
-        case .sessionSnapshot(let snapshot), .sessionRebaseline(let snapshot):
+        case .sessionSnapshot(let snapshot):
             return .init(
                 runtimeGeneration: snapshot.runtimeGeneration,
                 eventSequence: snapshot.eventSequence
+            )
+        case .sessionRebaseline(let rebaseline):
+            return .init(
+                runtimeGeneration: rebaseline.snapshot.runtimeGeneration,
+                eventSequence: rebaseline.snapshot.eventSequence
             )
         case .sessionEvent(let event):
             return .init(
@@ -137,8 +147,10 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
 
     var isConsumableSessionReplay: Bool {
         switch preparation {
-        case .sessionSnapshot(let snapshot), .sessionRebaseline(let snapshot):
+        case .sessionSnapshot(let snapshot):
             return sessionId != nil && sessionId == snapshot.sessionId
+        case .sessionRebaseline(let rebaseline):
+            return sessionId != nil && sessionId == rebaseline.snapshot.sessionId
         case .sessionEvent(let event):
             if case .invalid = event.data { return false }
             return true
@@ -158,10 +170,14 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
                   ExtensionPresentationPolicy.admit(snapshot.extensionPresentation) else { return .none }
             return .sessionSnapshot(snapshot)
         case "session.rebaseline":
-            struct Payload: Decodable { let snapshot: SessionSnapshot }
+            struct Payload: Decodable { let snapshot: SessionSnapshot; let subscriptionToken: String }
             guard let payload = try? Payload(from: decoder),
+                  !payload.subscriptionToken.isEmpty,
                   ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation) else { return .none }
-            return .sessionRebaseline(payload.snapshot)
+            return .sessionRebaseline(PreparedSessionRebaseline(
+                snapshot: payload.snapshot,
+                subscriptionToken: payload.subscriptionToken
+            ))
         case "terminal.output":
             return (try? PreparedTerminalOutputEvent(from: decoder))
                 .map { .terminalEvent(.output($0)) } ?? .none
@@ -219,10 +235,14 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
                   ExtensionPresentationPolicy.admit(snapshot.extensionPresentation) else { return .none }
             return .sessionSnapshot(snapshot)
         case "session.rebaseline":
-            struct Payload: Decodable { let snapshot: SessionSnapshot }
+            struct Payload: Decodable { let snapshot: SessionSnapshot; let subscriptionToken: String }
             guard let payload = try? payload.decode(Payload.self),
+                  !payload.subscriptionToken.isEmpty,
                   ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation) else { return .none }
-            return .sessionRebaseline(payload.snapshot)
+            return .sessionRebaseline(PreparedSessionRebaseline(
+                snapshot: payload.snapshot,
+                subscriptionToken: payload.subscriptionToken
+            ))
         case "terminal.output":
             return (try? payload.decode(PreparedTerminalOutputEvent.self))
                 .map { .terminalEvent(.output($0)) } ?? .none

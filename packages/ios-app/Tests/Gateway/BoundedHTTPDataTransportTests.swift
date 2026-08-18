@@ -97,6 +97,71 @@ struct BoundedHTTPDataTransportTests {
             #expect(recorded.request.httpBody == Data("body".utf8))
             #expect(recorded.request.url?.path == "/v1/uploads")
             #expect(recorded.request.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
+            #expect(recorded.request.value(forHTTPHeaderField: "Content-Length") == "4")
+            await client.close()
+        }
+    }
+
+    @Test("data upload preserves gateway failures instead of masking them")
+    func gatewayUploadPreservesFailure() async throws {
+        try await withTestWatchdog {
+            let profile = GatewayProfile(
+                id: "machine", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            let socket = ScriptedGatewaySocket()
+            let transport = BoundedHTTPDataTransport { request, _ in
+                let response = HTTPURLResponse(
+                    url: request.url!, statusCode: 503, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                return (Data(#"{"error":{"code":"busy","message":"Stored uploads are temporarily full","retryable":true,"details":null}}"#.utf8), response)
+            }
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                boundedHTTPDataTransport: transport
+            )
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await client.connectForLifecycle(profile: profile, token: "secret")
+
+            do {
+                _ = try await client.upload(name: "photo.heic", mimeType: "image/heic", data: Data("photo".utf8))
+                Issue.record("Upload unexpectedly succeeded")
+            } catch let failure as GatewayFailure {
+                #expect(failure == GatewayFailure(code: "busy", message: "Stored uploads are temporarily full", retryable: true, details: nil))
+            }
+            await client.close()
+        }
+    }
+
+    @Test("data upload survives a same-profile websocket reconnect")
+    func gatewayDataUploadReconnect() async throws {
+        try await withTestWatchdog {
+            let profile = GatewayProfile(
+                id: "machine", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            let oldSocket = ScriptedGatewaySocket()
+            let replacementSocket = ScriptedGatewaySocket()
+            let gate = UploadResponseGate()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(sockets: [oldSocket, replacementSocket]).factory,
+                boundedHTTPDataTransport: BoundedHTTPDataTransport { request, _ in
+                    try await gate.response(for: request)
+                }
+            )
+            await oldSocket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await client.connectForLifecycle(profile: profile, token: "secret")
+
+            let upload = Task {
+                try await client.upload(name: "photo.jpg", mimeType: "image/jpeg", data: Data("photo".utf8))
+            }
+            await gate.waitUntilStarted()
+            await replacementSocket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await client.connectForLifecycle(profile: profile, token: "secret")
+            await gate.succeed()
+
+            #expect(try await upload.value == "reconnected-upload")
             await client.close()
         }
     }

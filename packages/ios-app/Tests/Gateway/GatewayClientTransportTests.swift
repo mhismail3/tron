@@ -110,6 +110,7 @@ struct GatewayClientTransportTests {
                 "type": .string("hello"),
                 "protocolVersion": .number(3),
                 "clientId": .string("00000000-0000-0000-0000-000000000001"),
+                "clientRole": .string("mobile"),
             ]))
 
             let request = Task {
@@ -561,6 +562,32 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("background retirement discards queued events while preserving reconnect credentials")
+    func backgroundRetirementResetsEventQueue() async throws {
+        try await withTestWatchdog {
+            let oldSocket = ScriptedGatewaySocket()
+            let replacementSocket = ScriptedGatewaySocket()
+            let factory = ScriptedGatewaySocketFactory(sockets: [oldSocket, replacementSocket])
+            let client = GatewayClient(socketFactory: factory.factory)
+            await oldSocket.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+            var iterator = client.events.makeAsyncIterator()
+
+            await oldSocket.enqueue(eventFrame(topic: "stale.changed", payload: .number(1)))
+            await Task.yield()
+            await client.retireForBackground()
+            #expect(await oldSocket.closed())
+
+            await replacementSocket.enqueue(helloFrame())
+            _ = try await client.reconnect()
+            await replacementSocket.enqueue(eventFrame(topic: "current.changed", payload: .number(2)))
+            let delivery = try #require(await iterator.next())
+            #expect(delivery.event.topic == "current.changed")
+            #expect(delivery.event.payload.intValue == 2)
+            await client.close()
+        }
+    }
+
     @Test("a suspended old socket close cannot clear a replacement connection")
     func suspendedCloseDoesNotClearReplacement() async throws {
         try await withTestWatchdog {
@@ -586,12 +613,18 @@ struct GatewayClientTransportTests {
             await replacementSocket.enqueue(helloFrame())
             _ = try await client.connect(profile: profile, token: "new-token")
             #expect(await client.info?.machineId == "machine")
+            var iterator = client.events.makeAsyncIterator()
+            await replacementSocket.enqueue(eventFrame(topic: "replacement.changed", payload: .number(7)))
+            await Task.yield()
 
             await oldSocket.releaseClose()
             _ = try await valueOfOwnedTask(oldClose)
             #expect(await oldSocket.closeInvocationCount() == 1)
             #expect(await oldSocket.closeTransitionCount() == 1)
             #expect(await client.info?.machineId == "machine")
+            let delivery = try #require(await iterator.next())
+            #expect(delivery.event.topic == "replacement.changed")
+            #expect(delivery.event.payload.intValue == 7)
 
             let request = Task { try await client.requestValue("test.replacement", EmptyParams()) }
             defer { request.cancel() }

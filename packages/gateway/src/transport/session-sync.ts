@@ -93,6 +93,19 @@ export class SessionSyncBarrier {
     return undefined;
   }
 
+  /** Replace an overflowed quarantine with a bounded recovery quarantine. */
+  beginRecovery(requestId: string): boolean {
+    if (!this.isOverflowed(requestId)) return false;
+    this.synchronization = { requestId, events: [], bufferedBytes: 0, overflowed: false };
+    return true;
+  }
+
+  /** True while an acknowledged synchronization is waiting for recovery. */
+  isOverflowed(requestId: string): boolean {
+    return this.synchronization?.requestId === requestId
+      && this.synchronization.overflowed;
+  }
+
   /** Discard a failed or retired synchronization and its byte accounting. */
   abort(requestId: string): boolean {
     const synchronization = this.synchronization;

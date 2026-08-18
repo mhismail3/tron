@@ -8,14 +8,27 @@ import { GatewayError } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 
 const COMMAND_RECEIPT_MAX_BYTES = 1_048_576 + 4 * 1_024;
-const COMMAND_RECEIPT_MAX_ENTRIES = 4_096;
+// High-frequency revisioned UI updates are still idempotent mutations. Keep a
+// generous entry ceiling so normal sustained editing cannot block unrelated
+// commands; aggregate bytes remain the primary disk safety bound.
+const COMMAND_RECEIPT_MAX_ENTRIES = 32_768;
 const COMMAND_RECEIPT_MAX_AGGREGATE_BYTES = 64 * 1_048_576;
 const COMMAND_RECEIPT_MAX_AGE_MS = 24 * 60 * 60_000;
+const COMMAND_RECEIPT_PRUNE_INTERVAL_MS = 60_000;
+// Editor changes are superseded by their revisioned successors. Retain their
+// idempotency response long enough to cover reconnect/retry, but not for the
+// full command window: sustained typing otherwise exhausts shared capacity.
+const EDITOR_UPDATE_RECEIPT_MAX_AGE_MS = 10 * 60_000;
 
 interface CommandReceiptCapacity {
   maximumEntries?: number;
   maximumAggregateBytes?: number;
   maximumAgeMs?: number;
+}
+
+interface CommandReceiptUsage {
+  entries: number;
+  bytes: number;
 }
 
 interface Receipt {
@@ -59,6 +72,14 @@ function persistedReceiptBytes(value: unknown): number {
   return Buffer.byteLength(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+function isCanonicalReceiptName(name: string): boolean {
+  return /^[A-Za-z0-9_-]{43}\.json$/.test(name);
+}
+
+function isOwnedTemporaryReceiptName(name: string): boolean {
+  return /^[A-Za-z0-9_-]{43}\.json\.\d+\.[0-9a-f]{12}\.tmp$/.test(name);
+}
+
 export class CommandReceiptStore {
   private readonly directory: string;
   private readonly lanes = new Map<string, {
@@ -71,6 +92,8 @@ export class CommandReceiptStore {
   private readonly maximumAggregateBytes: number;
   private readonly maximumAgeMs: number;
   private reservedCompletionBytes = 0;
+  private inventory: CommandReceiptUsage | undefined;
+  private nextPruneAt = 0;
 
   constructor(
     tronHome: string,
@@ -126,38 +149,69 @@ export class CommandReceiptStore {
       : { status: "pending" };
   }
 
-  private async inventoryUsage(): Promise<{ entries: number; bytes: number }> {
+  private async inventoryUsage(): Promise<CommandReceiptUsage> {
+    if (this.inventory) return this.inventory;
     let names: string[];
     try { names = await readdir(this.directory); }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { entries: 0, bytes: 0 };
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return { entries: 0, bytes: 0 };
+      }
       throw error;
     }
     let bytes = 0;
     let entries = 0;
     for (const name of names) {
+      if (!isCanonicalReceiptName(name)) continue;
       try {
         const metadata = await lstat(join(this.directory, name));
+        if (!metadata.isFile()) continue;
         entries += 1;
         bytes += metadata.size;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
     }
-    return { entries, bytes };
+    this.inventory = { entries, bytes };
+    return this.inventory;
   }
 
-  private async pruneUnlocked(maxAgeMs: number): Promise<void> {
-    const cutoff = Date.now() - maxAgeMs;
+  private recordNewReceipt(bytes: number): void {
+    if (!this.inventory) return;
+    this.inventory.entries += 1;
+    this.inventory.bytes += bytes;
+  }
+
+  private replaceReceiptBytes(previousBytes: number, nextBytes: number): void {
+    if (!this.inventory) return;
+    this.inventory.bytes += nextBytes - previousBytes;
+  }
+
+  private removeReceipt(bytes: number): void {
+    if (!this.inventory) return;
+    this.inventory.entries -= 1;
+    this.inventory.bytes -= bytes;
+  }
+
+  private async pruneUnlocked(maxAgeMs: number, force = false): Promise<void> {
+    const now = Date.now();
+    if (!force && now < this.nextPruneAt) return;
+    this.nextPruneAt = now + COMMAND_RECEIPT_PRUNE_INTERVAL_MS;
     let names: string[];
     try { names = await readdir(this.directory); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;
     }
+    let changed = false;
     for (const name of names) {
-      if (!name.endsWith(".json")) continue;
       const path = join(this.directory, name);
+      if (isOwnedTemporaryReceiptName(name)) {
+        await rm(path, { force: true });
+        changed = true;
+        continue;
+      }
+      if (!isCanonicalReceiptName(name)) continue;
       let receipt: Receipt | null;
       try { receipt = await this.readReceipt(path); }
       catch (error) {
@@ -170,10 +224,17 @@ export class CommandReceiptStore {
         .digest("base64url");
       const expectedName = `${expectedKey}.json`;
       if (this.lanes.get(expectedKey)?.preserveReceiptUntilDrain) continue;
-      if (name === expectedName && Date.parse(receipt.createdAt) < cutoff) {
+      const receiptMaxAgeMs = receipt.method === "extension.editor.update"
+        ? Math.min(maxAgeMs, EDITOR_UPDATE_RECEIPT_MAX_AGE_MS)
+        : maxAgeMs;
+      if (name === expectedName && Date.parse(receipt.createdAt) < now - receiptMaxAgeMs) {
         await rm(path, { force: true });
+        changed = true;
       }
     }
+    // A prune may remove arbitrary pre-existing evidence. Rebuild once on the
+    // next admission instead of carrying a potentially stale cached total.
+    if (changed) this.inventory = undefined;
   }
 
   async execute(
@@ -205,10 +266,11 @@ export class CommandReceiptStore {
           status: "pending",
           createdAt: new Date().toISOString(),
         };
+        const pendingBytes = persistedReceiptBytes(pending);
         let reserved = false;
         const recorded = await this.inventoryMutex.run(async () => {
           await mkdir(this.directory, { recursive: true, mode: 0o700 });
-          await this.pruneUnlocked(this.maximumAgeMs);
+          await this.pruneUnlocked(this.maximumAgeMs, this.maximumAgeMs === 0);
           const existing = await this.readReceipt(path);
           if (existing) {
             if (existing.identityHash !== identityHash || existing.method !== method || existing.commandId !== commandId) {
@@ -217,15 +279,24 @@ export class CommandReceiptStore {
             if (existing.status === "completed") return { exists: true, result: existing.result ?? null } as const;
             throw new GatewayError("conflict", "Previous command outcome is uncertain; refresh authoritative state instead of replaying", false, { outcomeUnknown: true });
           }
-          const usage = await this.inventoryUsage();
+          let usage = await this.inventoryUsage();
           if (usage.entries >= this.maximumEntries
             || usage.bytes + this.reservedCompletionBytes + COMMAND_RECEIPT_MAX_BYTES > this.maximumAggregateBytes) {
-            throw new GatewayError("busy", "Command receipt capacity is full; retry after completed receipts expire", true);
+            // A capacity boundary is also an admission boundary: force one
+            // exact cleanup pass before rejecting, so a just-expired
+            // high-frequency receipt cannot unnecessarily block the command.
+            await this.pruneUnlocked(this.maximumAgeMs, true);
+            usage = await this.inventoryUsage();
+            if (usage.entries >= this.maximumEntries
+              || usage.bytes + this.reservedCompletionBytes + COMMAND_RECEIPT_MAX_BYTES > this.maximumAggregateBytes) {
+              throw new GatewayError("busy", "Command receipt capacity is full; retry after completed receipts expire", true);
+            }
           }
           this.reservedCompletionBytes += COMMAND_RECEIPT_MAX_BYTES;
           reserved = true;
           try {
             await this.writeReceipt(path, pending);
+            this.recordNewReceipt(pendingBytes);
             lane.preserveReceiptUntilDrain = true;
           } catch (error) {
             this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
@@ -245,6 +316,7 @@ export class CommandReceiptStore {
           await this.inventoryMutex.run(async () => {
             try {
               await rm(path, { force: true });
+              this.removeReceipt(pendingBytes);
             } finally {
               if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
               reserved = false;
@@ -253,7 +325,8 @@ export class CommandReceiptStore {
           throw error;
         }
         const completed: Receipt = { ...pending, status: "completed", result };
-        if (persistedReceiptBytes(completed) > COMMAND_RECEIPT_MAX_BYTES) {
+        const completedBytes = persistedReceiptBytes(completed);
+        if (completedBytes > COMMAND_RECEIPT_MAX_BYTES) {
           await this.inventoryMutex.run(async () => {
             if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
             reserved = false;
@@ -263,6 +336,7 @@ export class CommandReceiptStore {
         try {
           await this.inventoryMutex.run(async () => {
             await this.writeReceipt(path, completed);
+            this.replaceReceiptBytes(pendingBytes, completedBytes);
             if (reserved) this.reservedCompletionBytes -= COMMAND_RECEIPT_MAX_BYTES;
             reserved = false;
           });
@@ -283,7 +357,7 @@ export class CommandReceiptStore {
 
   async prune(maxAgeMs = this.maximumAgeMs): Promise<void> {
     await this.inventoryMutex.run(async () => {
-      await this.pruneUnlocked(maxAgeMs);
+      await this.pruneUnlocked(maxAgeMs, true);
     });
   }
 }

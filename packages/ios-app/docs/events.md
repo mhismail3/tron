@@ -4,8 +4,10 @@ Tron events are transient presentation and invalidation signals delivered by
 `GatewayClient`. They are not a durable journal and are not reconstructed into a
 local database. Each delivery carries the local connection-epoch identity; `AppModel`
 admits only the identity installed before receive activation, so buffered frames from a
-retired profile cannot mutate its replacement. `GatewayClient` decodes every inbound
-response/event frame through one discriminator and prepares large session DTOs on its
+retired profile cannot mutate its replacement. Backgrounding is an explicit transport boundary:
+`GatewayLifecycleCoordinator` retires the socket epoch and clears queued deliveries while retaining
+last-good session projections; foreground creates a new epoch and authoritative session baseline.
+`GatewayClient` decodes every inbound response/event frame through one discriminator and prepares large session DTOs on its
 actor before crossing into `AppModel`. The raw event remains beside that typed preparation:
 unknown frame discriminators are ignored, valid unknown sequenced session topics still
 advance their cursor, and malformed known session payloads fail closed to authoritative
@@ -146,20 +148,23 @@ Interaction sheets, working state (ambient bottom
 activity for the ordinary default and explicit rows for custom/retry detail), editor updates, typed generic
 notices, and durable extension transcript entries remain active. The canonical session name remains the
 primary navigation identity; an extension title is retained only as a presentation hint and cannot replace it. Backgrounding gates and
-cancels only disposable catalog/foreground reconciliation, never the route, accepted work, or responsive
-socket. Foreground activation coalesces to one responsiveness pass, then runs catalog convergence,
-mounted-session restoration concurrently, then reattaches terminals only after the mounted session's exact
-subscription is installed on that connection; catalog retention or failure alone
-does not replace a responsive socket. The owned foreground slot releases on success, failure,
-cancellation, or lifecycle replacement. Switch, forget, current-device revoke, and final
+cancels disposable catalog/foreground reconciliation, never the route or accepted work, but it retires
+the shared socket epoch and clears queued live deliveries before suspension. Foreground activation waits
+for that retirement, creates one fresh epoch, coalesces to one responsiveness pass, then runs catalog
+convergence and mounted-session restoration; terminals reattach only after the mounted session's exact
+subscription is installed on that connection. Catalog retention or failure alone does not discard the
+last-good mounted projection. The owned foreground slot releases on success, failure, cancellation, or
+lifecycle replacement. Switch, forget, current-device revoke, and final
 teardown invalidate that reconciliation, reconnect/debounce tasks, profile-scoped reads, and
 presentation intake before entering the serial retire/close chain; a late old-profile completion is
 discarded and no newer handshake can start ahead of an older close. Possibly-sent mutation
 reconciliation uses generation-only lifecycle admission so same-profile reconnect may resolve it, but
 replacement-profile polling or replay is forbidden. A terminal-open result resolved after a
 same-lifecycle connection replacement attaches on the current connection before publishing replay;
-a profile-generation replacement discards it. Ordinary scene backgrounding is not teardown. An aborted or resumed network path
-enters the ordinary reconnect loop. Compatible reconnect requests share one typed result instead of polling mutable tokens. Fresh
+a profile-generation replacement discards it. Ordinary scene backgrounding is a transport retirement,
+not a session teardown; accepted runtime work continues on the Mac and the next active scene enters the
+ordinary reconnect loop. Compatible reconnect requests share one typed result instead of polling mutable
+tokens. Fresh
 presentation and reconnect intents arbitrate serially, and at most three immediate authoritative
 attempts are retained for a continuous gap/overflow burst before the bounded catch-up state wins.
 A temporary catch-up notice is deduplicated, removed on successful synchronization and presentation navigation/close, and automatically expires after a bounded interval if a terminal retry path cannot converge. It never outlives its presentation owner.

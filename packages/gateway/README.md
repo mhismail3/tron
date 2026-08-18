@@ -70,7 +70,7 @@ token hashes with bounded names/timestamps; capacity rejection leaves the one-ti
 so an old device can be revoked before retrying. Device metadata is capped at 1 MiB, the local wrapper
 credential at 4 KiB, and the one-time invitation at 16 KiB before JSON decode. Local credentials and
 invitations also require exact versions, purposes, bounded identities/codes, and canonical timestamps. Uploads retain the 25 MiB per-request limit and additionally
-serialize reservation and commit against 128-entry and eight-times-per-upload (200 MiB by default) aggregate ceilings.
+serialize reservation and commit against a 1,024-entry and eight-times-per-upload (200 MiB by default) aggregate ceiling. The aggregate byte bound remains the primary storage limit so many small photos do not exhaust capacity prematurely.
 A separate admission permits at most half that ratio concurrently (four default 25 MiB bodies). Authenticated request
 chunks stream directly into protected store-owned files; exact declared and observed sizes are checked before atomic
 metadata publication. Persisted upload metadata is limited to an exact 64 KiB document with canonical timestamps and fields; malformed or oversized entries self-clean before quota admission or direct materialization. Every success, rejection, overflow, truncation, or disconnect removes uncommitted staging
@@ -108,11 +108,16 @@ its pending receipt so the definitive error remains definitive; process loss or 
 to persist a successful completion leaves pending state and therefore cannot enable a
 blind duplicate. Each receipt is capped at one response frame plus 4 KiB of
 identity/envelope overhead before decode and persistence. The store admits at most
-4,096 direct entries and 64 MiB of aggregate evidence, reserving one maximum
+32,768 direct entries and 64 MiB of aggregate evidence, reserving one maximum
 completion before a mutation executes; full capacity returns retryable `busy`.
-Only expired, valid completed receipts are reclaimed. Pending, malformed, oversized,
-or identity-mismatched evidence remains outcome-unknown, is never pruned, and can
-never authorize replay. Receipt execution serializes identical command keys only;
+Admission keeps an in-process usage total and periodically reconciles it from
+disk, so sustained revisioned activity is not quadratic in the receipt count;
+owned interrupted atomic-write temporaries are scavenged but arbitrary files are
+not treated as receipt evidence.
+Only expired, valid completed receipts are reclaimed; revisioned editor updates use
+a ten-minute receipt window because newer revisions supersede them. Pending,
+malformed, oversized, or identity-mismatched evidence remains outcome-unknown, is
+never pruned, and can never authorize replay. Receipt execution serializes identical command keys only;
 unrelated commands and sessions remain concurrent.
 The gateway sends WebSocket ping control frames every 25 seconds and terminates
 connections that fail the next heartbeat, so half-open Tailscale/iOS paths are

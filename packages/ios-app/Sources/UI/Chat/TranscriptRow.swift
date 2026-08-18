@@ -72,6 +72,10 @@ struct TranscriptRow: View, Equatable {
                             label: hiddenThinkingLabel,
                             animatesInsertion: streaming
                         )
+                        // Keep the incremental visibility ledger attached to
+                        // the logical thinking run, not its position among
+                        // parts that may be added while the response streams.
+                        .id(run.id)
                     case .content(let part):
                         switch part.type {
                         case .text:

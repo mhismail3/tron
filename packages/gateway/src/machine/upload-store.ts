@@ -8,6 +8,7 @@ import { atomicWriteJson, readJson } from "../util/json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 
 const UPLOAD_METADATA_MAX_BYTES = 64 * 1_024;
+const DEFAULT_MAXIMUM_ENTRIES = 1_024;
 
 interface UploadMetadata {
   version: 1;
@@ -91,7 +92,11 @@ export class UploadStore {
   ) {
     this.directory = join(tronHome, "gateway", "uploads");
     this.bodyDirectory = join(tronHome, "gateway", "upload-bodies");
-    this.maximumEntries = options.maximumEntries ?? 128;
+    // The aggregate byte bound is the primary storage limit. A 128-entry cap
+    // fragments that capacity when users attach many small photos or imported
+    // documents, even while substantial byte capacity remains. Keep the item
+    // bound high but finite so metadata/inventory work remains bounded.
+    this.maximumEntries = options.maximumEntries ?? DEFAULT_MAXIMUM_ENTRIES;
     this.maximumAggregateBytes = options.maximumAggregateBytes ?? maximumBytes * 8;
     this.maximumUnclaimedAgeMs = options.maximumUnclaimedAgeMs ?? 24 * 60 * 60_000;
     this.maximumConcurrentBodies = Math.max(1, Math.floor(this.maximumAggregateBytes / maximumBytes / 2));

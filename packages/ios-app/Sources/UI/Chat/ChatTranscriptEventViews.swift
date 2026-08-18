@@ -27,7 +27,6 @@ extension View {
 /// remain noninteractive and flat while retaining the same capsule geometry.
 struct ChatNotificationView: View {
     let presentation: ChatNotificationPresentation
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showingDetail = false
 
     var body: some View {
@@ -38,20 +37,13 @@ struct ChatNotificationView: View {
                 }
                     .buttonStyle(.plain)
                     .contentShape(Rectangle())
-                    .transition(notificationTransition)
             } else {
-                pill.transition(notificationTransition)
+                pill
             }
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .center)
-        .contentTransition(.opacity)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: visualState)
         .accessibilityLabel(accessibilityLabel)
         .sheet(isPresented: $showingDetail) { detailSheet }
-    }
-
-    private var notificationTransition: AnyTransition {
-        reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.985))
     }
 
     private var pill: some View {
@@ -74,18 +66,6 @@ struct ChatNotificationView: View {
 
     private var accessibilityLabel: String {
         [presentation.title, presentation.detail].compactMap { $0 }.joined(separator: ", ")
-    }
-
-    private var visualState: ChatCompactPillVisualState {
-        .init(
-            id: presentation.id,
-            title: presentation.title,
-            detail: presentation.detail,
-            icon: presentation.icon,
-            tone: presentation.tone,
-            material: presentation.material,
-            showsProgress: presentation.showsProgress
-        )
     }
 
     private var detailSheet: some View {

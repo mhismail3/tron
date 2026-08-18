@@ -642,7 +642,10 @@ images use the same square previews as pending photos and files use named chips.
 directly. Thumbnail fetch/decode is identity-single-flight behind one shared preparation slot and a
 32-flight admission ceiling. Its bounded HTTP delegate rejects declared or streamed bodies over 25 MiB
 while receiving them, then applies image orientation while downsampling off-main to at most 192 pixels
-and retains at most 64 items/4 MiB decoded under deterministic LRU. Lifecycle replacement and the
+and retains at most 64 items/4 MiB decoded under deterministic LRU. Uploads publish an explicit
+content length, accept a same-profile WebSocket reconnect while the independent HTTP upload completes,
+and preserve bounded Gateway error envelopes instead of collapsing quota or body-admission failures into
+a generic photo error. Lifecycle replacement and the
 app-lifetime memory-pressure observer advance exact invalidation generations, cancel flights, and clear
 the cache; late fetch or detached-decode completion cannot repopulate it.
 A preview uses one nonoptional item route, opens the historical medium sheet immediately with its captured

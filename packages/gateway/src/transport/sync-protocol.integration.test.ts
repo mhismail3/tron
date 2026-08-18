@@ -162,6 +162,38 @@ describe("two-phase session synchronization protocol", () => {
     openResolvers.get("large")?.();
     while (!frames.some((frame) => frame.id === "open-after-large")) await new Promise((resolve) => setTimeout(resolve, 1));
     expect(frames.filter((frame) => frame.id).map((frame) => frame.id).length).toBe(new Set(frames.filter((frame) => frame.id).map((frame) => frame.id)).size);
+
+    // Technical clients may keep independent subscriptions, but a mobile
+    // presentation connection is explicitly one-slot: A -> B -> C revokes
+    // every prior exact owner before installing the next one.
+    const mobile = new WebSocket(`ws://127.0.0.1:${port}/v1/socket`, { headers: { authorization: `Bearer ${token}` } });
+    const mobileFrames: any[] = [];
+    mobile.on("message", (raw) => mobileFrames.push(JSON.parse(raw.toString())));
+    await new Promise<void>((resolve) => mobile.once("open", () => resolve()));
+    mobile.send(JSON.stringify({ type: "hello", protocolVersion: 3, clientRole: "mobile" }));
+    while (!mobileFrames.some((frame) => frame.type === "hello")) await new Promise((resolve) => setTimeout(resolve, 1));
+    const mobileOpenSync = async (prefix: string, sessionId: string) => {
+      const expectedCount = (startedCounts.get(sessionId) ?? 0) + 1;
+      mobile.send(JSON.stringify({ type: "request", id: `${prefix}-open`, method: "session.open", params: { sessionId } }));
+      await waitStarted(sessionId, expectedCount);
+      openResolvers.get(sessionId)?.();
+      while (!mobileFrames.some((frame) => frame.id === `${prefix}-open`)) await new Promise((resolve) => setTimeout(resolve, 1));
+      const opened = mobileFrames.find((frame) => frame.id === `${prefix}-open`);
+      expect(opened.ok).toBe(true);
+      mobile.send(JSON.stringify({ type: "request", id: `${prefix}-sync`, method: "session.sync", params: { sessionId, syncToken: opened.result.syncToken } }));
+      while (!mobileFrames.some((frame) => frame.id === `${prefix}-sync`)) await new Promise((resolve) => setTimeout(resolve, 1));
+      return opened.result.subscriptionToken;
+    };
+    await mobileOpenSync("mobile-a", "a");
+    await mobileOpenSync("mobile-b", "b");
+    await mobileOpenSync("mobile-c", "c");
+    const mobileEventStart = mobileFrames.length;
+    gateway.broadcastSession("a", "session.progress", { runtimeGeneration: "generation-a", eventSequence: 200, revision: 200, data: { message: "a" } } as any);
+    gateway.broadcastSession("b", "session.progress", { runtimeGeneration: "generation-b", eventSequence: 200, revision: 200, data: { message: "b" } } as any);
+    gateway.broadcastSession("c", "session.progress", { runtimeGeneration: "generation-c", eventSequence: 200, revision: 200, data: { message: "c" } } as any);
+    while (!mobileFrames.slice(mobileEventStart).some((frame) => frame.sessionId === "c")) await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(mobileFrames.slice(mobileEventStart).filter((frame) => frame.topic === "session.progress").map((frame) => frame.sessionId)).toEqual(["c"]);
+    mobile.close();
     socket.close();
   });
 
@@ -236,17 +268,32 @@ describe("synchronization catch-up overflow recovery", () => {
     await new Promise<void>((resolve) => probe.close(() => resolve()));
 
     let gateway!: GatewayServer;
+    let recoveryStartedResolve: (() => void) | undefined;
+    let releaseRecovery: (() => void) | undefined;
+    let releaseTimedOutOpen: (() => void) | undefined;
+    const recoveryStarted = new Promise<void>((resolve) => { recoveryStartedResolve = resolve; });
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
       releaseClient: vi.fn(),
-      recoverySnapshot: async (sessionId: string) => sessionId === "gone"
-        ? undefined
-        : { sessionId, runtimeGeneration: `generation-${sessionId}`, eventSequence: 99, revision: 99 },
+      recoverySnapshot: async (sessionId: string) => {
+        if (sessionId === "gone") return undefined;
+        if (sessionId === "live") {
+          recoveryStartedResolve?.();
+          await new Promise<void>((resolve) => { releaseRecovery = resolve; });
+        }
+        if (sessionId === "oversized") {
+          return { sessionId, runtimeGeneration: `generation-${sessionId}`, eventSequence: 99, revision: 99, data: "x".repeat(1_100_000) };
+        }
+        return { sessionId, runtimeGeneration: `generation-${sessionId}`, eventSequence: 99, revision: 99 };
+      },
       invoke: async (context: any, method: string, params: any) => {
         const sessionId = params.sessionId as string;
         if (method === "session.open") {
           const syncToken = context.beginSynchronization(sessionId);
+          if (sessionId === "timeout") {
+            await new Promise<void>((resolve) => { releaseTimedOutOpen = resolve; });
+          }
           if (sessionId === "ordered") {
             // In-window events quarantine and flush exactly once after the ack.
             gateway.broadcastSession(sessionId, "session.progress", {
@@ -284,6 +331,7 @@ describe("synchronization catch-up overflow recovery", () => {
       host: "127.0.0.1",
       port,
       maxFrameBytes: 1_048_576,
+      synchronizationTimeoutMs: 250,
       devices,
       uploads: {} as any,
       sessions: sessions as any,
@@ -322,7 +370,16 @@ describe("synchronization catch-up overflow recovery", () => {
     expect(frames.findIndex((frame) => frame.id === "ordered-sync"))
       .toBeLessThan(frames.findIndex((frame) => frame.topic === "session.progress"));
 
-    await openAndSync("recover", "live");
+    const liveSync = openAndSync("recover", "live");
+    await recoveryStarted;
+    gateway.broadcastSession("live", "session.progress", {
+      runtimeGeneration: "generation-live",
+      eventSequence: 100,
+      revision: 100,
+      data: { message: "arrived during recovery" },
+    } as any);
+    releaseRecovery?.();
+    await liveSync;
     const deadline = Date.now() + 5_000;
     while (!frames.some((frame) => frame.topic === "session.rebaseline")) {
       if (Date.now() >= deadline) throw new Error("recovery snapshot timed out");
@@ -332,11 +389,15 @@ describe("synchronization catch-up overflow recovery", () => {
     expect(recovery.sessionId).toBe("live");
     expect(recovery.payload).toMatchObject({
       reason: "subscription catch-up overflow",
+      subscriptionToken: expect.any(String),
       snapshot: { sessionId: "live", runtimeGeneration: "generation-live", eventSequence: 99 },
     });
     expect(frames.some((frame) => frame.topic === "transport.resyncRequired")).toBe(false);
     const syncIndex = frames.findIndex((frame) => frame.id === "recover-sync");
-    expect(frames.findIndex((frame) => frame.topic === "session.rebaseline")).toBeGreaterThan(syncIndex);
+    const recoveryIndex = frames.findIndex((frame) => frame.topic === "session.rebaseline" && frame.sessionId === "live");
+    expect(recoveryIndex).toBeGreaterThan(syncIndex);
+    const recoveredEventIndex = frames.findIndex((frame) => frame.topic === "session.progress" && frame.payload.eventSequence === 100);
+    expect(recoveredEventIndex).toBeGreaterThan(recoveryIndex);
 
     await openAndSync("missing", "gone");
     while (!frames.some((frame) => frame.topic === "transport.resyncRequired")) {
@@ -346,6 +407,25 @@ describe("synchronization catch-up overflow recovery", () => {
     const resync = frames.find((frame) => frame.topic === "transport.resyncRequired");
     expect(resync.sessionId).toBe("gone");
     expect(resync.payload).toMatchObject({ reason: "subscription catch-up overflow" });
+
+    await openAndSync("oversized", "oversized");
+    const oversizedResyncDeadline = Date.now() + 5_000;
+    while (!frames.some((frame) => frame.topic === "transport.resyncRequired" && frame.sessionId === "oversized")) {
+      if (Date.now() >= oversizedResyncDeadline) throw new Error("oversized recovery resync timed out");
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    expect(frames.filter((frame) => frame.topic === "transport.resyncRequired" && frame.sessionId === "oversized")).toHaveLength(1);
+    expect(frames.some((frame) => frame.topic === "session.rebaseline" && frame.sessionId === "oversized")).toBe(false);
+
+    socket.send(JSON.stringify({ type: "request", id: "open-timeout", method: "session.open", params: { sessionId: "timeout" } }));
+    const timeoutDeadline = Date.now() + 5_000;
+    while (!frames.some((frame) => frame.topic === "transport.resyncRequired" && frame.sessionId === "timeout")) {
+      if (Date.now() >= timeoutDeadline) throw new Error("synchronization timeout did not fire");
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    releaseTimedOutOpen?.();
+    while (!frames.some((frame) => frame.id === "open-timeout")) await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(frames.find((frame) => frame.id === "open-timeout").ok).toBe(false);
     socket.close();
   });
 });

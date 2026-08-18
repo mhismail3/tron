@@ -84,6 +84,8 @@ final class GatewayLifecycleCoordinator {
     private var pairingAttempt: PairingAttempt?
     private var foregroundReconciliationTask: Task<Void, Never>?
     private var foregroundReconciliationGeneration = 0
+    private var backgroundRetirementTask: Task<Void, Never>?
+    private var sceneIsBackgrounded = false
 
     init(
         client: GatewayClient,
@@ -106,12 +108,12 @@ final class GatewayLifecycleCoordinator {
     }
 
     var admission: Admission? {
-        guard phase.admitsWork else { return nil }
+        guard phase.admitsWork, !sceneIsBackgrounded else { return nil }
         return Admission(generation: phase.generation, connectionID: connectionID)
     }
 
     var generationAdmission: Admission? {
-        guard phase.admitsWork else { return nil }
+        guard phase.admitsWork, !sceneIsBackgrounded else { return nil }
         return Admission(generation: phase.generation, connectionID: nil)
     }
 
@@ -124,16 +126,16 @@ final class GatewayLifecycleCoordinator {
         #endif
     }
 
-    var admitsWork: Bool { phase.admitsWork }
+    var admitsWork: Bool { phase.admitsWork && !sceneIsBackgrounded }
 
     func admits(_ admission: Admission) -> Bool {
-        guard phase.admitsWork, phase.generation == admission.generation else { return false }
+        guard phase.admitsWork, !sceneIsBackgrounded, phase.generation == admission.generation else { return false }
         guard let expectedConnectionID = admission.connectionID else { return true }
         return connectionID == expectedConnectionID
     }
 
     func admitsEvent(connectionID deliveredConnectionID: Int?) -> Bool {
-        guard phase.admitsWork else { return false }
+        guard phase.admitsWork, !sceneIsBackgrounded else { return false }
         guard let deliveredConnectionID else { return true }
         return connectionID == deliveredConnectionID
     }
@@ -150,7 +152,7 @@ final class GatewayLifecycleCoordinator {
     }
 
     func start() async {
-        guard phase.admitsWork,
+        guard phase.admitsWork, !sceneIsBackgrounded,
               connectionState != .connecting,
               connectionState != .connected,
               connectionState != .reconnecting else { return }
@@ -170,6 +172,21 @@ final class GatewayLifecycleCoordinator {
     @discardableResult
     func becameActive() -> Task<Void, Never>? {
         guard phase.admitsWork else { return nil }
+        sceneIsBackgrounded = false
+        if let backgroundRetirementTask {
+            let generation = phase.generation
+            let activationGeneration = foregroundReconciliationGeneration
+            return Task { @MainActor [weak self] in
+                await backgroundRetirementTask.value
+                guard let self,
+                      self.phase.admitsWork,
+                      self.phase.generation == generation,
+                      self.foregroundReconciliationGeneration == activationGeneration else { return }
+                self.backgroundRetirementTask = nil
+                self.connectionState = .reconnecting
+                self.requestReconnect(immediate: true, replaceExisting: true)
+            }
+        }
         guard connectionState == .connected else {
             switch connectionState {
             case .offline, .reconnecting:
@@ -205,14 +222,33 @@ final class GatewayLifecycleCoordinator {
         return task
     }
 
-    /// Backgrounding suspends disposable reconciliation work without retiring
-    /// the selected route or responsive socket. The next active scene owns a
-    /// fresh convergence pass.
+    /// A suspended app cannot service the shared event stream reliably. Retire
+    /// the transport epoch before suspension, discard its queued deliveries, and
+    /// let the next active scene perform one authoritative reconnect.
     func enteredBackground() {
         foregroundReconciliationGeneration &+= 1
         let task = foregroundReconciliationTask
         foregroundReconciliationTask = nil
         task?.cancel()
+        let reconnect = reconnectTask
+        reconnectTask = nil
+        reconnectAttemptGeneration &+= 1
+        reconnectCanBeAccelerated = false
+        reconnect?.cancel()
+        let committed = committedConnectionTask
+        committedConnectionTask = nil
+        committed?.cancel()
+        delegate?.lifecycleInvalidateSessionConnectionOwnership()
+        connectionID = nil
+        sceneIsBackgrounded = true
+        guard phase.admitsWork else { return }
+        let previousRetirement = backgroundRetirementTask
+        let retirement = Task { @MainActor [weak self] in
+            await previousRetirement?.value
+            guard !Task.isCancelled, let self else { return }
+            await self.client.retireForBackground()
+        }
+        backgroundRetirementTask = retirement
     }
 
     func pair(_ invitation: PairingInvitation) async throws {
@@ -337,7 +373,7 @@ final class GatewayLifecycleCoordinator {
     }
 
     func requestReconnect(immediate: Bool = false, replaceExisting: Bool = false) {
-        guard phase.admitsWork, profiles.selected != nil else { return }
+        guard phase.admitsWork, !sceneIsBackgrounded, profiles.selected != nil else { return }
         if replaceExisting, reconnectTask != nil {
             guard reconnectCanBeAccelerated else { return }
             cancelReconnect()
@@ -388,7 +424,7 @@ final class GatewayLifecycleCoordinator {
     }
 
     private func admitsGeneration(_ generation: Int) -> Bool {
-        phase.admitsWork && phase.generation == generation
+        phase.admitsWork && !sceneIsBackgrounded && phase.generation == generation
     }
 
     private func requireGeneration(_ generation: Int) throws {
@@ -447,11 +483,13 @@ final class GatewayLifecycleCoordinator {
         let reconnect = reconnectTask
         let committedConnection = committedConnectionTask
         let foreground = foregroundReconciliationTask
+        let backgroundRetirement = backgroundRetirementTask
         reconnectTask = nil
         committedConnectionTask = nil
         reconnectAttemptGeneration &+= 1
         reconnectCanBeAccelerated = false
         foregroundReconciliationTask = nil
+        backgroundRetirementTask = nil
         foregroundReconciliationGeneration &+= 1
         reconnect?.cancel()
         committedConnection?.cancel()
@@ -463,6 +501,7 @@ final class GatewayLifecycleCoordinator {
             await precedingTransition?.value
             guard let self else { return }
             await self.delegate?.lifecycleRetireProjection(final: final)
+            await backgroundRetirement?.value
             await self.client.close()
             await reconnect?.value
             await committedConnection?.value
@@ -504,8 +543,10 @@ final class GatewayLifecycleCoordinator {
     ) async {
         guard admits(admission) else { return }
         connectionState = .connecting
+        var establishedConnectionID: Int?
         do {
             let connection = try await client.connectForLifecycle(profile: profile, token: token)
+            establishedConnectionID = connection.id
             try require(admission)
             if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
             connectionID = connection.id
@@ -526,6 +567,10 @@ final class GatewayLifecycleCoordinator {
             connectionState = .connected
             cancelReconnect()
         } catch {
+            if let establishedConnectionID {
+                await client.closeIfCurrent(connectionID: establishedConnectionID)
+                if connectionID == establishedConnectionID { connectionID = nil }
+            }
             guard admitsGeneration(admission.generation) else { return }
             if let pairingAttemptID, (try? requirePairingAttempt(pairingAttemptID)) == nil { return }
             if let failure = error as? GatewayFailure, failure.code == "unauthenticated" {
@@ -597,7 +642,7 @@ final class GatewayLifecycleCoordinator {
     }
 
     private func scheduleReconnect(immediate: Bool = false) {
-        guard phase.admitsWork, profiles.selected != nil, reconnectTask == nil else { return }
+        guard phase.admitsWork, !sceneIsBackgrounded, profiles.selected != nil, reconnectTask == nil else { return }
         let lifecycleGeneration = phase.generation
         reconnectAttemptGeneration &+= 1
         let attemptGeneration = reconnectAttemptGeneration
@@ -621,8 +666,10 @@ final class GatewayLifecycleCoordinator {
                         attemptGeneration: attemptGeneration
                     ) else { return }
                     self.connectionState = .reconnecting
+                    var establishedConnectionID: Int?
                     do {
                         let connection = try await self.client.reconnectForLifecycle()
+                        establishedConnectionID = connection.id
                         try self.requireReconnect(
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration
@@ -654,6 +701,10 @@ final class GatewayLifecycleCoordinator {
                         )
                         return
                     } catch let failure as GatewayFailure where failure.code == "unauthenticated" {
+                        if let establishedConnectionID {
+                            await self.client.closeIfCurrent(connectionID: establishedConnectionID)
+                            if self.connectionID == establishedConnectionID { self.connectionID = nil }
+                        }
                         guard !Task.isCancelled, self.admitsReconnect(
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration
@@ -666,8 +717,16 @@ final class GatewayLifecycleCoordinator {
                         )
                         return
                     } catch is CancellationError {
+                        if let establishedConnectionID {
+                            await self.client.closeIfCurrent(connectionID: establishedConnectionID)
+                            if self.connectionID == establishedConnectionID { self.connectionID = nil }
+                        }
                         return
                     } catch {
+                        if let establishedConnectionID {
+                            await self.client.closeIfCurrent(connectionID: establishedConnectionID)
+                            if self.connectionID == establishedConnectionID { self.connectionID = nil }
+                        }
                         guard !Task.isCancelled, self.admitsReconnect(
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration

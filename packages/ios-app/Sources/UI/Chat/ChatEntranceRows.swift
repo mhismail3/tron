@@ -87,6 +87,49 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
     }
 }
 
+/// The ephemeral submission is the visual handoff from the composer. It owns
+/// one insertion animation while it waits for canonical reconciliation; later
+/// transcript snapshots update the same bubble without replaying that motion.
+struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
+    let reduceMotion: Bool
+    @ViewBuilder let content: Content
+    @State private var revealed = false
+
+    init(
+        reduceMotion: Bool,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.reduceMotion = reduceMotion
+        self.content = content()
+    }
+
+    var body: some View {
+        let hidden = ChatContentTransitionPolicy.hiddenTransform(
+            for: .userPrompt,
+            reduceMotion: reduceMotion
+        )
+        content
+            .opacity(revealed ? 1 : 0)
+            .scaleEffect(
+                revealed ? 1 : hidden.scale,
+                anchor: hidden.anchor.unitPoint
+            )
+            .offset(
+                x: revealed ? 0 : hidden.offsetX,
+                y: revealed ? 0 : hidden.offsetY
+            )
+            .onAppear {
+                guard !revealed else { return }
+                withAnimation(ChatContentTransitionPolicy.revealAnimation(
+                    for: .userPrompt,
+                    reduceMotion: reduceMotion
+                )) {
+                    revealed = true
+                }
+            }
+    }
+}
+
 struct ChatQueuedMessageEntranceRow<Content: View>: View {
     let animatesEntrance: Bool
     let reduceMotion: Bool
