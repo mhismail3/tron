@@ -22,7 +22,7 @@ struct ProviderSetupRow: View {
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(1)
                 Text(connectionDetail)
-                    .font(TronTypography.bodySM)
+                    .font(TronTypography.code(size: TronTypography.sizeBodySM))
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(1)
             }

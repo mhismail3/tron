@@ -40,11 +40,20 @@ export function safeJson(value: unknown, depth = 0, seen = new WeakSet<object>()
   if (typeof value === "object") {
     if (seen.has(value)) return "[circular]";
     seen.add(value);
-    if (Array.isArray(value)) return value.slice(0, 1_000).map((item) => safeJson(item, depth + 1, seen));
+    if (Array.isArray(value)) {
+      const result = value.slice(0, 1_000).map((item) => safeJson(item, depth + 1, seen));
+      seen.delete(value);
+      return result;
+    }
     const result: Record<string, JsonValue> = {};
     for (const [key, item] of Object.entries(value).slice(0, 1_000)) {
       result[key] = safeJson(item, depth + 1, seen);
     }
+    // `seen` is a recursion stack, not a global visited set. Pi reuses
+    // immutable metadata objects across resource entries; repeated siblings
+    // are valid JSON and must be projected again, while true back-edges still
+    // resolve to the bounded circular marker above.
+    seen.delete(value);
     return result;
   }
   return null;

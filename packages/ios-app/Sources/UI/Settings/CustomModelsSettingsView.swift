@@ -49,27 +49,19 @@ struct CustomModelsSettingsView: View {
                         .buttonStyle(TronActionButtonStyle())
                 }
 
-                DisclosureGroup(isExpanded: $showingAdvanced) {
-                    TextEditor(text: $document)
-                        .frame(minHeight: 300)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                        .tronTextEditor(monospaced: true)
-                        .padding(.top, 12)
-                        .focused($advancedEditorFocused)
-                        .onChange(of: document) { _, _ in
-                            if advancedEditorFocused {
-                                advancedDocumentEdited = true
-                                draftOwner.markEdited()
-                            }
+                TronTechnicalJSONRow(
+                    value: .object(documentRoot),
+                    title: "Advanced JSON",
+                    subtitle: advancedDocumentEdited ? "Unsaved edits · View or edit configuration" : "View or edit full custom model configuration",
+                    sheetTitle: "Advanced JSON",
+                    accent: .tronSlate,
+                    onEdit: {
+                        Task { @MainActor in
+                            await Task.yield()
+                            showingAdvanced = true
                         }
-                } label: {
-                    Label("Advanced JSON", systemImage: "curlybraces")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                }
-                .padding(14)
-                .tronGlassSurface(accent: .tronSlate, tintOpacity: 0.08)
+                    }
+                )
             }
             .padding(20)
         }
@@ -82,6 +74,9 @@ struct CustomModelsSettingsView: View {
                     Task { await save() }
                 }
             }
+        }
+        .sheet(isPresented: $showingAdvanced) {
+            advancedEditorSheet
         }
         .task(id: CustomModelLoadID(
             target: target,
@@ -107,6 +102,38 @@ struct CustomModelsSettingsView: View {
                 rebuildDocument()
             }
         }
+    }
+
+    private var advancedEditorSheet: some View {
+        NavigationStack {
+            TextEditor(text: $document)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .tronTextEditor(monospaced: true)
+                .padding(18)
+                .focused($advancedEditorFocused)
+                .onChange(of: document) { _, _ in
+                    if advancedEditorFocused {
+                        advancedDocumentEdited = true
+                        draftOwner.markEdited()
+                    }
+                }
+                .tronScrollEdgeChrome()
+                .tronNavigationTitle("Advanced JSON")
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button { showingAdvanced = false } label: {
+                            Image(systemName: "checkmark")
+                                .font(TronTypography.buttonSM)
+                                .foregroundStyle(Color.tronEmerald)
+                        }
+                        .accessibilityLabel("Done")
+                    }
+                }
+        }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
     }
 
     private var providersSection: some View {
@@ -141,10 +168,15 @@ struct CustomModelsSettingsView: View {
                 providers.append(CustomModelProviderDraft())
                 draftOwner.markEdited()
             } label: {
-                Label("Add Provider", systemImage: "plus")
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                TronSettingsRow(
+                    icon: "plus",
+                    title: "Add Provider",
+                    accent: .tronEmerald,
+                    titleColor: .tronEmerald
+                )
             }
-            .buttonStyle(TronRowButtonStyle(accent: .tronEmerald))
+            .buttonStyle(.plain)
+            .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07, interactive: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -177,15 +209,22 @@ struct CustomModelsSettingsView: View {
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(provider.baseURL.isEmpty ? "Add an endpoint" : provider.baseURL)
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text("\(modelLabel) · \(apiTitle(provider.api))")
-                    .font(TronTypography.caption)
-                    .foregroundStyle(Color.tronTextMuted)
-                    .lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(provider.baseURL.isEmpty ? "Add an endpoint" : provider.baseURL)
+                        .font(TronTypography.code(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .layoutPriority(1)
+                    Text("·")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                    Text("\(modelLabel) · \(apiTitle(provider.api))")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
             }
             Spacer(minLength: 6)
         }

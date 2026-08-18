@@ -299,7 +299,7 @@ from an identity-checked directory handle and fails visibly, without returning a
 above 1,000 examined entries or 768 KiB of projected metadata; ordinary folders retain the established directory-first
 ordering and exact paths. Package inventory and update projections reject duplicate stable
 identities, more than 256 packages/updates, more than 1,000 resources of any kind, strings above
-8 KiB, or encoded responses above 768 KiB before generic JSON projection can truncate them. Pi's configured `sessionDir`, or its
+8 KiB, or encoded responses above 768 KiB before generic JSON projection can truncate them. The bounded JSON projector tracks only the active recursion path, so shared Pi metadata objects are expanded for each sibling resource while true cycles remain marked and bounded. Pi's configured `sessionDir`, or its
 canonical per-workspace directories under `agentDir/sessions`, remain authoritative; Tron does
 not move or mirror those files. `session.list` defaults to user sessions, while `scope: "all"`
 additively includes extension-owned children classified from nested canonical storage or their
