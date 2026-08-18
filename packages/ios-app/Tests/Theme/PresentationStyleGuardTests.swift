@@ -515,6 +515,8 @@ struct PresentationStyleGuardTests {
         let saveToolbarButton = (presentation.components(separatedBy: "struct TronSaveToolbarButton").dropFirst().first ?? "")
             .components(separatedBy: "struct TronReloadToolbarButton").first ?? ""
         #expect(saveToolbarButton.contains(".tronToolbarAction()"))
+        #expect(saveToolbarButton.contains("Color.tronTextMuted"))
+        #expect(saveToolbarButton.contains("!isSaving"))
         #expect(!saveToolbarButton.contains(".buttonStyle(.glass)"))
         #expect(!saveToolbarButton.contains(".buttonBorderShape(.capsule)"))
         #expect(presentation.contains("static var numericValue"))
