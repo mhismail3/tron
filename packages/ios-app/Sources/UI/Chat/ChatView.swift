@@ -12,6 +12,7 @@ private struct ChatScrollGeometryObservation: Equatable {
     let geometry: ChatTranscriptGeometry
     let presentationEpoch: Int
     let phase: ChatOpenPresentationPhase
+    let layoutEpoch: Int
 }
 
 struct ChatView: View {
@@ -446,7 +447,8 @@ struct ChatView: View {
             ChatScrollGeometryObservation(
                 geometry: ChatTranscriptGeometry(geometry),
                 presentationEpoch: openPresentation.epoch,
-                phase: openPresentation.phase
+                phase: openPresentation.phase,
+                layoutEpoch: scrollCoordinator.layoutEpoch
             )
         } action: { previous, observation in
             guard observation.presentationEpoch == openPresentation.epoch,
@@ -766,6 +768,10 @@ struct ChatView: View {
     }
 
     private var isTranscriptReady: Bool { openPresentation.phase == .ready }
+
+    private var isLoadingEarlierMessages: Bool {
+        model.loadingEarlierTranscript || scrollCoordinator.isPrependingHistory
+    }
 
     private var transcriptRevealAnimation: Animation {
         reduceMotion ? .easeOut(duration: 0.12) : .easeOut(duration: 0.26)
@@ -1199,6 +1205,7 @@ struct ChatView: View {
 
     private func earlierMessagesChip(snapshot: SessionSnapshot) -> some View {
         Button {
+            guard !isLoadingEarlierMessages else { return }
             let sessionID = snapshot.sessionId
             let runtimeGeneration = snapshot.runtimeGeneration
             let previousStart = snapshot.transcriptStart ?? 0
@@ -1242,21 +1249,21 @@ struct ChatView: View {
             }
         } label: {
             HStack(spacing: 7) {
-                if model.loadingEarlierTranscript {
+                if isLoadingEarlierMessages {
                     ProgressView()
                         .controlSize(.mini)
                         .tint(Color.tronEmerald)
                 } else {
                     Image(systemName: "arrow.up")
                 }
-                Text(model.loadingEarlierTranscript ? "Loading earlier…" : "Load earlier messages")
+                Text(isLoadingEarlierMessages ? "Loading earlier…" : "Load earlier messages")
             }
             .chatTranscriptPill()
         }
         .buttonStyle(.plain)
-        .disabled(model.loadingEarlierTranscript)
+        .disabled(isLoadingEarlierMessages)
         .frame(maxWidth: .infinity, minHeight: 44)
-        .accessibilityLabel(model.loadingEarlierTranscript ? "Loading earlier messages" : "Load earlier messages")
+        .accessibilityLabel(isLoadingEarlierMessages ? "Loading earlier messages" : "Load earlier messages")
     }
 
     private var composer: some View {

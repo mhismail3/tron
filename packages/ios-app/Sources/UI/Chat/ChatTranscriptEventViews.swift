@@ -24,7 +24,8 @@ extension View {
 
 /// One visual language for transcript events that are not conversation turns.
 /// Detail-bearing events are buttons with Liquid Glass; informational events
-/// remain noninteractive and flat while retaining the same capsule geometry.
+/// remain noninteractive and flat. Error notices use a rounded rectangle so
+/// multiline diagnostics do not read like an oversized capsule.
 struct ChatNotificationView: View {
     let presentation: ChatNotificationPresentation
     @State private var showingDetail = false

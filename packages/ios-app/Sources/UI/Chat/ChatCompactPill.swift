@@ -42,6 +42,12 @@ enum ChatCompactPillLayoutPolicy {
     static let itemSpacing: CGFloat = 7
     static let standardIconSize: CGFloat = 10
     static let toolIconSize: CGFloat = 11
+    static let errorCornerRadius: CGFloat = 18
+    static let capsuleCornerRadius: CGFloat = 999
+
+    static func cornerRadius(for tone: ChatNotificationTone) -> CGFloat {
+        tone == .error ? errorCornerRadius : capsuleCornerRadius
+    }
 }
 
 /// Shared visual primitive for compact transcript activity. Alignment and
@@ -66,24 +72,27 @@ struct ChatCompactPillSurface<Content: View>: View {
     }
 
     @ViewBuilder var body: some View {
-        let capsule = Capsule()
+        let shape = RoundedRectangle(
+            cornerRadius: ChatCompactPillLayoutPolicy.cornerRadius(for: tone),
+            style: .continuous
+        )
         switch material {
         case .glass:
             content
                 .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
                 .padding(.vertical, ChatCompactPillLayoutPolicy.verticalPadding)
-                .contentShape(capsule)
+                .contentShape(shape)
                 .glassEffect(
                     .regular.tint(tone.surfaceColor.opacity(0.18)).interactive(interactive),
-                    in: capsule
+                    in: shape
                 )
         case .flat:
             content
                 .padding(.horizontal, ChatCompactPillLayoutPolicy.horizontalPadding)
                 .padding(.vertical, ChatCompactPillLayoutPolicy.verticalPadding)
-                .contentShape(capsule)
-                .background(tone.surfaceColor.opacity(0.10), in: capsule)
-                .overlay(capsule.stroke(tone.surfaceColor.opacity(0.30), lineWidth: 0.5))
+                .contentShape(shape)
+                .background(tone.surfaceColor.opacity(0.10), in: shape)
+                .overlay(shape.stroke(tone.surfaceColor.opacity(0.30), lineWidth: 0.5))
         }
     }
 }

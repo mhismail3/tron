@@ -1268,6 +1268,8 @@ struct PresentationStyleGuardTests {
         #expect(transcriptEvents.contains("struct ChatTranscriptPillModifier: ViewModifier"))
         #expect(transcriptEvents.contains("TronTypography.sizeBodySM"))
         #expect(compactPill.contains("static let verticalPadding: CGFloat = 6"))
+        #expect(compactPill.contains("static let errorCornerRadius: CGFloat = 18"))
+        #expect(compactPill.contains("tone == .error ? errorCornerRadius : capsuleCornerRadius"))
         #expect(compactPill.occurrences(of: ".padding(.vertical, ChatCompactPillLayoutPolicy.verticalPadding)") == 2)
         #expect(transcriptEvents.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(transcriptEvents.contains(".frame(minWidth: 44, minHeight: 44)"))
@@ -1277,7 +1279,7 @@ struct PresentationStyleGuardTests {
         #expect(compactPill.contains("struct ChatCompactPillSurface"))
         #expect(compactPill.contains("case .glass:"))
         #expect(compactPill.contains("case .flat:"))
-        #expect(compactPill.contains(".background(tone.surfaceColor.opacity(0.10), in: capsule)"))
+        #expect(compactPill.contains(".background(tone.surfaceColor.opacity(0.10), in: shape)"))
         #expect(compactPill.contains("Color(lightHex: \"#0369A1\", darkHex: \"#38BDF8\")"))
         #expect(compactPill.contains("Color(lightHex: \"#92400E\", darkHex: \"#FBBF24\")"))
         #expect(compactPill.contains("Color(lightHex: \"#475569\", darkHex: \"#CBD5E1\")"))
@@ -1308,6 +1310,9 @@ struct PresentationStyleGuardTests {
         let earlierMessagesChip = (chat.components(separatedBy: "private func earlierMessagesChip").dropFirst().first ?? "")
             .components(separatedBy: "private var composer").first ?? ""
         #expect(!earlierMessagesChip.contains("TronActionButtonStyle(expands: false)"))
+        #expect(earlierMessagesChip.contains("scrollCoordinator.isPrependingHistory"))
+        #expect(earlierMessagesChip.contains(".disabled(isLoadingEarlierMessages)"))
+        #expect(chat.contains("layoutEpoch: scrollCoordinator.layoutEpoch"))
     }
 
     @Test("send-to-chat motion stays role-aware, authoritative, and accessible")
