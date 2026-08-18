@@ -45,10 +45,10 @@ struct GatewayDiagnosticsView: View {
                         }
                         if visibleRecords.isEmpty {
                             TronSettingsDivider(accent: .tronSlate)
-                            TronSettingsRow(
+                            TronValueRow(
                                 icon: loadingLogs ? "arrow.clockwise" : "text.page.badge.magnifyingglass",
                                 title: loadingLogs ? "Loading logs…" : "No matching logs",
-                                subtitle: loadingLogs ? nil : "Try another level or refresh.",
+                                detail: loadingLogs ? nil : "Try another level or refresh.",
                                 accent: .tronSlate
                             ) {
                                 if loadingLogs { ProgressView().controlSize(.small).tint(Color.tronSlate) }
@@ -57,10 +57,10 @@ struct GatewayDiagnosticsView: View {
                             ForEach(Array(visibleRecords.enumerated()), id: \.element.id) { index, record in
                                 TronSettingsDivider(accent: .tronSlate)
                                 Button { selectedLog = record } label: {
-                                    TronSettingsRow(
+                                    TronValueRow(
                                         icon: record.icon,
                                         title: record.levelTitle,
-                                        subtitle: record.message,
+                                        detail: record.message,
                                         accent: record.accent
                                     ) {
                                         Text(logTimestamp(record))

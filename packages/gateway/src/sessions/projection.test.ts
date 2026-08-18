@@ -212,6 +212,22 @@ describe("transcript projection", () => {
     expect(safeJson(value)).toEqual({ self: "[circular]" });
   });
 
+  it("reprojects shared sibling objects instead of marking them circular", () => {
+    const metadata = { source: "shared-package", scope: "user", origin: "package" };
+    const value = {
+      skills: [
+        { path: "/skills/one", enabled: true, metadata },
+        { path: "/skills/two", enabled: true, metadata },
+      ],
+    };
+    expect(safeJson(value)).toEqual({
+      skills: [
+        { path: "/skills/one", enabled: true, metadata },
+        { path: "/skills/two", enabled: true, metadata },
+      ],
+    });
+  });
+
   it("projects deep history without recursive stack overflow", () => {
     const manager = SessionManager.inMemory("/tmp/deep-history");
     for (let index = 0; index < 5_000; index += 1) {

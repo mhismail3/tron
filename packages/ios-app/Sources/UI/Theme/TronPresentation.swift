@@ -727,6 +727,7 @@ struct TronSettingsRow<Trailing: View>: View {
     let title: String
     let subtitle: String?
     let accent: Color
+    let titleColor: Color
     let trailing: Trailing
 
     init(
@@ -734,12 +735,14 @@ struct TronSettingsRow<Trailing: View>: View {
         title: String,
         subtitle: String? = nil,
         accent: Color = .tronEmerald,
+        titleColor: Color = .tronTextPrimary,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
         self.title = title
         self.subtitle = subtitle
         self.accent = accent
+        self.titleColor = titleColor
         self.trailing = trailing()
     }
 
@@ -753,7 +756,7 @@ struct TronSettingsRow<Trailing: View>: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
+                    .foregroundStyle(titleColor)
                     .fixedSize(horizontal: false, vertical: true)
                 if let subtitle {
                     Text(subtitle)
@@ -774,8 +777,14 @@ struct TronSettingsRow<Trailing: View>: View {
 }
 
 extension TronSettingsRow where Trailing == EmptyView {
-    init(icon: String, title: String, subtitle: String? = nil, accent: Color = .tronEmerald) {
-        self.init(icon: icon, title: title, subtitle: subtitle, accent: accent) { EmptyView() }
+    init(
+        icon: String,
+        title: String,
+        subtitle: String? = nil,
+        accent: Color = .tronEmerald,
+        titleColor: Color = .tronTextPrimary
+    ) {
+        self.init(icon: icon, title: title, subtitle: subtitle, accent: accent, titleColor: titleColor) { EmptyView() }
     }
 }
 

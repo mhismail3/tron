@@ -267,6 +267,7 @@ struct TronTechnicalJSONRow: View {
     var subtitle = "View full protocol representation"
     var sheetTitle = "Technical JSON"
     var accent: Color = .tronSlate
+    var onEdit: (() -> Void)?
     @State private var isPresented = false
     @State private var detent: PresentationDetent = .medium
 
@@ -291,7 +292,8 @@ struct TronTechnicalJSONRow: View {
                 value: value,
                 title: sheetTitle,
                 accent: accent,
-                detent: $detent
+                detent: $detent,
+                onEdit: onEdit
             )
         }
     }
@@ -302,6 +304,7 @@ private struct TechnicalJSONSheet: View {
     let title: String
     let accent: Color
     @Binding var detent: PresentationDetent
+    let onEdit: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -321,6 +324,15 @@ private struct TechnicalJSONSheet: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     TronSheetTitle(title: title, accent: accent)
+                }
+                if let onEdit {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Edit") {
+                            dismiss()
+                            onEdit()
+                        }
+                        .tronToolbarAction(accent: .tronEmerald)
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button { dismiss() } label: {
