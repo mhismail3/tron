@@ -81,6 +81,7 @@ struct OnboardingPage<Content: View>: View {
             .padding(.horizontal, 24).padding(.top, 10).padding(.bottom, 126)
             .frame(maxWidth: 620, alignment: .leading).frame(maxWidth: .infinity)
         }
+        .tronScrollEdgeChrome()
         .scrollDismissesKeyboard(.interactively)
     }
 }

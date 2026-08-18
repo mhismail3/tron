@@ -67,37 +67,17 @@ struct OnboardingView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack(alignment: .bottom) {
-                TabView(selection: $step) {
-                    if mode == .addServer {
-                        pairingPage.tag(Step.pair)
-                    } else {
-                        welcomePage.tag(Step.welcome)
-                        tailscalePage.tag(Step.tailscale)
-                        macPage.tag(Step.mac)
-                        pairingPage.tag(Step.pair)
-                    }
-                    if mode == .setup && isPaired {
-                        workspacePage.tag(Step.workspace)
-                        preferredProviderPage(ids: ["anthropic"], name: "Anthropic").tag(Step.anthropic)
-                        preferredProviderPage(ids: ["openai-codex", "openai"], name: "OpenAI").tag(Step.openAI)
-                        remainingProvidersPage.tag(Step.providers)
-                        modelPage.tag(Step.model)
+            onboardingContent
+                .id(step)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if mode == .setup {
+                        pageDots
+                            .padding(.horizontal, TronSpacing.xlarge)
+                            .padding(.bottom, 10)
                     }
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-
-                if mode == .setup {
-                    pageDots
-                        .padding(.horizontal, TronSpacing.xlarge)
-                        .padding(.bottom, 10)
-                }
-            }
-            .tronTopBlurSurface()
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
-            .toolbarBackground(.clear, for: .navigationBar)
+                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if mode == .setup && step != .welcome {
@@ -220,6 +200,21 @@ struct OnboardingView: View {
                state == .connected && !model.setupComplete && step.rawValue < Step.workspace.rawValue {
                 withAnimation(.snappy(duration: 0.28)) { step = .workspace }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var onboardingContent: some View {
+        switch step {
+        case .welcome: welcomePage
+        case .tailscale: tailscalePage
+        case .mac: macPage
+        case .pair: pairingPage
+        case .workspace: workspacePage
+        case .anthropic: preferredProviderPage(ids: ["anthropic"], name: "Anthropic")
+        case .openAI: preferredProviderPage(ids: ["openai-codex", "openai"], name: "OpenAI")
+        case .providers: remainingProvidersPage
+        case .model: modelPage
         }
     }
 
