@@ -85,7 +85,7 @@ struct AgentDefaultsSettingsView: View {
                         TronToggleRow(icon: "arrow.clockwise", title: "Automatic Retry", accent: .tronTeal, isOn: $draft.retry)
                     }
                 }
-                TronSettingsGroup("Project Resources", detail: "Trust controls project resource loading; it is not a sandbox.", accent: .tronAmber) {
+                TronSettingsGroup("Project Resources", accent: .tronAmber) {
                     TronValueRow(icon: "checkmark.shield", title: "Default Trust", accent: .tronAmber) {
                         TronInlineMenu(draft.trust.capitalized, accent: .tronAmber) {
                             Button("Ask") { draft.trust = "ask" }
@@ -93,6 +93,11 @@ struct AgentDefaultsSettingsView: View {
                             Button("Never") { draft.trust = "never" }
                         }
                     }
+                    Text("Trust controls project resource loading; it is not a sandbox.")
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 12)
                 }
             }
             .padding(.horizontal, 20)
