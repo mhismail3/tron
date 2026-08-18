@@ -550,7 +550,7 @@ struct TronConfirmationSheet: View {
                 .padding(24)
             }
             .tronScrollEdgeChrome()
-            .tronNavigationTitle(title, accent: accent)
+            .tronNavigationTitle("Confirm", accent: .tronEmerald)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(secondaryTitle ?? "Cancel") {
