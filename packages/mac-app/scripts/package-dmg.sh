@@ -44,11 +44,36 @@ case "$layout" in structural|release) ;; *) die "--layout must be structural or 
 bundle="$(basename "$app")"
 [[ "$bundle" == *.app ]] || die "--app must name an .app bundle"
 helper="Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
-gateway="Contents/Resources/Gateway/app/dist/index.js"
-runtime="Contents/Resources/Gateway/runtime/node-arm64"
-[ -x "$app/$helper" ] || die "app bundle is missing executable helper: $app/$helper"
-[ -f "$app/$gateway" ] || die "app bundle is missing gateway entrypoint: $app/$gateway"
-[ -x "$app/$runtime" ] || die "app bundle is missing Node runtime: $app/$runtime"
+gateway_root="Contents/Resources/Gateway"
+launch_agent="Contents/Library/LaunchAgents/com.tron.server.plist"
+
+verify_app_bundle() {
+    local root="$1"
+    local required_file
+    local required_directory
+    local required_files=(
+        "$helper"
+        "$launch_agent"
+        "$gateway_root/app/dist/index.js"
+        "$gateway_root/app/package.json"
+        "$gateway_root/app/package-lock.json"
+        "$gateway_root/runtime/node-arm64"
+        "$gateway_root/runtime/node-x64"
+    )
+    local required_directories=("$gateway_root/app/node_modules")
+
+    for required_file in "${required_files[@]}"; do
+        [ -f "$root/$required_file" ] || die "app bundle is missing required Gateway file: $root/$required_file"
+    done
+    for required_directory in "${required_directories[@]}"; do
+        [ -d "$root/$required_directory" ] || die "app bundle is missing required Gateway directory: $root/$required_directory"
+    done
+    [ -x "$root/$helper" ] || die "app bundle helper is not executable: $root/$helper"
+    [ -x "$root/$gateway_root/runtime/node-arm64" ] || die "app bundle arm64 Node runtime is not executable"
+    [ -x "$root/$gateway_root/runtime/node-x64" ] || die "app bundle x64 Node runtime is not executable"
+}
+
+verify_app_bundle "$app"
 
 work="$(mktemp -d)"
 source="$work/source"
@@ -86,7 +111,7 @@ create-dmg "${args[@]}"
 hdiutil attach -readonly -nobrowse -mountpoint "$mount_point" "$output"
 attached=1
 [ -d "$mount_point/$bundle" ] || die "mounted DMG is missing $bundle"
-[ -x "$mount_point/$bundle/$helper" ] || die "mounted DMG is missing executable helper"
+verify_app_bundle "$mount_point/$bundle"
 [ -L "$mount_point/Applications" ] || die "mounted DMG is missing Applications link"
 [ "$(readlink "$mount_point/Applications")" = "/Applications" ] \
     || die "mounted DMG Applications link does not target /Applications"

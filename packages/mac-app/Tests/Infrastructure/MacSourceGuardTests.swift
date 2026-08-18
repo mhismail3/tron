@@ -115,6 +115,12 @@ struct MacSourceGuardTests {
             )
         )
 
+        let ensureScript = try Self.read(macRoot, "scripts/ensure-gateway-bundle.sh")
+        #expect(ensureScript.contains("bundle-gateway.sh"))
+        #expect(ensureScript.contains("node-arm64"))
+        #expect(ensureScript.contains("node-x64"))
+        #expect(ensureScript.contains("node_modules"))
+
         let bundleScript = try Self.read(macRoot, "scripts/bundle-gateway.sh")
         #expect(bundleScript.contains("NODE_VERSION=\"22.22.0\""))
         #expect(bundleScript.contains("NODE_ARM64_SHA256="))
@@ -125,6 +131,8 @@ struct MacSourceGuardTests {
         #expect(!bundleScript.contains("cargo build"))
 
         let project = try Self.read(macRoot, "project.yml")
+        #expect(project.contains("name: Ensure Bundled Gateway Payload"))
+        #expect(project.contains("ensure-gateway-bundle.sh"))
         #expect(project.contains("- \"Gateway/**\""))
         #expect(project.contains("ditto \"$GATEWAY_SRC\" \"$GATEWAY_DST\""))
         #expect(project.contains("find \"$GATEWAY_DST\" -type f"))
@@ -160,6 +168,13 @@ struct MacSourceGuardTests {
     func bundleGatewayCleanRemovesOnlyGeneratedPayloads() throws {
         let macRoot = try Self.macAppRoot()
         let script = try Self.read(macRoot, "scripts/bundle-gateway.sh")
+        let packageScript = try Self.read(macRoot, "scripts/package-dmg.sh")
+        #expect(packageScript.contains("verify_app_bundle"))
+        #expect(packageScript.contains("com.tron.server.plist"))
+        #expect(packageScript.contains("node-arm64"))
+        #expect(packageScript.contains("node-x64"))
+        #expect(packageScript.contains("app/node_modules"))
+        #expect(packageScript.contains("mounted DMG"))
         let cleanBlock = try #require(script.range(of: "if ((clean)); then"))
         let requiredSources = try #require(script.range(of: "required=("))
         let block = String(script[cleanBlock.lowerBound..<requiredSources.lowerBound])

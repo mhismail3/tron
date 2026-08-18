@@ -11,6 +11,7 @@ enum ExistingInstallDetector {
         plistPath: URL = TronPaths.launchAgentPlistPath,
         bundleVersionResolver: (URL) -> String? = ExistingInstallDetector.readMarketingVersion,
         bundleSignatureProblemResolver: (URL) -> String? = ExistingInstallDetector.bundleSignatureProblem,
+        gatewayPayloadProblemResolver: () -> String? = { nil },
         serviceStatusResolver: () -> ServiceRegistrationStatus = { ExistingInstallDetector.serviceStatus() }
     ) -> ExistingInstallStatus {
         let fm = FileManager.default
@@ -29,6 +30,9 @@ enum ExistingInstallDetector {
             return .partial(reason: "Bundled LaunchAgent plist is missing")
         }
         if let problem = bundleSignatureProblemResolver(helperBundle) {
+            return .partial(reason: problem)
+        }
+        if let problem = gatewayPayloadProblemResolver() {
             return .partial(reason: problem)
         }
 
@@ -88,6 +92,75 @@ enum ExistingInstallDetector {
             return "The bundled LaunchAgent plist is missing."
         }
         return signatureProblemResolver(helperBundle)
+    }
+
+    static func validateGatewayPayload(
+        payloadRoot: URL = TronPaths.gatewayPayloadRoot,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
+        fileSize: (String) -> Int64? = {
+            (try? FileManager.default.attributesOfItem(atPath: $0)[.size] as? NSNumber)?.int64Value
+        },
+        readData: (String) -> Data? = { try? Data(contentsOf: URL(fileURLWithPath: $0)) }
+    ) -> String? {
+        func usableFile(_ url: URL, minimumBytes: Int64 = 1) -> Bool {
+            fileExists(url.path) && (fileSize(url.path) ?? 0) >= minimumBytes
+        }
+
+        let entrypoint = payloadRoot.appendingPathComponent("app/dist/index.js", isDirectory: false)
+        guard usableFile(entrypoint, minimumBytes: 1_024) else {
+            return "The bundled Gateway entrypoint is missing or incomplete. Rebuild or reinstall Tron."
+        }
+
+        let packageManifest = payloadRoot.appendingPathComponent("app/package.json", isDirectory: false)
+        let packageLock = payloadRoot.appendingPathComponent("app/package-lock.json", isDirectory: false)
+        guard usableFile(packageManifest), usableFile(packageLock),
+              let manifestData = readData(packageManifest.path),
+              let lockData = readData(packageLock.path),
+              (try? JSONSerialization.jsonObject(with: manifestData)) is [String: Any],
+              (try? JSONSerialization.jsonObject(with: lockData)) is [String: Any] else {
+            return "The bundled Gateway package manifest is missing or invalid. Rebuild or reinstall Tron."
+        }
+
+        let dependencies = payloadRoot.appendingPathComponent("app/node_modules", isDirectory: true)
+        guard fileExists(dependencies.path) else {
+            return "The bundled Gateway dependencies are missing. Rebuild or reinstall Tron."
+        }
+
+        let requiredDependencyFiles = [
+            "@earendil-works/pi-agent-core/package.json",
+            "@earendil-works/pi-ai/package.json",
+            "@earendil-works/pi-coding-agent/package.json",
+            "@earendil-works/pi-tui/package.json",
+            "node-pty/package.json",
+            "proper-lockfile/package.json",
+            "ws/package.json",
+        ]
+        for relativePath in requiredDependencyFiles {
+            let dependency = dependencies.appendingPathComponent(relativePath, isDirectory: false)
+            guard usableFile(dependency) else {
+                return "The bundled Gateway dependency tree is incomplete. Rebuild or reinstall Tron."
+            }
+        }
+
+        let nodePtyHelper = payloadRoot
+            .appendingPathComponent("app/scripts/ensure-node-pty-helper.mjs", isDirectory: false)
+        guard usableFile(nodePtyHelper) else {
+            return "The bundled Gateway native helper is missing. Rebuild or reinstall Tron."
+        }
+
+        for architecture in ["arm64", "x64"] {
+            let runtime = payloadRoot
+                .appendingPathComponent("runtime", isDirectory: true)
+                .appendingPathComponent("node-\(architecture)", isDirectory: false)
+            guard usableFile(runtime, minimumBytes: 1_048_576) else {
+                return "The bundled Node \(architecture) runtime is missing or incomplete. Rebuild or reinstall Tron."
+            }
+            guard isExecutable(runtime.path) else {
+                return "The bundled Node \(architecture) runtime is not executable. Rebuild or reinstall Tron."
+            }
+        }
+        return nil
     }
 
     static func launchAgentPlistIsCurrent(

@@ -3,10 +3,16 @@
 ## Stage the gateway
 
 A fresh clone has neither Gateway dependencies/build output nor generated Mac
-payloads. Xcode copies generated payloads; it does not run npm or download Node
-during a build. Stage before opening or archiving the project:
+payloads. The Mac Xcode target automatically runs
+`ensure-gateway-bundle.sh` before compiling when the payload is missing. This
+stages the Gateway's locked production dependencies and embedded Node runtimes;
+it does not require Pi to be installed globally.
+
+For an explicit preflight or to refresh an existing payload:
 
 ```bash
+packages/mac-app/scripts/ensure-gateway-bundle.sh
+# Force a fresh staging pass:
 packages/mac-app/scripts/bundle-gateway.sh
 ```
 
@@ -41,6 +47,12 @@ xcodegen generate
 xcodebuild build -project TronMac.xcodeproj -scheme TronMac \
   -configuration Debug -destination 'platform=macOS,arch=arm64'
 ```
+
+The build fails closed if staging cannot complete (for example, if the
+machine lacks the development Node/npm toolchain or network access). A
+completed app contains the Gateway entrypoint, production `node_modules`, and
+both arm64/x64 Node runtimes, so the installed app does not consult `PATH`, a
+user's nvm installation, or a global Pi command.
 
 Use `TronMac Isolated Install` to own `com.tron.server.dev`, `~/.tron-dev`, and
 port 9848 without replacing the installed production app. Ordinary Debug runs
@@ -78,8 +90,10 @@ to legacy `~/.tron/auth.json` and never put the local token in the URL.
 
 ## Release
 
-Mac release is manual. Stage the Gateway, generate the project, archive with the
-maintainer's Developer ID identity, notarize and staple the app and DMG, then
-publish the release assets deliberately. `packages/mac-app/scripts/package-dmg.sh`
+Mac release is manual. The Xcode build preflight stages the Gateway, then the
+maintainer archives with the Developer ID identity. `package-dmg.sh` verifies
+the entrypoint, production dependency tree, both Node runtimes, and Login Item
+before creating the DMG. Notarize and staple the app and DMG, then publish the
+release assets deliberately. `packages/mac-app/scripts/package-dmg.sh`
 owns DMG layout verification and requires `create-dmg` on `PATH`. Never add an
 automated production release or deployment command.

@@ -40,6 +40,29 @@ struct ExistingInstallDetectorTests {
         #expect(result == .registered(version: "0.5.0"))
     }
 
+    @Test("incomplete Gateway payload is surfaced before registration state")
+    func incompleteGatewayPayloadIsPartial() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let paths = try makeHelperFixture(in: tmp)
+
+        let result = ExistingInstallDetector.detect(
+            helperBundle: paths.helperBundle,
+            helperBinary: paths.helperBinary,
+            plistPath: paths.plistPath,
+            bundleVersionResolver: { _ in nil },
+            bundleSignatureProblemResolver: { _ in nil },
+            gatewayPayloadProblemResolver: { "The bundled Gateway is incomplete" },
+            serviceStatusResolver: { .enabled }
+        )
+
+        if case .partial(let reason) = result {
+            #expect(reason.contains("Gateway"))
+        } else {
+            Issue.record("expected partial")
+        }
+    }
+
     @Test("requiresApproval maps to install blocking state")
     func requiresApproval() throws {
         let tmp = TestTempDir.make()
@@ -134,6 +157,52 @@ struct ExistingInstallDetectorTests {
         } else {
             Issue.record("expected partial")
         }
+    }
+
+    @Test("Gateway payload validation requires embedded runtime and production dependencies")
+    func gatewayPayloadValidation() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let payload = tmp.appendingPathComponent("Gateway", isDirectory: true)
+        let entrypoint = payload.appendingPathComponent("app/dist/index.js", isDirectory: false)
+        let packageManifest = payload.appendingPathComponent("app/package.json", isDirectory: false)
+        let packageLock = payload.appendingPathComponent("app/package-lock.json", isDirectory: false)
+        let dependencies = payload.appendingPathComponent("app/node_modules", isDirectory: true)
+        let runtime = payload.appendingPathComponent("runtime", isDirectory: true)
+        try FileManager.default.createDirectory(at: entrypoint.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(repeating: 0x2f, count: 1_024).write(to: entrypoint)
+        #expect(ExistingInstallDetector.validateGatewayPayload(payloadRoot: payload) != nil)
+
+        try Data("{}".utf8).write(to: packageManifest)
+        try Data("{}".utf8).write(to: packageLock)
+        try FileManager.default.createDirectory(at: dependencies, withIntermediateDirectories: true)
+        for relativePath in [
+            "@earendil-works/pi-agent-core/package.json",
+            "@earendil-works/pi-ai/package.json",
+            "@earendil-works/pi-coding-agent/package.json",
+            "@earendil-works/pi-tui/package.json",
+            "node-pty/package.json",
+            "proper-lockfile/package.json",
+            "ws/package.json",
+        ] {
+            let dependency = dependencies.appendingPathComponent(relativePath, isDirectory: false)
+            try FileManager.default.createDirectory(at: dependency.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("{}".utf8).write(to: dependency)
+        }
+        let helper = payload.appendingPathComponent("app/scripts/ensure-node-pty-helper.mjs", isDirectory: false)
+        try FileManager.default.createDirectory(at: helper.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("// test".utf8).write(to: helper)
+        try FileManager.default.createDirectory(at: runtime, withIntermediateDirectories: true)
+        for architecture in ["arm64", "x64"] {
+            try Data(repeating: 0, count: 1_048_576).write(to: runtime.appendingPathComponent("node-\(architecture)"))
+        }
+
+        #expect(
+            ExistingInstallDetector.validateGatewayPayload(
+                payloadRoot: payload,
+                isExecutable: { _ in true }
+            ) == nil
+        )
     }
 
     @Test("LaunchAgent plist requires current BundleProgram and associated wrapper IDs")

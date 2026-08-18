@@ -191,6 +191,11 @@ struct InstallStep: View {
             stages[.validateHelper] = .failed(helperProblem)
             return
         }
+        if let gatewayProblem = setup.validateGatewayPayload() {
+            state.installOutcome = .helperValidationFailed(gatewayProblem)
+            stages[.validateHelper] = .failed(gatewayProblem)
+            return
+        }
         guard ExistingInstallDetector.launchAgentPlistIsCurrent(
             plistPath: setup.launchAgentPlistPath,
             label: setup.launchAgentLabel,
@@ -439,7 +444,7 @@ enum InstallStepContent {
     static func label(for stage: InstallPipelineStage) -> String {
         switch stage {
         case .validateApplication: return "Confirm app location"
-        case .validateHelper: return "Verify agent runtime"
+        case .validateHelper: return "Verify bundled Gateway runtime"
         case .registerAgent: return "Register Login Item"
         case .awaitPing: return "Confirm it's running"
         }

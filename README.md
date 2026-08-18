@@ -100,9 +100,11 @@ scripts/tron ios generate
 scripts/tron mac generate
 ```
 
-A fresh clone contains no generated Xcode projects or staged Mac gateway. Run
-`npm ci` before the Gateway build, `xcodegen generate` before either native
-build, and `bundle-gateway.sh` before building the Mac app.
+A fresh clone contains no generated Xcode projects or staged Mac gateway.
+Run `npm ci` before direct Gateway development and `xcodegen generate` before
+either native build. The Mac Xcode target automatically stages the bundled
+Gateway, its production dependencies, and pinned Node runtimes when the
+payload is missing; a global Pi installation is not required.
 
 ### Focused native tests
 
@@ -130,12 +132,14 @@ suites only after focused owners are green.
 ## Mac packaging
 
 ```bash
-packages/mac-app/scripts/bundle-gateway.sh
+packages/mac-app/scripts/ensure-gateway-bundle.sh
 ```
 
-The script builds the gateway, installs a separate production-only dependency
-tree, verifies checksum-pinned Node 22.22.0 arm64/x64 archives, and compiles a
-universal launcher for both Login Item variants. Generated payloads are ignored.
+The build preflight and this script stage the Gateway, a separate
+production-only dependency tree, checksum-pinned Node 22.22.0 arm64/x64
+runtimes, and a universal launcher for both Login Item variants. The resulting
+Mac app runs without a global Pi or Node installation. Generated payloads are
+ignored; use `bundle-gateway.sh` when you explicitly need to refresh them.
 
 ## Legacy session migration
 

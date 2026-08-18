@@ -17,6 +17,9 @@ enum MacCommandModeServerStarter {
         if let problem = setup.validateBundledHelper() {
             return .invalidBundledHelper(problem)
         }
+        if let problem = setup.validateGatewayPayload() {
+            return .invalidBundledHelper(problem)
+        }
         guard setup.canManageLaunchAgent else {
             return .unmanagedWrapper
         }

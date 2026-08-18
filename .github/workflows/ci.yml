@@ -30,7 +30,9 @@ jobs:
             scripts/tron \
             scripts/tron-version \
             scripts/verify-ci-toolchain.sh \
-            packages/mac-app/scripts/bundle-gateway.sh
+            packages/mac-app/scripts/bundle-gateway.sh \
+            packages/mac-app/scripts/ensure-gateway-bundle.sh \
+            packages/mac-app/scripts/package-dmg.sh
 
   gateway:
     runs-on: macos-15

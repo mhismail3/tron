@@ -59,6 +59,11 @@ struct EnvironmentSetup: Sendable {
     /// plist, or helper signature is missing/corrupt.
     var validateBundledHelper: @Sendable () -> String?
 
+    /// Returns a user-facing problem when the embedded Gateway entrypoint,
+    /// production dependencies, or architecture-specific Node runtime is
+    /// missing. The shipped app must not depend on a global Pi or Node install.
+    var validateGatewayPayload: @Sendable () -> String? = { nil }
+
     /// Performs a single `system::ping` against the running server.
     /// Returns a classified `ServerPingResult` so the caller can
     /// distinguish "server is down" from "token rejected" — the menu
@@ -132,13 +137,18 @@ struct EnvironmentSetup: Sendable {
             await MacPermissionProbe.probeAll()
         },
         detectExistingInstall: {
-            ExistingInstallDetector.detect()
+            ExistingInstallDetector.detect(
+                gatewayPayloadProblemResolver: { ExistingInstallDetector.validateGatewayPayload() }
+            )
         },
         validateApplicationLocation: {
             MacRuntimeVariant.detect().locationProblem
         },
         validateBundledHelper: {
             ExistingInstallDetector.validateBundledHelper()
+        },
+        validateGatewayPayload: {
+            ExistingInstallDetector.validateGatewayPayload()
         },
         pingServer: { token in
             let tailscale = await TailscaleProbe.probe()

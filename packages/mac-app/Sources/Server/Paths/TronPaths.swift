@@ -59,6 +59,26 @@ enum TronPaths {
             .appendingPathComponent("tron", isDirectory: false)
     }
 
+    static var gatewayPayloadRoot: URL {
+        applicationBundle
+            .appendingPathComponent("Contents/Resources/Gateway", isDirectory: true)
+    }
+
+    static var gatewayEntrypoint: URL {
+        gatewayPayloadRoot
+            .appendingPathComponent("app/dist/index.js", isDirectory: false)
+    }
+
+    static var gatewayProductionDependencies: URL {
+        gatewayPayloadRoot
+            .appendingPathComponent("app/node_modules", isDirectory: true)
+    }
+
+    static func gatewayNodeRuntime(architecture: String) -> URL {
+        gatewayPayloadRoot
+            .appendingPathComponent("runtime/node-\(architecture)", isDirectory: false)
+    }
+
     static var bearerTokenPath: URL {
         tronHome
             .appendingPathComponent("gateway", isDirectory: true)

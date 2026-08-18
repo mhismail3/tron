@@ -59,6 +59,12 @@ targets:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac.dev
         Release:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mac
+    preBuildScripts:
+      - name: Ensure Bundled Gateway Payload
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          "$SRCROOT/scripts/ensure-gateway-bundle.sh"
     postBuildScripts:
       - name: Copy Bundled Login Item
         basedOnDependencyAnalysis: false
