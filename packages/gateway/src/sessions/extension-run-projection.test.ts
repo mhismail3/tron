@@ -73,7 +73,7 @@ describe("projectExtensionRunActivity", () => {
       mode: "workflow",
       state: "running",
       steps: [
-        { agent: "reviewer", status: "running", currentTool: "read", toolCount: 3, turnCount: 2 },
+        { agent: "reviewer", status: "running", description: "Inspect the projection", recentOutput: ["read complete"], currentTool: "read", toolCount: 3, turnCount: 2 },
         { agent: "scout", status: "completed", durationMs: 1_200 },
       ],
     }, base);
@@ -81,7 +81,7 @@ describe("projectExtensionRunActivity", () => {
       runId: "workflow-1",
       mode: "workflow",
       children: [
-        { label: "reviewer", status: "running", currentTool: "read", toolCount: 3 },
+        { label: "reviewer", status: "running", task: "Inspect the projection", output: "read complete", currentTool: "read", toolCount: 3 },
         { label: "scout", status: "completed", durationMs: 1_200 },
       ],
     });

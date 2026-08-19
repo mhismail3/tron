@@ -140,7 +140,7 @@ struct ExtensionDetailsSheet: View {
             Text("Select a run for its structured detail.")
                 .font(TronTypography.caption)
                 .foregroundStyle(Color.tronTextMuted)
-            ForEach(activities) { activity in
+            ForEach(ChatExtensionWidgetPolicy.orderedActivities(activities)) { activity in
                 Button { selectedActivityRoute = ExtensionActivityRoute(id: activity.id) } label: {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
@@ -284,7 +284,13 @@ struct ExtensionRunDetailsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private var activity: ExtensionRunActivity? {
-        model.authoritativeSnapshot(for: sessionID)?.extensionActivities?.first(where: { $0.id == activityID })
+        guard let snapshot = model.authoritativeSnapshot(for: sessionID) else { return nil }
+        return snapshot.extensionActivities?.first(where: {
+            $0.id == activityID || $0.toolCallId == activityID || $0.runId == activityID
+        })
+        ?? snapshot.toolExecutions.compactMap(\.extensionActivity).first(where: {
+            $0.id == activityID || $0.toolCallId == activityID || $0.runId == activityID
+        })
     }
 
     var body: some View {
@@ -296,6 +302,9 @@ struct ExtensionRunDetailsSheet: View {
                             summaryCard(activity: activity, now: context.date)
                         }
                         if !activity.children.isEmpty { childSection(activity) }
+                        if activity.children.isEmpty && activity.output == nil && activity.currentTool == nil {
+                            noStructuredProgressState(activity)
+                        }
                         if let output = activity.output, !output.isEmpty {
                             TronSettingsGroup("Recent output", detail: "A bounded live tail from the extension run.", accent: .tronCyan) {
                                 Text(output)
@@ -383,6 +392,25 @@ struct ExtensionRunDetailsSheet: View {
         return max(activity.durationMs ?? 0, Int(max(0, now.timeIntervalSince(started) * 1_000).rounded()))
     }
 
+    private func noStructuredProgressState(_ activity: ExtensionRunActivity) -> some View {
+        TronSettingsGroup("Run details", detail: "The run is tracked, but its producer has not published structured progress.", accent: .tronTeal) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Status: \(activity.status == .running ? "Running" : activity.status == .failed ? "Failed" : "Completed")")
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronTextPrimary)
+                if let runID = activity.runId {
+                    Text("Run ID: \(runID)")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                        .textSelection(.enabled)
+                }
+                Text("Live output will appear here when available.")
+                    .font(TronTypography.caption)
+                    .foregroundStyle(Color.tronTextMuted)
+            }
+        }
+    }
+
     private func childSection(_ activity: ExtensionRunActivity) -> some View {
         TronSettingsGroup("Subagents", detail: "Each child keeps its own stable progress identity.", accent: .tronTeal) {
             VStack(spacing: 0) {
@@ -393,6 +421,18 @@ struct ExtensionRunDetailsSheet: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(child.label).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
                             Text(childSummary(child)).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted).lineLimit(2)
+                            if let task = child.task, !task.isEmpty {
+                                Text(task)
+                                    .font(TronTypography.caption)
+                                    .foregroundStyle(Color.tronTextSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            if let output = child.output, !output.isEmpty {
+                                Text(output)
+                                    .font(TronTypography.codeContent)
+                                    .foregroundStyle(Color.tronTextPrimary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                         Spacer(minLength: 0)
                     }

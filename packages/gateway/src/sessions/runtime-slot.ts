@@ -916,21 +916,28 @@ export class RuntimeSlot {
   private async refreshSubagentActivityFromArtifact(asyncDir: string): Promise<void> {
     try {
       const raw = await this.readExtensionStatusArtifact(asyncDir);
-      if (!raw || raw.cwd !== this.cwd || raw.sessionId !== this.sessionFile) return;
+      if (!raw) return;
       const runId = typeof raw.runId === "string" ? raw.runId : undefined;
       if (!runId) return;
-      const toolCallId = `subagent:${runId}`;
-      const previous = this.extensionActivities.get(toolCallId);
+      const existingEntry = [...this.extensionActivities.entries()].find(([, activity]) => activity.runId === runId);
+      // A tool result is the ownership proof for an activity. Once that proof
+      // exists, the artifact may enrich it even when the producer's session
+      // path differs from the Gateway's canonical JSONL path. Unmatched
+      // artifacts still require the exact cwd/session guard.
+      const ownsUnmatchedArtifact = raw.cwd === this.cwd && raw.sessionId === this.sessionFile;
+      if (!ownsUnmatchedArtifact && !existingEntry) return;
+      const toolCallId = existingEntry?.[0] ?? `subagent:${runId}`;
+      const previous = existingEntry?.[1];
       const state = raw.state === "failed" ? "failed" : raw.state === "complete" || raw.state === "completed" || raw.state === "stopped" ? "completed" : "running";
       const startedAt = this.artifactTime(raw.startedAt) ?? previous?.startedAt ?? new Date().toISOString();
       const updatedAt = this.artifactTime(raw.lastUpdate) ?? previous?.updatedAt ?? startedAt;
       const completedAt = this.artifactTime(raw.endedAt);
       const durationMs = typeof raw.durationMs === "number" && Number.isSafeInteger(raw.durationMs) && raw.durationMs >= 0 ? raw.durationMs : undefined;
       const activity = projectExtensionRunActivity(raw, {
-        id: toolCallId,
+        id: previous?.id ?? toolCallId,
         toolCallId,
-        source: this.subagentExtensionOrigin(),
-        title: "Pi Subagents",
+        source: previous?.source ?? this.subagentExtensionOrigin(),
+        title: previous?.title ?? "Pi Subagents",
         status: state,
         startedAt,
         updatedAt,
@@ -939,6 +946,7 @@ export class RuntimeSlot {
         ...(previous ? { previous } : {}),
       });
       if (previous?.updatedAt && previous.updatedAt > activity.updatedAt) return;
+      if (existingEntry) this.extensionActivities.delete(existingEntry[0]);
       this.extensionActivities.delete(toolCallId);
       this.extensionActivities.set(toolCallId, activity);
       while (this.extensionActivities.size > 64) {

@@ -76,20 +76,29 @@ function child(
   if (!source) return undefined;
   const progress = progressRecord(source);
   const label = text(progress?.agent ?? source.agent, 256) ?? `Child ${index + 1}`;
-  const nested = Array.isArray(source.children)
-    ? source.children.slice(0, MAX_CHILDREN).map((item, nestedIndex) => child(item, nestedIndex, fallbackStatus, depth + 1, budget)).filter((item): item is ExtensionRunChild => Boolean(item))
-    : [];
-  const task = text(progress?.task ?? source.task, 2_048);
-  const lastActivityAt = isoTime(progress?.lastActivityAt ?? source.lastActivityAt);
+  const nestedValues = Array.isArray(source.children)
+    ? source.children
+    : Array.isArray(source.steps) ? source.steps : [];
+  const nested = nestedValues
+    .slice(0, MAX_CHILDREN)
+    .map((item, nestedIndex) => child(item, nestedIndex, fallbackStatus, depth + 1, budget))
+    .filter((item): item is ExtensionRunChild => Boolean(item));
+  const task = text(progress?.task ?? source.task ?? source.description ?? source.summary, 2_048);
+  const lastActivityAt = isoTime(progress?.lastActivityAt ?? source.lastActivityAt ?? source.updatedAt);
   const currentTool = text(progress?.currentTool ?? source.currentTool, 256);
   const currentToolStartedAt = isoTime(progress?.currentToolStartedAt ?? source.currentToolStartedAt);
   const currentPath = displayPath(progress?.currentPath ?? source.currentPath);
   const toolCount = number(progress?.toolCount ?? source.toolCount);
   const turnCount = number(progress?.turnCount ?? source.turnCount);
   const durationMs = number(progress?.durationMs ?? source.durationMs);
-  const recentOutput = output(progress?.recentOutput ?? source.output);
+  const recentOutput = output(
+    progress?.recentOutput
+      ?? source.recentOutput
+      ?? source.output
+      ?? source.error
+  );
   return {
-    id: text(source.runId, 256) ?? `${label}:${index}`,
+    id: text(source.runId ?? source.id ?? source.asyncId, 256) ?? `${label}:${index}`,
     label,
     status: status(progress?.status ?? source.status, fallbackStatus),
     ...(task ? { task } : {}),
@@ -136,7 +145,14 @@ export function projectExtensionRunActivity(
   const detailsResults = Array.isArray(details?.results) ? details.results : [];
   const progressValues = Array.isArray(details?.progress) ? details.progress : [];
   const stepValues = Array.isArray(details?.steps) ? details.steps : [];
-  const candidates = detailsResults.length > 0 ? detailsResults : progressValues.length > 0 ? progressValues : stepValues;
+  const childValues = Array.isArray(details?.children) ? details.children : [];
+  const candidates = detailsResults.length > 0
+    ? detailsResults
+    : progressValues.length > 0
+      ? progressValues
+      : stepValues.length > 0
+        ? stepValues
+        : childValues;
   const explicitStatus = details?.state ?? details?.status;
   const terminalStatus = explicitStatus === "failed"
     ? "failed"
@@ -153,7 +169,7 @@ export function projectExtensionRunActivity(
     .filter((item): item is ExtensionRunChild => Boolean(item));
   const firstProgress = candidates.length > 0 ? progressRecord(candidates[0]) : undefined;
   const runId = text(details?.runId ?? details?.asyncId, 256) ?? previous?.runId;
-  const lastActivityAt = isoTime(firstProgress?.lastActivityAt ?? details?.lastActivityAt) ?? previous?.lastActivityAt;
+  const lastActivityAt = isoTime(firstProgress?.lastActivityAt ?? details?.lastActivityAt ?? details?.updatedAt) ?? previous?.lastActivityAt;
   const currentTool = text(firstProgress?.currentTool ?? details?.currentTool, 256) ?? previous?.currentTool;
   const currentToolStartedAt = isoTime(firstProgress?.currentToolStartedAt ?? details?.currentToolStartedAt) ?? previous?.currentToolStartedAt;
   const currentPath = displayPath(firstProgress?.currentPath ?? details?.currentPath) ?? previous?.currentPath;
@@ -162,7 +178,14 @@ export function projectExtensionRunActivity(
   const durationMs = activityStatus === "running"
     ? number(firstProgress?.durationMs ?? details?.durationMs) ?? base.durationMs ?? previous?.durationMs
     : base.durationMs ?? number(firstProgress?.durationMs ?? details?.durationMs) ?? previous?.durationMs;
-  const recentOutput = output(firstProgress?.recentOutput ?? details?.recentOutput) ?? previous?.output;
+  const recentOutput = output(
+    firstProgress?.recentOutput
+      ?? firstProgress?.output
+      ?? details?.recentOutput
+      ?? details?.output
+      ?? details?.summary
+      ?? details?.error
+  ) ?? previous?.output;
   const mode = text(details?.mode, 64) ?? previous?.mode;
 
   return {

@@ -172,13 +172,24 @@ enum ChatExtensionWidgetPolicy {
             }
     }
 
+    static func orderedActivities(_ activities: [ExtensionRunActivity]) -> [ExtensionRunActivity] {
+        activities.sorted { left, right in
+            if left.isLive != right.isLive { return left.isLive }
+            let leftActivity = left.lastActivityAt ?? left.updatedAt
+            let rightActivity = right.lastActivityAt ?? right.updatedAt
+            if leftActivity != rightActivity { return leftActivity > rightActivity }
+            if left.startedAt != right.startedAt { return left.startedAt > right.startedAt }
+            return left.id < right.id
+        }
+    }
+
     static func groups(
         _ presentation: ExtensionPresentationState,
         executions: [ToolExecutionState] = [],
         activities: [ExtensionRunActivity] = []
     ) -> [ExtensionWidgetGroup] {
         let statuses = admittedStatuses(presentation.semanticState.statuses)
-        let admittedActivities = Array(activities.prefix(maximumActivities))
+        let admittedActivities = Array(orderedActivities(activities).prefix(maximumActivities))
         let activityToolIDs = Set(admittedActivities.map(\.toolCallId))
         let services = serviceItems(executions).filter { !activityToolIDs.contains($0.id) }
         var owners: [String: ExtensionOwner] = [:]
@@ -351,7 +362,7 @@ enum ChatExtensionWidgetPolicy {
     ) -> ExtensionActivitySummary? {
         let statuses = admittedStatuses(presentation.semanticState.statuses)
         let items = admittedItems(presentation)
-        let activities = Array(activities.prefix(maximumActivities))
+        let activities = Array(orderedActivities(activities).prefix(maximumActivities))
         let activityToolIDs = Set(activities.map(\.toolCallId))
         let services = serviceItems(executions).filter { !activityToolIDs.contains($0.id) }
         guard !statuses.isEmpty || !items.isEmpty || !services.isEmpty || !activities.isEmpty else { return nil }

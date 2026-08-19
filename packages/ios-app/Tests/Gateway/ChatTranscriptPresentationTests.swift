@@ -150,6 +150,30 @@ struct ChatTranscriptPresentationTests {
         #expect(live.first?.liveActivityCount == 1)
     }
 
+    @Test("activity groups put live runs before settled runs")
+    func activityGroupsPutLiveRunsFirst() throws {
+        var snapshot = try fixture(transcript: "[]")
+        let completed = ExtensionRunActivity(
+            id: "completed", runId: "completed", toolCallId: "completed",
+            source: ExtensionToolOrigin(source: "local"), title: "subagent", mode: "workflow",
+            status: .completed, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:03Z",
+            completedAt: "2026-01-01T00:00:03Z", lastActivityAt: "2026-01-01T00:00:03Z", currentTool: nil,
+            currentToolStartedAt: nil, currentPath: nil, toolCount: nil, turnCount: nil,
+            durationMs: 3_000, output: "done", children: []
+        )
+        let running = ExtensionRunActivity(
+            id: "running", runId: "running", toolCallId: "running",
+            source: ExtensionToolOrigin(source: "local"), title: "subagent", mode: "workflow",
+            status: .running, startedAt: "2026-01-01T00:00:01Z", updatedAt: "2026-01-01T00:00:02Z",
+            completedAt: nil, lastActivityAt: "2026-01-01T00:00:02Z", currentTool: "read",
+            currentToolStartedAt: nil, currentPath: nil, toolCount: 1, turnCount: 1,
+            durationMs: 1_000, output: nil, children: []
+        )
+        snapshot.extensionActivities = [completed, running]
+        let group = try #require(ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? []).first)
+        #expect(group.activities.map(\.id) == ["running", "completed"])
+    }
+
     @Test("structured local subagent activity gets a native package label")
     func structuredLocalSubagentActivityGetsNativeLabel() throws {
         var snapshot = try fixture(transcript: "[]")
