@@ -759,10 +759,10 @@ final class AppModel {
     }
 
     func switchGateway(_ profile: GatewayProfile) async {
-        // A profile may have been a shallow dashboard connection. Retire its
-        // old pool projection before it becomes the focused catalog owner.
-        dashboardSessionsByProfile[profile.id] = nil
-        dashboardStatesByProfile[profile.id] = nil
+        // Keep the target's last bounded dashboard bucket while its focused
+        // connection transitions. The authoritative catalog replaces it after
+        // the switch; deleting it here exposes an avoidable empty/reordered
+        // projection beneath translucent sheets.
         await lifecycle.switchGateway(profile)
         profileRevision &+= 1
         reconcileDashboardConnections()
@@ -1211,9 +1211,16 @@ final class AppModel {
     }
 
     func createSession(cwd: String) async throws -> SessionNavigationRoute {
+        try await createSession(cwd: cwd, sourceControl: nil)
+    }
+
+    func createSession(
+        cwd: String,
+        sourceControl: SessionSourceControlSelection?
+    ) async throws -> SessionNavigationRoute {
         guard let admission = lifecycle.generationAdmission,
               let profileID = lifecycle.selectedProfileID else { throw CancellationError() }
-        let sessionID = try await sessionMutations.createSession(cwd: cwd)
+        let sessionID = try await sessionMutations.createSession(cwd: cwd, sourceControl: sourceControl)
         try requireLifecycle(admission)
         guard lifecycle.selectedProfileID == profileID else { throw CancellationError() }
         defaultWorkspace = cwd

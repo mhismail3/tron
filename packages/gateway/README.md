@@ -248,7 +248,8 @@ updates without losing the newest state. Clients join calls, progress, and resul
 by canonical call ID rather than arrival order.
 
 Active message queues are projected with stable per-entry IDs, delivery behavior,
-display text, attachment count, and a monotonic queue revision. A Gateway advertising
+display text, total attachment count, optional photo/file counts, and a monotonic queue revision.
+A Gateway advertising
 `queue-management.v1` includes both `queueRevision` and `queuedItems` in every authoritative
 session snapshot. The legacy steering and follow-up string arrays remain a compatibility
 projection for older clients and Gateways; they never authorize entry-level mutation.
@@ -284,7 +285,16 @@ prompt queue entry and is never replayed by iOS. Snapshots also project the runt
 Session structure/context/resource invalidations refresh
 already-presented secondary surfaces. Provider, settings, trust, package, and
 custom-model mutations publish bounded global invalidations so another connected
-client refreshes its explicitly scoped canonical projection. Settings projections include
+client refreshes its explicitly scoped canonical projection. `session.create` accepts an
+optional source-control strategy. `existingCheckout` passes the selected directory through
+unchanged; `newBranchWorktree` creates a managed Git worktree on a new branch from `HEAD` or
+a validated committed base ref; and `existingBranchWorktree` creates a managed worktree from
+an existing local branch. Git arguments are passed without a shell, branch/ref inputs are
+validated, implicit-`HEAD` creation refuses dirty checkouts, and a worktree is removed again
+if session creation fails. Pi itself receives only the resulting canonical `cwd`; its SDK has
+no Git/worktree creation option. Persisted worktrees remain available for later sessions and
+are never silently deleted with a session.
+Settings projections include
 scope-owned documents and effective values, but write-only proxy credentials are removed
 from both; clients receive only `httpProxyConfigured` and can set or explicitly clear the
 canonical value. Persisted settings documents and their responses fail closed before generic JSON

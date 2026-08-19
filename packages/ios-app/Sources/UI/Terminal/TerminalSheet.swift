@@ -19,6 +19,7 @@ struct TerminalSheet: View {
                     let replay = model.terminalReplay(for: terminal.id)
                     NativeTerminal(
                         chunks: replay.chunks,
+                        isInteractive: controller.isRunning(model: model),
                         keyboard: keyboard,
                         onSend: { controller.send($0, model: model) },
                         onResize: { controller.resize(columns: $0, rows: $1, model: model) }
@@ -91,6 +92,14 @@ struct TerminalSheet: View {
         .animation(.easeOut(duration: 0.16), value: keyboard.isKeyboardPresented)
     }
 
+    private var openTerminals: [TerminalSummary] {
+        controller.history.filter { $0.exitedAt == nil && !model.terminalHasExited($0.id) }
+    }
+
+    private var recentTerminals: [TerminalSummary] {
+        controller.history.filter { $0.exitedAt != nil || model.terminalHasExited($0.id) }
+    }
+
     private var terminalMenu: some View {
         Menu {
             if !controller.isRunning(model: model) {
@@ -98,17 +107,26 @@ struct TerminalSheet: View {
                     controller.openLive(model: model)
                 }
             }
-            if !controller.history.isEmpty {
-                Section {
-                    ForEach(controller.history) { terminal in
+            if !openTerminals.isEmpty {
+                Section("Open terminals") {
+                    ForEach(openTerminals) { terminal in
+                        Button {
+                            controller.show(terminal, model: model)
+                        } label: {
+                            Text(terminal.createdAt)
+                        }
+                    }
+                }
+            }
+            if !recentTerminals.isEmpty {
+                Section("Recent terminals") {
+                    ForEach(recentTerminals) { terminal in
                         Button {
                             controller.show(terminal, model: model)
                         } label: {
                             Text(terminal.exitedAt ?? terminal.createdAt)
                         }
                     }
-                } header: {
-                    Text("Recent terminals")
                 }
             }
             Button("Quit Terminal", role: .destructive) { confirmQuit = true }

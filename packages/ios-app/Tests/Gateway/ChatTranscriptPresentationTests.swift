@@ -830,7 +830,7 @@ struct ChatTranscriptPresentationTests {
         #expect(compact.tone == .accent)
         #expect(model.material == .flat)
         #expect(!model.hasDetailSheet)
-        #expect(model.detail == "openai-codex / gpt-5.6-sol")
+        #expect(model.detail == "OpenAI Codex / GPT 5.6 Sol")
     }
 
     @Test("whitespace-only summaries stay flat and noninteractive")

@@ -124,4 +124,26 @@ describe("TrustService", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  it("propagates a resolved source decision to a new worktree and rolls it back", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-trust-worktree-"));
+    try {
+      const source = join(root, "source");
+      const target = join(root, "target");
+      const agentDir = join(root, "agent");
+      await mkdir(join(source, ".pi"), { recursive: true });
+      await mkdir(join(target, ".pi"), { recursive: true });
+      await writeFile(join(source, ".pi", "settings.json"), "{}\n");
+      await writeFile(join(target, ".pi", "settings.json"), "{}\n");
+      const trust = new TrustService(agentDir);
+      await trust.set(source, true);
+
+      const propagated = await trust.propagateResolvedDecision(source, target);
+      await expect(trust.inspect(target)).resolves.toMatchObject({ savedDecision: true, effectiveDecision: true });
+      await propagated.rollback();
+      await expect(trust.inspect(target)).resolves.toMatchObject({ savedDecision: null, effectiveDecision: null });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

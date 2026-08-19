@@ -357,6 +357,8 @@ struct ChatPendingPromptPresentation: Equatable, Identifiable, Sendable {
     let text: String
     let behavior: SessionSnapshot.QueuedMessage.Behavior?
     let attachmentCount: Int
+    let photoCount: Int?
+    let fileAttachmentCount: Int?
     let isCompacting: Bool
 
     init(snapshot: SessionSnapshot.PendingPrompt, isCompacting: Bool) {
@@ -365,6 +367,8 @@ struct ChatPendingPromptPresentation: Equatable, Identifiable, Sendable {
         text = snapshot.text
         behavior = snapshot.behavior
         attachmentCount = snapshot.attachmentCount
+        photoCount = snapshot.photoCount
+        fileAttachmentCount = snapshot.fileAttachmentCount
         self.isCompacting = isCompacting
     }
 
@@ -942,7 +946,7 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
             return ChatNotificationPresentation(
                 id: "notification-\(item.id)", semanticID: item.id,
                 icon: "cpu", title: "Model changed",
-                detail: item.modelRef.map { "\($0.provider) / \($0.id)" } ?? "Changed",
+                detail: item.modelRef?.displayDescription ?? "Changed",
                 body: nil, tone: .accent, material: .flat
             )
         case .thinkingChange:

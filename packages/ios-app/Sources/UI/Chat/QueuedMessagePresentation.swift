@@ -25,6 +25,51 @@ enum QueuedMessageManagementPolicy {
     }
 }
 
+struct QueuedMessageAttachmentLine: Equatable, Identifiable, Sendable {
+    let id: String
+    let iconName: String
+    let text: String
+}
+
+enum QueuedMessageAttachmentPresentation {
+    static func lines(for message: SessionSnapshot.QueuedMessage) -> [QueuedMessageAttachmentLine] {
+        lines(
+            attachmentCount: message.attachmentCount,
+            photoCount: message.photoCount,
+            fileAttachmentCount: message.fileAttachmentCount
+        )
+    }
+
+    static func lines(
+        attachmentCount: Int,
+        photoCount: Int?,
+        fileAttachmentCount: Int?
+    ) -> [QueuedMessageAttachmentLine] {
+        let typedCountsAvailable = photoCount != nil || fileAttachmentCount != nil
+        let photos = max(0, photoCount ?? 0)
+        let files = max(
+            0,
+            fileAttachmentCount ?? (typedCountsAvailable ? 0 : attachmentCount)
+        )
+        var result: [QueuedMessageAttachmentLine] = []
+        if photos > 0 {
+            result.append(.init(
+                id: "photos",
+                iconName: "photo.on.rectangle",
+                text: "\(photos) \(photos == 1 ? "photo" : "photos")"
+            ))
+        }
+        if files > 0 {
+            result.append(.init(
+                id: "attachments",
+                iconName: "paperclip",
+                text: "\(files) \(files == 1 ? "attachment" : "attachments")"
+            ))
+        }
+        return result
+    }
+}
+
 struct QueuedMessageRow: View {
     let message: SessionSnapshot.QueuedMessage
     let position: Int
@@ -79,16 +124,8 @@ struct QueuedMessageRow: View {
             cornerRadius: ChatPromptContainerStyle.cornerRadius,
             style: .continuous
         )
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center, spacing: 10) {
-                Image(systemName: message.behavior == .steer
-                    ? "arrow.turn.up.right"
-                    : "text.line.last.and.arrowtriangle.forward")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
-                    .foregroundStyle(accent)
-                    .frame(width: 28, height: 28)
-                    .background(accent.opacity(0.13), in: Circle())
-
                 Text(title)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
                     .foregroundStyle(Color.tronTextPrimary)
@@ -96,28 +133,34 @@ struct QueuedMessageRow: View {
                     .layoutPriority(1)
 
                 Spacer(minLength: 8)
-                Text("\(deliveryDetail) · \(position) of \(total)")
-                    .font(TronTypography.caption)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .multilineTextAlignment(.trailing)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                trailingStatus
+                HStack(alignment: .center, spacing: 8) {
+                    Text("\(deliveryDetail) · \(position) of \(total)")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .multilineTextAlignment(.trailing)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+
+                    Image(systemName: message.behavior == .steer
+                        ? "arrow.turn.up.right"
+                        : "text.line.last.and.arrowtriangle.forward")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                        .foregroundStyle(accent)
+                        .frame(width: 28, height: 28)
+                        .background(accent.opacity(0.13), in: Circle())
+
+                    trailingStatus
+                }
             }
 
             if !message.text.isEmpty {
                 UserPromptText(text: message.text)
-                    .padding(.leading, 38)
             }
 
-            if message.attachmentCount > 0 {
-                Label(
-                    "\(message.attachmentCount) \(message.attachmentCount == 1 ? "attachment" : "attachments")",
-                    systemImage: "paperclip"
-                )
-                .font(TronTypography.caption)
-                .foregroundStyle(Color.tronTextSecondary)
-                .padding(.leading, 38)
+            ForEach(QueuedMessageAttachmentPresentation.lines(for: message)) { line in
+                Label(line.text, systemImage: line.iconName)
+                    .font(TronTypography.caption)
+                    .foregroundStyle(Color.tronTextSecondary)
             }
         }
         .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)

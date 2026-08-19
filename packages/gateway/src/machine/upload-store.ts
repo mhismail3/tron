@@ -332,7 +332,12 @@ export class UploadStore {
     await this.serialize(async () => { await this.inventory(); }).catch(() => {});
   }
 
-  async materialize(ids: string[], sessionId: string): Promise<{ images: ImageContent[]; envelope: string }> {
+  async materialize(ids: string[], sessionId: string): Promise<{
+    images: ImageContent[];
+    envelope: string;
+    photoCount: number;
+    fileAttachmentCount: number;
+  }> {
     if (ids.length > 10) throw new GatewayError("invalid_request", "At most 10 attachments may be sent with one prompt");
     if (new Set(ids).size !== ids.length) throw new GatewayError("invalid_request", "Prompt attachment ids must be unique");
     return this.serialize(async () => {
@@ -348,11 +353,15 @@ export class UploadStore {
       const owned = await Promise.all(metadata.map((value) => this.ownedPath(value)));
       const images: ImageContent[] = [];
       const envelopes: string[] = [];
+      let photoCount = 0;
+      let fileAttachmentCount = 0;
       for (const [index, value] of metadata.entries()) {
         const actual = owned[index]!.actual;
         if (value.mimeType.startsWith("image/")) {
+          photoCount += 1;
           images.push({ type: "image", data: (await readFile(actual)).toString("base64"), mimeType: value.mimeType });
         } else {
+          fileAttachmentCount += 1;
           envelopes.push(`<attachment name="${xml(value.name)}" mime-type="${xml(value.mimeType)}" size="${value.size}" path="${xml(actual)}" />`);
         }
       }
@@ -360,7 +369,12 @@ export class UploadStore {
         join(owned[index]!.ownedDirectory, "metadata.json"),
         { ...value, sessionId },
       )));
-      return { images, envelope: envelopes.join("\n") };
+      return {
+        images,
+        envelope: envelopes.join("\n"),
+        photoCount,
+        fileAttachmentCount,
+      };
     });
   }
 

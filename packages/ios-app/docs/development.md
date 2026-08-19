@@ -159,7 +159,12 @@ Resolved package JSON is constructed only inside its progressive detail destinat
 constant-depth top-level count instead of recursively rendering a potentially large resource tree. Package reload
 refreshes the inventory and update projection together, while installation controls live in a medium/large
 progressive sheet. Custom provider editors keep their three dense text fields together before the API-format row
-and use the standard settings-group header treatment. Project Resources normalizes producer whitespace before display, caps overview subtitles to one line, and keeps detailed tool/resource content in the tapped detail sheet so scrolling remains lightweight. Provider settings cards use one centered leading
+and use the standard settings-group header treatment. Provider and model catalogs use the shared
+`ModelDisplayFormatting` projections everywhere they are shown; canonical IDs remain unchanged for
+search, persistence, and mutation while labels use product casing such as “OpenAI Codex / GPT 5.6 Luna”.
+New Session quick selectors carry both server and project identity; source-control choices are sent
+through the confirmed `session.create` mutation, and Gateway owns Git worktree creation, trust
+propagation, and rollback. Project Resources normalizes producer whitespace before display, caps overview subtitles to one line, and keeps detailed tool/resource content in the tapped detail sheet so scrolling remains lightweight. Provider settings cards use one centered leading
 icon column with vertically centered icons and leading-aligned text; the Manage Session workspace path
 uses a trailing inline group-header detail rather than a second header line.
 Terminal sheet composition, presentation lifecycle/error state, and native SwiftTerm/keyboard rendering live

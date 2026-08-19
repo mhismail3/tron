@@ -144,7 +144,9 @@ struct TranscriptRow: View, Equatable {
                    }),
                    let provider = item.provider,
                    let modelName = item.modelId {
-                    Text("\(provider) / \(modelName)").font(TronFont.mono(10)).foregroundStyle(Color.tronTextSecondary)
+                    Text(ModelDisplayFormatting.reference(provider: provider, model: modelName))
+                        .font(TronFont.mono(10))
+                        .foregroundStyle(Color.tronTextSecondary)
                 }
             }
             .padding(.horizontal, item.role == .user ? 0 : 2)

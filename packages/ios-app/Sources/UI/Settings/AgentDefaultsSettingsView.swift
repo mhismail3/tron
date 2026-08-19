@@ -66,7 +66,7 @@ struct AgentDefaultsSettingsView: View {
                             )
                                 .tronNavigationTitle("Default Model", accent: .tronPurple)
                         } label: {
-                            TronValueRow(icon: "cpu", title: "Model", detail: draft.selectedModel.map { "\($0.provider) / \($0.id)" } ?? "Choose model", accent: .tronPurple)
+                            TronValueRow(icon: "cpu", title: "Model", detail: draft.selectedModel?.displayDescription ?? "Choose model", accent: .tronPurple)
                         }
                         TronSettingsDivider(accent: .tronPurple)
                         TronValueRow(icon: "brain", title: "Thinking", accent: .tronPurple) {

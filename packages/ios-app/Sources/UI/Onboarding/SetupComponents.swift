@@ -17,7 +17,7 @@ struct ProviderSetupRow: View {
                 .frame(width: 22, height: 22)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
-                Text(provider.name)
+                Text(provider.displayName)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(1)
@@ -43,7 +43,7 @@ struct ProviderSetupRow: View {
                         .frame(width: 36, height: 44, alignment: .center)
                         .contentShape(Rectangle())
                 }
-                .accessibilityLabel("\(provider.name) provider actions")
+                .accessibilityLabel("\(provider.displayName) provider actions")
             } else {
                 Menu {
                     ForEach(provider.authMethods, id: \.self) { method in
@@ -62,7 +62,7 @@ struct ProviderSetupRow: View {
                         .fixedSize(horizontal: true, vertical: false)
                         .frame(minHeight: 44, alignment: .center)
                 }
-                .accessibilityLabel("Connect \(provider.name)")
+                .accessibilityLabel("Connect \(provider.displayName)")
             }
         }
         .padding(.horizontal, 12)
@@ -105,10 +105,10 @@ struct ModelPicker: View {
                                 .foregroundStyle(selection == model.ref ? Color.tronEmerald : Color.tronSlate)
                                 .frame(width: 22)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(model.name)
+                                Text(model.displayName)
                                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                                     .foregroundStyle(Color.tronTextPrimary)
-                                Text("\(model.provider) / \(model.id)")
+                                Text(model.displayDescription)
                                     .font(TronTypography.codeContent)
                                     .foregroundStyle(Color.tronTextPrimary)
                             }
@@ -126,7 +126,7 @@ struct ModelPicker: View {
                         tintOpacity: selection == model.ref ? 0.18 : 0.08,
                         interactive: true
                     )
-                    .accessibilityLabel(model.name)
+                    .accessibilityLabel(model.displayName)
                     .accessibilityValue(selection == model.ref ? "Selected" : "")
                 }
             }

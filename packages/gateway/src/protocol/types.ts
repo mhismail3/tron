@@ -346,7 +346,11 @@ export interface QueuedMessageState {
   id: string;
   behavior: "steer" | "followUp";
   text: string;
+  /** Total uploaded items retained for rolling protocol compatibility. */
   attachmentCount: number;
+  /** Optional typed counts added without breaking older clients. */
+  photoCount?: number;
+  fileAttachmentCount?: number;
 }
 
 /** A prompt admitted before its canonical user entry exists, usually while
@@ -357,7 +361,10 @@ export interface PendingPromptState {
   createdAt?: string;
   behavior?: "steer" | "followUp";
   text: string;
+  /** Total uploaded items retained for rolling protocol compatibility. */
   attachmentCount: number;
+  photoCount?: number;
+  fileAttachmentCount?: number;
 }
 
 export interface SessionSnapshot {

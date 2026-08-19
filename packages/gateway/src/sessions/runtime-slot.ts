@@ -940,6 +940,8 @@ export class RuntimeSlot {
           behavior,
           text: admission?.text ?? runtimeText,
           attachmentCount: admission?.attachmentCount ?? 0,
+          ...(admission?.photoCount === undefined ? {} : { photoCount: admission.photoCount }),
+          ...(admission?.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: admission.fileAttachmentCount }),
           runtimeText,
           attachmentEnvelope: admission?.attachmentEnvelope ?? "",
           images: admission?.images ?? [],
@@ -958,7 +960,9 @@ export class RuntimeSlot {
         || item.behavior !== next.behavior
         || item.text !== next.text
         || item.runtimeText !== next.runtimeText
-        || item.attachmentCount !== next.attachmentCount;
+        || item.attachmentCount !== next.attachmentCount
+        || item.photoCount !== next.photoCount
+        || item.fileAttachmentCount !== next.fileAttachmentCount;
     });
     this.queuedMessages = reconciled;
     if (changed) this.queueRevision += 1;
@@ -966,11 +970,13 @@ export class RuntimeSlot {
 
   private projectedQueue(): QueuedMessageState[] {
     this.reconcileQueuedMessages();
-    return this.queuedMessages.map(({ id, behavior, text, attachmentCount }) => ({
+    return this.queuedMessages.map(({ id, behavior, text, attachmentCount, photoCount, fileAttachmentCount }) => ({
       id,
       behavior,
       text,
       attachmentCount,
+      ...(photoCount === undefined ? {} : { photoCount }),
+      ...(fileAttachmentCount === undefined ? {} : { fileAttachmentCount }),
     }));
   }
 
@@ -1098,7 +1104,13 @@ export class RuntimeSlot {
     text: string,
     images: ImageContent[] = [],
     behavior?: QueueBehavior,
-    queueDisplay?: { text: string; attachmentEnvelope: string; attachmentCount: number },
+    queueDisplay?: {
+      text: string;
+      attachmentEnvelope: string;
+      attachmentCount: number;
+      photoCount?: number;
+      fileAttachmentCount?: number;
+    },
   ): Promise<{ operationId: string }> {
     return this.lane.run(async () => {
       this.assertUsable();
@@ -1111,11 +1123,22 @@ export class RuntimeSlot {
       if (session.isStreaming && !behavior && !isExactExtensionCommand) throw new GatewayError("busy", "Session is running; choose steer or follow-up");
       if (queuesIntoActiveRun) {
         this.reconcileQueuedMessages();
-        const display = queueDisplay ?? { text, attachmentEnvelope: "", attachmentCount: images.length };
+        const display = queueDisplay ?? {
+          text,
+          attachmentEnvelope: "",
+          attachmentCount: images.length,
+          ...(images.length > 0 ? { photoCount: images.length } : {}),
+          ...(images.length > 0 ? { fileAttachmentCount: 0 } : {}),
+        };
         RuntimeSlot.validateQueue([...this.queuedMessages, { text: display.text, attachmentCount: display.attachmentCount }]);
         this.pendingQueueAdmission = {
           id: randomUUID(), behavior: behavior!, text: display.text,
-          attachmentCount: display.attachmentCount, attachmentEnvelope: display.attachmentEnvelope, images,
+          attachmentCount: display.attachmentCount,
+          ...(display.photoCount === undefined ? {} : { photoCount: display.photoCount }),
+          ...(display.fileAttachmentCount === undefined
+            ? {}
+            : { fileAttachmentCount: display.fileAttachmentCount }),
+          attachmentEnvelope: display.attachmentEnvelope, images,
         };
       }
 
@@ -1139,6 +1162,15 @@ export class RuntimeSlot {
             MAXIMUM_PENDING_PROMPT_BYTES
           ),
           attachmentCount: queueDisplay?.attachmentCount ?? images.length,
+          ...(queueDisplay?.photoCount === undefined && images.length === 0
+            ? {}
+            : { photoCount: queueDisplay?.photoCount ?? images.length }),
+          ...(queueDisplay?.fileAttachmentCount === undefined && images.length === 0
+            ? {}
+            : {
+                fileAttachmentCount: queueDisplay?.fileAttachmentCount
+                  ?? Math.max(0, (queueDisplay?.attachmentCount ?? images.length) - (queueDisplay?.photoCount ?? images.length)),
+              }),
         };
         this.revision += 1;
         // Publish before entering Pi preflight. Automatic compaction can begin

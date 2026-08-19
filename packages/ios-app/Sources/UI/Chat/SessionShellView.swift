@@ -373,6 +373,14 @@ struct SessionShellView: View {
         .contentMargins(.bottom, 92)
         .tronCollectionSurface()
         .tronScrollEdgeChrome()
+        .transaction { transaction in
+            // Keep the dashboard projection visually stable while a focused
+            // server connection is being replaced. The bounded old buckets
+            // remain visible until the new authoritative catalog arrives.
+            if model.connectionState == .connecting || model.connectionState == .reconnecting {
+                transaction.animation = nil
+            }
+        }
     }
 
     @ViewBuilder

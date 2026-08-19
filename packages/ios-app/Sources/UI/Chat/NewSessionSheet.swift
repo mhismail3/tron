@@ -8,8 +8,12 @@ struct NewSessionSheet: View {
     @State private var useDefaultWorkspace = true
     @State private var selectedModel: ModelRef?
     @State private var configuredModel: ModelRef?
+    @State private var sourceControl = SessionSourceControlSelection.existing
+    @State private var gitInspection: GitInspection?
+    @State private var gitInspectionFailed = false
     @State private var showBrowser = false
     @State private var showServers = false
+    @State private var showSourceControl = false
     @State private var showModels = false
     @State private var trustInspection: JSONValue?
     @State private var configurationOwner = NewSessionConfigurationOwner()
@@ -20,6 +24,42 @@ struct NewSessionSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
+                    if !quickSelections.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(quickSelections) { shortcut in
+                                    Button {
+                                        selectQuickSelection(shortcut)
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(shortcut.projectName)
+                                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                                                .foregroundStyle(Color.tronAccentText)
+                                                .lineLimit(1)
+                                            Text(shortcut.serverName)
+                                                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                                                .foregroundStyle(Color.tronTextSecondary)
+                                                .lineLimit(1)
+                                        }
+                                        .frame(minWidth: 92, alignment: .leading)
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 7)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .glassEffect(
+                                        .regular.tint(Color.tronEmerald.opacity(workspace == shortcut.path && activeProfileID == shortcut.serverID ? 0.30 : 0.15)).interactive(),
+                                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    )
+                                    .accessibilityElement(children: .combine)
+                                    .accessibilityLabel("\(shortcut.projectName), \(shortcut.serverName)")
+                                    .accessibilityValue(workspace == shortcut.path && activeProfileID == shortcut.serverID ? "Selected" : "")
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .scrollClipDisabled()
+                    }
+
                     setupCard(
                         icon: "desktopcomputer",
                         title: "Server",
@@ -27,31 +67,6 @@ struct NewSessionSheet: View {
                         caption: selectedServer.map { "\($0.host):\($0.port)" } ?? "Choose the server for this new session.",
                         accent: .tronEmerald
                     ) { showServers = true }
-
-                    if !recentWorkspaces.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(recentWorkspaces) { shortcut in
-                                    Button {
-                                        workspace = shortcut.path
-                                    } label: {
-                                        Text(shortcut.title)
-                                            .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                                            .foregroundStyle(Color.tronAccentText)
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 6)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .glassEffect(
-                                        .regular.tint(Color.tronEmerald.opacity(workspace == shortcut.path ? 0.30 : 0.15)).interactive(),
-                                        in: Capsule()
-                                    )
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        .scrollClipDisabled()
-                    }
 
                     setupCard(
                         icon: "folder.fill",
@@ -64,16 +79,16 @@ struct NewSessionSheet: View {
                     setupCard(
                         icon: "arrow.triangle.branch",
                         title: "Source Control",
-                        value: "Use Existing",
-                        caption: "Use the selected checkout at its current commit.",
+                        value: sourceControl.displayName,
+                        caption: sourceControl.displayDescription,
                         accent: .tronTeal
-                    ) {}
+                    ) { showSourceControl = true }
 
                     setupCard(
                         icon: "cpu",
                         title: "Model",
-                        value: selectedModel?.id ?? "Default",
-                        caption: selectedModel.map { "\($0.provider) / \($0.id)" } ?? "Use the current agent default.",
+                        value: selectedModel?.displayName ?? "Default",
+                        caption: selectedModel?.displayDescription ?? "Use the current agent default.",
                         accent: .tronPurple
                     ) { showModels = true }
 
@@ -122,6 +137,16 @@ struct NewSessionSheet: View {
                     workspace = value
                     useDefaultWorkspace = false
                 }
+            }
+            .sheet(isPresented: $showSourceControl) {
+                NewSessionSourceControlSheet(
+                    selection: $sourceControl,
+                    inspection: gitInspection,
+                    inspectionFailed: gitInspectionFailed
+                )
+                .tronTopBlur(.sheet)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
             }
             .sheet(isPresented: $showServers) {
                 NavigationStack {
@@ -202,11 +227,20 @@ struct NewSessionSheet: View {
                 if selectedServerID == nil {
                     selectedServerID = model.profiles.selected?.id
                 }
-                let profileID = activeProfileID
+                guard let profileID = selectedServerID,
+                      model.profiles.selected?.id == profileID else {
+                    // A quick project selection can target another server. Do
+                    // not issue settings, trust, or Git reads through the old
+                    // connection while Gateway is switching profiles.
+                    return
+                }
                 configurationOwner.begin(profileID: profileID, workspace: workspace)
                 trustInspection = nil
+                gitInspection = nil
+                gitInspectionFailed = false
                 selectedModel = nil
                 configuredModel = nil
+                sourceControl = .existing
                 if workspace.isEmpty, useDefaultWorkspace,
                    let defaultWorkspace = model.defaultWorkspace, !defaultWorkspace.isEmpty {
                     workspace = defaultWorkspace
@@ -221,8 +255,30 @@ struct NewSessionSheet: View {
                 if requestedWorkspace.isEmpty {
                     trustReady = true
                 } else {
-                    trustReady = await inspectTrust(cwd: requestedWorkspace)
+                    trustReady = await inspectTrust(cwd: requestedWorkspace, profileID: profileID)
                 }
+                let inspectedGit: GitInspection?
+                let gitFailed: Bool
+                if requestedWorkspace.isEmpty {
+                    inspectedGit = nil
+                    gitFailed = false
+                } else {
+                    do {
+                        inspectedGit = try await model.gatewayDiagnostics.inspectGit(path: requestedWorkspace)
+                        gitFailed = false
+                    } catch {
+                        // A profile transition can close the old socket while
+                        // this read is suspended. The new profile will rerun
+                        // the load after its revision is published.
+                        inspectedGit = nil
+                        gitFailed = true
+                    }
+                }
+                guard model.profiles.selected?.id == profileID,
+                      selectedServerID == profileID,
+                      workspace == requestedWorkspace else { return }
+                gitInspection = inspectedGit
+                gitInspectionFailed = gitFailed
                 let loadedSettings = await settingsReady
                 guard model.profiles.selected?.id == profileID,
                       selectedServerID == profileID,
@@ -299,8 +355,11 @@ struct NewSessionSheet: View {
         workspace = ""
         useDefaultWorkspace = false
         trustInspection = nil
+        gitInspection = nil
+        gitInspectionFailed = false
         selectedModel = nil
         configuredModel = nil
+        sourceControl = .existing
         showServers = false
         guard model.profiles.selected?.id != profile.id else { return }
         Task { await model.switchGateway(profile) }
@@ -309,6 +368,24 @@ struct NewSessionSheet: View {
     private var needsTrust: Bool {
         guard let value = trustInspection?.objectValue else { return false }
         return value["requiresDecision"]?.boolValue == true && value["effectiveDecision"] == .null
+    }
+
+    private var quickSelections: [NewSessionQuickSelection] {
+        let profilesByID = Dictionary(uniqueKeysWithValues: pairedServers.map { ($0.id, $0) })
+        var seen = Set<String>()
+        return model.visibleSessions.compactMap { session in
+            let profileID = session.gatewayProfileID ?? model.profiles.selected?.id
+            guard let profileID,
+                  let profile = profilesByID[profileID],
+                  profile.isEnabled,
+                  seen.insert("\(profileID)|\(session.cwd)").inserted else { return nil }
+            return NewSessionQuickSelection(
+                path: session.cwd,
+                projectName: session.workspaceName,
+                serverID: profileID,
+                serverName: profile.label
+            )
+        }
     }
 
     private var recentWorkspaces: [WorkspaceShortcut] {
@@ -322,17 +399,37 @@ struct NewSessionSheet: View {
         }
     }
 
-    private func inspectTrust(cwd: String) async -> Bool {
+    private func selectQuickSelection(_ shortcut: NewSessionQuickSelection) {
+        guard let profile = pairedServers.first(where: { $0.id == shortcut.serverID }), profile.isEnabled else { return }
+        let shouldSwitch = model.profiles.selected?.id != profile.id
+        selectedServerID = profile.id
+        workspace = shortcut.path
+        useDefaultWorkspace = false
+        trustInspection = nil
+        gitInspection = nil
+        gitInspectionFailed = false
+        selectedModel = nil
+        configuredModel = nil
+        sourceControl = .existing
+        guard shouldSwitch else { return }
+        Task { await model.switchGateway(profile) }
+    }
+
+    private func inspectTrust(cwd: String, profileID: String) async -> Bool {
         guard let target = TrustTarget(cwd: cwd) else { return false }
         do {
             let inspection = try await model.inspectTrust(target: target)
-            guard workspace == cwd else { return false }
+            guard workspace == cwd,
+                  selectedServerID == profileID,
+                  model.profiles.selected?.id == profileID else { return false }
             trustInspection = inspection
             return true
         } catch is CancellationError {
             return false
         } catch {
-            guard workspace == cwd else { return false }
+            guard workspace == cwd,
+                  selectedServerID == profileID,
+                  model.profiles.selected?.id == profileID else { return false }
             model.lastError = error.localizedDescription
             return false
         }
@@ -356,14 +453,14 @@ struct NewSessionSheet: View {
             profileID: activeProfileID,
             workspace: workspace,
             requiresTrust: needsTrust
-        )
+        ) && sourceControl.isAdmissible(for: gitInspection)
     }
 
     private var configurationLoading: Bool {
         configurationOwner.isLoading(
             profileID: activeProfileID,
             workspace: workspace
-        )
+        ) || (sourceControl.mode != .existingCheckout && !workspace.isEmpty && gitInspection == nil && !gitInspectionFailed)
     }
 
     private var creating: Bool { creationOwner.isCreating }
@@ -381,13 +478,18 @@ struct NewSessionSheet: View {
             selected: selectedModel,
             configured: configuredModel
         )
-        Task { await create(cwd: cwd, modelOverride: modelOverride) }
+        let requestedSourceControl = sourceControl
+        Task { await create(cwd: cwd, sourceControl: requestedSourceControl, modelOverride: modelOverride) }
     }
 
-    private func create(cwd: String, modelOverride: ModelRef?) async {
+    private func create(
+        cwd: String,
+        sourceControl: SessionSourceControlSelection,
+        modelOverride: ModelRef?
+    ) async {
         defer { creationOwner.finish() }
         do {
-            let route = try await model.createSession(cwd: cwd)
+            let route = try await model.createSession(cwd: cwd, sourceControl: sourceControl)
             guard model.ownsNavigationRoute(route) else {
                 model.lastError = "The new session was created, but this navigation request is no longer current."
                 dismiss()

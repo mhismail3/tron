@@ -23,6 +23,8 @@ describe("UploadStore", () => {
     const document = await store.save("notes.txt", "text/plain", Buffer.from("text"));
     const materialized = await store.materialize([image.id, document.id], "session");
     expect(materialized.images[0]?.mimeType).toBe("image/png");
+    expect(materialized.photoCount).toBe(1);
+    expect(materialized.fileAttachmentCount).toBe(1);
     expect(materialized.envelope).toContain("<attachment");
     expect(materialized.envelope).toContain("notes.txt");
     await expect(store.materialize([image.id], "other-session")).rejects.toMatchObject({ code: "conflict" });

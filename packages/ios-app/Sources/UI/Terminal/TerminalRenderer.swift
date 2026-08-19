@@ -130,12 +130,18 @@ struct TerminalExtendedKey: Equatable {
 
 struct NativeTerminal: UIViewRepresentable {
     let chunks: [TerminalChunk]
+    let isInteractive: Bool
     let keyboard: TerminalKeyboardController
     let onSend: (ArraySlice<UInt8>) -> Void
     let onResize: (Int, Int) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(keyboard: keyboard, onSend: onSend, onResize: onResize)
+        Coordinator(
+            keyboard: keyboard,
+            isInteractive: isInteractive,
+            onSend: onSend,
+            onResize: onResize
+        )
     }
 
     func makeUIView(context: Context) -> TronNativeTerminalView {
@@ -144,6 +150,8 @@ struct NativeTerminal: UIViewRepresentable {
             font: TronFontLoader.createUIFont(size: 13, weight: .regular, mono: true)
         )
         terminal.terminalDelegate = context.coordinator
+        terminal.allowsTerminalInput = isInteractive
+        if !isInteractive { terminal.stopCursorBlinking() }
         terminal.backgroundColor = .clear
         terminal.layer.backgroundColor = UIColor.clear.cgColor
         terminal.nativeBackgroundColor = .clear
@@ -162,14 +170,27 @@ struct NativeTerminal: UIViewRepresentable {
         context.coordinator.keyboard = keyboard
         context.coordinator.onSend = onSend
         context.coordinator.onResize = onResize
+        view.allowsTerminalInput = isInteractive
+        if context.coordinator.isInteractive != isInteractive {
+            context.coordinator.isInteractive = isInteractive
+            if !isInteractive {
+                // SwiftTerm stops its caret animation when the native view loses
+                // first responder. A terminal that has exited must not retain a
+                // blinking cursor while its output remains visible.
+                view.stopCursorBlinking()
+                keyboard.dismissKeyboard()
+            }
+        }
         keyboard.attach(view)
         for chunk in chunks where chunk.sequence > context.coordinator.lastSequence {
             view.feed(byteArray: Array(chunk.data.utf8)[...])
             context.coordinator.lastSequence = chunk.sequence
         }
+        if !isInteractive { view.stopCursorBlinking() }
     }
 
     static func dismantleUIView(_ view: TronNativeTerminalView, coordinator: Coordinator) {
+        _ = view.resignFirstResponder()
         coordinator.keyboard.detach(view)
         view.focusDidChange = nil
         view.terminalDelegate = nil
@@ -187,16 +208,19 @@ struct NativeTerminal: UIViewRepresentable {
 
     final class Coordinator: NSObject, @MainActor TerminalViewDelegate {
         var keyboard: TerminalKeyboardController
+        var isInteractive: Bool
         var onSend: (ArraySlice<UInt8>) -> Void
         var onResize: (Int, Int) -> Void
         var lastSequence = 0
 
         init(
             keyboard: TerminalKeyboardController,
+            isInteractive: Bool,
             onSend: @escaping (ArraySlice<UInt8>) -> Void,
             onResize: @escaping (Int, Int) -> Void
         ) {
             self.keyboard = keyboard
+            self.isInteractive = isInteractive
             self.onSend = onSend
             self.onResize = onResize
         }
@@ -319,6 +343,16 @@ struct TerminalControlBar: View {
 
 final class TronNativeTerminalView: TerminalView {
     var focusDidChange: ((Bool) -> Void)?
+    var allowsTerminalInput = true
+
+    func stopCursorBlinking() {
+        _ = resignFirstResponder()
+        getTerminal().setCursorStyle(.steadyBlock)
+    }
+
+    override var canBecomeFirstResponder: Bool {
+        allowsTerminalInput && super.canBecomeFirstResponder
+    }
 
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()

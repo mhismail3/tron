@@ -23,6 +23,32 @@ struct SessionMutationServiceTests {
             ))
             #expect(try await valueOfOwnedTask(creating) == "created")
 
+            let worktreeCreating = Task {
+                try await harness.service.createSession(
+                    cwd: "/workspace",
+                    sourceControl: SessionSourceControlSelection(
+                        mode: .newBranchWorktree,
+                        branch: "feature/tron",
+                        base: "main"
+                    )
+                )
+            }
+            let worktreeCreate = try await request(in: harness.socket, frameIndex: frameIndex)
+            frameIndex += 1
+            #expect(worktreeCreate.method == "session.create")
+            #expect(worktreeCreate.params?["cwd"] == .string("/workspace"))
+            #expect(worktreeCreate.params?["sourceControl"] == .object([
+                "mode": .string("newBranchWorktree"),
+                "branch": .string("feature/tron"),
+                "base": .string("main"),
+            ]))
+            try expectCommandID(worktreeCreate)
+            await harness.socket.enqueue(successResponse(
+                id: worktreeCreate.id,
+                result: .object(["sessionId": .string("worktree-created")])
+            ))
+            #expect(try await valueOfOwnedTask(worktreeCreating) == "worktree-created")
+
             let prompting = Task {
                 try await harness.service.prompt(
                     "hello",

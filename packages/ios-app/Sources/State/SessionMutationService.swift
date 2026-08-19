@@ -48,10 +48,17 @@ final class SessionMutationService {
         return response.sessionId
     }
 
-    func createSession(cwd: String) async throws -> String {
-        struct Params: Codable { let cwd, commandId: String }
+    func createSession(
+        cwd: String,
+        sourceControl: SessionSourceControlSelection? = nil
+    ) async throws -> String {
+        struct Params: Codable {
+            let cwd: String
+            let commandId: String
+            let sourceControl: SessionSourceControlSelection?
+        }
         let commandID = uuidSource.next().uuidString
-        let params = Params(cwd: cwd, commandId: commandID)
+        let params = Params(cwd: cwd, commandId: commandID, sourceControl: sourceControl)
         let response: SessionIDResponse = try await executor.perform(
             method: "session.create",
             commandID: commandID

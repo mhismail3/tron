@@ -8,6 +8,7 @@ import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
 import type { FilesystemService } from "../machine/filesystem-service.js";
+import { GitWorktreeService, type SessionSourceControlRequest } from "../machine/git-worktree-service.js";
 import type { UploadStore } from "../machine/upload-store.js";
 import type { TerminalService } from "../machine/terminal-service.js";
 import type { TrustService } from "../admin/trust-service.js";
@@ -26,6 +27,31 @@ const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
 const PROVIDER_CATALOG_MAX_STRING_BYTES = 4 * 1_048_576;
 const PROVIDER_CATALOG_MAX_FIELD_CHARACTERS = 100_000;
+
+function parseSessionSourceControl(value: unknown): SessionSourceControlRequest | undefined {
+  if (value === undefined || value === null) return undefined;
+  const source = object(value, "sourceControl");
+  const mode = oneOf(source.mode, "sourceControl.mode", [
+    "existingCheckout",
+    "newBranchWorktree",
+    "existingBranchWorktree",
+  ] as const);
+  const result: SessionSourceControlRequest = { mode };
+  if (mode === "existingCheckout") {
+    if (source.branch !== undefined || source.base !== undefined) {
+      throw new GatewayError("invalid_request", "sourceControl existingCheckout does not accept branch or base");
+    }
+    return result;
+  }
+  result.branch = string(source.branch, "sourceControl.branch", { max: 255 });
+  if (mode === "newBranchWorktree") {
+    const base = optionalString(source.base, "sourceControl.base", 255);
+    if (base !== undefined) result.base = base;
+  } else if (source.base !== undefined) {
+    throw new GatewayError("invalid_request", "sourceControl.base is only valid for newBranchWorktree");
+  }
+  return result;
+}
 
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "gateway.restart",
@@ -53,6 +79,7 @@ export interface GatewayServiceDependencies {
   devices: DeviceStore;
   sessions: RuntimeRegistry;
   filesystem: FilesystemService;
+  gitWorktrees?: GitWorktreeService;
   uploads: UploadStore;
   terminals: TerminalService;
   trust: TrustService;
@@ -71,10 +98,15 @@ export interface GatewayServiceDependencies {
 
 export class GatewayService {
   private restartRequested = false;
+  private readonly gitWorktrees: GitWorktreeService;
   private readonly sessionListPages = new SessionListPaginationStore();
   private readonly modelCatalogPages = new ModelCatalogPager();
 
-  constructor(private readonly dependencies: GatewayServiceDependencies) {}
+  constructor(private readonly dependencies: GatewayServiceDependencies) {
+    this.gitWorktrees = dependencies.gitWorktrees ?? new GitWorktreeService(
+      dependencies.config?.tronHome ?? process.env.TRON_HOME ?? process.cwd(),
+    );
+  }
 
   releaseClient(clientID: string): void {
     this.sessionListPages.releaseClient(clientID);
@@ -112,6 +144,7 @@ export class GatewayService {
         "packages.v1",
         "trust.v1",
         "filesystem.v1",
+        "source-control.v1",
         "uploads.v1",
         "terminal.v1",
         "extension-presentation.v1",
@@ -182,8 +215,45 @@ export class GatewayService {
       }
       case "session.create": {
         const created = await this.mutation(client, method, params, async () => {
-          const slot = await this.dependencies.sessions.create(string(params.cwd, "cwd", { max: 4_096 }));
-          return safeJson({ sessionId: slot.id });
+          const cwd = string(params.cwd, "cwd", { max: 4_096 });
+          const sourceControl = parseSessionSourceControl(params.sourceControl);
+          const createsWorktree = sourceControl !== undefined && sourceControl.mode !== "existingCheckout";
+          if (createsWorktree) await this.dependencies.trust.requireResolved(cwd);
+          const prepared = await this.gitWorktrees.prepare(cwd, sourceControl);
+          let propagatedTrust: Awaited<ReturnType<TrustService["propagateResolvedDecision"]>> | undefined;
+          try {
+            if (createsWorktree) {
+              propagatedTrust = await this.dependencies.trust.propagateResolvedDecision(cwd, prepared.cwd);
+            }
+            const slot = await this.dependencies.sessions.create(prepared.cwd);
+            return safeJson({ sessionId: slot.id });
+          } catch (error) {
+            let cleanupError: unknown;
+            let trustRollbackError: unknown;
+            try {
+              await propagatedTrust?.rollback();
+            } catch (rollbackError) {
+              trustRollbackError = rollbackError;
+            }
+            try {
+              await prepared.cleanup();
+            } catch (worktreeError) {
+              cleanupError = worktreeError;
+            }
+            if (cleanupError || trustRollbackError) {
+              throw new GatewayError(
+                "internal",
+                "Session creation failed and temporary Git state could not be fully cleaned up",
+                false,
+                {
+                  failure: error instanceof Error ? error.message : "Unknown session creation failure",
+                  ...(cleanupError ? { cleanup: cleanupError instanceof Error ? cleanupError.message : "Unknown worktree cleanup failure" } : {}),
+                  ...(trustRollbackError ? { trustRollback: trustRollbackError instanceof Error ? trustRollbackError.message : "Unknown trust cleanup failure" } : {}),
+                },
+              );
+            }
+            throw error;
+          }
         }) as { sessionId: string };
         return safeJson(created);
       }
@@ -248,6 +318,8 @@ export class GatewayService {
             text,
             attachmentEnvelope: attachments.envelope,
             attachmentCount: uploadIds.length,
+            ...(attachments.photoCount > 0 ? { photoCount: attachments.photoCount } : {}),
+            ...(attachments.fileAttachmentCount > 0 ? { fileAttachmentCount: attachments.fileAttachmentCount } : {}),
           }));
         });
       case "session.abort":

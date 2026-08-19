@@ -111,7 +111,7 @@ export class FilesystemService {
   async inspectGit(path: string): Promise<{ isRepository: boolean; branch?: string; dirty?: boolean }> {
     const cwd = await this.canonical(path);
     return new Promise((resolvePromise) => {
-      const child = spawn("/usr/bin/git", ["status", "--porcelain=v1", "--branch", "--untracked-files=no"], {
+      const child = spawn("/usr/bin/git", ["status", "--porcelain=v1", "--branch", "--untracked-files=all"], {
         cwd,
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 3_000,

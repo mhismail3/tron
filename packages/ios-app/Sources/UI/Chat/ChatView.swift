@@ -1488,7 +1488,7 @@ struct ChatView: View {
             if let snapshot = selectedAuthoritativeSnapshot {
                 SessionContextProgressButton(
                     contextPercentage: contextPercentage(snapshot),
-                    modelName: snapshot.model.map { "\($0.provider) / \($0.id)" },
+                    modelName: snapshot.model?.displayDescription,
                     isCompacting: snapshot.phase == .compacting
                 ) { showContext = true }
             }

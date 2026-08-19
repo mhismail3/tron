@@ -4,7 +4,6 @@ struct ModelRef: Codable, Hashable, Sendable, Identifiable {
     let provider: String
     let id: String
 
-    var displayName: String { id }
 }
 
 struct ContextUsage: Codable, Hashable, Sendable {
@@ -151,7 +150,11 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
         let id: String
         var behavior: Behavior
         var text: String
+        /// Total uploaded items retained for rolling Gateway compatibility.
         let attachmentCount: Int
+        /// Optional typed counts from newer Gateways.
+        var photoCount: Int? = nil
+        var fileAttachmentCount: Int? = nil
     }
 
     struct PendingPrompt: Codable, Hashable, Identifiable, Sendable {
@@ -160,6 +163,8 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
         let behavior: QueuedMessage.Behavior?
         let text: String
         let attachmentCount: Int
+        var photoCount: Int? = nil
+        var fileAttachmentCount: Int? = nil
     }
 
     var displayedQueuedMessages: [QueuedMessage] {

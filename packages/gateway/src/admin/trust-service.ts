@@ -16,6 +16,12 @@ export interface TrustInspection {
   effectiveDecision: boolean | null;
 }
 
+export interface PropagatedTrustDecision {
+  source: TrustInspection;
+  target: TrustInspection;
+  rollback: () => Promise<void>;
+}
+
 export class TrustService {
   private readonly store: ProjectTrustStore;
   private readonly mutationMutex = new AsyncMutex();
@@ -55,6 +61,39 @@ export class TrustService {
       throw new GatewayError("trust_required", "Choose whether to trust this project before loading agent resources", false, inspection);
     }
     return { cwd: inspection.cwd, trusted: inspection.effectiveDecision === true };
+  }
+
+  /**
+   * A Git worktree is a new canonical path for the same project. Carry the
+   * already-resolved source decision only when the target has no explicit or
+   * inherited decision, so creating a worktree cannot bypass project trust or
+   * overwrite a deliberate target decision.
+   */
+  async propagateResolvedDecision(sourcePath: string, targetPath: string): Promise<PropagatedTrustDecision> {
+    return this.mutationMutex.run(async () => {
+      const source = await this.inspectUnlocked(sourcePath);
+      if (source.requiresDecision && source.effectiveDecision === null) {
+        throw new GatewayError("trust_required", "Choose whether to trust this project before creating a worktree", false, source);
+      }
+      const target = await this.inspectUnlocked(targetPath);
+      const shouldWrite = target.savedDecision === null && target.effectiveDecision === null;
+      if (shouldWrite) this.store.set(target.cwd, source.effectiveDecision === true);
+      let rolledBack = false;
+      return {
+        source,
+        target: shouldWrite ? { ...target, savedDecision: source.effectiveDecision === true, effectiveDecision: source.effectiveDecision === true } : target,
+        rollback: async () => {
+          if (!shouldWrite || rolledBack) return;
+          await this.mutationMutex.run(async () => {
+            if (rolledBack) return;
+            rolledBack = true;
+            if (this.store.get(target.cwd) === (source.effectiveDecision === true)) {
+              this.store.set(target.cwd, null);
+            }
+          });
+        },
+      };
+    });
   }
 
   async set(path: string, decision: boolean | null): Promise<TrustInspection> {

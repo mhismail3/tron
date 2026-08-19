@@ -82,7 +82,7 @@ struct StructuredJSONField: Identifiable, Sendable {
         }
         if let provider = object["provider"]?.stringValue,
            let id = object["modelId"]?.stringValue ?? object["id"]?.stringValue {
-            return "\(provider) / \(id)"
+            return ModelDisplayFormatting.reference(provider: provider, model: id)
         }
         return "Entry \(index + 1)"
     }

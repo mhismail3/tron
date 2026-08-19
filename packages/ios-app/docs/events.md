@@ -37,7 +37,8 @@ admits and reduces mounted-session topics:
   mismatch is discarded without creating or caching state. Synchronous intake revocation rejects all
   later sequenced topics before cursor reduction or cross-domain effects. Explicit acknowledged open/sync remains the only
   path allowed to replace a cursor or runtime baseline. The same snapshot carries the full
-  bounded queue projection and queue revision; queue updates therefore replace the visible
+  bounded queue projection (including total attachment count and optional photo/file counts) and queue
+  revision; queue updates therefore replace the visible
   queued-message cards atomically rather than applying per-row mobile deltas. A Gateway advertising
   `queue-management.v1` must supply both rich fields; iOS admits Edit/Remove only for that
   authoritative pair. Legacy string-only projections remain visibly locked and direct the user to

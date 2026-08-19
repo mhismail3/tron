@@ -436,20 +436,20 @@ struct SessionContextSheet: View {
                                 catch { surfaceActionError(error) }
                             }
                         } label: {
-                            if snapshot.model == candidate.ref { Label(candidate.name, systemImage: "checkmark") }
-                            else { Text(candidate.name) }
+                            if snapshot.model == candidate.ref { Label(candidate.displayName, systemImage: "checkmark") }
+                            else { Text(candidate.displayName) }
                         }
                     }
                 } label: {
                     TronSettingsRow(
                         icon: "cpu",
                         title: "Model",
-                        subtitle: snapshot.model.map { "\($0.provider) / \($0.id)" } ?? "Not selected",
+                        subtitle: snapshot.model?.displayDescription ?? "Not selected",
                         accent: configurationRowAccent
                     )
                     .accessibilityHidden(true)
                 }
-                .accessibilityLabel("Model: \(snapshot.model.map { "\($0.provider) / \($0.id)" } ?? "Not selected")")
+                .accessibilityLabel("Model: \(snapshot.model?.displayDescription ?? "Not selected")")
                 TronSettingsDivider(accent: .tronPurple)
                 Menu {
                     ForEach(snapshot.availableThinkingLevels, id: \.self) { level in

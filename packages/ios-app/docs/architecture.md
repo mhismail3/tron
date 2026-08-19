@@ -104,7 +104,9 @@ retirement, revokes profile-scoped loads and presentation intake, and awaits the
 before the focused profile changes. A profile switch considers the new socket ready after handshake
 and event activation; dashboard refresh, mounted-presentation restoration, and terminal reattachment
 continue under the same admission without blocking a valid session route from opening. The previous focused catalog is retained as a bounded stale
-dashboard bucket during that transition. Non-focused dashboard connections are independently retired or
+dashboard bucket during that transition. A target profile's last bounded bucket is also retained until
+its focused catalog replaces it, preventing translucent sheets from exposing an intermediate empty list.
+Non-focused dashboard connections are independently retired or
 reconnected and never blank healthy profiles when one Mac is offline. Provider-auth prompts are
 transport-client scoped: disconnect and profile transitions retire them before a new connection can
 receive input, and stale operation responses are treated as a retryable no-op rather than a misleading
@@ -571,7 +573,11 @@ explicit replay revision so SwiftTerm is recreated even when replacement sequenc
 increase; ordinary append/truncation does not change renderer identity. Presentation switch
 or dismissal revokes terminal intake and pending resize work synchronously, while multiple
 presentations sharing one terminal retain the connection subscription until the final owner
-closes. Secondary live-runtime reads require that exact session to be opened first, so a
+closes. Once the shell exits, the native terminal becomes non-interactive and resigns first
+responder and forces a steady cursor so SwiftTerm stops its caret animation while retained
+output remains readable. Terminal menus separate live terminals from exited retained
+replay entries, so a quit terminal can remain available as history without appearing active.
+Secondary live-runtime reads require that exact session to be opened first, so a
 stale selection cannot read or render another session's context, tree, resources,
 export, or terminal inventory.
 Backward transcript pages carry an entry anchor and are rejected if branch
@@ -644,7 +650,10 @@ navigation without replay. Pending attachment chips enter and leave with bounded
 motion; their height changes explicitly arm the sole scroll coordinator's viewport transition.
 Authoritative queued entries render after any explicit runtime detail as right-anchored compact cards
 that hug their content and wrap at the same 364-point maximum as a user prompt. They retain stable
-identity, delivery stage, position, text, and attachment count. Queue cards and the transcript
+identity, delivery stage, position, text, total attachment count, and optional photo/file counts. The
+steer card keeps its delivery detail and behavior icon together at the trailing edge, leaving the
+message and attachment rows on the full card width; photo counts use a photo label while file counts
+retain the attachment label. Queue cards and the transcript
 timeline are installed from the same exact tagged source, so consuming a queued entry cannot remove
 its card one frame before the corresponding canonical prompt installs. Manageable cards use one
 interactive, accent-tinted Liquid Glass surface with an explicit full-shape hit region; tapping
@@ -826,7 +835,14 @@ button rather than a trailing page action; its compact appearance uses the
 system toolbar glass without nesting a second button surface. Resource path
 editors share one padded, top-leading multiline field treatment, while numeric
 settings use the shared larger numeric scale. Connected-provider logout lives in the
-provider row's compact action menu while connection is a plain trailing affordance. Import
+provider row's compact action menu while connection is a plain trailing affordance. All provider and
+model catalog projections use `ModelDisplayFormatting` at the UI boundary: identifiers such as
+`openai-codex` and `gpt-5.6-luna` render as “OpenAI Codex” and “GPT 5.6 Luna” without changing
+canonical IDs or search/mutation values. New Session quick selections are compound
+server/project identities, so selecting one switches the owning Gateway profile before
+configuration admission. Source-control creation sends an explicit strategy to Gateway;
+Pi receives only the resulting worktree `cwd`, while Git worktree creation and cleanup remain
+Gateway-owned. Import
 is owned by one progressive Import sheet, including canonical session-file import
 and the bounded legacy migration path; the legacy import action is outside its
 amber status/configuration card. The chat composer remains visually floating without an

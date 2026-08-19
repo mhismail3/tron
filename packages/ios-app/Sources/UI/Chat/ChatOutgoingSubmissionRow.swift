@@ -22,8 +22,12 @@ struct ChatPendingPromptRow: View, Equatable {
                         .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
                         .modifier(UserPromptGlassModifier())
                 }
-                if presentation.attachmentCount > 0 {
-                    Text("\(presentation.attachmentCount) \(presentation.attachmentCount == 1 ? "attachment" : "attachments") pending")
+                ForEach(QueuedMessageAttachmentPresentation.lines(
+                    attachmentCount: presentation.attachmentCount,
+                    photoCount: presentation.photoCount,
+                    fileAttachmentCount: presentation.fileAttachmentCount
+                )) { line in
+                    Label("\(line.text) pending", systemImage: line.iconName)
                         .font(TronTypography.caption)
                         .foregroundStyle(Color.tronTextSecondary)
                 }
