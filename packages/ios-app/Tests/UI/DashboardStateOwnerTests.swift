@@ -40,6 +40,40 @@ struct DashboardStateOwnerTests {
         ) == Set([other.id]))
     }
 
+    @Test("retiring a background transport retains its bounded dashboard bucket")
+    func dashboardProjectionRetention() {
+        #expect(DashboardProjectionRetentionPolicy.retainsExistingBucket(
+            profileExists: true,
+            existingSessionCount: 3,
+            incomingSessionCount: 0,
+            state: .connecting
+        ))
+        #expect(DashboardProjectionRetentionPolicy.retainsExistingBucket(
+            profileExists: true,
+            existingSessionCount: 3,
+            incomingSessionCount: 0,
+            state: .stale
+        ))
+        #expect(!DashboardProjectionRetentionPolicy.retainsExistingBucket(
+            profileExists: true,
+            existingSessionCount: 0,
+            incomingSessionCount: 0,
+            state: .connecting
+        ))
+        #expect(!DashboardProjectionRetentionPolicy.retainsExistingBucket(
+            profileExists: true,
+            existingSessionCount: 3,
+            incomingSessionCount: 1,
+            state: .connected
+        ))
+        #expect(!DashboardProjectionRetentionPolicy.retainsExistingBucket(
+            profileExists: false,
+            existingSessionCount: 3,
+            incomingSessionCount: 0,
+            state: .stale
+        ))
+    }
+
     @Test("server filter defaults to all and preserves explicit selections")
     func serverFilterSelection() {
         var filter = DashboardServerFilterState()

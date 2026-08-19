@@ -398,6 +398,9 @@ struct PresentationStyleGuardTests {
         #expect(!shell.contains("struct NewSessionSheet: View"))
         #expect(newSession.contains("@State private var configurationOwner = NewSessionConfigurationOwner()"))
         #expect(newSession.contains("@State private var creationOwner = NewSessionCreationOwner()"))
+        #expect(newSession.contains("title: \"Server\""))
+        #expect(newSession.contains("private func selectServer(_ profile: GatewayProfile)"))
+        #expect(newSession.contains("session.gatewayProfileID == profileID"))
         #expect(newSession.contains(".task(id: NewSessionConfigurationLoadID("))
         #expect(newSession.contains(".disabled(creating || !configurationReady)"))
         #expect(shell.contains("@State private var presentedSession: AppModel.SessionNavigationRoute?"))
@@ -489,6 +492,9 @@ struct PresentationStyleGuardTests {
         #expect(codeSlider < codePreview)
         #expect(connections.contains("struct ConnectionsSettingsView"))
         #expect(connections.contains("struct ImportSettingsView"))
+        #expect(connections.contains("serverDetailDetent"))
+        #expect(connections.contains(".presentationDetents([.medium, .large], selection: $serverDetailDetent)"))
+        #expect(connections.contains("gatewayActionButton"))
         #expect(providerSettings.contains("struct ProvidersSettingsView"))
         #expect(defaults.contains("struct AgentDefaultsSettingsView"))
         #expect(settings.contains(".sheet(isPresented: $isPresented)"))
@@ -589,7 +595,7 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
         let settings = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/GatewayDiagnosticsView.swift"),
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ConnectionSettingsView.swift"),
             encoding: .utf8
         )
         let packages = try String(
@@ -718,8 +724,8 @@ struct PresentationStyleGuardTests {
         )
         #expect(settings.contains("private extension GatewayLogRecord"))
         #expect(settings.contains("Newest entries first"))
-        #expect(settings.contains("await model.requestGatewayRestart()"))
-        #expect(settings.contains("records = try await model.gatewayDiagnostics.logs(limit: 300)"))
+        #expect(settings.contains("await model.requestGatewayRestart(for: currentProfile)"))
+        #expect(settings.contains("records = await model.loadGatewayLogs(limit: 1_000)"))
         #expect(!settings.contains("try? await model."))
         #expect(context.contains("model.gatewayDiagnostics.inspectGit"))
         #expect(context.contains("SessionGitPresentation"))
@@ -744,7 +750,7 @@ struct PresentationStyleGuardTests {
         }
         #expect(presentationStore.contains("prepareSecondaryProjectionForRuntimeInstallation(installed)"))
         #expect(presentationStore.contains("ownsSubscription(sessionID: sessionID, requestedToken: token)"))
-        #expect(settings.contains("model.gatewayDiagnostics.logs"))
+        #expect(settings.contains("model.loadGatewayLogs"))
         #expect(!context.contains("model.client"))
         #expect(!settings.contains("model.client"))
         #expect(diagnostics.contains("request(\"git.inspect\""))
@@ -870,6 +876,9 @@ struct PresentationStyleGuardTests {
         #expect(composer.contains("usesInternalScrolling"))
         #expect(composer.contains("context.coordinator.reconcileFocus(on: view)"))
         #expect(composer.contains("hasMirroredFocus"))
+        #expect(composer.contains("focusReconciliationScheduled"))
+        #expect(composer.contains("caretScrollScheduled"))
+        #expect(composer.contains("Coalesce all caret work"))
         #expect(chat.contains("MultilineComposerTextView("))
         #expect(!chat.contains("TextField(\"\", text: $text, axis: .vertical)"))
         let attachmentButton = try #require(
@@ -1433,6 +1442,22 @@ struct PresentationStyleGuardTests {
         for (url, source) in uiSources where url.lastPathComponent != "TronPresentation.swift" {
             #expect(!source.contains(".scrollEdgeEffectStyle("), "\(url.lastPathComponent) bypasses local scroll-edge chrome")
         }
+    }
+
+    @Test("server filter uses a medium multi-select sheet")
+    func serverFilterUsesMediumSheet() throws {
+        let shell = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
+            encoding: .utf8
+        )
+        #expect(shell.contains(".sheet(isPresented: $showingServerFilter)"))
+        #expect(shell.contains(".presentationDetents([.medium])"))
+        #expect(shell.contains("private var serverFilterSheet: some View"))
+        #expect(shell.contains("Choose one or more servers"))
+        #expect(shell.contains("private func filterOption("))
+        #expect(shell.contains("serverFilter.toggle(source.profileID)"))
+        #expect(!shell.contains("serverFilterGlassNamespace"))
+        #expect(!shell.contains("serverFilterPopup"))
     }
 
     @Test("dashboard rows never retain canonical session selection styling")

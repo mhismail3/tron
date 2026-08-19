@@ -56,6 +56,8 @@ struct MultilineComposerTextView: UIViewRepresentable {
         private var usesInternalScrolling = false
         private var lastWidth: CGFloat = 0
         private var layoutRevision: UInt = 0
+        private var focusReconciliationScheduled = false
+        private var caretScrollScheduled = false
         private(set) var hasMirroredFocus = false
 
         init(_ parent: MultilineComposerTextView) { self.parent = parent }
@@ -66,13 +68,17 @@ struct MultilineComposerTextView: UIViewRepresentable {
             // Programmatic dismissal is explicit only after UIKit has reported
             // focus for this responder lifetime.
             if parent.isFocused, !view.isFirstResponder, parent.isEditable {
+                guard !focusReconciliationScheduled else { return }
+                focusReconciliationScheduled = true
                 DispatchQueue.main.async { [weak view, weak self] in
-                    guard let view, let self,
+                    guard let self else { return }
+                    self.focusReconciliationScheduled = false
+                    guard let view,
                           self.parent.isFocused,
                           self.parent.isEditable,
                           view.window != nil,
                           !view.isFirstResponder else { return }
-                    view.becomeFirstResponder()
+                    _ = view.becomeFirstResponder()
                 }
             } else if Self.shouldResign(
                 desiredFocus: parent.isFocused,
@@ -155,11 +161,27 @@ struct MultilineComposerTextView: UIViewRepresentable {
 
         private func keepCaretVisible(in view: UITextView) {
             guard usesInternalScrolling else {
-                if view.contentOffset != .zero { view.setContentOffset(.zero, animated: false) }
+                if abs(view.contentOffset.y) > 0.5 {
+                    view.setContentOffset(.zero, animated: false)
+                }
                 return
             }
-            DispatchQueue.main.async {
-                view.layoutIfNeeded()
+            // SwiftUI may update this representable several times during the
+            // keyboard/safe-area transition. Coalesce all caret work into one
+            // main-queue pass; repeatedly forcing layout and scrolling from
+            // every update can otherwise form a responder/layout feedback loop.
+            guard !caretScrollScheduled else { return }
+            caretScrollScheduled = true
+            DispatchQueue.main.async { [weak self, weak view] in
+                guard let self else { return }
+                self.caretScrollScheduled = false
+                guard let view, view.window != nil else { return }
+                guard self.usesInternalScrolling, view.isScrollEnabled else {
+                    if abs(view.contentOffset.y) > 0.5 {
+                        view.setContentOffset(.zero, animated: false)
+                    }
+                    return
+                }
                 view.scrollRangeToVisible(view.selectedRange)
                 let minimumY = -view.adjustedContentInset.top
                 let maximumY = max(minimumY, view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)

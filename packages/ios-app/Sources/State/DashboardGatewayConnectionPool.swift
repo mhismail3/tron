@@ -91,6 +91,30 @@ final class DashboardGatewayConnectionPool {
         entries[profileID]?.state
     }
 
+    func info(for profileID: String) async -> GatewayInfo? {
+        guard let client = entries[profileID]?.client else { return nil }
+        return await client.info
+    }
+
+    func diagnostics(for profileID: String) -> GatewayDiagnosticsService? {
+        guard let client = entries[profileID]?.client else { return nil }
+        return GatewayDiagnosticsService(client: client)
+    }
+
+    func devices(for profileID: String) async throws -> [PairedDevice] {
+        guard let client = entries[profileID]?.client else {
+            throw GatewayFailure(
+                code: "disconnected",
+                message: "The Mac gateway is offline.",
+                retryable: true,
+                details: nil
+            )
+        }
+        struct Response: Decodable { let devices: [PairedDevice] }
+        let response: Response = try await client.request("device.list", EmptyParams())
+        return try PairedDeviceCatalogPolicy.admit(response.devices)
+    }
+
     nonisolated static func shouldAdmit(
         _ profile: GatewayProfile,
         selectedProfileID: String?,
@@ -180,7 +204,9 @@ final class DashboardGatewayConnectionPool {
         entry.refreshTask?.cancel()
         entry.reconnectTask?.cancel()
         if close { Task { await entry.client.close() } }
-        delegate?.dashboardPoolDidUpdate(profileID: profileID, sessions: [], state: .stale)
+        // Retiring a background transport is not deletion of its bounded
+        // dashboard projection. The AppModel keeps the last-known bucket while
+        // this profile reconnects, is blocked, or is temporarily unadmitted.
     }
 
     private func isCurrent(profileID: String, client: GatewayClient, generation: Int) -> Bool {

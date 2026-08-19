@@ -14,6 +14,14 @@ struct GatewayLogRecord: Identifiable, Hashable, Sendable {
     var id: String { "\(timestamp)-\(level)-\(message)" }
 }
 
+struct GatewayProfileLogRecord: Hashable, Identifiable, Sendable {
+    let profileID: String
+    let profileLabel: String
+    let record: GatewayLogRecord
+
+    var id: String { "\(profileID):\(record.id)" }
+}
+
 typealias GatewayDiagnosticsRequest = @Sendable (String, JSONValue) async throws -> JSONValue
 
 struct GatewayDiagnosticsService: Sendable {

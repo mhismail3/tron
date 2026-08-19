@@ -71,15 +71,11 @@ struct SettingsView: View {
                             settingsLink("Custom Models", icon: "slider.horizontal.3") { CustomModelsSettingsView() }
                         }
                     }
-                    TronSettingsGroup("Gateway") {
-                        VStack(spacing: 0) {
-                            if scope == .dashboard {
-                                settingsLink("Import", icon: "tray.and.arrow.down") {
-                                    ImportSettingsView(onImported: onImported)
-                                }
-                                TronSettingsDivider()
+                    if scope == .dashboard {
+                        TronSettingsGroup("Gateway") {
+                            settingsLink("Import", icon: "tray.and.arrow.down") {
+                                ImportSettingsView(onImported: onImported)
                             }
-                            settingsLink("Diagnostics", icon: "stethoscope") { GatewayDiagnosticsView() }
                         }
                     }
                 }

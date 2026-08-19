@@ -2,6 +2,19 @@ struct NewSessionConfigurationLoadID: Hashable {
     let profileID: String?
     let workspace: String
     let trustInvalidationGeneration: Int
+    let profileRevision: Int
+
+    init(
+        profileID: String?,
+        workspace: String,
+        trustInvalidationGeneration: Int,
+        profileRevision: Int = 0
+    ) {
+        self.profileID = profileID
+        self.workspace = workspace
+        self.trustInvalidationGeneration = trustInvalidationGeneration
+        self.profileRevision = profileRevision
+    }
 }
 
 struct NewSessionConfigurationOwner: Equatable, Sendable {

@@ -70,7 +70,8 @@ Gateway transport tests inject `ManualClock`, `SequenceUUIDSource`, and
 connection identity; persisted profiles decode older records with
 `machineGroupID == machineId` and `isEnabled == true`. The dashboard pool admits
 at most one profile per physical-machine group and excludes disabled
-profiles, while retaining their pairing metadata and credentials. A foreground reconnect uses a five-second handshake deadline (initial pairing remains fifteen seconds), publishes transport readiness before slower projection/terminal restoration, and treats `system.stopping` as an immediate retry signal. `AppModelLifecycleTests` owns the façade and
+profiles, while retaining their pairing metadata, credentials, and bounded last-known
+session buckets across transport retirement and focused-server changes. A foreground reconnect uses a five-second handshake deadline (initial pairing remains fifteen seconds), publishes transport readiness before slower projection/terminal restoration, and treats `system.stopping` as an immediate retry signal. `AppModelLifecycleTests` owns the façade and
 `GatewayLifecycleCoordinator` boundary above it: exact admissions are revoked by transition,
 concurrent profile transitions chain retire/close work before any replacement handshake, switch
 closes the old socket before replacement connect, forget awaits close, concurrent final teardown
@@ -87,7 +88,8 @@ entering a reconnect loop. `AppModelCatalogSyncTests` owns scripted request barr
 zero-read updates, unknown discovery, shared single-flight traversal, dirty follow-up, silent mixed-revision
 recovery, page/item/identity bounds, typed retained/transport outcomes, background/foreground convergence,
 and responsive-socket preservation. `DashboardStateOwnerTests` separately owns synchronous
-cached/stale/live activity and ID-index integrity. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
+cached/stale/live activity, ID-index integrity, and retention of existing dashboard buckets
+when a background transport is retired. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
 waits on a scripted orchestration barrier must run inside `withTestWatchdog`; never add an unbounded
 wait or a clock that collapses liveness sleeps into a hot loop. Test-owned unstructured tasks
 must be cancelled for their full lifetime and joined with `valueOfOwnedTask` so
@@ -148,7 +150,7 @@ controls and tool-run/detail routing live in dedicated owners without widening t
 primary tool sheet, diff destination, technical-payload destination, and shared navigation chrome also have
 separate presentation owners; only their directly shared layout/diff primitives use module-internal access.
 The settings shell and its appearance, connection/import, provider, agent-default, runtime-behavior, resource-path,
-package, trust, custom-model, and diagnostics destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators. The dashboard settings overview uses an eager stack so the Gateway Import destination is materialized with the initial sheet; project-scoped settings intentionally omit that dashboard-only action.
+package, trust, and custom-model destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators. Connections owns the combined server-management and diagnostics surface: paired-server rows open per-server detail sheets, while authorized devices and the full bounded log history remain below the server list. The dashboard settings overview uses an eager stack so the Gateway Import destination is materialized with the initial sheet; project-scoped settings intentionally omit that dashboard-only action.
 Resolved package JSON is constructed only inside its progressive detail destination; the overview retains a
 constant-depth top-level count instead of recursively rendering a potentially large resource tree. Package reload
 refreshes the inventory and update projection together, while installation controls live in a medium/large
@@ -251,6 +253,7 @@ retirement rejection at each suspended boundary, exact `true`/`false`/explicit-`
 wire decisions, event-only revisions, centralized receipt replay, and nested Observation through
 the `AppModel` façade. `ProviderAuthCoordinatorTests` owns the corresponding provider boundary:
 target-isolated newest-load admission, atomic provider/model publication, bounded cursor validation,
+transport-retired prompts, and stale operation responses that close without surfacing a broker not-found error.
 profile-retirement rejection across parallel reads and pagination, operation-keyed prompt/event
 state, bounded event-before-response quarantine and promotion, stale response/cancellation safety,
 exact-target completion refresh, receipt-backed forced refresh/logout, event-only invalidation, and
@@ -264,8 +267,8 @@ validation/put errors, stable put receipts, A → B → A rejection, lifecycle-b
 cancellation-safe presentation, nested observation, and exact draft-revision save admission.
 `GatewayDiagnosticsServiceTests` own the read-only view boundary for exact-path `git.inspect` and
 bounded `system.logs` requests, typed projection, malformed-record skipping, and newest-first ordering.
-Presentation style guards prohibit those views from reaching `model.client`; DTO fields remain in the
-service while log color/icon/date formatting remains in the settings UI.
+The combined Connections surface uses AppModel's profile-targeted diagnostics façade; it never reaches
+`model.client`. DTO fields remain in the service while log color/icon/date formatting remains in the settings UI.
 `AppModelInvalidationTests` scripts every
 successful response and proves publication cannot schedule its own next load; event tests
 separately prove one generation advance per canonical invalidation. Settings requests use a

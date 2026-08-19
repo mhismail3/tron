@@ -570,6 +570,31 @@ struct ProviderAuthCoordinatorTests {
         }
     }
 
+    @Test("a retired operation response closes stale auth without surfacing not-found")
+    func retiredOperationResponseIsRetryable() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            harness.owner.installHostedAuthOperation("operation", target: .global)
+            harness.owner.handlePrompt(promptPayload(operation: "operation", prompt: "prompt"))
+
+            let answer = Task { try await harness.owner.answerAuth("secret") }
+            try await harness.socket.waitUntilSent(count: 2)
+            let request = try request(await harness.socket.sentFrames()[1])
+            await harness.socket.enqueue(errorResponse(
+                id: request.id,
+                code: "not_found",
+                message: "Authentication operation was not found"
+            ))
+            try await answer.value
+
+            #expect(harness.owner.prompt == nil)
+            #expect(harness.owner.event == nil)
+            #expect(harness.owner.hostedActiveAuthOperationID == nil)
+            #expect(harness.delegate.errors.isEmpty)
+            await harness.client.close()
+        }
+    }
+
     @Test("older completion refreshes only its retained target and preserves newer auth state")
     func olderCompletionCannotRefreshNewerTarget() async throws {
         try await runScenario {

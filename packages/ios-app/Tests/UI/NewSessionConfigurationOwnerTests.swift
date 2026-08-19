@@ -25,6 +25,12 @@ struct NewSessionConfigurationOwnerTests {
             workspace: "/workspace/a",
             trustInvalidationGeneration: 0
         ))
+        #expect(initialLoad != NewSessionConfigurationLoadID(
+            profileID: "profile-a",
+            workspace: "/workspace/a",
+            trustInvalidationGeneration: 0,
+            profileRevision: 1
+        ))
 
         var owner = NewSessionConfigurationOwner()
         owner.begin(profileID: "profile-a", workspace: "/workspace/a")

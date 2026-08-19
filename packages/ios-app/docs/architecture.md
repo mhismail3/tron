@@ -36,9 +36,10 @@ uses one bounded lightweight client per eligible non-focused paired Mac through
 replacing the active chat connection. Profiles sharing the selected
 `machineGroupID`, profiles with a provisional legacy group (`machineGroupID == machineId`),
 or profiles disabled in Connections settings, remain paired but are blocked from
-background admission and have no cached/live dashboard projection. Selecting a
-legacy profile once performs a verified Gateway handshake and persists its real
-physical-machine group before it can become a secondary connection. Connect and close invalidate older attempts across every suspension;
+background admission. Their last-known bounded dashboard buckets remain available as
+stale projections; transport retirement is not deletion. Selecting a legacy profile once
+performs a verified Gateway handshake and persists its real physical-machine group before
+it can become a secondary connection. Connect and close invalidate older attempts across every suspension;
 late hello, frame, failure, liveness, completion, and close callbacks can only detach or publish
 for their captured epoch. Event deliveries carry that non-wire connection identity. App lifecycle
 connects prepare the epoch without starting receive/liveness work, install the returned identity,
@@ -73,7 +74,7 @@ coordination state instead of routing facts through unrelated façade fields.
 connection state/info/identity, exact admissions, reconnect, foreground reconciliation, serial
 retire/close transitions, and final teardown. A non-selecting pairing commit adds a server without
 changing the focused profile; the dashboard pool owns shallow catalog connections for the other
-paired profiles, admitting at most one enabled profile per physical-machine group, each with an independent failure boundary. It composes `GatewayClient` without copying that actor's
+paired profiles, admitting at most one enabled profile per physical-machine group, each with an independent failure boundary. The combined Connections settings surface uses those profile-owned clients for per-server gateway metadata, authorized-device discovery, and log history; restart and other focused mutations transition through the lifecycle client so receipt handling remains authoritative. It composes `GatewayClient` without copying that actor's
 byte-transport epoch. `AppModel` supplies narrow projection hooks for cache installation, refresh,
 session/terminal reconciliation, and synchronous retirement; it no longer stores a parallel lifecycle
 phase, reconnect task, pairing attempt, connection identity, or transition waiters. A dedicated
@@ -100,8 +101,12 @@ enter that one disposable projection; hidden/local selection policy remains outs
 the canonical phase; only a live Gateway-authoritative interrupted phase uses the amber warning.
 A focused-profile boundary synchronously invalidates lifecycle admission, chains behind any preceding
 retirement, revokes profile-scoped loads and presentation intake, and awaits the exact transport close
-before the focused profile changes. Non-focused dashboard connections are independently retired or
-reconnected and never blank healthy profiles when one Mac is offline. Pairing pre-encodes profile metadata and uses one transactional profile
+before the focused profile changes. The previous focused catalog is retained as a bounded stale
+dashboard bucket during that transition. Non-focused dashboard connections are independently retired or
+reconnected and never blank healthy profiles when one Mac is offline. Provider-auth prompts are
+transport-client scoped: disconnect and profile transitions retire them before a new connection can
+receive input, and stale operation responses are treated as a retryable no-op rather than a misleading
+broker error. Pairing pre-encodes profile metadata and uses one transactional profile
 store boundary: atomic Keychain upsert succeeds before a single-document metadata commit, metadata failure
 restores the exact prior credential (or removes a newly created one), credential-deletion failure restores
 removed metadata, and explicit profile selection must commit its metadata before replacement cache or
@@ -205,7 +210,9 @@ that viewport so a detached reader is not displaced. Explicit earlier-page loads
 remain request-only, are scoped to the exact mount generation/cursor, and restore the
 former visible anchor with bounded late-layout correction so the viewport does not jump.
 A gesture that begins during that correction cancels every remaining position write
-and its final native geometry wins over the pre-load detached state.
+and its final native geometry wins over the pre-load detached state. The UIKit composer coalesces
+focus reconciliation and caret scrolling onto one main-queue pass during keyboard/safe-area changes,
+preventing responder/layout feedback from starving the main actor.
 Create and fork return navigation identity without mounting or selecting a transcript;
 only the destination route may establish live presentation authority.
 
@@ -329,8 +336,10 @@ clear only the matching cached update markers before refreshing that target's in
 Settings captures its session/CWD when presented rather than consulting later dashboard selection.
 Trust reads and mutations require a typed nonempty project target; onboarding, project Settings,
 and new-session admission discard stale workspace results, and trust invalidations reopen the
-new-session readiness gate until the matching workspace is inspected again. Successful first-run
-pairing inspects an already selected workspace before enabling onward navigation; the initial
+new-session readiness gate until the matching workspace is inspected again. Non-selecting pairing
+from Connections preserves the existing setup-completion state and suppresses the root setup sheet
+while the secondary-server pairing sheet is active. Successful first-run pairing inspects an already
+selected workspace before enabling onward navigation; the initial
 pre-pair view task is never treated as evidence for that post-pair target. Custom-model
 documents have one explicit typed global target and generation-owned publication, so a slower
 older read cannot replace a newer document. Validation and put revalidate the same profile and

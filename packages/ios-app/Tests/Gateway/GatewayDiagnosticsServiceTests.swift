@@ -57,6 +57,16 @@ struct GatewayDiagnosticsServiceTests {
         )])
     }
 
+    @Test("profile-qualified logs keep identical records distinct")
+    func profileQualifiedLogs() {
+        let record = GatewayLogRecord(timestamp: "2026-08-16T00:00:00Z", level: "info", message: "ready")
+        let first = GatewayProfileLogRecord(profileID: "server-a", profileLabel: "Server A", record: record)
+        let second = GatewayProfileLogRecord(profileID: "server-b", profileLabel: "Server B", record: record)
+
+        #expect(first.id != second.id)
+        #expect(first.record == second.record)
+    }
+
     @Test("non-repository and absent records retain empty presentation semantics")
     func emptyValues() async throws {
         let recorder = DiagnosticsRequestRecorder(responses: [

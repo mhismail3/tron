@@ -167,6 +167,9 @@ final class AppModel {
     var loadingEarlierTranscript: Bool { sessionPresentation.loadingEarlierTranscript }
     var commands: [CommandInfo] { sessionPresentation.commands }
     var resources: JSONValue? { sessionPresentation.resources }
+    /// Keeps the root setup sheet from reacting to the transient connection
+    /// state used while the Connections sheet adds a secondary server.
+    var isAddingServer = false
     var setupComplete: Bool {
         get {
             if UserDefaults.standard.object(forKey: "tronSetupComplete.v1") != nil {
@@ -720,6 +723,12 @@ final class AppModel {
         try lifecycle.requireConnection(admission)
     }
 
+    private func requireCurrentGatewayConnection() throws -> GatewayLifecycleCoordinator.Admission {
+        guard let admission = lifecycle.admission,
+              admission.connectionID != nil else { throw CancellationError() }
+        return admission
+    }
+
     private func invalidateProfileScopedLoads() {
         cancelCatalogRefresh()
         sessionCatalog.invalidateLoads()
@@ -729,6 +738,10 @@ final class AppModel {
     }
 
     private func clearGatewayProjection() {
+        // Preserve the focused catalog as a bounded stale dashboard bucket
+        // before clearing the live projection. Selecting another server must
+        // not make the previous server's sessions disappear from All servers.
+        clearLiveConnectionProjection()
         sessionCatalog.clear()
         sessionPresentation.clearProfile()
         pairedDevices.removeAll()
@@ -743,7 +756,6 @@ final class AppModel {
         composerDrafts.retireProfilePresentation()
         lastError = nil
         onboardingError = nil
-        clearLiveConnectionProjection()
     }
 
     func switchGateway(_ profile: GatewayProfile) async {
@@ -759,6 +771,33 @@ final class AppModel {
     func setGatewayEnabled(_ enabled: Bool, profile: GatewayProfile) {
         do {
             try profiles.setEnabled(enabled, for: profile)
+            profileRevision &+= 1
+            reconcileDashboardConnections()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func disableGateway(_ profile: GatewayProfile) async {
+        if profiles.selected?.id == profile.id {
+            guard let replacement = profiles.profiles.first(where: { $0.id != profile.id && $0.isEnabled }) else {
+                lastError = "Keep at least one server enabled before disabling this server."
+                return
+            }
+            await switchGateway(replacement)
+        }
+        setGatewayEnabled(false, profile: profile)
+    }
+
+    func forgetGateway(_ profile: GatewayProfile) async {
+        if profiles.selected?.id == profile.id {
+            await forgetCurrentGateway()
+            return
+        }
+        do {
+            try profiles.remove(profile)
+            composerDrafts.removeProfile(profile.id)
+            await cache.remove(profileID: profile.id)
             profileRevision &+= 1
             reconcileDashboardConnections()
         } catch {
@@ -995,7 +1034,81 @@ final class AppModel {
         }
     }
 
+    func gatewayInfo(for profileID: String) async -> GatewayInfo? {
+        if profiles.selected?.id == profileID { return gatewayInfo }
+        return await dashboardConnections.info(for: profileID)
+    }
+
+    func gatewayLogs(for profileID: String, limit: Int = 1_000) async throws -> [GatewayLogRecord] {
+        guard limit >= 0 else { throw GatewayFailure(code: "invalid_request", message: "Log limit is invalid.", retryable: false, details: nil) }
+        if profiles.selected?.id == profileID {
+            return try await gatewayDiagnostics.logs(limit: limit)
+        }
+        guard let diagnostics = dashboardConnections.diagnostics(for: profileID) else {
+            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
+        }
+        return try await diagnostics.logs(limit: limit)
+    }
+
+    func loadGatewayLogs(limit: Int = 1_000) async -> [GatewayProfileLogRecord] {
+        let profileSnapshot = profiles.profiles
+        var loaded: [GatewayProfileLogRecord] = []
+        for profile in profileSnapshot {
+            do {
+                let records = try await gatewayLogs(for: profile.id, limit: limit)
+                loaded.append(contentsOf: records.map {
+                    GatewayProfileLogRecord(profileID: profile.id, profileLabel: profile.label, record: $0)
+                })
+            } catch is CancellationError {
+                return loaded
+            } catch {
+                continue
+            }
+        }
+        return loaded.sorted { $0.record.timestamp > $1.record.timestamp }
+    }
+
+    func loadAuthorizedDevices() async -> [GatewayAuthorizedDevice] {
+        let profileSnapshot = profiles.profiles
+        let selectedID = profiles.selected?.id
+        if selectedID != nil {
+            await refreshDevices()
+            guard profiles.selected?.id == selectedID else { return [] }
+        }
+
+        var authorized: [GatewayAuthorizedDevice] = []
+        for profile in profileSnapshot {
+            let devices: [PairedDevice]
+            if profile.id == selectedID {
+                guard profiles.selected?.id == selectedID else { continue }
+                devices = pairedDevices
+            } else {
+                do {
+                    devices = try await dashboardConnections.devices(for: profile.id)
+                } catch is CancellationError {
+                    return authorized
+                } catch {
+                    continue
+                }
+            }
+            authorized.append(contentsOf: devices.map {
+                GatewayAuthorizedDevice(profileID: profile.id, profileLabel: profile.label, device: $0)
+            })
+        }
+        return authorized
+    }
+
+    func revokeDevice(_ id: String, for profileID: String) async throws {
+        if profiles.selected?.id != profileID,
+           let profile = profiles.profiles.first(where: { $0.id == profileID }) {
+            await switchGateway(profile)
+        }
+        guard profiles.selected?.id == profileID else { throw CancellationError() }
+        try await revokeDevice(id)
+    }
+
     func revokeDevice(_ id: String) async throws {
+        let expectedProfileID = profiles.selected?.id
         struct Params: Codable { let deviceId: String; let commandId: String }
         struct Response: Codable { let revoked: Bool }
         let commandID = uuidSource.next().uuidString
@@ -1003,6 +1116,7 @@ final class AppModel {
         let response: Response = try await mutationExecutor.perform(method: "device.revoke", commandID: commandID) {
             try await client.request("device.revoke", params)
         }
+        guard profiles.selected?.id == expectedProfileID else { throw CancellationError() }
         if response.revoked {
             pairedDevices.removeAll { $0.id == id }
             if let profile = profiles.selected, profile.deviceId == id,
@@ -1476,11 +1590,31 @@ final class AppModel {
     }
 
     func beginAuth(providerID: String, authType: String, target: ProviderCatalogTarget) async throws {
-        try await providerAuth.beginAuth(providerID: providerID, authType: authType, target: target)
+        let admission = try requireCurrentGatewayConnection()
+        do {
+            try await providerAuth.beginAuth(providerID: providerID, authType: authType, target: target)
+            try requireConnection(admission)
+        } catch {
+            guard lifecycle.admits(admission) else {
+                providerAuth.clearProfile()
+                throw CancellationError()
+            }
+            throw error
+        }
     }
 
     func answerAuth(_ value: String) async throws {
-        try await providerAuth.answerAuth(value)
+        let admission = try requireCurrentGatewayConnection()
+        do {
+            try await providerAuth.answerAuth(value)
+            try requireConnection(admission)
+        } catch {
+            guard lifecycle.admits(admission) else {
+                providerAuth.clearProfile()
+                throw CancellationError()
+            }
+            throw error
+        }
     }
 
     func cancelAuth(operationID: String? = nil) async {
@@ -1598,6 +1732,14 @@ final class AppModel {
     func requestGatewayRestart() async {
         do { try await restartGateway() }
         catch { surface(error) }
+    }
+
+    func requestGatewayRestart(for profile: GatewayProfile) async {
+        if profiles.selected?.id != profile.id {
+            await switchGateway(profile)
+        }
+        guard profiles.selected?.id == profile.id else { return }
+        await requestGatewayRestart()
     }
 
     private func restartGateway(
@@ -1851,6 +1993,10 @@ final class AppModel {
         switch event.topic {
         case "transport.disconnected", "system.stopping":
             lifecycle.noteDisconnected(connectionID: connectionID)
+            // AuthBroker operations belong to the current transport client.
+            // Retire any visible prompt before reconnect can expose a new
+            // client, so the UI never submits a stale operation ID.
+            providerAuth.clearProfile()
             invalidateSessionConnectionOwnership()
             sessionCatalog.markDisconnected()
             lifecycle.requestReconnect(immediate: event.topic == "system.stopping", replaceExisting: event.topic == "system.stopping")
@@ -1957,25 +2103,19 @@ final class AppModel {
         dashboardCacheLoadGeneration &+= 1
         let cacheGeneration = dashboardCacheLoadGeneration
         let selectedProfileID = profiles.selected?.id
-        let selectedGroup = profiles.selected?.machineGroupID
-        let admittedDashboardIDs = DashboardGatewayConnectionPool.admittedProfileIDs(
-            profiles.profiles,
-            selectedProfileID: selectedProfileID,
-            selectedMachineGroupID: selectedGroup
-        )
-        let excluded = profiles.profiles.filter { profile in
-            profile.id != selectedProfileID && !admittedDashboardIDs.contains(profile.id)
+        let currentProfileIDs = Set(profiles.profiles.map(\.id))
+        for profileID in Array(dashboardSessionsByProfile.keys) where !currentProfileIDs.contains(profileID) {
+            dashboardSessionsByProfile[profileID] = nil
         }
-        for profile in excluded {
-            dashboardSessionsByProfile[profile.id] = nil
-            dashboardStatesByProfile[profile.id] = nil
+        for profileID in Array(dashboardStatesByProfile.keys) where !currentProfileIDs.contains(profileID) {
+            dashboardStatesByProfile[profileID] = nil
         }
         dashboardConnections.reconcile(
             profiles: profiles.profiles,
             selectedProfileID: selectedProfileID,
             token: { [profiles] profile in profiles.token(for: profile) }
         )
-        for profile in profiles.profiles where profile.id != selectedProfileID && !excluded.contains(where: { $0.id == profile.id }) {
+        for profile in profiles.profiles where profile.id != selectedProfileID {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let cached = await self.cache.load(profileID: profile.id)
@@ -2004,9 +2144,14 @@ final class AppModel {
         sessionCatchUpNoticeTask = nil
         noticeStore.removeAll()
         sessionCatalog.markDisconnected()
-        if let profileID = profiles.selected?.id {
-            dashboardSessionsByProfile[profileID] = nil
-            dashboardStatesByProfile[profileID] = nil
+        if let profile = profiles.selected {
+            let retained = sessionCatalog.sessions.map {
+                $0.withGatewaySource(id: profile.id, label: profile.label)
+            }
+            if !retained.isEmpty || dashboardSessionsByProfile[profile.id] == nil {
+                dashboardSessionsByProfile[profile.id] = retained
+            }
+            dashboardStatesByProfile[profile.id] = .stale
         }
     }
 
@@ -2116,7 +2261,18 @@ extension AppModel: DashboardGatewayConnectionPoolDelegate {
         // Once a profile becomes focused, the lifecycle/catalog owner is the
         // only authority allowed to publish its dashboard rows. A delayed pool
         // stop callback must not erase that newly authoritative projection.
-        guard profileID != profiles.selected?.id else { return }
+        guard profileID != profiles.selected?.id,
+              profiles.profiles.contains(where: { $0.id == profileID }) else { return }
+        let existingCount = dashboardSessionsByProfile[profileID]?.count ?? 0
+        if DashboardProjectionRetentionPolicy.retainsExistingBucket(
+            profileExists: true,
+            existingSessionCount: existingCount,
+            incomingSessionCount: sessions.count,
+            state: state
+        ) {
+            dashboardStatesByProfile[profileID] = state
+            return
+        }
         dashboardSessionsByProfile[profileID] = sessions
         dashboardStatesByProfile[profileID] = state
     }

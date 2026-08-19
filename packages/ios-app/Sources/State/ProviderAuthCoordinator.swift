@@ -361,14 +361,26 @@ final class ProviderAuthCoordinator {
             if answeringPromptID == admittedPrompt.id { answeringPromptID = nil }
         }
         let admittedProfileGeneration = profileGeneration
-        let response: RespondResponse = try await client.request(
-            "auth.respond",
-            RespondParams(
-                operationId: admittedPrompt.operationId,
-                promptId: admittedPrompt.id,
-                value: value
+        let response: RespondResponse
+        do {
+            response = try await client.request(
+                "auth.respond",
+                RespondParams(
+                    operationId: admittedPrompt.operationId,
+                    promptId: admittedPrompt.id,
+                    value: value
+                )
             )
-        )
+        } catch let failure as GatewayFailure where failure.code == "not_found" {
+            // A reconnect or transport replacement can retire the broker
+            // operation between presenting the prompt and submitting its value.
+            // Never surface the broker's misleading operation-not-found popup;
+            // retire only this stale presentation and let the provider catalog
+            // refresh on the next authoritative connection.
+            guard profileGeneration == admittedProfileGeneration else { return }
+            retireAuthPresentation(operationID: admittedPrompt.operationId)
+            return
+        }
         try requireProfile(admittedProfileGeneration)
         guard response.answered else {
             // The Gateway may have already completed or retired this prompt
@@ -468,6 +480,7 @@ final class ProviderAuthCoordinator {
     /// Synchronously revokes suspended work and disposes all profile projections.
     func clearProfile() {
         profileGeneration &+= 1
+        invalidationGeneration &+= 1
         authBeginGeneration &+= 1
         authPresentationGeneration &+= 1
         loadGenerationByTarget = loadGenerationByTarget.mapValues { $0 &+ 1 }
@@ -479,6 +492,16 @@ final class ProviderAuthCoordinator {
         removeAllQuarantinedPresentations()
         prompt = nil
         event = nil
+    }
+
+    private func retireAuthPresentation(operationID: String) {
+        targetByAuthOperation[operationID] = nil
+        if activeAuthOperationID == operationID {
+            activeAuthOperationID = nil
+            authPresentationGeneration &+= 1
+        }
+        if prompt?.operationId == operationID { prompt = nil }
+        if event?.operationId == operationID { event = nil }
     }
 
     private func parsePrompt(_ payload: JSONValue) -> ProviderAuthPromptState? {

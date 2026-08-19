@@ -55,6 +55,23 @@ enum DashboardServerConnectionState: Equatable, Sendable {
     }
 }
 
+enum DashboardProjectionRetentionPolicy {
+    /// Background connection retirement is not deletion. Keep an existing
+    /// bounded dashboard bucket while a profile is reconnecting, blocked, or
+    /// otherwise temporarily unavailable.
+    static func retainsExistingBucket(
+        profileExists: Bool,
+        existingSessionCount: Int,
+        incomingSessionCount: Int,
+        state: DashboardServerConnectionState
+    ) -> Bool {
+        profileExists
+            && existingSessionCount > 0
+            && incomingSessionCount == 0
+            && [.connecting, .offline, .stale].contains(state)
+    }
+}
+
 struct DashboardServerSource: Identifiable, Equatable, Sendable {
     let profileID: String
     let label: String

@@ -4,9 +4,12 @@ struct NewSessionSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var workspace = ""
+    @State private var selectedServerID: String?
+    @State private var useDefaultWorkspace = true
     @State private var selectedModel: ModelRef?
     @State private var configuredModel: ModelRef?
     @State private var showBrowser = false
+    @State private var showServers = false
     @State private var showModels = false
     @State private var trustInspection: JSONValue?
     @State private var configurationOwner = NewSessionConfigurationOwner()
@@ -17,6 +20,14 @@ struct NewSessionSheet: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 12) {
+                    setupCard(
+                        icon: "desktopcomputer",
+                        title: "Server",
+                        value: selectedServer?.label ?? "Select",
+                        caption: selectedServer.map { "\($0.host):\($0.port)" } ?? "Choose the server for this new session.",
+                        accent: .tronEmerald
+                    ) { showServers = true }
+
                     if !recentWorkspaces.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
@@ -109,7 +120,54 @@ struct NewSessionSheet: View {
             .sheet(isPresented: $showBrowser) {
                 WorkspaceBrowser(shortcuts: recentWorkspaces, initialPath: workspace) { value in
                     workspace = value
+                    useDefaultWorkspace = false
                 }
+            }
+            .sheet(isPresented: $showServers) {
+                NavigationStack {
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(alignment: .leading, spacing: 16) {
+                            TronSettingsGroup("Paired Servers", detail: "New sessions will be created on the selected server.") {
+                                VStack(spacing: 0) {
+                                    ForEach(Array(pairedServers.enumerated()), id: \.element.id) { index, profile in
+                                        if index > 0 { TronSettingsDivider() }
+                                        Button {
+                                            selectServer(profile)
+                                        } label: {
+                                            TronValueRow(
+                                                icon: profile.id == activeProfileID ? "checkmark.circle.fill" : "desktopcomputer",
+                                                title: profile.label,
+                                                detail: profile.isEnabled
+                                                    ? "\(profile.host):\(profile.port)"
+                                                    : "Disabled · \(profile.host):\(profile.port)",
+                                                accent: profile.id == activeProfileID ? .tronEmerald : .tronCyan
+                                            )
+                                            .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(!profile.isEnabled)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(20)
+                    }
+                    .tronScrollEdgeChrome()
+                    .tronNavigationTitle("Select Server")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button { showServers = false } label: {
+                                Image(systemName: "checkmark")
+                                    .font(TronTypography.buttonSM)
+                                    .foregroundStyle(Color.tronEmerald)
+                            }
+                            .accessibilityLabel("Done")
+                        }
+                    }
+                }
+                .tronTopBlur(.sheet)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
             }
             .sheet(isPresented: $showModels) {
                 NavigationStack {
@@ -136,16 +194,21 @@ struct NewSessionSheet: View {
                 .presentationDragIndicator(.hidden)
             }
             .task(id: NewSessionConfigurationLoadID(
-                profileID: model.profiles.selected?.id,
+                profileID: activeProfileID,
                 workspace: workspace,
-                trustInvalidationGeneration: model.trustRevision
+                trustInvalidationGeneration: model.trustRevision,
+                profileRevision: model.profileRevision
             )) {
-                let profileID = model.profiles.selected?.id
+                if selectedServerID == nil {
+                    selectedServerID = model.profiles.selected?.id
+                }
+                let profileID = activeProfileID
                 configurationOwner.begin(profileID: profileID, workspace: workspace)
                 trustInspection = nil
                 selectedModel = nil
                 configuredModel = nil
-                if workspace.isEmpty, let defaultWorkspace = model.defaultWorkspace, !defaultWorkspace.isEmpty {
+                if workspace.isEmpty, useDefaultWorkspace,
+                   let defaultWorkspace = model.defaultWorkspace, !defaultWorkspace.isEmpty {
                     workspace = defaultWorkspace
                     return
                 }
@@ -162,6 +225,7 @@ struct NewSessionSheet: View {
                 }
                 let loadedSettings = await settingsReady
                 guard model.profiles.selected?.id == profileID,
+                      selectedServerID == profileID,
                       workspace == requestedWorkspace,
                       configurationOwner.admit(
                         profileID: profileID,
@@ -215,15 +279,45 @@ struct NewSessionSheet: View {
         .tronGlassSurface(accent: accent, cornerRadius: 12, tintOpacity: 0.15, interactive: true)
     }
 
+    private var pairedServers: [GatewayProfile] {
+        _ = model.profileRevision
+        return model.profiles.profiles
+    }
+
+    private var activeProfileID: String? {
+        selectedServerID ?? model.profiles.selected?.id
+    }
+
+    private var selectedServer: GatewayProfile? {
+        guard let activeProfileID else { return nil }
+        return model.profiles.profiles.first(where: { $0.id == activeProfileID })
+    }
+
+    private func selectServer(_ profile: GatewayProfile) {
+        guard profile.isEnabled else { return }
+        selectedServerID = profile.id
+        workspace = ""
+        useDefaultWorkspace = false
+        trustInspection = nil
+        selectedModel = nil
+        configuredModel = nil
+        showServers = false
+        guard model.profiles.selected?.id != profile.id else { return }
+        Task { await model.switchGateway(profile) }
+    }
+
     private var needsTrust: Bool {
         guard let value = trustInspection?.objectValue else { return false }
         return value["requiresDecision"]?.boolValue == true && value["effectiveDecision"] == .null
     }
 
     private var recentWorkspaces: [WorkspaceShortcut] {
+        guard let profileID = activeProfileID else { return [] }
         var seen = Set<String>()
         return model.visibleSessions.compactMap { session in
-            guard seen.insert(session.cwd).inserted else { return nil }
+            guard session.gatewayProfileID == profileID ||
+                    (session.gatewayProfileID == nil && model.profiles.selected?.id == profileID),
+                  seen.insert(session.cwd).inserted else { return nil }
             return WorkspaceShortcut(path: session.cwd, title: session.workspaceName, icon: "clock.arrow.circlepath")
         }
     }
@@ -259,7 +353,7 @@ struct NewSessionSheet: View {
 
     private var configurationReady: Bool {
         configurationOwner.permitsCreation(
-            profileID: model.profiles.selected?.id,
+            profileID: activeProfileID,
             workspace: workspace,
             requiresTrust: needsTrust
         )
@@ -267,7 +361,7 @@ struct NewSessionSheet: View {
 
     private var configurationLoading: Bool {
         configurationOwner.isLoading(
-            profileID: model.profiles.selected?.id,
+            profileID: activeProfileID,
             workspace: workspace
         )
     }

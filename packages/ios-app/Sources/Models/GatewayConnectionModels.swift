@@ -45,6 +45,15 @@ struct PairedDevice: Codable, Hashable, Identifiable, Sendable {
     let createdAt: String
 }
 
+struct GatewayAuthorizedDevice: Hashable, Identifiable, Sendable {
+    let profileID: String
+    let profileLabel: String
+    let device: PairedDevice
+
+    var id: String { "\(profileID):\(device.id)" }
+}
+
+
 enum PairedDeviceCatalogPolicy {
     static let maximumDevices = 256
     static let maximumIDBytes = 100

@@ -59,6 +59,12 @@ struct SessionShellView: View {
             })
             .presentationDragIndicator(.hidden)
         }
+        .sheet(isPresented: $showingServerFilter) {
+            serverFilterSheet
+                .tronTopBlur(.sheet)
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.hidden)
+        }
         .sheet(item: $sessionToDelete) { session in
             TronConfirmationSheet(
                 title: "Delete \(session.title)?",
@@ -159,68 +165,96 @@ struct SessionShellView: View {
         .padding(.bottom, 8)
     }
 
-    @ViewBuilder
     private var serverFilterControl: some View {
-        if showingServerFilter {
-            serverFilterPopup
-                .transition(.scale(scale: 0.92, anchor: .bottomLeading).combined(with: .opacity))
-        } else {
-            Button {
-                withAnimation(.snappy(duration: 0.2)) { showingServerFilter = true }
-            } label: {
-                Image(systemName: serverFilter.isFiltering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+        Button {
+            showingServerFilter = true
+        } label: {
+            Image(systemName: serverFilter.isFiltering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+        }
+        .buttonStyle(TronIconButtonStyle(size: 56))
+        .accessibilityLabel(serverFilter.accessibilityLabel)
+    }
+
+    private var serverFilterSheet: some View {
+        NavigationStack {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Choose one or more servers to show in your session history.")
+                        .font(TronTypography.code(size: TronTypography.sizeCaption))
+                        .foregroundStyle(Color.tronTextMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    filterOption(
+                        title: "All servers",
+                        detail: "Show sessions from every paired server.",
+                        selected: serverFilter.isAllSelected
+                    ) {
+                        serverFilter.selectAll()
+                    }
+
+                    ForEach(model.dashboardServerSources) { source in
+                        filterOption(
+                            title: source.label,
+                            detail: "\(source.sessionCount) session\(source.sessionCount == 1 ? "" : "s") · \(source.state.label)",
+                            selected: serverFilter.isSelected(source.profileID)
+                        ) {
+                            serverFilter.toggle(source.profileID)
+                        }
+                    }
+                }
+                .padding(20)
             }
-            .buttonStyle(TronIconButtonStyle(size: 56))
-            .accessibilityLabel(serverFilter.accessibilityLabel)
+            .tronScrollEdgeChrome()
+            .tronNavigationTitle("Filter Servers")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showingServerFilter = false }
+                        .tronToolbarAction()
+                }
+            }
         }
     }
 
-    private var serverFilterPopup: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Servers")
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
-                Spacer()
-                Button {
-                    withAnimation(.snappy(duration: 0.2)) { showingServerFilter = false }
-                } label: {
-                    Image(systemName: "xmark")
+    private func filterOption(
+        title: String,
+        detail: String?,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? Color.tronEmerald : Color.tronTextMuted)
+                    .frame(width: 22, height: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .lineLimit(1)
+                    if let detail {
+                        Text(detail)
+                            .font(TronTypography.code(size: TronTypography.sizeBodySM))
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .lineLimit(1)
+                    }
                 }
-                .accessibilityLabel("Close server filter")
+                .layoutPriority(1)
+                Spacer(minLength: 8)
             }
-            Button { serverFilter.selectAll() } label: {
-                filterRow(title: "All servers", detail: nil, selected: serverFilter.isAllSelected)
-            }
-            .buttonStyle(.plain)
-            ForEach(model.dashboardServerSources) { source in
-                Button { serverFilter.toggle(source.profileID) } label: {
-                    filterRow(
-                        title: source.label,
-                        detail: "\(source.sessionCount) session\(source.sessionCount == 1 ? "" : "s") · \(source.state.label)",
-                        selected: serverFilter.isSelected(source.profileID)
-                    )
-                }
-                .buttonStyle(.plain)
-            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(14)
-        .frame(minWidth: 260, maxWidth: 310)
-        .foregroundStyle(Color.tronTextPrimary)
-        .tronGlassSurface(accent: .tronEmerald, cornerRadius: 18, tintOpacity: 0.16)
-    }
-
-    private func filterRow(title: String, detail: String?, selected: Bool) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(selected ? Color.tronEmerald : Color.tronTextMuted)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                if let detail { Text(detail).font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary) }
-            }
-            Spacer(minLength: 8)
-        }
-        .frame(minHeight: 36)
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .tronGlassSurface(
+            accent: selected ? .tronEmerald : .tronCyan,
+            cornerRadius: 12,
+            tintOpacity: selected ? 0.18 : 0.08,
+            interactive: true
+        )
+        .accessibilityValue(selected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var newSessionButton: some View {

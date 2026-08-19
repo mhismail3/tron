@@ -86,7 +86,8 @@ private struct RootView: View {
         showOnboarding = OnboardingPresentationPolicy.shouldPresent(
             hasResolvedLaunchState: model.hasResolvedLaunchState,
             connectionState: model.connectionState,
-            setupComplete: model.setupComplete
+            setupComplete: model.setupComplete,
+            suppressSetup: model.isAddingServer
         )
     }
 }
@@ -95,9 +96,10 @@ enum OnboardingPresentationPolicy {
     static func shouldPresent(
         hasResolvedLaunchState: Bool,
         connectionState: AppModel.ConnectionState,
-        setupComplete: Bool
+        setupComplete: Bool,
+        suppressSetup: Bool = false
     ) -> Bool {
-        guard hasResolvedLaunchState else { return false }
+        guard hasResolvedLaunchState, !suppressSetup else { return false }
         return connectionState == .unpaired
             || connectionState == .unauthorized
             || !setupComplete

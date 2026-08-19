@@ -29,6 +29,12 @@ struct AppModelEventTests {
             connectionState: .connected,
             setupComplete: false
         ))
+        #expect(!OnboardingPresentationPolicy.shouldPresent(
+            hasResolvedLaunchState: true,
+            connectionState: .connected,
+            setupComplete: false,
+            suppressSetup: true
+        ))
     }
 
     @Test("portable tool and extension events update native session state in sequence")
@@ -680,6 +686,31 @@ struct AppModelEventTests {
         #expect(model.resources == nil)
         #expect(model.sessionTree.isEmpty)
         #expect(model.commands.isEmpty)
+    }
+
+    @Test("transport loss retires provider authentication before reconnect")
+    func authPresentationRetiresOnDisconnect() async {
+        let model = AppModel()
+        model.installHostedProviderAuthOperation("auth-operation")
+        await model.handle(GatewayEvent(
+            type: "event", topic: "auth.prompt", sessionId: nil,
+            payload: .object([
+                "operationId": .string("auth-operation"),
+                "promptId": .string("prompt"),
+                "prompt": .object([
+                    "type": .string("secret"),
+                    "message": .string("API key"),
+                ]),
+            ])
+        ))
+        #expect(model.authPrompt?.operationId == "auth-operation")
+
+        await model.handle(GatewayEvent(
+            type: "event", topic: "transport.disconnected", sessionId: nil,
+            payload: .null
+        ))
+        #expect(model.authPrompt == nil)
+        #expect(model.authEvent == nil)
     }
 
     @Test("OAuth URL and device-code notifications are retained for native presentation")
