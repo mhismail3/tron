@@ -26,56 +26,79 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(spacing: 16) {
-                    TronSettingsGroup("App") {
-                        VStack(spacing: 0) {
-                            settingsLink("Appearance", icon: "circle.lefthalf.filled") { AppearanceSettingsView() }
-                            TronSettingsDivider()
-                            settingsLink("Connections", icon: "desktopcomputer") { ConnectionsSettingsView() }
+                VStack(spacing: 12) {
+                    settingsLink(
+                        "Appearance",
+                        summary: "Theme, type scale, and visual preferences",
+                        icon: "circle.lefthalf.filled"
+                    ) { AppearanceSettingsView() }
+                    settingsLink(
+                        "Connections",
+                        summary: "Pair and manage Mac gateways",
+                        icon: "desktopcomputer"
+                    ) { ConnectionsSettingsView() }
+                    settingsLink(
+                        "Providers",
+                        summary: "Authentication and provider credentials",
+                        icon: "key"
+                    ) {
+                        ProvidersSettingsView(sessionID: projectSessionID)
+                    }
+                    settingsLink(
+                        "Models and Defaults",
+                        summary: "Default model, thinking, and selection policy",
+                        icon: "cpu"
+                    ) {
+                        AgentDefaultsSettingsView(
+                            allowsProjectScope: scope == .project,
+                            providerTarget: projectSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global,
+                            projectCWD: projectCWD
+                        )
+                    }
+                    settingsLink(
+                        "Runtime Behavior",
+                        summary: "Prompt queue, retries, and compaction behavior",
+                        icon: "gearshape.2"
+                    ) {
+                        RuntimeBehaviorSettingsView(projectCWD: projectCWD)
+                    }
+                    settingsLink(
+                        "Resource Paths",
+                        summary: "Instructions, skills, and project resources",
+                        icon: "folder.badge.gearshape"
+                    ) {
+                        ResourceSettingsView(projectCWD: projectCWD)
+                    }
+                    settingsLink(
+                        "Packages and Resources",
+                        summary: "Installed packages and executable resources",
+                        icon: "shippingbox"
+                    ) {
+                        PackagesSettingsView(projectCWD: projectCWD)
+                    }
+                    if scope == .project {
+                        settingsLink(
+                            "Project Trust",
+                            summary: "Review executable workspace resource trust",
+                            icon: "checkmark.shield"
+                        ) {
+                            TrustSettingsView(
+                                target: projectCWD.flatMap(TrustTarget.init(cwd:))
+                            )
                         }
                     }
-                    TronSettingsGroup("Agent") {
-                        VStack(spacing: 0) {
-                            settingsLink("Providers", icon: "key") {
-                                ProvidersSettingsView(sessionID: projectSessionID)
-                            }
-                            TronSettingsDivider()
-                            settingsLink("Models and Defaults", icon: "cpu") {
-                                AgentDefaultsSettingsView(
-                                    allowsProjectScope: scope == .project,
-                                    providerTarget: projectSessionID.map(ProviderCatalogTarget.session(id:)) ?? .global,
-                                    projectCWD: projectCWD
-                                )
-                            }
-                            TronSettingsDivider()
-                            settingsLink("Runtime Behavior", icon: "gearshape.2") {
-                                RuntimeBehaviorSettingsView(projectCWD: projectCWD)
-                            }
-                            TronSettingsDivider()
-                            settingsLink("Resource Paths", icon: "folder.badge.gearshape") {
-                                ResourceSettingsView(projectCWD: projectCWD)
-                            }
-                            TronSettingsDivider()
-                            settingsLink("Packages and Resources", icon: "shippingbox") {
-                                PackagesSettingsView(projectCWD: projectCWD)
-                            }
-                            if scope == .project {
-                                TronSettingsDivider()
-                                settingsLink("Project Trust", icon: "checkmark.shield") {
-                                    TrustSettingsView(
-                                        target: projectCWD.flatMap(TrustTarget.init(cwd:))
-                                    )
-                                }
-                            }
-                            TronSettingsDivider()
-                            settingsLink("Custom Models", icon: "slider.horizontal.3") { CustomModelsSettingsView() }
-                        }
-                    }
+                    settingsLink(
+                        "Custom Models",
+                        summary: "Saved model definitions and aliases",
+                        icon: "slider.horizontal.3"
+                    ) { CustomModelsSettingsView() }
                     if scope == .dashboard {
-                        TronSettingsGroup("Gateway") {
-                            settingsLink("Import", icon: "tray.and.arrow.down") {
-                                ImportSettingsView(onImported: onImported)
-                            }
+                        settingsLink(
+                            "Import",
+                            summary: "Restore a session export",
+                            icon: "tray.and.arrow.down"
+                        ) {
+                            ImportSettingsView(onImported: onImported)
                         }
                     }
                 }
@@ -112,12 +135,21 @@ struct SettingsView: View {
 
     private func settingsLink<Destination: View>(
         _ title: String,
+        summary: String,
         icon: String,
         @ViewBuilder destination: @escaping () -> Destination
     ) -> some View {
         TronProgressiveSheetLink(accessibilityLabel: title, destination: destination) {
-            TronSettingsRow(icon: icon, title: title)
-                .contentShape(Rectangle())
+            TronGlassCard(accent: .tronEmerald) {
+                TronSettingsRow(
+                    icon: icon,
+                    title: title,
+                    subtitle: summary,
+                    subtitleLineLimit: 2,
+                    subtitleColor: .tronTextSecondary
+                )
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 }

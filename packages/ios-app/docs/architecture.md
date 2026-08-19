@@ -779,8 +779,10 @@ so a cancelled interactive-pop transition cannot temporarily restore intrinsic-w
 across the back or Settings controls. App-owned workspace
 rows, session cards, setup cards, composer surfaces, attachment chips, tool
 chips and details, structured-data rows, Manage Session content, and
-settings groups use Tron's tinted Liquid Glass surfaces. The dashboard keeps
-search as an explicit toolbar action, aligns workspace headers to the session
+settings groups use Tron's tinted Liquid Glass surfaces. The main Settings sheet is a single
+list of separated row containers rather than category headers; each row carries a concise secondary
+summary while retaining progressive destination construction and exact dashboard/project scope
+admission. The dashboard keeps search as an explicit toolbar action, aligns workspace headers to the session
 status column, uses compact separated session cards, and keeps relative activity
 time at each row's trailing edge. Workspace headers and session cards share the
 same 28-point status-icon anchor: 16 points of outer row inset plus 12 points of

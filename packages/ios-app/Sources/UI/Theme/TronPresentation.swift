@@ -765,6 +765,7 @@ struct TronSettingsRow<Trailing: View>: View {
     let subtitleLineLimit: Int?
     let accent: Color
     let titleColor: Color
+    let subtitleColor: Color
     let trailing: Trailing
 
     init(
@@ -774,6 +775,7 @@ struct TronSettingsRow<Trailing: View>: View {
         subtitleLineLimit: Int? = nil,
         accent: Color = .tronEmerald,
         titleColor: Color = .tronTextPrimary,
+        subtitleColor: Color = .tronTextPrimary,
         @ViewBuilder trailing: () -> Trailing
     ) {
         self.icon = icon
@@ -782,6 +784,7 @@ struct TronSettingsRow<Trailing: View>: View {
         self.subtitleLineLimit = subtitleLineLimit
         self.accent = accent
         self.titleColor = titleColor
+        self.subtitleColor = subtitleColor
         self.trailing = trailing()
     }
 
@@ -800,7 +803,7 @@ struct TronSettingsRow<Trailing: View>: View {
                 if let subtitle {
                     Text(subtitle)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .regular))
-                        .foregroundStyle(Color.tronTextPrimary)
+                        .foregroundStyle(subtitleColor)
                         .lineLimit(subtitleLineLimit)
                         .truncationMode(.tail)
                         .fixedSize(horizontal: false, vertical: subtitleLineLimit == nil)
@@ -824,7 +827,8 @@ extension TronSettingsRow where Trailing == EmptyView {
         subtitle: String? = nil,
         subtitleLineLimit: Int? = nil,
         accent: Color = .tronEmerald,
-        titleColor: Color = .tronTextPrimary
+        titleColor: Color = .tronTextPrimary,
+        subtitleColor: Color = .tronTextPrimary
     ) {
         self.init(
             icon: icon,
@@ -832,7 +836,8 @@ extension TronSettingsRow where Trailing == EmptyView {
             subtitle: subtitle,
             subtitleLineLimit: subtitleLineLimit,
             accent: accent,
-            titleColor: titleColor
+            titleColor: titleColor,
+            subtitleColor: subtitleColor
         ) { EmptyView() }
     }
 }
