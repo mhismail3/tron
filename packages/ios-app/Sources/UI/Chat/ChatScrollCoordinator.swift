@@ -101,6 +101,7 @@ final class ChatScrollCoordinator {
     private var directTailReturnArmed = false
     private var boundaryCameFromViewportWithoutTailMovement = false
     private var pendingGrowthFollow = false
+    private var pendingGrowthFollowAnimation: ChatScrollAnimation = .disabled
     private var pendingContinuousGrowthFollow = false
     private var discreteFollowRenderedIDs: Set<String> = []
     private var discreteFollowRenderedIDOrder: [String] = []
@@ -715,10 +716,14 @@ final class ChatScrollCoordinator {
         }
     }
 
-    /// A geometry-admitted visible row insertion requests one coalesced,
-    /// nonanimated tail settlement. Continuous streaming growth uses the same
-    /// viewport policy and never creates a competing animation.
-    func discreteContentInserted(renderedID: String) {
+    /// A geometry-admitted visible row insertion requests one coalesced tail
+    /// settlement. Ordinary rows use a disabled animation; tool-chip callers
+    /// may request one smooth viewport follow. Continuous streaming growth uses
+    /// the same viewport policy and never creates a competing write.
+    func discreteContentInserted(
+        renderedID: String,
+        followAnimation: ChatScrollAnimation = .disabled
+    ) {
         guard canAutomaticallyFollow else { return }
         if discreteFollowRenderedIDs.insert(renderedID).inserted {
             discreteFollowRenderedIDOrder.append(renderedID)
@@ -731,6 +736,9 @@ final class ChatScrollCoordinator {
             }
         }
         pendingGrowthFollow = true
+        if case .smooth = followAnimation {
+            pendingGrowthFollowAnimation = followAnimation
+        }
         scheduleTailFollow()
     }
 
@@ -869,6 +877,11 @@ final class ChatScrollCoordinator {
 
         evaluateLayoutMutationIfReady()
         evaluatePrependMeasurementIfReady()
+        // Geometry can grow again while the previous automatic command is
+        // still being consumed by SwiftUI. Keep that growth pending and issue
+        // the next command only after the current token is acknowledged; two
+        // writes in one render transaction are a primary source of jumps.
+        if pendingGrowthFollow { scheduleTailFollow() }
     }
 
     func cancel() {
@@ -1013,7 +1026,7 @@ final class ChatScrollCoordinator {
     }
 
     private func scheduleTailFollow() {
-        guard pendingGrowthFollow, canAutomaticallyFollow,
+        guard pendingGrowthFollow, command == nil, canAutomaticallyFollow,
               (pendingInstalledTailSettlement
                 || !discreteFollowRenderedIDs.isEmpty
                 || geometry.distanceFromBottom > ChatTranscriptGeometry.catchUpDistance),
@@ -1035,8 +1048,10 @@ final class ChatScrollCoordinator {
             self.pendingContinuousGrowthFollow = false
             self.pendingInstalledTailSettlement = false
             self.clearDiscreteFollowIDs()
+            let followAnimation = self.pendingGrowthFollowAnimation
+            self.pendingGrowthFollowAnimation = .disabled
             if self.geometry.distanceFromBottom > ChatTranscriptGeometry.catchUpDistance {
-                self.publish(.tail, animation: .disabled, origin: .automaticFollow)
+                self.publish(.tail, animation: followAnimation, origin: .automaticFollow)
             }
         }
     }
@@ -1095,6 +1110,7 @@ final class ChatScrollCoordinator {
         followFrameTask?.cancel()
         followFrameTask = nil
         pendingGrowthFollow = false
+        pendingGrowthFollowAnimation = .disabled
         pendingContinuousGrowthFollow = false
         pendingInstalledTailSettlement = false
         clearDiscreteFollowIDs()
@@ -1106,6 +1122,7 @@ final class ChatScrollCoordinator {
         followFrameTask?.cancel()
         followFrameTask = nil
         pendingGrowthFollow = false
+        pendingGrowthFollowAnimation = .disabled
     }
 
     private func clearDiscreteFollowIDs() {
@@ -1567,6 +1584,7 @@ final class ChatScrollCoordinator {
         userScrolledAway = false
         hasUnreadContent = false
         pendingGrowthFollow = false
+        pendingGrowthFollowAnimation = .disabled
         pendingUnattributedOlderMovement = false
         if !isUserInteracting {
             isNativeUserOwned = false

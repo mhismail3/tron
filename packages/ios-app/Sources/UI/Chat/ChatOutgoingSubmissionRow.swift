@@ -55,6 +55,12 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
         HStack(alignment: .top, spacing: 10) {
             Spacer(minLength: 24)
             VStack(alignment: .trailing, spacing: 4) {
+                if let statusTitle = presentation.statusTitle {
+                    Label(statusTitle, systemImage: "arrow.turn.up.right")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .accessibilityLabel(statusTitle)
+                }
                 if !attachments.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
@@ -78,8 +84,10 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                                 }
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                     .scrollClipDisabled()
+                    .defaultScrollAnchor(.trailing)
                     .frame(maxWidth: .infinity, alignment: .trailing)
                     .padding(.vertical, 3)
                     .accessibilityLabel("Prompt attachments")
@@ -95,6 +103,12 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(presentation.text.isEmpty ? "Prompt attachments" : presentation.text)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var accessibilityLabel: String {
+        [presentation.statusTitle, presentation.text.isEmpty ? "Prompt attachments" : presentation.text]
+            .compactMap { $0 }
+            .joined(separator: ": ")
     }
 }

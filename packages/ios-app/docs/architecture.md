@@ -367,8 +367,13 @@ completion order—not newest-request arbitration—orders staged IDs. A confirm
 captured by its submission and never clears newer text or attachments. Admission installs one exact-target,
 bounded outgoing presentation row immediately; submitted attachments leave the composer strip and remain owned by
 that row until the exact tagged canonical projection installs, including Gateway pending-prompt snapshots. The
-handoff preserves one visual row rather than removing and reinserting optimistic/pending/canonical variants.
-Definitive rejection restores outgoing text before newer input, while a possibly-sent
+handoff preserves one visual row rather than removing and reinserting optimistic/pending/canonical variants. The
+admission is completed synchronously before ordinary-send keyboard dismissal, so the large prompt/photo outgoing
+shape, steering/follow-up label, and responder transition share one MainActor boundary; transport is a separate
+settlement of that exact admission. Outgoing attachment strips are right-anchored from their first frame, avoiding
+a left-aligned optimistic variant before canonical reconciliation. Prompt and queue cards use one bounded
+intrinsic/wrapped layout rather than a `ViewThatFits` branch swap, so large pasted text chooses its final
+container geometry on the first measurement. Definitive rejection restores outgoing text before newer input, while a possibly-sent
 transport outcome retains the row and captured IDs without replay. Retired completions publish neither restoration
 nor errors. Extension editor requests auto-apply only to an empty exact draft; nonempty drafts require the
 existing explicit Use/Keep disposition. Route-provided initial editor text seeds only an absent exact
@@ -555,7 +560,9 @@ settlement; prior and newly arriving unread state remains admitted throughout st
 final, and settling phases. Interruption away from the tail restores detached/unread
 ownership, while successful physical settlement clears unread only at completion.
 Every later measured height increase coalesces into
-the next display-frame command until another upward gesture. An ordinary installed projection
+the next display-frame command until another upward gesture; a newly admitted tool chip may request one
+smooth tail-follow command, while subsequent growth waits for that command's acknowledgement instead of
+replacing its token. An ordinary installed projection
 change captures the current visible semantic locus before publication and either settles a pinned
 reader to the tail once without animation or advances an exact layout epoch after installation to
 restore a surviving detached semantic anchor within one point. Persistent idle native ownership does
@@ -573,7 +580,12 @@ a newer line count. Every stable row owns its horizontal inset instead of relyin
 transient ScrollView content margins, so prompt insertion cannot expose a flush-left frame.
 Existing rows never participate in stack-wide insertion or scale animations. Thinking,
 Markdown, tool, and explicit custom/retry rows therefore remain stable above the composer while the user
-follows the tail. Ordinary default running activity owns no transcript row. Terminal output has its own monotonic sequence and reconnect replay cursor.
+follows the tail. Newly admitted tool rows reserve their layout before one local reveal, and status/title changes
+interpolate inside the mounted chip rather than recreating the row. The first mounted streaming/thinking frame is
+fully visible; only later authoritative tokens receive the presentation fade, and the bounded thinking viewport
+reserves an estimate based on the admitted line count until first measurement, capped at four lines, so TextKit
+preference delivery cannot flash its height. Ordinary
+default running activity owns no transcript row. Terminal output has its own monotonic sequence and reconnect replay cursor.
 Output/exit frames delivered while attach or gap recovery is suspended remain in a bounded
 coordinator quarantine and join the admitted replay contiguously. A reset increments an
 explicit replay revision so SwiftTerm is recreated even when replacement sequences do not

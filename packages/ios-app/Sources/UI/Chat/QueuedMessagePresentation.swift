@@ -97,11 +97,13 @@ struct QueuedMessageRow: View {
     }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            interactiveCard(card.fixedSize(horizontal: true, vertical: false))
-            interactiveCard(card)
-        }
-        .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
+        // Queue cards use the same single bounded layout as prompt bubbles;
+        // switching between intrinsic and wrapped ViewThatFits branches after
+        // a large queued prompt arrives causes a visible container flash.
+        interactiveCard(
+            card.fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
+        )
         .contextMenu {
             if isManageable && !isMutating {
                 if canMoveEarlier {

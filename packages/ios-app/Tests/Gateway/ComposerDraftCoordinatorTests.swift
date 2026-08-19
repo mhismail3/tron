@@ -437,6 +437,54 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("pre-existing identical queued prompts do not reconcile a newer submission")
+    func queuedReconciliationRequiresNewIdentity() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 43)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "same"
+            )
+            let existing = SessionSnapshot.QueuedMessage(
+                id: "existing",
+                behavior: .steer,
+                text: "same",
+                attachmentCount: 0
+            )
+            let sending = Task {
+                try await harness.coordinator.send(
+                    target: target,
+                    behavior: "steer",
+                    queuedMessages: [existing]
+                )
+            }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                queuedMessages: [existing]
+            )
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+
+            let admitted = SessionSnapshot.QueuedMessage(
+                id: "new",
+                behavior: .steer,
+                text: "same",
+                attachmentCount: 0
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                queuedMessages: [existing, admitted]
+            )
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+        }
+    }
+
     @Test("non-image canonical attachment metadata reconciles without a text blob ID")
     func nonImageAttachmentReconciliation() async throws {
         try await withTestWatchdog { @MainActor in

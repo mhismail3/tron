@@ -414,13 +414,23 @@ struct ChatOutgoingSubmissionPresentation: Equatable, Identifiable, Sendable {
     let id: String
     let text: String
     let attachmentIDs: [String]
+    let behavior: String?
     let transportActive: Bool
 
     init(snapshot: ComposerSubmissionSnapshot, transportActive: Bool) {
         id = snapshot.presentationID
         text = snapshot.outgoingText
         attachmentIDs = snapshot.attachmentIDs
+        behavior = snapshot.behavior
         self.transportActive = transportActive
+    }
+
+    var statusTitle: String? {
+        switch behavior {
+        case "steer": return "Steering next"
+        case "followUp": return "Follow-up pending"
+        default: return nil
+        }
     }
 }
 

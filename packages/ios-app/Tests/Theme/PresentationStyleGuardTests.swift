@@ -249,6 +249,26 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("slider.horizontal.3"))
     }
 
+    @Test("chat structural updates do not inherit opening animation")
+    func chatStructuralAnimationBoundary() throws {
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let toolRuns = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatToolRunViews.swift"),
+            encoding: .utf8
+        )
+        let reveal = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/StreamingTextReveal.swift"),
+            encoding: .utf8
+        )
+        #expect(chat.components(separatedBy: ".animation(transcriptRevealAnimation, value: isTranscriptReady)").count == 1)
+        #expect(chat.contains("followAnimation: entranceKind == .leadingActivity"))
+        #expect(toolRuns.contains(".contentTransition(.interpolate)"))
+        #expect(reveal.contains("initialViewportHeight"))
+    }
+
     @Test("top blur uses distinct chat, dashboard, and sheet proportions")
     func topBlurCoverage() throws {
         let blur = try String(
@@ -1355,8 +1375,8 @@ struct PresentationStyleGuardTests {
         let attachmentPosition = try #require(messageBody.firstRange(of: "attachmentStrip")?.lowerBound)
         let promptPosition = try #require(messageBody.firstRange(of: "UserPromptText(text:")?.lowerBound)
         #expect(attachmentPosition < promptPosition)
-        #expect(transcript.contains("ViewThatFits(in: .horizontal)"))
-        #expect(transcript.contains(".fixedSize(horizontal: true, vertical: false)"))
+        #expect(!transcript.contains("ViewThatFits(in: .horizontal)"))
+        #expect(transcript.contains(".fixedSize(horizontal: false, vertical: true)"))
         #expect(transcript.contains("ChatPromptContainerStyle.userPromptBottomPadding"))
         #expect(transcript.contains("Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)"))
         #expect(transcript.contains("ChatStreamingInlineText"))
@@ -1439,8 +1459,8 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains("model.replaceQueue("))
         #expect(queue.contains("struct QueuedMessageRow"))
         #expect(queue.contains("struct QueuedMessageEditorSheet"))
-        #expect(queue.contains("ViewThatFits(in: .horizontal)"))
-        #expect(queue.contains("card.fixedSize(horizontal: true, vertical: false)"))
+        #expect(!queue.contains("ViewThatFits(in: .horizontal)"))
+        #expect(queue.contains("card.fixedSize(horizontal: false, vertical: true)"))
         #expect(queue.contains(".frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)"))
         #expect(queue.contains("Button(action: onEdit)"))
         #expect(queue.contains(".glassEffect("))

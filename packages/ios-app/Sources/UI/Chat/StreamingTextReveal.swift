@@ -44,6 +44,18 @@ enum ChatThinkingTraceLayoutPolicy {
         return min(contentHeight, maximumHeight)
     }
 
+    /// Estimates the bounded trace viewport until TextKit has supplied its
+    /// first measurement. A zero-height preference is not evidence that the
+    /// trace has no content; using the normal fallback for every admitted line
+    /// can create a one-frame height flash when the hidden probe reports wraps.
+    static func initialViewportHeight(
+        lineCount: Int = 1,
+        fallbackLineHeight: CGFloat = Self.fallbackLineHeight
+    ) -> CGFloat {
+        let boundedLines = min(max(lineCount, 1), maximumLines)
+        return max(1, fallbackLineHeight) * CGFloat(boundedLines)
+    }
+
     static func tailOffset(contentHeight: CGFloat, viewportHeight: CGFloat) -> CGFloat {
         max(0, contentHeight - viewportHeight)
     }
@@ -123,6 +135,10 @@ struct ChatStreamingInlineText: View {
 
     private func tokenOpacity(_ id: String, now: Date) -> Double {
         guard streaming, !reduceMotion else { return 1 }
+        // The first body evaluation happens before the bookkeeping task. Keep
+        // the authoritative initial source visible during that handoff; a
+        // missing reveal start is only hidden for tokens admitted later.
+        guard hasAdmittedInitialContent else { return 1 }
         if revealedIDs.contains(id) { return 1 }
         guard let started = revealStarts[id] else { return 0 }
         return ChatStreamingTextRevealPolicy.opacity(
@@ -145,14 +161,15 @@ struct ChatStreamingInlineText: View {
 
         let pendingIDs = tokens.filter { $0.isWord && !revealedIDs.contains($0.id) && revealStarts[$0.id] == nil }
         if !hasAdmittedInitialContent {
+            // The first mounted frame is already authoritative and measured.
+            // Never render it transparent while the bookkeeping task starts:
+            // that produces the one-frame flash most noticeable in thinking
+            // traces and large assistant responses. Only tokens admitted by a
+            // later stream update receive the presentation fade.
             hasAdmittedInitialContent = true
-            if ChatStreamingTextRevealPolicy.shouldCatchUp(
-                pendingTokenCount: pendingIDs.count,
-                initialTokenCount: currentIDs.count
-            ) {
-                revealedIDs.formUnion(currentIDs)
-                return
-            }
+            revealedIDs.formUnion(currentIDs)
+            revealStarts.removeAll()
+            return
         } else if ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: pendingIDs.count) {
             // A slow renderer/network update must never make the native UI lag
             // behind the authoritative stream by an unbounded word queue.

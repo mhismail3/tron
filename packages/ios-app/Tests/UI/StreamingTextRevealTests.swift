@@ -22,6 +22,8 @@ struct StreamingTextRevealTests {
     @Test("thinking trace height grows naturally and caps at four measured lines")
     func thinkingTraceHeight() {
         #expect(ChatThinkingTraceLayoutPolicy.maximumLines == 4)
+        #expect(ChatThinkingTraceLayoutPolicy.initialViewportHeight() == 16)
+        #expect(ChatThinkingTraceLayoutPolicy.initialViewportHeight(lineCount: 4) == 64)
         #expect(ChatThinkingTraceLayoutPolicy.viewportHeight(contentHeight: 12, maximumHeight: 64) == 12)
         #expect(ChatThinkingTraceLayoutPolicy.viewportHeight(contentHeight: 96, maximumHeight: 64) == 64)
         #expect(!ChatThinkingTraceLayoutPolicy.isOverflowing(contentHeight: 64, maximumHeight: 64))

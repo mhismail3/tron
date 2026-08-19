@@ -92,15 +92,19 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
 /// transcript snapshots update the same bubble without replaying that motion.
 struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
     let reduceMotion: Bool
+    let animatesEntrance: Bool
     @ViewBuilder let content: Content
-    @State private var revealed = false
+    @State private var revealed: Bool
 
     init(
         reduceMotion: Bool,
+        animatesEntrance: Bool = true,
         @ViewBuilder content: () -> Content
     ) {
         self.reduceMotion = reduceMotion
+        self.animatesEntrance = animatesEntrance
         self.content = content()
+        _revealed = State(initialValue: !animatesEntrance)
     }
 
     var body: some View {
@@ -119,7 +123,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
                 y: revealed ? 0 : hidden.offsetY
             )
             .onAppear {
-                guard !revealed else { return }
+                guard animatesEntrance, !revealed else { return }
                 withAnimation(ChatContentTransitionPolicy.revealAnimation(
                     for: .userPrompt,
                     reduceMotion: reduceMotion

@@ -454,6 +454,24 @@ struct ChatTranscriptPresentationTests {
         #expect(ordinary.attachmentCount == 1)
     }
 
+    @Test("optimistic submissions preserve steering identity before Gateway reconstruction")
+    func outgoingSubmissionPresentation() {
+        let target = SessionPresentationIdentity(sessionID: "session", generation: 3)
+        let steer = ChatOutgoingSubmissionPresentation(
+            snapshot: ComposerSubmissionSnapshot(
+                target: target,
+                textRevision: 4,
+                outgoingText: String(repeating: "large prompt ", count: 100),
+                attachmentIDs: ["photo"],
+                behavior: "steer"
+            ),
+            transportActive: true
+        )
+        #expect(steer.statusTitle == "Steering next")
+        #expect(steer.attachmentIDs == ["photo"])
+        #expect(steer.transportActive)
+    }
+
     @Test("ordinary running state uses ambient bottom activity without a transcript row")
     func ordinaryRunningUsesAmbientActivity() throws {
         var snapshot = try fixture(transcript: "[]")

@@ -165,6 +165,12 @@ final class AppModel {
     var context: JSONValue? { sessionPresentation.context }
     var sessionTree: [SessionTreeNode] { sessionPresentation.sessionTree }
     var loadingEarlierTranscript: Bool { sessionPresentation.loadingEarlierTranscript }
+    /// Foreground reconciliation is an aggregate install, not a live insertion
+    /// stream; mounted chats use this fact to suppress entrance replay. The
+    /// generation remains stable until its first aggregate projection installs,
+    /// even if the network task finishes before projection preparation does.
+    private(set) var isReconcilingForeground = false
+    private(set) var foregroundReconciliationGeneration = 0
     var commands: [CommandInfo] { sessionPresentation.commands }
     var resources: JSONValue? { sessionPresentation.resources }
     /// Keeps the root setup sheet from reacting to the transient connection
@@ -1363,16 +1369,37 @@ final class AppModel {
         )
     }
 
+    func beginComposerSubmission(
+        target: SessionPresentationTarget,
+        behavior: String? = nil,
+        canonicalTranscript: [TranscriptItem] = [],
+        queuedMessages: [SessionSnapshot.QueuedMessage] = []
+    ) throws -> ComposerSubmissionSnapshot {
+        try composerDrafts.beginSubmission(
+            target: target,
+            behavior: behavior,
+            canonicalTranscript: canonicalTranscript,
+            queuedMessages: queuedMessages
+        )
+    }
+
+    func sendComposer(_ submission: ComposerSubmissionSnapshot) async throws {
+        try await composerDrafts.transmitSubmission(submission)
+    }
+
     func sendComposer(
         target: SessionPresentationTarget,
         behavior: String? = nil,
-        canonicalTranscript: [TranscriptItem] = []
+        canonicalTranscript: [TranscriptItem] = [],
+        queuedMessages: [SessionSnapshot.QueuedMessage] = []
     ) async throws {
-        try await composerDrafts.send(
+        let submission = try beginComposerSubmission(
             target: target,
             behavior: behavior,
-            canonicalTranscript: canonicalTranscript
+            canonicalTranscript: canonicalTranscript,
+            queuedMessages: queuedMessages
         )
+        try await sendComposer(submission)
     }
 
     func abort(sessionID: String, kind: String = "agent") async {
@@ -2424,6 +2451,9 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     func lifecycleReconcileForeground(
         admission: GatewayLifecycleCoordinator.Admission
     ) async throws {
+        foregroundReconciliationGeneration &+= 1
+        isReconcilingForeground = true
+        defer { isReconcilingForeground = false }
         try await client.ensureResponsive()
         try requireLifecycle(admission)
         async let catalog = refreshSessions()

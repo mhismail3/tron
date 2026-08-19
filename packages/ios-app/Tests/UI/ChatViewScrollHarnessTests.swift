@@ -349,16 +349,15 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.lastAnimatedEntranceSourceOrdinal == runningOrdinal
                 }
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
-                #expect(
-                    settled.observation.smoothAutomaticScrollCommandCount
-                        == smoothBaseline
-                )
-                #expect(settled.observation.rowFrames["tool-run-active-race"] != nil)
+                let followed = try await harness.recorder.waitUntil {
+                    $0.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1
+                }
+                #expect(followed.observation.rowFrames["tool-run-active-race"] != nil)
             }
         }
     }
 
-    @Test("real tool group topology stays pinned without smooth viewport motion")
+    @Test("real tool group topology follows new chips with one smooth viewport motion")
     func toolGroupTopologySettlement() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_194) { harness in
@@ -394,7 +393,9 @@ struct ChatViewScrollHarnessTests {
                 }
 
                 #expect(settled.observation.rowFrames["tool-run-group-two"] == nil)
-                #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1
+                }
             }
         }
     }

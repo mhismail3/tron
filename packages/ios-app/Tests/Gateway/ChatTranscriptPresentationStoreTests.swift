@@ -68,6 +68,34 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("foreground aggregate reconciliation suppresses row entrance replay")
+    func foregroundReconciliationSuppressesEntrances() async throws {
+        try await withTestWatchdog { @MainActor in
+            var baseline = try SessionScenarioBuilder(seed: 1_214)
+                .openingTail(targetEncodedBytes: 8_000)
+            let store = ChatTranscriptPresentationStore()
+            let baselineTag = ChatTranscriptProjectionTag(snapshot: baseline, presentationGeneration: 7)
+            store.submit(snapshot: baseline, tag: baselineTag)
+            _ = try await store.waitForInstall(of: baselineTag)
+
+            baseline.transcript.append(contentsOf: SessionScenarioBuilder(seed: 1_215)
+                .historyPage(count: 1, longRowBytes: 16))
+            baseline.transcriptTotal = baseline.transcript.count
+            baseline.revision += 1
+            baseline.eventSequence += 1
+            let foregroundTag = ChatTranscriptProjectionTag(
+                snapshot: baseline,
+                presentationGeneration: 7,
+                entranceSuppressionGeneration: 1
+            )
+            store.submit(snapshot: baseline, tag: foregroundTag)
+            let installed = try await store.waitForInstall(of: foregroundTag)
+            #expect(installed.timeline.items.count > 0)
+            #expect(store.pendingEntranceIDs.isEmpty)
+            #expect(store.admittedEntranceIDs.isEmpty)
+        }
+    }
+
     @Test("installed text preparation is bounded to its exact source and drops on memory pressure")
     func preparedTextMemoryPressure() async throws {
         try await withTestWatchdog { @MainActor in

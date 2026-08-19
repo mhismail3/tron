@@ -484,6 +484,34 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("growth waits for the prior automatic command acknowledgement")
+    func growthDoesNotReplacePendingCommand() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let first = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_120, containerHeight: 400)
+            let second = ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_240, containerHeight: 400)
+            coordinator.geometryChanged(previous: bottom, current: first)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let firstCommand = try await coordinator.hostedNextCommand()
+
+            // A second layout sample may arrive before SwiftUI acknowledges the
+            // first binding write. It must remain pending, not replace the
+            // command token in the same render transaction.
+            coordinator.geometryChanged(previous: first, current: second)
+            #expect(frames.requestCount == 1)
+            #expect(coordinator.command?.token == firstCommand.token)
+
+            coordinator.commandApplied(firstCommand)
+            await frames.waitForRequest(count: 2)
+            frames.releaseNext()
+            let secondCommand = try await coordinator.hostedNextCommand()
+            #expect(secondCommand.destination == .tail)
+            #expect(secondCommand.token != firstCommand.token)
+        }
+    }
+
     @Test("growth inside practical bottom tolerance emits no command")
     func noWriteInsideTolerance() async throws {
         let frames = ManualScrollFrameScheduler()

@@ -81,6 +81,23 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let outgoingText: String
     let attachmentIDs: [String]
     let behavior: String?
+    let baselineQueuedMessageIDs: Set<String>
+
+    init(
+        target: SessionPresentationIdentity,
+        textRevision: Int,
+        outgoingText: String,
+        attachmentIDs: [String],
+        behavior: String?,
+        baselineQueuedMessageIDs: Set<String> = []
+    ) {
+        self.target = target
+        self.textRevision = textRevision
+        self.outgoingText = outgoingText
+        self.attachmentIDs = attachmentIDs
+        self.behavior = behavior
+        self.baselineQueuedMessageIDs = baselineQueuedMessageIDs
+    }
 
     /// Stable only for the owning presentation and draft revision. This is a
     /// presentation identity, never a transcript/event ID.
@@ -408,7 +425,12 @@ final class ComposerDraftCoordinator {
             )
         })
         let queuedObserved = admission.snapshot.behavior.map { behavior in
-            queuedMessages.contains { $0.behavior.rawValue == behavior && $0.text == admission.snapshot.outgoingText }
+            queuedMessages.contains {
+                !admission.snapshot.baselineQueuedMessageIDs.contains($0.id)
+                    && $0.behavior.rawValue == behavior
+                    && $0.text == admission.snapshot.outgoingText
+                    && $0.attachmentCount == admission.submittedAttachments.count
+            }
         } ?? false
         guard transcriptObserved || queuedObserved else { return }
         admission.canonicalObserved = true
@@ -575,19 +597,48 @@ final class ComposerDraftCoordinator {
     func send(
         target: SessionPresentationIdentity,
         behavior: String?,
-        canonicalTranscript: [TranscriptItem] = []
+        canonicalTranscript: [TranscriptItem] = [],
+        queuedMessages: [SessionSnapshot.QueuedMessage] = []
     ) async throws {
-        let admission = try beginSubmission(
+        let submission = try beginSubmission(
             target: target,
             behavior: behavior,
-            canonicalTranscript: canonicalTranscript
+            canonicalTranscript: canonicalTranscript,
+            queuedMessages: queuedMessages
         )
+        try await transmitSubmission(submission)
+    }
+
+    /// Admits the optimistic row, captured attachments, and draft clearing as
+    /// one MainActor mutation. Transport is deliberately separate so the UI can
+    /// dismiss the keyboard only after this presentation state is installed.
+    func beginSubmission(
+        target: SessionPresentationIdentity,
+        behavior: String?,
+        canonicalTranscript: [TranscriptItem] = [],
+        queuedMessages: [SessionSnapshot.QueuedMessage] = []
+    ) throws -> ComposerSubmissionSnapshot {
+        try beginSubmissionAdmission(
+            target: target,
+            behavior: behavior,
+            canonicalTranscript: canonicalTranscript,
+            queuedMessages: queuedMessages
+        ).snapshot
+    }
+
+    /// Sends an already-admitted submission without changing its presentation
+    /// shape. A late transport result can only settle this exact admission.
+    func transmitSubmission(_ submission: ComposerSubmissionSnapshot) async throws {
+        guard let admission = submissionByTarget[submission.target],
+              admission.snapshot == submission else {
+            throw CancellationError()
+        }
         do {
             try await sendOperation(
                 admission.snapshot.outgoingText,
-                target.sessionID,
+                submission.target.sessionID,
                 admission.snapshot.attachmentIDs,
-                behavior
+                admission.snapshot.behavior
             )
         } catch {
             try require(admission)
@@ -696,10 +747,11 @@ final class ComposerDraftCoordinator {
         }
     }
 
-    private func beginSubmission(
+    private func beginSubmissionAdmission(
         target: SessionPresentationIdentity,
         behavior: String?,
-        canonicalTranscript: [TranscriptItem]
+        canonicalTranscript: [TranscriptItem],
+        queuedMessages: [SessionSnapshot.QueuedMessage]
     ) throws -> SubmissionAdmission {
         guard let lease, admits(target), submissionByTarget[target] == nil else {
             throw CancellationError()
@@ -716,7 +768,8 @@ final class ComposerDraftCoordinator {
             textRevision: draft.revision,
             outgoingText: outgoing,
             attachmentIDs: attachmentIDs,
-            behavior: behavior
+            behavior: behavior,
+            baselineQueuedMessageIDs: Set(queuedMessages.map(\.id))
         )
         let admission = SubmissionAdmission(
             id: sequence,

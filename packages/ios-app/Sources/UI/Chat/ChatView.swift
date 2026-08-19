@@ -221,10 +221,19 @@ struct ChatView: View {
             Task { await importFiles(result) }
         }
         .onChange(of: photos) { _, values in
-            guard !values.isEmpty, let target = presentationTarget else { return }
+            guard !values.isEmpty else { return }
+            // PhotosPicker may deliver its selection after the mounted
+            // presentation has been revoked. Clear the native selection before
+            // admitting a target so it cannot replay into a later chat.
+            photos = []
+            guard let target = presentationTarget else {
+                photoImportTask?.cancel()
+                photoImportTask = nil
+                photoImportTarget = nil
+                return
+            }
             photoImportTask?.cancel()
             photoImportTarget = target
-            photos = []
             photoImportTask = Task { @MainActor in
                 await importPhotos(values, target: target)
                 guard !Task.isCancelled, photoImportTarget == target else { return }
@@ -387,17 +396,19 @@ struct ChatView: View {
                     }
                     if let installed = transcriptPresentation.installed {
                         ForEach(installed.displayedItems) { item in
+                            let entranceKind = ChatContentEntranceKind.classify(item)
                             let entranceState = canonicalSubmissionHandoffIDs.contains(item.id)
                                 ? .none
                                 : transcriptPresentation.entranceState(for: item.id)
                             stableTranscriptRow(
                                 id: item.id,
                                 installedTag: installed.tag,
-                                entranceState: entranceState
+                                entranceState: entranceState,
+                                entranceKind: entranceKind
                             ) {
                                 ChatTranscriptEntranceRow(
                                     state: entranceState,
-                                    kind: .classify(item),
+                                    kind: entranceKind,
                                     reduceMotion: reduceMotion
                                 ) {
                                     ChatTranscriptRenderRow(
@@ -424,7 +435,8 @@ struct ChatView: View {
                                 entranceState: .none
                             ) {
                                 ChatOutgoingSubmissionEntranceRow(
-                                    reduceMotion: reduceMotion
+                                    reduceMotion: reduceMotion,
+                                    animatesEntrance: !model.isReconcilingForeground
                                 ) {
                                     ChatPendingPromptRow(presentation: pendingPrompt)
                                 }
@@ -438,7 +450,8 @@ struct ChatView: View {
                                 entranceState: .none
                             ) {
                                 ChatOutgoingSubmissionEntranceRow(
-                                    reduceMotion: reduceMotion
+                                    reduceMotion: reduceMotion,
+                                    animatesEntrance: !model.isReconcilingForeground
                                 ) {
                                     ChatOutgoingSubmissionRow(
                                         presentation: outgoing,
@@ -460,7 +473,10 @@ struct ChatView: View {
             // The cover fades away only after exact-tail positioning; opacity-zero
             // lazy content can defer the very target needed to position it.
             .offset(y: isTranscriptReady || reduceMotion ? 0 : 8)
-            .animation(transcriptRevealAnimation, value: isTranscriptReady)
+            // Readiness is animated only by the opening surface below. Keeping
+            // animation off this structural stack prevents a later tool,
+            // thinking-height, or composer-viewport update from inheriting the
+            // opening transaction and interpolating the entire transcript.
             .accessibilityHidden(!isTranscriptReady)
             .allowsHitTesting(isTranscriptReady)
         }
@@ -541,7 +557,6 @@ struct ChatView: View {
             }
         }
         .overlay { openingSurface }
-        .animation(transcriptRevealAnimation, value: isTranscriptReady)
     }
 
     @ViewBuilder
@@ -559,7 +574,7 @@ struct ChatView: View {
                 entranceState: .none
             ) {
                 ChatQueuedMessageEntranceRow(
-                    animatesEntrance: isTranscriptReady,
+                    animatesEntrance: isTranscriptReady && !model.isReconcilingForeground,
                     reduceMotion: reduceMotion
                 ) {
                     QueuedMessageRow(
@@ -586,6 +601,7 @@ struct ChatView: View {
         id: String,
         installedTag: ChatTranscriptProjectionTag?,
         entranceState: ChatTranscriptEntranceState,
+        entranceKind: ChatContentEntranceKind = .assistantContent,
         @ViewBuilder content: () -> Content
     ) -> some View {
         let rowLayoutEpoch = scrollCoordinator.layoutEpoch
@@ -634,7 +650,14 @@ struct ChatView: View {
                     sourceOrdinal: entranceTag.timelineGeneration
                 )
                 #endif
-                if animated { scrollCoordinator.discreteContentInserted(renderedID: id) }
+                if animated {
+                    scrollCoordinator.discreteContentInserted(
+                        renderedID: id,
+                        followAnimation: entranceKind == .leadingActivity && !reduceMotion
+                            ? .smooth(duration: 0.24)
+                            : .disabled
+                    )
+                }
             }
             #if HOSTED_TEST
             hostedProbe?.updateRowFrame(id: id, frame: sample.frame)
@@ -698,7 +721,10 @@ struct ChatView: View {
             snapshot: snapshot,
             presentationGeneration: generation,
             canonicalGeneration: projection.canonical,
-            timelineGeneration: projection.timeline
+            timelineGeneration: projection.timeline,
+            entranceSuppressionGeneration: model.foregroundReconciliationGeneration == 0
+                ? nil
+                : model.foregroundReconciliationGeneration
         )
     }
 
@@ -719,7 +745,10 @@ struct ChatView: View {
                 snapshot: snapshot,
                 presentationGeneration: presentationGeneration,
                 canonicalGeneration: projection.canonical,
-                timelineGeneration: projection.timeline
+                timelineGeneration: projection.timeline,
+                entranceSuppressionGeneration: model.foregroundReconciliationGeneration == 0
+                    ? nil
+                    : model.foregroundReconciliationGeneration
             )
             transcriptPresentation.submit(snapshot: snapshot, tag: tag)
             do {
@@ -1164,12 +1193,16 @@ struct ChatView: View {
             performanceSignposts.end(interval, result: .discarded, metrics: .none)
             return
         }
-        probe.markReady()
-        if transcriptGeometry.isAtCatchUpBoundary {
-            probe.recordScrollSettle(distanceFromBottom: transcriptGeometry.distanceFromBottom)
-        }
         let presented = await completeFirstReadyFrame(interval, epoch: epoch)
-        if presented { await scrollCoordinator.waitForOpeningTailSettlement() }
+        if presented {
+            // Hosted readiness means the reveal has actually crossed one
+            // presented frame, not merely that the phase flag changed.
+            probe.markReady()
+            if transcriptGeometry.isAtCatchUpBoundary {
+                probe.recordScrollSettle(distanceFromBottom: transcriptGeometry.distanceFromBottom)
+            }
+            await scrollCoordinator.waitForOpeningTailSettlement()
+        }
         probe.recordReadyFrameCompletion()
     }
     #endif
@@ -1418,7 +1451,9 @@ struct ChatView: View {
                         )
                 )
                 .animation(
-                    ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion),
+                    submissionPending
+                        ? nil
+                        : ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion),
                     value: pendingAttachments.map(\.id)
                 )
             }
@@ -1512,7 +1547,7 @@ struct ChatView: View {
                     isDisabled: sending || submissionPending || !isTranscriptReady,
                     isSending: sending,
                     offersQueueChoices: selectedAuthoritativeSnapshot?.phase.isActive == true,
-                    onSend: { behavior in Task { await send(behavior: behavior) } },
+                    onSend: { behavior in send(behavior: behavior) },
                     onAbort: { Task { await model.abort(sessionID: sessionID) } }
                 )
                 .transition(
@@ -1793,24 +1828,39 @@ struct ChatView: View {
         }
     }
 
-    private func send(behavior explicitBehavior: String? = nil) async {
+    @MainActor
+    private func send(behavior explicitBehavior: String? = nil) {
         guard let target = presentationTarget else { return }
         let behavior = explicitBehavior
             ?? ChatComposerPolicy.submissionBehavior(phase: selectedAuthoritativeSnapshot?.phase)
-        if !ChatComposerPolicy.preservesFocus(submissionBehavior: behavior) {
-            composerFocused = false
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        }
         do {
-            try await model.sendComposer(
+            // Admit the complete outgoing presentation before changing UIKit
+            // responder state. The optimistic row, captured photo chips, and
+            // keyboard transition therefore share one MainActor state boundary
+            // instead of arriving as three unrelated renders.
+            let submission = try model.beginComposerSubmission(
                 target: target,
                 behavior: behavior,
-                canonicalTranscript: selectedAuthoritativeSnapshot?.transcript ?? []
+                canonicalTranscript: selectedAuthoritativeSnapshot?.transcript ?? [],
+                queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? []
             )
-            if selectedAuthoritativeSnapshot?.extensionPresentation.hostEpoch.isEmpty == false {
-                model.scheduleExtensionEditorUpdate(target: target, text: "")
+            if !ChatComposerPolicy.preservesFocus(submissionBehavior: behavior) {
+                composerFocused = false
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
             }
-        } catch { model.presentComposerActionError(error, target: target) }
+            Task { @MainActor in
+                do {
+                    try await model.sendComposer(submission)
+                    if selectedAuthoritativeSnapshot?.extensionPresentation.hostEpoch.isEmpty == false {
+                        model.scheduleExtensionEditorUpdate(target: target, text: "")
+                    }
+                } catch {
+                    model.presentComposerActionError(error, target: target)
+                }
+            }
+        } catch {
+            model.presentComposerActionError(error, target: target)
+        }
     }
 
     private func importCameraImage(_ image: UIImage) async {

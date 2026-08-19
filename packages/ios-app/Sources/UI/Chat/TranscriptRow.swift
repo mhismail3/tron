@@ -184,6 +184,7 @@ struct TranscriptRow: View, Equatable {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
         }
         .scrollClipDisabled()
         .defaultScrollAnchor(item.role == .user ? .trailing : .leading)
@@ -200,20 +201,17 @@ struct UserPromptGlassModifier: ViewModifier {
             cornerRadius: ChatPromptContainerStyle.cornerRadius,
             style: .continuous
         )
-        ViewThatFits(in: .horizontal) {
-            content
-                .fixedSize(horizontal: true, vertical: false)
-                .glassEffect(
-                    .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
-                    in: shape
-                )
-            content
-                .glassEffect(
-                    .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
-                    in: shape
-                )
-        }
-        .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
+        // One deterministic constrained layout avoids ViewThatFits swapping
+        // between intrinsic and wrapped branches after a large paste/photo
+        // handoff. The label measures its intrinsic width within this bound,
+        // so short prompts stay compact while long prompts wrap immediately.
+        content
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
+            .glassEffect(
+                .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
+                in: shape
+            )
     }
 }
 
@@ -222,6 +220,7 @@ private struct ThinkingBlock: View {
     let preparedText: ChatTextPreparationSnapshot
     let label: String?
     let animatesInsertion: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var contentHeight: CGFloat = 0
     @State private var maximumHeight: CGFloat = 0
@@ -247,7 +246,10 @@ private struct ThinkingBlock: View {
     }
 
     private var traceHeight: CGFloat {
-        ChatThinkingTraceLayoutPolicy.viewportHeight(
+        guard maximumHeight > 0, contentHeight > 0 else {
+            return ChatThinkingTraceLayoutPolicy.initialViewportHeight(lineCount: segments.count)
+        }
+        return ChatThinkingTraceLayoutPolicy.viewportHeight(
             contentHeight: contentHeight,
             maximumHeight: maximumHeight
         )
@@ -304,6 +306,10 @@ private struct ThinkingBlock: View {
         }
         .frame(height: traceHeight, alignment: .topLeading)
         .frame(maxWidth: .infinity, alignment: .topLeading)
+        .animation(
+            reduceMotion ? nil : .smooth(duration: 0.18),
+            value: traceHeight
+        )
         .clipped()
         .mask(tailMask)
         .accessibilityHidden(true)

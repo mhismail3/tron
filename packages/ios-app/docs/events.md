@@ -84,6 +84,12 @@ admits and reduces mounted-session topics:
   content-only output, then only a fallback distinct from Request. Exact current-runtime
   monotonic start-to-end durations are authoritative when available; older canonical history derives only
   an observed call-to-result interval because Pi JSONL does not persist tool execution timing;
+- transcript structure has one explicit animation boundary: newly admitted rows
+  reserve their measured layout and reveal once after geometry admission, while
+  installed-row updates, thinking-height measurement, and tool status changes
+  inherit no stack-wide animation. Tool status text interpolates inside its
+  stable row, and automatic tail-follow commands are serialized by acknowledgement
+  so a second keyboard/composer/tool growth sample cannot replace a pending scroll write;
 - structure/context/resource invalidations reload an already-presented History,
   Manage Session, Agent Context, or Project Resources surface from the runtime. Context,
   tree, and resource reads each carry a subscription-scoped request generation, so an older
@@ -107,7 +113,12 @@ admits and reduces mounted-session topics:
   once without replacing an active handshake.
 
 A newly navigated chat opens exactly once and replaces any disposable cached or
-previously expanded projection with a fresh bounded authoritative latest tail.
+previously expanded projection with a fresh bounded authoritative latest tail. A mounted chat
+foreground reconciliation likewise installs the authoritative aggregate as one suppressed-entrance
+projection: content that arrived while iOS was backgrounded is shown in place, not replayed as a
+burst of row animations or automatic scroll writes. Its monotonic reconciliation
+generation is carried through delayed projection work and consumed once at installation,
+so a fast network completion cannot reclassify the same suspended rows as fresh later.
 After the authoritative two-phase handshake completes, the projection remains behind
 the opaque opening surface until the exact physical marker after transcript and queue rows intersects
 a plausible native bottom viewport. An exact-ID command realizes a missing lazy tail; submitted commands,

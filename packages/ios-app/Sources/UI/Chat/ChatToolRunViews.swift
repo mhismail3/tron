@@ -11,6 +11,7 @@ struct ToolCard: View {
     var outputTruncated = false
     var timing: ChatToolDescriptor? = nil
     var onOpenDetails: ((String) -> Void)? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var detailPresentation: ToolDetailRoute?
     @State private var detailDetent: PresentationDetent = .medium
 
@@ -80,7 +81,7 @@ struct ToolCard: View {
                     title: displayTitle,
                     detail: subtitle.lowercased(),
                     tone: tone,
-                    showsProgress: subtitle == "Running",
+                    showsProgress: isRunning,
                     iconSize: ChatCompactPillLayoutPolicy.toolIconSize
                 ) {
                     if let timing {
@@ -96,6 +97,11 @@ struct ToolCard: View {
             style: .continuous
         ))
         .fixedSize(horizontal: false, vertical: true)
+        .contentTransition(.interpolate)
+        .animation(
+            reduceMotion ? nil : .smooth(duration: 0.18),
+            value: visualSignature
+        )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(title)
@@ -126,13 +132,21 @@ struct ToolCard: View {
         )
     }
 
+    private var visualSignature: String {
+        "\(title)|\(subtitle)|\(error)"
+    }
+
     private var accessibilityLabel: String {
         let duration = timing?.elapsedMilliseconds().map(ToolTiming.format(milliseconds:))
         return [displayTitle, subtitle, duration].compactMap { $0 }.joined(separator: ", ")
     }
+    private var isRunning: Bool {
+        subtitle == "Running" || subtitle == "Invocation"
+    }
+
     private var tone: ChatNotificationTone {
         if error { return .error }
-        return subtitle == "Running" ? .warning : .accent
+        return isRunning ? .warning : .accent
     }
     private var displayTitle: String {
         if timing?.extensionOrigin != nil { return "Extension activity" }
@@ -145,6 +159,7 @@ struct ToolCard: View {
 
 struct ToolRunView: View {
     let run: ChatToolRunPresentation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let installationTag: ChatTranscriptProjectionTag
     let resolveDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
     @State private var detailRoute: ToolDetailRoute?
@@ -184,6 +199,18 @@ struct ToolRunView: View {
         .onChange(of: installationTag) { _, currentTag in
             refreshResolvedDetails(for: currentTag)
         }
+        // Tool status/title changes are updates to one mounted chip, not a
+        // remove-and-insert event. Interpolate the glyph/container content
+        // locally while the row's explicit entrance transition owns layout.
+        .contentTransition(.interpolate)
+        .animation(
+            reduceMotion ? nil : .smooth(duration: 0.18),
+            value: chipVisualSignature
+        )
+    }
+
+    private var chipVisualSignature: String {
+        "\(run.title)|\(run.status)|\(run.failureCount)"
     }
 
     private var detailToolIDs: [String] {

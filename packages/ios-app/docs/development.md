@@ -562,9 +562,10 @@ exceed four measured lines, then show only their latest four lines without scrol
 at the top to signal earlier content. Tapping the overflow opens the full trace sheet, which continues updating during
 streaming. The sheet uses the shared Tron title/top-blur/toolbar
 chrome with no drag handle. The same rendered tool/group row stays after non-tool streaming
-across running-to-completed updates, retains at most one installed-identity-owned nonanimated tail settlement while
-pinned, preserves a surviving semantic anchor while detached, and emits no unowned automatic write when content
-shrinks. Verify row entrance animation never combines with viewport animation.
+across running-to-completed updates, retains at most one installed-identity-owned tail settlement while
+pinned, uses one coordinated smooth viewport follow for a newly admitted tool chip,
+preserves a surviving semantic anchor while detached, and emits no unowned automatic write when content
+shrinks. Verify a tool entrance has one correlated chip reveal and viewport command rather than competing writes.
 Tool-detail checkpoints open read, edit, bash, and one unknown/extension call at the medium detent: verify the compact status/metadata chips,
 secondary-plus-accent path, faithful single-change diff glance, word-preserving wrapped bash commands in
 the smaller code size, high-signal generic summary, and larger live result are visible before

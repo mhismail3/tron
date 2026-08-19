@@ -12,12 +12,17 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     let transcriptCount: Int
     let firstTranscriptID: String?
     let lastTranscriptID: String?
+    /// Foreground reconciliation installs the authoritative aggregate without
+    /// replaying every row that arrived while the app was suspended. The
+    /// generation is consumed by the presentation store exactly once.
+    let entranceSuppressionGeneration: Int?
 
     init(
         snapshot: SessionSnapshot,
         presentationGeneration: Int,
         canonicalGeneration: Int? = nil,
-        timelineGeneration: Int? = nil
+        timelineGeneration: Int? = nil,
+        entranceSuppressionGeneration: Int? = nil
     ) {
         sessionID = snapshot.sessionId
         self.presentationGeneration = presentationGeneration
@@ -29,6 +34,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         transcriptCount = snapshot.transcript.count
         firstTranscriptID = snapshot.transcript.first?.id
         lastTranscriptID = snapshot.transcript.last?.id
+        self.entranceSuppressionGeneration = entranceSuppressionGeneration
     }
 
     func matchesIdentity(of other: Self) -> Bool {
@@ -597,6 +603,7 @@ final class ChatTranscriptPresentationStore {
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var workerID: UInt64 = 0
     @ObservationIgnored private var readyToInstall: InstalledChatTranscript?
+    @ObservationIgnored private var consumedEntranceSuppressionGeneration: Int?
     @ObservationIgnored private var installFrameTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var waiters: [Waiter] = []
@@ -646,7 +653,8 @@ final class ChatTranscriptPresentationStore {
                 snapshot: snapshot,
                 presentationGeneration: tag.presentationGeneration,
                 canonicalGeneration: tag.canonicalGeneration,
-                timelineGeneration: tag.timelineGeneration
+                timelineGeneration: tag.timelineGeneration,
+                entranceSuppressionGeneration: tag.entranceSuppressionGeneration
             ) == tag
         )
         if installed?.tag == tag || buildingTag == tag || readyToInstall?.tag == tag {
@@ -813,6 +821,7 @@ final class ChatTranscriptPresentationStore {
         workerID &+= 1
         buildingTag = nil
         readyToInstall = nil
+        consumedEntranceSuppressionGeneration = nil
         installFrameTask?.cancel()
         installFrameTask = nil
         installed = nil
@@ -917,10 +926,19 @@ final class ChatTranscriptPresentationStore {
             previous: installed,
             next: output
         )
-        let inserted = ChatTranscriptTransitionPolicy.discreteInsertedIDs(
-            previous: installed,
-            next: adjustedOutput
-        )
+        let suppressEntrances = adjustedOutput.tag.entranceSuppressionGeneration.map { generation in
+            generation > (consumedEntranceSuppressionGeneration ?? -1)
+        } ?? false
+        let inserted = suppressEntrances
+            ? []
+            : ChatTranscriptTransitionPolicy.discreteInsertedIDs(
+                previous: installed,
+                next: adjustedOutput
+            )
+        if suppressEntrances {
+            consumedEntranceSuppressionGeneration = adjustedOutput.tag.entranceSuppressionGeneration
+            clearEntranceBookkeeping(keepingCapacity: true)
+        }
         synchronizeEntranceBookkeeping(with: adjustedOutput)
         appendPendingEntrances(inserted)
         installed = adjustedOutput
