@@ -77,28 +77,19 @@ enum ChatBottomActivityBlurLayout {
     }
 }
 
-/// A short, nonstructural safe-area blur in light appearance. Dark appearance
-/// intentionally leaves this surface transparent until the thinking indicator
-/// is redesigned, so it cannot introduce a pulsing layer or a material seam.
+/// A short, nonstructural safe-area blur over the chat background. It uses
+/// the same masked custom blur in both appearances, without a separate tint,
+/// material overlay, or working-state animation.
 struct ChatBottomActivityBlur: View {
     let isActive: Bool
     let keyboardVisible: Bool
 
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
-        Group {
-            // Dark mode intentionally has no bottom blur until the replacement
-            // thinking indicator is designed. Leaving this transparent keeps
-            // the safe-area background identical to the chat surface.
-            if colorScheme == .light {
-                ChatTopVariableBlur(
-                    maxBlurRadius: ChatBottomActivityBlurLayout.radius,
-                    darkMode: false,
-                    fadesFromBottom: true
-                )
-            }
-        }
+        ChatTopVariableBlur(
+            maxBlurRadius: ChatBottomActivityBlurLayout.radius,
+            darkMode: false,
+            fadesFromBottom: true
+        )
         .frame(maxWidth: .infinity)
         .frame(height: ChatBottomActivityBlurLayout.height(keyboardVisible: keyboardVisible))
         .allowsHitTesting(false)

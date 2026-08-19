@@ -300,7 +300,7 @@ struct PresentationStyleGuardTests {
         #expect(blur.contains("@Environment(\\.colorScheme) private var colorScheme"))
         #expect(blur.contains("colorScheme == .dark"))
         #expect(blur.contains("darkMode: colorScheme == .dark"))
-        #expect(blur.contains("colorScheme == .light"))
+        #expect(blur.contains("darkMode: false"))
         #expect(!blur.contains("Color.black.opacity(0.54)"))
         #expect(blur.contains(".systemMaterialDark"))
         #expect(blur.contains("fadesFromBottom: true"))

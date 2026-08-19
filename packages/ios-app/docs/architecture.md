@@ -607,11 +607,10 @@ The composer supports text, system-keyboard dictation, images, and bounded file
 uploads. It does not expose an app-owned microphone control until a proper voice mode exists.
 Drafting remains available while authoritative opening finishes and throughout
 an active turn; only submission waits for readiness. Default visible running state consumes no transcript
-space: a nonstructural 68-point bottom-safe-area blur sits over the same chat background in light appearance
-without owning a working-state animation. Dark appearance leaves that surface transparent until the thinking indicator
-is redesigned; this removes the gray/black material seam entirely. The former traveling waveform layer is removed
-pending that redesign. Light appearance retains the regular material and its edge softness without changing the blur
-radius.
+space: a nonstructural 68-point bottom-safe-area blur sits over the same chat background in both appearances
+without owning a working-state animation. It uses the masked custom blur directly, with no separate tint or material
+overlay, so the surface does not introduce a gray/black seam. The former traveling waveform layer is removed pending
+a redesigned thinking indicator; blur edge softness is preserved without changing the configured radius.
 At rest its fixed 44-point safe-area translation leaves 24
 points of additional upward reach without increasing blur radius. The overlay belongs to the measured composer
 but remains nonstructural. It renders in the composer's background layer, keeping the Liquid Glass input and
