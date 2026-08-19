@@ -109,17 +109,20 @@ struct ExtensionDetailsSheet: View {
     }
 
     @ViewBuilder private func groupSection(_ group: ExtensionWidgetGroup) -> some View {
-        if !group.activities.isEmpty { activitySection(group.activities) }
-        if !group.statuses.isEmpty { statusSection(group.statuses) }
-        if !group.services.isEmpty { serviceSection(group.services) }
-        if !group.items.isEmpty {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(group.items) { item in
-                    switch item.content {
-                    case .semantic(let widget):
-                        ExtensionWidgetView(widget: widget, isExpanded: isExpanded) { toggleExpanded() }
-                    case .surface(let surface):
-                        ExtensionSurfaceWidgetView(surface: surface, isExpanded: isExpanded) { toggleExpanded() }
+        if !group.activities.isEmpty {
+            activitySection(group.activities)
+        } else {
+            if !group.statuses.isEmpty { statusSection(group.statuses) }
+            if !group.services.isEmpty { serviceSection(group.services) }
+            if !group.items.isEmpty {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(group.items) { item in
+                        switch item.content {
+                        case .semantic(let widget):
+                            ExtensionWidgetView(widget: widget, isExpanded: isExpanded) { toggleExpanded() }
+                        case .surface(let surface):
+                            ExtensionSurfaceWidgetView(surface: surface, isExpanded: isExpanded) { toggleExpanded() }
+                        }
                     }
                 }
             }

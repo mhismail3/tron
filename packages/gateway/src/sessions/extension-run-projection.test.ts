@@ -67,6 +67,26 @@ describe("projectExtensionRunActivity", () => {
     expect(activity.lastActivityAt).toBeUndefined();
   });
 
+  it("projects async workflow steps from the lifecycle artifact shape", () => {
+    const activity = projectExtensionRunActivity({
+      runId: "workflow-1",
+      mode: "workflow",
+      state: "running",
+      steps: [
+        { agent: "reviewer", status: "running", currentTool: "read", toolCount: 3, turnCount: 2 },
+        { agent: "scout", status: "completed", durationMs: 1_200 },
+      ],
+    }, base);
+    expect(activity).toMatchObject({
+      runId: "workflow-1",
+      mode: "workflow",
+      children: [
+        { label: "reviewer", status: "running", currentTool: "read", toolCount: 3 },
+        { label: "scout", status: "completed", durationMs: 1_200 },
+      ],
+    });
+  });
+
   it("keeps a generic extension activity when details are not structured", () => {
     const activity = projectExtensionRunActivity(undefined, base);
     expect(activity).toMatchObject({

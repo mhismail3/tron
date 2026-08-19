@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { copyFile, mkdtemp, open, rm, stat } from "node:fs/promises";
+import { copyFile, mkdtemp, open, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
@@ -156,6 +156,8 @@ export class RuntimeSlot {
   private readonly extensionActivities = new Map<string, ExtensionRunActivity>();
   private readonly extensionActivityWatchers = new Map<string, { watcher: FSWatcher; timer: NodeJS.Timeout | undefined; asyncDir: string }>();
   private readonly extensionActivityReadGenerations = new Map<string, number>();
+  private subagentArtifactScanTimer: NodeJS.Timeout | undefined;
+  private subagentArtifactScanInFlight = false;
   /** Bounded runtime timing enriches the mobile projection without changing Pi
    * JSONL. Historical entries without retained metadata use timestamp fallback. */
   private readonly toolMetadata = new Map<string, ToolProjectionMetadata>();
@@ -419,6 +421,7 @@ export class RuntimeSlot {
     }
     this.revision += 1;
     this.publishSnapshot();
+    this.startSubagentArtifactScan();
   }
 
   private requestExtensionShutdown(): void {
@@ -831,6 +834,124 @@ export class RuntimeSlot {
     });
   }
 
+  private startSubagentArtifactScan(): void {
+    if (this.disposed) return;
+    if (this.subagentArtifactScanTimer) {
+      void this.scanSubagentArtifacts();
+      return;
+    }
+    this.subagentArtifactScanTimer = setInterval(() => {
+      void this.scanSubagentArtifacts();
+    }, 750);
+    this.subagentArtifactScanTimer.unref();
+    void this.scanSubagentArtifacts();
+  }
+
+  private stopSubagentArtifactScan(): void {
+    if (this.subagentArtifactScanTimer) clearInterval(this.subagentArtifactScanTimer);
+    this.subagentArtifactScanTimer = undefined;
+  }
+
+  private async scanSubagentArtifacts(): Promise<void> {
+    if (this.subagentArtifactScanInFlight || this.disposed) return;
+    this.subagentArtifactScanInFlight = true;
+    try {
+      const entries = await readdir(tmpdir(), { withFileTypes: true });
+      const roots: string[] = [];
+      for (const entry of entries) {
+        if (!entry.isDirectory() || !entry.name.startsWith("pi-subagents-")) continue;
+        const root = join(tmpdir(), entry.name, "async-subagent-runs");
+        try {
+          if ((await stat(root)).isDirectory()) roots.push(root);
+        } catch {
+          // The per-user runtime directory may disappear during cleanup.
+        }
+      }
+      for (const root of roots) {
+        let runs: import("node:fs").Dirent[];
+        try {
+          runs = await readdir(root, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        for (const run of runs.slice(-64)) {
+          if (!run.isDirectory()) continue;
+          await this.refreshSubagentActivityFromArtifact(join(root, run.name));
+        }
+      }
+    } finally {
+      this.subagentArtifactScanInFlight = false;
+    }
+  }
+
+  private subagentExtensionOrigin(): ExtensionToolOrigin {
+    const extensions = this.runtime?.session.resourceLoader.getExtensions().extensions ?? [];
+    const extension = extensions.find((candidate) => {
+      const paths = [candidate.path, candidate.resolvedPath, candidate.sourceInfo.path, candidate.sourceInfo.baseDir]
+        .filter((value): value is string => typeof value === "string");
+      return paths.some((value) => /(?:^|[\\/])pi-subagents(?:[\\/]|$)/u.test(value));
+    });
+    const source = extension?.sourceInfo.source?.trim();
+    return { source: source || "pi-subagents" };
+  }
+
+  private async readExtensionStatusArtifact(asyncDir: string): Promise<Record<string, unknown> | undefined> {
+    if (!this.extensionArtifactPathAllowed(asyncDir)) return undefined;
+    const statusPath = realpathSync(join(asyncDir, "status.json"));
+    if (!this.extensionArtifactPathAllowed(statusPath)) return undefined;
+    const handle = await open(statusPath, "r");
+    try {
+      const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return undefined;
+      const parsed: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+      return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : undefined;
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private async refreshSubagentActivityFromArtifact(asyncDir: string): Promise<void> {
+    try {
+      const raw = await this.readExtensionStatusArtifact(asyncDir);
+      if (!raw || raw.cwd !== this.cwd || raw.sessionId !== this.sessionFile) return;
+      const runId = typeof raw.runId === "string" ? raw.runId : undefined;
+      if (!runId) return;
+      const toolCallId = `subagent:${runId}`;
+      const previous = this.extensionActivities.get(toolCallId);
+      const state = raw.state === "failed" ? "failed" : raw.state === "complete" || raw.state === "completed" || raw.state === "stopped" ? "completed" : "running";
+      const startedAt = this.artifactTime(raw.startedAt) ?? previous?.startedAt ?? new Date().toISOString();
+      const updatedAt = this.artifactTime(raw.lastUpdate) ?? previous?.updatedAt ?? startedAt;
+      const completedAt = this.artifactTime(raw.endedAt);
+      const durationMs = typeof raw.durationMs === "number" && Number.isSafeInteger(raw.durationMs) && raw.durationMs >= 0 ? raw.durationMs : undefined;
+      const activity = projectExtensionRunActivity(raw, {
+        id: toolCallId,
+        toolCallId,
+        source: this.subagentExtensionOrigin(),
+        title: "Pi Subagents",
+        status: state,
+        startedAt,
+        updatedAt,
+        ...(completedAt ? { completedAt } : {}),
+        ...(durationMs === undefined ? {} : { durationMs }),
+        ...(previous ? { previous } : {}),
+      });
+      if (previous?.updatedAt && previous.updatedAt > activity.updatedAt) return;
+      this.extensionActivities.delete(toolCallId);
+      this.extensionActivities.set(toolCallId, activity);
+      while (this.extensionActivities.size > 64) {
+        const oldest = this.extensionActivities.keys().next().value as string | undefined;
+        if (!oldest) break;
+        this.extensionActivities.delete(oldest);
+      }
+      this.scheduleSnapshot();
+    } catch {
+      // The artifact may be mid-replacement or may have been removed after the scan.
+    }
+  }
+
   private stopExtensionActivityWatcher(toolCallId: string): void {
     this.extensionActivityReadGenerations.set(
       toolCallId,
@@ -859,20 +980,9 @@ export class RuntimeSlot {
     const generation = (this.extensionActivityReadGenerations.get(toolCallId) ?? 0) + 1;
     this.extensionActivityReadGenerations.set(toolCallId, generation);
     try {
-      const statusPath = realpathSync(join(asyncDir, "status.json"));
-      if (!this.extensionArtifactPathAllowed(statusPath)) return;
-      const handle = await open(statusPath, "r");
-      let rawText: string;
-      try {
-        const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
-        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-        if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return;
-        rawText = buffer.subarray(0, bytesRead).toString("utf8");
-      } finally {
-        await handle.close();
-      }
+      const raw = await this.readExtensionStatusArtifact(asyncDir);
+      if (!raw) return;
       if (this.disposed || this.extensionActivityReadGenerations.get(toolCallId) !== generation) return;
-      const raw = JSON.parse(rawText) as Record<string, unknown>;
       const updatedAt = this.artifactTime(raw.lastUpdate) ?? new Date().toISOString();
       const completedAt = this.artifactTime(raw.endedAt);
       const durationMs = typeof raw.durationMs === "number" && Number.isSafeInteger(raw.durationMs) && raw.durationMs >= 0
@@ -2138,6 +2248,7 @@ export class RuntimeSlot {
     this.progressFlushTimer = undefined;
     this.pendingProgress = undefined;
     this.stopActivityHeartbeat();
+    this.stopSubagentArtifactScan();
     this.clearToolProgressTimers();
     this.clearExtensionActivityWatchers();
     this.unsubscribe?.();

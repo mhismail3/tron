@@ -245,7 +245,10 @@ enum ChatExtensionWidgetPolicy {
         for activity in admittedActivities {
             let owner = ownerBySource[activity.source.source]
             let groupID = owner.map(ownerID) ?? "source:\(activity.source.source)"
-            add(groupID, label: owner?.title ?? humanizedSource(activity.source.source), activities: [activity])
+            let fallbackLabel = activity.source.source == "local" && activity.title == "Pi Subagents"
+                ? activity.title
+                : humanizedSource(activity.source.source)
+            add(groupID, label: owner?.title ?? fallbackLabel, activities: [activity])
         }
 
         // Statuses and tools carry public source provenance. Only exact source

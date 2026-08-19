@@ -131,6 +131,21 @@ struct ChatTranscriptPresentationTests {
         #expect(live.first?.liveActivityCount == 1)
     }
 
+    @Test("structured local subagent activity gets a native package label")
+    func structuredLocalSubagentActivityGetsNativeLabel() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.extensionActivities = [ExtensionRunActivity(
+            id: "subagent:workflow", runId: "workflow", toolCallId: "subagent:workflow",
+            source: ExtensionToolOrigin(source: "local"), title: "Pi Subagents", mode: "workflow",
+            status: .running, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
+            completedAt: nil, lastActivityAt: "2026-01-01T00:00:01Z", currentTool: "read",
+            currentToolStartedAt: nil, currentPath: nil, toolCount: 2, turnCount: 1,
+            durationMs: 1_000, output: nil, children: []
+        )]
+        let group = try #require(ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? []).first)
+        #expect(group.label == "Pi Subagents")
+    }
+
     @Test("extension source labels omit package transport and versions")
     func extensionSourceLabelsAreStable() {
         #expect(ChatExtensionWidgetPolicy.humanizedSource("npm:pi-subagents@0.47.1") == "Pi Subagents")
