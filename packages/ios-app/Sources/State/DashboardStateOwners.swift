@@ -96,10 +96,28 @@ enum DashboardSessionSortMode: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum DashboardServerFilterPreferences {
+    static let sortModeKey = "dashboard.serverFilter.sortMode.v1"
+
+    static func loadSortMode(from defaults: UserDefaults = .standard) -> DashboardSessionSortMode {
+        defaults.string(forKey: sortModeKey)
+            .flatMap(DashboardSessionSortMode.init(rawValue:))
+            ?? .projectServer
+    }
+
+    static func saveSortMode(_ mode: DashboardSessionSortMode, to defaults: UserDefaults = .standard) {
+        defaults.set(mode.rawValue, forKey: sortModeKey)
+    }
+}
+
 struct DashboardServerFilterState: Equatable, Sendable {
     private(set) var selectedProfileIDs: Set<String> = []
     private var availableProfileIDs: Set<String> = []
-    private(set) var sortMode: DashboardSessionSortMode = .projectServer
+    private(set) var sortMode: DashboardSessionSortMode
+
+    init(sortMode: DashboardSessionSortMode = .projectServer) {
+        self.sortMode = sortMode
+    }
 
     var isFiltering: Bool { !selectedProfileIDs.isEmpty || sortMode != .projectServer }
     var isAllSelected: Bool { selectedProfileIDs.isEmpty }

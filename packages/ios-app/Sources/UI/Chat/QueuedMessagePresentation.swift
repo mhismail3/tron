@@ -80,7 +80,7 @@ struct QueuedMessageRow: View {
             style: .continuous
         )
         return VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
                 Image(systemName: message.behavior == .steer
                     ? "arrow.turn.up.right"
                     : "text.line.last.and.arrowtriangle.forward")
@@ -89,17 +89,19 @@ struct QueuedMessageRow: View {
                     .frame(width: 28, height: 28)
                     .background(accent.opacity(0.13), in: Circle())
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
-                        .foregroundStyle(Color.tronTextPrimary)
-                    Text("\(deliveryDetail) · \(position) of \(total)")
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextSecondary)
-                }
-                .fixedSize(horizontal: false, vertical: true)
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(1)
+                    .layoutPriority(1)
 
                 Spacer(minLength: 8)
+                Text("\(deliveryDetail) · \(position) of \(total)")
+                    .font(TronTypography.caption)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .multilineTextAlignment(.trailing)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 trailingStatus
             }
 

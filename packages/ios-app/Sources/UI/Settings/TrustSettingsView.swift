@@ -38,7 +38,7 @@ struct ProjectTrustSummary: Equatable, Sendable {
         switch effectiveDecision {
         case true: "checkmark.shield.fill"
         case false: "nosign"
-        case nil: "questionmark.shield"
+        case nil: requiresDecision ? "questionmark.circle.fill" : "info.circle.fill"
         }
     }
 
@@ -79,14 +79,11 @@ struct TrustSettingsView: View {
                     )
                 }
 
-                Label(
-                    "Trust gates project-local settings, extensions, skills, prompts, packages, and system prompt files. It is not a sandbox.",
-                    systemImage: "exclamationmark.shield"
+                TronSettingsRow(
+                    icon: "exclamationmark.shield",
+                    title: "Trust gates project-local settings, extensions, skills, prompts, packages, and system prompt files. It is not a sandbox.",
+                    accent: .tronAmber
                 )
-                .font(TronTypography.bodySM)
-                .foregroundStyle(Color.tronTextPrimary)
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.09)
             }
             .padding(20)

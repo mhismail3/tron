@@ -44,6 +44,14 @@ struct SessionShellView: View {
     @State private var showingServerFilter = false
     @State private var openingSessionID: String?
 
+    init() {
+        _serverFilter = State(
+            initialValue: DashboardServerFilterState(
+                sortMode: DashboardServerFilterPreferences.loadSortMode()
+            )
+        )
+    }
+
     var body: some View {
         dashboardNavigation
         .sheet(isPresented: $showNewSession) {
@@ -195,7 +203,7 @@ struct SessionShellView: View {
                             detail: mode.detail,
                             selected: serverFilter.sortMode == mode
                         ) {
-                            serverFilter.setSortMode(mode)
+                            setSortMode(mode)
                         }
                     }
 
@@ -233,6 +241,11 @@ struct SessionShellView: View {
                 }
             }
         }
+    }
+
+    private func setSortMode(_ mode: DashboardSessionSortMode) {
+        serverFilter.setSortMode(mode)
+        DashboardServerFilterPreferences.saveSortMode(mode)
     }
 
     private func filterOption(

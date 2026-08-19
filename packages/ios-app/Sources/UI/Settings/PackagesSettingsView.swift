@@ -69,7 +69,7 @@ struct PackagesSettingsView: View {
                 TronSettingsGroup("Install", detail: "Use an npm package, Git URL, or local path.", accent: .tronEmerald) {
                     Button { showingInstall = true } label: {
                         TronSettingsRow(
-                            icon: "shippingbox.and.arrow.down",
+                            icon: "arrow.down.circle.fill",
                             title: "Install Package",
                             subtitle: "Enter a package source and choose its scope.",
                             accent: .tronEmerald
@@ -87,7 +87,7 @@ struct PackagesSettingsView: View {
                             PackageResolvedResourcesView(resources: resources)
                         } label: {
                             TronSettingsRow(
-                                icon: "shippingbox.and.arrow.forward",
+                                icon: "magnifyingglass.circle.fill",
                                 title: "Inspect Resolved Resources",
                                 subtitle: summary,
                                 accent: .tronTeal

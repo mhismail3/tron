@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 import Synchronization
 import Testing
@@ -128,6 +129,22 @@ struct DashboardStateOwnerTests {
         #expect(filter.isFiltering)
         filter.setSortMode(.projectServer)
         #expect(!filter.isFiltering)
+    }
+
+    @Test("recent dashboard ordering persists through the preference store")
+    func recentSortPreferencePersistence() {
+        let suiteName = "DashboardStateOwnerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        #expect(DashboardServerFilterPreferences.loadSortMode(from: defaults) == .projectServer)
+        DashboardServerFilterPreferences.saveSortMode(.recent, to: defaults)
+        #expect(DashboardServerFilterPreferences.loadSortMode(from: defaults) == .recent)
+
+        let restored = DashboardServerFilterState(
+            sortMode: DashboardServerFilterPreferences.loadSortMode(from: defaults)
+        )
+        #expect(restored.sortMode == .recent)
     }
 
     @Test("direct navigation invalidates pending asynchronous navigation")
