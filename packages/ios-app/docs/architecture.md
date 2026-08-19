@@ -956,11 +956,16 @@ identical to Request is rejected. Running sheets consume the newest immutable to
 partial output, and bounded-output disclosure in place, and never move
 the reader's scroll position. Tool chips retain six-point vertical capsule insets and
 intrinsic label/timing geometry without a layout-inflating minimum interaction frame.
-Thinking traces are noninteractive and never hide canonical text behind a
-disclosure: adjacent thinking parts and their nonempty lines form one compact inline
-paragraph, each presentation segment ends in an ellipsis, and newly appended segments
-fade in unless Reduce Motion is enabled. Tool chips and system events share compact
-capsule geometry while preserving their role alignment and interaction semantics.
+Thinking traces remain one compact inline run while they fit, but their visible viewport
+is capped at four measured text lines rather than truncating canonical content. Once the run
+actually overflows, the compact viewport presents only the latest four measured lines without
+scrolling; the oldest visible line fades at the top to signal earlier content. Tapping opens a full
+trace sheet. The sheet reads the same live presentation source, so an
+active trace updates in place; it uses the shared Tron sheet title, top blur, typography, confirmation
+action, detents, and hidden drag indicator. Short traces remain their natural one-line height. Adjacent
+thinking parts and their nonempty lines form the run, each presentation segment ends in an
+ellipsis, and newly appended words fade in unless Reduce Motion is enabled. Tool chips and system
+events share compact capsule geometry while preserving their role alignment and interaction semantics.
 Compaction and branch-summary events use content-sized transcript pills whose sheets
 contain the complete canonical summary;
 compaction token counts use compact `K` shorthand.
@@ -969,8 +974,8 @@ bookmarks, and extension statuses share one readable notification-pill language,
 and thinking text and workspace shortcuts stay above the compact-caption scale.
 The hidden custom back button is paired with a UIKit navigation bridge so the
 native left-edge interactive-pop gesture remains available. Transcript rows enter with the historical soft
-opacity/scale transition, newly appended thinking segments fade independently within
-their stable paragraph, and tool status/result changes use spring and opacity content
+opacity/scale transition, newly appended thinking words fade independently within
+their stable four-line viewport, and tool status/result changes use spring and opacity content
 transitions. User turns are trailing-aligned while assistant and tool
 content remain leading-aligned. Initial model/thinking entries describe
 bootstrap configuration and are omitted from chat; later canonical changes are

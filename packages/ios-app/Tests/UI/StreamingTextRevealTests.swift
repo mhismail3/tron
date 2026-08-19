@@ -18,4 +18,17 @@ struct StreamingTextRevealTests {
         #expect(!ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: 18))
         #expect(ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: 19))
     }
+
+    @Test("thinking trace height grows naturally and caps at four measured lines")
+    func thinkingTraceHeight() {
+        #expect(ChatThinkingTraceLayoutPolicy.maximumLines == 4)
+        #expect(ChatThinkingTraceLayoutPolicy.viewportHeight(contentHeight: 12, maximumHeight: 64) == 12)
+        #expect(ChatThinkingTraceLayoutPolicy.viewportHeight(contentHeight: 96, maximumHeight: 64) == 64)
+        #expect(!ChatThinkingTraceLayoutPolicy.isOverflowing(contentHeight: 64, maximumHeight: 64))
+        #expect(ChatThinkingTraceLayoutPolicy.isOverflowing(contentHeight: 64.6, maximumHeight: 64))
+        #expect(ChatThinkingTraceLayoutPolicy.tailOffset(contentHeight: 96, viewportHeight: 64) == 32)
+        #expect(ChatThinkingTraceLayoutPolicy.tailOffset(contentHeight: 48, viewportHeight: 64) == 0)
+        #expect(ChatThinkingTraceLayoutPolicy.showsEarlierContent(contentHeight: 96, maximumHeight: 64))
+        #expect(!ChatThinkingTraceLayoutPolicy.showsEarlierContent(contentHeight: 48, maximumHeight: 64))
+    }
 }

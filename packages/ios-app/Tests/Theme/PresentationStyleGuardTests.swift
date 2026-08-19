@@ -1051,25 +1051,38 @@ struct PresentationStyleGuardTests {
         #expect(artifacts.contains("FileManager.default.moveItem(at: source, to: destination)"))
     }
 
-    @Test("thinking traces stay complete, compact, and noninteractive")
+    @Test("thinking traces stay compact and expose only overflow details")
     func thinkingTraceAccessibility() throws {
         let transcript = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
             encoding: .utf8
         )
+        let reveal = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/StreamingTextReveal.swift"),
+            encoding: .utf8
+        )
         let block = (transcript.components(separatedBy: "private struct ThinkingBlock").dropFirst().first ?? "")
             .components(separatedBy: "private struct MarkdownText").first ?? ""
-        #expect(block.contains("@Environment(\\.accessibilityReduceMotion)"))
-        #expect(block.contains("animatesInsertion"))
-        #expect(block.contains("State(initialValue: animatesInsertion ? [] : Set(segments.map(\\.id)))"))
+        #expect(block.contains("ChatThinkingTraceLayoutPolicy"))
+        #expect(block.contains("maximumHeight"))
+        #expect(block.contains(".onTapGesture"))
+        #expect(block.contains(".sheet(isPresented: $showingDetails)"))
+        #expect(block.contains("ThinkingTraceDetailSheet"))
+        let compactViewport = (block.components(separatedBy: "private var traceViewport").dropFirst().first ?? "")
+            .components(separatedBy: "private var paragraph").first ?? ""
+        #expect(compactViewport.contains("tailOffset"))
+        #expect(compactViewport.contains("LinearGradient"))
+        #expect(!compactViewport.contains("ScrollViewReader"))
+        #expect(block.contains(".presentationDragIndicator(.hidden)"))
+        #expect(block.contains("TronSheetTitle"))
+        #expect(block.contains("TronTypography.body"))
+        #expect(block.contains(".tronTopBlur(.sheet)"))
+        #expect(!block.contains(".presentationDragIndicator(.visible)"))
         #expect(block.contains(".accessibilityLabel(accessibleParagraph)"))
         #expect(block.contains("return \"\\(label). \\(paragraph)\""))
-        #expect(block.contains("withAnimation(.easeOut(duration: 0.28))"))
-        #expect(!block.contains("Button {"))
-        #expect(!block.contains("expanded"))
-        #expect(!block.contains(".lineLimit("))
-        #expect(!block.contains("minHeight: 44"))
-        #expect(!block.contains(".onTapGesture"))
+        #expect(reveal.contains("static let maximumLines = 4"))
+        #expect(reveal.contains("static func isOverflowing"))
+        #expect(reveal.contains("static func viewportHeight"))
     }
 
     @Test("tool details foreground semantic content and isolate technical JSON")

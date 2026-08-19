@@ -25,6 +25,34 @@ enum ChatStreamingTextRevealPolicy {
     }
 }
 
+enum ChatThinkingTraceLayoutPolicy {
+    static let maximumLines = 4
+    static let fallbackLineHeight: CGFloat = 16
+
+    static func isOverflowing(contentHeight: CGFloat, maximumHeight: CGFloat) -> Bool {
+        contentHeight > 0 && maximumHeight > 0 && contentHeight > maximumHeight + 0.5
+    }
+
+    static func viewportHeight(
+        contentHeight: CGFloat,
+        maximumHeight: CGFloat,
+        fallbackLineHeight: CGFloat = Self.fallbackLineHeight
+    ) -> CGFloat {
+        let fallback = max(1, fallbackLineHeight)
+        guard maximumHeight > 0 else { return min(max(contentHeight, fallback), fallback) }
+        guard contentHeight > 0 else { return min(maximumHeight, fallback) }
+        return min(contentHeight, maximumHeight)
+    }
+
+    static func tailOffset(contentHeight: CGFloat, viewportHeight: CGFloat) -> CGFloat {
+        max(0, contentHeight - viewportHeight)
+    }
+
+    static func showsEarlierContent(contentHeight: CGFloat, maximumHeight: CGFloat) -> Bool {
+        isOverflowing(contentHeight: contentHeight, maximumHeight: maximumHeight)
+    }
+}
+
 private struct ChatStreamingTextToken: Identifiable {
     let id: String
     let value: AttributedString

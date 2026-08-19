@@ -552,7 +552,11 @@ retain one mounted visual handoff, submitted attachment chips leave the composer
 and attachment-only prompts reconcile by attachment metadata. Streaming assistant settlement and runtime-to-canonical
 tool grouping retain their visual row identities. Agent text and thinking traces reveal only newly admitted words while
 keeping full layout geometry stable; reconnecting to a long stream catches up instead of replaying the backlog, and
-completion reveals the full source without a flash. The same rendered tool/group row stays after non-tool streaming
+completion reveals the full source without a flash. Thinking traces remain one-line natural height until they
+exceed four measured lines, then show only their latest four lines without scrolling; the oldest visible line fades
+at the top to signal earlier content. Tapping the overflow opens the full trace sheet, which continues updating during
+streaming. The sheet uses the shared Tron title/top-blur/toolbar
+chrome with no drag handle. The same rendered tool/group row stays after non-tool streaming
 across running-to-completed updates, retains at most one installed-identity-owned nonanimated tail settlement while
 pinned, preserves a surviving semantic anchor while detached, and emits no unowned automatic write when content
 shrinks. Verify row entrance animation never combines with viewport animation.

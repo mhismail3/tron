@@ -220,6 +220,11 @@ private struct ThinkingBlock: View {
     let preparedText: ChatTextPreparationSnapshot
     let label: String?
     let animatesInsertion: Bool
+
+    @State private var contentHeight: CGFloat = 0
+    @State private var maximumHeight: CGFloat = 0
+    @State private var showingDetails = false
+
     init(
         segments: [ChatThinkingSegment],
         preparedText: ChatTextPreparationSnapshot,
@@ -232,6 +237,20 @@ private struct ThinkingBlock: View {
         self.animatesInsertion = animatesInsertion
     }
 
+    private var isOverflowing: Bool {
+        ChatThinkingTraceLayoutPolicy.isOverflowing(
+            contentHeight: contentHeight,
+            maximumHeight: maximumHeight
+        )
+    }
+
+    private var traceHeight: CGFloat {
+        ChatThinkingTraceLayoutPolicy.viewportHeight(
+            contentHeight: contentHeight,
+            maximumHeight: maximumHeight
+        )
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let label, !label.isEmpty {
@@ -239,15 +258,28 @@ private struct ThinkingBlock: View {
                     .font(TronFont.body(11, weight: .semibold))
                     .foregroundStyle(.secondary)
             }
-            paragraph
-                .font(TronFont.body(12))
-                .italic()
-                .lineSpacing(0)
-                .fixedSize(horizontal: false, vertical: true)
+            traceViewport
+                .frame(height: traceHeight)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    guard isOverflowing else { return }
+                    showingDetails = true
+                }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibleParagraph)
+        .accessibilityAddTraits(isOverflowing ? .isButton : [])
+        .accessibilityHint(isOverflowing ? "Double-tap to view the full thinking trace" : "")
+        .overlay(alignment: .topLeading) { measurementProbe }
+        .sheet(isPresented: $showingDetails) {
+            ThinkingTraceDetailSheet(
+                label: label,
+                inline: preparedInline,
+                identity: traceIdentity,
+                streaming: animatesInsertion
+            )
+        }
     }
 
     private var accessibleParagraph: String {
@@ -256,21 +288,72 @@ private struct ThinkingBlock: View {
         return "\(label). \(paragraph)"
     }
 
-    private var paragraph: some View {
-        ChatStreamingInlineText(
-            inline: preparedInline,
-            identity: "thinking-run:\(segments.first?.id ?? "empty")",
-            baseColor: Color.tronTextSecondary,
-            streaming: animatesInsertion
+    private var traceIdentity: String {
+        "thinking-run:\(segments.first?.id ?? "empty")"
+    }
+
+    /// The compact row is a tail projection, not a nested scroll surface:
+    /// full content stays authoritative and measured while only the latest
+    /// four measured lines are presented in the visible viewport.
+    private var traceViewport: some View {
+        ZStack(alignment: .topLeading) {
+            paragraph
+                .offset(y: -tailOffset)
+        }
+        .frame(height: traceHeight, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .clipped()
+        .mask(tailMask)
+        .accessibilityHidden(true)
+    }
+
+    private var tailOffset: CGFloat {
+        ChatThinkingTraceLayoutPolicy.tailOffset(
+            contentHeight: contentHeight,
+            viewportHeight: traceHeight
         )
     }
 
+    @ViewBuilder
+    private var tailMask: some View {
+        if ChatThinkingTraceLayoutPolicy.showsEarlierContent(
+            contentHeight: contentHeight,
+            maximumHeight: maximumHeight
+        ) {
+            let fadeHeight = min(20, max(1, traceHeight * 0.35))
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0.38), location: 0),
+                    .init(color: .black, location: min(1, fadeHeight / max(1, traceHeight))),
+                    .init(color: .black, location: 1)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        } else {
+            Color.black
+        }
+    }
+
+    private var paragraph: some View {
+        ChatStreamingInlineText(
+            inline: preparedInline,
+            identity: traceIdentity,
+            baseColor: Color.tronTextSecondary,
+            streaming: animatesInsertion
+        )
+        .font(TronFont.body(12))
+        .italic()
+        .lineSpacing(0)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
     private var preparedInline: MarkdownPresentation.Inline {
-        let source = segments.map(\.text).joined(separator: " ")
+        let source = segments.map(\.text).joined(separator: "\n")
         var attributed = AttributedString()
         var allPrepared = true
         for (index, segment) in segments.enumerated() {
-            if index > 0 { attributed += AttributedString(" ") }
+            if index > 0 { attributed += AttributedString("\n") }
             guard let prepared = preparedText.thinkingInline(
                 identity: segment.id,
                 source: segment.text
@@ -284,6 +367,137 @@ private struct ThinkingBlock: View {
             source: source,
             attributedString: allPrepared ? attributed : nil
         )
+    }
+
+    private var measurementText: some View {
+        Text(preparedInline.attributedString ?? AttributedString(preparedInline.source))
+            .font(TronFont.body(12))
+            .italic()
+            .lineSpacing(0)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var measurementProbe: some View {
+        VStack(spacing: 0) {
+            measurementText
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: ChatThinkingTraceMetricsKey.self,
+                            value: ChatThinkingTraceMetrics(contentHeight: geometry.size.height)
+                        )
+                    }
+                }
+            Text("Ag\nAg\nAg\nAg")
+                .font(TronFont.body(12))
+                .italic()
+                .lineSpacing(0)
+                .fixedSize(horizontal: false, vertical: true)
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: ChatThinkingTraceMetricsKey.self,
+                            value: ChatThinkingTraceMetrics(maximumHeight: geometry.size.height)
+                        )
+                    }
+                }
+        }
+        .hidden()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .onPreferenceChange(ChatThinkingTraceMetricsKey.self) { metrics in
+            contentHeight = metrics.contentHeight
+            maximumHeight = metrics.maximumHeight
+        }
+    }
+}
+
+private struct ChatThinkingTraceMetrics: Equatable {
+    var contentHeight: CGFloat = 0
+    var maximumHeight: CGFloat = 0
+
+    init(contentHeight: CGFloat = 0, maximumHeight: CGFloat = 0) {
+        self.contentHeight = contentHeight
+        self.maximumHeight = maximumHeight
+    }
+}
+
+private struct ChatThinkingTraceMetricsKey: PreferenceKey {
+    static let defaultValue = ChatThinkingTraceMetrics()
+
+    static func reduce(value: inout ChatThinkingTraceMetrics, nextValue: () -> ChatThinkingTraceMetrics) {
+        let next = nextValue()
+        if next.contentHeight > 0 { value.contentHeight = next.contentHeight }
+        if next.maximumHeight > 0 { value.maximumHeight = next.maximumHeight }
+    }
+}
+
+private struct ThinkingTraceDetailSheet: View {
+    let label: String?
+    let inline: MarkdownPresentation.Inline
+    let identity: String
+    let streaming: Bool
+    @Environment(\.dismiss) private var dismiss
+
+    private var title: String {
+        label?.isEmpty == false ? label! : "Thinking trace"
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ChatStreamingInlineText(
+                            inline: inline,
+                            identity: "detail:\(identity)",
+                            baseColor: Color.tronTextSecondary,
+                            // The detail surface always shows the complete
+                            // authoritative trace. It must never lag behind
+                            // the source merely because the compact row fades.
+                            streaming: false
+                        )
+                        .font(TronTypography.body)
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .id("thinking-detail-bottom")
+                    }
+                    .padding(18)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+                .defaultScrollAnchor(.top)
+                .tronScrollEdgeChrome()
+                .onAppear {
+                    proxy.scrollTo("thinking-detail-bottom", anchor: .top)
+                }
+                .onChange(of: inline.source) { _, _ in
+                    guard streaming else { return }
+                    var transaction = Transaction()
+                    transaction.animation = nil
+                    withTransaction(transaction) {
+                        proxy.scrollTo("thinking-detail-bottom", anchor: .bottom)
+                    }
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: title, accent: .tronEmerald)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronEmerald)
+                    }
+                    .accessibilityLabel("Done")
+                }
+            }
+        }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
     }
 }
 
