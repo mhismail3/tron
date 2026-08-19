@@ -42,7 +42,7 @@ else
 fi
 
 MANIFEST="$APP/Contents/Resources/Gateway/manifest.json"
-if [[ -s "$MANIFEST" ]] && plutil -lint "$MANIFEST" >/dev/null 2>&1; then
+if [[ -s "$MANIFEST" ]] && plutil -p "$MANIFEST" >/dev/null 2>&1; then
   fingerprint="$(plutil -extract payloadFingerprint raw -o - "$MANIFEST" 2>/dev/null || true)"
   if [[ "$fingerprint" =~ ^[0-9a-f]{64}$ ]]; then pass "Gateway payload manifest is present ($fingerprint)"; else fail "Gateway payload manifest has no valid fingerprint"; fi
 else
