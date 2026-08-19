@@ -81,5 +81,18 @@ only when packaging/build validation needs generated resources.
 - Mac architecture/development: `packages/mac-app/docs/`
 - Contributor workflow: `CONTRIBUTING.md` and `scripts/tron --help`
 
+### Local Mac reinstall runbook
+
+When a user explicitly requests a local Mac app reinstall, read and follow
+`packages/mac-app/docs/development.md` → **Reinstall a local Release build**.
+That runbook is the canonical sequence for staging the Gateway, building the
+Release app, preserving `~/.tron`, and refreshing the LaunchAgent registration.
+An agent may prepare the build and report the exact `.app` artifact path, but
+must not silently replace `/Applications/Tron.app` or perform production
+release/deployment; the user must explicitly approve and perform that local
+application replacement. Never delete `~/.tron` or reset credentials as part of
+an update. Restarting the Gateway is not an app reinstall: it only restarts the
+currently registered Gateway image.
+
 When behavior changes, update the nearest owner. Legacy claims must be removed,
 not retained as audit ledgers.
