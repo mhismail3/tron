@@ -204,6 +204,10 @@ enum ChatExtensionWidgetPolicy {
         }
         for source in ambiguousSources { ownerBySource[source] = nil }
         let hasLocalStructuredActivity = admittedActivities.contains { $0.source.source == "local" }
+        let dominantLiveActivitySource = admittedActivities
+            .filter { $0.isLive }
+            .sorted { ($0.lastActivityAt ?? $0.updatedAt) > ($1.lastActivityAt ?? $1.updatedAt) }
+            .first?.source.source
         var matchedStatusKeys = Set<String>()
         var matchedServiceIDs = Set<String>()
         var groups: [String: ExtensionWidgetGroup] = [:]
@@ -239,7 +243,10 @@ enum ChatExtensionWidgetPolicy {
         let surfaces = visibleSurfaces(presentation.surfaces, placement: .aboveEditor)
             + visibleSurfaces(presentation.surfaces, placement: .belowEditor)
         for surface in surfaces.sorted(by: { $0.id < $1.id }) {
+            // When the surface has no provenance, attribute it to the dominant live activity's source
+            // so they merge into the same group (fixes the "Local" / "Pi Subagents" split).
             let source = admittedSource(surface.provenance?.source)
+                ?? dominantLiveActivitySource
                 ?? (hasLocalStructuredActivity ? "local" : nil)
             let canonicalKey = canonicalWidgetKey(for: surface.id)
             let owner = canonicalKey.flatMap { semanticGroups[$0].flatMap { groups[$0] }?.items.compactMap { item in
