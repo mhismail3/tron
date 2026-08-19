@@ -18,6 +18,7 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     var parentBundleIdentifier: String?
     var parentBundleVersion: String?
     var executablePath: String?
+    var gatewaySupervisionMarker: String?
     var needsLaunchConstraintRefresh: Bool
 
     init(
@@ -26,6 +27,7 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
         parentBundleIdentifier: String? = nil,
         parentBundleVersion: String? = nil,
         executablePath: String? = nil,
+        gatewaySupervisionMarker: String? = nil,
         needsLaunchConstraintRefresh: Bool = false
     ) {
         self.pid = pid
@@ -33,6 +35,7 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
         self.parentBundleIdentifier = parentBundleIdentifier
         self.parentBundleVersion = parentBundleVersion
         self.executablePath = executablePath
+        self.gatewaySupervisionMarker = gatewaySupervisionMarker
         self.needsLaunchConstraintRefresh = needsLaunchConstraintRefresh
     }
 }

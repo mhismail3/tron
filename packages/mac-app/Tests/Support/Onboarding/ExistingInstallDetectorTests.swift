@@ -214,7 +214,7 @@ struct ExistingInstallDetectorTests {
             label: "com.tron.server",
             port: 9847,
             bundleProgram: "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
-            environmentVariables: [:],
+            environmentVariables: [TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue],
             associatedBundleIDs: ["com.tron.mac", "com.tron.mac.dev"]
         ))
     }
@@ -244,6 +244,7 @@ struct ExistingInstallDetectorTests {
     func isolatedLaunchAgentPlistIsCurrent() {
         let plist = trackedLaunchAgentPlist(named: "com.tron.server.dev.plist")
         let environment = [
+            TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue,
             TronPaths.tronHomeNameEnv: ".tron-dev",
             TronPaths.agentDirNameEnv: "agent-dev",
         ]

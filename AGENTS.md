@@ -90,9 +90,10 @@ Release app, preserving `~/.tron`, and refreshing the LaunchAgent registration.
 An agent may prepare the build and report the exact `.app` artifact path, but
 must not silently replace `/Applications/Tron.app` or perform production
 release/deployment; the user must explicitly approve and perform that local
-application replacement. Never delete `~/.tron` or reset credentials as part of
-an update. Restarting the Gateway is not an app reinstall: it only restarts the
-currently registered Gateway image.
+application replacement. After the user replaces it, run `scripts/tron mac verify`
+and do not claim success until it passes. Never delete `~/.tron` or reset
+credentials as part of an update. Restarting the Gateway is not an app
+reinstall: it only restarts the currently registered Gateway image.
 
 When behavior changes, update the nearest owner. Legacy claims must be removed,
 not retained as audit ledgers.

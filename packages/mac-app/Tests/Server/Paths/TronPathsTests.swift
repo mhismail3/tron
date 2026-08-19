@@ -33,7 +33,14 @@ struct TronPathsTests {
         #expect(TronPaths.serverHelperBundleProgram(environment: [:]) == "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron")
     }
 
-    @Test("isolated install mode uses the dev helper, port, and home")
+    @Test("production LaunchAgent always advertises Gateway supervision")
+    func productionLaunchAgentSupervisionEnvironment() {
+        #expect(TronPaths.launchAgentEnvironmentVariables(environment: [:]) == [
+            TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue,
+        ])
+    }
+
+    @Test("isolated install mode uses the dev helper, port, home, and supervision")
     func isolatedInstallModeShape() {
         let environment = [TronPaths.isolatedInstallModeEnv: TronPaths.isolatedInstallModeValue]
 
@@ -42,6 +49,7 @@ struct TronPathsTests {
         #expect(TronPaths.agentBundleName(environment: environment) == "Tron Agent Dev")
         #expect(TronPaths.serverHelperBundleProgram(environment: environment) == "Contents/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron")
         #expect(TronPaths.launchAgentEnvironmentVariables(environment: environment) == [
+            TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue,
             TronPaths.tronHomeNameEnv: ".tron-dev",
             TronPaths.agentDirNameEnv: "agent-dev",
         ])

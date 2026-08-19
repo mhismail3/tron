@@ -69,6 +69,8 @@ enum MenuBarItemBuilder {
         switch snapshot.state {
         case .running:
             return "Running"
+        case .needsRepair:
+            return "Update required"
         case .busy(let action):
             return action.rawValue
         case .paused:
@@ -133,6 +135,7 @@ enum ServerBusyAction: String, Equatable, Sendable {
 enum ServerStatusState: Equatable, Sendable {
     case checking
     case running(version: String?, port: Int)
+    case needsRepair(version: String?, port: Int, reason: String)
     case busy(ServerBusyAction)
     case paused
     case failed(reason: String)
@@ -142,7 +145,7 @@ enum ServerStatusState: Equatable, Sendable {
         switch self {
         case .running:
             return .running
-        case .checking, .busy, .unauthorized:
+        case .needsRepair, .checking, .busy, .unauthorized:
             return .attention
         case .paused:
             return .paused
@@ -162,8 +165,10 @@ enum ServerStatusState: Equatable, Sendable {
     }
 
     var runningPort: Int? {
-        if case .running(_, let port) = self { return port }
-        return nil
+        switch self {
+        case .running(_, let port), .needsRepair(_, let port, _): return port
+        default: return nil
+        }
     }
 
     var tooltip: String {
@@ -172,6 +177,8 @@ enum ServerStatusState: Equatable, Sendable {
             return "Tron: Checking"
         case .running:
             return "Tron: Running"
+        case .needsRepair:
+            return "Tron: Installation needs repair"
         case .busy(let action):
             return "Tron: \(action.rawValue)"
         case .paused:
@@ -187,6 +194,7 @@ enum ServerStatusState: Equatable, Sendable {
         if case .busy(let action) = self {
             return "\(action.rawValue)…"
         }
+        if case .needsRepair = self { return "Repair Tron" }
         return "Restart Tron"
     }
 
@@ -194,6 +202,7 @@ enum ServerStatusState: Equatable, Sendable {
         if case .busy(let action) = self {
             return "\(action.rawValue)…"
         }
+        if case .needsRepair = self { return "Repair Tron" }
         return "Resume Tron"
     }
 }

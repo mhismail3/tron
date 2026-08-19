@@ -3,6 +3,13 @@ import Foundation
 struct MacAppVersionIdentity: Codable, Equatable, Sendable {
     var canonicalVersion: String
     var buildNumber: String
+    var gatewayFingerprint: String?
+
+    init(canonicalVersion: String, buildNumber: String, gatewayFingerprint: String? = nil) {
+        self.canonicalVersion = canonicalVersion
+        self.buildNumber = buildNumber
+        self.gatewayFingerprint = gatewayFingerprint
+    }
 
     static func current(bundle: Bundle = .main) -> MacAppVersionIdentity {
         let canonical = bundle.object(forInfoDictionaryKey: "TRONCanonicalVersion") as? String
@@ -10,8 +17,19 @@ struct MacAppVersionIdentity: Codable, Equatable, Sendable {
         let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         return MacAppVersionIdentity(
             canonicalVersion: canonical ?? marketing ?? "unknown",
-            buildNumber: build ?? "unknown"
+            buildNumber: build ?? "unknown",
+            gatewayFingerprint: gatewayFingerprint(bundle: bundle)
         )
+    }
+
+    private static func gatewayFingerprint(bundle: Bundle) -> String? {
+        let manifest = bundle.bundleURL
+            .appendingPathComponent("Contents/Resources/Gateway/manifest.json", isDirectory: false)
+        guard let data = try? Data(contentsOf: manifest),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let fingerprint = object["payloadFingerprint"] as? String,
+              !fingerprint.isEmpty else { return nil }
+        return fingerprint
     }
 }
 
@@ -78,15 +96,36 @@ enum MacAppStartupMaintenance {
             onboarded: onboarded
         ) {
             guard reason == .versionAlreadyRecorded else { return .skipped(reason) }
+            let runtime = await setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
+            let currentVariant = MacRuntimeVariant.detect()
+            let helperName = setup.launchAgentLabel == TronPaths.isolatedLaunchAgentLabel ? "Tron Agent Dev" : "Tron Agent"
+            let expectedHelperPath = setup.applicationBundle
+                .appendingPathComponent("Contents/Library/LoginItems/\(helperName).app/Contents/MacOS/tron")
+                .path
+            let registrationNeedsRepair = runtime == nil
+                || runtime?.parentBundleIdentifier != currentVariant.expectedParentBundleIdentifier
+                || runtime?.gatewaySupervisionMarker != TronPaths.gatewaySupervisionValue
+                || LiveLaunchAgentManager.runtimeRequiresReplacement(
+                    runtimeInfo: runtime,
+                    expectedHelperPath: expectedHelperPath
+                )
+                || LiveLaunchAgentManager.shouldRefreshRegistrationForCurrentBundle(
+                    status: .enabled,
+                    currentVariant: currentVariant,
+                    runtimeInfo: runtime,
+                    currentParentBundleVersion: currentVersion.buildNumber,
+                    canManageLaunchAgent: setup.canManageLaunchAgent
+                )
+                || runtime?.needsLaunchConstraintRefresh == true
             let health = await ServerHealthAwaiter.waitForHealthy(
                 token: setup.readBearerToken(),
                 attempts: 1,
                 delayNanoseconds: 0,
                 pingServer: setup.pingServer
             )
-            if case .success = health { return .skipped(reason) }
-            // A same-version wrapper launch still repairs a stale or unhealthy
-            // LaunchAgent; the version marker is not a health assertion.
+            if case .success = health, !registrationNeedsRepair { return .skipped(reason) }
+            // A same-version wrapper launch still repairs a stale, unsupervised,
+            // or unhealthy LaunchAgent; the version marker is not a health assertion.
         }
 
         await MainActor.run {

@@ -87,10 +87,22 @@ and starts the new helper. Approve Tron Agent under System Settings → General 
 Login Items if macOS asks. Wait for the menu-bar status to report Running before
 reconnecting iOS. Pause/Resume is intentional here: it reloads the plist and
 its supervision environment, whereas **Restart Tron** only restarts the
-currently registered job. If the menu-bar controls are unavailable, use the
-installed app's **Uninstall Tron** action without selecting reset options, then
-launch the replacement and complete the Install step; that preserves canonical
-sessions and credentials but stops the Gateway during the transition.
+currently registered job. The new wrapper also detects a running same-bundle
+job without the supervision marker and repairs its registration before it
+settles into the healthy state.
+
+Verify the result with the read-only check:
+
+```bash
+scripts/tron mac verify
+```
+
+It fails if the installed app, structured Gateway payload, supervision marker,
+LaunchAgent PID, or running executable is stale. If the menu-bar controls are
+unavailable, use the installed app's **Uninstall Tron** action without selecting
+reset options, then launch the replacement and complete the Install step; that
+preserves canonical sessions and credentials but stops the Gateway during the
+transition.
 
 Use `TronMac Isolated Install` to own `com.tron.server.dev`, `~/.tron-dev`,
 `~/.pi/agent-dev`, and port 9848 without replacing the installed production app.

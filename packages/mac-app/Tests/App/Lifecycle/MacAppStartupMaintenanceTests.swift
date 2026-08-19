@@ -118,6 +118,10 @@ struct MacAppStartupMaintenanceTests {
         defer { TestTempDir.cleanup(tmp) }
         let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
         let mock = MockLaunchAgentManager()
+        mock.runtimeInfo = LaunchAgentRuntimeInfo(
+            parentBundleIdentifier: MacRuntimeVariant.detect().expectedParentBundleIdentifier,
+            gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue
+        )
         let setup = Self.makeSetup(
             tmp: tmp,
             currentVersion: current,
@@ -132,7 +136,7 @@ struct MacAppStartupMaintenanceTests {
         )
 
         #expect(result == .skipped(.versionAlreadyRecorded))
-        #expect(mock.calls.isEmpty)
+        #expect(mock.calls.map(\.kind) == [.runtimeInfo])
     }
 
     @Test("same-version marker does not suppress repair after an unhealthy probe")
@@ -157,7 +161,7 @@ struct MacAppStartupMaintenanceTests {
         )
 
         #expect(result == .restartUnhealthy(.ok, .unreachable))
-        #expect(mock.calls.map(\.kind) == [.load, .restart, .isLoaded])
+        #expect(mock.calls.map(\.kind) == [.runtimeInfo, .load, .restart, .isLoaded])
     }
 
     @Test("wizard completion records current version without restarting")

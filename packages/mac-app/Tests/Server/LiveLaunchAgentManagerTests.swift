@@ -205,6 +205,31 @@ struct LiveLaunchAgentManagerTests {
         )
     }
 
+    @Test("installed release refreshes same-bundle registration when supervision marker is stale")
+    func installedReleaseRefreshesStaleGatewaySupervision() {
+        let runtime = LaunchAgentRuntimeInfo(
+            parentBundleIdentifier: "com.tron.mac",
+            gatewaySupervisionMarker: nil
+        )
+        #expect(
+            LiveLaunchAgentManager.shouldRefreshRegistrationForGatewaySupervision(
+                status: .enabled,
+                currentVariant: .installedRelease,
+                runtimeInfo: runtime
+            )
+        )
+        #expect(
+            !LiveLaunchAgentManager.shouldRefreshRegistrationForGatewaySupervision(
+                status: .enabled,
+                currentVariant: .installedRelease,
+                runtimeInfo: LaunchAgentRuntimeInfo(
+                    parentBundleIdentifier: "com.tron.mac",
+                    gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue
+                )
+            )
+        )
+    }
+
     @Test("installed release refreshes same-bundle registration when launch constraints are stale")
     func installedReleaseRefreshesStaleLaunchConstraints() {
         let runtime = LaunchAgentRuntimeInfo(

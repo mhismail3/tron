@@ -108,7 +108,8 @@ final class MenuBarActionHandler {
     private func resumeServer() async {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Resume blocked") else { return }
         applyBusy(.resuming)
-        let outcome = await setup.launchAgentManager.load(
+        let outcome = await LaunchAgentLoader.ensureLoaded(
+            manager: setup.launchAgentManager,
             plistPath: setup.launchAgentPlistPath,
             label: setup.launchAgentLabel
         )

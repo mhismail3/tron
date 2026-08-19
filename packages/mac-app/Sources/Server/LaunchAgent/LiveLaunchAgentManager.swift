@@ -39,6 +39,12 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             currentVariant: currentVariant,
             runtimeInfo: runtime,
             canManageLaunchAgent: TronPaths.canManageLaunchAgent
+        ) || Self.shouldRefreshRegistrationForGatewaySupervision(
+            status: status,
+            currentVariant: currentVariant,
+            runtimeInfo: runtime,
+            expectedMarker: TronPaths.gatewaySupervisionValue,
+            canManageLaunchAgent: TronPaths.canManageLaunchAgent
         )
 
         if let outcome = Self.preRegistrationOutcome(
@@ -53,10 +59,17 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             return outcome
         }
         if shouldReplaceStaleRuntime || shouldTakeOverRuntime || shouldRefreshCurrentRegistration {
-            _ = await Subprocess.run(
+            let bootout = await Subprocess.run(
                 executable: URL(fileURLWithPath: "/bin/launchctl"),
                 arguments: ["bootout", "gui/\(currentUID())/\(label)"]
             )
+            guard bootout.exitCode == 0 else {
+                return .launchdRefused(
+                    message: bootout.stderr.isEmpty
+                        ? "Tron Agent could not unload the stale LaunchAgent before re-registering it."
+                        : bootout.stderr
+                )
+            }
         }
         let externalPortBound = await isPortBound(TronPaths.defaultServerPort)
         if Self.shouldRefuseExternalServer(
@@ -217,6 +230,22 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         return registeredVersion != currentParentBundleVersion
     }
 
+    static func shouldRefreshRegistrationForGatewaySupervision(
+        status: ExistingInstallDetector.ServiceRegistrationStatus,
+        currentVariant: MacRuntimeVariant,
+        runtimeInfo: LaunchAgentRuntimeInfo?,
+        expectedMarker: String = TronPaths.gatewaySupervisionValue,
+        canManageLaunchAgent: Bool = true
+    ) -> Bool {
+        guard canManageLaunchAgent,
+              status == .enabled,
+              let runtimeInfo,
+              runtimeInfo.parentBundleIdentifier == currentVariant.expectedParentBundleIdentifier else {
+            return false
+        }
+        return runtimeInfo.gatewaySupervisionMarker != expectedMarker
+    }
+
     static func shouldRefreshRegistrationForLaunchConstraints(
         status: ExistingInstallDetector.ServiceRegistrationStatus,
         currentVariant: MacRuntimeVariant,
@@ -318,6 +347,10 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             ),
             parentBundleVersion: parseLaunchctlValue(named: "parent bundle version", from: result.stdout),
             executablePath: parseLaunchctlDictionaryValue(named: "Executable", from: result.stdout),
+            gatewaySupervisionMarker: parseLaunchctlEnvironmentValue(
+                named: TronPaths.gatewaySupervisionEnv,
+                from: result.stdout
+            ),
             needsLaunchConstraintRefresh: result.stdout.contains("needs LWCR update")
         )
     }
@@ -339,6 +372,19 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             guard trimmed.hasPrefix(prefix) else { continue }
             let value = trimmed.dropFirst(prefix.count).trimmingCharacters(in: .whitespaces)
             return value.isEmpty ? nil : value
+        }
+        return nil
+    }
+
+    private func parseLaunchctlEnvironmentValue(named key: String, from launchctlOutput: String) -> String? {
+        for line in launchctlOutput.split(whereSeparator: \.isNewline) {
+            let text = line.trimmingCharacters(in: .whitespaces)
+            for separator in [" => ", " = "] {
+                let prefix = "\(key)\(separator)"
+                guard text.hasPrefix(prefix) else { continue }
+                let value = text.dropFirst(prefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
+                return value.isEmpty ? nil : value
+            }
         }
         return nil
     }

@@ -20,6 +20,7 @@ Commands:
   bundle gateway                    Stage the Mac gateway payload and Node runtimes
   ios generate                      Regenerate the iOS Xcode project
   mac generate                      Regenerate the macOS Xcode project
+  mac verify                        Verify installed app, payload, LaunchAgent, and PID
   version                           Print the canonical Tron version
 
 There is no deploy command. Production deployment is manual-only.
@@ -153,8 +154,15 @@ case "$cmd" in
     (cd "$ROOT/packages/ios-app" && xcodegen generate)
     ;;
   mac)
-    [[ "${1:-}" == generate ]] || { usage >&2; exit 64; }
-    (cd "$ROOT/packages/mac-app" && xcodegen generate)
+    case "${1:-}" in
+      generate)
+        (cd "$ROOT/packages/mac-app" && xcodegen generate)
+        ;;
+      verify)
+        exec "$ROOT/scripts/verify-mac-install.sh"
+        ;;
+      *) usage >&2; exit 64 ;;
+    esac
     ;;
   *) usage >&2; exit 64 ;;
 esac

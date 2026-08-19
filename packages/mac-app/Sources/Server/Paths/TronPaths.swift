@@ -13,6 +13,8 @@ enum TronPaths {
     static let agentDirNameEnv = "TRON_AGENT_DIR_NAME"
     static let isolatedInstallModeEnv = "TRON_MAC_INSTALL_MODE"
     static let isolatedInstallModeValue = "isolated"
+    static let gatewaySupervisionEnv = "TRON_GATEWAY_SUPERVISED"
+    static let gatewaySupervisionValue = "1"
     static let productionLaunchAgentLabel = "com.tron.server"
     static let isolatedLaunchAgentLabel = "com.tron.server.dev"
     static let productionServerPort = 9847
@@ -151,11 +153,12 @@ enum TronPaths {
     static func launchAgentEnvironmentVariables(environment: [String: String]) -> [String: String] {
         if isIsolatedInstallMode(environment: environment) {
             return [
+                gatewaySupervisionEnv: gatewaySupervisionValue,
                 tronHomeNameEnv: ".tron-dev",
                 agentDirNameEnv: "agent-dev",
             ]
         }
-        return [:]
+        return [gatewaySupervisionEnv: gatewaySupervisionValue]
     }
 
     static var canManageLaunchAgent: Bool {

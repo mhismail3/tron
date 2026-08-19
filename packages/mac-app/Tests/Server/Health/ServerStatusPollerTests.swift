@@ -14,7 +14,12 @@ struct ServerStatusPollerTests {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         let launchAgentManager = MockLaunchAgentManager()
         launchAgentManager.loaded = launchAgentLoaded
-        launchAgentManager.runtimeInfo = LaunchAgentRuntimeInfo(pid: 16027, uptime: "01:07:42")
+        launchAgentManager.runtimeInfo = LaunchAgentRuntimeInfo(
+            pid: 16027,
+            uptime: "01:07:42",
+            parentBundleIdentifier: MacRuntimeVariant.detect().expectedParentBundleIdentifier,
+            gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue
+        )
         return EnvironmentSetup(
             tronHome: tmp,
             applicationBundle: tmp,

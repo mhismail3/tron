@@ -116,8 +116,31 @@ rm -rf "$(dirname "$launcher_temp")"
 cp "$RESOURCES_DIR/AppIcon.icns" "$HELPER_DIR/Resources/AppIcon.icns"
 cp "$RESOURCES_DIR/AppIcon.icns" "$DEV_HELPER_DIR/Resources/AppIcon.icns"
 
-printf 'staged Tron Gateway %s with Node %s\n' \
-    "$(node -p "require('$GATEWAY_DIR/package.json').version")" "$NODE_VERSION"
+GATEWAY_VERSION="$(node -p "require('$GATEWAY_DIR/package.json').version")"
+SOURCE_REVISION="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
+fingerprint_input="$(mktemp)"
+{
+    printf 'gatewayVersion=%s\n' "$GATEWAY_VERSION"
+    printf 'nodeVersion=%s\n' "$NODE_VERSION"
+    (
+        cd "$APP_DIR"
+        find dist scripts -type f -print | sort | while IFS= read -r file; do
+            shasum -a 256 "$file"
+        done
+        shasum -a 256 package.json package-lock.json
+    )
+    for runtime in "$RUNTIME_DIR"/node-*; do
+        shasum -a 256 "$runtime"
+    done
+} > "$fingerprint_input"
+PAYLOAD_FINGERPRINT="$(shasum -a 256 "$fingerprint_input" | awk '{print $1}')"
+rm -f "$fingerprint_input"
+printf '{"schema":1,"gatewayVersion":"%s","nodeVersion":"%s","sourceRevision":"%s","payloadFingerprint":"%s"}\n' \
+    "$GATEWAY_VERSION" "$NODE_VERSION" "$SOURCE_REVISION" "$PAYLOAD_FINGERPRINT" \
+    > "$PAYLOAD_DIR/manifest.json"
+
+printf 'staged Tron Gateway %s with Node %s (fingerprint %s)\n' \
+    "$GATEWAY_VERSION" "$NODE_VERSION" "$PAYLOAD_FINGERPRINT"
 for destination in "${launchers[@]}"; do
     printf '  %s (architectures: %s)\n' "$destination" "$(lipo -archs "$destination")"
 done

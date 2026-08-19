@@ -42,8 +42,27 @@ struct ServerStatusPoller: Sendable {
         case .success(let info):
             let port = setup.serverPort
             let runtimeInfo = await setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
+            let installationState: ServerStatusState
+            if setup.canManageLaunchAgent,
+               let runtimeInfo,
+               runtimeInfo.parentBundleIdentifier == MacRuntimeVariant.detect().expectedParentBundleIdentifier,
+               runtimeInfo.gatewaySupervisionMarker == TronPaths.gatewaySupervisionValue,
+               !LiveLaunchAgentManager.runtimeRequiresReplacement(
+                   runtimeInfo: runtimeInfo,
+                   expectedHelperPath: TronPaths.serverHelperBinary.path
+               ) {
+                installationState = .running(version: info.version, port: port)
+            } else if setup.canManageLaunchAgent {
+                installationState = .needsRepair(
+                    version: info.version,
+                    port: port,
+                    reason: "Installed app and running LaunchAgent do not match"
+                )
+            } else {
+                installationState = .running(version: info.version, port: port)
+            }
             return ServerStatusSnapshot(
-                state: .running(version: info.version, port: port),
+                state: installationState,
                 tailscaleIP: setup.readTailscaleIPFromSettings(),
                 processID: runtimeInfo?.pid,
                 uptime: runtimeInfo?.uptime
