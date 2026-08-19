@@ -762,6 +762,7 @@ struct TronSettingsRow<Trailing: View>: View {
     let icon: String
     let title: String
     let subtitle: String?
+    let subtitleLineLimit: Int?
     let accent: Color
     let titleColor: Color
     let trailing: Trailing
@@ -770,6 +771,7 @@ struct TronSettingsRow<Trailing: View>: View {
         icon: String,
         title: String,
         subtitle: String? = nil,
+        subtitleLineLimit: Int? = nil,
         accent: Color = .tronEmerald,
         titleColor: Color = .tronTextPrimary,
         @ViewBuilder trailing: () -> Trailing
@@ -777,6 +779,7 @@ struct TronSettingsRow<Trailing: View>: View {
         self.icon = icon
         self.title = title
         self.subtitle = subtitle
+        self.subtitleLineLimit = subtitleLineLimit
         self.accent = accent
         self.titleColor = titleColor
         self.trailing = trailing()
@@ -798,7 +801,9 @@ struct TronSettingsRow<Trailing: View>: View {
                     Text(subtitle)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .regular))
                         .foregroundStyle(Color.tronTextPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(subtitleLineLimit)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: subtitleLineLimit == nil)
                 }
             }
             Spacer(minLength: TronSpacing.md)
@@ -817,10 +822,18 @@ extension TronSettingsRow where Trailing == EmptyView {
         icon: String,
         title: String,
         subtitle: String? = nil,
+        subtitleLineLimit: Int? = nil,
         accent: Color = .tronEmerald,
         titleColor: Color = .tronTextPrimary
     ) {
-        self.init(icon: icon, title: title, subtitle: subtitle, accent: accent, titleColor: titleColor) { EmptyView() }
+        self.init(
+            icon: icon,
+            title: title,
+            subtitle: subtitle,
+            subtitleLineLimit: subtitleLineLimit,
+            accent: accent,
+            titleColor: titleColor
+        ) { EmptyView() }
     }
 }
 

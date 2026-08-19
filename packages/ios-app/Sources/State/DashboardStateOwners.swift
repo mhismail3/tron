@@ -83,14 +83,32 @@ struct DashboardServerSource: Identifiable, Equatable, Sendable {
     var id: String { profileID }
 }
 
+enum DashboardSessionSortMode: String, CaseIterable, Identifiable, Sendable {
+    case projectServer = "By Project / Server"
+    case recent = "Recent Activity"
+
+    var id: String { rawValue }
+    var detail: String {
+        switch self {
+        case .projectServer: "Group sessions by project folder and server."
+        case .recent: "Show one newest-first list with project and server details."
+        }
+    }
+}
+
 struct DashboardServerFilterState: Equatable, Sendable {
     private(set) var selectedProfileIDs: Set<String> = []
     private var availableProfileIDs: Set<String> = []
+    private(set) var sortMode: DashboardSessionSortMode = .projectServer
 
-    var isFiltering: Bool { !selectedProfileIDs.isEmpty }
+    var isFiltering: Bool { !selectedProfileIDs.isEmpty || sortMode != .projectServer }
     var isAllSelected: Bool { selectedProfileIDs.isEmpty }
     var accessibilityLabel: String {
-        isFiltering ? "Filter servers, \(selectedProfileIDs.count) selected" : "Filter servers, all selected"
+        let serverSelection = isAllSelected
+            ? "all servers selected"
+            : "\(selectedProfileIDs.count) servers selected"
+        let ordering = sortMode == .recent ? ", recent activity order" : ""
+        return "Filter servers, \(serverSelection)\(ordering)"
     }
 
     mutating func reconcile(profileIDs: [String]) {
@@ -109,6 +127,10 @@ struct DashboardServerFilterState: Equatable, Sendable {
     }
 
     mutating func selectAll() { selectedProfileIDs.removeAll() }
+
+    mutating func setSortMode(_ mode: DashboardSessionSortMode) {
+        sortMode = mode
+    }
 
     mutating func toggle(_ profileID: String) {
         if selectedProfileIDs.isEmpty {

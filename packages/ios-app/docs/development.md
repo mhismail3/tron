@@ -147,18 +147,19 @@ and new-session sheet are separate presentation owners; the sheet retains the sa
 owners, focus behavior, controls, detents, and mutation admission.
 `ChatView` retains route/composer/transcript composition while attachment controls and chips, entrance/render
 rows, and extension-widget implementation live in separate presentation files with unchanged identities and
-transitions. Widget/status state remains canonical, but both native presentations are temporarily gated off.
+transitions. Session History uses the same compact settings-row typography, icon column, spacing, and padding
+rhythm as the surrounding management sheets; long canonical previews wrap without increasing the base row scale. Widget/status state remains canonical, but both native presentations are temporarily gated off.
 Conversation-turn rendering and lifecycle-safe media chips remain in `TranscriptRow.swift`; transcript event
 controls and tool-run/detail routing live in dedicated owners without widening their private helper state. The
 primary tool sheet, diff destination, technical-payload destination, and shared navigation chrome also have
 separate presentation owners; only their directly shared layout/diff primitives use module-internal access.
 The settings shell and its appearance, connection/import, provider, agent-default, runtime-behavior, resource-path,
-package, trust, and custom-model destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators. Connections owns the combined server-management and diagnostics surface: paired-server rows open per-server detail sheets, while authorized devices and the full bounded log history remain below the server list. The dashboard settings overview uses an eager stack so the Gateway Import destination is materialized with the initial sheet; project-scoped settings intentionally omit that dashboard-only action.
+package, trust, and custom-model destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators. Connections owns the combined server-management and diagnostics surface: paired-server rows open per-server detail sheets, while authorized devices and the full bounded log history remain below the server list. The dashboard server filter keeps multi-selection separate from ordering: the default groups by project/server, while Recent Activity renders one reverse-chronological session list with project/server context beneath each row. Project headers show the project folder in bold monospace with the server name as a right-aligned secondary monospace label. The dashboard settings overview uses an eager stack so the Gateway Import destination is materialized with the initial sheet; project-scoped settings intentionally omit that dashboard-only action.
 Resolved package JSON is constructed only inside its progressive detail destination; the overview retains a
 constant-depth top-level count instead of recursively rendering a potentially large resource tree. Package reload
 refreshes the inventory and update projection together, while installation controls live in a medium/large
 progressive sheet. Custom provider editors keep their three dense text fields together before the API-format row
-and use the standard settings-group header treatment. Provider settings cards use one centered leading
+and use the standard settings-group header treatment. Project Resources normalizes producer whitespace before display, caps overview subtitles to one line, and keeps detailed tool/resource content in the tapped detail sheet so scrolling remains lightweight. Provider settings cards use one centered leading
 icon column with vertically centered icons and leading-aligned text; the Manage Session workspace path
 uses a trailing inline group-header detail rather than a second header line.
 Terminal sheet composition, presentation lifecycle/error state, and native SwiftTerm/keyboard rendering live

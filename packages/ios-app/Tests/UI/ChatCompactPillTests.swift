@@ -29,7 +29,7 @@ struct ChatCompactPillTests {
         #expect(UserPromptTextLayoutPolicy.fittedWidth(measured: 520, proposed: 364) == 364)
     }
 
-    @Test("bottom activity blur follows keyboard focus without changing layout")
+    @Test("bottom blur follows keyboard focus without changing layout")
     func bottomActivityBlurGeometry() {
         #expect(ChatBottomActivityBlurLayout.height(keyboardVisible: false) == 68)
         #expect(ChatBottomActivityBlurLayout.translation(keyboardVisible: false) == 44)
@@ -40,16 +40,6 @@ struct ChatCompactPillTests {
                 - ChatBottomActivityBlurLayout.translation(keyboardVisible: true)
                 == 56
         )
-    }
-
-    @Test("activity pulse phase advances continuously and has a stable period")
-    func activityPulsePhase() {
-        let start = Date(timeIntervalSinceReferenceDate: 10)
-        let next = start.addingTimeInterval(ChatBottomActivityBlurLayout.pulseDuration)
-        let phaseDelta = ChatBottomActivityBlurLayout.pulsePhase(at: next)
-            - ChatBottomActivityBlurLayout.pulsePhase(at: start)
-
-        #expect(abs(phaseDelta - 2 * Double.pi) < 0.000_001)
     }
 
     @Test("error notifications use rounded rectangles while other notifications remain capsules")
@@ -123,6 +113,14 @@ struct ChatCompactPillTests {
         #expect(summary.contextTokens == 120)
         #expect(summary.contextWindow == 1_000)
         #expect(summary.instructionPreview.count == AgentContextSummary.maximumInstructionPreviewCharacters + 1)
+    }
+
+    @Test("Project resource descriptions normalize producer line breaks")
+    func projectResourceDescriptionsNormalizeWhitespace() {
+        #expect(
+            ProjectResourceTextPresentation.readableDescription("Parallel\nsubagents\treview\r\nresults.")
+                == "Parallel subagents review results."
+        )
     }
 
     @Test("Project resource details foreground kind-specific user guidance")

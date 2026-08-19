@@ -34,17 +34,17 @@ struct TronTopBlurOverlay: View {
 
     var body: some View {
         ZStack {
-            // Keep the native/variable backdrop blur unchanged. Dark mode gets
-            // only a black tint over that blur so the material stays soft
+            // Keep the native/variable backdrop blur and radius unchanged.
+            // Dark mode uses a dark material plus black tint so it stays soft
             // without the regular UIBlurEffect's gray lift.
-            ChatTopVariableBlur(maxBlurRadius: style.radius)
+            ChatTopVariableBlur(maxBlurRadius: style.radius, darkMode: colorScheme == .dark)
             if colorScheme == .dark {
                 LinearGradient(
                     colors: [
-                        Color.black.opacity(0.28),
+                        Color.black.opacity(0.46),
+                        Color.black.opacity(0.40),
                         Color.black.opacity(0.24),
-                        Color.black.opacity(0.14),
-                        Color.black.opacity(0.04),
+                        Color.black.opacity(0.08),
                         Color.clear,
                     ],
                     startPoint: .top,
@@ -67,13 +67,6 @@ enum ChatBottomActivityBlurLayout {
     static let bottomSafeAreaTranslation: CGFloat = 44
     static let keyboardTranslation: CGFloat = 24
     static let radius: CGFloat = 10
-    static let pulseDuration: TimeInterval = 2.2
-    static let restingTintOpacity = 0.02
-    static let activeTintOpacity = 0.105
-    static let reduceMotionTintOpacity = 0.06
-    static let lightRestingTintOpacity = 0.045
-    static let lightActiveTintOpacity = 0.18
-    static let lightReduceMotionTintOpacity = 0.085
 
     static func height(keyboardVisible: Bool) -> CGFloat {
         keyboardVisible ? keyboardHeight : bottomHeight
@@ -82,70 +75,28 @@ enum ChatBottomActivityBlurLayout {
     static func translation(keyboardVisible: Bool) -> CGFloat {
         keyboardVisible ? keyboardTranslation : bottomSafeAreaTranslation
     }
-
-    static func pulsePhase(at date: Date) -> Double {
-        date.timeIntervalSinceReferenceDate / pulseDuration * 2 * Double.pi
-    }
 }
 
-/// A short, nonstructural safe-area treatment. Ordinary running state changes
-/// only its tint; retry, compaction, and custom working detail retain explicit
-/// transcript presentation. The animation is timeline-driven so it resumes
-/// when a chat returns to the foreground instead of depending on a one-shot
-/// state animation that can remain at its terminal value.
+/// A short, nonstructural safe-area blur in light appearance. Dark appearance
+/// intentionally leaves this surface transparent until the thinking indicator
+/// is redesigned, so it cannot introduce a pulsing layer or a material seam.
 struct ChatBottomActivityBlur: View {
     let isActive: Bool
     let keyboardVisible: Bool
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        TimelineView(.animation(
-            minimumInterval: 1.0 / 30.0,
-            paused: !isActive || reduceMotion || scenePhase != .active
-        )) { context in
-            ZStack {
-                ChatTopVariableBlur(maxBlurRadius: ChatBottomActivityBlurLayout.radius)
-                    .rotationEffect(.degrees(180))
-
-                // Match the top blur's dark-mode treatment. The public regular
-                // blur lifts toward gray, so a black tint keeps the idle state
-                // anchored to the chat background rather than changing its hue.
-                if colorScheme == .dark {
-                    LinearGradient(
-                        colors: [
-                            Color.black.opacity(0.28),
-                            Color.black.opacity(0.24),
-                            Color.black.opacity(0.14),
-                            Color.black.opacity(0.04),
-                            Color.clear,
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                }
-
-                LinearGradient(
-                    colors: [
-                        Color.clear,
-                        Color.tronEmerald.opacity(tintOpacity(at: context.date)),
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
+        Group {
+            // Dark mode intentionally has no bottom blur until the replacement
+            // thinking indicator is designed. Leaving this transparent keeps
+            // the safe-area background identical to the chat surface.
+            if colorScheme == .light {
+                ChatTopVariableBlur(
+                    maxBlurRadius: ChatBottomActivityBlurLayout.radius,
+                    darkMode: false,
+                    fadesFromBottom: true
                 )
-
-                if isActive {
-                    ChatThinkingWaveform(
-                        date: context.date,
-                        reduceMotion: reduceMotion
-                    )
-                    .frame(maxWidth: .infinity)
-                    .frame(maxHeight: .infinity, alignment: .bottom)
-                    .padding(.horizontal, 18)
-                    .padding(.bottom, keyboardVisible ? 10 : 14)
-                }
             }
         }
         .frame(maxWidth: .infinity)
@@ -154,87 +105,6 @@ struct ChatBottomActivityBlur: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Tron is working")
         .accessibilityHidden(!isActive)
-    }
-
-    private func tintOpacity(at date: Date) -> Double {
-        guard isActive else { return 0 }
-        if reduceMotion {
-            return colorScheme == .light
-                ? ChatBottomActivityBlurLayout.lightReduceMotionTintOpacity
-                : ChatBottomActivityBlurLayout.reduceMotionTintOpacity
-        }
-
-        let pulse = 0.5 + 0.5 * sin(ChatBottomActivityBlurLayout.pulsePhase(at: date))
-        if colorScheme == .light {
-            return ChatBottomActivityBlurLayout.lightRestingTintOpacity
-                + (ChatBottomActivityBlurLayout.lightActiveTintOpacity
-                    - ChatBottomActivityBlurLayout.lightRestingTintOpacity) * pulse
-        }
-        return ChatBottomActivityBlurLayout.restingTintOpacity
-            + (ChatBottomActivityBlurLayout.activeTintOpacity
-                - ChatBottomActivityBlurLayout.restingTintOpacity) * pulse
-    }
-}
-
-private struct ChatThinkingWaveform: View {
-    let date: Date
-    let reduceMotion: Bool
-
-    var body: some View {
-        Canvas { context, size in
-            guard size.width > 0, size.height > 0 else { return }
-
-            let pointCount = max(Int(size.width / 3), 2)
-            let phase = reduceMotion
-                ? 0
-                : ChatBottomActivityBlurLayout.pulsePhase(at: date) * 1.35
-            let centerY = size.height / 2
-            var primaryWave = Path()
-            var secondaryWave = Path()
-
-            for index in 0...pointCount {
-                let progress = Double(index) / Double(pointCount)
-                let x = CGFloat(progress) * size.width
-                let envelope = sin(progress * Double.pi)
-                let primary = sin(progress * Double.pi * 5 - phase)
-                let secondary = sin(progress * Double.pi * 9 - phase * 1.2)
-                let primaryAmplitude = 3.0 + 4.0 * envelope
-                let secondaryAmplitude = 2.0 + 3.0 * envelope
-                let primaryY = centerY + CGFloat(primary * primaryAmplitude)
-                let secondaryY = centerY + CGFloat(secondary * secondaryAmplitude + 1)
-
-                if index == 0 {
-                    primaryWave.move(to: CGPoint(x: x, y: primaryY))
-                    secondaryWave.move(to: CGPoint(x: x, y: secondaryY))
-                } else {
-                    primaryWave.addLine(to: CGPoint(x: x, y: primaryY))
-                    secondaryWave.addLine(to: CGPoint(x: x, y: secondaryY))
-                }
-            }
-
-            // Use broad strokes and then blur the whole drawing. The result is
-            // a soft traveling green waveform, not a sharp equalizer line.
-            context.stroke(
-                primaryWave,
-                with: .color(Color.tronEmerald.opacity(reduceMotion ? 0.07 : 0.11)),
-                style: StrokeStyle(lineWidth: 14, lineCap: .round, lineJoin: .round)
-            )
-            context.stroke(
-                secondaryWave,
-                with: .color(Color.tronEmerald.opacity(reduceMotion ? 0.035 : 0.06)),
-                style: StrokeStyle(lineWidth: 24, lineCap: .round, lineJoin: .round)
-            )
-        }
-        .frame(height: 32)
-        .blur(radius: reduceMotion ? 6 : 9)
-        .mask {
-            LinearGradient(
-                colors: [.clear, .black, .black, .clear],
-                startPoint: .leading,
-                endPoint: .trailing
-            )
-        }
-        .accessibilityHidden(true)
     }
 }
 
@@ -282,13 +152,21 @@ extension View {
 
 struct ChatTopVariableBlur: UIViewRepresentable {
     var maxBlurRadius: CGFloat = 18
+    var darkMode = false
+    var fadesFromBottom = false
 
     func makeUIView(context: Context) -> VariableBackdropBlurView {
-        VariableBackdropBlurView(maxBlurRadius: maxBlurRadius)
+        VariableBackdropBlurView(
+            maxBlurRadius: maxBlurRadius,
+            darkMode: darkMode,
+            fadesFromBottom: fadesFromBottom
+        )
     }
 
     func updateUIView(_ blurView: VariableBackdropBlurView, context: Context) {
         blurView.maxBlurRadius = maxBlurRadius
+        blurView.darkMode = darkMode
+        blurView.fadesFromBottom = fadesFromBottom
     }
 }
 
@@ -297,6 +175,25 @@ final class VariableBackdropBlurView: UIVisualEffectView {
     var maxBlurRadius: CGFloat {
         didSet {
             guard maxBlurRadius != oldValue else { return }
+            setNeedsLayout()
+        }
+    }
+
+    var darkMode: Bool {
+        didSet {
+            guard darkMode != oldValue else { return }
+            applyPublicEffect()
+        }
+    }
+
+    var fadesFromBottom: Bool {
+        didSet {
+            guard fadesFromBottom != oldValue else { return }
+            installEdgeMask()
+            #if TRON_PRIVATE_VARIABLE_BLUR
+            renderedMask = nil
+            configuredRadius = nil
+            #endif
             setNeedsLayout()
         }
     }
@@ -312,12 +209,14 @@ final class VariableBackdropBlurView: UIVisualEffectView {
     private var renderedMaskScale: CGFloat = 0
     #endif
 
-    init(maxBlurRadius: CGFloat) {
+    init(maxBlurRadius: CGFloat, darkMode: Bool = false, fadesFromBottom: Bool = false) {
         self.maxBlurRadius = maxBlurRadius
+        self.darkMode = darkMode
+        self.fadesFromBottom = fadesFromBottom
         #if TRON_PRIVATE_VARIABLE_BLUR
         variableBlurFilter = TronMakePrivateVariableBlurFilter()
         #endif
-        super.init(effect: UIBlurEffect(style: .regular))
+        super.init(effect: darkMode ? UIBlurEffect(style: .systemMaterialDark) : UIBlurEffect(style: .regular))
 
         isUserInteractionEnabled = false
         accessibilityElementsHidden = true
@@ -352,8 +251,8 @@ final class VariableBackdropBlurView: UIVisualEffectView {
     private func installEdgeMask() {
         edgeMask.colors = Self.edgeMaskColors
         edgeMask.locations = Self.edgeMaskLocations
-        edgeMask.startPoint = CGPoint(x: 0.5, y: 0)
-        edgeMask.endPoint = CGPoint(x: 0.5, y: 1)
+        edgeMask.startPoint = CGPoint(x: 0.5, y: fadesFromBottom ? 1 : 0)
+        edgeMask.endPoint = CGPoint(x: 0.5, y: fadesFromBottom ? 0 : 1)
         layer.mask = edgeMask
     }
 
@@ -386,6 +285,15 @@ final class VariableBackdropBlurView: UIVisualEffectView {
 
     private static let gradientLocations: [NSNumber] = [0, 0.14, 0.30, 0.46, 0.61, 0.73, 0.82, 1]
 
+    private func applyPublicEffect() {
+        effect = nil
+        effect = darkMode
+            ? UIBlurEffect(style: .systemMaterialDark)
+            : UIBlurEffect(style: .regular)
+        subviews.forEach { $0.alpha = 1 }
+        installEdgeMask()
+    }
+
     #if TRON_PRIVATE_VARIABLE_BLUR
     private var maskNeedsRefresh: Bool {
         bounds.size != renderedMaskSize || traitCollection.displayScale != renderedMaskScale
@@ -400,7 +308,8 @@ final class VariableBackdropBlurView: UIVisualEffectView {
             renderedMaskScale = traitCollection.displayScale
             renderedMask = Self.makeTopGradientMask(
                 size: bounds.size,
-                scale: renderedMaskScale
+                scale: renderedMaskScale,
+                fadesFromBottom: fadesFromBottom
             )
         }
         guard let renderedMask else { return false }
@@ -414,13 +323,14 @@ final class VariableBackdropBlurView: UIVisualEffectView {
     }
 
     private func restorePublicEffect() {
-        effect = nil
-        effect = UIBlurEffect(style: .regular)
-        subviews.forEach { $0.alpha = 1 }
-        installEdgeMask()
+        applyPublicEffect()
     }
 
-    private static func makeTopGradientMask(size: CGSize, scale: CGFloat) -> CGImage? {
+    private static func makeTopGradientMask(
+        size: CGSize,
+        scale: CGFloat,
+        fadesFromBottom: Bool
+    ) -> CGImage? {
         guard size.width > 0, size.height > 0 else { return nil }
 
         let format = UIGraphicsImageRendererFormat()
@@ -436,8 +346,8 @@ final class VariableBackdropBlurView: UIVisualEffectView {
 
             rendererContext.cgContext.drawLinearGradient(
                 gradient,
-                start: CGPoint(x: size.width / 2, y: 0),
-                end: CGPoint(x: size.width / 2, y: size.height),
+                start: CGPoint(x: size.width / 2, y: fadesFromBottom ? size.height : 0),
+                end: CGPoint(x: size.width / 2, y: fadesFromBottom ? 0 : size.height),
                 options: [.drawsBeforeStartLocation, .drawsAfterEndLocation]
             )
         }.cgImage

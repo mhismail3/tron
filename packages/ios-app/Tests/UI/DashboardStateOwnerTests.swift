@@ -122,6 +122,12 @@ struct DashboardStateOwnerTests {
         #expect(filter.isAllSelected)
         filter.selectAll()
         #expect(filter.isAllSelected)
+
+        filter.setSortMode(.recent)
+        #expect(filter.sortMode == .recent)
+        #expect(filter.isFiltering)
+        filter.setSortMode(.projectServer)
+        #expect(!filter.isFiltering)
     }
 
     @Test("direct navigation invalidates pending asynchronous navigation")

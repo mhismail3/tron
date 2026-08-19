@@ -169,7 +169,8 @@ struct SessionShellView: View {
         Button {
             showingServerFilter = true
         } label: {
-            Image(systemName: serverFilter.isFiltering ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle")
+            Image(systemName: "line.3.horizontal.decrease")
+                .font(TronTypography.sans(size: 22, weight: .semibold))
         }
         .buttonStyle(TronIconButtonStyle(size: 56))
         .accessibilityLabel(serverFilter.accessibilityLabel)
@@ -178,12 +179,30 @@ struct SessionShellView: View {
     private var serverFilterSheet: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: TronSpacing.md) {
                     Text("Choose one or more servers to show in your session history.")
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
+                        .font(TronTypography.caption)
                         .foregroundStyle(Color.tronTextMuted)
                         .fixedSize(horizontal: false, vertical: true)
 
+                    Text("View")
+                        .font(TronTypography.sheetSectionHeader)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(DashboardSessionSortMode.allCases) { mode in
+                        filterOption(
+                            title: mode.rawValue,
+                            detail: mode.detail,
+                            selected: serverFilter.sortMode == mode
+                        ) {
+                            serverFilter.setSortMode(mode)
+                        }
+                    }
+
+                    Text("Servers")
+                        .font(TronTypography.sheetSectionHeader)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .accessibilityAddTraits(.isHeader)
                     filterOption(
                         title: "All servers",
                         detail: "Show sessions from every paired server.",
@@ -202,7 +221,8 @@ struct SessionShellView: View {
                         }
                     }
                 }
-                .padding(20)
+                .padding(.horizontal, TronSpacing.xlarge)
+                .padding(.vertical, TronSpacing.large)
             }
             .tronScrollEdgeChrome()
             .tronNavigationTitle("Filter Servers")
@@ -222,10 +242,10 @@ struct SessionShellView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: TronSpacing.xl) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(selected ? Color.tronEmerald : Color.tronTextMuted)
-                    .frame(width: 22, height: 22)
+                    .frame(width: 20, height: 20, alignment: .center)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
@@ -233,17 +253,17 @@ struct SessionShellView: View {
                         .lineLimit(1)
                     if let detail {
                         Text(detail)
-                            .font(TronTypography.code(size: TronTypography.sizeBodySM))
+                            .font(TronTypography.bodySM)
                             .foregroundStyle(Color.tronTextSecondary)
                             .lineLimit(1)
                     }
                 }
                 .layoutPriority(1)
-                Spacer(minLength: 8)
+                Spacer(minLength: TronSpacing.md)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+            .padding(.horizontal, TronSpacing.xl)
+            .padding(.vertical, TronSpacing.md)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -344,7 +364,16 @@ struct SessionShellView: View {
 
     @ViewBuilder
     private var sessionSections: some View {
-        ForEach(workspaceGroups) { group in
+        if serverFilter.sortMode == .recent {
+            Section {
+                ForEach(recentSessions, id: \.dashboardID) { session in
+                    sessionButton(session, showsContext: true)
+                }
+            } header: {
+                recentActivityHeader
+            }
+        } else {
+            ForEach(workspaceGroups) { group in
             let visibleSessions = sessionExpansion.visibleSessions(in: group)
             let canShowMore = sessionExpansion.canViewMore(
                 groupID: group.id,
@@ -415,9 +444,22 @@ struct SessionShellView: View {
                 workspaceHeader(group, itemCount: disclosureItemCount)
             }
         }
+        }
     }
 
-    private func sessionButton(_ session: SessionSummary) -> some View {
+    private var recentActivityHeader: some View {
+        Text("Recent Activity · newest first")
+            .font(TronTypography.sheetSectionHeader)
+            .foregroundStyle(Color.tronEmerald)
+            .textCase(nil)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, SessionDashboardLayout.headerLeadingPadding)
+            .padding(.top, SessionDashboardLayout.headerTopPadding)
+            .padding(.bottom, SessionDashboardLayout.headerBottomPadding)
+            .listRowInsets(SessionDashboardLayout.headerInsets)
+    }
+
+    private func sessionButton(_ session: SessionSummary, showsContext: Bool = false) -> some View {
         return Button {
             guard openingSessionID == nil else { return }
             openingSessionID = session.dashboardID
@@ -435,7 +477,8 @@ struct SessionShellView: View {
         } label: {
             HistoricalSessionRow(
                 session: session,
-                activity: model.dashboardActivity(for: session)
+                activity: model.dashboardActivity(for: session),
+                showsContext: showsContext
             )
         }
         .buttonStyle(.plain)
@@ -462,12 +505,20 @@ struct SessionShellView: View {
                     .font(TronTypography.sans(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
                     .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
                     .contentTransition(.symbolEffect(.replace))
-                Text(group.displayName)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodyLG, weight: .bold))
+                Text(group.name)
+                    .font(TronTypography.code(size: TronTypography.sizeBodyLG, weight: .bold))
                     .lineLimit(1)
                     .truncationMode(.tail)
+                Spacer(minLength: SessionDashboardLayout.iconTextSpacing)
+                if let serverName = group.profileLabel, !serverName.isEmpty {
+                    Text(serverName)
+                        .font(TronTypography.code(size: TronTypography.sizeBodySM))
+                        .foregroundStyle(Color.tronTextSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 Image(systemName: "chevron.right")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                    .font(TronTypography.sans(size: SessionDashboardLayout.headerChevronSize, weight: .bold))
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
             }
             .foregroundStyle(Color.tronEmerald)
@@ -487,14 +538,21 @@ struct SessionShellView: View {
         .accessibilityHint(isExpanded ? "Double tap to hide sessions" : "Double tap to show sessions")
     }
 
-    private var workspaceGroups: [SessionListWorkspaceGroup] {
-        let filtered = model.visibleSessions.filter { session in
+    private var filteredSessions: [SessionSummary] {
+        model.visibleSessions.filter { session in
             serverFilter.allows(session.gatewayProfileID)
                 && (search.isEmpty
                     || session.title.localizedCaseInsensitiveContains(search)
                     || session.cwd.localizedCaseInsensitiveContains(search))
         }
-        return SessionListWorkspaceGroup.groups(from: filtered)
+    }
+
+    private var recentSessions: [SessionSummary] {
+        filteredSessions.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    private var workspaceGroups: [SessionListWorkspaceGroup] {
+        SessionListWorkspaceGroup.groups(from: filteredSessions)
             .map { group in
                 SessionListWorkspaceGroup(
                     path: group.path,
@@ -723,6 +781,7 @@ private struct SessionListExpansionControls: View {
 private struct HistoricalSessionRow: View {
     let session: SessionSummary
     let activity: DashboardSessionActivity
+    let showsContext: Bool
 
     var body: some View {
         HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
@@ -737,11 +796,21 @@ private struct HistoricalSessionRow: View {
             }
             .frame(width: SessionDashboardLayout.iconColumnWidth, height: SessionDashboardLayout.iconColumnWidth)
 
-            Text(session.title)
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                .foregroundStyle(Color.tronTextPrimary)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            VStack(alignment: .leading, spacing: showsContext ? 2 : 0) {
+                Text(session.title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if showsContext {
+                    Text(projectServerContext)
+                        .font(TronTypography.code(size: TronTypography.sizeCaption))
+                        .foregroundStyle(Color.tronTextMuted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Spacer(minLength: 10)
 
@@ -761,6 +830,15 @@ private struct HistoricalSessionRow: View {
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(session.title), \(activity.accessibilityDescription), \(session.relativeActivityDescription())")
+    }
+
+    private var projectServerContext: String {
+        let project = URL(fileURLWithPath: session.cwd).lastPathComponent
+        let projectName = project.isEmpty ? session.cwd : project
+        let serverName = session.gatewayProfileLabel.flatMap { label in
+            label.isEmpty ? nil : label
+        } ?? "Unknown server"
+        return "\(projectName) · \(serverName)"
     }
 }
 

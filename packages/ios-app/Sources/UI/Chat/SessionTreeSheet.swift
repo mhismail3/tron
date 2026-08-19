@@ -109,10 +109,12 @@ private struct SessionHistorySelection: Identifiable {
 }
 
 private enum SessionHistoryCardMetrics {
-    static let contentSpacing: CGFloat = 12
-    static let iconWidth: CGFloat = 24
-    static let horizontalPadding: CGFloat = 14
-    static let verticalPadding: CGFloat = 14
+    // Match TronSettingsRow's compact settings rhythm so history cards do not
+    // grow larger than the surrounding sheets.
+    static let contentSpacing: CGFloat = TronSpacing.xl
+    static let iconWidth: CGFloat = 20
+    static let horizontalPadding: CGFloat = TronSpacing.xl
+    static let verticalPadding: CGFloat = TronSpacing.md
 }
 
 struct SessionTreeSheet: View {
@@ -134,7 +136,7 @@ struct SessionTreeSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
                     if let snapshot = model.authoritativeSnapshot(for: sessionID) {
                         runtimeSummary(snapshot)
                     }
@@ -143,7 +145,7 @@ struct SessionTreeSheet: View {
                     if reloading && model.sessionTree.isEmpty {
                         TronGlassCard(accent: .tronCyan) {
                             TronLoadingState(label: "Loading recent history…")
-                                .padding(20)
+                                .padding(TronSpacing.xl)
                                 .frame(maxWidth: .infinity)
                         }
                     } else if visibleNodes.isEmpty {
@@ -232,7 +234,7 @@ struct SessionTreeSheet: View {
             runtimeIcon
             VStack(alignment: .leading, spacing: 4) {
                 Text("Runtime")
-                    .font(TronTypography.headline)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .multilineTextAlignment(.leading)
                 runtimeStatistics(snapshot)
@@ -249,9 +251,9 @@ struct SessionTreeSheet: View {
 
     private var runtimeIcon: some View {
         Image(systemName: "waveform.path.ecg")
-            .font(TronTypography.headline)
+            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
             .foregroundStyle(Color.tronAmber)
-            .frame(width: SessionHistoryCardMetrics.iconWidth)
+            .frame(width: SessionHistoryCardMetrics.iconWidth, height: 20, alignment: .center)
             .accessibilityHidden(true)
     }
 
@@ -272,13 +274,13 @@ struct SessionTreeSheet: View {
     private var historyOverview: some View {
         HStack(alignment: .center, spacing: SessionHistoryCardMetrics.contentSpacing) {
             Image(systemName: "clock.arrow.circlepath")
-                .font(TronTypography.headline)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(Color.tronCyan)
-                .frame(width: SessionHistoryCardMetrics.iconWidth)
+                .frame(width: SessionHistoryCardMetrics.iconWidth, height: 20, alignment: .center)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Recent canonical history")
-                    .font(TronTypography.headline)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                     .foregroundStyle(Color.tronTextPrimary)
                     .multilineTextAlignment(.leading)
                 Text("Review activity, inspect branches, continue from an earlier point, or fork from an entry action. This is a bounded recent projection; JSONL Export in Manage Session provides the complete canonical audit.")
@@ -311,13 +313,13 @@ struct SessionTreeSheet: View {
             } label: {
                 HStack(alignment: .center, spacing: SessionHistoryCardMetrics.contentSpacing) {
                     Image(systemName: mode.icon)
-                        .font(TronTypography.headline)
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                         .foregroundStyle(Color.tronCyan)
-                        .frame(width: SessionHistoryCardMetrics.iconWidth)
+                        .frame(width: SessionHistoryCardMetrics.iconWidth, height: 20, alignment: .center)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(mode.rawValue)
-                            .font(TronTypography.headline)
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                             .foregroundStyle(Color.tronTextPrimary)
                             .multilineTextAlignment(.leading)
                         Text(mode.explanation)
@@ -343,7 +345,7 @@ struct SessionTreeSheet: View {
                     .font(TronTypography.sans(size: TronTypography.sizeXXL, weight: .semibold))
                     .foregroundStyle(Color.tronTextMuted)
                 Text(model.sessionTree.isEmpty ? "History unavailable" : "No matching entries")
-                    .font(TronTypography.headline)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 Text(model.sessionTree.isEmpty
                      ? "Reload the bounded canonical history projection."
                      : "Choose another history view.")
@@ -355,7 +357,7 @@ struct SessionTreeSheet: View {
                         .buttonStyle(TronActionButtonStyle(expands: false))
                 }
             }
-            .padding(20)
+            .padding(TronSpacing.xl)
             .frame(maxWidth: .infinity)
         }
     }
@@ -398,18 +400,18 @@ private struct TreeNodeRow: View {
     let bookmark: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
+        HStack(alignment: .center, spacing: TronSpacing.md) {
             Button(action: select) {
                 HStack(alignment: .center, spacing: SessionHistoryCardMetrics.contentSpacing) {
                     Image(systemName: icon)
-                        .font(TronTypography.headline)
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(accent)
-                        .frame(width: SessionHistoryCardMetrics.iconWidth)
+                        .frame(width: SessionHistoryCardMetrics.iconWidth, height: 20, alignment: .center)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(title)
-                                .font(TronTypography.body)
+                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                                 .foregroundStyle(Color.tronTextPrimary)
                                 .multilineTextAlignment(.leading)
                                 .lineLimit(3)
@@ -427,7 +429,7 @@ private struct TreeNodeRow: View {
                             if node.childCount > 1 { Text("\(node.childCount) branches") }
                             Text(relativeTimestamp)
                         }
-                        .font(TronTypography.bodySM)
+                        .font(TronTypography.caption)
                         .foregroundStyle(Color.tronTextMuted)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -450,8 +452,7 @@ private struct TreeNodeRow: View {
             }
             .accessibilityLabel("Actions for \(title)")
         }
-        .padding(.leading, SessionHistoryCardMetrics.horizontalPadding)
-        .padding(.trailing, 8)
+        .padding(.horizontal, SessionHistoryCardMetrics.horizontalPadding)
         .padding(.vertical, SessionHistoryCardMetrics.verticalPadding)
         .tronGlassSurface(accent: accent, tintOpacity: node.id == leafID ? 0.15 : 0.07)
     }

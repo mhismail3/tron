@@ -63,8 +63,15 @@ struct ProjectResourceSelection: Identifiable {
 
 enum ProjectResourceTextPresentation {
     static func readableDescription(_ value: String) -> String {
-        let characters = Array(value)
-        guard characters.count > 2 else { return value }
+        // Resource descriptions may arrive from Markdown/front matter with
+        // hard wraps. Collapse all producer whitespace before SwiftUI lays the
+        // text out so wrapping happens only at the card's actual width.
+        let normalized = value
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        let characters = Array(normalized)
+        guard characters.count > 2 else { return normalized }
         return characters.indices.map { index in
             guard characters[index] == "-",
                   index > characters.startIndex,
@@ -150,7 +157,7 @@ struct ProjectResourceDetailPresentation: Equatable {
             schemaSummary = propertyCount == 0
                 ? "No declared inputs"
                 : "\(propertyCount) input\(propertyCount == 1 ? "" : "s") · \(requiredCount) required"
-            guidance = object["promptGuidelines"]?.stringValue
+            guidance = object["promptGuidelines"]?.stringValue.map(ProjectResourceTextPresentation.readableDescription)
         }
     }
 
@@ -272,6 +279,7 @@ struct ProjectResourcesView: View {
                                 icon: kind.icon,
                                 title: resourceTitle(value, fallback: "Unnamed \(kind.rawValue.dropLast())"),
                                 subtitle: resourceSubtitle(value),
+                                subtitleLineLimit: 1,
                                 accent: kind.accent
                             )
                         }
