@@ -192,6 +192,7 @@ enum ChatExtensionWidgetPolicy {
             else { ownerBySource[owner.source] = owner }
         }
         for source in ambiguousSources { ownerBySource[source] = nil }
+        let hasLocalStructuredActivity = admittedActivities.contains { $0.source.source == "local" }
         var matchedStatusKeys = Set<String>()
         var matchedServiceIDs = Set<String>()
         var groups: [String: ExtensionWidgetGroup] = [:]
@@ -200,10 +201,10 @@ enum ChatExtensionWidgetPolicy {
         func ownerID(_ owner: ExtensionOwner) -> String { "owner:\(owner.id)" }
         func add(_ groupID: String, label: String, item: ChatExtensionWidgetItem? = nil,
                  status: ExtensionActivityStatus? = nil, serviceItems: [ExtensionActivityServiceItem] = [],
-                 activities: [ExtensionRunActivity] = []) {
+                 activities: [ExtensionRunActivity] = [], replaceLabel: Bool = false) {
             let old = groups[groupID]
             groups[groupID] = ExtensionWidgetGroup(
-                id: groupID, label: bounded(old?.label ?? label, maximum: 64),
+                id: groupID, label: bounded(replaceLabel ? label : (old?.label ?? label), maximum: 64),
                 items: (old?.items ?? []) + (item.map { [$0] } ?? []),
                 statuses: {
                     let existing = old?.statuses ?? []
@@ -228,6 +229,7 @@ enum ChatExtensionWidgetPolicy {
             + visibleSurfaces(presentation.surfaces, placement: .belowEditor)
         for surface in surfaces.sorted(by: { $0.id < $1.id }) {
             let source = admittedSource(surface.provenance?.source)
+                ?? (hasLocalStructuredActivity ? "local" : nil)
             let canonicalKey = canonicalWidgetKey(for: surface.id)
             let owner = canonicalKey.flatMap { semanticGroups[$0].flatMap { groups[$0] }?.items.compactMap { item in
                 if case .semantic(let widget) = item.content { return widget.owner }
@@ -245,10 +247,14 @@ enum ChatExtensionWidgetPolicy {
         for activity in admittedActivities {
             let owner = ownerBySource[activity.source.source]
             let groupID = owner.map(ownerID) ?? "source:\(activity.source.source)"
-            let fallbackLabel = activity.source.source == "local" && activity.title == "Pi Subagents"
-                ? activity.title
-                : humanizedSource(activity.source.source)
-            add(groupID, label: owner?.title ?? fallbackLabel, activities: [activity])
+            let isLocalSubagent = activity.source.source == "local"
+            let fallbackLabel = isLocalSubagent ? "Pi Subagents" : humanizedSource(activity.source.source)
+            add(
+                groupID,
+                label: owner?.title ?? fallbackLabel,
+                activities: [activity],
+                replaceLabel: owner == nil && isLocalSubagent
+            )
         }
 
         // Statuses and tools carry public source provenance. Only exact source
@@ -291,9 +297,16 @@ enum ChatExtensionWidgetPolicy {
         groups(presentation, executions: executions, activities: activities).compactMap { group in
             let liveActivities = group.activities.filter(\.isLive)
             let liveServices = group.services.filter { $0.status == "Running" }
-            guard !group.items.isEmpty || !group.statuses.isEmpty || !liveActivities.isEmpty || !liveServices.isEmpty else { return nil }
+            // A structured activity owns the live presentation for its exact
+            // provenance group. Do not let the retained opaque widget surface
+            // reappear when the activity settles; that was the source of the
+            // raw `async subagent … background` fallback returning after the
+            // native sheet disappeared. Manage Session still receives the
+            // complete group, including finished activities and any surface.
+            let liveItems = group.activities.isEmpty ? group.items : []
+            guard !liveItems.isEmpty || !group.statuses.isEmpty || !liveActivities.isEmpty || !liveServices.isEmpty else { return nil }
             return ExtensionWidgetGroup(
-                id: group.id, label: group.label, items: group.items, statuses: group.statuses,
+                id: group.id, label: group.label, items: liveItems, statuses: group.statuses,
                 services: liveServices, activities: liveActivities
             )
         }

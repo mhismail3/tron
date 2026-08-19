@@ -122,12 +122,31 @@ struct ChatTranscriptPresentationTests {
             durationMs: 2_000, output: "working", children: []
         )
         snapshot.extensionActivities = [completed, running]
+        let frame = ExtensionFrame(
+            width: 8,
+            height: 1,
+            lines: [ExtensionFrameLine(plainText: "async subagent … background", runs: [])],
+            plainText: "async subagent … background"
+        )
+        snapshot.extensionPresentation.surfaces = [ExtensionSurface(
+            id: "surface",
+            kind: .widget,
+            placement: .belowEditor,
+            lifecycle: .retained,
+            targetId: nil,
+            provenance: .init(source: "subagent-source", path: nil),
+            revision: 1,
+            focused: false,
+            inputMode: .none,
+            frame: frame
+        )]
         let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? [])
         let live = ChatExtensionWidgetPolicy.liveGroups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? [])
         #expect(groups.count == 1)
         #expect(groups.first?.activities.count == 2)
         #expect(live.count == 1)
         #expect(live.first?.activities.map(\.id) == ["running"])
+        #expect(live.first?.items.isEmpty == true)
         #expect(live.first?.liveActivityCount == 1)
     }
 
@@ -136,14 +155,27 @@ struct ChatTranscriptPresentationTests {
         var snapshot = try fixture(transcript: "[]")
         snapshot.extensionActivities = [ExtensionRunActivity(
             id: "subagent:workflow", runId: "workflow", toolCallId: "subagent:workflow",
-            source: ExtensionToolOrigin(source: "local"), title: "Pi Subagents", mode: "workflow",
+            source: ExtensionToolOrigin(source: "local"), title: "subagent", mode: "workflow",
             status: .running, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
             completedAt: nil, lastActivityAt: "2026-01-01T00:00:01Z", currentTool: "read",
             currentToolStartedAt: nil, currentPath: nil, toolCount: 2, turnCount: 1,
             durationMs: 1_000, output: nil, children: []
         )]
+        snapshot.extensionPresentation.surfaces = [ExtensionSurface(
+            id: "surface",
+            kind: .widget,
+            placement: .belowEditor,
+            lifecycle: .retained,
+            targetId: nil,
+            provenance: nil,
+            revision: 1,
+            focused: false,
+            inputMode: .none,
+            frame: ExtensionFrame(width: 4, height: 1, lines: [], plainText: "raw")
+        )]
         let group = try #require(ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? []).first)
         #expect(group.label == "Pi Subagents")
+        #expect(group.items.count == 1)
     }
 
     @Test("extension source labels omit package transport and versions")
