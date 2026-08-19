@@ -131,6 +131,12 @@ struct ChatTranscriptPresentationTests {
         #expect(live.first?.liveActivityCount == 1)
     }
 
+    @Test("extension source labels omit package transport and versions")
+    func extensionSourceLabelsAreStable() {
+        #expect(ChatExtensionWidgetPolicy.humanizedSource("npm:pi-subagents@0.47.1") == "Pi Subagents")
+        #expect(ChatExtensionWidgetPolicy.humanizedSource("npm:@scope/example@1.2.3") == "Scope Example")
+    }
+
     @Test("widget groups remain separate and deterministic with conservative activity fallback")
     func widgetGroupsAreSeparate() throws {
         var snapshot = try fixture(transcript: "[]")

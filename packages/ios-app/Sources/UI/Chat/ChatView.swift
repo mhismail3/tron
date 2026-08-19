@@ -38,6 +38,7 @@ struct ChatView: View {
     @State private var showContext = false
     @State private var showExtensionDetails = false
     @State private var extensionDetailsGroupID: String?
+    @State private var extensionActivityRoute: ExtensionActivityRoute?
     @State private var initialModelSettled = true
     @State private var showSettings = false
     @State private var queuedMessageEditor: QueuedMessageEditorRoute?
@@ -183,6 +184,9 @@ struct ChatView: View {
         )
         .sheet(isPresented: $showExtensionDetails) {
             ExtensionDetailsSheet(sessionID: sessionID, groupID: extensionDetailsGroupID)
+        }
+        .sheet(item: $extensionActivityRoute) { route in
+            ExtensionRunDetailsSheet(sessionID: sessionID, activityID: route.id)
         }
         .sheet(item: interactionBinding) { interaction in
             if interaction.questionnaire != nil {
@@ -1359,8 +1363,13 @@ struct ChatView: View {
                         HStack(spacing: 8) {
                             ForEach(groups) { group in
                                 ExtensionActivityPill(group: group) {
-                                    extensionDetailsGroupID = group.id
-                                    showExtensionDetails = true
+                                    let liveActivities = group.activities.filter(\.isLive)
+                                    if liveActivities.count == 1, let activity = liveActivities.first {
+                                        extensionActivityRoute = ExtensionActivityRoute(id: activity.id)
+                                    } else {
+                                        extensionDetailsGroupID = group.id
+                                        showExtensionDetails = true
+                                    }
                                 }
                             }
                         }

@@ -1,5 +1,9 @@
 import SwiftUI
 
+struct ExtensionActivityRoute: Identifiable, Hashable {
+    let id: String
+}
+
 /// One compact, composer-adjacent affordance per opaque widget group. Groups
 /// are intentionally not inferred from package names or display text.
 struct ExtensionActivityPill: View {
@@ -31,7 +35,8 @@ struct ExtensionDetailsSheet: View {
     let groupID: String?
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedActivity: ExtensionRunActivity?
+    @State private var selectedActivityRoute: ExtensionActivityRoute?
+    @State private var directActivityIDState: String?
 
     init(sessionID: String, groupID: String? = nil) { self.sessionID = sessionID; self.groupID = groupID }
 
@@ -50,8 +55,25 @@ struct ExtensionDetailsSheet: View {
         return groups.first(where: { $0.id == groupID })
     }
     private var isExpanded: Bool { presentation?.semanticState.toolsExpanded ?? false }
+    private var directActivityID: String? {
+        guard let group = selectedGroup, group.activities.count == 1 else { return nil }
+        return group.activities[0].id
+    }
 
     var body: some View {
+        Group {
+            if let activityID = directActivityIDState ?? directActivityID {
+                ExtensionRunDetailsSheet(sessionID: sessionID, activityID: activityID)
+            } else {
+                detailsList
+            }
+        }
+        .onAppear {
+            if directActivityIDState == nil { directActivityIDState = directActivityID }
+        }
+    }
+
+    private var detailsList: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: TronSpacing.lg) {
@@ -81,14 +103,8 @@ struct ExtensionDetailsSheet: View {
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .accessibilityIdentifier("extension-details-sheet")
-        .onChange(of: groups) { _, updatedGroups in
-            guard let selectedActivity else { return }
-            self.selectedActivity = updatedGroups
-                .flatMap(\.activities)
-                .first(where: { $0.id == selectedActivity.id })
-        }
-        .sheet(item: $selectedActivity) { activity in
-            ExtensionRunDetailsSheet(activity: activity)
+        .sheet(item: $selectedActivityRoute) { route in
+            ExtensionRunDetailsSheet(sessionID: sessionID, activityID: route.id)
         }
     }
 
@@ -108,39 +124,74 @@ struct ExtensionDetailsSheet: View {
                 }
             }
         }
+        if group.activities.isEmpty && group.statuses.isEmpty && group.services.isEmpty && !hasRenderableItems(group) {
+            emptyGroupState
+        }
     }
 
     private func activitySection(_ activities: [ExtensionRunActivity]) -> some View {
-        TronSettingsGroup("Live runs", detail: "Structured progress from extension-owned work.", accent: .tronEmerald) {
-            VStack(spacing: 0) {
-                ForEach(activities) { activity in
-                    Button { selectedActivity = activity } label: {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Runs")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                .foregroundStyle(Color.tronTextPrimary)
+            Text("Select a run for its structured detail.")
+                .font(TronTypography.caption)
+                .foregroundStyle(Color.tronTextMuted)
+            ForEach(activities) { activity in
+                Button { selectedActivityRoute = ExtensionActivityRoute(id: activity.id) } label: {
+                    VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
                             Image(systemName: activity.isLive ? "circle.dotted" : (activity.status == .failed ? "exclamationmark.triangle.fill" : "checkmark.circle"))
                                 .foregroundStyle(activity.status == .failed ? Color.tronError : Color.tronEmerald)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(activity.title)
-                                    .font(TronTypography.bodySM)
-                                    .foregroundStyle(Color.tronTextPrimary)
-                                    .lineLimit(1)
-                                Text(activitySummary(activity))
-                                    .font(TronTypography.caption)
-                                    .foregroundStyle(Color.tronTextMuted)
-                                    .lineLimit(2)
-                                    .multilineTextAlignment(.leading)
-                            }
+                            Text(activity.title)
+                                .font(TronTypography.bodySM)
+                                .foregroundStyle(Color.tronTextPrimary)
+                                .lineLimit(1)
                             Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
+                            Text(activity.status == .running ? "Live" : activity.status == .failed ? "Failed" : "Completed")
                                 .font(TronTypography.caption)
-                                .foregroundStyle(Color.tronTextMuted)
+                                .foregroundStyle(activity.status == .failed ? Color.tronError : Color.tronTextMuted)
                         }
-                        .padding(.vertical, 9)
+                        Text(activitySummary(activity))
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextMuted)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        if let currentTool = activity.currentTool {
+                            Label(currentTool, systemImage: "wrench.and.screwdriver")
+                                .font(TronTypography.caption)
+                                .foregroundStyle(Color.tronEmerald)
+                                .lineLimit(1)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(activity.title), \(activitySummary(activity))")
-                    if activity.id != activities.last?.id { TronSettingsDivider(accent: .tronEmerald) }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(14)
+                    .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.1, interactive: true)
                 }
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(activity.title), \(activitySummary(activity))")
+            }
+        }
+    }
+
+    private var emptyGroupState: some View {
+        ContentUnavailableView(
+            "No readable extension detail",
+            systemImage: "rectangle.dashed",
+            description: Text("The extension has not published a displayable live surface.")
+        )
+        .frame(maxWidth: .infinity)
+        .padding(.top, 36)
+    }
+
+    private func hasRenderableItems(_ group: ExtensionWidgetGroup) -> Bool {
+        group.items.contains { item in
+            switch item.content {
+            case .semantic(let widget):
+                return widget.lines.map(NativeExtensionText.clean).contains { !$0.isEmpty }
+            case .surface(let surface):
+                return surface.frame.plainText.split(separator: "\n").map(String.init).map(NativeExtensionText.clean).contains { !$0.isEmpty }
             }
         }
     }
@@ -224,36 +275,52 @@ struct ExtensionDetailsSheet: View {
 }
 
 struct ExtensionRunDetailsSheet: View {
-    let activity: ExtensionRunActivity
+    let sessionID: String
+    let activityID: String
+    @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+
+    private var activity: ExtensionRunActivity? {
+        model.authoritativeSnapshot(for: sessionID)?.extensionActivities?.first(where: { $0.id == activityID })
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: TronSpacing.lg) {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        summaryCard(now: context.date)
-                    }
-                    if !activity.children.isEmpty { childSection }
-                    if let output = activity.output, !output.isEmpty {
-                        TronSettingsGroup("Recent output", detail: "A bounded live tail from the extension run.", accent: .tronCyan) {
-                            Text(output)
-                                .font(TronTypography.codeContent)
-                                .foregroundStyle(Color.tronTextPrimary)
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .padding(14)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                if let activity {
+                    LazyVStack(alignment: .leading, spacing: TronSpacing.lg) {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            summaryCard(activity: activity, now: context.date)
+                        }
+                        if !activity.children.isEmpty { childSection(activity) }
+                        if let output = activity.output, !output.isEmpty {
+                            TronSettingsGroup("Recent output", detail: "A bounded live tail from the extension run.", accent: .tronCyan) {
+                                Text(output)
+                                    .font(TronTypography.codeContent)
+                                    .foregroundStyle(Color.tronTextPrimary)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(14)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
                     }
+                    .padding(.horizontal, TronSpacing.section)
+                    .padding(.top, TronSpacing.md).padding(.bottom, TronSpacing.xl)
+                } else {
+                    ContentUnavailableView(
+                        "Activity No Longer Available",
+                        systemImage: "clock.arrow.circlepath",
+                        description: Text("The Gateway no longer has this bounded live projection.")
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 48)
                 }
-                .padding(.horizontal, TronSpacing.section)
-                .padding(.top, TronSpacing.md).padding(.bottom, TronSpacing.xl)
             }
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: activity.title, accent: .tronEmerald) }
+                ToolbarItem(placement: .principal) { TronSheetTitle(title: activity?.title ?? "Extension run", accent: .tronEmerald) }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }.foregroundStyle(Color.tronEmerald)
                 }
@@ -265,7 +332,7 @@ struct ExtensionRunDetailsSheet: View {
         .accessibilityIdentifier("extension-run-details-sheet")
     }
 
-    private func summaryCard(now: Date) -> some View {
+    private func summaryCard(activity: ExtensionRunActivity, now: Date) -> some View {
         let state = switch activity.status {
         case .running: "Running"
         case .completed: "Completed"
@@ -275,7 +342,7 @@ struct ExtensionRunDetailsSheet: View {
             (state, "Status"),
             (activity.toolCount.map(String.init) ?? "—", "Tools"),
             (activity.turnCount.map(String.init) ?? "—", "Turns"),
-            (durationLabel(activeDurationMs(now)), "Active time"),
+            (durationLabel(activeDurationMs(activity, now: now)), "Active time"),
         ]
         return VStack(alignment: .leading, spacing: 12) {
             Text(activity.mode?.capitalized ?? "Extension run")
@@ -306,14 +373,14 @@ struct ExtensionRunDetailsSheet: View {
         .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.14)
     }
 
-    private func activeDurationMs(_ now: Date) -> Int {
+    private func activeDurationMs(_ activity: ExtensionRunActivity, now: Date) -> Int {
         guard activity.isLive, let started = ISO8601DateFormatter().date(from: activity.startedAt) else {
             return activity.durationMs ?? 0
         }
         return max(activity.durationMs ?? 0, Int(max(0, now.timeIntervalSince(started) * 1_000).rounded()))
     }
 
-    private var childSection: some View {
+    private func childSection(_ activity: ExtensionRunActivity) -> some View {
         TronSettingsGroup("Subagents", detail: "Each child keeps its own stable progress identity.", accent: .tronTeal) {
             VStack(spacing: 0) {
                 ForEach(activity.children) { child in

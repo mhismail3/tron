@@ -167,6 +167,7 @@ struct SessionContextSheet: View {
     @State private var gitPresentation: SessionGitPresentation = .loading
     @State private var gitLoadGeneration = 0
     @State private var extensionActivityGroupID: String?
+    @State private var extensionActivityRoute: ExtensionActivityRoute?
     @State private var showExtensionActivity = false
 
     var body: some View {
@@ -217,6 +218,9 @@ struct SessionContextSheet: View {
             }
             .sheet(isPresented: $showExtensionActivity) {
                 ExtensionDetailsSheet(sessionID: sessionID, groupID: extensionActivityGroupID)
+            }
+            .sheet(item: $extensionActivityRoute) { route in
+                ExtensionRunDetailsSheet(sessionID: sessionID, activityID: route.id)
             }
             .sheet(item: $destination) { route in
                 switch route {
@@ -434,14 +438,30 @@ struct SessionContextSheet: View {
             snapshot.extensionPresentation,
             executions: snapshot.toolExecutions,
             activities: snapshot.extensionActivities ?? []
-        )
+        ).compactMap { group -> ExtensionWidgetGroup? in
+            let activities = group.activities.filter { !$0.isLive }
+            let services = group.services.filter { $0.status != "Running" }
+            guard !activities.isEmpty || !services.isEmpty else { return nil }
+            return ExtensionWidgetGroup(
+                id: group.id,
+                label: group.label,
+                items: [],
+                statuses: [],
+                services: services,
+                activities: activities
+            )
+        }
         if !groups.isEmpty {
-            TronSettingsGroup("Extension Activity", detail: "Live and recent work published by extensions.", accent: .tronEmerald) {
+            TronSettingsGroup("Extension History", detail: "Completed extension work retained for this runtime.", accent: .tronEmerald) {
                 VStack(spacing: 0) {
                     ForEach(groups) { group in
                         Button {
-                            extensionActivityGroupID = group.id
-                            showExtensionActivity = true
+                            if group.activities.count == 1, let activity = group.activities.first {
+                                extensionActivityRoute = ExtensionActivityRoute(id: activity.id)
+                            } else {
+                                extensionActivityGroupID = group.id
+                                showExtensionActivity = true
+                            }
                         } label: {
                             TronSettingsRow(
                                 icon: group.hasLiveContent ? "circle.dotted" : "clock.arrow.circlepath",
@@ -465,8 +485,7 @@ struct SessionContextSheet: View {
 
     private func extensionActivitySubtitle(_ group: ExtensionWidgetGroup) -> String {
         let parts = [
-            group.liveActivityCount > 0 ? "\(group.liveActivityCount) live" : nil,
-            group.activities.count > 0 ? "\(group.activities.count) runs" : nil,
+            group.activities.count > 0 ? "\(group.activities.count) completed runs" : nil,
             group.services.count > 0 ? "\(group.services.count) tools" : nil,
             group.items.count > 0 ? "\(group.items.count) widgets" : nil,
             group.statuses.count > 0 ? "\(group.statuses.count) statuses" : nil,

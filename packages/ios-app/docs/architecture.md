@@ -480,11 +480,14 @@ snapshot replaces the whole projection. Unknown surface kinds decode to a readab
 surface, and removal is an explicit ID list. Native rendering admits only read-only widget surfaces through deterministic, horizontally-scrolling
 composer pills (one opaque live pill per attributed extension; semantic widgets merge with their
 host surface representation when its public surface ID decodes to the same key, while explicit provenance
-provides source grouping and labels); tapping a live pill opens a bounded native detail sheet scoped to that group.
-Structured extension-owned run projections carry stable child IDs, active time, tool/turn counts, current
-work, and bounded output independently of rendered widget text. Completed run/tool history is retained as a
-bounded snapshot projection and is shown in the Manage Session Extension Activity container, not as a stale
-composer pill. A live run detail sheet is read-only and never opens a child canonical session concurrently.
+provides source grouping and labels); a pill with one live run opens that run's bounded native detail sheet,
+while a multi-run group opens a compact run chooser. Structured extension-owned run projections carry stable
+child IDs, active time, tool/turn counts, current work, and bounded output independently of rendered widget text.
+Completed run/tool history is retained as a bounded snapshot projection and is shown in the Manage Session
+Extension History container; live work is intentionally not duplicated there. Run detail resolves by stable
+activity ID against the newest authoritative snapshot, so active time, child progress, current tool, and output
+continue updating while the sheet is presented. The live run detail sheet is read-only and never opens a child
+canonical session concurrently.
 The sheet translates terminal-only hints into native disclosure controls and uses the public tools-expanded
 mutation with exact epoch/revision/command ownership to rerender retained surfaces. Frame runs render as
 wrapping native information rows rather than a terminal viewport or per-run backgrounds, preserving only

@@ -315,7 +315,12 @@ enum ChatExtensionWidgetPolicy {
     }
 
     static func humanizedSource(_ source: String) -> String {
-        let words = source.split { !$0.isLetter && !$0.isNumber }
+        var normalized = source
+        if normalized.hasPrefix("npm:") { normalized.removeFirst(4) }
+        if let versionSeparator = normalized.lastIndex(of: "@"), versionSeparator > normalized.startIndex {
+            normalized = String(normalized[..<versionSeparator])
+        }
+        let words = normalized.split { !$0.isLetter && !$0.isNumber }
         guard !words.isEmpty else { return "Extension widget" }
         return words.map { word in
             let value = String(word)
