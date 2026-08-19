@@ -138,6 +138,7 @@ export class GatewayService {
       machineGroupID: config.machineGroupID,
       machineName: config.machineName,
       capabilities: [
+        ...(process.env.TRON_GATEWAY_SUPERVISED === "1" ? ["restart-supervised.v1"] : []),
         "sessions.v1",
         "auth.v1",
         "settings.v1",
@@ -186,6 +187,11 @@ export class GatewayService {
             throw new GatewayError("busy", "Close active terminal sessions before restarting the Gateway", true);
           }
           const activeSessionIds = this.dependencies.sessions.activeSessionIds();
+          this.dependencies.logger?.log(
+            "info",
+            `Gateway restart requested; draining ${activeSessionIds.length} active session${activeSessionIds.length === 1 ? "" : "s"}`,
+            { event: "gateway.restart.requested", source: "transport" }
+          );
           if (!this.restartRequested) {
             this.restartRequested = true;
             setTimeout(this.dependencies.requestRestart, 100).unref();

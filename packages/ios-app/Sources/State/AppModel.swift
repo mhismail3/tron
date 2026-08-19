@@ -581,34 +581,35 @@ final class AppModel {
         providerAuth.preferredAvailableModel(for: target)
     }
 
+    func dashboardServerState(for profileID: String) -> DashboardServerConnectionState {
+        _ = profileRevision
+        guard let profile = profiles.profiles.first(where: { $0.id == profileID }) else { return .stale }
+        if !profile.isEnabled { return .disabled }
+        if profiles.selected?.id == profile.id {
+            switch connectionState {
+            case .connected: return .connected
+            case .connecting: return .connecting
+            case .reconnecting: return .reconnecting
+            case .restarting: return .restarting
+            case .offline: return .offline
+            case .unpaired, .unauthorized: return .stale
+            }
+        }
+        if profile.machineGroupID == profile.machineId { return .needsVerification }
+        if profiles.profiles.contains(where: {
+            $0.id != profile.id && $0.isEnabled && $0.machineGroupID == profile.machineGroupID
+        }) { return .blocked }
+        return dashboardStatesByProfile[profile.id] ?? .stale
+    }
+
     var dashboardServerSources: [DashboardServerSource] {
         _ = profileRevision
         return profiles.profiles.map { profile in
-            let sourceSessions = dashboardSessionsByProfile[profile.id] ?? []
-            let state: DashboardServerConnectionState
-            if !profile.isEnabled {
-                state = .disabled
-            } else if profiles.selected?.id == profile.id {
-                switch connectionState {
-                case .connected: state = .connected
-                case .connecting, .reconnecting: state = .connecting
-                case .offline: state = .offline
-                case .unpaired, .unauthorized: state = .stale
-                }
-            } else if profile.machineGroupID == profile.machineId {
-                state = .needsVerification
-            } else if profiles.profiles.contains(where: {
-                $0.id != profile.id && $0.isEnabled && $0.machineGroupID == profile.machineGroupID
-            }) {
-                state = .blocked
-            } else {
-                state = dashboardStatesByProfile[profile.id] ?? .stale
-            }
-            return DashboardServerSource(
+            DashboardServerSource(
                 profileID: profile.id,
                 label: profile.label,
-                sessionCount: sourceSessions.count,
-                state: state
+                sessionCount: (dashboardSessionsByProfile[profile.id] ?? []).count,
+                state: dashboardServerState(for: profile.id)
             )
         }
     }
@@ -1723,7 +1724,7 @@ final class AppModel {
     }
 
     nonisolated static func supportsSafeGatewayRestart(capabilities: [String]) -> Bool {
-        capabilities.contains("restart-drain.v1")
+        capabilities.contains("restart-drain.v1") && capabilities.contains("restart-supervised.v1")
     }
 
     func restartGateway() async throws {
@@ -1756,7 +1757,7 @@ final class AppModel {
         guard Self.supportsSafeGatewayRestart(capabilities: gatewayInfo?.capabilities ?? []) else {
             throw GatewayFailure(
                 code: "unsupported",
-                message: "Update the Mac Gateway before restarting it from iPhone; this version cannot preserve accepted runs during restart.",
+                message: "This Gateway is not supervised for remote restart. Install or relaunch the managed Tron Mac app, then retry; direct foreground Gateway processes must be restarted from their supervisor.",
                 retryable: false,
                 details: nil
             )
@@ -1774,6 +1775,7 @@ final class AppModel {
             throw error
         }
         try requireLifecycle(admission)
+        lifecycle.beginRestarting()
         if response.scheduled {
             postNotice(
                 "Gateway restart scheduled after \(response.activeSessionIds.count) active agent run\(response.activeSessionIds.count == 1 ? "" : "s") finishes.",

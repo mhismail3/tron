@@ -72,6 +72,15 @@ struct DashboardStateOwnerTests {
         ))
     }
 
+    @Test("connection status labels cover live, restart, and failure states")
+    func connectionStatusLabels() {
+        #expect(DashboardServerConnectionState.connected.label == "Connected")
+        #expect(DashboardServerConnectionState.reconnecting.label == "Reconnecting")
+        #expect(DashboardServerConnectionState.restarting.label == "Restarting")
+        #expect(DashboardServerConnectionState.identityMismatch.label == "Identity changed")
+        #expect(DashboardServerConnectionState.disabled.label == "Disabled")
+    }
+
     @Test("retiring a background transport retains its bounded dashboard bucket")
     func dashboardProjectionRetention() {
         #expect(DashboardProjectionRetentionPolicy.retainsExistingBucket(

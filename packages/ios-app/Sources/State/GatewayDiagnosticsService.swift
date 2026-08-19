@@ -10,8 +10,18 @@ struct GatewayLogRecord: Identifiable, Hashable, Sendable {
     let timestamp: String
     let level: String
     let message: String
+    let event: String?
+    let source: String?
 
-    var id: String { "\(timestamp)-\(level)-\(message)" }
+    init(timestamp: String, level: String, message: String, event: String? = nil, source: String? = nil) {
+        self.timestamp = timestamp
+        self.level = level
+        self.message = message
+        self.event = event
+        self.source = source
+    }
+
+    var id: String { "\(timestamp)-\(level)-\(event ?? "")-\(message)" }
 }
 
 struct GatewayProfileLogRecord: Hashable, Identifiable, Sendable {
@@ -56,7 +66,13 @@ struct GatewayDiagnosticsService: Sendable {
                   let timestamp = object["timestamp"]?.stringValue,
                   let level = object["level"]?.stringValue,
                   let message = object["message"]?.stringValue else { return nil }
-            return GatewayLogRecord(timestamp: timestamp, level: level, message: message)
+            return GatewayLogRecord(
+                timestamp: timestamp,
+                level: level,
+                message: message,
+                event: object["event"]?.stringValue,
+                source: object["source"]?.stringValue
+            )
         }.reversed()
     }
 }

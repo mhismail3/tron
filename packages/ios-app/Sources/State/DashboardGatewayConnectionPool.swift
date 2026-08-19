@@ -203,7 +203,7 @@ final class DashboardGatewayConnectionPool {
                 }
                 guard !Task.isCancelled,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
-                self.entries[profile.id]?.state = .offline
+                self.entries[profile.id]?.state = .reconnecting
                 self.publish(profileID: profile.id)
                 self.scheduleReconnect(profileID: profile.id, generation: generation)
             } catch is CancellationError {
@@ -217,7 +217,7 @@ final class DashboardGatewayConnectionPool {
             } catch {
                 guard let self,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
-                self.entries[profile.id]?.state = .offline
+                self.entries[profile.id]?.state = .reconnecting
                 self.publish(profileID: profile.id)
                 self.scheduleReconnect(profileID: profile.id, generation: generation)
             }
@@ -230,6 +230,11 @@ final class DashboardGatewayConnectionPool {
         entry.task?.cancel()
         entry.refreshTask?.cancel()
         entry.reconnectTask?.cancel()
+        delegate?.dashboardPoolDidUpdate(
+            profileID: profileID,
+            sessions: entry.sessions,
+            state: .offline
+        )
         if close { Task { await entry.client.close() } }
         // Retiring a background transport is not deletion of its bounded
         // dashboard projection. The AppModel keeps the last-known bucket while
@@ -279,11 +284,11 @@ final class DashboardGatewayConnectionPool {
         case "session.listChanged":
             scheduleRefresh(profileID: profileID, generation: generation)
         case "transport.disconnected":
-            entries[profileID]?.state = .offline
+            entries[profileID]?.state = .reconnecting
             publish(profileID: profileID)
             scheduleReconnect(profileID: profileID, generation: generation)
         case "system.stopping":
-            entries[profileID]?.state = .offline
+            entries[profileID]?.state = .restarting
             publish(profileID: profileID)
             scheduleReconnect(profileID: profileID, generation: generation, immediate: true)
         default:
@@ -324,7 +329,7 @@ final class DashboardGatewayConnectionPool {
                 } catch is CancellationError {
                     return
                 } catch {
-                    self.entries[profileID]?.state = .offline
+                    self.entries[profileID]?.state = .reconnecting
                     self.publish(profileID: profileID)
                     delay = min(delay * 2, .seconds(15))
                 }
@@ -399,7 +404,7 @@ final class DashboardGatewayConnectionPool {
         } catch {
             guard isCurrent(profileID: profileID, client: entry.client, generation: generation),
                   entries[profileID]?.connectionID == expectedConnectionID else { return }
-            entries[profileID]?.state = .offline
+            entries[profileID]?.state = .reconnecting
             publish(profileID: profileID)
             scheduleReconnect(profileID: profileID, generation: generation)
         }

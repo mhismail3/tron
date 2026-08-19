@@ -98,6 +98,7 @@ struct MacSourceGuardTests {
             "Sources/Resources/Library/LaunchAgents/com.tron.server.plist"
         )
         #expect(releaseLaunchAgent.contains("<string>com.tron.server</string>"))
+        #expect(releaseLaunchAgent.contains("<key>TRON_GATEWAY_SUPERVISED</key>\n        <string>1</string>"))
         #expect(
             releaseLaunchAgent.contains(
                 "<string>Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron</string>"
@@ -109,6 +110,7 @@ struct MacSourceGuardTests {
             "Sources/Resources/Library/LaunchAgents/com.tron.server.dev.plist"
         )
         #expect(devLaunchAgent.contains("<string>com.tron.server.dev</string>"))
+        #expect(devLaunchAgent.contains("<key>TRON_GATEWAY_SUPERVISED</key>\n        <string>1</string>"))
         #expect(devLaunchAgent.contains("<key>TRON_AGENT_DIR_NAME</key>\n        <string>agent-dev</string>"))
         #expect(
             devLaunchAgent.contains(

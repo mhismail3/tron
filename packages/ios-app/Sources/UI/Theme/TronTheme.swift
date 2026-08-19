@@ -138,7 +138,7 @@ struct ConnectionBadge: View {
     private var color: Color {
         switch state {
         case .connected: .tronEmerald
-        case .connecting, .reconnecting: .tronWarning
+        case .connecting, .reconnecting, .restarting: .tronWarning
         case .unpaired: .secondary
         case .unauthorized, .offline: .tronError
         }
@@ -148,6 +148,7 @@ struct ConnectionBadge: View {
         case .connected: "Connected"
         case .connecting: "Connecting"
         case .reconnecting: "Reconnecting"
+        case .restarting: "Restarting"
         case .unpaired: "Not paired"
         case .unauthorized: "Re-pair required"
         case .offline: "Offline"

@@ -3,7 +3,7 @@ import Observation
 import UIKit
 
 enum GatewayConnectionState: Equatable {
-    case unpaired, connecting, connected, reconnecting, unauthorized, offline(String)
+    case unpaired, connecting, connected, reconnecting, restarting, unauthorized, offline(String)
 }
 
 typealias GatewayPairingCommit = @MainActor @Sendable (GatewayProfile, String) throws -> Void
@@ -82,6 +82,8 @@ final class GatewayLifecycleCoordinator {
     private var committedConnectionTask: Task<Void, Never>?
     private var reconnectAttemptGeneration = 0
     private var reconnectCanBeAccelerated = false
+    private var restartRequested = false
+    private var restartWatchdogTask: Task<Void, Never>?
     private var pairingAttempt: PairingAttempt?
     private var foregroundReconciliationTask: Task<Void, Never>?
     /// Projection refresh/restoration may continue after transport readiness
@@ -197,7 +199,7 @@ final class GatewayLifecycleCoordinator {
         }
         guard connectionState == .connected else {
             switch connectionState {
-            case .offline, .reconnecting:
+            case .offline, .reconnecting, .restarting:
                 requestReconnect(immediate: true, replaceExisting: true)
                 return reconnectTask
             case .unpaired, .unauthorized, .connecting, .connected:
@@ -387,6 +389,30 @@ final class GatewayLifecycleCoordinator {
         connectionID = nil
     }
 
+    func beginRestarting() {
+        guard phase.admitsWork, !sceneIsBackgrounded else { return }
+        restartRequested = true
+        connectionState = .restarting
+        restartWatchdogTask?.cancel()
+        let generation = phase.generation
+        restartWatchdogTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await self.clock.sleep(.seconds(90))
+            guard !Task.isCancelled,
+                  self.phase.generation == generation,
+                  self.restartRequested else { return }
+            self.restartRequested = false
+            self.connectionState = .offline("Gateway restart did not complete")
+        }
+    }
+
+    func cancelRestarting() {
+        restartWatchdogTask?.cancel()
+        restartWatchdogTask = nil
+        restartRequested = false
+        if case .restarting = connectionState { connectionState = .connected }
+    }
+
     func noteProjectionFailure(_ admission: Admission) {
         guard admits(admission) else { return }
         projectionFailureGeneration = admission.generation
@@ -399,7 +425,7 @@ final class GatewayLifecycleCoordinator {
             cancelReconnect()
         }
         guard reconnectTask == nil else { return }
-        connectionState = .reconnecting
+        connectionState = restartRequested ? .restarting : .reconnecting
         scheduleReconnect(immediate: immediate)
     }
 
@@ -603,6 +629,9 @@ final class GatewayLifecycleCoordinator {
             try require(connectedAdmission)
             gatewayInfo = connection.info
             connectionState = .connected
+            restartWatchdogTask?.cancel()
+            restartWatchdogTask = nil
+            restartRequested = false
             delegate?.lifecycleInvalidateSessionConnectionOwnership()
             if awaitProjection {
                 async let refresh: Void = delegate?.lifecycleRefreshAll(admission: connectedAdmission) ?? ()
@@ -765,6 +794,9 @@ final class GatewayLifecycleCoordinator {
                         )
                         self.gatewayInfo = connection.info
                         self.connectionState = .connected
+                        self.restartWatchdogTask?.cancel()
+                        self.restartWatchdogTask = nil
+                        self.restartRequested = false
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()
                         async let refresh: Void = self.delegate?.lifecycleRefreshAll(admission: admission) ?? ()
                         await self.delegate?.lifecycleRestoreMountedPresentation(admission: admission)

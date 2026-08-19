@@ -252,7 +252,7 @@ export class GatewayServer {
       await new Promise<void>((resolve) => this.server.close(() => resolve()));
       throw error;
     }
-    this.options.logger.log("info", `Gateway listening on ${this.options.host}:${this.options.port}`);
+    this.options.logger.log("info", `Gateway listening on ${this.options.host}:${this.options.port}`, { event: "gateway.listening", source: "transport" });
   }
 
   /** Move connection-local ownership with the registry's canonical rekey. */
@@ -457,6 +457,7 @@ export class GatewayServer {
       }
       const authenticated = await this.options.devices.authenticate(bearer(request));
       if (!authenticated || !this.ready || this.shuttingDown) {
+        this.options.logger.log("warning", "Rejected unauthenticated or unavailable socket upgrade", { event: "connection.rejected", source: "transport" });
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
@@ -466,6 +467,7 @@ export class GatewayServer {
       const maximumPerIdentity = this.options.maximumConnectionsPerIdentity ?? 4;
       const identityConnections = [...this.clients.values()].filter((client) => client.identity === identity).length;
       if (this.clients.size >= maximumConnections || identityConnections >= maximumPerIdentity) {
+        this.options.logger.log("warning", "Rejected socket upgrade at connection capacity", { event: "connection.capacity", source: "transport" });
         socket.write("HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
@@ -499,6 +501,7 @@ export class GatewayServer {
       helloTimer: setTimeout(() => socket.close(1008, "hello required"), 5_000),
     };
     this.clients.set(connection.id, connection);
+    this.options.logger.log("info", `Client connection admitted (${isLocal ? "local" : "paired"})`, { event: "connection.admitted", source: "transport" });
     socket.on("message", (data, binary) => {
       connection.alive = true;
       void this.onMessage(connection, binary ? data : data.toString());
@@ -524,6 +527,7 @@ export class GatewayServer {
       if (protocol < MIN_PROTOCOL_VERSION || protocol > PROTOCOL_VERSION) return connection.socket.close(1008, "protocol version mismatch");
       connection.ready = true;
       connection.presentationOnly = (frame as Record<string, unknown>).clientRole === "mobile";
+      this.options.logger.log("info", `Client handshake accepted (${connection.presentationOnly ? "mobile" : "local"})`, { event: "connection.handshake", source: "transport" });
       clearTimeout(connection.helloTimer);
       this.send(connection, { type: "hello", ...this.options.service.info() as Record<string, JsonValue> });
       return;
@@ -567,6 +571,7 @@ export class GatewayServer {
       connection.pendingSessionOpens.set(sessionOpenID, frame.id);
     }
     connection.inFlight.add(frame.id);
+    this.options.logger.log("info", `RPC request ${frame.method}`, { event: "rpc.request", source: "transport" });
     const requestId = frame.id;
     const synchronizationOwners: SynchronizationOwner[] = [];
     const synchronizationCompletions: SynchronizationCompletion[] = [];
@@ -877,6 +882,7 @@ export class GatewayServer {
         }
       }
     } catch (error) {
+      this.options.logger.log("error", `RPC ${frame.method} failed: ${error instanceof Error ? error.message : String(error)}`, { event: "rpc.error", source: "transport" });
       const ownerRequestIDs = new Set([
         requestId,
         ...synchronizationCompletions.map((completion) => completion.requestId),
@@ -937,6 +943,7 @@ export class GatewayServer {
 
   private disconnect(connection: Connection): void {
     if (!this.clients.delete(connection.id)) return;
+    this.options.logger.log("info", "Client connection closed", { event: "connection.closed", source: "transport" });
     clearTimeout(connection.helloTimer);
     for (const synchronization of connection.synchronizations.values()) {
       clearTimeout(synchronization.timeout);
@@ -951,6 +958,7 @@ export class GatewayServer {
   async close(): Promise<void> {
     if (this.shuttingDown) return;
     this.shuttingDown = true;
+    this.options.logger.log("info", "Closing Gateway transport", { event: "gateway.transport-closing", source: "transport" });
     this.ready = false;
     clearInterval(this.heartbeat);
     for (const client of this.clients.values()) {

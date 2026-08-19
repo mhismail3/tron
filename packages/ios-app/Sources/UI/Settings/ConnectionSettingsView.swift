@@ -1,6 +1,48 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+private extension DashboardServerConnectionState {
+    var color: Color {
+        switch self {
+        case .connected: .tronEmerald
+        case .connecting, .reconnecting, .restarting: .tronAmber
+        case .offline, .identityMismatch: .tronError
+        case .disabled, .stale, .blocked, .needsVerification: .tronSlate
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .connected: "checkmark.circle.fill"
+        case .connecting, .reconnecting: "arrow.triangle.2.circlepath"
+        case .restarting: "arrow.clockwise.circle.fill"
+        case .offline, .identityMismatch: "exclamationmark.triangle.fill"
+        case .disabled: "pause.circle.fill"
+        case .stale, .blocked, .needsVerification: "network"
+        }
+    }
+}
+
+struct GatewayConnectionStatusBadge: View {
+    let state: DashboardServerConnectionState
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(state.color)
+                .frame(width: 8, height: 8)
+            Text(state.label)
+                .font(TronTypography.caption)
+                .foregroundStyle(state.color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Connection status: \(state.label)")
+    }
+}
+
 private extension GatewayLogRecord {
     var date: Date? { GatewayTimestamp.parse(timestamp) }
     var levelTitle: String { level.capitalized }
@@ -72,7 +114,9 @@ struct ConnectionsSettingsView: View {
                                         ? "\(profile.host):\(profile.port)"
                                         : "Disabled · \(profile.host):\(profile.port)",
                                     accent: .tronEmerald
-                                )
+                                ) {
+                                    GatewayConnectionStatusBadge(state: model.dashboardServerState(for: profile.id))
+                                }
                                 .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -152,8 +196,8 @@ struct ConnectionsSettingsView: View {
                                 Button { selectedLog = record } label: {
                                     TronValueRow(
                                         icon: record.record.icon,
-                                        title: "\(record.profileLabel) · \(record.record.levelTitle)",
-                                        detail: record.record.message,
+                                        title: "\(record.profileLabel) · \(record.record.event ?? record.record.levelTitle)",
+                                        detail: record.record.source.map { "\($0) · \(record.record.message)" } ?? record.record.message,
                                         accent: record.record.accent
                                     ) {
                                         Text(logTimestamp(record.record))
@@ -217,6 +261,13 @@ struct ConnectionsSettingsView: View {
             Text("This removes \(authorized.device.name)'s access to \(authorized.profileLabel).")
         }
         .task(id: model.profileRevision) { await reload() }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                guard !Task.isCancelled else { return }
+                await refreshLogs()
+            }
+        }
     }
 
     private func deviceDetail(_ authorized: GatewayAuthorizedDevice) -> String {
@@ -279,26 +330,10 @@ struct GatewayConnectionDetailView: View {
     }
 
     private var status: DashboardServerConnectionState {
-        if !currentProfile.isEnabled { return .disabled }
-        if model.profiles.selected?.id == currentProfile.id {
-            switch model.connectionState {
-            case .connected: return .connected
-            case .connecting, .reconnecting: return .connecting
-            case .offline: return .offline
-            case .unpaired, .unauthorized: return .stale
-            }
-        }
-        return model.dashboardServerSources.first(where: { $0.profileID == currentProfile.id })?.state ?? .stale
+        model.dashboardServerState(for: currentProfile.id)
     }
 
-    private var statusColor: Color {
-        switch status {
-        case .connected: .tronEmerald
-        case .connecting: .tronAmber
-        case .offline, .blocked, .identityMismatch: .tronError
-        case .disabled, .stale, .needsVerification: .tronSlate
-        }
-    }
+    private var statusColor: Color { status.color }
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -306,11 +341,13 @@ struct GatewayConnectionDetailView: View {
                 TronSettingsGroup("Status", accent: statusColor) {
                     VStack(spacing: 0) {
                         TronValueRow(
-                            icon: statusIcon,
-                            title: statusTitle,
+                            icon: status.icon,
+                            title: "Connection",
                             detail: "\(currentProfile.host):\(currentProfile.port)",
                             accent: statusColor
-                        )
+                        ) {
+                            GatewayConnectionStatusBadge(state: status)
+                        }
                         if model.profiles.selected?.id != currentProfile.id {
                             TronSettingsDivider(accent: statusColor)
                             Button {
@@ -341,6 +378,12 @@ struct GatewayConnectionDetailView: View {
                             infoRow("cpu", "Agent runtime", info.piVersion)
                             TronSettingsDivider(accent: .tronCyan)
                             infoRow("point.3.connected.trianglepath.dotted", "Protocol", String(info.protocolVersion), numeric: true)
+                            TronSettingsDivider(accent: .tronCyan)
+                            infoRow(
+                                "lock.shield",
+                                "Restart supervision",
+                                info.capabilities.contains("restart-supervised.v1") ? "Managed LaunchAgent" : "Unavailable"
+                            )
                         } else {
                             TronValueRow(
                                 icon: loadingInfo ? "arrow.clockwise" : "questionmark.circle",
@@ -358,7 +401,7 @@ struct GatewayConnectionDetailView: View {
                     gatewayActionButton(
                         "Restart Gateway",
                         accent: .tronCyan,
-                        disabled: !currentProfile.isEnabled
+                        disabled: !currentProfile.isEnabled || !supportsSafeRestart
                     ) { confirmingRestart = true }
 
                     if currentProfile.isEnabled {
@@ -434,26 +477,9 @@ struct GatewayConnectionDetailView: View {
         .disabled(disabled)
     }
 
-    private var statusTitle: String {
-        guard model.profiles.selected?.id == currentProfile.id else { return status.label }
-        switch model.connectionState {
-        case .unpaired: return "Not paired"
-        case .connecting: return "Connecting"
-        case .connected: return "Connected"
-        case .reconnecting: return "Reconnecting"
-        case .unauthorized: return "Pairing expired"
-        case .offline(let message): return "Offline · \(message)"
-        }
-    }
-
-    private var statusIcon: String {
-        switch status {
-        case .connected: "checkmark.circle.fill"
-        case .connecting: "arrow.triangle.2.circlepath"
-        case .offline, .blocked, .identityMismatch: "exclamationmark.triangle.fill"
-        case .disabled: "pause.circle.fill"
-        case .stale, .needsVerification: "network"
-        }
+    private var supportsSafeRestart: Bool {
+        guard let info else { return false }
+        return AppModel.supportsSafeGatewayRestart(capabilities: info.capabilities)
     }
 
     private func loadInfo() async {
@@ -487,7 +513,7 @@ struct GatewayLogDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 8) {
-                        Label(record.record.levelTitle, systemImage: record.record.icon)
+                        Label(record.record.event ?? record.record.levelTitle, systemImage: record.record.icon)
                             .foregroundStyle(record.record.accent)
                         Spacer()
                         Text(record.profileLabel)
@@ -496,6 +522,11 @@ struct GatewayLogDetailView: View {
                             .foregroundStyle(Color.tronTextMuted)
                     }
                     .font(TronTypography.bodySM)
+                    if let source = record.record.source {
+                        Text("Source: \(source)")
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextMuted)
+                    }
                     Text(record.record.message)
                         .font(TronTypography.codeContent)
                         .foregroundStyle(Color.tronTextPrimary)

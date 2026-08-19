@@ -32,7 +32,10 @@
     <integer>10</integer>
 
     <key>EnvironmentVariables</key>
-    <dict/>
+    <dict>
+        <key>TRON_GATEWAY_SUPERVISED</key>
+        <string>1</string>
+    </dict>
 
     <key>SoftResourceLimits</key>
     <dict>

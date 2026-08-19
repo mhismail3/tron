@@ -35,6 +35,8 @@ enum DashboardSessionActivity: Equatable, Sendable {
 
 enum DashboardServerConnectionState: Equatable, Sendable {
     case connecting
+    case reconnecting
+    case restarting
     case connected
     case offline
     case stale
@@ -46,6 +48,8 @@ enum DashboardServerConnectionState: Equatable, Sendable {
     var label: String {
         switch self {
         case .connecting: "Connecting"
+        case .reconnecting: "Reconnecting"
+        case .restarting: "Restarting"
         case .connected: "Connected"
         case .offline: "Offline"
         case .stale: "Cached"
@@ -70,7 +74,7 @@ enum DashboardProjectionRetentionPolicy {
         profileExists
             && existingSessionCount > 0
             && incomingSessionCount == 0
-            && [.connecting, .offline, .stale].contains(state)
+            && [.connecting, .reconnecting, .restarting, .offline, .stale].contains(state)
     }
 }
 

@@ -370,10 +370,11 @@ struct GatewayProtocolContractTests {
         #expect(ExtensionPresentationPolicy.admit(surface("界👨‍👩‍👧‍👦", width: 4)))
     }
 
-    @Test("iOS only requests restart from a drain-capable Gateway")
+    @Test("iOS only requests restart from a drain-capable supervised Gateway")
     func safeRestartCapability() {
         #expect(!AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1"]))
-        #expect(AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1", "restart-drain.v1"]))
+        #expect(!AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1", "restart-drain.v1"]))
+        #expect(AppModel.supportsSafeGatewayRestart(capabilities: ["sessions.v1", "restart-drain.v1", "restart-supervised.v1"]))
     }
 
     @Test("gateway failure is a localized error")

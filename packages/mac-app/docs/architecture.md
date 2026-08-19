@@ -58,10 +58,12 @@ an exchange the gateway removes the used invitation and issues a new one.
 
 ## Supervision and status
 
-`SMAppService` owns registration and launchd owns the gateway process. Quitting
-`Tron.app` does not stop accepted work. `ServerStatusPoller` probes the Tron
+`SMAppService` owns registration and launchd owns the gateway process. Managed
+LaunchAgents advertise `TRON_GATEWAY_SUPERVISED=1`; the Gateway exposes that
+capability so remote restart controls fail closed for direct foreground processes.
+Quitting `Tron.app` does not stop accepted work. `ServerStatusPoller` probes the Tron
 Gateway protocol and combines health with registration state. Menu controls can
-pause, resume, restart, inspect bounded in-memory gateway logs, show a fresh
+pause, resume, restart, inspect bounded persisted Gateway logs, show a fresh
 pairing invitation, and uninstall.
 
 The wrapper and gateway share no in-memory state. Their only shared secrets are

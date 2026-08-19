@@ -38,7 +38,7 @@ process.env.PI_CODING_AGENT ??= "true";
 process.env.AI_AGENT ??= "pi";
 process.env.PI_SKIP_VERSION_CHECK ??= "1";
 
-const logger = new GatewayLogger();
+const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"));
 const devices = new DeviceStore(config.tronHome, config.machineId);
 await devices.initialize();
 
@@ -61,7 +61,11 @@ const administrationServices = await createAgentSessionServices({
   resourceLoaderReloadOptions: { resolveProjectTrust: async () => false },
 });
 for (const diagnostic of administrationServices.diagnostics) {
-  logger.log(diagnostic.type === "error" ? "error" : diagnostic.type === "warning" ? "warning" : "info", diagnostic.message);
+  logger.log(
+    diagnostic.type === "error" ? "error" : diagnostic.type === "warning" ? "warning" : "info",
+    diagnostic.message,
+    { event: "runtime.diagnostic", source: "resource-loader" }
+  );
 }
 const trust = new TrustService(config.agentDir);
 const filesystem = new FilesystemService();
@@ -102,7 +106,7 @@ let stopping = false;
 async function shutdown(reason: string, exitCode = 0): Promise<void> {
   if (stopping) return;
   stopping = true;
-  logger.log("info", `Stopping gateway (${reason})`);
+  logger.log("info", `Stopping gateway (${reason})`, { event: "gateway.stopping", source: "lifecycle" });
   const forced = setTimeout(() => process.exit(1), 15_000);
   forced.unref();
   try {
@@ -113,7 +117,7 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     clearTimeout(forced);
     process.exit(exitCode);
   } catch (error) {
-    logger.log("error", error instanceof Error ? error.message : String(error));
+    logger.log("error", error instanceof Error ? error.message : String(error), { event: "gateway.shutdown-failed", source: "lifecycle" });
     await releaseRuntimeLock();
     process.exit(1);
   }
@@ -122,12 +126,12 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
 let requestedRestart: Promise<void> | undefined;
 function requestRestart(): void {
   if (requestedRestart) return;
-  logger.log("info", "Gateway restart scheduled after accepted agent runs settle");
+  logger.log("info", "Gateway restart scheduled after accepted agent runs settle", { event: "gateway.restart-drain", source: "lifecycle" });
   requestedRestart = (async () => {
     await sessions.waitUntilIdle();
     await shutdown("requested restart", 75);
   })().catch((error) => {
-    logger.log("error", error instanceof Error ? error.message : String(error));
+    logger.log("error", error instanceof Error ? error.message : String(error), { event: "gateway.restart-drain-failed", source: "lifecycle" });
     void shutdown("restart drain failed", 1);
   });
 }
@@ -176,11 +180,11 @@ transport = new GatewayServer({
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 process.once("SIGINT", () => void shutdown("SIGINT"));
 process.on("uncaughtException", (error) => {
-  logger.log("error", `Uncaught exception: ${error.message}`);
+  logger.log("error", `Uncaught exception: ${error.message}`, { event: "process.uncaught-exception", source: "process" });
   void shutdown("uncaught exception", 1);
 });
 process.on("unhandledRejection", (error) => {
-  logger.log("error", `Unhandled rejection: ${error instanceof Error ? error.message : String(error)}`);
+  logger.log("error", `Unhandled rejection: ${error instanceof Error ? error.message : String(error)}`, { event: "process.unhandled-rejection", source: "process" });
 });
 
 const enrollmentTimer = setInterval(() => void devices.ensureEnrollment(), 60_000);
