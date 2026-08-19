@@ -103,6 +103,7 @@ export class GatewayService {
       protocolVersion: PROTOCOL_VERSION,
       minProtocolVersion: MIN_PROTOCOL_VERSION,
       machineId: config.machineId,
+      machineGroupID: config.machineGroupID,
       machineName: config.machineName,
       capabilities: [
         "sessions.v1",

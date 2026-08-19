@@ -74,10 +74,40 @@ final class GatewayProfileStore {
         guard current.profiles.contains(where: { $0.id == profile.id }) else {
             throw GatewayProfileStoreError.unknownProfile
         }
-        try metadata.save(GatewayProfileDocument(
-            profiles: current.profiles,
-            selectedProfileID: profile.id
-        ))
+        let values = current.profiles.map { value in
+            guard value.id == profile.id else { return value }
+            var enabled = value
+            enabled.isEnabled = true
+            return enabled
+        }
+        try metadata.save(GatewayProfileDocument(profiles: values, selectedProfileID: profile.id))
+    }
+
+    func update(_ profile: GatewayProfile) throws {
+        guard profile.hasValidEndpoint else { throw GatewayProfileStoreError.invalidEndpoint }
+        let current = document
+        guard current.profiles.contains(where: { $0.id == profile.id }) else {
+            throw GatewayProfileStoreError.unknownProfile
+        }
+        let values = current.profiles.map { $0.id == profile.id ? profile : $0 }
+        try metadata.save(GatewayProfileDocument(profiles: values, selectedProfileID: current.selectedProfileID))
+    }
+
+    func setEnabled(_ enabled: Bool, for profile: GatewayProfile) throws {
+        let current = document
+        guard current.profiles.contains(where: { $0.id == profile.id }) else {
+            throw GatewayProfileStoreError.unknownProfile
+        }
+        if !enabled && current.selectedProfileID == profile.id {
+            throw GatewayProfileStoreError.cannotDisableSelected
+        }
+        let values = current.profiles.map { value in
+            guard value.id == profile.id else { return value }
+            var replacement = value
+            replacement.isEnabled = enabled
+            return replacement
+        }
+        try metadata.save(GatewayProfileDocument(profiles: values, selectedProfileID: current.selectedProfileID))
     }
 
     func remove(_ profile: GatewayProfile) throws {
@@ -108,14 +138,17 @@ final class GatewayProfileStore {
         guard let loaded = try? metadata.load() else {
             return GatewayProfileDocument(profiles: [], selectedProfileID: nil)
         }
-        let profiles = loaded.profiles.filter(\.hasValidEndpoint)
-        let selectedProfileID = profiles.contains { $0.id == loaded.selectedProfileID }
+        let validProfiles = loaded.profiles.filter(\.hasValidEndpoint)
+        let selectedProfileID = validProfiles.contains { $0.id == loaded.selectedProfileID }
             ? loaded.selectedProfileID
-            : profiles.first?.id
-        let sanitized = GatewayProfileDocument(
-            profiles: profiles,
-            selectedProfileID: selectedProfileID
-        )
+            : validProfiles.first?.id
+        let profiles = validProfiles.map { profile in
+            guard profile.id == selectedProfileID, !profile.isEnabled else { return profile }
+            var enabled = profile
+            enabled.isEnabled = true
+            return enabled
+        }
+        let sanitized = GatewayProfileDocument(profiles: profiles, selectedProfileID: selectedProfileID)
         if sanitized != loaded { try? metadata.save(sanitized) }
         return sanitized
     }
@@ -124,6 +157,7 @@ final class GatewayProfileStore {
 enum GatewayProfileStoreError: Error {
     case invalidEndpoint
     case unknownProfile
+    case cannotDisableSelected
     case rollbackFailed(commit: Error, rollback: Error)
 }
 

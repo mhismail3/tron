@@ -87,6 +87,7 @@ final class GatewayLifecycleCoordinator {
     private var foregroundReconciliationGeneration = 0
     private var backgroundRetirementTask: Task<Void, Never>?
     private var sceneIsBackgrounded = false
+    private var projectionFailureGeneration: Int?
 
     init(
         client: GatewayClient,
@@ -380,6 +381,11 @@ final class GatewayLifecycleCoordinator {
         connectionID = nil
     }
 
+    func noteProjectionFailure(_ admission: Admission) {
+        guard admits(admission) else { return }
+        projectionFailureGeneration = admission.generation
+    }
+
     func requestReconnect(immediate: Bool = false, replaceExisting: Bool = false) {
         guard phase.admitsWork, !sceneIsBackgrounded, profiles.selected != nil else { return }
         if replaceExisting, reconnectTask != nil {
@@ -523,6 +529,7 @@ final class GatewayLifecycleCoordinator {
         foreground?.cancel()
         gatewayInfo = nil
         connectionID = nil
+        projectionFailureGeneration = nil
 
         let transition = Task { @MainActor [weak self] in
             await precedingTransition?.value
@@ -584,14 +591,20 @@ final class GatewayLifecycleCoordinator {
             )
             try require(connectedAdmission)
             gatewayInfo = connection.info
+            connectionState = .connected
             delegate?.lifecycleInvalidateSessionConnectionOwnership()
             async let refresh: Void = delegate?.lifecycleRefreshAll(admission: connectedAdmission) ?? ()
             async let restore: Void = delegate?.lifecycleRestoreMountedPresentation(admission: connectedAdmission) ?? ()
             async let terminals: Void = delegate?.lifecycleReattachTerminals(admission: connectedAdmission) ?? ()
             _ = await (refresh, restore, terminals)
             try require(connectedAdmission)
+            if projectionFailureGeneration == admission.generation {
+                projectionFailureGeneration = nil
+                connectionState = .offline("Gateway projection refresh failed")
+                scheduleReconnect(immediate: true)
+                return
+            }
             if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
-            connectionState = .connected
             cancelReconnect()
         } catch {
             if let establishedConnectionID {
@@ -707,11 +720,20 @@ final class GatewayLifecycleCoordinator {
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration
                         )
+                        guard self.connectionID == connection.id else {
+                            throw GatewayFailure(
+                                code: "disconnected",
+                                message: "The Gateway connection ended during reconnect.",
+                                retryable: true,
+                                details: nil
+                            )
+                        }
                         let admission = Admission(
                             generation: lifecycleGeneration,
                             connectionID: connection.id
                         )
                         self.gatewayInfo = connection.info
+                        self.connectionState = .connected
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()
                         async let refresh: Void = self.delegate?.lifecycleRefreshAll(admission: admission) ?? ()
                         await self.delegate?.lifecycleRestoreMountedPresentation(admission: admission)
@@ -721,7 +743,24 @@ final class GatewayLifecycleCoordinator {
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration
                         )
-                        self.connectionState = .connected
+                        guard self.connectionID == connection.id else {
+                            throw GatewayFailure(
+                                code: "disconnected",
+                                message: "The Gateway connection ended during refresh.",
+                                retryable: true,
+                                details: nil
+                            )
+                        }
+                        if self.projectionFailureGeneration == lifecycleGeneration {
+                            self.projectionFailureGeneration = nil
+                            self.connectionState = .offline("Gateway projection refresh failed")
+                            self.finishReconnect(
+                                lifecycleGeneration: lifecycleGeneration,
+                                attemptGeneration: attemptGeneration
+                            )
+                            self.scheduleReconnect(immediate: true)
+                            return
+                        }
                         self.finishReconnect(
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration

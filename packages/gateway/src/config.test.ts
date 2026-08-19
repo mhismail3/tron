@@ -1,5 +1,5 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isTailscaleAddress, loadConfig, resolveBindHost, resolveTronHome } from "./config.js";
@@ -17,6 +17,25 @@ describe("gateway configuration", () => {
     expect(resolveBindHost("127.0.0.1")).toBe("127.0.0.1");
     expect(resolveTronHome({ TRON_DATA_DIR: "/tmp/tron-home" })).toBe("/tmp/tron-home");
     expect(() => resolveTronHome({ TRON_DATA_DIR: "relative" })).toThrow(/absolute/);
+  });
+
+  it("shares an injected machine group while retaining per-home machine identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-config-group-"));
+    const groupPath = join(root, "machine-group.json");
+    const [first, second] = await Promise.all([
+      loadConfig([], { TRON_DATA_DIR: join(root, "prod"), TRON_MACHINE_GROUP_PATH: groupPath, TRON_AGENT_DIR_NAME: "agent-prod" }),
+      loadConfig([], { TRON_DATA_DIR: join(root, "dev"), TRON_MACHINE_GROUP_PATH: groupPath, TRON_AGENT_DIR_NAME: "agent-dev" }),
+    ]);
+    expect(first.machineGroupID).toBe(second.machineGroupID);
+    expect(first.machineId).not.toBe(second.machineId);
+    const sameHome = join(root, "same-home");
+    const [sameFirst, sameSecond] = await Promise.all([
+      loadConfig([], { TRON_DATA_DIR: sameHome, TRON_MACHINE_GROUP_PATH: groupPath }),
+      loadConfig([], { TRON_DATA_DIR: sameHome, TRON_MACHINE_GROUP_PATH: groupPath }),
+    ]);
+    expect(sameFirst.machineId).toBe(sameSecond.machineId);
+    expect(first.agentDir).toBe(join(homedir(), ".pi", "agent-prod"));
+    expect(second.agentDir).toBe(join(homedir(), ".pi", "agent-dev"));
   });
 
   it("persists one bounded identity and reloads it without rekeying", async () => {

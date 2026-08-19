@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { ModelRuntime, createAgentSessionServices } from "@earendil-works/pi-coding-agent";
+import { ModelRuntime, SettingsManager, createAgentSessionServices } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.js";
 import { DeviceStore } from "./security/device-store.js";
 import { TrustService } from "./admin/trust-service.js";
@@ -13,6 +13,7 @@ import { PackageService } from "./admin/package-service.js";
 import { AuthBroker } from "./admin/auth-broker.js";
 import { LegacyImportService } from "./admin/legacy-import-service.js";
 import { RuntimeRegistry } from "./sessions/runtime-registry.js";
+import { acquireAgentRuntimeLocks } from "./sessions/agent-runtime-lock.js";
 import type { JsonValue } from "./protocol/types.js";
 import { GatewayLogger } from "./transport/logger.js";
 import { CommandReceiptStore } from "./transport/command-receipts.js";
@@ -21,6 +22,17 @@ import { GatewayServer } from "./transport/server.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
 
 const config = await loadConfig();
+const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
+const releaseAgentRuntimeLock = await acquireAgentRuntimeLocks([
+  config.agentDir,
+  ...(configuredSessionDir ? [configuredSessionDir] : []),
+]);
+let agentRuntimeLockReleased = false;
+async function releaseRuntimeLock(): Promise<void> {
+  if (agentRuntimeLockReleased) return;
+  agentRuntimeLockReleased = true;
+  await releaseAgentRuntimeLock();
+}
 process.env.PI_CODING_AGENT_DIR = config.agentDir;
 process.env.PI_CODING_AGENT ??= "true";
 process.env.AI_AGENT ??= "pi";
@@ -54,7 +66,7 @@ for (const diagnostic of administrationServices.diagnostics) {
 const trust = new TrustService(config.agentDir);
 const filesystem = new FilesystemService();
 const uploads = new UploadStore(config.tronHome, config.maxUploadBytes);
-const settings = new SettingsService(config.agentDir, modelRuntime);
+const settings = new SettingsService(config.agentDir, modelRuntime, false);
 const modelConfig = new ModelConfigService(config.agentDir);
 const receipts = new CommandReceiptStore(config.tronHome);
 await receipts.prune();
@@ -97,10 +109,12 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
     await transport.close();
     terminal.dispose();
     await sessions.dispose();
+    await releaseRuntimeLock();
     clearTimeout(forced);
     process.exit(exitCode);
   } catch (error) {
     logger.log("error", error instanceof Error ? error.message : String(error));
+    await releaseRuntimeLock();
     process.exit(1);
   }
 }

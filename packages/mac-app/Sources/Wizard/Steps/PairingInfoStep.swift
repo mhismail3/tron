@@ -270,7 +270,7 @@ struct PairingInfoStep: View {
             host: host,
             port: setup.serverPort,
             code: code,
-            label: LocalComputerName.current()
+            label: LocalComputerName.currentPairingName()
         )
         guard let url = PairingURLBuilder.makeURL(payload),
               let qrImage = QRCodeGenerator.makeImage(payload: url.absoluteString, size: PairingInfoStepLayout.qrSize) else {

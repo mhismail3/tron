@@ -40,6 +40,19 @@ describe("SettingsService", () => {
     });
   });
 
+  it("rejects a runtime session-directory change until restart", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "tron-settings-runtime-lock-"));
+    const cwd = join(agentDir, "project");
+    await mkdir(cwd);
+    const models = await ModelRuntime.create({ authPath: join(agentDir, "auth.json"), modelsPath: null, refreshOnCreate: false });
+    const service = new SettingsService(agentDir, models, false);
+
+    await expect(service.update(
+      { sessionDir: "/tmp/other-sessions" },
+      { cwd, scope: "global", projectTrusted: false },
+    )).rejects.toThrow(/restart is required/);
+  });
+
   it("rejects settings that generic JSON projection would silently alter", async () => {
     const agentDir = await mkdtemp(join(tmpdir(), "tron-bounded-settings-"));
     const cwd = join(agentDir, "project");

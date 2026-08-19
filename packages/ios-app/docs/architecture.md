@@ -31,9 +31,14 @@ second cache or reducer.
 request correlation, deadlines, and event delivery. One private connection epoch owns the
 exact socket, receive/liveness tasks, pending requests, liveness timestamp, overflow state,
 and handshake projection. The focused chat uses the lifecycle-owned client; the dashboard
-uses one bounded lightweight client per non-focused paired Mac through
+uses one bounded lightweight client per eligible non-focused paired Mac through
 `DashboardGatewayConnectionPool`, so catalog state from another Mac can update without
-replacing the active chat connection. Connect and close invalidate older attempts across every suspension;
+replacing the active chat connection. Profiles sharing the selected
+`machineGroupID`, profiles with a provisional legacy group (`machineGroupID == machineId`),
+or profiles disabled in Connections settings, remain paired but are blocked from
+background admission and have no cached/live dashboard projection. Selecting a
+legacy profile once performs a verified Gateway handshake and persists its real
+physical-machine group before it can become a secondary connection. Connect and close invalidate older attempts across every suspension;
 late hello, frame, failure, liveness, completion, and close callbacks can only detach or publish
 for their captured epoch. Event deliveries carry that non-wire connection identity. App lifecycle
 connects prepare the epoch without starting receive/liveness work, install the returned identity,
@@ -68,13 +73,14 @@ coordination state instead of routing facts through unrelated façade fields.
 connection state/info/identity, exact admissions, reconnect, foreground reconciliation, serial
 retire/close transitions, and final teardown. A non-selecting pairing commit adds a server without
 changing the focused profile; the dashboard pool owns shallow catalog connections for the other
-paired profiles, each with an independent failure boundary. It composes `GatewayClient` without copying that actor's
+paired profiles, admitting at most one enabled profile per physical-machine group, each with an independent failure boundary. It composes `GatewayClient` without copying that actor's
 byte-transport epoch. `AppModel` supplies narrow projection hooks for cache installation, refresh,
 session/terminal reconciliation, and synchronous retirement; it no longer stores a parallel lifecycle
 phase, reconnect task, pairing attempt, connection identity, or transition waiters. A dedicated
 `SessionCatalogCoordinator` owns the focused profile's summaries, while the dashboard pool owns
 profile-qualified shallow catalogs for non-focused profiles. `SessionSummary` carries dashboard-only
-profile ownership and the dashboard aggregates by `(profileID, sessionID)`; an ID-indexed monotonic
+profile ownership and the dashboard aggregates by `(profileID, sessionID)`; equal bare session IDs from
+separate runtimes therefore remain distinct. An ID-indexed monotonic
 live-summary overlay, cached/stale/live provenance, and exact profile/lifecycle/connection load admission
 remain scoped to each source. Equivalent
 foreground, reconnect, pull-to-refresh, unknown-summary, and structural-invalidations share one

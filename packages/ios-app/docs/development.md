@@ -66,7 +66,11 @@ xcodebuild build-for-testing -project TronMobile.xcodeproj -scheme 'Tron Fast' \
 ```
 
 Gateway transport tests inject `ManualClock`, `SequenceUUIDSource`, and
-`ScriptedGatewaySocket` below `GatewayClient`. `AppModelLifecycleTests` owns the façade and
+`ScriptedGatewaySocket` below `GatewayClient`. Pairing generates a local UUID for
+connection identity; persisted profiles decode older records with
+`machineGroupID == machineId` and `isEnabled == true`. The dashboard pool admits
+at most one profile per physical-machine group and excludes disabled
+profiles, while retaining their pairing metadata and credentials. A foreground reconnect uses a five-second handshake deadline (initial pairing remains fifteen seconds), publishes transport readiness before slower projection/terminal restoration, and treats `system.stopping` as an immediate retry signal. `AppModelLifecycleTests` owns the façade and
 `GatewayLifecycleCoordinator` boundary above it: exact admissions are revoked by transition,
 concurrent profile transitions chain retire/close work before any replacement handshake, switch
 closes the old socket before replacement connect, forget awaits close, concurrent final teardown

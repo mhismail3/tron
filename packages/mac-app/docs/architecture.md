@@ -13,12 +13,17 @@ registrations.
 | Variant | Login Item | Label | Home | Port |
 |---|---|---|---|---|
 | Installed | `Tron Agent.app` | `com.tron.server` | `~/.tron` | 9847 |
-| Isolated Xcode install | `Tron Agent Dev.app` | `com.tron.server.dev` | `~/.tron-dev` | 9848 |
-| Debug companion | observes installed agent only | none owned | `~/.tron` | 9847 |
+| Isolated Xcode install | `Tron Agent Dev.app` | `com.tron.server.dev` | `~/.tron-dev` + `~/.pi/agent-dev` | 9848 |
+| Debug companion | regular companion window; observes installed agent only | none owned | `~/.tron` | 9847 |
 
 The LaunchAgent passes `--host tailscale`; gateway startup resolves and binds the
 actual Tailscale interface rather than all interfaces. Developer CLI operation
-is loopback unless `--tailscale` is explicit.
+is loopback unless `--tailscale` is explicit. Isolated pairing invitations append
+`(Dev)` to the Mac's friendly name so the `9848` profile is distinct from the
+production connection; production invitations keep the unchanged name. The two
+homes share only the random physical-machine group hint at
+`~/.tron-machine-group-id`; their gateway machine IDs, agent directories, JSONL
+sessions, credentials, and runtime markers remain separate.
 
 ## Source owners
 
@@ -39,9 +44,10 @@ worker host.
 ## Pairing
 
 The gateway creates `~/.tron/gateway/enrollment.json` with mode `0600`, a
-10-minute expiry, and a one-time code. `PairingInfoStep` first authenticates a
-local `system.info` request using `gateway/local-auth.json`, then reads the
-current enrollment file and emits:
+10-minute expiry, and a one-time code. The wrapper accepts the gateway's
+RFC3339 expiration timestamp with or without fractional seconds.
+`PairingInfoStep` first authenticates a local `system.info` request using
+`gateway/local-auth.json`, then reads the current enrollment file and emits:
 
 ```text
 tron://pair?host=<tailscale>&port=<port>&code=<one-time>&label=<mac>
@@ -66,7 +72,9 @@ gateway authentication and is left untouched for explicit migration.
 
 The Xcode post-build phase copies the tracked `Contents/Library` tree and signs
 nested Login Items before resealing the outer app. The shared gateway payload is
-in `Contents/Resources/Gateway`; its Node runtimes and native modules are sealed
-by the outer app signature. Release validation must inspect the helper launcher,
-both runtime binaries, production dependency tree, outer signature, and
-notarization ticket.
+in `Contents/Resources/Gateway`; its Node runtimes are signed with
+`TronNode.entitlements` so V8 JIT execution remains permitted under the
+hardened runtime, while native modules remain minimally entitled. Release
+validation must inspect the helper launcher, execute both runtime binaries,
+verify the production dependency tree, outer signature, and notarization
+ticket.

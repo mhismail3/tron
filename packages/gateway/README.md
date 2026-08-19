@@ -20,7 +20,13 @@ Gateway owns only mobile infrastructure:
 
 The embedded runtime remains canonical for sessions, provider/model semantics,
 credentials, settings, packages, resources, compaction, and retries. Gateway
-does not maintain a session database or event journal.
+does not maintain a session database or event journal. A process lock is held per
+agent directory and any configured external session directory because the session
+format has no cross-process lock; another Gateway must use separate canonical
+storage, not the same JSONL tree. Runtime `sessionDir` changes are rejected until
+the Gateway is stopped and restarted; the runtime also snapshots the admitted
+session directory at startup so an out-of-band settings edit cannot redirect
+new work around the ownership lock.
 
 ## Moonshot Kimi K3
 
@@ -38,7 +44,12 @@ never persisted by Gateway.
 
 ## Runtime and state
 
-- Agent state: `PI_CODING_AGENT_DIR`, default `~/.pi/agent`
+- Agent state: `PI_CODING_AGENT_DIR`, default `~/.pi/agent`; the isolated Xcode
+  Dev LaunchAgent sets `TRON_AGENT_DIR_NAME=agent-dev`, so Dev sessions live in
+  `~/.pi/agent-dev` and never share production JSONL with `~/.pi/agent`
+- Physical-machine group identity: a bounded random ID in
+  `~/.tron-machine-group-id`, shared by separate Tron homes only for connection
+  grouping; it is not a session, credential, or runtime-data store
 - Gateway state: `<TRON_DATA_DIR|~/$TRON_HOME_NAME|~/.tron>/gateway/`; `gateway.json` is an exact-shape, 16 KiB maximum document with a 256-byte machine ID, 1 KiB machine name, and optional 8 KiB default workspace; malformed/oversized existing files fail startup without rekeying
 - Local wrapper credential: `gateway/local-auth.json` (`0600`)
 - Hashed mobile devices: `gateway/devices.json`
@@ -98,6 +109,13 @@ Every WebSocket starts with:
 ```json
 {"type":"hello","protocolVersion":3}
 ```
+
+The hello and pairing response identify the runtime with `machineId` (stable per
+Tron home) and, on current gateways, `machineGroupID` (stable across separate
+production and isolated-Dev homes on one physical Mac). Older gateways omit the
+latter; clients fall back to `machineId`. The group identifier is only a bounded
+connection-group hint and never names or shares session files, credentials, or
+other canonical runtime data.
 
 Requests use `{type,id,method,params}` and receive `{type,id,ok,result|error}`.
 Mutations require `params.commandId`; receipts deduplicate completed commands.

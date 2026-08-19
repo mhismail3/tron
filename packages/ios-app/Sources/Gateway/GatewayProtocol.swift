@@ -340,6 +340,7 @@ struct GatewayHello: Decodable, Sendable {
     let protocolVersion: Int
     let minProtocolVersion: Int
     let machineId: String
+    let machineGroupID: String?
     let machineName: String
     let capabilities: [String]
 
@@ -350,6 +351,7 @@ struct GatewayHello: Decodable, Sendable {
             protocolVersion: protocolVersion,
             minProtocolVersion: minProtocolVersion,
             machineId: machineId,
+            machineGroupID: machineGroupID,
             machineName: machineName,
             capabilities: capabilities
         )

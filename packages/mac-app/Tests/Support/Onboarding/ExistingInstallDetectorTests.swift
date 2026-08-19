@@ -245,6 +245,7 @@ struct ExistingInstallDetectorTests {
         let plist = trackedLaunchAgentPlist(named: "com.tron.server.dev.plist")
         let environment = [
             TronPaths.tronHomeNameEnv: ".tron-dev",
+            TronPaths.agentDirNameEnv: "agent-dev",
         ]
 
         #expect(ExistingInstallDetector.launchAgentPlistIsCurrent(

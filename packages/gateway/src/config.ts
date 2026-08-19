@@ -1,8 +1,9 @@
 import { homedir, hostname, networkInterfaces } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
-import { atomicWriteJson, readJson } from "./util/json.js";
+import { mkdir, stat, writeFile } from "node:fs/promises";
+import lockfile from "proper-lockfile";
+import { atomicWriteJson, readJson, updateJsonLocked } from "./util/json.js";
 import { GatewayError } from "./errors.js";
 
 export interface GatewayConfig {
@@ -11,6 +12,7 @@ export interface GatewayConfig {
   readonly tronHome: string;
   readonly agentDir: string;
   readonly machineId: string;
+  readonly machineGroupID: string;
   readonly machineName: string;
   readonly maxFrameBytes: number;
   readonly maxUploadBytes: number;
@@ -26,6 +28,8 @@ export interface GatewayConfig {
 }
 
 const GATEWAY_CONFIG_MAX_BYTES = 16 * 1_024;
+const MACHINE_GROUP_MAX_BYTES = 256;
+const MACHINE_GROUP_FILE = ".tron-machine-group-id";
 
 interface StoredGatewayConfig {
   version: 1;
@@ -126,27 +130,101 @@ async function storedGatewayConfig(path: string): Promise<StoredGatewayConfig | 
   return value;
 }
 
+function validateMachineGroupID(value: unknown): string {
+  if (typeof value !== "string" || value.trim().length === 0
+    || Buffer.byteLength(value) > MACHINE_GROUP_MAX_BYTES
+    || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new GatewayError("conflict", "Machine group identity is malformed or oversized");
+  }
+  return value;
+}
+
+async function loadOrCreateStoredGatewayConfig(path: string): Promise<StoredGatewayConfig> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  let created = false;
+  try {
+    await stat(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    try {
+      await writeFile(path, "", { flag: "wx", mode: 0o600 });
+      created = true;
+    } catch (creationError) {
+      if ((creationError as NodeJS.ErrnoException).code !== "EEXIST") throw creationError;
+    }
+  }
+  const release = await lockfile.lock(path, {
+    realpath: false,
+    retries: { retries: 10, minTimeout: 20, maxTimeout: 100 },
+  });
+  try {
+    if (!created) {
+      const stored = await storedGatewayConfig(path);
+      if (stored) return stored;
+      throw new GatewayError("conflict", "Gateway identity configuration is empty");
+    }
+    const next: StoredGatewayConfig = {
+      version: 1,
+      machineId: randomUUID(),
+      machineName: hostname(),
+    };
+    await atomicWriteJson(path, next);
+    return next;
+  } finally {
+    await release();
+  }
+}
+
+async function loadMachineGroupID(environment: NodeJS.ProcessEnv): Promise<string> {
+  const injected = environment.TRON_MACHINE_GROUP_ID?.trim();
+  if (injected) {
+    if (Buffer.byteLength(injected) > MACHINE_GROUP_MAX_BYTES || /[\u0000-\u001f\u007f]/.test(injected)) {
+      throw new GatewayError("invalid_request", "TRON_MACHINE_GROUP_ID is invalid");
+    }
+    return injected;
+  }
+  const path = environment.TRON_MACHINE_GROUP_PATH?.trim() || join(homedir(), MACHINE_GROUP_FILE);
+  if (!isAbsolute(path)) throw new GatewayError("invalid_request", "TRON_MACHINE_GROUP_PATH must be absolute");
+  try {
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const value = await updateJsonLocked<unknown>(
+      path,
+      null,
+      current => current === null ? randomUUID() : validateMachineGroupID(current),
+      MACHINE_GROUP_MAX_BYTES,
+    );
+    return validateMachineGroupID(value);
+  } catch (error) {
+    if (error instanceof GatewayError) throw error;
+    if (error instanceof RangeError || error instanceof SyntaxError) {
+      throw new GatewayError("conflict", "Machine group identity is malformed or oversized");
+    }
+    throw error;
+  }
+}
+
 export async function loadConfig(
   args = process.argv.slice(2),
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<GatewayConfig> {
   const tronHome = resolveTronHome(environment);
+  const machineGroupID = await loadMachineGroupID(environment);
   const configPath = join(tronHome, "gateway", "gateway.json");
-  const stored = await storedGatewayConfig(configPath);
-  const next: StoredGatewayConfig = stored ?? {
-    version: 1,
-    machineId: randomUUID(),
-    machineName: hostname(),
-  };
-  if (!stored) await atomicWriteJson(configPath, next);
+  const next = await loadOrCreateStoredGatewayConfig(configPath);
 
-  const agentDir = resolve(environment.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"));
+  const explicitAgentDir = environment.PI_CODING_AGENT_DIR;
+  const agentDirName = environment.TRON_AGENT_DIR_NAME?.trim();
+  if (agentDirName && (agentDirName === "." || agentDirName === ".." || agentDirName.includes("/") || agentDirName.includes("\\"))) {
+    throw new GatewayError("invalid_request", "TRON_AGENT_DIR_NAME must be one .pi-relative directory name");
+  }
+  const agentDir = resolve(explicitAgentDir ?? join(homedir(), ".pi", agentDirName || "agent"));
   return {
     host: resolveBindHost(valueAfter(args, "--host") ?? environment.TRON_GATEWAY_HOST),
     port: parsePort(valueAfter(args, "--port") ?? environment.TRON_GATEWAY_PORT),
     tronHome,
     agentDir,
     machineId: next.machineId,
+    machineGroupID,
     machineName: next.machineName,
     maxFrameBytes: 1_048_576,
     maxUploadBytes: 25 * 1_048_576,

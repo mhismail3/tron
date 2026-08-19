@@ -135,6 +135,31 @@ struct MacAppStartupMaintenanceTests {
         #expect(mock.calls.isEmpty)
     }
 
+    @Test("same-version marker does not suppress repair after an unhealthy probe")
+    func recordedVersionRepairsUnhealthyGateway() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
+        let mock = MockLaunchAgentManager()
+        mock.loadOutcome = .alreadyLoaded
+        let setup = Self.makeSetup(
+            tmp: tmp,
+            currentVersion: current,
+            recordedVersion: current,
+            pingResult: .unreachable,
+            launchAgentManager: mock
+        )
+
+        let result = await MacAppStartupMaintenance.run(
+            setup: setup,
+            controller: nil,
+            context: .existingOnboardedLaunch
+        )
+
+        #expect(result == .restartUnhealthy(.ok, .unreachable))
+        #expect(mock.calls.map(\.kind) == [.load, .restart, .isLoaded])
+    }
+
     @Test("wizard completion records current version without restarting")
     func wizardCompletionRecordsWithoutRestarting() async throws {
         let tmp = TestTempDir.make()

@@ -6,8 +6,37 @@ struct GatewayInfo: Codable, Hashable, Sendable {
     let protocolVersion: Int
     let minProtocolVersion: Int
     let machineId: String
+    let machineGroupID: String
     let machineName: String
     let capabilities: [String]
+
+    init(gatewayVersion: String, piVersion: String, protocolVersion: Int, minProtocolVersion: Int,
+         machineId: String, machineGroupID: String? = nil, machineName: String, capabilities: [String]) {
+        self.gatewayVersion = gatewayVersion
+        self.piVersion = piVersion
+        self.protocolVersion = protocolVersion
+        self.minProtocolVersion = minProtocolVersion
+        self.machineId = machineId
+        self.machineGroupID = machineGroupID ?? machineId
+        self.machineName = machineName
+        self.capabilities = capabilities
+    }
+
+    private enum CodingKeys: String, CodingKey { case gatewayVersion, piVersion, protocolVersion, minProtocolVersion, machineId, machineGroupID, machineName, capabilities }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            gatewayVersion: try values.decode(String.self, forKey: .gatewayVersion),
+            piVersion: try values.decode(String.self, forKey: .piVersion),
+            protocolVersion: try values.decode(Int.self, forKey: .protocolVersion),
+            minProtocolVersion: try values.decode(Int.self, forKey: .minProtocolVersion),
+            machineId: try values.decode(String.self, forKey: .machineId),
+            machineGroupID: try values.decodeIfPresent(String.self, forKey: .machineGroupID),
+            machineName: try values.decode(String.self, forKey: .machineName),
+            capabilities: try values.decode([String].self, forKey: .capabilities)
+        )
+    }
 }
 
 struct PairedDevice: Codable, Hashable, Identifiable, Sendable {

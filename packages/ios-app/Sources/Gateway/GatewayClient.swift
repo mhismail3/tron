@@ -208,24 +208,26 @@ actor GatewayClient {
     }
 
     func connect(profile: GatewayProfile, token: String) async throws -> GatewayInfo {
-        try await establish(profile: profile, token: token, activateEvents: true).info
+        try await establish(profile: profile, token: token, activateEvents: true, isReconnect: false).info
     }
 
     func connectForLifecycle(profile: GatewayProfile, token: String) async throws -> GatewayConnectionIdentity {
-        try await establish(profile: profile, token: token, activateEvents: false)
+        try await establish(profile: profile, token: token, activateEvents: false, isReconnect: false)
     }
 
     private func establish(
         profile: GatewayProfile,
         token: String,
-        activateEvents: Bool
+        activateEvents: Bool,
+        isReconnect: Bool = false
     ) async throws -> GatewayConnectionIdentity {
         let interval = performanceSignposts.begin(.gatewayConnect)
         do {
             let identity = try await establishConnection(
                 profile: profile,
                 token: token,
-                activateEvents: activateEvents
+                activateEvents: activateEvents,
+                isReconnect: isReconnect
             )
             performanceSignposts.end(interval, result: .success, metrics: .none)
             return identity
@@ -239,7 +241,8 @@ actor GatewayClient {
     private func establishConnection(
         profile: GatewayProfile,
         token: String,
-        activateEvents: Bool
+        activateEvents: Bool,
+        isReconnect: Bool
     ) async throws -> GatewayConnectionIdentity {
         generation &+= 1
         let epochID = generation
@@ -252,7 +255,8 @@ actor GatewayClient {
         guard let socketURL = profile.socketURL else { throw Self.invalidProfileEndpoint() }
         self.profile = profile
         self.token = token
-        var request = URLRequest(url: socketURL, timeoutInterval: 15)
+        let handshakeTimeout: Duration = isReconnect ? .seconds(5) : .seconds(15)
+        var request = URLRequest(url: socketURL, timeoutInterval: isReconnect ? 5 : 15)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let socket = socketFactory.makeConnection(request)
         connection = ConnectionEpoch(id: epochID, socket: socket)
@@ -266,7 +270,7 @@ actor GatewayClient {
             ])
             try await socket.send(JSONEncoder.gateway.encode(hello))
             try requireEpoch(epochID)
-            let data = try await withTimeout(duration: .seconds(15)) { try await socket.receive() }
+            let data = try await withTimeout(duration: handshakeTimeout) { try await socket.receive() }
             try requireEpoch(epochID)
             try GatewayFramePolicy.validateInboundBytes(data)
             let decoded = try JSONDecoder.gateway.decode(GatewayHello.self, from: data)
@@ -297,7 +301,7 @@ actor GatewayClient {
         guard let profile, let token else {
             throw GatewayFailure(code: "not_paired", message: "No paired gateway is selected.", retryable: false, details: nil)
         }
-        return try await establish(profile: profile, token: token, activateEvents: activateEvents)
+        return try await establish(profile: profile, token: token, activateEvents: activateEvents, isReconnect: true)
     }
 
     func activateEvents(connectionID: Int) throws {

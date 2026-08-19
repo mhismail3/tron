@@ -242,7 +242,6 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> Bool {
         guard let runtimeInfo,
-              runtimeInfo.pid == nil,
               let executablePath = runtimeInfo.executablePath,
               !executablePath.isEmpty else {
             return false

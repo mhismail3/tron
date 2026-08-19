@@ -43,8 +43,11 @@ struct TronPathsTests {
         #expect(TronPaths.serverHelperBundleProgram(environment: environment) == "Contents/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron")
         #expect(TronPaths.launchAgentEnvironmentVariables(environment: environment) == [
             TronPaths.tronHomeNameEnv: ".tron-dev",
+            TronPaths.agentDirNameEnv: "agent-dev",
         ])
         #expect(TronPaths.tronHome(environment: environment).path.hasSuffix("/.tron-dev"))
+        #expect(TronPaths.canManageLaunchAgent(environment: environment))
+        #expect(!TronPaths.canManageLaunchAgent(environment: environment.merging([TronPaths.tronDataDirEnv: "/tmp/custom"]) { _, value in value }))
     }
 
     @Test("TRON_HOME_NAME overrides isolated install home with a single directory name")

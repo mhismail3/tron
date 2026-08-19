@@ -35,6 +35,8 @@
     <dict>
         <key>TRON_HOME_NAME</key>
         <string>.tron-dev</string>
+        <key>TRON_AGENT_DIR_NAME</key>
+        <string>agent-dev</string>
     </dict>
 
     <key>SoftResourceLimits</key>

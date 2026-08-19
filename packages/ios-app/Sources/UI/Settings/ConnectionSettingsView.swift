@@ -7,6 +7,12 @@ struct ConnectionsSettingsView: View {
     @State private var deviceToRevoke: PairedDevice?
     @State private var showAddServer = false
     @State private var addServerDetent: PresentationDetent = .medium
+
+    private var pairedProfiles: [GatewayProfile] {
+        _ = model.profileRevision
+        return model.profiles.profiles
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
@@ -22,16 +28,36 @@ struct ConnectionsSettingsView: View {
 
                 TronSettingsGroup("Paired Macs") {
                     VStack(spacing: 0) {
-                        ForEach(Array(model.profiles.profiles.enumerated()), id: \.element.id) { index, profile in
+                        ForEach(Array(pairedProfiles.enumerated()), id: \.element.id) { index, profile in
                             if index > 0 { TronSettingsDivider() }
-                            Button { Task { await model.switchGateway(profile) } } label: {
-                                TronValueRow(
-                                    icon: profile.id == model.profiles.selected?.id ? "checkmark.circle.fill" : "desktopcomputer",
-                                    title: profile.label,
-                                    detail: "\(profile.host):\(profile.port)"
-                                )
+                            HStack(spacing: 8) {
+                                Button { Task { await model.switchGateway(profile) } } label: {
+                                    TronValueRow(
+                                        icon: profile.id == model.profiles.selected?.id ? "checkmark.circle.fill" : "desktopcomputer",
+                                        title: profile.label,
+                                        detail: profile.isEnabled ? "\(profile.host):\(profile.port)" : "Disabled · \(profile.host):\(profile.port)"
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                                Menu {
+                                    if profile.isEnabled {
+                                        Button("Disable Background Connection", systemImage: "pause.circle") {
+                                            model.setGatewayEnabled(false, profile: profile)
+                                        }
+                                        .disabled(profile.id == model.profiles.selected?.id)
+                                    } else {
+                                        Button("Enable Background Connection", systemImage: "play.circle") {
+                                            model.setGatewayEnabled(true, profile: profile)
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis.circle")
+                                        .font(.title3)
+                                        .foregroundStyle(Color.tronTextSecondary)
+                                        .frame(width: 44, height: 44)
+                                }
+                                .accessibilityLabel("Options for \(profile.label)")
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }

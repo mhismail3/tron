@@ -13,6 +13,12 @@ struct LocalComputerNameTests {
         #expect(name == "Studio Mac")
     }
 
+    @Test("adds a Dev suffix only for isolated pairing")
+    func pairingName() {
+        #expect(LocalComputerName.pairingName("Moose's MacBook Server", isDev: false) == "Moose's MacBook Server")
+        #expect(LocalComputerName.pairingName("Moose's MacBook Server", isDev: true) == "Moose's MacBook Server (Dev)")
+    }
+
     @Test("Uses localized host, host, then default")
     func candidateOrder() {
         #expect(LocalComputerName.preferredName(

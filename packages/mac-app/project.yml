@@ -82,9 +82,17 @@ targets:
           ditto "$GATEWAY_SRC" "$GATEWAY_DST"
           if [ -d "$DST/LoginItems" ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]; then
             SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
+            NODE_ENTITLEMENTS="$SRCROOT/TronNode.entitlements"
+            test -f "$NODE_ENTITLEMENTS" || { echo "Missing Node runtime entitlements at $NODE_ENTITLEMENTS" >&2; exit 1; }
             find "$GATEWAY_DST" -type f \( -perm -111 -o -name '*.node' \) | while IFS= read -r NATIVE; do
               if file "$NATIVE" | grep -q 'Mach-O'; then
-                codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$NATIVE"
+                if [ "$NATIVE" = "$GATEWAY_DST/runtime/node-arm64" ] \
+                  || [ "$NATIVE" = "$GATEWAY_DST/runtime/node-x64" ]; then
+                  codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none \
+                    --entitlements "$NODE_ENTITLEMENTS" "$NATIVE"
+                else
+                  codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$NATIVE"
+                fi
               fi
             done
             for HELPER in "$DST"/LoginItems/*.app; do
@@ -158,6 +166,7 @@ schemes:
         TRON_PROJECT_ROOT: "$(SRCROOT)/../.."
         TRON_MAC_INSTALL_MODE: isolated
         TRON_HOME_NAME: ".tron-dev"
+        TRON_AGENT_DIR_NAME: "agent-dev"
     test:
       config: Debug
       environmentVariables:

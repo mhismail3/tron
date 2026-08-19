@@ -78,6 +78,11 @@ struct TronMacApp: App {
 }
 
 enum TronMacRuntime {
+    static func menuBarMode(onboarded: Bool, canManage: Bool) -> AppMode {
+        guard canManage else { return .companion }
+        return onboarded ? .menuBarOnly : .wizard
+    }
+
     /// Xcode has exposed different test-host markers across XCTest,
     /// Swift Testing, and runner generations. Treat any known marker as
     /// a test host so CI never boots wizard/menu side effects just to run
@@ -131,13 +136,15 @@ struct RootView: View {
                 WizardView()
             case .menuBarOnly:
                 MenuBarHostView()
+            case .companion:
+                CompanionHostView()
             }
         }
         .task(id: mode) {
             switch mode {
             case .loading:
                 let onboarded = setup.onboardedSentinelExists()
-                mode = onboarded ? .menuBarOnly : .wizard
+                mode = TronMacRuntime.menuBarMode(onboarded: onboarded, canManage: setup.canManageLaunchAgent)
             case .wizard:
                 NSApp.setActivationPolicy(.regular)
                 NSApp.activate(ignoringOtherApps: true)
@@ -150,6 +157,10 @@ struct RootView: View {
                 NSApp.windows.first?.makeKeyAndOrderFront(nil)
             case .menuBarOnly:
                 NSApp.setActivationPolicy(.accessory)
+            case .companion:
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.windows.first?.makeKeyAndOrderFront(nil)
             }
         }
     }
@@ -159,6 +170,7 @@ enum AppMode: Equatable {
     case loading
     case wizard
     case menuBarOnly
+    case companion
 }
 
 /// Visible only in menu-bar mode. Renders a 1×1 hidden placeholder so
@@ -173,6 +185,27 @@ struct MenuBarHostView: View {
                     window.orderOut(nil)
                 }
             }
+    }
+}
+
+struct CompanionHostView: View {
+    @Environment(\.environmentSetup) private var setup
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Tron Debug Companion", systemImage: "hammer.circle.fill")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(Color.tronEmerald)
+            Text("This debug wrapper observes the production Gateway on port \(setup.serverPort).")
+                .foregroundStyle(.primary)
+            Text("Production ownership remains with /Applications/Tron.app. This window does not install a second menu-bar item or restart the production service.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(28)
+        .frame(width: WizardLayout.width, height: WizardLayout.height, alignment: .topLeading)
+        .background(.regularMaterial)
     }
 }
 
@@ -226,7 +259,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         instanceLock = lock
 
-        if setup.onboardedSentinelExists() {
+        if TronMacRuntime.menuBarMode(
+            onboarded: setup.onboardedSentinelExists(),
+            canManage: setup.canManageLaunchAgent
+        ) == .menuBarOnly {
             installMenuBar(setup: setup, context: .existingOnboardedLaunch)
         }
         // Otherwise the WindowGroup shows WizardView; menu bar is installed

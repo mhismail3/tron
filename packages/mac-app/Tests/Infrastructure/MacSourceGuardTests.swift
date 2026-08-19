@@ -109,6 +109,7 @@ struct MacSourceGuardTests {
             "Sources/Resources/Library/LaunchAgents/com.tron.server.dev.plist"
         )
         #expect(devLaunchAgent.contains("<string>com.tron.server.dev</string>"))
+        #expect(devLaunchAgent.contains("<key>TRON_AGENT_DIR_NAME</key>\n        <string>agent-dev</string>"))
         #expect(
             devLaunchAgent.contains(
                 "<string>Contents/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron</string>"
@@ -136,6 +137,11 @@ struct MacSourceGuardTests {
         #expect(project.contains("- \"Gateway/**\""))
         #expect(project.contains("ditto \"$GATEWAY_SRC\" \"$GATEWAY_DST\""))
         #expect(project.contains("find \"$GATEWAY_DST\" -type f"))
+        #expect(project.contains("NODE_ENTITLEMENTS=\"$SRCROOT/TronNode.entitlements\""))
+        #expect(project.contains("--entitlements \"$NODE_ENTITLEMENTS\""))
+
+        let nodeEntitlements = try Self.read(macRoot, "TronNode.entitlements")
+        #expect(nodeEntitlements.contains("com.apple.security.cs.allow-jit"))
     }
 
     @Test("generated helper payload policy keeps outputs ignored")

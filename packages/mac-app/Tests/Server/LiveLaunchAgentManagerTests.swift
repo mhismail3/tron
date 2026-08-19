@@ -111,6 +111,19 @@ struct LiveLaunchAgentManagerTests {
         )
     }
 
+    @Test("a running helper at an old path is still repaired")
+    func runningStaleRuntimeIsRepaired() {
+        let runtime = LaunchAgentRuntimeInfo(
+            pid: 123,
+            executablePath: "/tmp/old/Tron Agent.app/Contents/MacOS/tron"
+        )
+        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
+            runtimeInfo: runtime,
+            expectedHelperPath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
+            fileExists: { _ in true }
+        ))
+    }
+
     @Test("takeover unregisters stale enabled registration before register")
     func takeoverUnregistersEnabledRegistrationBeforeRegister() {
         #expect(

@@ -74,6 +74,28 @@ struct GatewayProfileStoreTests {
         #expect(tokens.values.isEmpty)
     }
 
+    @Test("legacy profiles fall back to machine identity and remain enabled")
+    func legacyProfileDefaults() throws {
+        let data = Data(#"{"id":"legacy","label":"Legacy","host":"gateway.test","port":9847,"machineId":"machine"}"#.utf8)
+        let decoded = try JSONDecoder.gateway.decode(GatewayProfile.self, from: data)
+        #expect(decoded.id == "legacy")
+        #expect(decoded.machineGroupID == "machine")
+        #expect(decoded.isEnabled)
+    }
+
+    @Test("background disable persists and selection re-enables the profile")
+    func disablePersistence() throws {
+        let first = profile(id: "first", label: "First")
+        let second = profile(id: "second", label: "Second")
+        let metadata = RecordingProfileMetadata(document: .init(profiles: [first, second], selectedProfileID: first.id))
+        let store = GatewayProfileStore(metadata: metadata, tokens: RecordingTokenStore(values: [first.id: "a", second.id: "b"]))
+        try store.setEnabled(false, for: second)
+        #expect(store.profiles.first(where: { $0.id == second.id })?.isEnabled == false)
+        try store.select(second)
+        #expect(store.selected?.isEnabled == true)
+        #expect(throws: GatewayProfileStoreError.self) { try store.setEnabled(false, for: second) }
+    }
+
     @Test("successful replacement commits one selected document and token")
     func successfulReplacement() throws {
         let first = profile(id: "first", label: "First")

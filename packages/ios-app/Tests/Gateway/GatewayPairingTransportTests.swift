@@ -16,9 +16,9 @@ struct GatewayPairingTransportTests {
     func exactRequest() async throws {
         let recorder = PairingHTTPRecorder(response: Self.response(
             status: 200,
-            body: #"{"deviceId":"device-1","token":"secret-token","machineId":"machine-1","machineName":"Runtime Mac"}"#
+            body: #"{"deviceId":"device-1","token":"secret-token","machineId":"machine-1","machineGroupID":"physical-1","machineName":"Runtime Mac"}"#
         ))
-        let pairer = GatewayPairer(transport: recorder.transport)
+        let pairer = GatewayPairer(transport: recorder.transport, uuidSource: { "connection-1" })
 
         let (profile, token) = try await pairer.pair(invitation, deviceName: "Test iPhone")
         let requests = await recorder.requests
@@ -35,11 +35,12 @@ struct GatewayPairingTransportTests {
             "deviceName": .string("Test iPhone"),
         ]))
         #expect(profile == GatewayProfile(
-            id: "machine-1",
+            id: "connection-1",
             label: "Office Mac",
             host: "gateway.test",
             port: 9_847,
             machineId: "machine-1",
+            machineGroupID: "physical-1",
             deviceId: "device-1"
         ))
         #expect(token == "secret-token")
@@ -49,9 +50,9 @@ struct GatewayPairingTransportTests {
     func machineNameFallback() async throws {
         let recorder = PairingHTTPRecorder(response: Self.response(
             status: 200,
-            body: #"{"deviceId":"device-1","token":"secret-token","machineId":"machine-1","machineName":"Runtime Mac"}"#
+            body: #"{"deviceId":"device-1","token":"secret-token","machineId":"machine-1","machineGroupID":"physical-1","machineName":"Runtime Mac"}"#
         ))
-        let pairer = GatewayPairer(transport: recorder.transport)
+        let pairer = GatewayPairer(transport: recorder.transport, uuidSource: { "connection-2" })
         let unlabeledInvitation = PairingInvitation(
             host: invitation.host,
             port: invitation.port,

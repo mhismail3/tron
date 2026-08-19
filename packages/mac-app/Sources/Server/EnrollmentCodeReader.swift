@@ -19,9 +19,18 @@ enum EnrollmentCodeReader {
               let document = try? JSONDecoder().decode(Document.self, from: data),
               document.version == 1,
               !document.machineId.isEmpty,
-              let expires = ISO8601DateFormatter().date(from: document.expiresAt),
+              let expires = expirationDate(from: document.expiresAt),
               expires > now else { return nil }
         let code = document.code.trimmingCharacters(in: .whitespacesAndNewlines)
         return (8...32).contains(code.count) ? code : nil
+    }
+
+    private static func expirationDate(from value: String) -> Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) {
+            return date
+        }
+        return ISO8601DateFormatter().date(from: value)
     }
 }

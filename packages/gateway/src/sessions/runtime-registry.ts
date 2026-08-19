@@ -71,6 +71,7 @@ export class RuntimeRegistry {
   private readonly catalogAcquisitionMutex = new AsyncMutex();
   private readonly blobs: BlobStore;
   private readonly markers: RunMarkerStore;
+  private readonly configuredSessionDir: string | undefined;
   private interrupted = new Set<string>();
   private readonly subscribers = new Map<string, Set<string>>();
   // A reservation is intentionally separate from slot ownership. Acquiring or
@@ -107,6 +108,11 @@ export class RuntimeRegistry {
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
     this.markers = new RunMarkerStore(options.tronHome);
+    this.configuredSessionDir = SettingsManager.create(
+      process.cwd(),
+      options.agentDir,
+      { projectTrusted: false },
+    ).getSessionDir();
     for (const [name, value] of Object.entries(this.catalogDiscoveryLimits())) {
       if (!Number.isSafeInteger(value) || value < 1) throw new Error(`Invalid session catalog ${name} bound`);
     }
@@ -205,7 +211,7 @@ export class RuntimeRegistry {
   }
 
   private configuredSessionDirectory(): string | undefined {
-    return SettingsManager.create(process.cwd(), this.options.agentDir, { projectTrusted: false }).getSessionDir();
+    return this.configuredSessionDir;
   }
 
   private sessionDirectoryFor(cwd: string): string {

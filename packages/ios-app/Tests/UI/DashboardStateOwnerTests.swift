@@ -19,6 +19,27 @@ struct DashboardStateOwnerTests {
         #expect(!admittedDuplicate)
     }
 
+    @MainActor
+    @Test("dashboard admits only one enabled profile per physical machine group")
+    func sameMachineAdmission() {
+        let selected = GatewayProfile(id: "prod", label: "Production", host: "mac", port: 9847, machineId: "runtime-prod", machineGroupID: "physical", deviceId: "device")
+        let dev = GatewayProfile(id: "dev", label: "Dev", host: "mac", port: 9848, machineId: "runtime-dev", machineGroupID: "physical", deviceId: "device")
+        let other = GatewayProfile(id: "other", label: "Other", host: "other-mac", port: 9847, machineId: "runtime-other", machineGroupID: "other-physical", deviceId: "device")
+        #expect(!DashboardGatewayConnectionPool.shouldAdmit(dev, selectedProfileID: selected.id, selectedMachineGroupID: selected.machineGroupID))
+        #expect(DashboardGatewayConnectionPool.shouldAdmit(other, selectedProfileID: selected.id, selectedMachineGroupID: selected.machineGroupID))
+        var disabled = other
+        disabled.isEnabled = false
+        #expect(!DashboardGatewayConnectionPool.shouldAdmit(disabled, selectedProfileID: selected.id, selectedMachineGroupID: selected.machineGroupID))
+        let legacy = GatewayProfile(id: "legacy", label: "Legacy", host: "legacy-mac", port: 9847, machineId: "legacy-runtime", deviceId: "device")
+        #expect(!DashboardGatewayConnectionPool.shouldAdmit(legacy, selectedProfileID: selected.id, selectedMachineGroupID: selected.machineGroupID))
+        let sameGroupOther = GatewayProfile(id: "other-dev", label: "Other Dev", host: "other-mac", port: 9848, machineId: "runtime-other-dev", machineGroupID: "other-physical", deviceId: "device")
+        #expect(DashboardGatewayConnectionPool.admittedProfileIDs(
+            [dev, other, sameGroupOther],
+            selectedProfileID: selected.id,
+            selectedMachineGroupID: selected.machineGroupID
+        ) == Set([other.id]))
+    }
+
     @Test("server filter defaults to all and preserves explicit selections")
     func serverFilterSelection() {
         var filter = DashboardServerFilterState()

@@ -77,7 +77,16 @@ enum MacAppStartupMaintenance {
             canManageLaunchAgent: setup.canManageLaunchAgent,
             onboarded: onboarded
         ) {
-            return .skipped(reason)
+            guard reason == .versionAlreadyRecorded else { return .skipped(reason) }
+            let health = await ServerHealthAwaiter.waitForHealthy(
+                token: setup.readBearerToken(),
+                attempts: 1,
+                delayNanoseconds: 0,
+                pingServer: setup.pingServer
+            )
+            if case .success = health { return .skipped(reason) }
+            // A same-version wrapper launch still repairs a stale or unhealthy
+            // LaunchAgent; the version marker is not a health assertion.
         }
 
         await MainActor.run {

@@ -6,7 +6,32 @@ struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
     let host: String
     let port: Int
     let machineId: String
+    var machineGroupID: String
     var deviceId: String? = nil
+    var isEnabled: Bool = true
+
+    init(id: String, label: String, host: String, port: Int, machineId: String,
+         machineGroupID: String? = nil, deviceId: String? = nil, isEnabled: Bool = true) {
+        self.id = id; self.label = label; self.host = host; self.port = port
+        self.machineId = machineId; self.machineGroupID = machineGroupID ?? machineId
+        self.deviceId = deviceId; self.isEnabled = isEnabled
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, label, host, port, machineId, machineGroupID, deviceId, isEnabled }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try values.decode(String.self, forKey: .id),
+            label: try values.decode(String.self, forKey: .label),
+            host: try values.decode(String.self, forKey: .host),
+            port: try values.decode(Int.self, forKey: .port),
+            machineId: try values.decode(String.self, forKey: .machineId),
+            machineGroupID: try values.decodeIfPresent(String.self, forKey: .machineGroupID),
+            deviceId: try values.decodeIfPresent(String.self, forKey: .deviceId),
+            isEnabled: try values.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        )
+    }
 
     var hasValidEndpoint: Bool {
         PairingInvitationParser.canonicalHost(host) != nil
@@ -90,6 +115,7 @@ struct PairingResponse: Decodable, Sendable {
     let deviceId: String
     let token: String
     let machineId: String
+    let machineGroupID: String?
     let machineName: String
 }
 
@@ -98,6 +124,7 @@ enum GatewayPairingPolicy {
 }
 
 struct GatewayPairer: Sendable {
+    private let uuidSource: @Sendable () -> String
     private struct PairingRequest: Encodable {
         let code: String
         let deviceName: String
@@ -107,8 +134,9 @@ struct GatewayPairer: Sendable {
 
     private let transport: HTTPDataTransport
 
-    init(transport: HTTPDataTransport = .urlSession) {
+    init(transport: HTTPDataTransport = .urlSession, uuidSource: @escaping @Sendable () -> String = { UUID().uuidString }) {
         self.transport = transport
+        self.uuidSource = uuidSource
     }
 
     func pair(_ invitation: PairingInvitation, deviceName: String) async throws -> (GatewayProfile, String) {
@@ -139,11 +167,12 @@ struct GatewayPairer: Sendable {
         }
         let paired = try JSONDecoder.gateway.decode(PairingResponse.self, from: data)
         let profile = GatewayProfile(
-            id: paired.machineId,
+            id: uuidSource(),
             label: invitation.label ?? paired.machineName,
             host: invitation.host,
             port: invitation.port,
             machineId: paired.machineId,
+            machineGroupID: paired.machineGroupID,
             deviceId: paired.deviceId
         )
         return (profile, paired.token)

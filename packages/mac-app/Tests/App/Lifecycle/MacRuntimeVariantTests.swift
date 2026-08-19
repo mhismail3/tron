@@ -75,6 +75,14 @@ struct MacCommandLineModeTests {
 
 @Suite("TronMacRuntime")
 struct TronMacRuntimeTests {
+    @Test("only managed onboarded wrappers install a menu bar")
+    func menuBarOwnership() {
+        #expect(TronMacRuntime.menuBarMode(onboarded: false, canManage: true) == .wizard)
+        #expect(TronMacRuntime.menuBarMode(onboarded: true, canManage: true) == .menuBarOnly)
+        #expect(TronMacRuntime.menuBarMode(onboarded: false, canManage: false) == .companion)
+        #expect(TronMacRuntime.menuBarMode(onboarded: true, canManage: false) == .companion)
+    }
+
     @Test("test-host detection accepts Xcode test environment markers")
     func testHostDetectionMarkers() {
         #expect(TronMacRuntime.isRunningUnderTests(environment: ["TRON_MAC_TEST_HOST": "1"]))

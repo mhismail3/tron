@@ -30,6 +30,7 @@ final class DashboardGatewayConnectionPool {
     weak var delegate: (any DashboardGatewayConnectionPoolDelegate)?
     private var entries: [String: Entry] = [:]
     private var generation = 0
+    private var retirementTask: Task<Void, Never>?
 
     func reconcile(
         profiles: [GatewayProfile],
@@ -37,7 +38,13 @@ final class DashboardGatewayConnectionPool {
         token: (GatewayProfile) -> String?
     ) {
         generation &+= 1
-        let desired = profiles.filter { $0.id != selectedProfileID && token($0) != nil }
+        let selectedGroup = profiles.first(where: { $0.id == selectedProfileID })?.machineGroupID
+        let admittedIDs = Self.admittedProfileIDs(
+            profiles,
+            selectedProfileID: selectedProfileID,
+            selectedMachineGroupID: selectedGroup
+        )
+        let desired = profiles.filter { admittedIDs.contains($0.id) && token($0) != nil }
         let desiredIDs = Set(desired.map(\.id))
         for profileID in Array(entries.keys) {
             guard let profile = desired.first(where: { $0.id == profileID }),
@@ -57,7 +64,17 @@ final class DashboardGatewayConnectionPool {
 
     func retire() {
         generation &+= 1
-        for profileID in Array(entries.keys) { stop(profileID: profileID) }
+        let clients = Array(entries.values).map(\.client)
+        for profileID in Array(entries.keys) { stop(profileID: profileID, close: false) }
+        let previous = retirementTask
+        retirementTask = Task { @MainActor in
+            await previous?.value
+            for client in clients { await client.close() }
+        }
+    }
+
+    func waitForRetirement() async {
+        await retirementTask?.value
     }
 
     func refreshAll() async {
@@ -72,6 +89,36 @@ final class DashboardGatewayConnectionPool {
 
     func state(for profileID: String) -> DashboardServerConnectionState? {
         entries[profileID]?.state
+    }
+
+    nonisolated static func shouldAdmit(
+        _ profile: GatewayProfile,
+        selectedProfileID: String?,
+        selectedMachineGroupID: String?
+    ) -> Bool {
+        profile.id != selectedProfileID
+            && profile.isEnabled
+            // Older stored profiles use machineId as a provisional group.
+            // Select once to handshake and persist the real physical group
+            // before allowing a secondary background connection.
+            && profile.machineGroupID != profile.machineId
+            && profile.machineGroupID != selectedMachineGroupID
+    }
+
+    nonisolated static func admittedProfileIDs(
+        _ profiles: [GatewayProfile],
+        selectedProfileID: String?,
+        selectedMachineGroupID: String?
+    ) -> Set<String> {
+        var groups = Set<String>()
+        return Set(profiles.compactMap { profile in
+            guard shouldAdmit(
+                profile,
+                selectedProfileID: selectedProfileID,
+                selectedMachineGroupID: selectedMachineGroupID
+            ), groups.insert(profile.machineGroupID).inserted else { return nil }
+            return profile.id
+        })
     }
 
     private func start(profile: GatewayProfile, token: String?, generation: Int) {
@@ -97,7 +144,7 @@ final class DashboardGatewayConnectionPool {
                 guard let self, let connectionID,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
                 self.entries[profile.id]?.connectionID = connectionID
-                self.entries[profile.id]?.state = .connected
+                self.entries[profile.id]?.state = .connecting
                 self.publish(profileID: profile.id)
                 await self.refresh(
                     profileID: profile.id,
@@ -127,12 +174,12 @@ final class DashboardGatewayConnectionPool {
         entries[profile.id]?.task = task
     }
 
-    private func stop(profileID: String) {
+    private func stop(profileID: String, close: Bool = true) {
         guard let entry = entries.removeValue(forKey: profileID) else { return }
         entry.task?.cancel()
         entry.refreshTask?.cancel()
         entry.reconnectTask?.cancel()
-        Task { await entry.client.close() }
+        if close { Task { await entry.client.close() } }
         delegate?.dashboardPoolDidUpdate(profileID: profileID, sessions: [], state: .stale)
     }
 
@@ -178,40 +225,48 @@ final class DashboardGatewayConnectionPool {
             }
         case "session.listChanged":
             scheduleRefresh(profileID: profileID, generation: generation)
-        case "transport.disconnected", "system.stopping":
+        case "transport.disconnected":
             entries[profileID]?.state = .offline
             publish(profileID: profileID)
             scheduleReconnect(profileID: profileID, generation: generation)
+        case "system.stopping":
+            entries[profileID]?.state = .offline
+            publish(profileID: profileID)
+            scheduleReconnect(profileID: profileID, generation: generation, immediate: true)
         default:
             break
         }
     }
 
-    private func scheduleReconnect(profileID: String, generation: Int) {
-        guard let entry = entries[profileID], entry.generation == generation,
-              entry.reconnectTask == nil else { return }
+    private func scheduleReconnect(profileID: String, generation: Int, immediate: Bool = false) {
+        guard let entry = entries[profileID], entry.generation == generation else { return }
+        if immediate, let existing = entry.reconnectTask {
+            existing.cancel()
+            entries[profileID]?.reconnectTask = nil
+        }
+        guard entries[profileID]?.reconnectTask == nil else { return }
         let task = Task { @MainActor [weak self] in
-            var delay: Duration = .seconds(2)
+            var delay: Duration = immediate ? .zero : .seconds(2)
             while !Task.isCancelled {
-                try? await Task.sleep(for: delay)
+                if delay > .zero { try? await Task.sleep(for: delay) }
                 guard !Task.isCancelled, let self,
                       let entry = self.entries[profileID],
                       entry.generation == generation else { return }
                 do {
                     _ = try await entry.client.reconnect()
                     guard self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
-                    self.entries[profileID]?.state = .connected
+                    self.entries[profileID]?.state = .connecting
                     self.publish(profileID: profileID)
                     let connectionID = await entry.client.activeConnectionID()
                     guard let connectionID,
                           self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     self.entries[profileID]?.connectionID = connectionID
+                    self.entries[profileID]?.reconnectTask = nil
                     await self.refresh(
                         profileID: profileID,
                         generation: generation,
                         expectedConnectionID: connectionID
                     )
-                    self.entries[profileID]?.reconnectTask = nil
                     return
                 } catch is CancellationError {
                     return

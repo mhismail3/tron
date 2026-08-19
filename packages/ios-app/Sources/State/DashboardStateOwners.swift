@@ -38,6 +38,9 @@ enum DashboardServerConnectionState: Equatable, Sendable {
     case connected
     case offline
     case stale
+    case blocked
+    case needsVerification
+    case disabled
 
     var label: String {
         switch self {
@@ -45,6 +48,9 @@ enum DashboardServerConnectionState: Equatable, Sendable {
         case .connected: "Connected"
         case .offline: "Offline"
         case .stale: "Cached"
+        case .blocked: "Blocked (same Mac)"
+        case .needsVerification: "Select to identify"
+        case .disabled: "Disabled"
         }
     }
 }

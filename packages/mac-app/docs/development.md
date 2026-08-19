@@ -26,6 +26,12 @@ The script:
 5. compiles `tron-gateway-launcher.c` as a universal macOS executable;
 6. stages the launcher into both tracked Login Item skeletons.
 
+The Xcode post-build signing phase signs the embedded Node runtimes with
+`TronNode.entitlements`. Node executes V8 JIT code, so the
+`com.apple.security.cs.allow-jit` entitlement is required when the runtime is
+sealed by the hardened runtime. Native Gateway modules and Login Items remain
+signed without that extra entitlement.
+
 Useful iteration options:
 
 ```bash
@@ -52,11 +58,17 @@ The build fails closed if staging cannot complete (for example, if the
 machine lacks the development Node/npm toolchain or network access). A
 completed app contains the Gateway entrypoint, production `node_modules`, and
 both arm64/x64 Node runtimes, so the installed app does not consult `PATH`, a
-user's nvm installation, or a global Pi command.
+user's nvm installation, or a global Pi command. Release validation must also
+execute the signed embedded runtime, not only check that the binary is present;
+a hardened Node runtime without its JIT entitlement exits before the Gateway
+can bind its port.
 
-Use `TronMac Isolated Install` to own `com.tron.server.dev`, `~/.tron-dev`, and
-port 9848 without replacing the installed production app. Ordinary Debug runs
-are companions and do not manage production registration.
+Use `TronMac Isolated Install` to own `com.tron.server.dev`, `~/.tron-dev`,
+`~/.pi/agent-dev`, and port 9848 without replacing the installed production app.
+The isolated Gateway shares only the physical-machine group hint stored at
+`~/.tron-machine-group-id`; it does not share canonical JSONL sessions or
+credentials. Ordinary Debug runs as a regular companion window and do not
+install a second production menu-bar item or manage production registration.
 
 ## Efficient focused tests
 

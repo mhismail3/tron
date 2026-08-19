@@ -54,6 +54,14 @@ struct SessionSummaryPresentationTests {
         #expect(SessionSummary.dashboardSessions([decoded]).map(\.id) == ["legacy"])
     }
 
+    @Test("equal session IDs from different gateways retain distinct dashboard identities")
+    func profileQualifiedIdentity() {
+        let first = session("same").withGatewaySource(id: "production", label: "Mac")
+        let second = session("same").withGatewaySource(id: "dev", label: "Mac (Dev)")
+        #expect(first.id == second.id)
+        #expect(first.dashboardID != second.dashboardID)
+    }
+
     @Test("dashboard hides classified subagents but retains ordinary user forks")
     func dashboardVisibility() {
         let parent = session("parent")

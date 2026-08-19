@@ -10,6 +10,7 @@ enum TronPaths {
 
     static let tronDataDirEnv = "TRON_DATA_DIR"
     static let tronHomeNameEnv = "TRON_HOME_NAME"
+    static let agentDirNameEnv = "TRON_AGENT_DIR_NAME"
     static let isolatedInstallModeEnv = "TRON_MAC_INSTALL_MODE"
     static let isolatedInstallModeValue = "isolated"
     static let productionLaunchAgentLabel = "com.tron.server"
@@ -149,13 +150,30 @@ enum TronPaths {
 
     static func launchAgentEnvironmentVariables(environment: [String: String]) -> [String: String] {
         if isIsolatedInstallMode(environment: environment) {
-            return [tronHomeNameEnv: ".tron-dev"]
+            return [
+                tronHomeNameEnv: ".tron-dev",
+                agentDirNameEnv: "agent-dev",
+            ]
         }
         return [:]
     }
 
     static var canManageLaunchAgent: Bool {
-        MacRuntimeVariant.detect().canManageLaunchAgent(isIsolatedInstallMode: isIsolatedInstallMode())
+        canManageLaunchAgent(environment: ProcessInfo.processInfo.environment)
+    }
+
+    static func canManageLaunchAgent(environment: [String: String]) -> Bool {
+        guard MacRuntimeVariant.detect().canManageLaunchAgent(
+            isIsolatedInstallMode: isIsolatedInstallMode(environment: environment)
+        ) else { return false }
+        if isIsolatedInstallMode(environment: environment) {
+            return environment[tronDataDirEnv] == nil
+                && (environment[tronHomeNameEnv] == nil || environment[tronHomeNameEnv] == ".tron-dev")
+                && (environment[agentDirNameEnv] == nil || environment[agentDirNameEnv] == "agent-dev")
+        }
+        return environment[tronDataDirEnv] == nil
+            && environment[tronHomeNameEnv] == nil
+            && environment[agentDirNameEnv] == nil
     }
     static var agentBundleName: String {
         agentBundleName(environment: ProcessInfo.processInfo.environment)

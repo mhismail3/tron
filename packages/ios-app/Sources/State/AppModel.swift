@@ -148,6 +148,9 @@ final class AppModel {
     var customModelInvalidationGeneration: Int { customModelConfiguration.invalidationGeneration }
     var trustRevision: Int { settingsTrust.trustRevision }
     var pairedDevices: [PairedDevice] = []
+    /// GatewayProfileStore owns transactional persistence; this revision makes
+    /// profile metadata changes observable to SwiftUI without duplicating it.
+    private(set) var profileRevision = 0
     var legacyImportAvailable = false
     var legacyImportedCount = 0
     var workspace: WorkspaceListing?
@@ -576,16 +579,25 @@ final class AppModel {
     }
 
     var dashboardServerSources: [DashboardServerSource] {
-        profiles.profiles.map { profile in
+        _ = profileRevision
+        return profiles.profiles.map { profile in
             let sourceSessions = dashboardSessionsByProfile[profile.id] ?? []
             let state: DashboardServerConnectionState
-            if profiles.selected?.id == profile.id {
+            if !profile.isEnabled {
+                state = .disabled
+            } else if profiles.selected?.id == profile.id {
                 switch connectionState {
                 case .connected: state = .connected
                 case .connecting, .reconnecting: state = .connecting
                 case .offline: state = .offline
                 case .unpaired, .unauthorized: state = .stale
                 }
+            } else if profile.machineGroupID == profile.machineId {
+                state = .needsVerification
+            } else if profiles.profiles.contains(where: {
+                $0.id != profile.id && $0.isEnabled && $0.machineGroupID == profile.machineGroupID
+            }) {
+                state = .blocked
             } else {
                 state = dashboardStatesByProfile[profile.id] ?? .stale
             }
@@ -599,6 +611,7 @@ final class AppModel {
     }
 
     var visibleSessions: [SessionSummary] {
+        _ = profileRevision
         let projected = dashboardSessionsByProfile.values.flatMap { $0 }
         let values = projected.isEmpty ? sessions : projected
         return SessionSummary.dashboardSessions(values).sorted { $0.updatedAt > $1.updatedAt }
@@ -659,7 +672,12 @@ final class AppModel {
     func becameActive() -> Task<Void, Never>? {
         sceneAllowsCatalogRefresh = true
         let task = lifecycle.becameActive()
-        reconcileDashboardConnections()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.dashboardConnections.waitForRetirement()
+            guard self.sceneAllowsCatalogRefresh else { return }
+            self.reconcileDashboardConnections()
+        }
         return task
     }
 
@@ -675,8 +693,19 @@ final class AppModel {
     }
 
     func pair(_ invitation: PairingInvitation, selectingProfile: Bool = true) async throws {
-        try await lifecycle.pair(invitation, selectingProfile: selectingProfile)
-        if !selectingProfile { reconcileDashboardConnections() }
+        do {
+            try await lifecycle.pair(invitation, selectingProfile: selectingProfile)
+        } catch {
+            // The credential commit can succeed immediately before a later
+            // handshake/projection failure. Reconcile the old pool even when
+            // pairing reports failure so two same-machine profiles never stay
+            // live after a partial selection transition.
+            profileRevision &+= 1
+            reconcileDashboardConnections()
+            throw error
+        }
+        profileRevision &+= 1
+        reconcileDashboardConnections()
     }
 
     private func admitsLifecycle(_ admission: GatewayLifecycleCoordinator.Admission) -> Bool {
@@ -718,7 +747,23 @@ final class AppModel {
     }
 
     func switchGateway(_ profile: GatewayProfile) async {
+        // A profile may have been a shallow dashboard connection. Retire its
+        // old pool projection before it becomes the focused catalog owner.
+        dashboardSessionsByProfile[profile.id] = nil
+        dashboardStatesByProfile[profile.id] = nil
         await lifecycle.switchGateway(profile)
+        profileRevision &+= 1
+        reconcileDashboardConnections()
+    }
+
+    func setGatewayEnabled(_ enabled: Bool, profile: GatewayProfile) {
+        do {
+            try profiles.setEnabled(enabled, for: profile)
+            profileRevision &+= 1
+            reconcileDashboardConnections()
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 
     func forgetCurrentGateway() async {
@@ -728,6 +773,8 @@ final class AppModel {
                 composerDrafts.removeProfile(forgottenProfileID)
                 await cache.remove(profileID: forgottenProfileID)
             }
+            profileRevision &+= 1
+            reconcileDashboardConnections()
             setupComplete = false
         }
     }
@@ -962,6 +1009,8 @@ final class AppModel {
                await lifecycle.forget(profile: profile) {
                 composerDrafts.removeProfile(profile.id)
                 await cache.remove(profileID: profile.id)
+                profileRevision &+= 1
+                reconcileDashboardConnections()
                 setupComplete = false
             }
         }
@@ -1804,7 +1853,7 @@ final class AppModel {
             lifecycle.noteDisconnected(connectionID: connectionID)
             invalidateSessionConnectionOwnership()
             sessionCatalog.markDisconnected()
-            lifecycle.requestReconnect()
+            lifecycle.requestReconnect(immediate: event.topic == "system.stopping", replaceExisting: event.topic == "system.stopping")
         case "transport.resyncRequired":
             await sessionPresentation.handleResyncRequired(sessionID: event.sessionId)
         case "session.summary":
@@ -1886,16 +1935,47 @@ final class AppModel {
         }
     }
 
+    private func adoptConnectedGatewayIdentity() {
+        guard let profile = profiles.selected,
+              let info = gatewayInfo,
+              info.machineId == profile.machineId,
+              profile.machineGroupID == profile.machineId,
+              info.machineGroupID != profile.machineGroupID else { return }
+        var updated = profile
+        updated.machineGroupID = info.machineGroupID
+        do {
+            try profiles.update(updated)
+            profileRevision &+= 1
+        } catch {
+            // Group identity is a presentation-side safety hint. Keep the
+            // authenticated runtime usable if metadata repair is unavailable.
+            lastError = error.localizedDescription
+        }
+    }
+
     private func reconcileDashboardConnections() {
         dashboardCacheLoadGeneration &+= 1
         let cacheGeneration = dashboardCacheLoadGeneration
         let selectedProfileID = profiles.selected?.id
+        let selectedGroup = profiles.selected?.machineGroupID
+        let admittedDashboardIDs = DashboardGatewayConnectionPool.admittedProfileIDs(
+            profiles.profiles,
+            selectedProfileID: selectedProfileID,
+            selectedMachineGroupID: selectedGroup
+        )
+        let excluded = profiles.profiles.filter { profile in
+            profile.id != selectedProfileID && !admittedDashboardIDs.contains(profile.id)
+        }
+        for profile in excluded {
+            dashboardSessionsByProfile[profile.id] = nil
+            dashboardStatesByProfile[profile.id] = nil
+        }
         dashboardConnections.reconcile(
             profiles: profiles.profiles,
             selectedProfileID: selectedProfileID,
             token: { [profiles] profile in profiles.token(for: profile) }
         )
-        for profile in profiles.profiles where profile.id != selectedProfileID {
+        for profile in profiles.profiles where profile.id != selectedProfileID && !excluded.contains(where: { $0.id == profile.id }) {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let cached = await self.cache.load(profileID: profile.id)
@@ -2148,8 +2228,18 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {
         guard admitsLifecycle(admission) else { return }
-        await refreshAll()
+        adoptConnectedGatewayIdentity()
+        async let sessionLoad = refreshSessions()
+        async let providerLoad = refreshProviders(target: .global)
+        async let settingLoad = refreshSettings(target: .global)
+        async let deviceLoad = refreshDevices()
+        let sessionOutcome = await sessionLoad
+        _ = await (providerLoad, settingLoad, deviceLoad)
         guard admitsLifecycle(admission) else { return }
+        if sessionOutcome == .transportFailure {
+            lifecycle.noteProjectionFailure(admission)
+            return
+        }
         reconcileDashboardConnections()
     }
 
@@ -2174,7 +2264,15 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         async let catalog = refreshSessions()
         await sessionPresentation.reconnectMountedPresentation()
         await terminal.reattach(admission: admission)
-        _ = await catalog
+        let outcome = await catalog
+        if outcome == .transportFailure {
+            throw GatewayFailure(
+                code: "disconnected",
+                message: "The Mac gateway did not provide a fresh session catalog.",
+                retryable: true,
+                details: nil
+            )
+        }
         reconcileDashboardConnections()
         try requireLifecycle(admission)
     }
@@ -2192,6 +2290,8 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
 
         invalidateProfileScopedLoads()
+        dashboardConnections.retire()
+        await dashboardConnections.waitForRetirement()
         invalidateSessionConnectionOwnership()
         clearGatewayProjection()
 

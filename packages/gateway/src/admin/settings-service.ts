@@ -111,6 +111,7 @@ export class SettingsService {
   constructor(
     private readonly agentDir: string,
     private readonly modelRuntime: ModelRuntime,
+    private readonly allowSessionDirectoryChange = true,
   ) {}
 
   get(cwd: string, projectTrusted = false): Record<string, unknown> {
@@ -293,7 +294,16 @@ export class SettingsService {
     if ("shellPath" in patch) setNullable(next, "shellPath", nullableString(patch.shellPath, "shellPath", 4_096));
     if ("shellCommandPrefix" in patch) setNullable(next, "shellCommandPrefix", nullableString(patch.shellCommandPrefix, "shellCommandPrefix", 4_096));
     if ("npmCommand" in patch) setNullable(next, "npmCommand", patch.npmCommand === null ? null : arrayOfStrings(patch.npmCommand, "npmCommand", 20));
-    if ("sessionDir" in patch) setNullable(next, "sessionDir", nullableString(patch.sessionDir, "sessionDir", 4_096));
+    if ("sessionDir" in patch) {
+      if (!this.allowSessionDirectoryChange) {
+        throw new GatewayError(
+          "conflict",
+          "Change sessionDir only while the Gateway is stopped; restart is required before a new canonical session directory can be used.",
+          false,
+        );
+      }
+      setNullable(next, "sessionDir", nullableString(patch.sessionDir, "sessionDir", 4_096));
+    }
     for (const key of ["extensions", "skills", "prompts", "themes"] as const) {
       if (key in patch) next[key] = arrayOfStrings(patch[key], key, 500);
     }
