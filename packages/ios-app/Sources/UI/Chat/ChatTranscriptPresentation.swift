@@ -112,8 +112,11 @@ struct ExtensionWidgetGroup: Identifiable, Hashable, Sendable {
     let items: [ChatExtensionWidgetItem]
     let statuses: [ExtensionActivityStatus]
     let services: [ExtensionActivityServiceItem]
+    let activities: [ExtensionRunActivity]
 
     var isWidgetGroup: Bool { !items.isEmpty }
+    var liveActivityCount: Int { activities.filter(\.isLive).count + services.filter { $0.status == "Running" }.count }
+    var hasLiveContent: Bool { !items.isEmpty || !statuses.isEmpty || liveActivityCount > 0 }
 }
 
 enum ChatExtensionWidgetPolicy {
@@ -123,6 +126,7 @@ enum ChatExtensionWidgetPolicy {
     static let maximumWidgets = 24
     static let maximumWidgetLines = 200
     static let maximumServiceItems = 24
+    static let maximumActivities = 64
 
     static func bounded(_ value: String, maximum: Int) -> String {
         let clean = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -168,9 +172,15 @@ enum ChatExtensionWidgetPolicy {
             }
     }
 
-    static func groups(_ presentation: ExtensionPresentationState, executions: [ToolExecutionState] = []) -> [ExtensionWidgetGroup] {
+    static func groups(
+        _ presentation: ExtensionPresentationState,
+        executions: [ToolExecutionState] = [],
+        activities: [ExtensionRunActivity] = []
+    ) -> [ExtensionWidgetGroup] {
         let statuses = admittedStatuses(presentation.semanticState.statuses)
-        let services = serviceItems(executions)
+        let admittedActivities = Array(activities.prefix(maximumActivities))
+        let activityToolIDs = Set(admittedActivities.map(\.toolCallId))
+        let services = serviceItems(executions).filter { !activityToolIDs.contains($0.id) }
         var owners: [String: ExtensionOwner] = [:]
         for owner in presentation.semanticState.widgets.compactMap(\.owner) + Array(presentation.semanticState.statusOwners.values) {
             owners[owner.id] = owner
@@ -189,7 +199,8 @@ enum ChatExtensionWidgetPolicy {
 
         func ownerID(_ owner: ExtensionOwner) -> String { "owner:\(owner.id)" }
         func add(_ groupID: String, label: String, item: ChatExtensionWidgetItem? = nil,
-                 status: ExtensionActivityStatus? = nil, serviceItems: [ExtensionActivityServiceItem] = []) {
+                 status: ExtensionActivityStatus? = nil, serviceItems: [ExtensionActivityServiceItem] = [],
+                 activities: [ExtensionRunActivity] = []) {
             let old = groups[groupID]
             groups[groupID] = ExtensionWidgetGroup(
                 id: groupID, label: bounded(old?.label ?? label, maximum: 64),
@@ -199,7 +210,8 @@ enum ChatExtensionWidgetPolicy {
                     guard let status, !existing.contains(where: { $0.key == status.key }) else { return existing }
                     return existing + [status]
                 }(),
-                services: (old?.services ?? []) + serviceItems
+                services: (old?.services ?? []) + serviceItems,
+                activities: (old?.activities ?? []) + activities
             )
         }
 
@@ -230,6 +242,12 @@ enum ChatExtensionWidgetPolicy {
                  item: ChatExtensionWidgetItem(id: "surface-widget:\(surface.id)", content: .surface(surface)), status: status, serviceItems: newServices)
         }
 
+        for activity in admittedActivities {
+            let owner = ownerBySource[activity.source.source]
+            let groupID = owner.map(ownerID) ?? "source:\(activity.source.source)"
+            add(groupID, label: owner?.title ?? humanizedSource(activity.source.source), activities: [activity])
+        }
+
         // Statuses and tools carry public source provenance. Only exact source
         // matches are attributed; unknown values remain one truthful fallback.
         for status in statuses where !matchedStatusKeys.contains(status.key) {
@@ -244,11 +262,38 @@ enum ChatExtensionWidgetPolicy {
         }
 
         let unmatchedStatuses = statuses.filter { !matchedStatusKeys.contains($0.key) }
+        let unmatchedServiceValues = services.filter { !matchedServiceIDs.contains($0.id) }
+        for source in Set(unmatchedServiceValues.map(\.matchingSource)).sorted() {
+            let sourceServices = unmatchedServiceValues.filter { $0.matchingSource == source }
+            add("source:\(source)", label: humanizedSource(source), serviceItems: sourceServices)
+            sourceServices.forEach { matchedServiceIDs.insert($0.id) }
+        }
         let unmatchedServices = services.filter { !matchedServiceIDs.contains($0.id) }
-        if !unmatchedStatuses.isEmpty || !unmatchedServices.isEmpty {
-            groups["activity"] = ExtensionWidgetGroup(id: "activity", label: "Extension activity", items: [], statuses: unmatchedStatuses, services: unmatchedServices)
+        let matchedActivityIDs = Set(groups.values.flatMap(\.activities).map(\.id))
+        let unmatchedActivities = admittedActivities.filter { !matchedActivityIDs.contains($0.id) }
+        if !unmatchedStatuses.isEmpty || !unmatchedServices.isEmpty || !unmatchedActivities.isEmpty {
+            groups["activity"] = ExtensionWidgetGroup(
+                id: "activity", label: "Extension activity", items: [], statuses: unmatchedStatuses,
+                services: unmatchedServices, activities: unmatchedActivities
+            )
         }
         return groups.values.sorted { $0.id < $1.id }
+    }
+
+    static func liveGroups(
+        _ presentation: ExtensionPresentationState,
+        executions: [ToolExecutionState] = [],
+        activities: [ExtensionRunActivity] = []
+    ) -> [ExtensionWidgetGroup] {
+        groups(presentation, executions: executions, activities: activities).compactMap { group in
+            let liveActivities = group.activities.filter(\.isLive)
+            let liveServices = group.services.filter { $0.status == "Running" }
+            guard !group.items.isEmpty || !group.statuses.isEmpty || !liveActivities.isEmpty || !liveServices.isEmpty else { return nil }
+            return ExtensionWidgetGroup(
+                id: group.id, label: group.label, items: group.items, statuses: group.statuses,
+                services: liveServices, activities: liveActivities
+            )
+        }
     }
 
     /// Reverses the host's opaque widget surface identity without relying on a
@@ -278,23 +323,33 @@ enum ChatExtensionWidgetPolicy {
         }.joined(separator: " ")
     }
 
-    static func summary(_ presentation: ExtensionPresentationState, executions: [ToolExecutionState] = []) -> ExtensionActivitySummary? {
+    static func summary(
+        _ presentation: ExtensionPresentationState,
+        executions: [ToolExecutionState] = [],
+        activities: [ExtensionRunActivity] = []
+    ) -> ExtensionActivitySummary? {
         let statuses = admittedStatuses(presentation.semanticState.statuses)
         let items = admittedItems(presentation)
-        let services = serviceItems(executions)
-        guard !statuses.isEmpty || !items.isEmpty || !services.isEmpty else { return nil }
-        let running = services.filter { $0.status == "Running" }.count
+        let activities = Array(activities.prefix(maximumActivities))
+        let activityToolIDs = Set(activities.map(\.toolCallId))
+        let services = serviceItems(executions).filter { !activityToolIDs.contains($0.id) }
+        guard !statuses.isEmpty || !items.isEmpty || !services.isEmpty || !activities.isEmpty else { return nil }
+        let running = services.filter { $0.status == "Running" }.count + activities.filter(\.isLive).count
         let label: String
         if running > 0 { label = running == 1 ? "Extension activity · 1 running" : "Extension activity · \(running) running" }
         else if statuses.count == 1 { label = bounded(statuses[0].value, maximum: 72) }
-        else if items.count == 1 && statuses.isEmpty && services.isEmpty { label = "Extension widget" }
+        else if items.count == 1 && statuses.isEmpty && services.isEmpty && activities.isEmpty { label = "Extension widget" }
         else { label = "Extension activity" }
-        return ExtensionActivitySummary(label: label, statusCount: statuses.count, widgetCount: items.count, serviceCount: services.count, runningServiceCount: running, services: services)
+        return ExtensionActivitySummary(label: label, statusCount: statuses.count, widgetCount: items.count, serviceCount: services.count + activities.count, runningServiceCount: running, services: services)
     }
 
-    static func hasActivity(_ presentation: ExtensionPresentationState, executions: [ToolExecutionState] = []) -> Bool {
+    static func hasActivity(
+        _ presentation: ExtensionPresentationState,
+        executions: [ToolExecutionState] = [],
+        activities: [ExtensionRunActivity] = []
+    ) -> Bool {
         guard ChatExtensionChromePolicy.rendersWidgets else { return false }
-        return summary(presentation, executions: executions) != nil
+        return summary(presentation, executions: executions, activities: activities) != nil
     }
 
     static func visibleWidgets(

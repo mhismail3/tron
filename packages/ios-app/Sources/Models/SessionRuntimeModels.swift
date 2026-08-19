@@ -12,6 +12,48 @@ struct ContextUsage: Codable, Hashable, Sendable {
     let percent: Double?
 }
 
+struct ExtensionRunChild: Codable, Hashable, Identifiable, Sendable {
+    enum Status: String, Codable, Sendable { case running, completed, failed }
+    let id: String
+    let label: String
+    let status: Status
+    let task: String?
+    let lastActivityAt: String?
+    let currentTool: String?
+    let currentToolStartedAt: String?
+    let currentPath: String?
+    let toolCount: Int?
+    let turnCount: Int?
+    let durationMs: Int?
+    let output: String?
+    let children: [ExtensionRunChild]?
+}
+
+struct ExtensionRunActivity: Codable, Hashable, Identifiable, Sendable {
+    enum Status: String, Codable, Sendable { case running, completed, failed }
+    let id: String
+    let runId: String?
+    let toolCallId: String
+    let source: ExtensionToolOrigin
+    let title: String
+    let mode: String?
+    let status: Status
+    let startedAt: String
+    let updatedAt: String
+    let completedAt: String?
+    let lastActivityAt: String?
+    let currentTool: String?
+    let currentToolStartedAt: String?
+    let currentPath: String?
+    let toolCount: Int?
+    let turnCount: Int?
+    let durationMs: Int?
+    let output: String?
+    let children: [ExtensionRunChild]
+
+    var isLive: Bool { status == .running }
+}
+
 struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     enum Status: String, Codable, Sendable { case running, completed, failed }
     let toolCallId: String
@@ -31,6 +73,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
     let durationMs: Int?
     let progressSequence: Int?
     let extensionOrigin: ExtensionToolOrigin?
+    let extensionActivity: ExtensionRunActivity?
     var id: String { toolCallId }
 
     init(
@@ -40,7 +83,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         isError: Bool, startedAt: String, updatedAt: String,
         lastProgressAt: String? = nil, completedAt: String? = nil,
         durationMs: Int? = nil, progressSequence: Int? = nil,
-        extensionOrigin: ExtensionToolOrigin? = nil
+        extensionOrigin: ExtensionToolOrigin? = nil, extensionActivity: ExtensionRunActivity? = nil
     ) {
         self.toolCallId = toolCallId
         self.toolName = toolName
@@ -59,6 +102,7 @@ struct ToolExecutionState: Codable, Hashable, Identifiable, Sendable {
         self.durationMs = durationMs
         self.progressSequence = progressSequence
         self.extensionOrigin = extensionOrigin
+        self.extensionActivity = extensionActivity
     }
 }
 
@@ -131,6 +175,7 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
     var extensionCommand: SessionOperationState? = nil
     var retry: RetryState?
     var toolExecutions: [ToolExecutionState]
+    var extensionActivities: [ExtensionRunActivity]? = nil
     var extensionPresentation: ExtensionPresentationState
     var diagnostics: [RuntimeDiagnostic]
     /// Set only on the disposable offline cache projection. Gateway snapshots

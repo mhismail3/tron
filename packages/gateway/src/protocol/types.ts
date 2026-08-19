@@ -122,6 +122,48 @@ export interface ExtensionToolOrigin {
   source: string;
 }
 
+export type ExtensionRunStatus = "running" | "completed" | "failed";
+
+/** Structured, bounded progress emitted by an extension-owned delegated run.
+ * This is intentionally presentation-neutral: native clients may render it
+ * as a live card while the extension remains the authority for execution. */
+export interface ExtensionRunChild {
+  id: string;
+  label: string;
+  status: ExtensionRunStatus;
+  task?: string;
+  lastActivityAt?: string;
+  currentTool?: string;
+  currentToolStartedAt?: string;
+  currentPath?: string;
+  toolCount?: number;
+  turnCount?: number;
+  durationMs?: number;
+  output?: string;
+  children?: ExtensionRunChild[];
+}
+
+export interface ExtensionRunActivity {
+  id: string;
+  runId?: string;
+  toolCallId: string;
+  source: ExtensionToolOrigin;
+  title: string;
+  mode?: string;
+  status: ExtensionRunStatus;
+  startedAt: string;
+  updatedAt: string;
+  lastActivityAt?: string;
+  currentTool?: string;
+  currentToolStartedAt?: string;
+  currentPath?: string;
+  toolCount?: number;
+  turnCount?: number;
+  durationMs?: number;
+  output?: string;
+  children: ExtensionRunChild[];
+}
+
 export interface ToolExecutionState {
   toolCallId: string;
   toolName: string;
@@ -144,6 +186,8 @@ export interface ToolExecutionState {
   progressSequence: number;
   /** Disposable provenance derived from public Pi sourceInfo; absent means unknown/ambiguous. */
   extensionOrigin?: ExtensionToolOrigin | undefined;
+  /** Optional structured extension-owned run projection for native clients. */
+  extensionActivity?: ExtensionRunActivity;
 }
 
 export interface RetryState {
@@ -401,6 +445,9 @@ export interface SessionSnapshot {
   extensionCommand?: SessionOperationState;
   retry?: RetryState;
   toolExecutions: ToolExecutionState[];
+  /** Bounded recent extension-owned run history. Live entries are also carried
+   * on their owning toolExecution so progress can update without a snapshot. */
+  extensionActivities?: ExtensionRunActivity[];
   extensionPresentation: ExtensionPresentationState;
   diagnostics: Array<{ type: string; message: string }>;
 }

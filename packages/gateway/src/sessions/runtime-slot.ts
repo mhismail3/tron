@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { copyFile, mkdtemp, rm, stat } from "node:fs/promises";
+import { copyFile, mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import {
   AgentSessionRuntime,
@@ -18,6 +19,7 @@ import {
 import { GatewayError } from "../errors.js";
 import type {
   CommandInfo,
+  ExtensionRunActivity,
   ExtensionToolOrigin,
   JsonValue,
   QueuedMessageState,
@@ -53,6 +55,7 @@ import {
 } from "./projection.js";
 import type { RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions } from "../extensions/owner-attribution.js";
+import { extensionRunAsyncDir, projectExtensionRunActivity } from "./extension-run-projection.js";
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
@@ -86,6 +89,7 @@ const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
  * because each payload fully replaces the client's streaming bubble.
  */
 const STREAMING_PROGRESS_FLUSH_MS = 150;
+const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 
 function boundedSummaryText(value: string, maximumBytes = 1_024): string {
   const encoded = Buffer.from(value);
@@ -147,6 +151,11 @@ export class RuntimeSlot {
   private projectTrustReloadOverride: boolean | undefined;
   private trustReloadPending = false;
   private readonly toolExecutions = new Map<string, ToolExecutionState>();
+  /** Bounded, disposable extension-owned run projections retain completed work
+   * for Manage Session while the owning tool carries the live copy. */
+  private readonly extensionActivities = new Map<string, ExtensionRunActivity>();
+  private readonly extensionActivityWatchers = new Map<string, { watcher: FSWatcher; timer: NodeJS.Timeout | undefined; asyncDir: string }>();
+  private readonly extensionActivityReadGenerations = new Map<string, number>();
   /** Bounded runtime timing enriches the mobile projection without changing Pi
    * JSONL. Historical entries without retained metadata use timestamp fallback. */
   private readonly toolMetadata = new Map<string, ToolProjectionMetadata>();
@@ -403,7 +412,11 @@ export class RuntimeSlot {
     });
     this.unsubscribe = session.subscribe((event) => this.onEvent(event));
     const nextId = session.sessionId;
-    if (previousId !== nextId) this.hooks.rekey(previousId, nextId, this);
+    if (previousId !== nextId) {
+      this.clearExtensionActivityWatchers();
+      this.extensionActivities.clear();
+      this.hooks.rekey(previousId, nextId, this);
+    }
     this.revision += 1;
     this.publishSnapshot();
   }
@@ -642,6 +655,10 @@ export class RuntimeSlot {
           now,
           performance.now()
         );
+        const extensionOrigin = this.extensionToolOrigin(event.toolName);
+        const extensionActivity = this.updateExtensionActivity(
+          event.toolCallId, event.toolName, extensionOrigin, "running", startedAt, now, undefined, undefined, durationMs
+        );
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
@@ -654,7 +671,8 @@ export class RuntimeSlot {
           lastProgressAt: now,
           durationMs,
           progressSequence,
-          ...(this.extensionToolOrigin(event.toolName) ? { extensionOrigin: this.extensionToolOrigin(event.toolName) } : {}),
+          ...(extensionOrigin ? { extensionOrigin } : {}),
+          ...(extensionActivity ? { extensionActivity } : {}),
         };
         this.toolExecutions.set(event.toolCallId, state);
         this.rememberToolMetadata(event.toolCallId, state);
@@ -675,6 +693,10 @@ export class RuntimeSlot {
           now,
           performance.now()
         );
+        const extensionOrigin = this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin;
+        const extensionActivity = this.updateExtensionActivity(
+          event.toolCallId, event.toolName, extensionOrigin, "running", startedAt, now, event.partialResult, undefined, durationMs
+        );
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
@@ -694,9 +716,8 @@ export class RuntimeSlot {
           lastProgressAt: now,
           durationMs,
           progressSequence: (existing?.progressSequence ?? 0) + 1,
-          ...(this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin
-            ? { extensionOrigin: this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin }
-            : {}),
+          ...(extensionOrigin ? { extensionOrigin } : {}),
+          ...(extensionActivity ? { extensionActivity } : {}),
         };
         this.toolExecutions.set(event.toolCallId, state);
         this.rememberToolMetadata(event.toolCallId, state);
@@ -716,6 +737,10 @@ export class RuntimeSlot {
           performance.now()
         );
         const output = projectToolOutput(event.result);
+        const extensionOrigin = this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin;
+        const extensionActivity = this.updateExtensionActivity(
+          event.toolCallId, event.toolName, extensionOrigin, event.isError ? "failed" : "completed", startedAt, now, event.result, now, durationMs
+        );
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
@@ -737,9 +762,8 @@ export class RuntimeSlot {
           completedAt: now,
           durationMs,
           progressSequence: (existing?.progressSequence ?? 0) + 1,
-          ...(this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin
-            ? { extensionOrigin: this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin }
-            : {}),
+          ...(extensionOrigin ? { extensionOrigin } : {}),
+          ...(extensionActivity ? { extensionActivity } : {}),
         };
         this.toolExecutions.set(event.toolCallId, state);
         this.rememberToolMetadata(event.toolCallId, state);
@@ -795,6 +819,168 @@ export class RuntimeSlot {
       default:
         break;
     }
+  }
+
+  private extensionArtifactPathAllowed(asyncDir: string): boolean {
+    if (!isAbsolute(asyncDir)) return false;
+    const candidate = resolve(asyncDir);
+    const roots = [resolve(tmpdir()), resolve(this.cwd, ".pi", "subagents")];
+    return roots.some((root) => {
+      const remainder = relative(root, candidate);
+      return remainder === "" || (!remainder.startsWith("..") && !isAbsolute(remainder));
+    });
+  }
+
+  private stopExtensionActivityWatcher(toolCallId: string): void {
+    this.extensionActivityReadGenerations.set(
+      toolCallId,
+      (this.extensionActivityReadGenerations.get(toolCallId) ?? 0) + 1
+    );
+    const tracked = this.extensionActivityWatchers.get(toolCallId);
+    if (!tracked) return;
+    if (tracked.timer) clearTimeout(tracked.timer);
+    tracked.watcher.close();
+    this.extensionActivityWatchers.delete(toolCallId);
+  }
+
+  private clearExtensionActivityWatchers(): void {
+    for (const toolCallId of this.extensionActivityWatchers.keys()) this.stopExtensionActivityWatcher(toolCallId);
+    this.extensionActivityReadGenerations.clear();
+  }
+
+  private artifactTime(value: unknown): string | undefined {
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > 8.64e15) return undefined;
+    return new Date(value).toISOString();
+  }
+
+  private async refreshExtensionActivityFromArtifact(toolCallId: string, asyncDir: string): Promise<void> {
+    const previous = this.extensionActivities.get(toolCallId);
+    if (!previous || this.disposed || !this.extensionArtifactPathAllowed(asyncDir)) return;
+    const generation = (this.extensionActivityReadGenerations.get(toolCallId) ?? 0) + 1;
+    this.extensionActivityReadGenerations.set(toolCallId, generation);
+    try {
+      const statusPath = realpathSync(join(asyncDir, "status.json"));
+      if (!this.extensionArtifactPathAllowed(statusPath)) return;
+      const handle = await open(statusPath, "r");
+      let rawText: string;
+      try {
+        const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+        if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return;
+        rawText = buffer.subarray(0, bytesRead).toString("utf8");
+      } finally {
+        await handle.close();
+      }
+      if (this.disposed || this.extensionActivityReadGenerations.get(toolCallId) !== generation) return;
+      const raw = JSON.parse(rawText) as Record<string, unknown>;
+      const updatedAt = this.artifactTime(raw.lastUpdate) ?? new Date().toISOString();
+      const completedAt = this.artifactTime(raw.endedAt);
+      const durationMs = typeof raw.durationMs === "number" && Number.isSafeInteger(raw.durationMs) && raw.durationMs >= 0
+        ? raw.durationMs
+        : undefined;
+      const activity = projectExtensionRunActivity(raw, {
+        id: previous.id,
+        toolCallId,
+        source: previous.source,
+        title: previous.title,
+        status: previous.status,
+        startedAt: previous.startedAt,
+        updatedAt,
+        ...(completedAt ? { completedAt } : {}),
+        ...(durationMs === undefined ? {} : { durationMs }),
+        previous,
+      });
+      const current = this.extensionActivities.get(toolCallId);
+      if (!current || current.updatedAt > activity.updatedAt) return;
+      this.extensionActivities.delete(toolCallId);
+      this.extensionActivities.set(toolCallId, activity);
+      const tool = this.toolExecutions.get(toolCallId);
+      if (tool) {
+        const nextTool = { ...tool, extensionActivity: activity };
+        this.toolExecutions.set(toolCallId, nextTool);
+        this.publishToolProgress(nextTool, true);
+      }
+      if (activity.status !== "running") this.stopExtensionActivityWatcher(toolCallId);
+      this.scheduleSnapshot();
+    } catch {
+      // The runner may be atomically replacing status.json. The next filesystem
+      // event or the normal runtime snapshot will retry without surfacing noise.
+    }
+  }
+
+  private startExtensionActivityWatcher(toolCallId: string, asyncDir: string): void {
+    if (!this.extensionArtifactPathAllowed(asyncDir)) return;
+    let realAsyncDir: string;
+    try {
+      realAsyncDir = realpathSync(asyncDir);
+    } catch {
+      return;
+    }
+    if (!this.extensionArtifactPathAllowed(realAsyncDir)) return;
+    const existing = this.extensionActivityWatchers.get(toolCallId);
+    if (existing?.asyncDir === realAsyncDir) {
+      void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
+      return;
+    }
+    this.stopExtensionActivityWatcher(toolCallId);
+    try {
+      const watcher = watch(realAsyncDir, (_eventType, filename) => {
+        if (filename !== null && filename.toString() !== "status.json") return;
+        const tracked = this.extensionActivityWatchers.get(toolCallId);
+        if (!tracked) return;
+        if (tracked.timer) clearTimeout(tracked.timer);
+        tracked.timer = setTimeout(() => {
+          tracked.timer = undefined;
+          void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
+        }, 50);
+        tracked.timer.unref();
+      });
+      watcher.on("error", () => this.stopExtensionActivityWatcher(toolCallId));
+      this.extensionActivityWatchers.set(toolCallId, { watcher, timer: undefined, asyncDir: realAsyncDir });
+      void this.refreshExtensionActivityFromArtifact(toolCallId, realAsyncDir);
+    } catch {
+      // A missing or inaccessible extension artifact remains a generic live row.
+    }
+  }
+
+  private updateExtensionActivity(
+    toolCallId: string,
+    toolName: string,
+    extensionOrigin: ExtensionToolOrigin | undefined,
+    status: "running" | "completed" | "failed",
+    startedAt: string,
+    updatedAt: string,
+    value: unknown,
+    completedAt?: string,
+    durationMs?: number,
+  ): ExtensionRunActivity | undefined {
+    if (!extensionOrigin) return undefined;
+    const activity = projectExtensionRunActivity(value, {
+      id: toolCallId,
+      toolCallId,
+      source: extensionOrigin,
+      title: toolName,
+      status,
+      startedAt,
+      updatedAt,
+      ...(completedAt ? { completedAt } : {}),
+      ...(durationMs === undefined ? {} : { durationMs }),
+      ...(this.extensionActivities.has(toolCallId)
+        ? { previous: this.extensionActivities.get(toolCallId)! }
+        : {}),
+    });
+    this.extensionActivities.delete(toolCallId);
+    this.extensionActivities.set(toolCallId, activity);
+    while (this.extensionActivities.size > 64) {
+      const oldest = this.extensionActivities.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.stopExtensionActivityWatcher(oldest);
+      this.extensionActivities.delete(oldest);
+    }
+    const asyncDir = extensionRunAsyncDir(value);
+    if (asyncDir && activity.status === "running") this.startExtensionActivityWatcher(toolCallId, asyncDir);
+    if (activity.status !== "running") this.stopExtensionActivityWatcher(toolCallId);
+    return activity;
   }
 
   private measureToolDuration(
@@ -1056,6 +1242,9 @@ export class RuntimeSlot {
       toolExecutions: [...this.toolExecutions.values()]
         .filter((tool) => this.effectivePhase === "running" || tool.status !== "running")
         .sort((left, right) => left.order - right.order),
+      ...(this.extensionActivities.size > 0
+        ? { extensionActivities: [...this.extensionActivities.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)) }
+        : {}),
       extensionPresentation: this.ui.state(),
       diagnostics: this.runtime.diagnostics.map((diagnostic) => ({ type: diagnostic.type, message: diagnostic.message })),
     });
@@ -1950,6 +2139,7 @@ export class RuntimeSlot {
     this.pendingProgress = undefined;
     this.stopActivityHeartbeat();
     this.clearToolProgressTimers();
+    this.clearExtensionActivityWatchers();
     this.unsubscribe?.();
     this.ui.cancelAll();
     this.extensionHost.retire("Session runtime disposed");

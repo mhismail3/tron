@@ -1349,7 +1349,11 @@ struct ChatView: View {
     private var composer: some View {
         VStack(spacing: 10) {
             if let snapshot = selectedAuthoritativeSnapshot {
-                let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, executions: snapshot.toolExecutions)
+                let groups = ChatExtensionWidgetPolicy.liveGroups(
+                    snapshot.extensionPresentation,
+                    executions: snapshot.toolExecutions,
+                    activities: snapshot.extensionActivities ?? []
+                )
                 if !groups.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {

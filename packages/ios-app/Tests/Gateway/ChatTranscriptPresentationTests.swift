@@ -102,6 +102,35 @@ struct ChatTranscriptPresentationTests {
         #expect(run.title == "Extension activity")
     }
 
+    @Test("composer pills keep only live extension work while Manage Session retains history")
+    func liveExtensionGroupsExcludeCompletedRuns() throws {
+        var snapshot = try fixture(transcript: "[]")
+        let completed = ExtensionRunActivity(
+            id: "completed", runId: "run-completed", toolCallId: "call-completed",
+            source: ExtensionToolOrigin(source: "subagent-source"), title: "subagent", mode: "single",
+            status: .completed, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:02Z",
+            completedAt: "2026-01-01T00:00:02Z", lastActivityAt: nil, currentTool: nil,
+            currentToolStartedAt: nil, currentPath: nil, toolCount: 3, turnCount: 1,
+            durationMs: 2_000, output: "done", children: []
+        )
+        let running = ExtensionRunActivity(
+            id: "running", runId: "run-running", toolCallId: "call-running",
+            source: ExtensionToolOrigin(source: "subagent-source"), title: "subagent", mode: "single",
+            status: .running, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:02Z",
+            completedAt: nil, lastActivityAt: "2026-01-01T00:00:02Z", currentTool: "read",
+            currentToolStartedAt: nil, currentPath: nil, toolCount: 4, turnCount: 2,
+            durationMs: 2_000, output: "working", children: []
+        )
+        snapshot.extensionActivities = [completed, running]
+        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? [])
+        let live = ChatExtensionWidgetPolicy.liveGroups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? [])
+        #expect(groups.count == 1)
+        #expect(groups.first?.activities.count == 2)
+        #expect(live.count == 1)
+        #expect(live.first?.activities.map(\.id) == ["running"])
+        #expect(live.first?.liveActivityCount == 1)
+    }
+
     @Test("widget groups remain separate and deterministic with conservative activity fallback")
     func widgetGroupsAreSeparate() throws {
         var snapshot = try fixture(transcript: "[]")

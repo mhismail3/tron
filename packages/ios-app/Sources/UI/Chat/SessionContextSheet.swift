@@ -166,6 +166,8 @@ struct SessionContextSheet: View {
     @State private var exportTask: Task<Void, Never>?
     @State private var gitPresentation: SessionGitPresentation = .loading
     @State private var gitLoadGeneration = 0
+    @State private var extensionActivityGroupID: String?
+    @State private var showExtensionActivity = false
 
     var body: some View {
         NavigationStack {
@@ -174,6 +176,7 @@ struct SessionContextSheet: View {
                     if let snapshot = model.authoritativeSnapshot(for: sessionID) {
                         contextUsageCard(snapshot)
                         configurationSection(snapshot)
+                        extensionActivitySection(snapshot)
                         sessionSection(snapshot)
                     } else {
                         TronLoadingState(label: "Loading session…")
@@ -211,6 +214,9 @@ struct SessionContextSheet: View {
                     snapshot: model.authoritativeSnapshot(for: sessionID),
                     generation: generation
                 )
+            }
+            .sheet(isPresented: $showExtensionActivity) {
+                ExtensionDetailsSheet(sessionID: sessionID, groupID: extensionActivityGroupID)
             }
             .sheet(item: $destination) { route in
                 switch route {
@@ -421,6 +427,52 @@ struct SessionContextSheet: View {
 
     private var configurationRowAccent: Color { .tronPurple }
     private var sessionRowAccent: Color { .tronBlue }
+
+    @ViewBuilder
+    private func extensionActivitySection(_ snapshot: SessionSnapshot) -> some View {
+        let groups = ChatExtensionWidgetPolicy.groups(
+            snapshot.extensionPresentation,
+            executions: snapshot.toolExecutions,
+            activities: snapshot.extensionActivities ?? []
+        )
+        if !groups.isEmpty {
+            TronSettingsGroup("Extension Activity", detail: "Live and recent work published by extensions.", accent: .tronEmerald) {
+                VStack(spacing: 0) {
+                    ForEach(groups) { group in
+                        Button {
+                            extensionActivityGroupID = group.id
+                            showExtensionActivity = true
+                        } label: {
+                            TronSettingsRow(
+                                icon: group.hasLiveContent ? "circle.dotted" : "clock.arrow.circlepath",
+                                title: group.label,
+                                subtitle: extensionActivitySubtitle(group),
+                                accent: .tronEmerald
+                            ) {
+                                Image(systemName: "chevron.right")
+                                    .font(TronTypography.caption)
+                                    .foregroundStyle(Color.tronTextMuted)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Extension activity: \(group.label)")
+                        if group.id != groups.last?.id { TronSettingsDivider(accent: .tronEmerald) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func extensionActivitySubtitle(_ group: ExtensionWidgetGroup) -> String {
+        let parts = [
+            group.liveActivityCount > 0 ? "\(group.liveActivityCount) live" : nil,
+            group.activities.count > 0 ? "\(group.activities.count) runs" : nil,
+            group.services.count > 0 ? "\(group.services.count) tools" : nil,
+            group.items.count > 0 ? "\(group.items.count) widgets" : nil,
+            group.statuses.count > 0 ? "\(group.statuses.count) statuses" : nil,
+        ].compactMap { $0 }
+        return parts.isEmpty ? "View extension details" : parts.joined(separator: " · ")
+    }
 
     private func configurationSection(_ snapshot: SessionSnapshot) -> some View {
         TronSettingsGroup("Configuration", accent: .tronPurple) {
