@@ -1243,6 +1243,41 @@ struct ChatTranscriptPresentationTests {
         #expect(settled.ids == ["user", "assistant-tools", "tool-run-call-1", "assistant-final"])
     }
 
+    @Test("streaming assistant rows keep their visual identity when canonical text settles")
+    func streamingSettlementKeepsVisualIdentity() throws {
+        var liveSnapshot = try fixture(transcript: "[]")
+        liveSnapshot.phase = .running
+        liveSnapshot.streaming = try message("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"answer","type":"text","text":"hello"}]}
+        """)
+        var settledSnapshot = liveSnapshot
+        settledSnapshot.phase = .idle
+        settledSnapshot.revision += 1
+        settledSnapshot.eventSequence += 1
+        settledSnapshot.transcript = [try message("""
+        {"id":"assistant-final","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"answer","type":"text","text":"hello"}]}
+        """)]
+        settledSnapshot.streaming = nil
+        let liveTag = ChatTranscriptProjectionTag(snapshot: liveSnapshot, presentationGeneration: 3)
+        let settledTag = ChatTranscriptProjectionTag(snapshot: settledSnapshot, presentationGeneration: 3)
+        let live = InstalledChatTranscript(
+            tag: liveTag,
+            timeline: ChatTranscriptPresentation.timeline(in: liveSnapshot),
+            runtimeItems: [],
+            sourceWindow: .init(snapshot: liveSnapshot)
+        )
+        let settled = InstalledChatTranscript(
+            tag: settledTag,
+            timeline: ChatTranscriptPresentation.timeline(in: settledSnapshot),
+            runtimeItems: [],
+            sourceWindow: .init(snapshot: settledSnapshot)
+        )
+
+        let adjusted = ChatTranscriptTransitionPolicy.continuityAdjusted(previous: live, next: settled)
+        #expect(adjusted.timeline.ids == ["streaming"])
+        #expect(adjusted.timeline.renderedIDBySemanticID["assistant-final"] == "streaming")
+    }
+
     @Test("isolated text streaming tail is identical when no runtime tool is unanchored")
     func isolatedStreamingParity() throws {
         var snapshot = try fixture(transcript: """

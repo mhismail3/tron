@@ -220,9 +220,6 @@ private struct ThinkingBlock: View {
     let preparedText: ChatTextPreparationSnapshot
     let label: String?
     let animatesInsertion: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var visibleSegmentIDs: Set<String>
-
     init(
         segments: [ChatThinkingSegment],
         preparedText: ChatTextPreparationSnapshot,
@@ -233,7 +230,6 @@ private struct ThinkingBlock: View {
         self.preparedText = preparedText
         self.label = label
         self.animatesInsertion = animatesInsertion
-        _visibleSegmentIDs = State(initialValue: animatesInsertion ? [] : Set(segments.map(\.id)))
     }
 
     var body: some View {
@@ -252,32 +248,6 @@ private struct ThinkingBlock: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibleParagraph)
-        .task(id: segments.map(\.id)) { await revealNewSegments() }
-    }
-
-    private var paragraph: Text {
-        segments.enumerated().reduce(Text("")) { paragraph, element in
-            let (index, segment) = element
-            let separator = index == 0 ? Text("") : Text(" ")
-            let renderedSegment = rendered(segment)
-                .foregroundColor(Color.tronTextSecondary.opacity(segmentOpacity(segment.id)))
-            return Text("\(paragraph)\(separator)\(renderedSegment)")
-        }
-    }
-
-    private func rendered(_ segment: ChatThinkingSegment) -> Text {
-        if let prepared = preparedText.thinkingInline(
-            identity: segment.id,
-            source: segment.text
-        ) {
-            if let attributed = prepared.attributedString { return Text(attributed) }
-            return Text(prepared.source)
-        }
-        guard let attributed = try? AttributedString(
-            markdown: segment.text,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) else { return Text(segment.text) }
-        return Text(attributed)
     }
 
     private var accessibleParagraph: String {
@@ -286,27 +256,34 @@ private struct ThinkingBlock: View {
         return "\(label). \(paragraph)"
     }
 
-    private func segmentOpacity(_ id: String) -> Double {
-        !animatesInsertion || reduceMotion || visibleSegmentIDs.contains(id) ? 1 : 0
+    private var paragraph: some View {
+        ChatStreamingInlineText(
+            inline: preparedInline,
+            identity: "thinking-run:\(segments.first?.id ?? "empty")",
+            baseColor: Color.tronTextSecondary,
+            streaming: animatesInsertion
+        )
     }
 
-    @MainActor private func revealNewSegments() async {
-        let currentIDs = Set(segments.map(\.id))
-        visibleSegmentIDs.formIntersection(currentIDs)
-        let hiddenIDs = segments.map(\.id).filter { !visibleSegmentIDs.contains($0) }
-        guard animatesInsertion, !reduceMotion else {
-            visibleSegmentIDs.formUnion(hiddenIDs)
-            return
-        }
-
-        for id in hiddenIDs {
-            guard !Task.isCancelled else { return }
-            await Task.yield()
-            withAnimation(.easeOut(duration: 0.28)) {
-                _ = visibleSegmentIDs.insert(id)
+    private var preparedInline: MarkdownPresentation.Inline {
+        let source = segments.map(\.text).joined(separator: " ")
+        var attributed = AttributedString()
+        var allPrepared = true
+        for (index, segment) in segments.enumerated() {
+            if index > 0 { attributed += AttributedString(" ") }
+            guard let prepared = preparedText.thinkingInline(
+                identity: segment.id,
+                source: segment.text
+            ), let value = prepared.attributedString else {
+                allPrepared = false
+                break
             }
-            try? await Task.sleep(for: .milliseconds(80))
+            attributed += value
         }
+        return MarkdownPresentation.Inline(
+            source: source,
+            attributedString: allPrepared ? attributed : nil
+        )
     }
 }
 
@@ -402,7 +379,8 @@ private struct TranscriptImageChip: View {
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .trailing)))
+        // The slot is stable from projection install; thumbnail replacement
+        // must not animate as a second chip insertion during prompt settlement.
         .accessibilityLabel(loadFailed ? "Image attachment unavailable, retry" : "Image attachment")
         .task(id: loadKey) {
             let requestedKey = loadKey

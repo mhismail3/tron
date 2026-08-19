@@ -348,6 +348,26 @@ final class ComposerDraftCoordinator {
         return attachmentsByTarget[target] ?? []
     }
 
+    func submittedAttachments(for target: SessionPresentationIdentity) -> [PendingAttachment] {
+        guard admits(target) else { return [] }
+        return submissionByTarget[target]?.submittedAttachments ?? []
+    }
+
+    func canonicalSubmissionIDs(
+        target: SessionPresentationIdentity,
+        canonicalTranscript: [TranscriptItem]
+    ) -> Set<String> {
+        guard admits(target), let admission = submissionByTarget[target] else { return [] }
+        return Set(canonicalTranscript.compactMap { item in
+            Self.canonicalUserMessage(
+                item,
+                matches: admission.snapshot,
+                submittedAttachments: admission.submittedAttachments,
+                baselineTranscriptIDs: admission.baselineTranscriptIDs
+            ) ? item.id : nil
+        })
+    }
+
     func editorRequest(for target: SessionPresentationIdentity) -> ComposerEditorRequest? {
         guard admits(target) else { return nil }
         return editorRequestByTarget[target]

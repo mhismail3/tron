@@ -185,9 +185,75 @@ struct InstalledChatTranscript: Hashable, Sendable {
             sourceWindow: sourceWindow
         )
     }
+
+    func replacingTimeline(_ timeline: ChatTranscriptTimeline) -> InstalledChatTranscript {
+        InstalledChatTranscript(
+            tag: tag,
+            timeline: timeline,
+            toolPayloads: toolPayloads,
+            runtimeItems: runtimeItems,
+            preparedText: preparedText,
+            queuedMessages: queuedMessages,
+            queueRevision: queueRevision,
+            supportsQueueManagement: supportsQueueManagement,
+            sourceWindow: sourceWindow
+        )
+    }
 }
 
 enum ChatTranscriptTransitionPolicy {
+    static func continuityAdjusted(
+        previous: InstalledChatTranscript?,
+        next: InstalledChatTranscript
+    ) -> InstalledChatTranscript {
+        guard let previous,
+              previous.tag.matchesIdentity(of: next.tag) else { return next }
+        let replacements = continuityReplacements(previous: previous.timeline, next: next.timeline)
+        guard !replacements.isEmpty else { return next }
+        return next.replacingTimeline(next.timeline.replacingRenderedIDs(replacements))
+    }
+
+    private static func continuityReplacements(
+        previous: ChatTranscriptTimeline,
+        next: ChatTranscriptTimeline
+    ) -> [String: String] {
+        let count = min(previous.items.count, next.items.count)
+        var replacements: [String: String] = [:]
+        for index in 0..<count {
+            guard case .message(let oldMessage) = previous.items[index],
+                  case .message(let newMessage) = next.items[index],
+                  oldMessage.streaming,
+                  !newMessage.streaming,
+                  oldMessage.item.role == .assistant,
+                  newMessage.item.role == .assistant,
+                  oldMessage.id != newMessage.id,
+                  messagesShareContinuity(oldMessage, newMessage) else { continue }
+            replacements[newMessage.id] = oldMessage.id
+        }
+
+        for index in 0..<count {
+            guard case .toolRun(let oldRun) = previous.items[index],
+                  case .toolRun(let newRun) = next.items[index],
+                  oldRun.id != newRun.id,
+                  !Set(oldRun.tools.map(\.id)).isDisjoint(with: newRun.tools.map(\.id)) else { continue }
+            replacements[newRun.id] = oldRun.id
+        }
+        return replacements
+    }
+
+    private static func messagesShareContinuity(
+        _ previous: ChatMessagePresentation,
+        _ next: ChatMessagePresentation
+    ) -> Bool {
+        let previousParts = Set(previous.parts.map(\.id))
+        let nextParts = Set(next.parts.map(\.id))
+        if !previousParts.isDisjoint(with: nextParts) { return true }
+        let previousText = previous.item.text
+        let nextText = next.item.text
+        guard !previousText.isEmpty, !nextText.isEmpty else { return false }
+        return previousText.hasPrefix(nextText) || nextText.hasPrefix(previousText)
+    }
+
     static func discreteInsertedIDs(
         previous: InstalledChatTranscript?,
         next: InstalledChatTranscript
@@ -847,13 +913,17 @@ final class ChatTranscriptPresentationStore {
     }
 
     private func install(_ output: InstalledChatTranscript) {
-        let inserted = ChatTranscriptTransitionPolicy.discreteInsertedIDs(
+        let adjustedOutput = ChatTranscriptTransitionPolicy.continuityAdjusted(
             previous: installed,
             next: output
         )
-        synchronizeEntranceBookkeeping(with: output)
+        let inserted = ChatTranscriptTransitionPolicy.discreteInsertedIDs(
+            previous: installed,
+            next: adjustedOutput
+        )
+        synchronizeEntranceBookkeeping(with: adjustedOutput)
         appendPendingEntrances(inserted)
-        installed = output
+        installed = adjustedOutput
     }
 
     private func synchronizeEntranceBookkeeping(with output: InstalledChatTranscript) {

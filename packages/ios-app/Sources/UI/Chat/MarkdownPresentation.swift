@@ -38,11 +38,18 @@ enum MarkdownPresentation: Sendable {
         var accessibilitySource: String { source }
 
         init(source: String) {
-            self.source = source
-            attributedString = try? AttributedString(
-                markdown: source,
-                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+            self.init(
+                source: source,
+                attributedString: try? AttributedString(
+                    markdown: source,
+                    options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+                )
             )
+        }
+
+        init(source: String, attributedString: AttributedString?) {
+            self.source = source
+            self.attributedString = attributedString
         }
 
         var accountedByteCount: Int {

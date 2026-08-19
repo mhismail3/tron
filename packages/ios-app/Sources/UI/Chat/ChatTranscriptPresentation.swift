@@ -1067,6 +1067,10 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
         self.init(tools: tools.map(\.descriptor), anchorID: anchorID)
     }
 
+    func replacingAnchorID(_ anchorID: String) -> Self {
+        Self(tools: tools, anchorID: anchorID)
+    }
+
     var id: String { "tool-run-" + anchorID }
     var reverseChronologicalTools: [ChatToolDescriptor] {
         ChatToolInvocationOrdering.reverseChronological(tools)
@@ -1101,7 +1105,8 @@ struct ChatThinkingSegment: Hashable, Identifiable, Sendable {
 
 struct ChatThinkingRun: Hashable, Identifiable, Sendable {
     /// The first canonical thinking part anchors the run while later lines
-    /// arrive, so SwiftUI can fade only the newly appended segments.
+    /// arrive. Word-level reveal is a presentation concern owned by the row,
+    /// so projection identity remains segment-stable and authoritative.
     let id: String
     let segments: [ChatThinkingSegment]
 }
@@ -1124,6 +1129,16 @@ struct ChatMessagePresentation: Hashable, Identifiable, Sendable {
     let parts: [ChatMessagePart]
     let streaming: Bool
     let showsFooter: Bool
+
+    func replacingID(_ id: String) -> Self {
+        Self(
+            id: id,
+            item: item,
+            parts: parts,
+            streaming: streaming,
+            showsFooter: showsFooter
+        )
+    }
 }
 
 enum ChatTranscriptRenderItem: Hashable, Identifiable, Sendable {
@@ -1404,6 +1419,76 @@ struct ChatTranscriptTimeline: Hashable, Sendable {
     }
     func containsID(_ id: String) -> Bool {
         canonicalRenderedIDSet.contains(id) || liveRenderedIDSet.contains(id)
+    }
+
+    /// Rewrites only presentation row IDs while retaining canonical semantic
+    /// identities. This is used for a live-to-canonical handoff so SwiftUI
+    /// updates one mounted row instead of removing and reinserting it.
+    func replacingRenderedIDs(_ replacements: [String: String]) -> ChatTranscriptTimeline {
+        guard !replacements.isEmpty else { return self }
+        let canonical = items.canonical.map { item in
+            Self.replacingRenderedID(item, replacements: replacements)
+        }
+        let live = items.live.map { item in
+            Self.replacingRenderedID(item, replacements: replacements)
+        }
+        let preferred = ChatSemanticIndex(
+            canonical: Self.replacingRenderedIDKeys(
+                preferredSemanticIDByRenderedID.canonical,
+                replacements: replacements
+            ),
+            live: Self.replacingRenderedIDKeys(
+                preferredSemanticIDByRenderedID.live,
+                replacements: replacements
+            )
+        )
+        let reverse = ChatSemanticIndex(
+            canonical: Self.replacingRenderedIDValues(
+                renderedIDBySemanticID.canonical,
+                replacements: replacements
+            ),
+            live: Self.replacingRenderedIDValues(
+                renderedIDBySemanticID.live,
+                replacements: replacements
+            )
+        )
+        return ChatTranscriptTimeline(
+            items: ChatTranscriptItems(canonical: canonical, live: live),
+            preferredSemanticIDByRenderedID: preferred,
+            renderedIDBySemanticID: reverse
+        )
+    }
+
+    private static func replacingRenderedID(
+        _ item: ChatTranscriptRenderItem,
+        replacements: [String: String]
+    ) -> ChatTranscriptRenderItem {
+        guard let replacement = replacements[item.id], replacement != item.id else { return item }
+        switch item {
+        case .message(let message):
+            return .message(message.replacingID(replacement))
+        case .toolRun(let run):
+            guard replacement.hasPrefix("tool-run-") else { return item }
+            return .toolRun(run.replacingAnchorID(String(replacement.dropFirst("tool-run-".count))))
+        case .transcript, .notification:
+            return item
+        }
+    }
+
+    private static func replacingRenderedIDKeys(
+        _ values: [String: String],
+        replacements: [String: String]
+    ) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: values.map { key, value in
+            (replacements[key] ?? key, value)
+        })
+    }
+
+    private static func replacingRenderedIDValues(
+        _ values: [String: String],
+        replacements: [String: String]
+    ) -> [String: String] {
+        values.mapValues { replacements[$0] ?? $0 }
     }
 
     /// Sparse replacements are permitted only after the kernel proves every row

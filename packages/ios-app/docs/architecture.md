@@ -363,8 +363,10 @@ off-main through the same cancellation-aware media preparation slot before publi
 have a separate 64 KiB ceiling and must return on the captured connection epoch. Uploads are independent, so
 completion order—not newest-request arbitration—orders staged IDs. A confirmed prompt removes only the IDs
 captured by its submission and never clears newer text or attachments. Admission installs one exact-target,
-bounded outgoing presentation row immediately; it is not a TranscriptItem and remains until matching canonical
-user-message state is observed. Definitive rejection restores outgoing text before newer input, while a possibly-sent
+bounded outgoing presentation row immediately; submitted attachments leave the composer strip and remain owned by
+that row until the exact tagged canonical projection installs, including Gateway pending-prompt snapshots. The
+handoff preserves one visual row rather than removing and reinserting optimistic/pending/canonical variants.
+Definitive rejection restores outgoing text before newer input, while a possibly-sent
 transport outcome retains the row and captured IDs without replay. Retired completions publish neither restoration
 nor errors. Extension editor requests auto-apply only to an empty exact draft; nonempty drafts require the
 existing explicit Use/Keep disposition. Route-provided initial editor text seeds only an absent exact
@@ -861,8 +863,10 @@ canonical content uses that same role geometry for presentation-only motion: use
 queued intents rise from the trailing composer edge, tool activity enters from the leading edge,
 system capsules settle from center, and assistant prose uses only a shallow vertical reveal. The
 exact installed-row geometry gate still owns admission, so projection preparation cannot animate a
-row that was never displayed, detached readers gain no follow authority, and same-ID tool/status
-morphs never replay an entrance. Reduce Motion retains only a brief opacity reveal. Canonical
+row that was never displayed, detached readers gain no follow authority, and continuity-adjusted same-turn
+assistant/tool rows preserve their mounted visual IDs instead of replaying an entrance. Submission handoffs also
+suppress the canonical replacement entrance because the outgoing row already owns that reveal. Reduce Motion retains
+only a brief opacity reveal. Canonical
 compaction/branch/configuration entries, embedded assistant failures, and exact admitted custom/retry
 working detail share one semantic notification projection and capsule primitive. Ordinary default running
 state instead drives only the bottom-safe-area blur and never changes transcript geometry. Extension status
@@ -871,7 +875,12 @@ Only a pill with real detail content is an interactive Liquid Glass button; no-d
 fill and stroke with identical type and geometry. Tones are Sendable semantic values resolved to
 SwiftUI color only at the view boundary. Conversation turns retain one row owner for text, thinking, and
 lifecycle-safe attachments; event/control capsules and tool-run/detail routes are separate presentation owners
-with unchanged SwiftUI identity and private state. Under exact tail bounds, a pending compaction and its
+with unchanged SwiftUI identity and private state. While an authoritative assistant message or thinking run is
+streaming, `ChatStreamingInlineText` keeps the complete source in layout and reveals only newly admitted lexical
+words through presentation-only foreground opacity. Stable message/block/run identities preserve the reveal ledger
+across projection snapshots; a large initial/backlogged stream catches up immediately, and completion shows the
+full source without replay. Reduce Motion and accessibility never hide authoritative text. Under exact tail bounds,
+a pending compaction and its
 canonical entry share a presentation-only global-ordinal identity, so “Compacting context” becomes
 “Context compacted” in place without changing Gateway identity or semantic scroll maps.
 
@@ -891,7 +900,8 @@ exactly once, realized offscreen rows become visible without replay, and direct 
 unresolved candidates. `ChatScrollCoordinator` alone may consume one coalesced nonanimated tail
 settlement for an admitted discrete insertion. Its bounded rendered-ID entitlement is intersected only on
 actual installed transitions, so a surviving tool/group row retains the same one-shot settlement through
-completion while replacement removes it. Row entrance motion never combines with viewport animation.
+completion while replacement removes it. Continuity-preserved assistant/tool rows do not manufacture a new
+entrance, and row entrance motion never combines with viewport animation.
 Continuous Markdown growth remains coalesced and nonanimated, while detached readers
 receive no writes and Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
 the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.

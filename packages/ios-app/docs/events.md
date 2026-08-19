@@ -51,7 +51,8 @@ admits and reduces mounted-session topics:
   whose canonical user entry is still being prepared, including automatic compaction
   during prompt preflight. iOS renders that exact prompt after runtime feedback and
   reconstructs it from every authoritative snapshot until the canonical user entry
-  arrives; it never replays the prompt. `automaticCompactionEnabled` likewise reports
+  arrives; a mounted submission keeps one visual handoff through pending and canonical
+  installation, and it never replays the prompt. `automaticCompactionEnabled` likewise reports
   runtime truth rather than a mobile inference; older snapshots may omit these fields;
 - provider, package, settings, trust, and custom-model mutation invalidations
   advance owner revisions across connected clients; each visible surface reloads

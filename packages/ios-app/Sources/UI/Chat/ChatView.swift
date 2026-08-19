@@ -59,6 +59,7 @@ struct ChatView: View {
     // a UIViewRepresentable that has no `.focused` registration.
     @State private var composerFocused = false
     @State private var suppressedInteractionScope: ExtensionInteractionScope?
+    @State private var canonicalSubmissionHandoffIDs: Set<String> = []
 
     #if HOSTED_TEST
     init(
@@ -289,10 +290,11 @@ struct ChatView: View {
                   let snapshot = selectedAuthoritativeSnapshot,
                   snapshot.sessionId == currentSource.sessionID else { return }
             if let target = presentationTarget {
-                model.composerDrafts.reconcileSubmission(
-                    target: target,
-                    canonicalTranscript: snapshot.transcript,
-                    queuedMessages: snapshot.displayedQueuedMessages
+                canonicalSubmissionHandoffIDs.formUnion(
+                    model.composerDrafts.canonicalSubmissionIDs(
+                        target: target,
+                        canonicalTranscript: snapshot.transcript
+                    )
                 )
             }
             // Prepend owns its exact page projection/layout-epoch transaction.
@@ -315,6 +317,20 @@ struct ChatView: View {
         }
         .onChange(of: transcriptPresentation.installed?.tag) { _, _ in
             let installed = transcriptPresentation.installed
+            if let target = presentationTarget,
+               let snapshot = selectedAuthoritativeSnapshot {
+                canonicalSubmissionHandoffIDs.formUnion(
+                    model.composerDrafts.canonicalSubmissionIDs(
+                        target: target,
+                        canonicalTranscript: snapshot.transcript
+                    )
+                )
+                model.composerDrafts.reconcileSubmission(
+                    target: target,
+                    canonicalTranscript: snapshot.transcript,
+                    queuedMessages: installed?.queuedMessages ?? snapshot.displayedQueuedMessages
+                )
+            }
             scrollCoordinator.installedTranscriptChanged(installed)
             #if HOSTED_TEST
             if let installed {
@@ -336,6 +352,7 @@ struct ChatView: View {
             openingTask = nil
             scrollCoordinator.cancel()
             transcriptPresentation.reset()
+            canonicalSubmissionHandoffIDs.removeAll()
             performanceTracker.cancelAll()
             cancelAttachmentPresentation(includingActive: true)
             photoImportTask?.cancel()
@@ -366,7 +383,9 @@ struct ChatView: View {
                     }
                     if let installed = transcriptPresentation.installed {
                         ForEach(installed.displayedItems) { item in
-                            let entranceState = transcriptPresentation.entranceState(for: item.id)
+                            let entranceState = canonicalSubmissionHandoffIDs.contains(item.id)
+                                ? .none
+                                : transcriptPresentation.entranceState(for: item.id)
                             stableTranscriptRow(
                                 id: item.id,
                                 installedTag: installed.tag,
@@ -419,7 +438,7 @@ struct ChatView: View {
                                 ) {
                                     ChatOutgoingSubmissionRow(
                                         presentation: outgoing,
-                                        attachments: pendingAttachments.filter {
+                                        attachments: submittedAttachments.filter {
                                             outgoing.attachmentIDs.contains($0.id)
                                         }
                                     )
@@ -730,7 +749,16 @@ struct ChatView: View {
     }
 
     private var pendingAttachments: [PendingAttachment] {
-        presentationTarget.map(model.composerDrafts.pendingAttachments(for:)) ?? []
+        guard let target = presentationTarget else { return [] }
+        let submittedIDs = Set(
+            model.composerDrafts.submittedAttachments(for: target).map(\.id)
+        )
+        return model.composerDrafts.pendingAttachments(for: target)
+            .filter { !submittedIDs.contains($0.id) }
+    }
+
+    private var submittedAttachments: [PendingAttachment] {
+        presentationTarget.map(model.composerDrafts.submittedAttachments(for:)) ?? []
     }
 
     private var candidatePresentedInteraction: ExtensionInteraction? {
@@ -775,7 +803,8 @@ struct ChatView: View {
     }
 
     private var pendingPromptPresentation: ChatPendingPromptPresentation? {
-        guard let snapshot = selectedAuthoritativeSnapshot,
+        guard outgoingSubmissionPresentation == nil,
+              let snapshot = selectedAuthoritativeSnapshot,
               let pending = snapshot.pendingPrompt,
               !hasCanonicalPendingPrompt(pending, in: snapshot) else { return nil }
         return ChatPendingPromptPresentation(
@@ -789,22 +818,25 @@ struct ChatView: View {
         _ pending: SessionSnapshot.PendingPrompt,
         in snapshot: SessionSnapshot
     ) -> Bool {
-        guard !pending.text.isEmpty,
-              let pendingDate = pending.createdAt.flatMap(GatewayTimestamp.parse) else { return false }
+        guard let pendingDate = pending.createdAt.flatMap(GatewayTimestamp.parse) else { return false }
         return snapshot.transcript.contains { item in
             guard item.kind == .message,
                   item.role == .user,
                   let itemDate = GatewayTimestamp.parse(item.timestamp),
-                  itemDate >= pendingDate else { return false }
-            return item.text == pending.text
+                  itemDate >= pendingDate,
+                  item.text == pending.text else { return false }
+            let attachmentCount = (item.content ?? []).reduce(into: 0) { count, part in
+                if part.type == .image || part.attachment != nil { count += 1 }
+            }
+            return attachmentCount >= pending.attachmentCount
         }
     }
 
     private var displaysComposerOutgoingSubmission: Bool {
-        // Once Gateway owns the pending admission, it is the only row. The
-        // composer-owned row is an optimistic fallback and must not coexist
-        // with its authoritative reconstruction, even during text normalization.
-        pendingPromptPresentation == nil && outgoingSubmissionPresentation != nil
+        // Keep the composer-owned visual row through Gateway pending admission.
+        // It is the continuous handoff surface until the installed canonical
+        // projection is ready to replace it in the same render transaction.
+        outgoingSubmissionPresentation != nil
     }
 
     private var submissionPending: Bool {
@@ -1486,17 +1518,9 @@ struct ChatView: View {
         )
         .frame(maxWidth: .infinity, minHeight: 40)
         .padding(.horizontal, 4)
-        .scaleEffect(sending && !reduceMotion ? 0.992 : 1, anchor: .bottom)
-        .overlay {
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(Color.tronEmerald.opacity(sending ? 0.30 : 0), lineWidth: 0.75)
-        }
-        .animation(
-            reduceMotion
-                ? .easeOut(duration: 0.12)
-                : .spring(response: 0.30, dampingFraction: 0.86),
-            value: sending
-        )
+        // Sending is represented by the trailing control only. Animating the
+        // entire glass bar while UIKit clears text/height and the transcript
+        // installs a new row creates a competing structural transition.
         .glassEffect(
             .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
             in: RoundedRectangle(cornerRadius: 22, style: .continuous)

@@ -1328,6 +1328,7 @@ struct PresentationStyleGuardTests {
         #expect(transcript.contains(".fixedSize(horizontal: true, vertical: false)"))
         #expect(transcript.contains("ChatPromptContainerStyle.userPromptBottomPadding"))
         #expect(transcript.contains("Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)"))
+        #expect(transcript.contains("ChatStreamingInlineText"))
         #expect(compactPill.contains("static let fontScale: CGFloat = 1"))
         #expect(!compactPill.contains(".justified"))
         #expect(!userPrompt.contains("minHeight: 44"))
@@ -1338,7 +1339,10 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains("scrollCoordinator.isPrependingHistory"))
         #expect(earlierMessagesChip.contains(".disabled(isLoadingEarlierMessages)"))
         #expect(chat.contains(".onChange(of: scrollCoordinator.layoutEpoch)"))
-        #expect(chat.contains("pendingPromptPresentation == nil && outgoingSubmissionPresentation != nil"))
+        #expect(chat.contains("outgoingSubmissionPresentation != nil"))
+        #expect(chat.contains("canonicalSubmissionHandoffIDs"))
+        #expect(chat.contains("submittedAttachments(for: target)"))
+        #expect(chat.contains("canonicalSubmissionIDs("))
     }
 
     @Test("send-to-chat motion stays role-aware, authoritative, and accessible")
@@ -1376,6 +1380,12 @@ struct PresentationStyleGuardTests {
         #expect(composer.contains("isSending ? \"Sending message\" : \"Send message\""))
         #expect(!motion.contains("Task.sleep"))
         #expect(!motion.contains("DispatchQueue"))
+        let streamingReveal = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/StreamingTextReveal.swift"),
+            encoding: .utf8
+        )
+        #expect(streamingReveal.contains("maximumAnimatedBacklog"))
+        #expect(streamingReveal.contains("revealedIDs.formUnion(currentIDs)"))
     }
 
     @Test("queued messages remain visible and individually manageable in chat")
@@ -1558,6 +1568,7 @@ struct PresentationStyleGuardTests {
         #expect(notification.contains("pill.frame(minWidth: 44, minHeight: 44)"))
         #expect(notification.contains(".frame(maxWidth: .infinity, minHeight: 44, alignment: .center)"))
         #expect(chat.contains("LazyVStack(alignment: .leading, spacing: 8)"))
+        #expect(chat.contains("canonicalSubmissionHandoffIDs.contains(item.id)"))
         for label in [toolCardLabel, toolRunLabel] {
             #expect(label.contains("ChatCompactPillSurface"))
             #expect(!label.contains("minHeight"))

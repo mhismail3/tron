@@ -547,10 +547,15 @@ tool pills retain six-point vertical insets with the slightly larger tool-only s
 elapsed timing hugs its intrinsic width, and a pending photo's 22-point remove
 circle sits half outside the 64-point preview within a 30-point target centered on its top-trailing corner.
 Active-chat reliability checks must advance a desired completion before the displayed running tool receives
-geometry and verify that the running chip still reveals exactly once. The same rendered tool/group row stays
-after non-tool streaming across running-to-completed updates, retains at most one installed-identity-owned
-nonanimated tail settlement while pinned, preserves a surviving semantic anchor while detached, and emits no
-unowned automatic write when content shrinks. Verify row entrance animation never combines with viewport animation.
+geometry and verify that the running chip still reveals exactly once. Submission-to-pending-to-canonical prompts
+retain one mounted visual handoff, submitted attachment chips leave the composer before the transcript replacement,
+and attachment-only prompts reconcile by attachment metadata. Streaming assistant settlement and runtime-to-canonical
+tool grouping retain their visual row identities. Agent text and thinking traces reveal only newly admitted words while
+keeping full layout geometry stable; reconnecting to a long stream catches up instead of replaying the backlog, and
+completion reveals the full source without a flash. The same rendered tool/group row stays after non-tool streaming
+across running-to-completed updates, retains at most one installed-identity-owned nonanimated tail settlement while
+pinned, preserves a surviving semantic anchor while detached, and emits no unowned automatic write when content
+shrinks. Verify row entrance animation never combines with viewport animation.
 Tool-detail checkpoints open read, edit, bash, and one unknown/extension call at the medium detent: verify the compact status/metadata chips,
 secondary-plus-accent path, faithful single-change diff glance, word-preserving wrapped bash commands in
 the smaller code size, high-signal generic summary, and larger live result are visible before

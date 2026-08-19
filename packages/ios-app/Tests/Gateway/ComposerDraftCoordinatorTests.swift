@@ -377,6 +377,7 @@ struct ComposerDraftCoordinatorTests {
             #expect(harness.coordinator.text(for: scope) == "newer")
             #expect(harness.coordinator.pendingAttachments(for: target).map(\.id) == ["a", "b", "c"])
             #expect(harness.coordinator.outgoingSubmission(for: target)?.outgoingText == "outgoing")
+            #expect(harness.coordinator.submittedAttachments(for: target).map(\.id) == ["a", "b"])
             #expect(!harness.coordinator.isSending(target: target))
 
             let canonical = TranscriptItem.message(MessageTranscriptItem(
@@ -393,6 +394,7 @@ struct ComposerDraftCoordinatorTests {
             ))
             harness.coordinator.reconcileSubmission(target: target, canonicalTranscript: [canonical])
             #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+            #expect(harness.coordinator.submittedAttachments(for: target).isEmpty)
             #expect(harness.coordinator.pendingAttachments(for: target).map(\.id) == ["c"])
         }
     }

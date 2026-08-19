@@ -17,31 +17,37 @@ struct TronMarkdownView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
-            ForEach(document.blocks) { block in
+            ForEach(Array(document.blocks.enumerated()), id: \.offset) { index, block in
+                // During a live stream, block positions are the stable
+                // presentation slots while the authoritative source grows in
+                // place. Completed code blocks add their content identity below
+                // so copy state still resets when a block is replaced.
                 switch block.kind {
                 case .paragraph(let value):
-                    inline(value)
+                    streamingInline(value, identity: "block:\(index)")
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(value.accessibilitySource)
                         .accessibilityRespondsToUserInteraction(false)
                         .frame(alignment: .topLeading)
                 case .heading(let level, let value):
-                    inline(value)
+                    streamingInline(value, identity: "block:\(index)")
                         .font(TronFont.body(max(14, 22 - CGFloat(level * 2)), weight: level <= 2 ? .bold : .semibold))
                         .padding(.top, level <= 2 ? 6 : 2)
                 case .code(let language, let value):
                     CodeBlock(language: language, code: value, streaming: streaming)
+                        .id(block.id)
                 case .quote(let value):
                     HStack(alignment: .top, spacing: 10) {
                         RoundedRectangle(cornerRadius: 2).fill(Color.tronBorder).frame(width: 3)
-                        inline(value).foregroundStyle(Color.tronTextSecondary)
+                        streamingInline(value, identity: "block:\(index)")
+                            .foregroundStyle(Color.tronTextSecondary)
                     }
                 case .list(let items):
                     VStack(alignment: .leading, spacing: 5) {
-                        ForEach(items) { item in
+                        ForEach(Array(items.enumerated()), id: \.offset) { itemIndex, item in
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text(item.marker).frame(minWidth: 10, alignment: .leading)
-                                inline(item.inline)
+                                streamingInline(item.inline, identity: "block:\(index):item:\(itemIndex)")
                             }.padding(.leading, CGFloat(item.depth) * 14)
                         }
                     }
@@ -55,6 +61,23 @@ struct TronMarkdownView: View {
         .font(TronFont.body())
         .foregroundStyle(Color.assistantMessageText)
         .transcriptTextSelection(enabled: !dynamicTypeSize.isAccessibilitySize)
+    }
+
+    @ViewBuilder
+    private func streamingInline(
+        _ value: MarkdownPresentation.Inline,
+        identity: String
+    ) -> some View {
+        if streaming {
+            ChatStreamingInlineText(
+                inline: value,
+                identity: identity,
+                baseColor: Color.assistantMessageText,
+                streaming: true
+            )
+        } else {
+            inline(value)
+        }
     }
 
     private func inline(_ value: MarkdownPresentation.Inline) -> Text {
