@@ -299,7 +299,8 @@ private struct UserPromptLabel: UIViewRepresentable {
         uiView: UILabel,
         context: Context
     ) -> CGSize? {
-        guard let proposedWidth = proposal.width, proposedWidth > 0 else { return nil }
+        let proposedWidth = proposal.width ?? 10_000
+        guard proposedWidth > 0 else { return nil }
         configure(uiView, width: proposedWidth)
         guard let attributedText = uiView.attributedText else { return .zero }
         let measured = attributedText.boundingRect(
@@ -307,10 +308,12 @@ private struct UserPromptLabel: UIViewRepresentable {
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             context: nil
         )
-        let fittedWidth = UserPromptTextLayoutPolicy.fittedWidth(
-            measured: ceil(measured.width),
-            proposed: proposedWidth
-        )
+        let fittedWidth = proposal.width == nil
+            ? ceil(measured.width)
+            : UserPromptTextLayoutPolicy.fittedWidth(
+                measured: ceil(measured.width),
+                proposed: proposedWidth
+            )
         configure(uiView, width: fittedWidth)
         let size = uiView.sizeThatFits(
             CGSize(width: fittedWidth, height: .greatestFiniteMagnitude)

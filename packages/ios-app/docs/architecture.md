@@ -561,8 +561,8 @@ final, and settling phases. Interruption away from the tail restores detached/un
 ownership, while successful physical settlement clears unread only at completion.
 Every later measured height increase coalesces into
 the next display-frame command until another upward gesture; a newly admitted tool chip may request one
-smooth tail-follow command, while subsequent growth waits for that command's acknowledgement instead of
-replacing its token. An ordinary installed projection
+nonanimated tail-follow command, while subsequent growth waits for fresh native geometry to acknowledge
+that command instead of replacing its token. An ordinary installed projection
 change captures the current visible semantic locus before publication and either settles a pinned
 reader to the tail once without animation or advances an exact layout epoch after installation to
 restore a surviving detached semantic anchor within one point. Persistent idle native ownership does
@@ -580,8 +580,8 @@ a newer line count. Every stable row owns its horizontal inset instead of relyin
 transient ScrollView content margins, so prompt insertion cannot expose a flush-left frame.
 Existing rows never participate in stack-wide insertion or scale animations. Thinking,
 Markdown, tool, and explicit custom/retry rows therefore remain stable above the composer while the user
-follows the tail. Newly admitted tool rows reserve their layout before one local reveal, and status/title changes
-interpolate inside the mounted chip rather than recreating the row. The first mounted streaming/thinking frame is
+follows the tail. Newly admitted tool rows reserve their layout before one local reveal, and status/title changes update
+inside the mounted chip without recreating the row or animating its layout. The first mounted streaming/thinking frame is
 fully visible; only later authoritative tokens receive the presentation fade, and the bounded thinking viewport
 reserves an estimate based on the admitted line count until first measurement, capped at four lines, so TextKit
 preference delivery cannot flash its height. Ordinary
@@ -1012,8 +1012,8 @@ and thinking text and workspace shortcuts stay above the compact-caption scale.
 The hidden custom back button is paired with a UIKit navigation bridge so the
 native left-edge interactive-pop gesture remains available. Transcript rows enter with the historical soft
 opacity/scale transition, newly appended thinking words fade independently within
-their stable four-line viewport, and tool status/result changes use spring and opacity content
-transitions. User turns are trailing-aligned while assistant and tool
+their stable four-line viewport, and tool status/result changes preserve the mounted
+layout without implicit animation. User turns are trailing-aligned while assistant and tool
 content remain leading-aligned. Initial model/thinking entries describe
 bootstrap configuration and are omitted from chat; later canonical changes are
 shown as compact notification pills. Structured result data expands recursively, with raw

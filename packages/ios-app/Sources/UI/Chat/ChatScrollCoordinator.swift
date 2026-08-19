@@ -102,6 +102,11 @@ final class ChatScrollCoordinator {
     private var boundaryCameFromViewportWithoutTailMovement = false
     private var pendingGrowthFollow = false
     private var pendingGrowthFollowAnimation: ChatScrollAnimation = .disabled
+    /// A command write is not a native acknowledgement. Automatic tail
+    /// commands remain owned until fresh geometry proves the physical tail.
+    private var pendingAutomaticTailCommandToken: Int?
+    private var automaticTailCommandStartGeometryRevision: Int?
+    private var automaticTailCommandStartOffsetY: CGFloat?
     private var pendingContinuousGrowthFollow = false
     private var discreteFollowRenderedIDs: Set<String> = []
     private var discreteFollowRenderedIDOrder: [String] = []
@@ -227,6 +232,9 @@ final class ChatScrollCoordinator {
         directTailReturnArmed = false
         boundaryCameFromViewportWithoutTailMovement = false
         pendingGrowthFollow = false
+        pendingAutomaticTailCommandToken = nil
+        automaticTailCommandStartGeometryRevision = nil
+        automaticTailCommandStartOffsetY = nil
         pendingContinuousGrowthFollow = false
         pendingUnattributedOlderMovement = false
         userInteractionStartOffsetY = nil
@@ -354,7 +362,11 @@ final class ChatScrollCoordinator {
     }
 
     func scrollPhaseChanged(from oldPhase: ScrollPhase, to newPhase: ScrollPhase, finalGeometry: ChatTranscriptGeometry?) {
-        if let finalGeometry { geometry = finalGeometry }
+        if let finalGeometry {
+            geometry = finalGeometry
+            geometryRevision &+= 1
+            acknowledgeAutomaticTailIfSettled(finalGeometry)
+        }
         let wasInteracting = isUserInteracting
         let wasSettling = isUserDrivenSettling
         isUserInteracting = Self.isDirectUserPhase(newPhase)
@@ -422,6 +434,7 @@ final class ChatScrollCoordinator {
     func geometryChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
         geometry = current
         geometryRevision &+= 1
+        acknowledgeAutomaticTailIfSettled(current)
         evaluateLayoutMutationIfReady()
         evaluatePrependMeasurementIfReady()
         evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
@@ -465,7 +478,10 @@ final class ChatScrollCoordinator {
         if !isUserInteracting { hadUserInteraction = false }
 
         guard grew, previous.isValid, !userScrolledAway,
-              catchUpPhase == .none, !isPrependingHistory else { return }
+              catchUpPhase == .none, !isPrependingHistory else {
+            if pendingGrowthFollow { scheduleTailFollow() }
+            return
+        }
         pendingGrowthFollow = true
         pendingContinuousGrowthFollow = true
         scheduleTailFollow()
@@ -474,6 +490,7 @@ final class ChatScrollCoordinator {
     func viewportChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
         geometry = current
         geometryRevision &+= 1
+        acknowledgeAutomaticTailIfSettled(current)
         evaluateLayoutMutationIfReady()
         evaluatePrependMeasurementIfReady()
         evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
@@ -815,9 +832,33 @@ final class ChatScrollCoordinator {
         return true
     }
 
+    private func acknowledgeAutomaticTailIfSettled(_ current: ChatTranscriptGeometry) {
+        guard pendingAutomaticTailCommandToken != nil,
+              command?.destination == .tail,
+              let startRevision = automaticTailCommandStartGeometryRevision,
+              geometryRevision > startRevision else { return }
+        let movedNativeViewport = automaticTailCommandStartOffsetY.map {
+            abs(current.offsetY - $0) > 1
+        } == true
+        guard movedNativeViewport || current.isAtCatchUpBoundary else { return }
+        pendingAutomaticTailCommandToken = nil
+        automaticTailCommandStartGeometryRevision = nil
+        automaticTailCommandStartOffsetY = nil
+        command = nil
+        commandRevision &+= 1
+    }
+
     func commandApplied(_ applied: ChatScrollCommand) {
         guard command?.token == applied.token, applied.presentation == presentation else { return }
-        command = nil
+        let awaitsNativeTailEvidence = applied.origin == .automaticFollow
+            && applied.destination == .tail
+        if awaitsNativeTailEvidence {
+            pendingAutomaticTailCommandToken = applied.token
+            automaticTailCommandStartGeometryRevision = geometryRevision
+            automaticTailCommandStartOffsetY = geometry.offsetY
+        } else {
+            command = nil
+        }
         switch applied.destination {
         case .resetToBottom:
             bindingIsReleased = false
@@ -1088,8 +1129,11 @@ final class ChatScrollCoordinator {
     }
 
     private func clearCommand() {
-        guard command != nil else { return }
+        guard command != nil || pendingAutomaticTailCommandToken != nil else { return }
         command = nil
+        pendingAutomaticTailCommandToken = nil
+        automaticTailCommandStartGeometryRevision = nil
+        automaticTailCommandStartOffsetY = nil
         commandRevision &+= 1
     }
 
@@ -1111,6 +1155,9 @@ final class ChatScrollCoordinator {
         followFrameTask = nil
         pendingGrowthFollow = false
         pendingGrowthFollowAnimation = .disabled
+        pendingAutomaticTailCommandToken = nil
+        automaticTailCommandStartGeometryRevision = nil
+        automaticTailCommandStartOffsetY = nil
         pendingContinuousGrowthFollow = false
         pendingInstalledTailSettlement = false
         clearDiscreteFollowIDs()

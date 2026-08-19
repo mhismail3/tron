@@ -131,6 +131,12 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
                     revealed = true
                 }
             }
+            .onChange(of: animatesEntrance) { _, enabled in
+                guard !enabled else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { revealed = true }
+            }
     }
 }
 

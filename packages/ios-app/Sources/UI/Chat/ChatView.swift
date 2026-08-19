@@ -451,7 +451,11 @@ struct ChatView: View {
                             ) {
                                 ChatOutgoingSubmissionEntranceRow(
                                     reduceMotion: reduceMotion,
-                                    animatesEntrance: !model.isReconcilingForeground
+                                    // Submission admission is already the
+                                    // ownership handoff. Do not animate a
+                                    // second, partially realized photo/prompt
+                                    // row while the composer is collapsing.
+                                    animatesEntrance: false
                                 ) {
                                     ChatOutgoingSubmissionRow(
                                         presentation: outgoing,
@@ -651,12 +655,11 @@ struct ChatView: View {
                 )
                 #endif
                 if animated {
-                    scrollCoordinator.discreteContentInserted(
-                        renderedID: id,
-                        followAnimation: entranceKind == .leadingActivity && !reduceMotion
-                            ? .smooth(duration: 0.24)
-                            : .disabled
-                    )
+                    // Newly realized rows may settle the pinned tail, but
+                    // that settlement is never animated. An animated tail
+                    // command competes with streaming geometry and can expose
+                    // blank lazy-stack space while the response grows.
+                    scrollCoordinator.discreteContentInserted(renderedID: id)
                 }
             }
             #if HOSTED_TEST

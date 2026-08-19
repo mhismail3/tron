@@ -504,6 +504,16 @@ struct ChatScrollCoordinatorTests {
             #expect(coordinator.command?.token == firstCommand.token)
 
             coordinator.commandApplied(firstCommand)
+            #expect(coordinator.command?.token == firstCommand.token)
+            // The write is not its own acknowledgement. A fresh native frame
+            // proves that the first command moved the viewport before the
+            // queued growth can request a second tail command.
+            coordinator.geometryChanged(
+                previous: second,
+                current: ChatTranscriptGeometry(
+                    offsetY: 720, contentHeight: 1_240, containerHeight: 400
+                )
+            )
             await frames.waitForRequest(count: 2)
             frames.releaseNext()
             let secondCommand = try await coordinator.hostedNextCommand()

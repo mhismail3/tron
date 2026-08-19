@@ -87,9 +87,10 @@ admits and reduces mounted-session topics:
 - transcript structure has one explicit animation boundary: newly admitted rows
   reserve their measured layout and reveal once after geometry admission, while
   installed-row updates, thinking-height measurement, and tool status changes
-  inherit no stack-wide animation. Tool status text interpolates inside its
-  stable row, and automatic tail-follow commands are serialized by acknowledgement
-  so a second keyboard/composer/tool growth sample cannot replace a pending scroll write;
+  inherit no stack-wide animation. Tool status text updates inside its
+  stable row without an implicit layout animation, and automatic tail-follow commands remain
+  owned until fresh native geometry acknowledges them, so a second keyboard/composer/tool growth
+  sample cannot replace a pending scroll write;
 - structure/context/resource invalidations reload an already-presented History,
   Manage Session, Agent Context, or Project Resources surface from the runtime. Context,
   tree, and resource reads each carry a subscription-scoped request generation, so an older

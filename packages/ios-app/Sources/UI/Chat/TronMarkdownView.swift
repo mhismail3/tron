@@ -68,16 +68,15 @@ struct TronMarkdownView: View {
         _ value: MarkdownPresentation.Inline,
         identity: String
     ) -> some View {
-        if streaming {
-            ChatStreamingInlineText(
-                inline: value,
-                identity: identity,
-                baseColor: Color.assistantMessageText,
-                streaming: true
-            )
-        } else {
-            inline(value)
-        }
+        // Keep one mounted view type as the response crosses the streaming
+        // boundary. Changing from a reveal view to a fresh Text at completion
+        // recreates the whole final paragraph and produces the visible flash.
+        ChatStreamingInlineText(
+            inline: value,
+            identity: identity,
+            baseColor: Color.assistantMessageText,
+            streaming: streaming
+        )
     }
 
     private func inline(_ value: MarkdownPresentation.Inline) -> Text {

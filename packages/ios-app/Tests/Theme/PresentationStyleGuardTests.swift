@@ -1414,7 +1414,7 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
             encoding: .utf8
         )
-        #expect(chat.contains("kind: .classify(item)"))
+        #expect(chat.contains("kind: entranceKind"))
         #expect(chat.contains("ChatQueuedMessageEntranceRow"))
         #expect(!chat.contains("struct ChatTranscriptEntranceRow"))
         #expect(entranceRows.contains("struct ChatTranscriptEntranceRow"))

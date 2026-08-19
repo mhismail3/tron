@@ -414,8 +414,9 @@ prove exact page `start`/`end`/count admission and that return-to-latest compact
 history back to the retained authoritative tail. `ChatScrollCoordinatorTests` use watchdog-bounded
 barriers rather than sleeps or yields to prove callback-order equivalence, immediate
 catch-up dismissal for geometry-first manual return to the tail, pinned keyboard/composer
-following, one follow command per frame, a single smooth command only for an admitted discrete
-insertion, immediate continuous-stream following, no writes for detached layout/stream/keyboard
+following, one follow command per frame, nonanimated settlement for an admitted discrete
+insertion, native-geometry acknowledgement before a subsequent follow, immediate continuous-stream following,
+no writes for detached layout/stream/keyboard
 settlement, viewport geometry-first expansion detachment, frame-separated catch-up with unread admission
 through every interruption stage, Reduce Motion, exact reset/release command admission,
 exact physical-tail opening settlement, phase-keyed native-geometry replay, bounded exact-binding fallback,
@@ -425,7 +426,7 @@ stale-presentation rejection, repeat-prepend ownership, post-install layout-epoc
 callbacks, and exact semantic remeasurement with at most one late correction and no
 frame retry or total-height polling. Hosted controls drive the production
 coordinator/executor; new evidence is bounded aggregate callback/command/frame and
-maximum-excursion data only. Hosted discrete-insertion cases record aggregate entrance and smooth-follow
+maximum-excursion data only. Hosted discrete-insertion cases record aggregate entrance and automatic-follow
 counts, prove a visible insertion admits once, and prove detached insertion emits no automatic write.
 Hosted streaming bursts must install only their newest exact source while detached composer/viewport work
 remains writable and creates no projection work. `ChatCompactPillTests` own intrinsic-width trailing placement for short prompts, the 364-point

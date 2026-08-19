@@ -55,12 +55,6 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
         HStack(alignment: .top, spacing: 10) {
             Spacer(minLength: 24)
             VStack(alignment: .trailing, spacing: 4) {
-                if let statusTitle = presentation.statusTitle {
-                    Label(statusTitle, systemImage: "arrow.turn.up.right")
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .accessibilityLabel(statusTitle)
-                }
                 if !attachments.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {

@@ -195,23 +195,62 @@ struct TranscriptRow: View, Equatable {
 
 }
 
+private struct UserPromptBubbleLayout: Layout {
+    let maxWidth: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let availableWidth = min(maxWidth, proposal.width ?? maxWidth)
+        let intrinsic = subview.sizeThatFits(.unspecified)
+        let width = intrinsic.width > 0 && intrinsic.width <= availableWidth
+            ? intrinsic.width
+            : availableWidth
+        let fitted = subview.sizeThatFits(ProposedViewSize(width: width, height: proposal.height))
+        return CGSize(width: width, height: fitted.height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        guard let subview = subviews.first else { return }
+        let availableWidth = min(maxWidth, bounds.width)
+        let intrinsic = subview.sizeThatFits(.unspecified)
+        let width = intrinsic.width > 0 && intrinsic.width <= availableWidth
+            ? intrinsic.width
+            : availableWidth
+        let fitted = subview.sizeThatFits(ProposedViewSize(width: width, height: bounds.height))
+        subview.place(
+            at: CGPoint(x: bounds.maxX - width, y: bounds.minY),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: width, height: fitted.height)
+        )
+    }
+}
+
 struct UserPromptGlassModifier: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(
             cornerRadius: ChatPromptContainerStyle.cornerRadius,
             style: .continuous
         )
-        // One deterministic constrained layout avoids ViewThatFits swapping
-        // between intrinsic and wrapped branches after a large paste/photo
-        // handoff. The label measures its intrinsic width within this bound,
-        // so short prompts stay compact while long prompts wrap immediately.
-        content
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
-            .glassEffect(
-                .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
-                in: shape
-            )
+        // Measure once against the bounded proposal: short prompts retain
+        // their intrinsic bubble width, while long prompts wrap immediately.
+        // This replaces ViewThatFits without expanding every prompt to the
+        // maximum width or swapping branches after a large paste.
+        UserPromptBubbleLayout(maxWidth: UserPromptTextLayoutPolicy.maximumWidth) {
+            content.fixedSize(horizontal: false, vertical: true)
+        }
+        .glassEffect(
+            .regular.tint(Color.tronEmerald.opacity(ChatPromptContainerStyle.tintOpacity)),
+            in: shape
+        )
     }
 }
 
