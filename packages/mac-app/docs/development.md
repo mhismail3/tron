@@ -63,6 +63,35 @@ execute the signed embedded runtime, not only check that the binary is present;
 a hardened Node runtime without its JIT entitlement exits before the Gateway
 can bind its port.
 
+### Reinstall a local Release build
+
+This is a manual developer installation, not a production deployment command.
+Do not remove `~/.tron`; it contains canonical sessions and owned credentials.
+When replacing an already-installed app, first wait for active runs to finish,
+choose **Pause Tron** from the Mac menu bar, and quit the wrapper. Then build a
+Release app with an explicit derived-data directory:
+
+```bash
+cd packages/mac-app
+xcodegen generate
+xcodebuild -project TronMac.xcodeproj -scheme TronMac \
+  -configuration Release -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath /tmp/tron-mac-release build
+open /tmp/tron-mac-release/Build/Products/Release/Tron.app
+```
+
+In Finder, replace `/Applications/Tron.app` with that built `Tron.app`, then
+launch it. The existing onboarding marker keeps the wrapper in menu-bar mode;
+choose **Resume Tron** so macOS registers the new bundled LaunchAgent plist
+and starts the new helper. Approve Tron Agent under System Settings → General →
+Login Items if macOS asks. Wait for the menu-bar status to report Running before
+reconnecting iOS. Pause/Resume is intentional here: it reloads the plist and
+its supervision environment, whereas **Restart Tron** only restarts the
+currently registered job. If the menu-bar controls are unavailable, use the
+installed app's **Uninstall Tron** action without selecting reset options, then
+launch the replacement and complete the Install step; that preserves canonical
+sessions and credentials but stops the Gateway during the transition.
+
 Use `TronMac Isolated Install` to own `com.tron.server.dev`, `~/.tron-dev`,
 `~/.pi/agent-dev`, and port 9848 without replacing the installed production app.
 The isolated Gateway shares only the physical-machine group hint stored at
