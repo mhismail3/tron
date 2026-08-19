@@ -69,10 +69,13 @@ Gateway transport tests inject `ManualClock`, `SequenceUUIDSource`, and
 `ScriptedGatewaySocket` below `GatewayClient`. Pairing generates a local UUID for
 connection identity; persisted profiles decode older records with
 `machineGroupID == machineId` and `isEnabled == true`. The dashboard pool admits
-at most one profile per physical-machine group and excludes disabled
+at most one profile per verified physical-machine group and excludes disabled
 profiles, while retaining their pairing metadata, credentials, and bounded last-known
-session buckets across transport retirement and focused-server changes. A foreground reconnect uses a five-second handshake deadline (initial pairing remains fifteen seconds), publishes transport readiness before slower projection/terminal restoration, and treats `system.stopping` as an immediate retry signal. `AppModelLifecycleTests` owns the façade and
-`GatewayLifecycleCoordinator` boundary above it: exact admissions are revoked by transition,
+session buckets across transport retirement and focused-server changes. It validates each
+secondary handshake against the paired machine identity, prefers token-bearing profiles when
+choosing a group representative, and retries malformed bounded catalogs instead of leaving a
+connection stuck in connecting. A foreground reconnect uses a five-second handshake deadline (initial pairing remains fifteen seconds), publishes transport readiness before slower projection/terminal restoration, and treats `system.stopping` as an immediate retry signal. Focused profile switches likewise return after handshake/event activation while refresh, mounted-session restoration, and terminal reattachment continue under admission. `AppModelLifecycleTests` owns the façade and
+`GatewayLifecycleCoordinator` boundary above it: exact admissions are revoked by transition, profile-switch navigation may proceed at transport readiness before deferred projection convergence, and
 concurrent profile transitions chain retire/close work before any replacement handshake, switch
 closes the old socket before replacement connect, forget awaits close, concurrent final teardown
 callers share completion, retired profile loads cannot publish errors or values, and final teardown
@@ -155,7 +158,9 @@ Resolved package JSON is constructed only inside its progressive detail destinat
 constant-depth top-level count instead of recursively rendering a potentially large resource tree. Package reload
 refreshes the inventory and update projection together, while installation controls live in a medium/large
 progressive sheet. Custom provider editors keep their three dense text fields together before the API-format row
-and use the standard settings-group header treatment.
+and use the standard settings-group header treatment. Provider settings cards use one centered leading
+icon column with vertically centered icons and leading-aligned text; the Manage Session workspace path
+uses a trailing inline group-header detail rather than a second header line.
 Terminal sheet composition, presentation lifecycle/error state, and native SwiftTerm/keyboard rendering live
 in separate source files. The presentation owner permits one active start/show/open flight and one newest pending
 route; read replacement cancels safely, while attach/open replacement waits for stale compensation before launching

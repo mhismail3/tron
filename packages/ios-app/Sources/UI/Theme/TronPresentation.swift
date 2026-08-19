@@ -702,33 +702,54 @@ struct TronGlassCard<Content: View>: View {
 struct TronSettingsGroup<Content: View>: View {
     let title: String
     let detail: String?
+    let detailInline: Bool
     let accent: Color
     let content: Content
 
     init(
         _ title: String,
         detail: String? = nil,
+        detailInline: Bool = false,
         accent: Color = .tronEmerald,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
         self.detail = detail
+        self.detailInline = detailInline
         self.accent = accent
         self.content = content()
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: TronSpacing.md) {
-            VStack(alignment: .leading, spacing: TronSpacing.xs) {
-                Text(title)
-                    .font(TronTypography.sheetSectionHeader)
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .accessibilityAddTraits(.isHeader)
-                if let detail {
+            if detailInline, let detail {
+                HStack(alignment: .firstTextBaseline, spacing: TronSpacing.md) {
+                    Text(title)
+                        .font(TronTypography.sheetSectionHeader)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: TronSpacing.sm)
                     Text(detail)
-                        .font(TronTypography.caption)
+                        .font(TronTypography.codeContent)
                         .foregroundStyle(Color.tronTextMuted)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .multilineTextAlignment(.trailing)
+                        .minimumScaleFactor(0.7)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                    Text(title)
+                        .font(TronTypography.sheetSectionHeader)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .accessibilityAddTraits(.isHeader)
+                    if let detail {
+                        Text(detail)
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             TronGlassCard(accent: accent) { content }
@@ -766,7 +787,7 @@ struct TronSettingsRow<Trailing: View>: View {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(accent)
-                .frame(width: 20)
+                .frame(width: 20, height: 20, alignment: .center)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)

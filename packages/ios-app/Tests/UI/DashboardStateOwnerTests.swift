@@ -38,6 +38,37 @@ struct DashboardStateOwnerTests {
             selectedProfileID: selected.id,
             selectedMachineGroupID: selected.machineGroupID
         ) == Set([other.id]))
+
+        #expect(DashboardGatewayConnectionPool.admittedProfileIDs(
+            [dev, other],
+            selectedProfileID: selected.id,
+            selectedMachineGroupID: selected.machineGroupID,
+            selectedProfileIsProvisional: true
+        ).isEmpty)
+
+        let firstRemote = GatewayProfile(id: "first-remote", label: "First", host: "first", port: 9847, machineId: "first-machine", machineGroupID: "remote", deviceId: "device")
+        let secondRemote = GatewayProfile(id: "second-remote", label: "Second", host: "second", port: 9847, machineId: "second-machine", machineGroupID: "remote", deviceId: "device")
+        #expect(DashboardGatewayConnectionPool.admittedProfileIDs(
+            [firstRemote, secondRemote],
+            selectedProfileID: selected.id,
+            selectedMachineGroupID: selected.machineGroupID,
+            tokenAvailable: { $0.id == secondRemote.id }
+        ) == Set([secondRemote.id]))
+
+        let matchingInfo = GatewayInfo(
+            gatewayVersion: "1", piVersion: "1", protocolVersion: 3, minProtocolVersion: 3,
+            machineId: other.machineId, machineGroupID: other.machineGroupID,
+            machineName: "Other", capabilities: []
+        )
+        #expect(DashboardGatewayConnectionPool.admitsIdentity(matchingInfo, for: other))
+        #expect(!DashboardGatewayConnectionPool.admitsIdentity(
+            GatewayInfo(
+                gatewayVersion: "1", piVersion: "1", protocolVersion: 3, minProtocolVersion: 3,
+                machineId: "wrong", machineGroupID: other.machineGroupID,
+                machineName: "Other", capabilities: []
+            ),
+            for: other
+        ))
     }
 
     @Test("retiring a background transport retains its bounded dashboard bucket")

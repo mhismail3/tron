@@ -21,24 +21,46 @@ struct CustomModelsSettingsView: View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
                 if redacted {
-                    Label("Secret-looking values are hidden. Tron preserves them when you save; manage provider credentials from Providers.", systemImage: "key.slash")
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.10)
+                    HStack(alignment: .center, spacing: TronSpacing.xl) {
+                        Image(systemName: "key.slash")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(Color.tronAmber)
+                            .frame(width: 20, height: 20, alignment: .center)
+                            .accessibilityHidden(true)
+                        Text("Secret-looking values are hidden. Tron preserves them when you save; manage provider credentials from Providers.")
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, TronSpacing.xl)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.10)
                 }
 
                 providersSection
                     .disabled(advancedDocumentEdited)
 
                 if advancedDocumentEdited {
-                    Label("Advanced JSON has unsaved edits. Save it directly, or reload it into the guided editor.", systemImage: "curlybraces")
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.09)
+                    HStack(alignment: .center, spacing: TronSpacing.xl) {
+                        Image(systemName: "curlybraces")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(Color.tronCyan)
+                            .frame(width: 20, height: 20, alignment: .center)
+                            .accessibilityHidden(true)
+                        Text("Advanced JSON has unsaved edits. Save it directly, or reload it into the guided editor.")
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .multilineTextAlignment(.leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, TronSpacing.xl)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.09)
                     Button("Load JSON into Guided Editor") {
                         localTransformationTask?.cancel()
                         localTransformationTask = Task {
@@ -200,11 +222,12 @@ struct CustomModelsSettingsView: View {
         let endpoint = provider.baseURL.isEmpty ? "Add an endpoint" : provider.baseURL
         let secondaryLine = "\(endpoint) · \(modelLabel) · \(apiTitle(provider.api))"
 
-        return HStack(alignment: .center, spacing: 12) {
+        return HStack(alignment: .center, spacing: TronSpacing.xl) {
             Image(systemName: "cpu")
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(Color.tronEmerald)
-                .frame(width: 24)
+                .frame(width: 20, height: 20, alignment: .center)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(provider.identifier.isEmpty ? "New Provider" : provider.identifier)
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
@@ -218,6 +241,7 @@ struct CustomModelsSettingsView: View {
                     .truncationMode(.middle)
                     .minimumScaleFactor(0.8)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 6)
         }
     }
@@ -510,7 +534,8 @@ private struct CustomModelProviderRow<Label: View, Destination: View>: View {
             Button { isPresented = true } label: {
                 label
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14)
+                    .padding(.horizontal, TronSpacing.xl)
+                    .padding(.vertical, 14)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

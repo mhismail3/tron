@@ -494,7 +494,7 @@ struct SessionContextSheet: View {
     }
 
     private func sessionSection(_ snapshot: SessionSnapshot) -> some View {
-        TronSettingsGroup("Session", detail: snapshot.cwd, accent: .tronCyan) {
+        TronSettingsGroup("Session", detail: snapshot.cwd, detailInline: true, accent: .tronCyan) {
             VStack(spacing: 0) {
                 manageRow(
                     icon: "doc.text.magnifyingglass",

@@ -35,14 +35,16 @@ final class DashboardGatewayConnectionPool {
     func reconcile(
         profiles: [GatewayProfile],
         selectedProfileID: String?,
-        token: (GatewayProfile) -> String?
+        token: @escaping (GatewayProfile) -> String?
     ) {
         generation &+= 1
-        let selectedGroup = profiles.first(where: { $0.id == selectedProfileID })?.machineGroupID
+        let selectedProfile = profiles.first(where: { $0.id == selectedProfileID })
         let admittedIDs = Self.admittedProfileIDs(
             profiles,
             selectedProfileID: selectedProfileID,
-            selectedMachineGroupID: selectedGroup
+            selectedMachineGroupID: selectedProfile?.machineGroupID,
+            selectedProfileIsProvisional: selectedProfile.map { $0.machineGroupID == $0.machineId } == true,
+            tokenAvailable: { token($0) != nil }
         )
         let desired = profiles.filter { admittedIDs.contains($0.id) && token($0) != nil }
         let desiredIDs = Set(desired.map(\.id))
@@ -115,12 +117,18 @@ final class DashboardGatewayConnectionPool {
         return try PairedDeviceCatalogPolicy.admit(response.devices)
     }
 
+    nonisolated static func admitsIdentity(_ info: GatewayInfo, for profile: GatewayProfile) -> Bool {
+        info.machineId == profile.machineId && info.machineGroupID == profile.machineGroupID
+    }
+
     nonisolated static func shouldAdmit(
         _ profile: GatewayProfile,
         selectedProfileID: String?,
-        selectedMachineGroupID: String?
+        selectedMachineGroupID: String?,
+        selectedProfileIsProvisional: Bool = false
     ) -> Bool {
-        profile.id != selectedProfileID
+        !selectedProfileIsProvisional
+            && profile.id != selectedProfileID
             && profile.isEnabled
             // Older stored profiles use machineId as a provisional group.
             // Select once to handshake and persist the real physical group
@@ -132,15 +140,20 @@ final class DashboardGatewayConnectionPool {
     nonisolated static func admittedProfileIDs(
         _ profiles: [GatewayProfile],
         selectedProfileID: String?,
-        selectedMachineGroupID: String?
+        selectedMachineGroupID: String?,
+        selectedProfileIsProvisional: Bool = false,
+        tokenAvailable: ((GatewayProfile) -> Bool)? = nil
     ) -> Set<String> {
         var groups = Set<String>()
         return Set(profiles.compactMap { profile in
             guard shouldAdmit(
                 profile,
                 selectedProfileID: selectedProfileID,
-                selectedMachineGroupID: selectedMachineGroupID
-            ), groups.insert(profile.machineGroupID).inserted else { return nil }
+                selectedMachineGroupID: selectedMachineGroupID,
+                selectedProfileIsProvisional: selectedProfileIsProvisional
+            ),
+            tokenAvailable?(profile) ?? true,
+            groups.insert(profile.machineGroupID).inserted else { return nil }
             return profile.id
         })
     }
@@ -163,7 +176,15 @@ final class DashboardGatewayConnectionPool {
         publish(profileID: profile.id)
         let task = Task { @MainActor [weak self] in
             do {
-                _ = try await client.connect(profile: profile, token: token)
+                let info = try await client.connect(profile: profile, token: token)
+                guard Self.admitsIdentity(info, for: profile) else {
+                    throw GatewayFailure(
+                        code: "identity_mismatch",
+                        message: "The paired server identity no longer matches this endpoint.",
+                        retryable: false,
+                        details: nil
+                    )
+                }
                 let connectionID = await client.activeConnectionID()
                 guard let self, let connectionID,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
@@ -187,6 +208,12 @@ final class DashboardGatewayConnectionPool {
                 self.scheduleReconnect(profileID: profile.id, generation: generation)
             } catch is CancellationError {
                 return
+            } catch let failure as GatewayFailure where failure.code == "identity_mismatch" {
+                await client.close()
+                guard let self,
+                      self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
+                self.entries[profile.id]?.state = .identityMismatch
+                self.publish(profileID: profile.id)
             } catch {
                 guard let self,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
@@ -341,20 +368,26 @@ final class DashboardGatewayConnectionPool {
             var seenSessionIDs = Set<String>()
             var pageCount = 0
             repeat {
-                guard pageCount < 50 else { return }
+                guard pageCount < 50 else {
+                    throw Self.invalidDashboardCatalog("The server returned too many dashboard pages.")
+                }
                 let response: Response = try await entry.client.request(
                     "session.list",
                     Params(cursor: cursor, limit: 500, scope: "user")
                 )
                 guard response.sessions.count <= 500,
                       all.count <= 25_000 - response.sessions.count,
-                      response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else { return }
+                      response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
+                    throw Self.invalidDashboardCatalog("The server returned an invalid dashboard page.")
+                }
                 pageCount += 1
                 all.append(contentsOf: response.sessions.map {
                     $0.withGatewaySource(id: profileID, label: entry.profile.label)
                 })
                 cursor = response.nextCursor
-                if let cursor, !seenCursors.insert(cursor).inserted { return }
+                if let cursor, !seenCursors.insert(cursor).inserted {
+                    throw Self.invalidDashboardCatalog("The server returned a repeated dashboard cursor.")
+                }
             } while cursor != nil
             guard isCurrent(profileID: profileID, client: entry.client, generation: generation),
                   entries[profileID]?.connectionID == expectedConnectionID else { return }
@@ -370,6 +403,10 @@ final class DashboardGatewayConnectionPool {
             publish(profileID: profileID)
             scheduleReconnect(profileID: profileID, generation: generation)
         }
+    }
+
+    private static func invalidDashboardCatalog(_ message: String) -> GatewayFailure {
+        GatewayFailure(code: "invalid_dashboard_catalog", message: message, retryable: true, details: nil)
     }
 
     private func publish(profileID: String) {

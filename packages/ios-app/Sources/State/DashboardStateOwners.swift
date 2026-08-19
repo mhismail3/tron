@@ -39,6 +39,7 @@ enum DashboardServerConnectionState: Equatable, Sendable {
     case offline
     case stale
     case blocked
+    case identityMismatch
     case needsVerification
     case disabled
 
@@ -49,6 +50,7 @@ enum DashboardServerConnectionState: Equatable, Sendable {
         case .offline: "Offline"
         case .stale: "Cached"
         case .blocked: "Blocked (same Mac)"
+        case .identityMismatch: "Identity changed"
         case .needsVerification: "Select to identify"
         case .disabled: "Disabled"
         }

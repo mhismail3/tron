@@ -74,7 +74,7 @@ coordination state instead of routing facts through unrelated façade fields.
 connection state/info/identity, exact admissions, reconnect, foreground reconciliation, serial
 retire/close transitions, and final teardown. A non-selecting pairing commit adds a server without
 changing the focused profile; the dashboard pool owns shallow catalog connections for the other
-paired profiles, admitting at most one enabled profile per physical-machine group, each with an independent failure boundary. The combined Connections settings surface uses those profile-owned clients for per-server gateway metadata, authorized-device discovery, and log history; restart and other focused mutations transition through the lifecycle client so receipt handling remains authoritative. It composes `GatewayClient` without copying that actor's
+paired profiles, admitting at most one enabled profile per verified physical-machine group, each with an independent failure boundary. Pool handshakes validate the paired machine identity; mismatches stop retrying until pairing metadata changes, while malformed bounded catalogs enter the normal retry path. The combined Connections settings surface uses those profile-owned clients for per-server gateway metadata, authorized-device discovery, and log history; restart and other focused mutations transition through the lifecycle client so receipt handling remains authoritative. It composes `GatewayClient` without copying that actor's
 byte-transport epoch. `AppModel` supplies narrow projection hooks for cache installation, refresh,
 session/terminal reconciliation, and synchronous retirement; it no longer stores a parallel lifecycle
 phase, reconnect task, pairing attempt, connection identity, or transition waiters. A dedicated
@@ -101,7 +101,9 @@ enter that one disposable projection; hidden/local selection policy remains outs
 the canonical phase; only a live Gateway-authoritative interrupted phase uses the amber warning.
 A focused-profile boundary synchronously invalidates lifecycle admission, chains behind any preceding
 retirement, revokes profile-scoped loads and presentation intake, and awaits the exact transport close
-before the focused profile changes. The previous focused catalog is retained as a bounded stale
+before the focused profile changes. A profile switch considers the new socket ready after handshake
+and event activation; dashboard refresh, mounted-presentation restoration, and terminal reattachment
+continue under the same admission without blocking a valid session route from opening. The previous focused catalog is retained as a bounded stale
 dashboard bucket during that transition. Non-focused dashboard connections are independently retired or
 reconnected and never blank healthy profiles when one Mac is offline. Provider-auth prompts are
 transport-client scoped: disconnect and profile transitions retire them before a new connection can

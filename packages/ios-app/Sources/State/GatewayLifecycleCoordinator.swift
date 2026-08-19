@@ -84,6 +84,10 @@ final class GatewayLifecycleCoordinator {
     private var reconnectCanBeAccelerated = false
     private var pairingAttempt: PairingAttempt?
     private var foregroundReconciliationTask: Task<Void, Never>?
+    /// Projection refresh/restoration may continue after transport readiness
+    /// for profile switches so dashboard navigation can hand ChatView an
+    /// admitted route without waiting on unrelated slow work.
+    private var deferredProjectionTask: Task<Void, Never>?
     private var foregroundReconciliationGeneration = 0
     private var backgroundRetirementTask: Task<Void, Never>?
     private var sceneIsBackgrounded = false
@@ -242,6 +246,8 @@ final class GatewayLifecycleCoordinator {
         let committed = committedConnectionTask
         committedConnectionTask = nil
         committed?.cancel()
+        deferredProjectionTask?.cancel()
+        deferredProjectionTask = nil
         delegate?.lifecycleInvalidateSessionConnectionOwnership()
         connectionID = nil
         sceneIsBackgrounded = true
@@ -321,7 +327,7 @@ final class GatewayLifecycleCoordinator {
         let admission = Admission(generation: generation, connectionID: nil)
         await delegate?.lifecycleLoadCache(profileID: profile.id, admission: admission)
         guard admits(admission) else { return }
-        await connect(profile: profile, token: token, admission: admission)
+        await connect(profile: profile, token: token, admission: admission, awaitProjection: false)
     }
 
     @discardableResult
@@ -516,17 +522,20 @@ final class GatewayLifecycleCoordinator {
         let reconnect = reconnectTask
         let committedConnection = committedConnectionTask
         let foreground = foregroundReconciliationTask
+        let deferredProjection = deferredProjectionTask
         let backgroundRetirement = backgroundRetirementTask
         reconnectTask = nil
         committedConnectionTask = nil
         reconnectAttemptGeneration &+= 1
         reconnectCanBeAccelerated = false
         foregroundReconciliationTask = nil
+        deferredProjectionTask = nil
         backgroundRetirementTask = nil
         foregroundReconciliationGeneration &+= 1
         reconnect?.cancel()
         committedConnection?.cancel()
         foreground?.cancel()
+        deferredProjection?.cancel()
         gatewayInfo = nil
         connectionID = nil
         projectionFailureGeneration = nil
@@ -535,6 +544,7 @@ final class GatewayLifecycleCoordinator {
             await precedingTransition?.value
             guard let self else { return }
             await self.delegate?.lifecycleRetireProjection(final: final)
+            await deferredProjection?.value
             await backgroundRetirement?.value
             await self.client.close()
             await reconnect?.value
@@ -573,7 +583,8 @@ final class GatewayLifecycleCoordinator {
         profile: GatewayProfile,
         token: String,
         pairingAttemptID: UUID? = nil,
-        admission: Admission
+        admission: Admission,
+        awaitProjection: Bool = true
     ) async {
         guard admits(admission) else { return }
         connectionState = .connecting
@@ -593,19 +604,39 @@ final class GatewayLifecycleCoordinator {
             gatewayInfo = connection.info
             connectionState = .connected
             delegate?.lifecycleInvalidateSessionConnectionOwnership()
-            async let refresh: Void = delegate?.lifecycleRefreshAll(admission: connectedAdmission) ?? ()
-            async let restore: Void = delegate?.lifecycleRestoreMountedPresentation(admission: connectedAdmission) ?? ()
-            async let terminals: Void = delegate?.lifecycleReattachTerminals(admission: connectedAdmission) ?? ()
-            _ = await (refresh, restore, terminals)
-            try require(connectedAdmission)
-            if projectionFailureGeneration == admission.generation {
-                projectionFailureGeneration = nil
-                connectionState = .offline("Gateway projection refresh failed")
-                scheduleReconnect(immediate: true)
-                return
+            if awaitProjection {
+                async let refresh: Void = delegate?.lifecycleRefreshAll(admission: connectedAdmission) ?? ()
+                async let restore: Void = delegate?.lifecycleRestoreMountedPresentation(admission: connectedAdmission) ?? ()
+                async let terminals: Void = delegate?.lifecycleReattachTerminals(admission: connectedAdmission) ?? ()
+                _ = await (refresh, restore, terminals)
+                try require(connectedAdmission)
+                if projectionFailureGeneration == admission.generation {
+                    projectionFailureGeneration = nil
+                    connectionState = .offline("Gateway projection refresh failed")
+                    scheduleReconnect(immediate: true)
+                    return
+                }
+                if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
+                cancelReconnect()
+            } else {
+                let projectionTask = Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    async let refresh: Void = self.delegate?.lifecycleRefreshAll(admission: connectedAdmission) ?? ()
+                    async let restore: Void = self.delegate?.lifecycleRestoreMountedPresentation(admission: connectedAdmission) ?? ()
+                    async let terminals: Void = self.delegate?.lifecycleReattachTerminals(admission: connectedAdmission) ?? ()
+                    _ = await (refresh, restore, terminals)
+                    guard !Task.isCancelled, self.admits(connectedAdmission) else { return }
+                    if self.projectionFailureGeneration == admission.generation {
+                        self.projectionFailureGeneration = nil
+                        self.connectionState = .offline("Gateway projection refresh failed")
+                        self.scheduleReconnect(immediate: true)
+                    } else {
+                        self.cancelReconnect()
+                    }
+                    self.deferredProjectionTask = nil
+                }
+                deferredProjectionTask = projectionTask
             }
-            if let pairingAttemptID { try requirePairingAttempt(pairingAttemptID) }
-            cancelReconnect()
         } catch {
             if let establishedConnectionID {
                 await client.closeIfCurrent(connectionID: establishedConnectionID)

@@ -295,7 +295,7 @@ struct GatewayConnectionDetailView: View {
         switch status {
         case .connected: .tronEmerald
         case .connecting: .tronAmber
-        case .offline, .blocked: .tronError
+        case .offline, .blocked, .identityMismatch: .tronError
         case .disabled, .stale, .needsVerification: .tronSlate
         }
     }
@@ -450,7 +450,7 @@ struct GatewayConnectionDetailView: View {
         switch status {
         case .connected: "checkmark.circle.fill"
         case .connecting: "arrow.triangle.2.circlepath"
-        case .offline, .blocked: "exclamationmark.triangle.fill"
+        case .offline, .blocked, .identityMismatch: "exclamationmark.triangle.fill"
         case .disabled: "pause.circle.fill"
         case .stale, .needsVerification: "network"
         }
