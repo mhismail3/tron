@@ -2191,6 +2191,12 @@ export default function (pi) {
     expect(finalOrder).toEqual(new Map([["call-read", 0], ["call-bash", 1]]));
     const bashProgress = progress.filter((event) => event.toolCallId === "call-bash");
     expect(bashProgress.some((event) => event.status === "running" && event.output?.includes("start"))).toBe(true);
+    const runningDurations = bashProgress
+      .filter((event) => event.status === "running")
+      .map((event) => event.durationMs);
+    expect(runningDurations.length).toBeGreaterThan(0);
+    expect(runningDurations.every((duration) => typeof duration === "number" && duration >= 0)).toBe(true);
+    expect(runningDurations).toEqual([...runningDurations].sort((left, right) => left! - right!));
     expect(bashProgress.at(-1)).toMatchObject({ status: "completed", output: "startend" });
     expect(bashProgress.at(-1)!.progressSequence).toBeGreaterThan(2);
     expect(bashProgress.at(-1)!.durationMs).toBeGreaterThanOrEqual(300);

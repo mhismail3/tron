@@ -1385,7 +1385,7 @@ struct ChatTranscriptPresentationTests {
         #expect(tool.elapsedMilliseconds() == 2_000)
     }
 
-    @Test("completed timing prefers the observed interval and tool runs accumulate durations")
+    @Test("Gateway duration is authoritative and tool runs accumulate durations")
     func completedAndAccumulatedTiming() {
         let first = ChatToolPresentation(
             id: "first", title: "edit", subtitle: "Completed", request: nil, response: nil,
@@ -1401,9 +1401,22 @@ struct ChatTranscriptPresentationTests {
         )
         let run = ChatToolRunPresentation(tools: [first.descriptor, second.descriptor])
 
-        #expect(first.elapsedMilliseconds() == 2_000)
-        #expect(second.elapsedMilliseconds() == 3_000)
-        #expect(run.elapsedMilliseconds() == 5_000)
+        #expect(first.elapsedMilliseconds() == 25)
+        #expect(second.elapsedMilliseconds() == 40)
+        #expect(run.elapsedMilliseconds() == 65)
+    }
+
+    @Test("running Gateway duration does not use the device wall clock")
+    func runningGatewayDurationIsAuthoritative() throws {
+        let tool = ChatToolPresentation(
+            id: "running", title: "bash", subtitle: "Running", request: nil, response: nil,
+            content: "", fallbackContent: nil, error: false,
+            startedAt: "2026-01-01T00:00:01Z", completedAt: nil,
+            durationMs: 237, lastProgressAt: "2026-01-01T00:00:02Z", progressSequence: 2
+        )
+
+        let farFuture = try #require(ToolTiming.date("2036-01-01T00:00:01Z"))
+        #expect(tool.elapsedMilliseconds(at: farFuture) == 237)
     }
 
     @Test("conversation content interrupts tool grouping")

@@ -241,7 +241,9 @@ Extension callbacks are wrapped through the public `DefaultResourceLoaderOptions
 
 Parallel tool events carry a monotonic per-run ordinal; each call additionally has
 a monotonic progress sequence, bounded display-safe live-output tail, runtime start,
-last-progress/completion timestamps, and duration. The Gateway coalesces high-rate
+last-progress/completion timestamps, and a duration measured from the tool callback
+with a monotonic clock. Running progress carries the latest monotonic duration sample;
+the completion carries the final call-to-return duration. The Gateway coalesces high-rate
 updates without losing the newest state. Clients join calls, progress, and results
 by canonical call ID rather than arrival order.
 

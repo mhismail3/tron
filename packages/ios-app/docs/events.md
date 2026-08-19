@@ -65,8 +65,11 @@ admits and reduces mounted-session topics:
   identity from invocation through completion so final assistant text cannot jump
   ahead of or reinsert it. Only consecutive tool calls consolidate; thinking or
   other canonical content flushes the group and remains in exact transcript order.
-  Every chip has a locally ticking elapsed clock. Its open detail sheet continues to
-  consume the newest immutable call presentation, showing status, the bounded readable
+  The Gateway supplies monotonic duration samples while a call is running and the
+  authoritative final call-to-return duration when it completes; chips display those
+  samples without deriving normal timing from the device wall clock. Older Gateways
+  without live duration samples use a bounded local monotonic fallback. The open detail
+  sheet continues to consume the newest immutable call presentation, showing status, the bounded readable
   live-output tail, explicit output-truncation state only when the runtime flag or
   structured truncation contract says `truncated: true`, and the age of the most recent
   runtime update without automatic scrolling. Multi-tool run chips show accumulated time as
@@ -77,7 +80,7 @@ admits and reduces mounted-session topics:
   identifiers, timing, and progress remain first in Technical details, followed directly by
   complete Request JSON and Result JSON in that order. Result JSON prefers the response, then
   content-only output, then only a fallback distinct from Request. Exact current-runtime
-  start-to-end intervals are preferred when available; older canonical history derives only
+  monotonic start-to-end durations are authoritative when available; older canonical history derives only
   an observed call-to-result interval because Pi JSONL does not persist tool execution timing;
 - structure/context/resource invalidations reload an already-presented History,
   Manage Session, Agent Context, or Project Resources surface from the runtime. Context,

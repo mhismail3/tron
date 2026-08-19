@@ -636,6 +636,12 @@ export class RuntimeSlot {
           this.toolStartedAtMonotonicMs.set(event.toolCallId, performance.now());
         }
         const progressSequence = (existing?.progressSequence ?? 0) + 1;
+        const durationMs = this.measureToolDuration(
+          event.toolCallId,
+          startedAt,
+          now,
+          performance.now()
+        );
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
@@ -646,6 +652,7 @@ export class RuntimeSlot {
           startedAt,
           updatedAt: now,
           lastProgressAt: now,
+          durationMs,
           progressSequence,
           ...(this.extensionToolOrigin(event.toolName) ? { extensionOrigin: this.extensionToolOrigin(event.toolName) } : {}),
         };
@@ -661,6 +668,13 @@ export class RuntimeSlot {
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
         const output = projectToolOutput(event.partialResult);
+        const startedAt = existing?.startedAt ?? now;
+        const durationMs = this.measureToolDuration(
+          event.toolCallId,
+          startedAt,
+          now,
+          performance.now()
+        );
         const state: ToolExecutionState = {
           toolCallId: event.toolCallId,
           toolName: event.toolName,
@@ -675,9 +689,10 @@ export class RuntimeSlot {
               })
             : output),
           isError: false,
-          startedAt: existing?.startedAt ?? now,
+          startedAt,
           updatedAt: now,
           lastProgressAt: now,
+          durationMs,
           progressSequence: (existing?.progressSequence ?? 0) + 1,
           ...(this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin
             ? { extensionOrigin: this.extensionToolOrigin(event.toolName) ?? existing?.extensionOrigin }
@@ -694,7 +709,7 @@ export class RuntimeSlot {
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
         const startedAt = existing?.startedAt ?? now;
-        const durationMs = existing?.durationMs ?? this.measureToolDuration(
+        const durationMs = this.measureToolDuration(
           event.toolCallId,
           startedAt,
           now,

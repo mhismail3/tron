@@ -361,7 +361,7 @@ Checkpoint status and deliverables:
 - **Structured-detail realization complete:** structured JSON sub-sheets retain semantic child paths and resolve them against the newest live root. Collection storage now provides stable structural identities through a random-access field owner, so `LazyVStack` derives labels, previews, and values only for realized rows instead of eagerly mapping every item. Object key ordering and every visible row remain unchanged.
 - Before reveal, atomically install the complete lightweight identity/order descriptor spine and render-critical tail plus overscan. Progressively prepare only non-observed heavyweight Markdown/JSON/image caches afterward; never insert canonical rows, change projection revision, swap height-changing placeholders near the viewport, or write scroll position merely because offscreen preparation completed.
 - Keep explicit earlier-history loading request-only and visually unchanged.
-- **Complete:** parse tool timestamps with shared cached `Sendable` ISO-8601 strategies supporting fractional and whole-second Gateway values.
+- **Complete:** runtime tool duration samples and final call-to-return durations use Gateway monotonic timing; shared cached `Sendable` ISO-8601 strategies support fractional and whole-second values only as the compatibility fallback for older Gateway or canonical-history data.
 
 The Phase 6 exit gate remains open pending physical pixel, text-selection,
 VoiceOver, Dynamic Type, Reduce Motion, frame, and peak-memory evidence.

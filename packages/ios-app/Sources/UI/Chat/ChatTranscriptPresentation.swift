@@ -661,6 +661,9 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
 
     func elapsedMilliseconds(at date: Date = .now) -> Int? {
+        if isRunning, let durationMs {
+            return max(0, durationMs)
+        }
         guard let start = ToolTiming.date(startedAt) else {
             return durationMs.map { max(0, $0) }
         }
@@ -781,6 +784,9 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
 
     func elapsedMilliseconds(at date: Date = .now) -> Int? {
+        if isRunning, let durationMs {
+            return max(0, durationMs)
+        }
         guard let start = ToolTiming.date(startedAt) else {
             return durationMs.map { max(0, $0) }
         }
@@ -828,20 +834,17 @@ enum ToolTiming {
         return max(0, Int(rounded))
     }
 
-    /// Prefer the observed start-to-end interval when both runtime timestamps
-    /// exist. A runtime duration remains a fallback and protects against coarse
-    /// or malformed timestamp pairs without allowing a tiny duration to erase a
-    /// longer observed invocation.
+    /// Runtime duration is authoritative when supplied by the Gateway because
+    /// it is measured from the tool callback with a monotonic clock. Timestamp
+    /// subtraction is only the compatibility fallback for older canonical
+    /// history that has no retained execution metadata.
     static func resolvedDuration(
         startedAt: String?,
         completedAt: String?,
         fallback: Int?
     ) -> Int? {
-        let fallback = fallback.map { max(0, $0) }
-        guard let interval = intervalMilliseconds(start: startedAt, end: completedAt) else {
-            return fallback
-        }
-        return max(interval, fallback ?? 0)
+        if let fallback { return max(0, fallback) }
+        return intervalMilliseconds(start: startedAt, end: completedAt)
     }
 
     static func format(milliseconds: Int) -> String {

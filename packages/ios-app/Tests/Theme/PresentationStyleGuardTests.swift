@@ -1588,8 +1588,10 @@ struct PresentationStyleGuardTests {
         #expect(transcript.contains(".foregroundStyle(Color.tronTextSecondary)"))
         #expect(transcript.contains(".italic()"))
         #expect(toolRuns.contains("run.reverseChronologicalTools.map(\\.id)"))
-        #expect(toolElapsed.contains("TimelineView(.animation(minimumInterval: 0.1))"))
-        #expect(toolRunElapsed.contains("TimelineView(.animation(minimumInterval: 0.1))"))
+        #expect(toolElapsed.contains("TimelineView(.periodic(from: .now, by: 0.1)"))
+        #expect(toolRunElapsed.contains("TimelineView(.periodic(from: .now, by: 0.1)"))
+        #expect(toolRuns.contains("private struct ToolElapsedClock"))
+        #expect(toolRuns.contains("ProcessInfo.processInfo.systemUptime"))
         #expect(!toolRuns.contains(".periodic(from:"))
         for elapsed in [toolElapsed, toolRunElapsed] {
             #expect(elapsed.contains(".monospacedDigit()"))

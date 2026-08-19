@@ -936,9 +936,10 @@ detent above the one-tool/grouped rendering branch, resolving the selected stabl
 run projection so a second arriving call cannot dismiss the first call's sheet. Metadata VoiceOver labels use
 only concise bounded chip previews and disclose that complete values remain in Technical details. The chip
 flow measures every chip against the finite available width; status and scalar text may wrap to two lines at
-Accessibility Dynamic Type without escaping the sheet or changing VoiceOver order. Cached Sendable ISO 8601
-parse strategies handle both fractional and whole-second Gateway timestamps for live timers without repeated
-formatter allocation. Technical execution rows use compact selectable label/value geometry; a bounded bash
+Accessibility Dynamic Type without escaping the sheet or changing VoiceOver order. Runtime duration samples
+are authoritative for live timers; cached Sendable ISO 8601 parse strategies remain a compatibility fallback
+for older Gateways and canonical history, handling both fractional and whole-second Gateway timestamps without
+repeated formatter allocation. Technical execution rows use compact selectable label/value geometry; a bounded bash
 preview records its completeness fact there, followed by on-demand Request JSON and Result JSON summary rows
 with explicit `null` for a truly missing side. Content-only results remain JSON strings, response data wins, and a fallback
 identical to Request is rejected. Running sheets consume the newest immutable tool presentation, update status, timing,

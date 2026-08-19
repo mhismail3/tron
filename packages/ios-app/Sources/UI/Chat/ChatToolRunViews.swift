@@ -296,22 +296,48 @@ private struct ToolRunDetailSheet: View {
     }
 }
 
+private struct ToolElapsedClock: Equatable {
+    let baselineMilliseconds: Int
+    let baselineUptime: TimeInterval
+
+    func milliseconds(at uptime: TimeInterval) -> Int {
+        let delta = (uptime - baselineUptime) * 1_000
+        guard delta.isFinite, delta > 0 else { return baselineMilliseconds }
+        let rounded = delta.rounded()
+        guard rounded < Double(Int.max - baselineMilliseconds) else { return Int.max }
+        return baselineMilliseconds + Int(rounded)
+    }
+}
+
 private struct ToolElapsedText: View {
     let tool: ChatToolDescriptor
     let color: Color
+    @State private var localClock: ToolElapsedClock?
+
+    private var needsLocalClock: Bool { tool.isRunning && tool.durationMs == nil }
 
     var body: some View {
-        if tool.isRunning {
-            TimelineView(.animation(minimumInterval: 0.1)) { context in
-                elapsed(at: context.date)
+        Group {
+            if needsLocalClock {
+                // Compatibility fallback for older Gateways that do not send a
+                // runtime duration sample while a tool is running. The normal
+                // path renders Gateway-monotonic samples and never ticks from
+                // the device wall clock.
+                TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+                    elapsed(at: .now)
+                }
+            } else {
+                elapsed(at: .now)
             }
-        } else {
-            elapsed(at: .now)
         }
+        .onAppear(perform: synchronizeLocalClock)
+        .onChange(of: tool.id) { _, _ in synchronizeLocalClock() }
+        .onChange(of: tool.startedAt) { _, _ in synchronizeLocalClock() }
+        .onChange(of: tool.isRunning) { _, _ in synchronizeLocalClock() }
     }
 
     @ViewBuilder private func elapsed(at date: Date) -> some View {
-        if let milliseconds = tool.elapsedMilliseconds(at: date) {
+        if let milliseconds = milliseconds(at: date) {
             Text(ToolTiming.format(milliseconds: milliseconds))
                 .font(TronFont.mono(10, weight: .semibold))
                 .foregroundStyle(color)
@@ -319,23 +345,53 @@ private struct ToolElapsedText: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }
+    }
+
+    private func milliseconds(at date: Date) -> Int? {
+        guard needsLocalClock, let localClock else {
+            return tool.elapsedMilliseconds(at: date)
+        }
+        return localClock.milliseconds(at: ProcessInfo.processInfo.systemUptime)
+    }
+
+    private func synchronizeLocalClock() {
+        guard needsLocalClock,
+              let baseline = tool.elapsedMilliseconds(at: .now) else {
+            localClock = nil
+            return
+        }
+        localClock = ToolElapsedClock(
+            baselineMilliseconds: baseline,
+            baselineUptime: ProcessInfo.processInfo.systemUptime
+        )
     }
 }
 
 private struct ToolRunElapsedText: View {
     let run: ChatToolRunPresentation
     let color: Color
+    @State private var localClocks: [String: ToolElapsedClock] = [:]
+
+    private var needsLocalClocks: Bool {
+        run.tools.contains { $0.isRunning && $0.durationMs == nil }
+    }
 
     var body: some View {
-        if run.isRunning {
-            TimelineView(.animation(minimumInterval: 0.1)) { context in elapsed(at: context.date) }
-        } else {
-            elapsed(at: .now)
+        Group {
+            if needsLocalClocks {
+                TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+                    elapsed(at: .now)
+                }
+            } else {
+                elapsed(at: .now)
+            }
         }
+        .onAppear(perform: synchronizeLocalClocks)
+        .onChange(of: run.tools) { _, _ in synchronizeLocalClocks() }
     }
 
     @ViewBuilder private func elapsed(at date: Date) -> some View {
-        if let milliseconds = run.elapsedMilliseconds(at: date) {
+        if let milliseconds = milliseconds(at: date) {
             Text(ToolTiming.format(milliseconds: milliseconds))
                 .font(TronFont.mono(10, weight: .semibold))
                 .foregroundStyle(color)
@@ -343,6 +399,42 @@ private struct ToolRunElapsedText: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }
+    }
+
+    private func milliseconds(at date: Date) -> Int? {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let values = run.tools.compactMap { tool -> Int? in
+            guard tool.isRunning, tool.durationMs == nil,
+                  let localClock = localClocks[tool.id] else {
+                return tool.elapsedMilliseconds(at: date)
+            }
+            return localClock.milliseconds(at: uptime)
+        }
+        guard !values.isEmpty else { return nil }
+        return values.reduce(into: 0) { total, value in
+            total = total > Int.max - value ? Int.max : total + value
+        }
+    }
+
+    private func synchronizeLocalClocks() {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        let now = Date.now
+        var updated = localClocks
+        let liveIDs = Set(run.tools.map(\.id))
+        updated = updated.filter { liveIDs.contains($0.key) }
+        for tool in run.tools {
+            guard tool.isRunning && tool.durationMs == nil else {
+                updated.removeValue(forKey: tool.id)
+                continue
+            }
+            guard updated[tool.id] == nil,
+                  let baseline = tool.elapsedMilliseconds(at: now) else { continue }
+            updated[tool.id] = ToolElapsedClock(
+                baselineMilliseconds: baseline,
+                baselineUptime: uptime
+            )
+        }
+        localClocks = updated
     }
 }
 
