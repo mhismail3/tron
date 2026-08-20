@@ -73,6 +73,12 @@ struct EnvironmentSetup: Sendable {
     /// `.unauthorized`.
     var pingServer: @Sendable (String?) async -> ServerPingResult
 
+    /// Requests the Gateway-owned drain restart. This is deliberately separate
+    /// from LaunchAgent registration: launchd remains the process supervisor.
+    var restartGateway: @Sendable () async throws -> GatewayRestartClient.Response = {
+        throw GatewayRestartClient.Failure.transport
+    }
+
     /// Health wait policy after menu-bar start/restart/resume actions.
     /// Tests can lower these to keep stale-helper paths deterministic.
     var serverStartHealthCheckAttempts: Int = 60
@@ -156,6 +162,17 @@ struct EnvironmentSetup: Sendable {
                 ?? GatewayNetworkCacheReader.tailscaleIP(at: TronPaths.networkCachePath)
                 ?? "127.0.0.1"
             return await ServerPing.ping(host: host, port: TronPaths.defaultServerPort, token: token)
+        },
+        restartGateway: {
+            let tailscale = await TailscaleProbe.probe()
+            let host = tailscale.displayIP
+                ?? GatewayNetworkCacheReader.tailscaleIP(at: TronPaths.networkCachePath)
+                ?? "127.0.0.1"
+            return try await GatewayRestartClient.restart(
+                host: host,
+                port: TronPaths.defaultServerPort,
+                token: BearerTokenReader.read(at: TronPaths.bearerTokenPath)
+            )
         },
         launchAgentManager: LiveLaunchAgentManager(),
         touchOnboardedSentinel: {

@@ -35,6 +35,8 @@
     <dict>
         <key>TRON_GATEWAY_SUPERVISED</key>
         <string>1</string>
+        <key>TRON_GATEWAY_CHANNEL</key>
+        <string>dev</string>
         <key>TRON_HOME_NAME</key>
         <string>.tron-dev</string>
         <key>TRON_AGENT_DIR_NAME</key>

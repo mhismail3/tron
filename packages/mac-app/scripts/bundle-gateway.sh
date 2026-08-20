@@ -94,6 +94,9 @@ stage_node() {
 mkdir -p "$APP_DIR/dist" "$APP_DIR/scripts" "$RUNTIME_DIR" \
     "$HELPER_DIR/MacOS" "$HELPER_DIR/Resources" \
     "$DEV_HELPER_DIR/MacOS" "$DEV_HELPER_DIR/Resources"
+# Permit replacing a previously staged immutable payload during an explicit
+# bundle operation; publication directories remain read-only afterward.
+chmod -R u+w "$PAYLOAD_DIR" 2>/dev/null || true
 rm -rf "$APP_DIR/dist" "$APP_DIR/node_modules"
 cp -R "$GATEWAY_DIR/dist" "$APP_DIR/dist"
 cp "$GATEWAY_DIR/package.json" "$GATEWAY_DIR/package-lock.json" "$APP_DIR/"
@@ -118,26 +121,17 @@ cp "$RESOURCES_DIR/AppIcon.icns" "$DEV_HELPER_DIR/Resources/AppIcon.icns"
 
 GATEWAY_VERSION="$(node -p "require('$GATEWAY_DIR/package.json').version")"
 SOURCE_REVISION="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
-fingerprint_input="$(mktemp)"
-{
-    printf 'gatewayVersion=%s\n' "$GATEWAY_VERSION"
-    printf 'nodeVersion=%s\n' "$NODE_VERSION"
-    (
-        cd "$APP_DIR"
-        find dist scripts -type f -print | sort | while IFS= read -r file; do
-            shasum -a 256 "$file"
-        done
-        shasum -a 256 package.json package-lock.json
-    )
-    for runtime in "$RUNTIME_DIR"/node-*; do
-        shasum -a 256 "$runtime"
-    done
-} > "$fingerprint_input"
-PAYLOAD_FINGERPRINT="$(shasum -a 256 "$fingerprint_input" | awk '{print $1}')"
-rm -f "$fingerprint_input"
-printf '{"schema":1,"gatewayVersion":"%s","nodeVersion":"%s","sourceRevision":"%s","payloadFingerprint":"%s"}\n' \
-    "$GATEWAY_VERSION" "$NODE_VERSION" "$SOURCE_REVISION" "$PAYLOAD_FINGERPRINT" \
+RUNTIME_EPOCH="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+# Hash the complete staged dependency tree, not merely the compiled entrypoint.
+# The helper is standalone so release validation can exercise the same coverage.
+PAYLOAD_FINGERPRINT="$($SCRIPT_DIR/hash-gateway-payload.sh "$PAYLOAD_DIR")"
+printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"%s","nodeVersion":"%s","sourceRevision":"%s","runtimeEpoch":"%s","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' \
+    "$GATEWAY_VERSION" "$GATEWAY_VERSION" "$NODE_VERSION" "$SOURCE_REVISION" "$RUNTIME_EPOCH" "$PAYLOAD_FINGERPRINT" \
     > "$PAYLOAD_DIR/manifest.json"
+# Version payloads are immutable after publication; current.json remains the
+# only mutable deployment pointer. The launcher uses this as its bounded
+# anti-tampering check and does not claim to re-hash the tree.
+chmod -R a-w "$PAYLOAD_DIR"
 
 printf 'staged Tron Gateway %s with Node %s (fingerprint %s)\n' \
     "$GATEWAY_VERSION" "$NODE_VERSION" "$PAYLOAD_FINGERPRINT"

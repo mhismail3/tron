@@ -53,7 +53,8 @@ protocol LaunchAgentManaging: Sendable {
     /// bundled Login Item registration. Safe to call when not registered.
     func unload(label: String) async -> LaunchAgentOutcome
 
-    /// `launchctl kickstart -k gui/$UID/<label>` — restarts the agent.
+    /// Explicit process restart used only by lifecycle flows that cannot use
+    /// the Gateway's authenticated drain command (for example permissions).
     func restart(label: String) async -> LaunchAgentOutcome
 
     /// True if `launchctl print gui/$UID/<label>` returns a state row.
@@ -65,9 +66,9 @@ protocol LaunchAgentManaging: Sendable {
     func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo?
 }
 
-/// Applies the shared service-start policy. An already-enabled label may
-/// still be running an older helper image after app replacement, so
-/// `.alreadyLoaded` is followed by `kickstart -k` through the manager.
+/// Applies the shared service-start policy for registration/start flows.
+/// The menu-bar Restart action deliberately does not use this helper: it asks
+/// the supervised Gateway to drain and lets launchd perform relaunch.
 enum LaunchAgentLoader {
     static func ensureLoaded(
         manager: LaunchAgentManaging,

@@ -50,37 +50,62 @@ final class MenuBarActionHandler {
 
     // MARK: - Actions
 
+    /// Requests a drain-aware Gateway restart. Launchd owns the process and is
+    /// only asked to register an unloaded service; an already-loaded service
+    /// is never force-kickstarted by this user-facing action.
     private func restartServer() async {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Restart blocked") else { return }
         applyBusy(.restarting)
-        let outcome = await LaunchAgentLoader.ensureLoaded(
-            manager: setup.launchAgentManager,
-            plistPath: setup.launchAgentPlistPath,
-            label: setup.launchAgentLabel
-        )
-        switch outcome {
-        case .ok, .alreadyLoaded:
+
+        let serviceWasLoaded = await setup.launchAgentManager.isLoaded(label: setup.launchAgentLabel)
+        if !serviceWasLoaded {
+            let outcome = await setup.launchAgentManager.load(
+                plistPath: setup.launchAgentPlistPath,
+                label: setup.launchAgentLabel
+            )
+            switch outcome {
+            case .ok, .alreadyLoaded:
+                break
+            case .requiresApproval(let message):
+                await finishRestartFailure(title: "Restart blocked", message: message, openLoginItems: true)
+                return
+            case .launchdRefused(let message), .unknown(let message):
+                await finishRestartFailure(title: "Restart failed", message: message)
+                return
+            case .binaryMissing(let path):
+                await finishRestartFailure(title: "Restart failed", message: "Binary missing: \(path)")
+                return
+            }
+
+            // A repaired registration may need a moment to launch before it
+            // can receive the authenticated restart request. Do not kick it;
+            // wait for the launchd-owned health endpoint instead.
+            let health = await ServerHealthAwaiter.waitForHealthy(setup: setup)
+            guard case .success = health else {
+                await finishRestartFailure(title: "Restart failed", message: unhealthyStartMessage(result: health))
+                return
+            }
+        }
+
+        do {
+            _ = try await setup.restartGateway()
             await finishServerStartAction(
                 successTitle: "Tron restarted",
-                successBody: "The menu bar status has been refreshed.",
+                successBody: "The Gateway drained accepted work and reconnected through launchd.",
                 failureTitle: "Restart failed"
             )
-            return
-        case .requiresApproval(let message):
-            await refreshStatus()
-            LoginItemsSettingsOpener.open()
-            await MenuBarNotifier.post(title: "Restart blocked", body: message)
-            await presentNonBlockingError(title: "Restart blocked", message: message)
-        case .launchdRefused(let message), .unknown(let message):
-            await refreshStatus()
-            await MenuBarNotifier.post(title: "Restart failed", body: message)
-            await presentNonBlockingError(title: "Restart failed", message: message)
-        case .binaryMissing(let path):
-            await refreshStatus()
-            let message = "Binary missing: \(path)"
-            await MenuBarNotifier.post(title: "Restart failed", body: message)
-            await presentNonBlockingError(title: "Restart failed", message: message)
+        } catch let failure as GatewayRestartClient.Failure {
+            await finishRestartFailure(title: "Restart failed", message: failure.userMessage)
+        } catch {
+            await finishRestartFailure(title: "Restart failed", message: "The Gateway restart request failed safely.")
         }
+    }
+
+    private func finishRestartFailure(title: String, message: String, openLoginItems: Bool = false) async {
+        await refreshStatus()
+        if openLoginItems { LoginItemsSettingsOpener.open() }
+        await MenuBarNotifier.post(title: title, body: message)
+        await presentNonBlockingError(title: title, message: message)
     }
 
     private func pauseServer() async {

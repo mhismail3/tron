@@ -99,6 +99,7 @@ struct MacSourceGuardTests {
         )
         #expect(releaseLaunchAgent.contains("<string>com.tron.server</string>"))
         #expect(releaseLaunchAgent.contains("<key>TRON_GATEWAY_SUPERVISED</key>\n        <string>1</string>"))
+        #expect(releaseLaunchAgent.contains("<key>TRON_GATEWAY_CHANNEL</key>\n        <string>stable</string>"))
         #expect(
             releaseLaunchAgent.contains(
                 "<string>Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron</string>"
@@ -111,6 +112,7 @@ struct MacSourceGuardTests {
         )
         #expect(devLaunchAgent.contains("<string>com.tron.server.dev</string>"))
         #expect(devLaunchAgent.contains("<key>TRON_GATEWAY_SUPERVISED</key>\n        <string>1</string>"))
+        #expect(devLaunchAgent.contains("<key>TRON_GATEWAY_CHANNEL</key>\n        <string>dev</string>"))
         #expect(devLaunchAgent.contains("<key>TRON_AGENT_DIR_NAME</key>\n        <string>agent-dev</string>"))
         #expect(
             devLaunchAgent.contains(
@@ -120,6 +122,8 @@ struct MacSourceGuardTests {
 
         let ensureScript = try Self.read(macRoot, "scripts/ensure-gateway-bundle.sh")
         #expect(ensureScript.contains("bundle-gateway.sh"))
+        #expect(ensureScript.contains("manifest.json"))
+        #expect(ensureScript.contains("tron-gateway-payload"))
         #expect(ensureScript.contains("node-arm64"))
         #expect(ensureScript.contains("node-x64"))
         #expect(ensureScript.contains("node_modules"))
@@ -130,8 +134,20 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("NODE_X64_SHA256="))
         #expect(bundleScript.contains("npm ci --omit=dev"))
         #expect(bundleScript.contains("tron-gateway-launcher.c"))
+        #expect(bundleScript.contains("hash-gateway-payload.sh"))
+        #expect(bundleScript.contains("dependencyTreeCoverage"))
+        #expect(bundleScript.contains("runtimeEpoch"))
         #expect(bundleScript.contains("-arch arm64 -arch x86_64"))
         #expect(!bundleScript.contains("cargo build"))
+
+        let hashScript = try Self.read(macRoot, "scripts/hash-gateway-payload.sh")
+        #expect(hashScript.contains("find app runtime -type f"))
+        #expect(hashScript.contains("shasum -a 256"))
+
+        let launcher = try Self.read(macRoot, "scripts/tron-gateway-launcher.c")
+        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "immutable_tree", "S_IWUSR"] {
+            #expect(launcher.contains(required), "launcher missing external payload safety marker: \(required)")
+        }
 
         let project = try Self.read(macRoot, "project.yml")
         #expect(project.contains("name: Ensure Bundled Gateway Payload"))

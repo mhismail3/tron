@@ -35,8 +35,8 @@ struct BearerTokenReaderTests {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        try writeSecureToken(Data(#"{"version":1,"bearerToken":"abcdef1234567890","providers":{},"lastUpdated":"2026-04-27T00:00:00Z"}"#.utf8), to: path)
-        #expect(BearerTokenReader.read(at: path) == "abcdef1234567890")
+        try writeSecureToken(Data(#"{"version":2,"bearerToken":"abcdef1234567890abcdef1234567890","purpose":"local-wrapper-health","lastUpdated":"2026-04-27T00:00:00Z"}"#.utf8), to: path)
+        #expect(BearerTokenReader.read(at: path) == "abcdef1234567890abcdef1234567890")
     }
 
     @Test("JSON with empty bearerToken returns nil")
@@ -77,12 +77,26 @@ struct BearerTokenReaderTests {
 
     // MARK: - Permission guard
 
+    @Test("symlinks and directories are rejected")
+    func nonRegularFilesRejected() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
+        try FileManager.default.createDirectory(at: path, withIntermediateDirectories: false)
+        #expect(BearerTokenReader.read(at: path) == nil)
+        try FileManager.default.removeItem(at: path)
+        let target = tmp.appendingPathComponent("target.json")
+        try Data(#"{"version":2}"#.utf8).write(to: target)
+        try FileManager.default.createSymbolicLink(at: path, withDestinationURL: target)
+        #expect(BearerTokenReader.read(at: path) == nil)
+    }
+
     @Test("0o644 file is rejected by default")
     func wideOpenPermissionsRejected() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        try Data(#"{"bearerToken":"abcdef1234567890"}"#.utf8).write(to: path)
+        try Data(#"{"version":2,"bearerToken":"abcdef1234567890abcdef1234567890","purpose":"local-wrapper-health","lastUpdated":"2026-04-27T00:00:00Z"}"#.utf8).write(to: path)
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path.path)
         #expect(BearerTokenReader.read(at: path) == nil)
     }
@@ -92,7 +106,7 @@ struct BearerTokenReaderTests {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        try Data(#"{"bearerToken":"abcdef1234567890"}"#.utf8).write(to: path)
+        try Data(#"{"version":2,"bearerToken":"abcdef1234567890abcdef1234567890","purpose":"local-wrapper-health","lastUpdated":"2026-04-27T00:00:00Z"}"#.utf8).write(to: path)
         try FileManager.default.setAttributes([.posixPermissions: 0o640], ofItemAtPath: path.path)
         #expect(BearerTokenReader.read(at: path) == nil)
     }
@@ -102,8 +116,8 @@ struct BearerTokenReaderTests {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
         let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
-        try writeSecureToken(Data(#"{"bearerToken":"abcdef1234567890"}"#.utf8), to: path)
-        #expect(BearerTokenReader.read(at: path) == "abcdef1234567890")
+        try writeSecureToken(Data(#"{"version":2,"bearerToken":"abcdef1234567890abcdef1234567890","purpose":"local-wrapper-health","lastUpdated":"2026-04-27T00:00:00Z"}"#.utf8), to: path)
+        #expect(BearerTokenReader.read(at: path) == "abcdef1234567890abcdef1234567890")
     }
 
 }

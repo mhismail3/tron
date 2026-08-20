@@ -17,7 +17,10 @@ registrations.
 | Debug companion | regular companion window; observes installed agent only | none owned | `~/.tron` | 9847 |
 
 The LaunchAgent passes `--host tailscale`; gateway startup resolves and binds the
-actual Tailscale interface rather than all interfaces. Developer CLI operation
+actual Tailscale interface rather than all interfaces, choosing the lowest IPv4
+address (then deterministic IPv6/address/interface order). Deployment health and
+restart traffic resolve the same name; an explicit host always overrides it.
+Developer CLI operation
 is loopback unless `--tailscale` is explicit. Isolated pairing invitations append
 `(Dev)` to the Mac's friendly name so the `9848` profile is distinct from the
 production connection; production invitations keep the unchanged name. The two
@@ -81,6 +84,54 @@ an iOS release; release replacement is a separate manual maintainer action.
 The wrapper and gateway share no in-memory state. Their only shared secrets are
 owner-only gateway files. Legacy `~/.tron/auth.json` is neither wrapper nor
 gateway authentication and is left untouched for explicit migration.
+
+## Gateway payload selection
+
+The installed release wrapper is one launcher image and LaunchAgent owner for
+both the stable and optional dev channels; the channels may run in parallel on
+9847 and 9848. It first checks the selected channel (`TRON_GATEWAY_CHANNEL`,
+with `stable` as the compatibility default) under the selected Tron home:
+
+```
+~/.tron/gateway/payloads/<channel>/current.json
+~/.tron/gateway/payloads/<channel>/versions/<version>/manifest.json
+```
+
+The isolated LaunchAgent supplies `.tron-dev` and the `dev` channel. The
+agent-manageable command is explicit:
+
+```text
+scripts/gateway-payload-deploy.mjs stage --channel stable --source <payload>
+scripts/gateway-payload-deploy.mjs promote --channel stable --version <version>
+scripts/gateway-payload-deploy.mjs rollback --channel stable
+```
+
+`stage` copies into a new immutable version directory, verifies required files
+and the complete SHA-256 fingerprint, and never mutates the active version.
+`promote` records expected identity, atomically publishes `current.json` while
+retaining `previous.json`, invokes authenticated `gateway.restart` (the
+Gateway remains the drain-aware supervisor), and waits for health identity and
+a changed runtime epoch. Failure restores the prior selection and requests a
+second restart; `rollback` performs the same checked transition explicitly.
+Stable and dev have independent locks, selections, and payload directories and
+may run concurrently. The pointer has schema `1`, kind
+`tron-gateway-selection`, and fields `channel`, `version`, and
+`payloadFingerprint`. Each version manifest also carries source revision,
+runtime epoch, and the complete fingerprint coverage declaration. Staging,
+promotion, and the Swift payload validator verify every regular file under
+`app/` and `runtime/`. The small C launcher does not re-hash that tree; it
+bounds manifest reads, rejects symlinks and writable payload entries, resolves
+every executable/resource path with `realpath`, and exports provenance before
+`exec`. Invalid or absent external
+selection falls back to the bundled payload only after validating its
+authoritative manifest. No payload selection code writes canonical sessions or
+credentials.
+
+The Mac menu Restart action authenticates to the Gateway WebSocket, validates
+protocol identity, and calls `gateway.restart` with a bounded command ID. The
+Gateway drains accepted work; the wrapper then waits for the launchd-owned
+Gateway to become healthy again. It does not use `launchctl kickstart -k` as a
+restart shortcut.
 
 ## Signing order
 

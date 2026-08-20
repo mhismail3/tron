@@ -62,7 +62,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     /// Pushes an out-of-band snapshot into the menu bar (used by
-    /// `MenuBarActionHandler` after a launchctl restart/pause/resume so
+    /// `MenuBarActionHandler` after a Gateway restart/pause/resume so
     /// the icon + menu items refresh immediately rather than waiting for
     /// the next 30s poll).
     func applySnapshot(_ snapshot: ServerStatusSnapshot) {

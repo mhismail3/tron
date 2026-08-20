@@ -37,6 +37,7 @@ struct TronPathsTests {
     func productionLaunchAgentSupervisionEnvironment() {
         #expect(TronPaths.launchAgentEnvironmentVariables(environment: [:]) == [
             TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue,
+            TronPaths.gatewayChannelEnv: TronPaths.productionGatewayChannel,
         ])
     }
 
@@ -52,6 +53,7 @@ struct TronPathsTests {
             TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue,
             TronPaths.tronHomeNameEnv: ".tron-dev",
             TronPaths.agentDirNameEnv: "agent-dev",
+            TronPaths.gatewayChannelEnv: TronPaths.isolatedGatewayChannel,
         ])
         #expect(TronPaths.tronHome(environment: environment).path.hasSuffix("/.tron-dev"))
         #expect(TronPaths.canManageLaunchAgent(environment: environment))

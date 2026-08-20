@@ -422,9 +422,10 @@ allowed to read.
 Administrative restart is a drain, not an abort: the Gateway freezes new mutations,
 allows every admitted agent run to settle canonically, then exits with the supervised
 restart code. Live PTYs block restart because process replacement cannot preserve them.
-LaunchAgent supervises packaged Gateways; `scripts/tron dev --background` runs the isolated
-Gateway behind an equivalent development supervisor. `scripts/tron dev --restart` uses the
-same protocol request and is safe to invoke from a Gateway-owned agent tool; direct self-stop
+The installed release wrapper and its LaunchAgents supervise packaged Gateways; stable and
+optional dev channels may run in parallel. Payload staging, promotion, and rollback use
+`scripts/gateway-payload-deploy.mjs`; the former `scripts/tron dev` owner is deprecated and
+fails closed. Restart requests use the authenticated drain-aware Gateway protocol; direct self-stop
 is rejected. Clients receive `system.stopping`, reconnect with bounded backoff, and replace
 live state from a new authoritative snapshot. An unexpected process death remains an
 interruption represented by the durable run marker and is never automatically replayed.

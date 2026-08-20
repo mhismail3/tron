@@ -24,7 +24,21 @@ The script:
 3. downloads exact Node 22.22.0 arm64 and x64 archives;
 4. checks hard-coded SHA-256 values;
 5. compiles `tron-gateway-launcher.c` as a universal macOS executable;
-6. stages the launcher into both tracked Login Item skeletons.
+6. stages the launcher into both tracked Login Item skeletons;
+7. hashes every regular file under `app/**` (including the complete production
+   `node_modules` tree) and `runtime/**` with `hash-gateway-payload.sh`, then
+   writes that fingerprint into the bundled `manifest.json` and stamps a
+   runtime epoch. Use `scripts/gateway-payload-deploy.mjs` to stage, promote,
+   or roll back immutable stable/dev payload versions; do not use `scripts/tron
+   dev` as a Gateway owner (it is deprecated/fail-closed for this architecture).
+
+The bundled manifest is the fallback identity authority. External payloads use
+an atomically replaced `gateway/payloads/<channel>/current.json` pointer to a
+complete `versions/<version>` directory. The stable LaunchAgent selects the
+`stable` channel; the isolated LaunchAgent selects `dev`. The helper validates
+both manifests and all required paths before selecting an external payload,
+otherwise it uses the validated bundled payload. Promotion additionally checks
+the complete fingerprint before publishing.
 
 The Xcode post-build signing phase signs the embedded Node runtimes with
 `TronNode.entitlements`. Node executes V8 JIT code, so the
@@ -43,6 +57,9 @@ packages/mac-app/scripts/bundle-gateway.sh --skip-install --skip-download
 
 # Remove generated payloads only
 packages/mac-app/scripts/bundle-gateway.sh --clean
+
+# Pure helper check against a staged payload (does not build or install)
+packages/mac-app/scripts/hash-gateway-payload.sh Sources/Resources/Gateway
 ```
 
 ## Generate and build
@@ -63,7 +80,26 @@ execute the signed embedded runtime, not only check that the binary is present;
 a hardened Node runtime without its JIT entitlement exits before the Gateway
 can bind its port.
 
-### Reinstall a local Release build
+### Gateway payload promotion
+
+The installed release wrapper owns the stable LaunchAgent and the optional dev
+LaunchAgent; they use separate homes and ports and can run in parallel. Without
+building, bundling, installing, or restarting during preparation, an operator
+can stage and then explicitly promote a complete payload:
+
+```bash
+scripts/gateway-payload-deploy.mjs stage --channel stable --source <payload>
+scripts/gateway-payload-deploy.mjs promote --channel stable --version <version>
+scripts/gateway-payload-deploy.mjs rollback --channel stable
+```
+
+Promotion is serialized per channel, verifies the complete payload fingerprint,
+uses authenticated drain-aware `gateway.restart`, and proves the new health
+identity before success. On timeout or identity mismatch it atomically restores
+`previous.json` and requests/awaits rollback restart. The Mac menu Restart
+seam uses the same authenticated drain command rather than `launchctl kickstart`.
+
+## Reinstall a local Release build
 
 This is a manual developer installation, not a production deployment command.
 Do not remove `~/.tron`; it contains canonical sessions and owned credentials.
@@ -111,43 +147,25 @@ The isolated Gateway shares only the physical-machine group hint stored at
 credentials. Ordinary Debug runs as a regular companion window and do not
 install a second production menu-bar item or manage production registration.
 
-### Automated isolated development versus release replacement
+### Gateway payload operations
 
-Routine agent-driven Gateway changes stay isolated: use `~/.tron-dev/gateway`,
-port `9848`, and the repository supervisor. `scripts/tron dev --status --json`
-is a deterministic, read-only preflight; it does not build, restart, or touch
-the installed app. `scripts/tron dev --stop` is likewise build-free. The
-supervisor's atomic lifecycle manifest records PID start identities, epoch,
-revision, payload fingerprint, bounded restart state, and `/health` readiness.
-Status/preflight probes the manifest's expected host and port (an explicit
-`--tailscale` selection remains an override). Exit 75 means the authenticated
-Gateway drain completed intentionally. A
-restart action reconciles a new epoch and health identity before it succeeds.
+The installed `Tron.app` wrapper owns the stable LaunchAgent and optional dev
+LaunchAgent. Their `.tron`/`.tron-dev` homes and ports 9847/9848 are independent
+and may run in parallel. `scripts/tron dev` is deprecated and fail-closed; it
+must not become a second Gateway supervisor. Use the explicit deployment core:
 
-The installed `Tron.app` and its supervised `9847` Gateway are a frozen release
-image during this workflow. Never automate copying into `/Applications`,
-production deployment, launchd/SMAppService operations, or iOS release
-installation from the isolated development command. Release replacement remains
-the manual runbook above, including the explicit Finder replacement and the
-read-only `scripts/tron mac verify` check afterward.
+```bash
+scripts/gateway-payload-deploy.mjs stage --channel stable --source <payload>
+scripts/gateway-payload-deploy.mjs promote --channel stable --version <version>
+scripts/gateway-payload-deploy.mjs rollback --channel stable
+```
 
-### Separate-terminal stopping point
-
-When implementation and allowed static validation are complete, stop before
-operating the Gateway and give the maintainer this exact separate-terminal
-sequence:
-
-1. From the repository root run `scripts/tron dev --preflight --json` and inspect
-   endpoint/home, lifecycle, PID identities, epoch, revision/fingerprint, and
-   readiness. This command does not build.
-2. In that separate terminal, run exactly
-   `scripts/tron dev --restart --tailscale --command-id <new-unique-command-id>`.
-   This is the single approved rebuild/restart operation; do not run `bundle`,
-   launchd/SMAppService commands, or replace `/Applications/Tron.app`.
-3. Wait for the command to report the new runtime epoch and ready health, then
-   verify with `scripts/tron dev --status --json` (and retain the bounded log path
-   if it fails).
-4. Return to the agent terminal with the preflight and readiness output.
+The command serializes selection publication per channel, verifies complete
+payload fingerprints, calls authenticated drain-aware `gateway.restart`, and
+proves health identity plus a changed runtime epoch. On failure it restores the
+previous selection and requests/awaits rollback. The Mac menu Restart seam
+uses authenticated `gateway.restart` instead of `launchctl kickstart`. Never automate
+copying into `/Applications`, release deployment, or launchd registration.
 
 ## Efficient focused tests
 

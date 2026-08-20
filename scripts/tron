@@ -10,12 +10,8 @@ usage() {
 Usage: scripts/tron <command> [options]
 
 Commands:
-  dev [--tailscale] [--background]  Build and run an isolated gateway on port 9848
-  dev --restart [--tailscale] [--command-id <id>]
-                                    Drain runs, restart, and reconcile readiness
-  dev --stop                        Stop the background isolated gateway (no build)
-  dev --status [--json]             Read isolated lifecycle/health status (no build)
-  dev --preflight [--json]          Alias for deterministic read-only status
+  dev                                Deprecated and fail-closed; use the installed LaunchAgent
+                                    and scripts/gateway-payload-deploy.mjs
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
   ci [check|test|all]               Validate the gateway and repository policy
@@ -40,6 +36,8 @@ case "$cmd" in
     fi
     ;;
   __dev-supervise)
+    echo "scripts/tron development supervision is deprecated and fail-closed; LaunchAgent owns Gateway processes." >&2
+    exit 64
     host="${1:?missing development Gateway host}"
     source_revision="${2:-unknown}"; payload_fingerprint="${3:-unknown}"; supervisor_epoch="${4:-$(date +%s)}"
     state="$HOME/.tron-dev/gateway"; state_file="$state/lifecycle.json"; child_file="$state/dev.child.pid"; log="$state/dev.log"
@@ -117,6 +115,8 @@ case "$cmd" in
     done
     ;;
   dev)
+    echo "scripts/tron dev is deprecated and fail-closed: use the LaunchAgent-owned Gateway and scripts/gateway-payload-deploy.mjs." >&2
+    exit 64
     action=run; background=0; host=127.0.0.1; host_explicit=0; json=0; command_id=""
     while (($#)); do
       case "$1" in
@@ -169,7 +169,7 @@ case "$cmd" in
         ancestor="$PPID"
         while [[ "$ancestor" =~ ^[0-9]+$ ]] && ((ancestor > 1)); do
           if [[ "$ancestor" == "$gateway_pid" ]]; then
-            echo "Refusing to stop the development Gateway from its own runtime. Use 'scripts/tron dev --restart --tailscale' so accepted work can drain." >&2; exit 65
+            echo "The deprecated development owner cannot stop a Gateway. Use authenticated gateway.restart through the LaunchAgent-owned deployment core." >&2; exit 65
           fi
           ancestor="$(ps -o ppid= -p "$ancestor" 2>/dev/null | tr -d ' ' || true)"
         done

@@ -9,6 +9,7 @@ RESOURCES_DIR="$SCRIPT_DIR/../Sources/Resources"
 PAYLOAD_DIR="$RESOURCES_DIR/Gateway"
 
 required_files=(
+    "$PAYLOAD_DIR/manifest.json"
     "$PAYLOAD_DIR/app/dist/index.js"
     "$PAYLOAD_DIR/app/package.json"
     "$PAYLOAD_DIR/app/package-lock.json"
@@ -30,6 +31,9 @@ for path in "${required_files[@]}"; do
         break
     fi
 done
+if ((needs_bundle == 0)) && ! grep -Eq '"kind":"tron-gateway-payload"' "$PAYLOAD_DIR/manifest.json"; then
+    needs_bundle=1
+fi
 if ((needs_bundle == 0)); then
     for path in "${required_directories[@]}"; do
         if [[ ! -d "$path" ]]; then

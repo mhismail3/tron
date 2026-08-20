@@ -107,6 +107,22 @@ enum ExistingInstallDetector {
             fileExists(url.path) && (fileSize(url.path) ?? 0) >= minimumBytes
         }
 
+        let payloadManifest = payloadRoot.appendingPathComponent("manifest.json", isDirectory: false)
+        guard usableFile(payloadManifest),
+              (fileSize(payloadManifest.path) ?? Int64.max) <= Int64(GatewayPayloadStore.maxManifestBytes),
+              let payloadManifestData = readData(payloadManifest.path),
+              let identity = try? JSONDecoder().decode(GatewayPayloadManifest.self, from: payloadManifestData),
+              identity.schema == GatewayPayloadStore.schema,
+              identity.kind == GatewayPayloadManifest.payloadKind,
+              GatewayPayloadStore.validComponent(identity.channel, maximumLength: GatewayPayloadStore.channelComponentLimit),
+              GatewayPayloadStore.validComponent(identity.version, maximumLength: GatewayPayloadStore.versionComponentLimit),
+              identity.payloadFingerprint.count == 64,
+              identity.payloadFingerprint.unicodeScalars.allSatisfy({ "0123456789abcdef".unicodeScalars.contains($0) }),
+              identity.sourceRevision?.isEmpty == false,
+              identity.runtimeEpoch.map({ GatewayPayloadStore.validComponent($0, maximumLength: GatewayPayloadStore.versionComponentLimit) }) == true else {
+            return "The bundled Gateway payload manifest is missing or invalid. Rebuild or reinstall Tron."
+        }
+
         let entrypoint = payloadRoot.appendingPathComponent("app/dist/index.js", isDirectory: false)
         guard usableFile(entrypoint, minimumBytes: 1_024) else {
             return "The bundled Gateway entrypoint is missing or incomplete. Rebuild or reinstall Tron."

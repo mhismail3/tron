@@ -197,6 +197,17 @@ struct ExistingInstallDetectorTests {
             try Data(repeating: 0, count: 1_048_576).write(to: runtime.appendingPathComponent("node-\(architecture)"))
         }
 
+        try JSONEncoder().encode(
+            GatewayPayloadManifest(
+                channel: "stable",
+                version: "1",
+                gatewayVersion: "1",
+                nodeVersion: "22",
+                sourceRevision: "test-revision",
+                runtimeEpoch: "test-epoch",
+                payloadFingerprint: String(repeating: "a", count: 64)
+            )
+        ).write(to: payload.appendingPathComponent("manifest.json"))
         #expect(
             ExistingInstallDetector.validateGatewayPayload(
                 payloadRoot: payload,
@@ -214,7 +225,10 @@ struct ExistingInstallDetectorTests {
             label: "com.tron.server",
             port: 9847,
             bundleProgram: "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
-            environmentVariables: [TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue],
+            environmentVariables: [
+                TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue,
+                TronPaths.gatewayChannelEnv: TronPaths.productionGatewayChannel,
+            ],
             associatedBundleIDs: ["com.tron.mac", "com.tron.mac.dev"]
         ))
     }
@@ -247,6 +261,7 @@ struct ExistingInstallDetectorTests {
             TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue,
             TronPaths.tronHomeNameEnv: ".tron-dev",
             TronPaths.agentDirNameEnv: "agent-dev",
+            TronPaths.gatewayChannelEnv: TronPaths.isolatedGatewayChannel,
         ]
 
         #expect(ExistingInstallDetector.launchAgentPlistIsCurrent(

@@ -15,6 +15,10 @@ enum TronPaths {
     static let isolatedInstallModeValue = "isolated"
     static let gatewaySupervisionEnv = "TRON_GATEWAY_SUPERVISED"
     static let gatewaySupervisionValue = "1"
+    /// Selects the externally staged payload namespace under the selected Tron home.
+    static let gatewayChannelEnv = "TRON_GATEWAY_CHANNEL"
+    static let productionGatewayChannel = "stable"
+    static let isolatedGatewayChannel = "dev"
     static let productionLaunchAgentLabel = "com.tron.server"
     static let isolatedLaunchAgentLabel = "com.tron.server.dev"
     static let productionServerPort = 9847
@@ -156,9 +160,13 @@ enum TronPaths {
                 gatewaySupervisionEnv: gatewaySupervisionValue,
                 tronHomeNameEnv: ".tron-dev",
                 agentDirNameEnv: "agent-dev",
+                gatewayChannelEnv: isolatedGatewayChannel,
             ]
         }
-        return [gatewaySupervisionEnv: gatewaySupervisionValue]
+        return [
+            gatewaySupervisionEnv: gatewaySupervisionValue,
+            gatewayChannelEnv: productionGatewayChannel,
+        ]
     }
 
     static var canManageLaunchAgent: Bool {

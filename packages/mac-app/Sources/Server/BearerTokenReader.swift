@@ -1,78 +1,45 @@
 import Foundation
+import Darwin
 
-/// Reads the wrapper-only bearer token from
-/// `~/.tron/gateway/local-auth.json`. This credential authenticates the signed
-/// Mac wrapper and is never included in pairing invitations.
-///
-/// Gateway-owned file format:
-/// ```json
-/// {
-///   "version": 2,
-///   "bearerToken": "trn_<random token>",
-///   "purpose": "local-wrapper-health",
-///   "lastUpdated": "..."
-/// }
-/// ```
-///
-/// Security INVARIANT: `local-auth.json` MUST have owner-only permissions. Any
-/// group or other permission bit indicates either a tampered file or a buggy
-/// writer; in either case the token is treated as untrusted and `read` returns
-/// nil with an `NSLog` audit line. No caller may bypass this check.
-///
-/// Tests in `Tests/Server/BearerTokenReaderTests.swift` cover happy
-/// path, missing file, malformed JSON, missing `bearerToken`, and the
-/// permission guard. The gateway creates this file with mode `0o600`.
+/// Reads the wrapper-only bearer token from `gateway/local-auth.json`.
+/// The file is treated as hostile input: symlinks, non-regular files,
+/// oversized data, broad permissions, and any credential shape drift fail closed.
 enum BearerTokenReader {
-    private struct AuthFile: Decodable {
-        let bearerToken: String?
-    }
+    private static let maximumBytes = 64 * 1024
+    private static let expectedKeys: Set<String> = ["version", "bearerToken", "purpose", "lastUpdated"]
 
-    /// Reads the token file. Returns nil if missing, empty, malformed,
-    /// or has unsafe permissions.
+    /// Reads the token only when the Gateway-owned credential is an owner-only,
+    /// regular file with the exact version-2 local-wrapper-health shape.
     static func read(at path: URL) -> String? {
-        if !permissionsAreSafe(at: path) {
+        var info = stat()
+        guard lstat(path.path, &info) == 0,
+              (info.st_mode & S_IFMT) == S_IFREG,
+              (info.st_mode & 0o077) == 0,
+              info.st_size > 0,
+              info.st_size <= off_t(maximumBytes) else {
             return nil
         }
-        guard let data = try? Data(contentsOf: path), !data.isEmpty else {
+        guard let data = try? Data(contentsOf: path), data.count <= maximumBytes,
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let document = object as? [String: Any],
+              Set(document.keys) == expectedKeys,
+              let version = document["version"] as? Int, version == 2,
+              let token = document["bearerToken"] as? String,
+              token.utf8.count >= 32, token.utf8.count <= 256,
+              let purpose = document["purpose"] as? String, purpose == "local-wrapper-health",
+              let timestamp = document["lastUpdated"] as? String,
+              isGatewayTimestamp(timestamp) else {
             return nil
         }
-
-        guard let decoded = try? JSONDecoder().decode(AuthFile.self, from: data) else {
-            return nil
-        }
-        return nonEmpty(decoded.bearerToken ?? "")
+        return token
     }
 
-    /// Returns true when the file has no group or other permission bits.
-    /// A missing file returns true (caller surfaces the
-    /// "missing" case via `read` returning nil for empty data).
-    private static func permissionsAreSafe(at path: URL) -> Bool {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: path.path) else {
-            return true
-        }
-        let attrs: [FileAttributeKey: Any]
-        do {
-            attrs = try fm.attributesOfItem(atPath: path.path)
-        } catch {
-            NSLog("[BearerTokenReader] cannot stat %@: %@", path.path, error.localizedDescription)
+    private static func isGatewayTimestamp(_ value: String) -> Bool {
+        guard value.utf8.count <= 64,
+              value.range(of: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$"#, options: .regularExpression) != nil else {
             return false
         }
-        let mode = (attrs[.posixPermissions] as? NSNumber)?.intValue ?? 0
-        let unsafeMask = 0o077
-        if mode & unsafeMask != 0 {
-            NSLog(
-                "[BearerTokenReader] refusing to read %@: mode 0o%o exposes group/other permissions. Re-run `tron auth rotate`.",
-                path.path,
-                mode & 0o777
-            )
-            return false
-        }
-        return true
-    }
-
-    private static func nonEmpty(_ string: String) -> String? {
-        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        let formatter = ISO8601DateFormatter()
+        return formatter.date(from: value) != nil
     }
 }
