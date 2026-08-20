@@ -30,9 +30,17 @@ struct EnvironmentSetup: Sendable {
     /// It is used only by this signed wrapper and never shown to users.
     var readBearerToken: @Sendable () -> String?
 
-    /// Projects the authoritative registered/running LaunchAgent ownership
-    /// for pairing. Pairing additionally proves credential health with ping.
+    /// Projects authoritative LaunchAgent ownership for Stable lifecycle actions.
+    /// Read-only Debug observation deliberately leaves this false.
     var runtimeOwnershipHealthy: @Sendable () async -> Bool = { false }
+
+    /// Coherent Stable admission correlating launchd, listener, payload,
+    /// process command, and authenticated identity.
+    var admitStableRuntime: @Sendable (ServerPingInfo) async -> StableGatewayObserver.Admission? = { _ in nil }
+
+    /// One-shot read-only Debug observation. It owns transport resolution and
+    /// returns one immutable admission rather than exposing split projections.
+    var observeDebugGateway: @Sendable (String?) async -> DebugGatewayObserver.Observation = { _ in .unavailable }
 
     /// Reads the short-lived one-time code emitted for mobile enrollment.
     var readEnrollmentCode: @Sendable () -> String? = { nil }
@@ -95,10 +103,6 @@ struct EnvironmentSetup: Sendable {
     /// LaunchAgent control surface - load/unload/restart/check.
     var launchAgentManager: LaunchAgentManaging
 
-    /// Release uninstall unregisters an enabled Preview service but never
-    /// removes its canonical ~/.tron-dev or ~/.pi/agent-dev data.
-    var unregisterPreviewIfEnabled: @Sendable () async -> LaunchAgentOutcome = { .ok }
-
     /// Touches the `~/.tron/internal/run/.onboarded` sentinel atomically.
     var touchOnboardedSentinel: @Sendable () throws -> Void
 
@@ -114,12 +118,9 @@ struct EnvironmentSetup: Sendable {
         try MacAppVersionMarkerStore.write(version, at: TronPaths.macAppVersionMarkerPath)
     }
 
-    // Debug isolated composition must resolve every live path to Preview;
-    // installed Release remains stable because activeProfile is stable there.
-    static let live = makeLive(profile: TronPaths.activeProfile)
-    // Release exposes Preview explicitly without changing its own stable
-    // credentials, home, or LaunchAgent.
-    static let preview = makeLive(profile: .preview)
+    static let live = makeLive(profile: .stable)
+    /// Read-only authenticated observation of the scripts/tron-dev runtime.
+    static let debug = makeDebugObserver()
 
     private static func makeLive(profile: TronGatewayProfile) -> EnvironmentSetup {
         let home = TronPaths.tronHome(profile: profile)
@@ -128,21 +129,15 @@ struct EnvironmentSetup: Sendable {
         let cache = TronPaths.networkCachePath(profile: profile)
         let marker = TronPaths.onboardedMarkerPath(profile: profile)
         let plist = TronPaths.launchAgentPlistPath(profile: profile)
-        let unregisterPreview: @Sendable () async -> LaunchAgentOutcome
-        if profile == .stable {
-            unregisterPreview = {
-                let preview = EnvironmentSetup.preview
-                // Unknown is not absence: ask SMAppService to unregister for
-                // every non-terminal status so stale registrations cannot
-                // survive uninstall. Canonical Preview homes are untouched.
-                switch ExistingInstallDetector.serviceStatus(label: preview.launchAgentLabel) {
-                case .notRegistered, .notFound: return .ok
-                case .enabled, .requiresApproval, .unknown:
-                    return await preview.launchAgentManager.unload(label: preview.launchAgentLabel)
-                }
-            }
-        } else {
-            unregisterPreview = { .ok }
+        let ownership: @Sendable () async -> Bool = {
+            guard profile == .stable,
+                  ExistingInstallDetector.serviceStatus(label: profile.launchAgentLabel) == .enabled else { return false }
+            return LiveLaunchAgentManager.runtimeOwnsProfile(
+                runtimeInfo: await LiveLaunchAgentManager(profile: profile).runtimeInfo(label: profile.launchAgentLabel),
+                profile: profile,
+                expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+                expectedHelperPath: TronPaths.serverHelperBinary(profile: profile).path
+            )
         }
         return EnvironmentSetup(
             profile: profile,
@@ -161,14 +156,9 @@ struct EnvironmentSetup: Sendable {
             wrapperLockPath: TronPaths.macWrapperLockPath(profile: profile),
             onboardedSentinelExists: { FileManager.default.fileExists(atPath: marker.path) },
             readBearerToken: { BearerTokenReader.read(at: bearer) },
-            runtimeOwnershipHealthy: {
-                guard ExistingInstallDetector.serviceStatus(label: profile.launchAgentLabel) == .enabled else { return false }
-                return LiveLaunchAgentManager.runtimeOwnsProfile(
-                    runtimeInfo: await LiveLaunchAgentManager(profile: profile).runtimeInfo(label: profile.launchAgentLabel),
-                    profile: profile,
-                    expectedParentBundleIdentifier: MacRuntimeVariant.detect().expectedParentBundleIdentifier,
-                    expectedHelperPath: TronPaths.serverHelperBinary(profile: profile).path
-                )
+            runtimeOwnershipHealthy: ownership,
+            admitStableRuntime: { info in
+                await StableGatewayObserver.observe(info: info)
             },
             readEnrollmentCode: { EnrollmentCodeReader.read(at: enrollment) },
             readTailscaleIPFromSettings: { GatewayNetworkCacheReader.tailscaleIP(at: cache) },
@@ -212,7 +202,6 @@ struct EnvironmentSetup: Sendable {
                 )
             },
             launchAgentManager: LiveLaunchAgentManager(profile: profile),
-            unregisterPreviewIfEnabled: unregisterPreview,
             touchOnboardedSentinel: { try OnboardedSentinelWriter.touch(at: marker) },
             currentAppVersion: { MacAppVersionIdentity.current() },
             readRecordedAppVersion: {
@@ -223,6 +212,95 @@ struct EnvironmentSetup: Sendable {
             }
         )
     }
+
+    private static func makeDebugObserver() -> EnvironmentSetup {
+        let profile = TronGatewayProfile.debug
+        let home = TronPaths.tronHome(profile: profile)
+        let bearer = TronPaths.bearerTokenPath(profile: profile)
+        let enrollment = TronPaths.enrollmentCodePath(profile: profile)
+        let cache = TronPaths.networkCachePath(profile: profile)
+        let marker = TronPaths.onboardedMarkerPath(profile: profile)
+        return EnvironmentSetup(
+            profile: profile,
+            tronHome: home,
+            agentHome: TronPaths.agentHome(profile: profile),
+            applicationBundle: TronPaths.applicationBundle,
+            bearerTokenPath: bearer,
+            enrollmentCodePath: enrollment,
+            onboardedMarkerPath: marker,
+            networkCachePath: cache,
+            launchAgentPlistPath: TronPaths.launchAgentPlistPath(profile: profile),
+            serverHelperBinaryPath: TronPaths.serverHelperBinary(profile: .stable),
+            launchAgentLabel: profile.launchAgentLabel,
+            serverPort: profile.port,
+            canManageLaunchAgent: false,
+            wrapperLockPath: TronPaths.macWrapperLockPath(profile: profile),
+            onboardedSentinelExists: { FileManager.default.fileExists(atPath: marker.path) },
+            readBearerToken: { BearerTokenReader.read(at: bearer) },
+            runtimeOwnershipHealthy: { false },
+            observeDebugGateway: { token in
+                await DebugGatewayObserver.observe(home: home, token: token)
+            },
+            readEnrollmentCode: { EnrollmentCodeReader.read(at: enrollment) },
+            readTailscaleIPFromSettings: { GatewayNetworkCacheReader.tailscaleIP(at: cache) },
+            cacheTailscaleIP: { _ in },
+            probeTailscale: { await TailscaleProbe.probe() },
+            probePermissions: { await MacPermissionProbe.probeAll() },
+            detectExistingInstall: { .none },
+            validateApplicationLocation: { nil },
+            validateBundledHelper: { nil },
+            validateGatewayPayload: { nil },
+            pingServer: { _ in .unreachable },
+            restartGateway: { throw GatewayRestartClient.Failure.transport },
+            launchAgentManager: ReadOnlyDebugLaunchAgentManager(),
+            touchOnboardedSentinel: {},
+            readRecordedAppVersion: { nil },
+            writeRecordedAppVersion: { _ in }
+        )
+    }
+
+    /// Pins a freshly admitted Debug observation into a pairing presentation.
+    /// The sheet cannot race a later lifecycle/host transition or reconstruct
+    /// identity from independent reads.
+    func pinnedDebug(admission: DebugGatewayObserver.Admission) -> EnvironmentSetup {
+        precondition(profile == .debug)
+        var copy = self
+        let observeFresh = observeDebugGateway
+        copy.observeDebugGateway = { token in
+            switch await observeFresh(token) {
+            case .admitted(let current) where current == admission:
+                return .admitted(current)
+            case .unauthorized:
+                return .unauthorized
+            case .admitted, .unavailable:
+                return .unavailable
+            }
+        }
+        copy.pingServer = { token in
+            switch await observeFresh(token) {
+            case .admitted(let current) where current == admission: return .success(current.info)
+            case .unauthorized: return .unauthorized
+            case .admitted, .unavailable: return .unreachable
+            }
+        }
+        copy.readTailscaleIPFromSettings = { admission.transportHost }
+        copy.cacheTailscaleIP = { _ in }
+        copy.probeTailscale = { .signedIn(address: admission.transportHost) }
+        return copy
+    }
+}
+
+private struct ReadOnlyDebugLaunchAgentManager: LaunchAgentManaging {
+    private var refused: LaunchAgentOutcome {
+        .launchdRefused(message: "Debug Gateway lifecycle belongs to scripts/tron dev.")
+    }
+
+    func load(plistPath: URL, label: String) async -> LaunchAgentOutcome { refused }
+    func unload(label: String) async -> LaunchAgentOutcome { refused }
+    func restart(label: String) async -> LaunchAgentOutcome { refused }
+    func isLoaded(label: String) async -> Bool { false }
+    func isRegistered(label: String) async -> Bool { false }
+    func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo? { nil }
 }
 
 // MARK: - SwiftUI Environment plumbing

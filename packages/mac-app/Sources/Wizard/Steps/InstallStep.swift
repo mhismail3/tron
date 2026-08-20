@@ -209,7 +209,7 @@ struct InstallStep: View {
         stages[.validateHelper] = .succeeded
 
         guard setup.canManageLaunchAgent else {
-            let message = "This Xcode Debug wrapper is in companion mode. Use /Applications/Tron.app for the production install, or run the isolated install-testing scheme."
+            let message = "This Xcode Debug wrapper is a read-only companion. Use /Applications/Tron.app to install or manage Stable."
             stages[.registerAgent] = .failed(message)
             state.installOutcome = .serviceRegistrationFailed(message)
             return
@@ -378,7 +378,11 @@ struct InstallStep: View {
         for _ in 0..<30 {
             let token = setup.readBearerToken()
             switch await setup.pingServer(token) {
-            case .success, .unauthorized:
+            case .success(let info) where info.gatewayChannel == setup.profile.channel:
+                return true
+            case .success:
+                break
+            case .unauthorized:
                 return true
             case .unreachable, .timeout, .malformedResponse:
                 break
@@ -414,8 +418,10 @@ struct InstallStep: View {
         installStatusText = "Checking..."
         let token = setup.readBearerToken()
         switch await setup.pingServer(token) {
-        case .success:
+        case .success(let info) where info.gatewayChannel == setup.profile.channel:
             installStatusText = "Running on port \(setup.serverPort)"
+        case .success:
+            installStatusText = "Unexpected Gateway channel"
         case .unauthorized:
             installStatusText = "Running; token needs refresh"
         case .unreachable:

@@ -35,6 +35,21 @@ struct ServerStatusPollerTests {
             wrapperLockPath: tmp.appendingPathComponent(".mac-wrapper.com.tron.mac.lock"),
             onboardedSentinelExists: { false },
             readBearerToken: { token },
+            admitStableRuntime: { info in
+                StableGatewayObserver.Admission(
+                    processID: 16027,
+                    uptime: "01:07:42",
+                    payload: GatewayPayloadValidationResult(
+                        root: tmp,
+                        manifest: GatewayPayloadManifest(
+                            channel: "stable", version: "test", gatewayVersion: info.version,
+                            nodeVersion: "22", sourceRevision: "revision", runtimeEpoch: "epoch",
+                            payloadFingerprint: String(repeating: "a", count: 64)
+                        )
+                    ),
+                    info: info
+                )
+            },
             readTailscaleIPFromSettings: { tailscaleFromSettings },
             cacheTailscaleIP: { _ in },
             probeTailscale: { .notInstalled },
@@ -67,7 +82,7 @@ struct ServerStatusPollerTests {
     func runningSnapshot() async throws {
         let setup = Self.makeSetup(
             token: "abc123",
-            pingResult: .success(ServerPingInfo(version: "0.5.0")),
+            pingResult: .success(ServerPingInfo(version: "0.5.0", gatewayChannel: "stable")),
             tailscaleFromSettings: "100.64.0.1",
             serverPort: 19047
         )
@@ -77,6 +92,26 @@ struct ServerStatusPollerTests {
         #expect(snapshot.tailscaleIP == "100.64.0.1")
         #expect(snapshot.processID == 16027)
         #expect(snapshot.uptime == "01:07:42")
+    }
+
+    @Test("read-only Debug health fails closed when provenance is not admitted")
+    func debugProvenanceMismatch() async {
+        var setup = Self.makeSetup(
+            token: "debug-token",
+            pingResult: .success(ServerPingInfo(
+                version: "0.5.0",
+                gatewayChannel: "dev",
+                sourceRevision: "revision",
+                buildFingerprint: String(repeating: "a", count: 64),
+                runtimeEpoch: "epoch"
+            )),
+            serverPort: 9848
+        )
+        setup.profile = .debug
+        setup.canManageLaunchAgent = false
+        setup.observeDebugGateway = { _ in .unavailable }
+        let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
+        #expect(snapshot.state == .paused)
     }
 
     @Test("unreachable + launchd unloaded: paused")
@@ -121,7 +156,7 @@ struct ServerStatusPollerTests {
     func cachedTailscaleFromSettings() async throws {
         let setup = Self.makeSetup(
             token: "abc",
-            pingResult: .success(ServerPingInfo(version: "0.5.0")),
+            pingResult: .success(ServerPingInfo(version: "0.5.0", gatewayChannel: "stable")),
             tailscaleFromSettings: "100.99.99.99"
         )
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)

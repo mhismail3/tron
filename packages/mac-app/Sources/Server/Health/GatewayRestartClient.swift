@@ -136,12 +136,7 @@ enum GatewayRestartClient {
               host.unicodeScalars.allSatisfy({ !CharacterSet.whitespacesAndNewlines.contains($0) && $0.value >= 0x20 && $0.value != 0x7f }),
               port > 0, port <= 65_535,
               timeout.isFinite, timeout > 0 else { throw Failure.invalidURL }
-        var components = URLComponents()
-        components.scheme = "ws"
-        components.host = host
-        components.port = port
-        components.path = "/v1/socket"
-        guard let url = components.url else { throw Failure.invalidURL }
+        guard let url = GatewaySocketURL.make(host: host, port: port) else { throw Failure.invalidURL }
         var request = URLRequest(url: url, timeoutInterval: max(1, timeout))
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         return request

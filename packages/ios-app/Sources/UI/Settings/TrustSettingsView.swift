@@ -79,12 +79,11 @@ struct TrustSettingsView: View {
                     )
                 }
 
-                TronSettingsRow(
+                TronInfoCard(
                     icon: "exclamationmark.shield",
-                    title: "Trust gates project-local settings, extensions, skills, prompts, packages, and system prompt files. It is not a sandbox.",
+                    text: "Trust gates project-local settings, extensions, skills, prompts, packages, and system prompt files. It is not a sandbox.",
                     accent: .tronAmber
                 )
-                .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.09)
             }
             .padding(20)
         }
@@ -150,7 +149,7 @@ struct TrustSettingsView: View {
                     .foregroundStyle(Color.tronTextPrimary)
                     .accessibilityAddTraits(.isHeader)
                 Text("Controls whether project-local resources may load.")
-                    .font(TronTypography.caption)
+                    .font(TronTypography.bodySM)
                     .foregroundStyle(Color.tronTextMuted)
             }
 

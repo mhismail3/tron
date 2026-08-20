@@ -6,10 +6,7 @@ import UserNotifications
 /// controller-owned action handler.
 enum MenuBarAction: Equatable, Sendable {
     case showPairingInfo
-    case showPreviewPairingInfo
-    case enablePreviewGateway
-    case stopPreviewGateway
-    case restartPreviewGateway
+    case showDebugPairingInfo
     case viewLogs
     case sendFeedback
     case pauseServer
@@ -24,29 +21,21 @@ enum MenuBarAction: Equatable, Sendable {
 @MainActor
 final class MenuBarActionHandler {
     private let setup: EnvironmentSetup
-    private let previewSetup: EnvironmentSetup
 
     /// Handle on the menu-bar controller so re-pairing can request a
     /// status refresh and pause/resume can re-render the menu.
     weak var menuBarController: MenuBarController?
 
-    init(setup: EnvironmentSetup, previewSetup: EnvironmentSetup = .preview) {
+    init(setup: EnvironmentSetup) {
         self.setup = setup
-        self.previewSetup = previewSetup
     }
 
     func perform(_ action: MenuBarAction) async {
         switch action {
         case .showPairingInfo:
             menuBarController?.showPairingInfoWindow()
-        case .showPreviewPairingInfo:
-            menuBarController?.showPreviewPairingInfoWindow()
-        case .enablePreviewGateway:
-            await enablePreviewGateway()
-        case .stopPreviewGateway:
-            await stopPreviewGateway()
-        case .restartPreviewGateway:
-            await restartPreviewGateway()
+        case .showDebugPairingInfo:
+            await menuBarController?.showDebugPairingInfoWindow()
         case .viewLogs:
             menuBarController?.showLogsWindow()
         case .sendFeedback:
@@ -63,110 +52,6 @@ final class MenuBarActionHandler {
     }
 
     // MARK: - Actions
-
-    private func enablePreviewGateway() async {
-        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Preview Gateway blocked") else {
-            menuBarController?.refreshPreviewState(); return
-        }
-        menuBarController?.setPreviewBusy(true)
-        defer {
-            menuBarController?.setPreviewBusy(false)
-            menuBarController?.refreshPreviewState()
-        }
-        // Registration starts an absent Preview job through RunAtLoad; do not
-        // turn an idempotent enable into a force-kickstart.
-        let outcome = await previewSetup.launchAgentManager.load(
-            plistPath: previewSetup.launchAgentPlistPath,
-            label: previewSetup.launchAgentLabel
-        )
-        switch outcome {
-        case .ok, .alreadyLoaded:
-            let health = await ServerHealthAwaiter.waitForHealthy(setup: previewSetup)
-            let snapshot = await ServerStatusPoller.singleSnapshot(setup: previewSetup)
-            await refreshStatus()
-            if case .success = health, snapshot.state.isRunning, await previewRuntimeIsOwned() {
-                await MenuBarNotifier.post(title: "Preview Gateway enabled", body: "Preview is healthy on port 9848.")
-            } else {
-                await presentNonBlockingError(title: "Preview Gateway failed", message: unhealthyPreviewMessage(health))
-            }
-        case .requiresApproval(let message):
-            LoginItemsSettingsOpener.open()
-            await presentNonBlockingError(title: "Preview Gateway blocked", message: message)
-        case .launchdRefused(let message), .unknown(let message):
-            await presentNonBlockingError(title: "Preview Gateway failed", message: message)
-        case .binaryMissing(let path):
-            await presentNonBlockingError(title: "Preview Gateway failed", message: "Binary missing: \(path)")
-        }
-    }
-
-    private func stopPreviewGateway() async {
-        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Preview Gateway blocked") else {
-            menuBarController?.refreshPreviewState(); return
-        }
-        menuBarController?.setPreviewBusy(true)
-        defer {
-            menuBarController?.setPreviewBusy(false)
-            menuBarController?.refreshPreviewState()
-        }
-        let outcome = await previewSetup.launchAgentManager.unload(label: previewSetup.launchAgentLabel)
-        await refreshStatus()
-        if case .ok = outcome {
-            await MenuBarNotifier.post(title: "Preview Gateway stopped", body: "Preview remains disabled until you enable it again.")
-        } else if case .alreadyLoaded = outcome {
-            await MenuBarNotifier.post(title: "Preview Gateway stopped", body: "Preview remains disabled until you enable it again.")
-        } else {
-            await presentNonBlockingError(title: "Preview Gateway stop failed", message: previewOutcomeMessage(outcome))
-        }
-    }
-
-    private func restartPreviewGateway() async {
-        guard await ensureLaunchAgentManagementAllowed(actionTitle: "Preview Gateway blocked") else {
-            menuBarController?.refreshPreviewState(); return
-        }
-        menuBarController?.setPreviewBusy(true)
-        defer {
-            menuBarController?.setPreviewBusy(false)
-            menuBarController?.refreshPreviewState()
-        }
-        let health = await ServerHealthAwaiter.waitForHealthy(setup: previewSetup)
-        guard case .success = health, await previewRuntimeIsOwned() else {
-            await presentNonBlockingError(title: "Preview restart blocked", message: unhealthyPreviewMessage(health))
-            return
-        }
-        do {
-            _ = try await previewSetup.restartGateway()
-            let result = await ServerHealthAwaiter.waitForHealthy(setup: previewSetup)
-            let snapshot = await ServerStatusPoller.singleSnapshot(setup: previewSetup)
-            if case .success = result, snapshot.state.isRunning {
-                await MenuBarNotifier.post(title: "Preview Gateway restarted", body: "Preview drained accepted work and is healthy.")
-            } else {
-                await presentNonBlockingError(title: "Preview restart failed", message: unhealthyPreviewMessage(result))
-            }
-        } catch {
-            await presentNonBlockingError(title: "Preview restart failed", message: "The authenticated Preview restart request failed safely.")
-        }
-    }
-
-    private func previewRuntimeIsOwned() async -> Bool {
-        guard MacRuntimeVariant.detect() == .installedRelease else { return false }
-        return await previewSetup.runtimeOwnershipHealthy()
-    }
-
-    private func unhealthyPreviewMessage(_ result: ServerPingResult) -> String {
-        switch result {
-        case .success: return "Preview health responded, but its registered Release helper could not be verified."
-        case .unauthorized: return "Preview started but rejected its local credential."
-        case .unreachable, .timeout, .malformedResponse: return "Preview is not healthy; it remains unclaimed by the menu."
-        }
-    }
-
-    private func previewOutcomeMessage(_ outcome: LaunchAgentOutcome) -> String {
-        switch outcome {
-        case .launchdRefused(let message), .unknown(let message), .requiresApproval(let message): return message
-        case .binaryMissing(let path): return "Binary missing: \(path)"
-        case .ok, .alreadyLoaded: return "Preview state changed; reopen the menu to verify it."
-        }
-    }
 
     /// Requests a drain-aware Gateway restart. Launchd owns the process and is
     /// only asked to register an unloaded service; an already-loaded service
@@ -393,7 +278,7 @@ final class MenuBarActionHandler {
         guard let controller = menuBarController else { return }
         let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
         controller.applySnapshot(snapshot)
-        controller.refreshPreviewState()
+        controller.refreshDebugGatewayState()
     }
 
     private func finishServerStartAction(
@@ -449,7 +334,7 @@ final class MenuBarActionHandler {
 
     private func ensureLaunchAgentManagementAllowed(actionTitle: String) async -> Bool {
         guard setup.canManageLaunchAgent else {
-            let message = "This Xcode wrapper is running in companion mode. Use the installed Tron.app for Tron install, pause, restart, and uninstall actions, or use the isolated install scheme for reinstall testing."
+            let message = "This Xcode wrapper is a read-only companion. Use the installed Tron.app to install, pause, restart, or uninstall Stable."
             await MenuBarNotifier.post(title: actionTitle, body: message)
             await presentNonBlockingError(title: actionTitle, message: message)
             return false

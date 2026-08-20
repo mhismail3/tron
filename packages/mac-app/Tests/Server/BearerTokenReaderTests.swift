@@ -39,6 +39,15 @@ struct BearerTokenReaderTests {
         #expect(BearerTokenReader.read(at: path) == "abcdef1234567890abcdef1234567890")
     }
 
+    @Test("gateway fractional timestamp: bearerToken returned")
+    func fractionalGatewayTimestamp() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
+        try writeSecureToken(Data(#"{"version":2,"bearerToken":"abcdef1234567890abcdef1234567890","purpose":"local-wrapper-health","lastUpdated":"2026-08-19T00:26:48.173Z"}"#.utf8), to: path)
+        #expect(BearerTokenReader.read(at: path) == "abcdef1234567890abcdef1234567890")
+    }
+
     @Test("JSON with empty bearerToken returns nil")
     func emptyJSONToken() throws {
         let tmp = TestTempDir.make()

@@ -188,11 +188,6 @@ struct SessionShellView: View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: TronSpacing.md) {
-                    Text("Choose one or more servers to show in your session history.")
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-
                     Text("View")
                         .font(TronTypography.sheetSectionHeader)
                         .foregroundStyle(Color.tronTextPrimary)
@@ -207,10 +202,17 @@ struct SessionShellView: View {
                         }
                     }
 
-                    Text("Servers")
-                        .font(TronTypography.sheetSectionHeader)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .accessibilityAddTraits(.isHeader)
+                    VStack(alignment: .leading, spacing: TronSpacing.xs) {
+                        Text("Servers")
+                            .font(TronTypography.sheetSectionHeader)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .accessibilityAddTraits(.isHeader)
+                        Text("Choose one or more servers to show in your session history.")
+                            .font(TronTypography.secondaryDescription)
+                            .foregroundStyle(Color.tronTextMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.top, TronSpacing.md)
                     filterOption(
                         title: "All servers",
                         detail: "Show sessions from every paired server.",

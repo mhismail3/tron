@@ -205,8 +205,14 @@ struct PairingInfoStep: View {
         case .noCode:
             return "Tron has not issued a current one-time pairing code. Wait a few seconds and try again."
         case .serverUnreachable:
+            if setup.profile == .debug {
+                return "The Debug Gateway is not an admitted scripts/tron-dev runtime. Start it with --tailscale, then reopen Pairing Info."
+            }
             return "Tron did not answer on this Mac. Go back to Install to confirm it is running, then reopen Pairing Info."
         case .localAuthenticationFailed:
+            if setup.profile == .debug {
+                return "The Mac app could not authenticate to Debug. Restart it with scripts/tron dev, then reopen Pairing Info."
+            }
             return "The Mac app could not authenticate to Tron. Restart Tron from the menu bar, then reopen Pairing Info."
         case .qrGenerationFailed:
             return "The pairing values were resolved, but the QR code could not be generated. Use the manual values or reopen Pairing Info."
@@ -225,13 +231,6 @@ struct PairingInfoStep: View {
             if Task.isCancelled { return }
         }
 
-        // Pairing is exposed only from the authoritative owner projection;
-        // health alone must not disclose a QR for a foreign helper.
-        guard await setup.runtimeOwnershipHealthy() else {
-            fail(.serverUnreachable)
-            return
-        }
-
         // Fresh installs may not have a settings file yet. Prefer live and
         // current-session state, then fall back to server/settings state;
         // cache the selected host for later wrapper and server reads.
@@ -240,21 +239,37 @@ struct PairingInfoStep: View {
             return
         }
 
-        let pingResult = await setup.pingServer(localToken)
-        switch pingResult {
-        case .success:
-            break
-        case .unauthorized:
-            fail(.localAuthenticationFailed)
-            return
-        case .unreachable, .timeout, .malformedResponse:
-            fail(.serverUnreachable)
-            return
-        }
-
-        guard let code = setup.readEnrollmentCode() else {
-            fail(.noCode)
-            return
+        var debugAdmission: DebugGatewayObserver.Admission?
+        if setup.profile == .debug {
+            switch await setup.observeDebugGateway(localToken) {
+            case .admitted(let admission):
+                guard admission.pairingTransportAvailable else {
+                    fail(.serverUnreachable)
+                    return
+                }
+                debugAdmission = admission
+            case .unauthorized:
+                fail(.localAuthenticationFailed)
+                return
+            case .unavailable:
+                fail(.serverUnreachable)
+                return
+            }
+        } else {
+            let pingResult = await setup.pingServer(localToken)
+            switch pingResult {
+            case .success(let info):
+                guard await setup.admitStableRuntime(info) != nil else {
+                    fail(.serverUnreachable)
+                    return
+                }
+            case .unauthorized:
+                fail(.localAuthenticationFailed)
+                return
+            case .unreachable, .timeout, .malformedResponse:
+                fail(.serverUnreachable)
+                return
+            }
         }
 
         let liveTailscale = await setup.probeTailscale()
@@ -262,7 +277,25 @@ struct PairingInfoStep: View {
             state.tailscaleStatus = liveTailscale
         }
 
-        guard let host = firstNonEmpty(
+        // Re-observe immediately before reading the one-time invitation and
+        // generating the QR. A restart or host transition after the first
+        // admission invalidates the pinned pairing presentation rather than
+        // publishing a stale endpoint/runtime combination.
+        if let admitted = debugAdmission {
+            guard case .admitted(let current) = await setup.observeDebugGateway(localToken),
+                  current == admitted else {
+                fail(.serverUnreachable)
+                return
+            }
+            debugAdmission = current
+        }
+
+        guard let code = setup.readEnrollmentCode() else {
+            fail(.noCode)
+            return
+        }
+
+        guard let host = debugAdmission?.transportHost ?? firstNonEmpty(
             liveTailscale.displayIP,
             state.tailscaleStatus?.displayIP,
             setup.readTailscaleIPFromSettings()
@@ -279,7 +312,7 @@ struct PairingInfoStep: View {
             code: code,
             label: LocalComputerName.pairingName(
                 LocalComputerName.current(),
-                isDev: setup.profile == .preview
+                isDev: setup.profile == .debug
             )
         )
         guard let url = PairingURLBuilder.makeURL(payload),
@@ -395,7 +428,7 @@ struct PairingInfoWindowView: View {
     @State private var state = WizardState(initialStep: .pairingInfo)
 
     private var displayedTitle: String {
-        setup.profile == .preview ? "\(title) (Dev)" : title
+        setup.profile == .debug ? "\(title) (Debug)" : title
     }
 
     var body: some View {

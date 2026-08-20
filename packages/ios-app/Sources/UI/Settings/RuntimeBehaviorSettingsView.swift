@@ -86,11 +86,11 @@ struct RuntimeBehaviorSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            LazyVStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 18) {
                 scopeGroup
                 TronSettingsGroup("Provider Transport", accent: .tronCyan) {
                     VStack(spacing: 0) {
-                        choiceRow("network", "Transport", transportLabel, accent: .tronCyan) {
+                        choiceRow("network", "Transport", transportLabel, detail: "Protocol used for provider connections", accent: .tronCyan) {
                             Button("Automatic") { draft.transport = "auto" }
                             Button("Server-Sent Events") { draft.transport = "sse" }
                             Button("WebSocket") { draft.transport = "websocket" }
@@ -104,12 +104,12 @@ struct RuntimeBehaviorSettingsView: View {
                 }
                 TronSettingsGroup("Message Queue", accent: .tronPurple) {
                     VStack(spacing: 0) {
-                        choiceRow("arrow.turn.up.right", "Steering delivery", queueLabel(draft.steeringMode), accent: .tronPurple) {
+                        choiceRow("arrow.turn.up.right", "Steering delivery", queueLabel(draft.steeringMode), detail: "How steering messages reach active work", accent: .tronPurple) {
                             Button("Deliver all") { draft.steeringMode = "all" }
                             Button("One at a time") { draft.steeringMode = "one-at-a-time" }
                         }
                         TronSettingsDivider(accent: .tronPurple)
-                        choiceRow("clock.arrow.circlepath", "Follow-up delivery", queueLabel(draft.followUpMode), accent: .tronPurple) {
+                        choiceRow("clock.arrow.circlepath", "Follow-up delivery", queueLabel(draft.followUpMode), detail: "How queued follow-ups start after a response", accent: .tronPurple) {
                             Button("Deliver all") { draft.followUpMode = "all" }
                             Button("One at a time") { draft.followUpMode = "one-at-a-time" }
                         }
@@ -117,30 +117,48 @@ struct RuntimeBehaviorSettingsView: View {
                 }
                 TronSettingsGroup("Compaction", accent: .tronTeal) {
                     VStack(spacing: 0) {
-                        TronToggleRow(icon: "arrow.triangle.2.circlepath", title: "Automatic compaction", accent: .tronTeal, isOn: $draft.compactionEnabled)
+                        TronToggleRow(
+                            icon: "arrow.triangle.2.circlepath",
+                            title: "Automatic compaction",
+                            detail: "Summarize context before the model window fills",
+                            accent: .tronTeal,
+                            isOn: $draft.compactionEnabled
+                        )
                         TronSettingsDivider(accent: .tronTeal)
-                        numberRow("gauge.with.dots.needle.33percent", "Reserve tokens", nil, value: $draft.compactionReserve, accent: .tronTeal)
+                        numberRow("gauge.with.dots.needle.33percent", "Reserve tokens", "Tokens reserved before compaction", value: $draft.compactionReserve, accent: .tronTeal)
                         TronSettingsDivider(accent: .tronTeal)
-                        numberRow("text.line.last.and.arrowtriangle.forward", "Keep recent tokens", nil, value: $draft.compactionRecent, accent: .tronTeal)
+                        numberRow("text.line.last.and.arrowtriangle.forward", "Keep recent tokens", "Recent context retained verbatim", value: $draft.compactionRecent, accent: .tronTeal)
                         TronSettingsDivider(accent: .tronTeal)
-                        numberRow("arrow.triangle.branch", "Branch summary reserve", nil, value: $draft.branchReserve, accent: .tronTeal)
+                        numberRow("arrow.triangle.branch", "Branch summary reserve", "Tokens reserved for branch summaries", value: $draft.branchReserve, accent: .tronTeal)
                         TronSettingsDivider(accent: .tronTeal)
-                        TronToggleRow(icon: "text.bubble", title: "Skip branch-summary prompt", accent: .tronTeal, isOn: $draft.branchSkipPrompt)
+                        TronToggleRow(
+                            icon: "text.bubble",
+                            title: "Skip branch-summary prompt",
+                            detail: "Skip the optional branch-summary instruction",
+                            accent: .tronTeal,
+                            isOn: $draft.branchSkipPrompt
+                        )
                     }
                 }
                 TronSettingsGroup("Retry", accent: .tronAmber) {
                     VStack(spacing: 0) {
-                        TronToggleRow(icon: "arrow.clockwise", title: "Automatic retry", accent: .tronAmber, isOn: $draft.retryEnabled)
+                        TronToggleRow(
+                            icon: "arrow.clockwise",
+                            title: "Automatic retry",
+                            detail: "Retry transient request failures",
+                            accent: .tronAmber,
+                            isOn: $draft.retryEnabled
+                        )
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("number", "Agent retry count", nil, value: $draft.retryCount, accent: .tronAmber)
+                        numberRow("number", "Agent retry count", "Maximum retries for agent requests", value: $draft.retryCount, accent: .tronAmber)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("timer", "Base delay", "Milliseconds", value: $draft.retryDelay, accent: .tronAmber)
+                        numberRow("timer", "Base delay", "Initial delay in milliseconds", value: $draft.retryDelay, accent: .tronAmber)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("hourglass", "Provider timeout", "Milliseconds", value: $draft.providerTimeout, accent: .tronAmber)
+                        numberRow("hourglass", "Provider timeout", "Request timeout in milliseconds", value: $draft.providerTimeout, accent: .tronAmber)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("number", "Provider retry count", nil, value: $draft.providerRetryCount, accent: .tronAmber)
+                        numberRow("number", "Provider retry count", "Maximum retries for provider requests", value: $draft.providerRetryCount, accent: .tronAmber)
                         TronSettingsDivider(accent: .tronAmber)
-                        numberRow("timer", "Maximum provider delay", "Milliseconds", value: $draft.providerRetryDelay, accent: .tronAmber)
+                        numberRow("timer", "Maximum provider delay", "Delay cap in milliseconds", value: $draft.providerRetryDelay, accent: .tronAmber)
                     }
                 }
                 TronSettingsGroup("Conversation") {
@@ -209,19 +227,19 @@ struct RuntimeBehaviorSettingsView: View {
     }
 
     @ViewBuilder private var toggleRows: some View {
-        TronToggleRow(icon: "brain", title: "Hide thinking blocks", isOn: $draft.hideThinking)
+        TronToggleRow(icon: "brain", title: "Hide thinking blocks", detail: "Keep model reasoning out of the transcript", isOn: $draft.hideThinking)
         TronSettingsDivider()
-        TronToggleRow(icon: "bell", title: "Show cache-miss notices", isOn: $draft.cacheNotices)
+        TronToggleRow(icon: "bell", title: "Show cache-miss notices", detail: "Surface provider cache misses in chat", isOn: $draft.cacheNotices)
         TronSettingsDivider()
-        TronToggleRow(icon: "photo", title: "Resize large images", isOn: $draft.resizeImages)
+        TronToggleRow(icon: "photo", title: "Resize large images", detail: "Reduce oversized images before upload", isOn: $draft.resizeImages)
         TronSettingsDivider()
-        TronToggleRow(icon: "photo.slash", title: "Block images", isOn: $draft.blockImages)
+        TronToggleRow(icon: "photo.slash", title: "Block images", detail: "Prevent image input from reaching providers", isOn: $draft.blockImages)
         TronSettingsDivider()
-        TronToggleRow(icon: "command", title: "Enable skill commands", isOn: $draft.skillCommands)
+        TronToggleRow(icon: "command", title: "Enable skill commands", detail: "Expose installed skills as slash commands", isOn: $draft.skillCommands)
     }
 
-    private func choiceRow<Content: View>(_ icon: String, _ title: String, _ value: String, accent: Color = .tronEmerald, @ViewBuilder choices: () -> Content) -> some View {
-        TronValueRow(icon: icon, title: title, accent: accent) {
+    private func choiceRow<Content: View>(_ icon: String, _ title: String, _ value: String, detail: String? = nil, accent: Color = .tronEmerald, @ViewBuilder choices: () -> Content) -> some View {
+        TronValueRow(icon: icon, title: title, detail: detail, accent: accent) {
             TronInlineMenu(value, accent: accent, content: choices)
         }
     }

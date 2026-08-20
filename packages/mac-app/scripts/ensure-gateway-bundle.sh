@@ -21,7 +21,6 @@ required_executables=(
     "$PAYLOAD_DIR/runtime/node-arm64"
     "$PAYLOAD_DIR/runtime/node-x64"
     "$RESOURCES_DIR/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
-    "$RESOURCES_DIR/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron"
 )
 
 needs_bundle=0

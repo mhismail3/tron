@@ -17,7 +17,7 @@ enum LocalComputerName {
         )
     }
 
-    static func currentPairingName(isDev: Bool = TronPaths.isIsolatedInstallMode()) -> String {
+    static func currentPairingName(isDev: Bool = false) -> String {
         pairingName(current(), isDev: isDev)
     }
 

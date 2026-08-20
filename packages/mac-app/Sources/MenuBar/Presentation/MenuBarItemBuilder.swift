@@ -23,17 +23,13 @@ enum MenuItemDescriptor: Equatable {
     }
 }
 
-struct PreviewMenuState: Equatable, Sendable {
-    var isRegistered: Bool
+struct DebugGatewayMenuState: Equatable, Sendable {
+    /// True only after lifecycle/PID/payload/authenticated identity admission.
     var isRunning: Bool
-    var isBusy: Bool = false
-    var canManage: Bool
-    /// True only when the running Preview job belongs to the installed
-    /// Release wrapper and its exact Preview helper path.
-    var isOwned: Bool = true
-    var needsRepair: Bool = false
+    var isPairable: Bool = false
+    var isUnauthorized: Bool = false
 
-    static let unavailable = PreviewMenuState(isRegistered: false, isRunning: false, canManage: false)
+    static let unavailable = DebugGatewayMenuState(isRunning: false)
 }
 
 enum MenuBarItemBuilder {
@@ -45,7 +41,7 @@ enum MenuBarItemBuilder {
         tronHome: URL,
         defaultServerPort: Int,
         canManageLaunchAgent: Bool,
-        preview: PreviewMenuState = .unavailable
+        debugGateway: DebugGatewayMenuState = .unavailable
     ) -> [MenuItemDescriptor] {
         var items: [MenuItemDescriptor] = []
 
@@ -59,23 +55,13 @@ enum MenuBarItemBuilder {
         items.append(.separator)
 
         items.append(.action(title: "Show pairing info", isEnabled: true, action: .showPairingInfo))
-        if preview.canManage {
-            let previewEnabled = !preview.isBusy
-            if preview.isRegistered && !preview.needsRepair && preview.isOwned {
-                items.append(.action(title: "Show Preview pairing info", isEnabled: true, action: .showPreviewPairingInfo))
-                if preview.isRunning {
-                    items.append(.action(title: "Restart Preview Gateway", isEnabled: previewEnabled, action: .restartPreviewGateway))
-                }
-                items.append(.action(title: "Stop Preview Gateway", isEnabled: previewEnabled, action: .stopPreviewGateway))
-            } else {
-                // A Debug-owned or partially registered job is repairable, not
-                // pairable and not a stop-only state.
-                items.append(.action(
-                    title: preview.isRegistered || preview.needsRepair ? "Repair Preview" : "Enable Preview Gateway",
-                    isEnabled: previewEnabled,
-                    action: .enablePreviewGateway
-                ))
+        if debugGateway.isRunning {
+            if debugGateway.isPairable {
+                items.append(.action(title: "Show Debug pairing info", isEnabled: true, action: .showDebugPairingInfo))
             }
+            items.append(.action(title: "Debug Gateway running on 9848", isEnabled: false, action: .showDebugPairingInfo))
+        } else if debugGateway.isUnauthorized {
+            items.append(.action(title: "Debug Gateway needs its local token", isEnabled: false, action: .showDebugPairingInfo))
         }
 
         items.append(.openLink(title: "Open Tron folder", url: tronHome))
@@ -247,17 +233,20 @@ struct ServerStatusSnapshot: Equatable {
     var tailscaleIP: String?
     var processID: Int?
     var uptime: String?
+    var debugAdmission: DebugGatewayObserver.Admission?
 
     init(
         state: ServerStatusState,
         tailscaleIP: String? = nil,
         processID: Int? = nil,
-        uptime: String? = nil
+        uptime: String? = nil,
+        debugAdmission: DebugGatewayObserver.Admission? = nil
     ) {
         self.state = state
         self.tailscaleIP = tailscaleIP
         self.processID = processID
         self.uptime = uptime
+        self.debugAdmission = debugAdmission
     }
 
     static let checking = ServerStatusSnapshot(state: .checking)

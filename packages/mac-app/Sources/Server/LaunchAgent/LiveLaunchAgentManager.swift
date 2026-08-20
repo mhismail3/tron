@@ -12,6 +12,9 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
     }
 
     func load(plistPath: URL, label: String) async -> LaunchAgentOutcome {
+        guard profile == .stable else {
+            return .launchdRefused(message: "Debug Gateway lifecycle belongs to scripts/tron dev.")
+        }
         guard label == profile.launchAgentLabel,
               plistPath.standardizedFileURL.path == TronPaths.launchAgentPlistPath(profile: profile).standardizedFileURL.path else {
             return .launchdRefused(message: "LaunchAgent profile arguments do not match the requested Gateway profile.")
@@ -33,13 +36,14 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             return .launchdRefused(message: signatureProblem)
         }
 
+        let currentVariant = MacRuntimeVariant.detect()
         let service = SMAppService.agent(plistName: "\(label).plist")
         let status = ExistingInstallDetector.serviceStatus(label: label)
-        let currentVariant = MacRuntimeVariant.detect()
         let runtime = await runtimeInfo(label: label)
         let runningParent = runtime?.parentBundleIdentifier
         let shouldReplaceStaleRuntime = Self.runtimeRequiresReplacement(
             runtimeInfo: runtime,
+            profile: profile,
             expectedHelperPath: helperBinary.path
         )
         let shouldTakeOverRuntime = Self.shouldBootoutForTakeover(
@@ -73,6 +77,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             runtimeInfo: runtime,
             runningParentBundleIdentifier: runningParent,
             canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile),
+            profile: profile,
             expectedHelperPath: helperBinary.path,
             shouldRefreshCurrentRegistration: shouldRefreshCurrentRegistration
         ) {
@@ -142,6 +147,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         runtimeInfo: LaunchAgentRuntimeInfo? = nil,
         runningParentBundleIdentifier: String? = nil,
         canManageLaunchAgent: Bool = true,
+        profile: TronGatewayProfile = .stable,
         expectedHelperPath: String = TronPaths.serverHelperBinary.path,
         shouldRefreshCurrentRegistration: Bool = false
     ) -> LaunchAgentOutcome? {
@@ -149,13 +155,17 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         case .requiresApproval:
             return .requiresApproval(message: "Approve Tron Agent in Login Items to finish installation.")
         case .enabled, .notRegistered, .notFound, .unknown:
-            let runtimeIsStale = runtimeRequiresReplacement(runtimeInfo: runtimeInfo, expectedHelperPath: expectedHelperPath)
+            let runtimeIsStale = runtimeRequiresReplacement(
+                runtimeInfo: runtimeInfo,
+                profile: profile,
+                expectedHelperPath: expectedHelperPath
+            )
             let resolvedParent = runtimeInfo?.parentBundleIdentifier ?? runningParentBundleIdentifier
 
             if !canManageLaunchAgent {
                 if runtimeIsStale || resolvedParent == nil {
                     return .launchdRefused(
-                        message: "This Xcode Debug wrapper is in companion mode and cannot install or repair the production Tron Agent. Use /Applications/Tron.app, or run the isolated install-testing scheme."
+                        message: "This Xcode Debug wrapper is a read-only companion. Use /Applications/Tron.app to manage Stable."
                     )
                 }
                 return .alreadyLoaded
@@ -307,6 +317,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
               runtimeInfo.gatewayChannelMarker == profile.channel else { return false }
         return !runtimeRequiresReplacement(
             runtimeInfo: runtimeInfo,
+            profile: profile,
             expectedHelperPath: expectedHelperPath,
             fileExists: fileExists
         )
@@ -314,21 +325,69 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
 
     static func runtimeRequiresReplacement(
         runtimeInfo: LaunchAgentRuntimeInfo?,
+        profile: TronGatewayProfile = .stable,
         expectedHelperPath: String,
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> Bool {
-        guard let runtimeInfo,
-              let executablePath = runtimeInfo.executablePath,
-              !executablePath.isEmpty else {
-            return false
-        }
+        guard let runtimeInfo else { return false }
+        guard runtimeInfo.gatewaySupervisionMarker == TronPaths.gatewaySupervisionValue,
+              runtimeInfo.gatewayChannelMarker == profile.channel else { return true }
 
         let expected = URL(fileURLWithPath: expectedHelperPath).standardizedFileURL.path
-        let actual = URL(fileURLWithPath: executablePath).standardizedFileURL.path
-        return actual != expected || !fileExists(actual)
+        guard fileExists(expected), processCommandOwnsProfile(
+            runtimeInfo.processCommand,
+            profile: profile,
+            expectedHelperPath: expectedHelperPath
+        ) else { return true }
+        if let executablePath = runtimeInfo.executablePath, !executablePath.isEmpty {
+            let actual = URL(fileURLWithPath: executablePath).standardizedFileURL.path
+            return actual != expected
+        }
+
+        guard let bundleProgram = runtimeInfo.bundleProgram,
+              !bundleProgram.isEmpty,
+              let contentsRange = expected.range(of: "Contents/") else {
+            return true
+        }
+        return bundleProgram != String(expected[contentsRange.lowerBound...])
+    }
+
+    static func processCommandOwnsProfile(
+        _ command: String?,
+        profile: TronGatewayProfile,
+        expectedHelperPath: String
+    ) -> Bool {
+        guard let command, !command.isEmpty else { return false }
+        let fields = command.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        guard fields.count >= 2,
+              let runtimeRange = fields[0].range(of: "/runtime/node-", options: .backwards) else {
+            return false
+        }
+        let payloadRoot = String(fields[0][..<runtimeRange.lowerBound])
+        guard fields[1] == "\(payloadRoot)/app/dist/index.js" else { return false }
+
+        let helper = URL(fileURLWithPath: expectedHelperPath).standardizedFileURL.path
+        guard let contentsRange = helper.range(of: "/Contents/Library/LoginItems/") else { return false }
+        let bundledRoot = String(helper[..<contentsRange.lowerBound]) + "/Contents/Resources/Gateway"
+        if payloadRoot == bundledRoot { return true }
+
+        let versionsRoot = GatewayPayloadStore(
+            home: TronPaths.tronHome(profile: profile),
+            channel: profile.channel
+        ).versionsRoot.standardizedFileURL.path
+        let prefix = versionsRoot + "/"
+        guard payloadRoot.hasPrefix(prefix) else { return false }
+        let version = String(payloadRoot.dropFirst(prefix.count))
+        return GatewayPayloadStore.validComponent(
+            version,
+            maximumLength: GatewayPayloadStore.versionComponentLimit
+        )
     }
 
     func unload(label: String) async -> LaunchAgentOutcome {
+        guard profile == .stable else {
+            return .launchdRefused(message: "Debug Gateway lifecycle belongs to scripts/tron dev.")
+        }
         guard label == profile.launchAgentLabel else {
             return .launchdRefused(message: "LaunchAgent label does not match the requested Gateway profile.")
         }
@@ -361,6 +420,9 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
     }
 
     func restart(label: String) async -> LaunchAgentOutcome {
+        guard profile == .stable else {
+            return .launchdRefused(message: "Debug Gateway lifecycle belongs to scripts/tron dev.")
+        }
         guard label == profile.launchAgentLabel else {
             return .launchdRefused(message: "LaunchAgent label does not match the requested Gateway profile.")
         }
@@ -396,10 +458,13 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         guard result.exitCode == 0 else { return nil }
         let pid = parsePID(from: result.stdout)
         let uptime: String?
+        let processCommand: String?
         if let pid {
             uptime = await ServerProcessProbe.processElapsedTime(pid: pid)
+            processCommand = await ServerProcessProbe.processCommand(pid: pid)
         } else {
             uptime = nil
+            processCommand = nil
         }
         return LaunchAgentRuntimeInfo(
             pid: pid,
@@ -410,6 +475,8 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             ),
             parentBundleVersion: parseLaunchctlValue(named: "parent bundle version", from: result.stdout),
             executablePath: parseLaunchctlDictionaryValue(named: "Executable", from: result.stdout),
+            bundleProgram: parseLaunchctlProgramIdentifier(from: result.stdout),
+            processCommand: processCommand,
             gatewaySupervisionMarker: parseLaunchctlEnvironmentValue(
                 named: TronPaths.gatewaySupervisionEnv,
                 from: result.stdout
@@ -454,6 +521,15 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             }
         }
         return nil
+    }
+
+    private func parseLaunchctlProgramIdentifier(from launchctlOutput: String) -> String? {
+        guard let value = parseLaunchctlValue(named: "program identifier", from: launchctlOutput) else {
+            return nil
+        }
+        let program = value.components(separatedBy: " (mode:").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return program?.isEmpty == false ? program : nil
     }
 
     private func parseLaunchctlDictionaryValue(named key: String, from launchctlOutput: String) -> String? {

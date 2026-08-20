@@ -10,8 +10,8 @@ usage() {
 Usage: scripts/tron <command> [options]
 
 Commands:
-  dev                                Deprecated and fail-closed; use the installed LaunchAgent
-                                    and scripts/gateway-payload-deploy.mjs
+  dev [start|restart|status|preflight|stop|handoff]
+                                    Own the immutable Debug Gateway on port 9848
   chat [--session <id>] [--cwd <path>] [--host <host>] [--port <port>]
                                     Attach terminal chat to the Gateway-owned runtime
   ci [check|test|all]               Validate the gateway and repository policy
@@ -36,8 +36,7 @@ case "$cmd" in
     fi
     ;;
   __dev-supervise|dev)
-    echo "scripts/tron dev is deprecated and fail-closed: use the installed Release wrapper and its LaunchAgent-owned Gateway." >&2
-    exit 64
+    exec "$ROOT/scripts/tron-dev" "$@"
     ;;
   chat)
     (cd "$GATEWAY" && npm run build >/dev/null)

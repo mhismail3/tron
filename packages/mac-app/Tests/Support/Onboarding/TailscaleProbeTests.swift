@@ -149,8 +149,8 @@ struct TailscaleProbeTests {
         #expect(status == .installedNotSignedIn)
     }
 
-    @Test("BackendState=Running but no IPv4 in payload: installed-not-signed-in")
-    func runningButNoIPv4() async throws {
+    @Test("BackendState=Running with only eligible IPv6: signed-in")
+    func runningWithIPv6Only() async throws {
         let cli = try makeFakeCLI()
         defer { try? FileManager.default.removeItem(at: cli.deletingLastPathComponent()) }
 
@@ -167,7 +167,22 @@ struct TailscaleProbeTests {
             cliPaths: [cli],
             runProcess: { _ in ProcessResult(exitCode: 0, stdout: json, stderr: "") }
         )
-        #expect(status == .installedNotSignedIn)
+        if case .signedIn(let address) = status {
+            #expect(address == "fd7a:115c:a1e0::1")
+        } else {
+            Issue.record("expected IPv6 .signedIn, got \(status)")
+        }
+    }
+
+    @Test("selection matches Gateway family and address ordering")
+    func deterministicSelection() {
+        #expect(TailscaleProbe.selectedAddress([
+            "fd7a:115c:a1e0::2", "100.100.0.20", "100.64.0.10", "100.64.0.2",
+        ]) == "100.64.0.2")
+        #expect(TailscaleProbe.selectedAddress([
+            "fd7a:115c:a1e0::b", "fd7a:115c:a1e0::a",
+        ]) == "fd7a:115c:a1e0::a")
+        #expect(TailscaleProbe.selectedAddress(["192.168.1.2", "fd00::1"]) == nil)
     }
 
     @Test("BackendState=Running, Self absent, IPv4 only in top-level TailscaleIPs: signed-in")
@@ -214,8 +229,8 @@ struct TailscaleProbeTests {
         let json = """
         {
           "BackendState": "Running",
-          "TailscaleIPs": ["100.1.2.3"],
-          "Self": { "TailscaleIPs": ["100.1.2.3"] }
+          "TailscaleIPs": ["100.65.2.3"],
+          "Self": { "TailscaleIPs": ["100.65.2.3"] }
         }
         """
         let status = await TailscaleProbe.probe(
@@ -229,7 +244,7 @@ struct TailscaleProbeTests {
 
         #expect(seen == second, "first non-executable path should be skipped")
         if case .signedIn(let ip) = status {
-            #expect(ip == "100.1.2.3")
+            #expect(ip == "100.65.2.3")
         } else {
             Issue.record("expected .signedIn")
         }

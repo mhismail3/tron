@@ -117,16 +117,6 @@ struct ResourceSettingsView: View {
             LazyVStack(alignment: .leading, spacing: 18) {
                 scopeGroup
 
-                Label(
-                    "Tron already discovers resources in the standard global and trusted-project folders. Add locations here only when resources live somewhere else.",
-                    systemImage: "info.circle"
-                )
-                .font(TronTypography.bodySM)
-                .foregroundStyle(Color.tronTextPrimary)
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
-
                 TronSettingsGroup("Additional Locations", detail: "Optional paths outside automatic discovery.") {
                     VStack(spacing: 0) {
                         editorRow(.extensions, icon: "shippingbox", value: draft.extensions, accent: .tronPurple)
@@ -150,6 +140,12 @@ struct ResourceSettingsView: View {
                         editorRow(.proxy, icon: "network", value: draft.proxy, accent: .tronAmber)
                     }
                 }
+
+                TronInfoCard(
+                    icon: "info.circle",
+                    text: "Tron already discovers resources in the standard global and trusted-project folders. Add locations here only when resources live somewhere else.",
+                    accent: .tronCyan
+                )
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)

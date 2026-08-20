@@ -51,9 +51,12 @@ verify_app_bundle() {
     local root="$1"
     local required_file
     local required_directory
+    local manifest="$root/$gateway_root/manifest.json"
+    local expected_fingerprint actual_fingerprint runtime expected_arch actual_arch entitlements version_output helper_archs
     local required_files=(
         "$helper"
         "$launch_agent"
+        "$gateway_root/manifest.json"
         "$gateway_root/app/dist/index.js"
         "$gateway_root/app/package.json"
         "$gateway_root/app/package-lock.json"
@@ -69,8 +72,45 @@ verify_app_bundle() {
         [ -d "$root/$required_directory" ] || die "app bundle is missing required Gateway directory: $root/$required_directory"
     done
     [ -x "$root/$helper" ] || die "app bundle helper is not executable: $root/$helper"
-    [ -x "$root/$gateway_root/runtime/node-arm64" ] || die "app bundle arm64 Node runtime is not executable"
-    [ -x "$root/$gateway_root/runtime/node-x64" ] || die "app bundle x64 Node runtime is not executable"
+    codesign --verify --deep --strict "$root" >/dev/null 2>&1 \
+        || die "app bundle deep strict signature is invalid: $root"
+    codesign --verify --deep --strict "$root/Contents/Library/LoginItems/Tron Agent.app" >/dev/null 2>&1 \
+        || die "Tron Agent helper signature is invalid"
+    helper_archs="$(lipo -archs "$root/$helper" 2>/dev/null || true)"
+    [[ " $helper_archs " == *" arm64 "* && " $helper_archs " == *" x86_64 "* ]] \
+        || die "Tron Agent helper is not universal arm64/x86_64"
+
+    expected_fingerprint="$(plutil -extract payloadFingerprint raw -o - "$manifest" 2>/dev/null || true)"
+    [[ "$expected_fingerprint" =~ ^[0-9a-f]{64}$ ]] \
+        || die "Gateway manifest has an invalid payload fingerprint"
+    [[ "$(plutil -extract kind raw -o - "$manifest" 2>/dev/null || true)" == "tron-gateway-payload" ]] \
+        || die "Gateway manifest kind is invalid"
+    [[ "$(plutil -extract channel raw -o - "$manifest" 2>/dev/null || true)" == "stable" ]] \
+        || die "Gateway manifest channel is not stable"
+    actual_fingerprint="$("$root/$helper" --fingerprint "$root/$gateway_root" 2>/dev/null || true)"
+    [[ "$actual_fingerprint" == "$expected_fingerprint" ]] \
+        || die "Gateway payload fingerprint does not match its authoritative manifest"
+
+    for expected_arch in arm64 x86_64; do
+        if [[ "$expected_arch" == arm64 ]]; then
+            runtime="$root/$gateway_root/runtime/node-arm64"
+        else
+            runtime="$root/$gateway_root/runtime/node-x64"
+        fi
+        [ -x "$runtime" ] || die "Node $expected_arch runtime is not executable"
+        codesign --verify --strict "$runtime" >/dev/null 2>&1 \
+            || die "Node $expected_arch runtime signature is invalid"
+        entitlements="$(codesign -d --entitlements :- "$runtime" 2>/dev/null || true)"
+        [[ "$(grep -c '<key>' <<<"$entitlements")" == 1 \
+            && "$entitlements" == *'<key>com.apple.security.cs.allow-jit</key>'*'<true/>'* ]] \
+            || die "Node $expected_arch runtime does not have the exact allow-jit entitlement"
+        actual_arch="$(lipo -archs "$runtime" 2>/dev/null || true)"
+        [[ "$actual_arch" == "$expected_arch" ]] \
+            || die "Node runtime architecture mismatch: expected $expected_arch, got $actual_arch"
+        version_output="$("$runtime" --version 2>/dev/null || true)"
+        [[ "$version_output" == v* ]] \
+            || die "Node $expected_arch runtime failed --version execution"
+    done
 }
 
 verify_app_bundle "$app"
@@ -85,16 +125,22 @@ cleanup() {
     if [ "$attached" -eq 1 ] && ! hdiutil detach "$mount_point" >/dev/null 2>&1; then
         echo "error: failed to detach DMG mount: $mount_point" >&2
         status=1
-    else
-        rm -rf "$work"
     fi
+    # Bundled payloads are deliberately immutable. Restore owner write access
+    # only inside this private packaging scratch directory before removing it.
+    chmod -R u+w "$work" 2>/dev/null || true
+    rm -rf "$work"
     exit "$status"
 }
 trap cleanup EXIT
 
 mkdir -p "$source" "$mount_point" "$(dirname "$output")"
-ditto "$app" "$source/$bundle"
-[ -x "$source/$bundle/$helper" ] || die "copied app bundle is missing executable helper"
+# `ditto` applies an immutable directory's mode before copying its children and
+# then cannot populate the complete read-only payload tree. `cp -R` materializes
+# children first; the verification below proves signatures, bytes, and modes
+# survived the copy before the image is created.
+cp -R "$app" "$source/$bundle"
+verify_app_bundle "$source/$bundle"
 rm -f "$output"
 
 if [ "$layout" = structural ]; then

@@ -20,26 +20,6 @@ struct CustomModelsSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
-                if redacted {
-                    HStack(alignment: .center, spacing: TronSpacing.xl) {
-                        Image(systemName: "key.slash")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronAmber)
-                            .frame(width: 20, height: 20, alignment: .center)
-                            .accessibilityHidden(true)
-                        Text("Secret-looking values are hidden. Tron preserves them when you save; manage provider credentials from Providers.")
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .padding(.horizontal, TronSpacing.xl)
-                    .padding(.vertical, 14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.10)
-                }
-
                 providersSection
                     .disabled(advancedDocumentEdited)
 
@@ -84,6 +64,14 @@ struct CustomModelsSettingsView: View {
                         }
                     }
                 )
+
+                if redacted {
+                    TronInfoCard(
+                        icon: "key.slash",
+                        text: "Secret-looking values are hidden. Tron preserves them when you save; manage provider credentials from Providers.",
+                        accent: .tronAmber
+                    )
+                }
             }
             .padding(20)
         }

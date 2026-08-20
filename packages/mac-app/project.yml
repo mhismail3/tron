@@ -172,27 +172,3 @@ schemes:
       config: Debug
     archive:
       config: Release
-  TronMac Isolated Install:
-    build:
-      targets:
-        TronMac: all
-        TronMacTests: [test]
-    run:
-      config: Debug
-      environmentVariables:
-        TRON_PROJECT_ROOT: "$(SRCROOT)/../.."
-        TRON_MAC_INSTALL_MODE: isolated
-        TRON_HOME_NAME: ".tron-dev"
-        TRON_AGENT_DIR_NAME: "agent-dev"
-    test:
-      config: Debug
-      environmentVariables:
-        TRON_MAC_TEST_HOST: "1"
-      targets:
-        - TronMacTests
-    profile:
-      config: Release
-    analyze:
-      config: Debug
-    archive:
-      config: Release

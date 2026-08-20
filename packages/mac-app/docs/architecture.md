@@ -12,16 +12,17 @@ registrations.
 
 | Variant | Login Item | Label | Home | Port |
 |---|---|---|---|---|
-| Installed | `Tron Agent.app` | `com.tron.server` | `~/.tron` | 9847 |
-| Preview (opt-in, Release-owned) | `Tron Agent Dev.app` | `com.tron.server.dev` | `~/.tron-dev` + `~/.pi/agent-dev` | 9848 |
-| Debug companion | regular companion window; observes installed agent only | none owned | `~/.tron` | 9847 |
+| Installed Stable | `Tron Agent.app` | `com.tron.server` | `~/.tron` | 9847 |
+| Developer Debug | `scripts/tron dev` supervisor | none (no SMAppService) | `~/.tron-dev` + `~/.pi/agent-dev` | 9848 |
+| Xcode companion | read-only wrapper UI | none | `~/.tron` | 9847 |
 
 The LaunchAgent passes `--host tailscale`; gateway startup resolves and binds the
-actual Tailscale interface rather than all interfaces, choosing the lowest IPv4
-address (then deterministic IPv6/address/interface order). Deployment health and
+actual Tailscale interface rather than all interfaces. The Gateway and wrapper
+use the same deterministic policy: eligible IPv4 before IPv6, then address and
+interface order; IPv6-only tailnets remain supported. Deployment health and
 restart traffic resolve the same name; an explicit host always overrides it.
 Developer CLI operation
-is loopback unless `--tailscale` is explicit. Preview pairing appends `(Dev)` to
+is loopback unless `--tailscale` is explicit. Debug pairing appends `(Dev)` to
 the Mac's friendly name so the `9848` profile is distinct from the stable connection. The two homes share only the random physical-machine group hint at
 `~/.tron-machine-group-id`; their gateway machine IDs, agent directories, JSONL
 sessions, credentials, and runtime markers remain separate.
@@ -44,12 +45,14 @@ worker host.
 
 ## Pairing
 
-Each profile's gateway creates `<profile home>/gateway/enrollment.json` (stable
-`~/.tron`, Preview `~/.tron-dev`) with mode `0600`, a 10-minute expiry, and a
+Each profile's gateway creates `<profile home>/gateway/enrollment.json` (Stable
+`~/.tron`, Debug `~/.tron-dev`) with mode `0600`, a 10-minute expiry, and a
 one-time code. The wrapper accepts the gateway's
 RFC3339 expiration timestamp with or without fractional seconds.
 `PairingInfoStep` first authenticates a local `system.info` request using
-`gateway/local-auth.json`, then reads the current enrollment file and emits:
+`gateway/local-auth.json`. The wrapper accepts the Gateway's RFC3339 credential
+timestamp with or without fractional seconds, then reads the current enrollment
+file and emits:
 
 ```text
 tron://pair?host=<tailscale>&port=<port>&code=<one-time>&label=<mac>
@@ -68,13 +71,27 @@ Gateway protocol and combines health with registration state. Menu controls can
 pause, resume, restart, inspect bounded persisted Gateway logs, show a fresh
 pairing invitation, and uninstall.
 
-The payload/store contract and Release wrapper support independent stable and
-Preview channels. Preview is opt-in: the menu registers `com.tron.server.dev`
-only when the user chooses **Enable Preview Gateway**. **Stop Preview Gateway**
-unregisters it without deleting `~/.tron-dev` or `~/.pi/agent-dev`; **Restart
-Preview Gateway** uses the authenticated drain command and never force-kickstarts.
-Preview health is reported only when registration and authenticated health both
-succeed. Stable ownership remains independent on `com.tron.server`/9847.
+Installed Release owns only Stable registration and lifecycle. It authenticates
+to the developer-owned Debug Gateway on 9848 to report status and, when Debug
+is Tailscale-bound, show pairing information. It never registers, repairs,
+restarts, stops, uninstalls, caches into, or takes over Debug. Stable uninstall
+therefore cannot affect `~/.tron-dev` or `~/.pi/agent-dev`. Stable associates
+exactly with `com.tron.mac`; Debug has no SMAppService identity or helper in the
+Release bundle. Stable ownership requires the exact parent, markers, helper
+metadata, exact 9847 listener PID, selected immutable payload (or the validated
+bundled fallback), PID command, and authenticated `system.info` version,
+channel, revision, fingerprint, and runtime epoch to agree. Relative
+BundleProgram metadata alone is never proof. Debug observation reads one bounded
+scripts/tron-dev lifecycle snapshot and requires its exact live supervisor
+PID/start identity, exact live child PID/start identity, sole 9848 listener,
+immutable selected manifest, process command, and authenticated `system.info`
+identity to agree. An orphan child is never admitted. Menu refreshes are
+cancellation- and generation-gated; a pairing sheet consumes one pinned
+immutable admission, so an older host/runtime observation cannot overwrite a
+newer restart or loopback/Tailscale transition. Admission identity compares the
+exact supervisor/child start identities, transport host, selected payload, and
+authenticated runtime provenance; elapsed uptime is display-only and cannot
+invalidate an otherwise unchanged admission.
 
 The wrapper and gateway share no in-memory state. Their only shared secrets are
 owner-only gateway files. Legacy `~/.tron/auth.json` is neither wrapper nor
@@ -82,8 +99,8 @@ gateway authentication and is left untouched for explicit migration.
 
 ## Gateway payload selection
 
-The installed release wrapper owns the stable launcher and the opt-in Preview
-LaunchAgent. It first
+The installed Release wrapper owns only the stable launcher. Developer tooling
+owns the independent dev channel. Each launcher first
 checks the selected channel (`TRON_GATEWAY_CHANNEL`, with `stable` as the
 compatibility default) under the selected Tron home:
 
@@ -92,8 +109,11 @@ compatibility default) under the selected Tron home:
 ~/.tron/gateway/payloads/<channel>/versions/<version>/manifest.json
 ```
 
-The Preview descriptor supplies `.tron-dev`, `.pi/agent-dev`, and the `dev`
-channel when explicitly registered by the Release control. The agent-manageable command is explicit:
+`scripts/tron dev` builds and stages an immutable dev payload, starts or
+authentically drain-restarts the developer-owned supervisor on 9848, and preserves all
+Debug state. `scripts/tron dev handoff` copies only the exact selected payload
+whose pre/post authenticated identity remains unchanged into the Stable store as
+an inactive candidate. The agent-manageable command remains explicit:
 
 ```text
 scripts/gateway-payload-deploy.mjs stage --channel stable --source <payload>

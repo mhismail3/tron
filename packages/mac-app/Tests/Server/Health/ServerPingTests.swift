@@ -8,8 +8,27 @@ import Testing
 struct ServerPingDecodeTests {
     @Test("matching system.info response projects the gateway version")
     func matchingCanonicalResponseProjectsVersion() {
-        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","piVersion":"0.84.1","capabilities":[]}}"#
-        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(version: "0.1.0")))
+        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","gatewayChannel":"stable","machineName":"Mac","piVersion":"0.84.1","capabilities":[]}}"#
+        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(version: "0.1.0", gatewayChannel: "stable")))
+    }
+
+    @Test("matching system.info response retains runtime provenance")
+    func matchingResponseProjectsRuntimeIdentity() {
+        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","gatewayChannel":"dev","sourceRevision":"revision-1","buildFingerprint":"fingerprint-1","runtimeEpoch":"epoch-1"}}"#
+        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(
+            version: "0.1.0",
+            gatewayChannel: "dev",
+            sourceRevision: "revision-1",
+            buildFingerprint: "fingerprint-1",
+            runtimeEpoch: "epoch-1"
+        )))
+    }
+
+    @Test("gateway channel is bounded when present")
+    func gatewayChannelIsBounded() {
+        let oversized = String(repeating: "x", count: GatewayPayloadStore.channelComponentLimit + 1)
+        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","gatewayChannel":"\#(oversized)"}}"#
+        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .malformed)
     }
 
     @Test("missing required gateway identity is malformed")
@@ -46,9 +65,15 @@ struct ServerPingDecodeTests {
 
     @Test("system.info responses are not accepted as the server hello")
     func responseCannotSatisfyHelloGate() {
-        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine"}}"#
+        let body = #"{"type":"response","id":"mac-system-info","ok":true,"result":{"gatewayVersion":"0.1.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","gatewayChannel":"stable"}}"#
         #expect(!ServerPing.decodeHello(data: Data(body.utf8)))
-        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(version: "0.1.0")))
+        #expect(ServerPing.decodeFrame(data: Data(body.utf8)) == .result(ServerPingInfo(version: "0.1.0", gatewayChannel: "stable")))
+    }
+
+    @Test("socket URL brackets IPv6 literals")
+    func socketURLSupportsIPv6() throws {
+        #expect(ServerPing.socketURL(host: "fd7a:115c:a1e0::1", port: 9848)?.absoluteString == "ws://[fd7a:115c:a1e0::1]:9848/v1/socket")
+        #expect(ServerPing.socketURL(host: "100.64.0.2", port: 9847)?.absoluteString == "ws://100.64.0.2:9847/v1/socket")
     }
 
     @Test("matching gateway error frame is not a heartbeat")

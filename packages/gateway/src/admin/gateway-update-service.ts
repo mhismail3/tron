@@ -22,6 +22,7 @@ export interface GatewayUpdateRequest {
   channel: GatewayUpdateChannel;
   mode: GatewayUpdateMode;
   candidateVersion?: string;
+  candidateFingerprint?: string;
   /** Gateway-owned receipt identity, never accepted from the update helper's options. */
   commandId?: string;
 }
@@ -48,6 +49,15 @@ export interface GatewayUpdateConfig {
   updatedAt: string;
 }
 
+export interface GatewayDebugCandidateProvenance {
+  origin: "debug";
+  version: string;
+  payloadFingerprint: string;
+  sourceRevision: string;
+  testedRuntimeEpoch: string;
+  candidateRuntimeEpoch: string;
+}
+
 export interface GatewayUpdateStatus {
   state: string;
   channel: GatewayUpdateChannel;
@@ -58,6 +68,8 @@ export interface GatewayUpdateStatus {
   updatedAt: string | null;
   commandId: string | null;
   rollbackAvailable: boolean;
+  candidateOrigin: "debug" | null;
+  candidateProvenance: GatewayDebugCandidateProvenance | null;
 }
 
 export type GatewayUpdateCallback = (request: GatewayUpdateRequest | (GatewayRollbackRequest & { operation?: "rollback" })) => Promise<JsonValue>;
@@ -108,6 +120,7 @@ export function gatewayUpdateHelperArgs(request: GatewayUpdateRequest): string[]
   const normalized = validateGatewayUpdateRequest({
     channel: request.channel, mode: request.mode,
     ...(request.candidateVersion === undefined ? {} : { candidateVersion: request.candidateVersion }),
+    ...(request.candidateFingerprint === undefined ? {} : { candidateFingerprint: request.candidateFingerprint }),
   });
   const commandId = request.commandId;
   if (typeof commandId !== "string" || !/^[A-Za-z0-9._:-]{8,160}$/u.test(commandId)) {
@@ -115,6 +128,7 @@ export function gatewayUpdateHelperArgs(request: GatewayUpdateRequest): string[]
   }
   return ["apply", "--channel", normalized.channel, "--mode", normalized.mode,
     ...(normalized.candidateVersion === undefined ? [] : ["--candidate-version", normalized.candidateVersion]),
+    ...(normalized.candidateFingerprint === undefined ? [] : ["--candidate-fingerprint", normalized.candidateFingerprint]),
     "--command-id", commandId];
 }
 
@@ -324,16 +338,24 @@ function configDocument(value: unknown): GatewayUpdateConfig {
 
 export class GatewayUpdateService {
   private readonly updater: GatewayUpdateCallback | undefined;
+  private readonly runtimeChannel: GatewayUpdateChannel;
 
   constructor(private readonly options: {
     tronHome: string;
     runtimeIdentity?: RuntimeIdentityFallback;
     updater?: GatewayUpdateCallback;
+    runtimeChannel?: GatewayUpdateChannel;
   }) {
     this.updater = options.updater ?? launchAgentUpdater(process.env, options.tronHome);
+    const configuredChannel = options.runtimeChannel ?? process.env.TRON_GATEWAY_CHANNEL ?? "stable";
+    if (configuredChannel !== "stable" && configuredChannel !== "dev") {
+      throw new GatewayError("conflict", "Gateway runtime channel is invalid");
+    }
+    this.runtimeChannel = configuredChannel;
   }
 
   get isUsable(): boolean { return this.updater !== undefined; }
+  get channel(): GatewayUpdateChannel { return this.runtimeChannel; }
 
   private configPath(): string { return join(this.options.tronHome, "gateway", "update-config.json"); }
 
@@ -371,8 +393,9 @@ export class GatewayUpdateService {
     return config;
   }
 
-  async status(channel: GatewayUpdateChannel = "stable"): Promise<GatewayUpdateStatus> {
+  async status(channel: GatewayUpdateChannel = this.runtimeChannel): Promise<GatewayUpdateStatus> {
     if (channel !== "stable" && channel !== "dev") throw new GatewayError("invalid_request", "Gateway update channel is invalid");
+    if (channel !== this.runtimeChannel) throw new GatewayError("invalid_request", `Gateway ${this.runtimeChannel} runtime cannot inspect ${channel} updates`);
     const root = join(this.options.tronHome, "gateway", "payloads", channel);
     const stateValue = await readBounded(join(root, "deployment-state.json"));
     const progressValue = await readBounded(join(root, "update-progress.json"));
@@ -385,12 +408,19 @@ export class GatewayUpdateService {
     let error: string | null = null;
     let updatedAt: string | null = null;
     let commandId: string | null = null;
+    let candidateOrigin: "debug" | null = null;
+    let candidateProvenance: GatewayDebugCandidateProvenance | null = null;
+    let debugOriginValue: unknown;
+    let declaresDebugOrigin = false;
 
     if (currentSelectionValue !== undefined) {
       const selected = selection(currentSelectionValue, channel);
       const selectedManifest = await readBounded(join(root, "versions", selected.version, "manifest.json"));
       if (selectedManifest === undefined) throw new GatewayError("conflict", "Gateway payload manifest is missing");
-      currentIdentity = manifest(selectedManifest, channel, selected);
+      // Validate the selected pointer, but never replace observed live identity
+      // with it: publication precedes restart and status must not report an
+      // inactive candidate as the running Gateway.
+      void manifest(selectedManifest, channel, selected);
     }
     const rollbackAvailable = previousSelectionValue !== undefined;
     if (previousSelectionValue !== undefined) {
@@ -420,6 +450,11 @@ export class GatewayUpdateService {
       }
       commandId = stateCommandId ?? null;
       if (raw.error !== undefined) error = boundedString(raw.error, "error", 2_048) ?? null;
+      if (raw.candidateOrigin !== undefined) {
+        if (raw.candidateOrigin !== "debug") throw new GatewayError("conflict", "Gateway candidate origin is malformed");
+        declaresDebugOrigin = true;
+        debugOriginValue = raw.debugOriginIdentity;
+      }
       let candidateReference: GatewayUpdateIdentity | null = null;
       if (raw.candidateIdentity !== undefined) {
         candidateReference = stateIdentity(raw.candidateIdentity as Record<string, unknown>, "candidate");
@@ -454,6 +489,29 @@ export class GatewayUpdateService {
           if (!isCurrent) {
             candidateIdentity = verifiedCandidate;
             candidateAvailable = true;
+            if (declaresDebugOrigin) {
+              if (!debugOriginValue || typeof debugOriginValue !== "object" || Array.isArray(debugOriginValue)) {
+                throw new GatewayError("conflict", "Gateway Debug candidate provenance is malformed");
+              }
+              const origin = debugOriginValue as Record<string, unknown>;
+              const fields = ["version", "payloadFingerprint", "testedPayloadFingerprint", "sourceRevision", "testedRuntimeEpoch", "candidateRuntimeEpoch"];
+              if (Object.keys(origin).some((key) => !fields.includes(key))
+                || typeof origin.version !== "string" || !COMPONENT.test(origin.version) || origin.version !== verifiedCandidate.version
+                || typeof origin.payloadFingerprint !== "string" || !FINGERPRINT.test(origin.payloadFingerprint) || origin.payloadFingerprint !== verifiedCandidate.payloadFingerprint
+                || typeof origin.testedPayloadFingerprint !== "string" || !FINGERPRINT.test(origin.testedPayloadFingerprint)
+                || typeof origin.sourceRevision !== "string" || origin.sourceRevision !== verifiedCandidate.sourceRevision
+                || typeof origin.testedRuntimeEpoch !== "string" || !COMPONENT.test(origin.testedRuntimeEpoch)
+                || typeof origin.candidateRuntimeEpoch !== "string" || !COMPONENT.test(origin.candidateRuntimeEpoch)
+                || origin.candidateRuntimeEpoch !== verifiedCandidate.runtimeEpoch) {
+                throw new GatewayError("conflict", "Gateway Debug candidate provenance does not match the verified candidate");
+              }
+              candidateOrigin = "debug";
+              candidateProvenance = {
+                origin: "debug", version: origin.version, payloadFingerprint: origin.payloadFingerprint,
+                sourceRevision: origin.sourceRevision, testedRuntimeEpoch: origin.testedRuntimeEpoch,
+                candidateRuntimeEpoch: origin.candidateRuntimeEpoch,
+              } as GatewayDebugCandidateProvenance;
+            }
           }
         } catch (candidateError) {
           // A deployment marker may outlive a failed staging attempt. Never
@@ -490,22 +548,25 @@ export class GatewayUpdateService {
         if (raw.error !== undefined) error = boundedString(raw.error, "error", 2_048) ?? null;
       }
     }
-    return { state, channel, currentIdentity, candidateIdentity, candidateAvailable, error, updatedAt, commandId, rollbackAvailable };
+    if (!candidateAvailable) { candidateOrigin = null; candidateProvenance = null; }
+    return { state, channel, currentIdentity, candidateIdentity, candidateAvailable, error, updatedAt, commandId, rollbackAvailable, candidateOrigin, candidateProvenance };
   }
 
   async rollback(request: GatewayRollbackRequest): Promise<JsonValue> {
+    if (request.channel !== this.runtimeChannel) throw new GatewayError("invalid_request", `Gateway ${this.runtimeChannel} runtime cannot roll back ${request.channel}`);
     if (!this.updater) throw new GatewayError("unsupported", "Gateway updates require the LaunchAgent-owned update helper");
     return this.updater({ ...request, operation: "rollback" });
   }
 
   async update(request: GatewayUpdateRequest): Promise<JsonValue> {
+    if (request.channel !== this.runtimeChannel) throw new GatewayError("invalid_request", `Gateway ${this.runtimeChannel} runtime cannot update ${request.channel}`);
     if (!this.updater) throw new GatewayError("unsupported", "Gateway updates require the LaunchAgent-owned update helper");
     return this.updater(request);
   }
 }
 
 export function validateGatewayUpdateRequest(value: Record<string, unknown>): GatewayUpdateRequest {
-  const allowed = new Set(["commandId", "channel", "mode", "candidateVersion"]);
+  const allowed = new Set(["commandId", "channel", "mode", "candidateVersion", "candidateFingerprint"]);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Gateway update parameters contain an unsupported field");
   const channel = value.channel === undefined ? "stable" : value.channel;
   const mode = value.mode === undefined ? "auto" : value.mode;
@@ -513,5 +574,10 @@ export function validateGatewayUpdateRequest(value: Record<string, unknown>): Ga
   if (mode !== "source" && mode !== "artifact" && mode !== "auto") throw new GatewayError("invalid_request", "Gateway update mode is invalid");
   const candidateVersion = value.candidateVersion === undefined ? undefined : boundedString(value.candidateVersion, "candidateVersion", MAX_VERSION_BYTES);
   if (candidateVersion !== undefined && !COMPONENT.test(candidateVersion)) throw new GatewayError("invalid_request", "Gateway update candidateVersion is invalid");
-  return { channel, mode, ...(candidateVersion === undefined ? {} : { candidateVersion }) };
+  const candidateFingerprint = value.candidateFingerprint === undefined ? undefined : boundedString(value.candidateFingerprint, "candidateFingerprint", 64);
+  if (candidateFingerprint !== undefined && !FINGERPRINT.test(candidateFingerprint)) throw new GatewayError("invalid_request", "Gateway update candidateFingerprint is invalid");
+  if (mode === "artifact" && (candidateVersion === undefined || candidateFingerprint === undefined)) {
+    throw new GatewayError("invalid_request", "Artifact updates require exact candidateVersion and candidateFingerprint");
+  }
+  return { channel, mode, ...(candidateVersion === undefined ? {} : { candidateVersion }), ...(candidateFingerprint === undefined ? {} : { candidateFingerprint }) };
 }

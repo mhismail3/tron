@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# Developer-owned immutable Gateway lifecycle for port 9848.
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEPLOY="$ROOT/scripts/gateway-payload-deploy.mjs"
+STATE_DIR="$HOME/.tron-dev/gateway"
+STATE_FILE="$STATE_DIR/lifecycle.json"
+PID_FILE="$STATE_DIR/dev.pid"
+LOG_FILE="$STATE_DIR/dev.log"
+STATE_HELPER="$ROOT/scripts/tron-dev-state.mjs"
+LAUNCHER="/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
+HOST=""
+HOST_EXPLICIT=no
+
+require_installed_launcher() {
+  [[ -x "$LAUNCHER" ]] || {
+    echo "Debug Gateway requires the installed signed launcher at $LAUNCHER; install /Applications/Tron.app first" >&2
+    return 1
+  }
+  /usr/bin/codesign --verify --strict "$LAUNCHER" >/dev/null 2>&1 || {
+    echo "Debug Gateway refused an invalid installed launcher signature: $LAUNCHER" >&2
+    return 1
+  }
+}
+
+pid_current() {
+  local pid="${1:-}" identity="${2:-}"
+  [[ "$pid" =~ ^[0-9]+$ && -n "$identity" ]] || return 1
+  [[ "$(node "$STATE_HELPER" pid-current "$pid" "$identity")" == yes ]]
+}
+
+supervisor_live() {
+  [[ -f "$STATE_FILE" ]] || return 1
+  pid_current "$(node "$STATE_HELPER" get "$STATE_FILE" supervisorPid)" "$(node "$STATE_HELPER" get "$STATE_FILE" supervisorStartIdentity)"
+}
+
+status() {
+  node "$STATE_HELPER" status "$STATE_FILE" "$HOST" 9848
+}
+
+stop_dev() {
+  local supervisor_pid="" supervisor_identity="" child_pid="" child_identity=""
+  if [[ -f "$STATE_FILE" ]]; then
+    supervisor_pid="$(node "$STATE_HELPER" get "$STATE_FILE" supervisorPid)"
+    supervisor_identity="$(node "$STATE_HELPER" get "$STATE_FILE" supervisorStartIdentity)"
+    child_pid="$(node "$STATE_HELPER" get "$STATE_FILE" childPid)"
+    child_identity="$(node "$STATE_HELPER" get "$STATE_FILE" childStartIdentity)"
+  fi
+  node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=draining intentionalExit=true 2>/dev/null || true
+  pid_current "$child_pid" "$child_identity" && kill -TERM "$child_pid" 2>/dev/null || true
+  pid_current "$supervisor_pid" "$supervisor_identity" && kill -TERM "$supervisor_pid" 2>/dev/null || true
+  for _ in $(seq 1 80); do
+    pid_current "$child_pid" "$child_identity" || child_pid=""
+    pid_current "$supervisor_pid" "$supervisor_identity" || supervisor_pid=""
+    [[ -z "$child_pid" && -z "$supervisor_pid" ]] && break
+    sleep 0.05
+  done
+  [[ -z "$child_pid" && -z "$supervisor_pid" ]] || { echo "Debug Gateway stop timed out; inspect $LOG_FILE" >&2; return 1; }
+  rm -f "$PID_FILE"
+  node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=stopped intentionalExit=true supervisorPid= supervisorStartIdentity= childPid= childStartIdentity=
+}
+
+supervise() {
+  local failures=0 child="" child_identity="" supervisor_identity expected_epoch expected_revision expected_fingerprint terminating=0
+  require_installed_launcher
+  mkdir -p "$STATE_DIR"
+  supervisor_identity="$(node "$STATE_HELPER" pid-start "$$")"
+  node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=starting expectedHost="$HOST" expectedPort=9848 expectedHome="$HOME/.tron-dev" supervisorPid="$$" supervisorStartIdentity="$supervisor_identity" intentionalExit=false restartCount=0
+  handle_termination() {
+    terminating=1
+    node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=draining intentionalExit=true 2>/dev/null || true
+    if pid_current "$child" "$child_identity"; then
+      kill -TERM "$child" 2>/dev/null || true
+      set +e; wait "$child"; set -e
+    fi
+    node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=stopped intentionalExit=true childPid= childStartIdentity= supervisorPid= supervisorStartIdentity= 2>/dev/null || true
+    rm -f "$PID_FILE"
+    exit 0
+  }
+  trap handle_termination TERM INT
+  trap '' HUP
+  while true; do
+    if ! read -r expected_epoch expected_revision expected_fingerprint <<<"$(node "$STATE_HELPER" selected-identity "$HOME/.tron-dev" dev)"; then
+      node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=failed intentionalExit=false
+      exit 1
+    fi
+    node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=starting childPid= childStartIdentity=
+    TRON_HOME_NAME=.tron-dev TRON_AGENT_DIR_NAME=agent-dev TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 "$LAUNCHER" --host "$HOST" --port 9848 &
+    child=$!
+    child_identity="$(node "$STATE_HELPER" pid-start "$child")"
+    node "$STATE_HELPER" patch "$STATE_FILE" childPid="$child" childStartIdentity="$child_identity"
+    ready=0
+    for _ in $(seq 1 80); do
+      health="$(node "$STATE_HELPER" health "$HOST" 9848)"
+      if [[ "$health" == *'"readiness":"ready"'* ]]; then
+        ready=1
+        read -r runtime_epoch source_revision build_fingerprint <<<"$(printf '%s' "$health" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const x=JSON.parse(b);console.log([x.runtimeEpoch??"",x.sourceRevision??"",x.buildFingerprint??""].join(" "))})')"
+        [[ "$runtime_epoch" == "$expected_epoch" && "$source_revision" == "$expected_revision" && "$build_fingerprint" == "$expected_fingerprint" ]] || { kill -TERM "$child" 2>/dev/null || true; break; }
+        node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=ready readiness=ready epoch="$runtime_epoch" sourceRevision="$source_revision" buildFingerprint="$build_fingerprint"
+        break
+      fi
+      pid_current "$child" "$child_identity" || break
+      sleep 0.25
+    done
+    ((ready == 1)) || kill -TERM "$child" 2>/dev/null || true
+    set +e; wait "$child"; code=$?; set -e
+    ((terminating == 0)) || exit 0
+    node "$STATE_HELPER" patch "$STATE_FILE" childPid= childStartIdentity= exitCode="$code"
+    if ((code == 75)); then
+      failures=0
+      node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=restarting intentionalExit=true
+      sleep 0.2
+      continue
+    fi
+    failures=$((failures + 1))
+    if ((failures >= 5 || ready == 0)); then
+      node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=failed intentionalExit=false restartCount="$failures"
+      exit 1
+    fi
+    node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=restarting intentionalExit=false restartCount="$failures"
+    sleep "$failures"
+  done
+}
+
+build_candidate() {
+  (cd "$ROOT/packages/gateway" && npm run build) >&2
+  if [[ -x "$ROOT/packages/mac-app/Sources/Resources/Gateway/runtime/node-arm64" && -x "$ROOT/packages/mac-app/Sources/Resources/Gateway/runtime/node-x64" ]]; then
+    "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" --skip-install --skip-download >&2
+  else
+    "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" --skip-install >&2
+  fi
+  local revision version result
+  revision="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+  [[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null || true)" ]] || revision="${revision}-dirty"
+  version="debug-${revision}-$(date -u +%Y%m%d%H%M%S)"
+  result="$(node "$DEPLOY" stage --channel dev --home "$HOME/.tron-dev" --source "$ROOT/packages/mac-app/Sources/Resources/Gateway" --version "$version" --source-revision "$revision")"
+  printf '%s' "$result" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const x=JSON.parse(b);console.log(`${x.manifest.version} ${x.manifest.payloadFingerprint}`)})'
+}
+
+command="${1:-start}"; [[ $# -eq 0 ]] || shift
+while (($#)); do
+  case "$1" in
+    --loopback) HOST=127.0.0.1; HOST_EXPLICIT=yes ;;
+    --tailscale) HOST=tailscale; HOST_EXPLICIT=yes ;;
+    *) echo "unknown Debug Gateway option: $1" >&2; exit 64 ;;
+  esac
+  shift
+done
+mkdir -p "$STATE_DIR"
+if supervisor_live; then SUPERVISOR_LIVE=yes; else SUPERVISOR_LIVE=no; fi
+HOST="$(node "$STATE_HELPER" resolve-command-host "$STATE_FILE" "$HOST" "$HOST_EXPLICIT" "$SUPERVISOR_LIVE")" || exit 64
+case "$command" in
+  __supervise) supervise ;;
+  status|preflight) status ;;
+  stop) stop_dev ;;
+  handoff)
+    require_installed_launcher
+    supervisor_live || { echo "Debug Gateway is not supervised and ready" >&2; exit 1; }
+    [[ "$(status)" == *'"readiness":"ready"'* ]] || { echo "Debug Gateway is not ready" >&2; exit 1; }
+    node "$DEPLOY" handoff-debug --host "$HOST" --dev-home "$HOME/.tron-dev" --stable-home "$HOME/.tron" --stable-bundled-root /Applications/Tron.app/Contents/Resources/Gateway
+    ;;
+  start|restart)
+    require_installed_launcher
+    identity_line="$(build_candidate)"
+    identity_line="$(node "$STATE_HELPER" validate-build-identity "$identity_line")" || exit 78
+    read -r version payload_fingerprint <<<"$identity_line"
+    if supervisor_live; then
+      token_args=(--channel dev --home "$HOME/.tron-dev" --version "$version" --fingerprint "$payload_fingerprint" --host "$HOST" --port 9848 --command-id "debug-update-$(date +%s)-$$")
+      TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 node "$DEPLOY" promote "${token_args[@]}" >&2
+      echo "Debug Gateway ready on 9848 (version $version, fingerprint ${payload_fingerprint:0:12})" >&2
+      printf '%s %s\n' "$version" "$payload_fingerprint"
+    else
+      if /usr/sbin/lsof -nP -iTCP:9848 -sTCP:LISTEN >/dev/null 2>&1; then
+        echo "Port 9848 is already owned by another process; refusing Debug takeover" >&2
+        exit 65
+      fi
+      TRON_DEV_STOPPED=1 node "$DEPLOY" select-dev --channel dev --home "$HOME/.tron-dev" --version "$version" --fingerprint "$payload_fingerprint" >&2
+      if [[ "$HOST" == tailscale ]]; then supervisor_host_arg=--tailscale; else supervisor_host_arg=--loopback; fi
+      nohup "$0" __supervise "$supervisor_host_arg" >"$LOG_FILE" 2>&1 &
+      supervisor_pid=$!
+      printf '%s\n' "$supervisor_pid" >"$PID_FILE"
+      for _ in $(seq 1 80); do
+        if supervisor_live && [[ "$(status)" == *'"readiness":"ready"'* ]]; then
+          echo "Debug Gateway ready on 9848 (version $version, fingerprint ${payload_fingerprint:0:12})" >&2
+          printf '%s %s\n' "$version" "$payload_fingerprint"
+          exit 0
+        fi
+        sleep 0.25
+      done
+      echo "Debug Gateway failed readiness; inspect $LOG_FILE" >&2
+      exit 1
+    fi
+    ;;
+  *) echo "usage: scripts/tron dev [start|restart|status|preflight|stop|handoff] [--tailscale|--loopback]" >&2; exit 64 ;;
+esac

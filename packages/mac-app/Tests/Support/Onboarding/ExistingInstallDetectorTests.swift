@@ -231,7 +231,7 @@ struct ExistingInstallDetectorTests {
                 TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue,
                 TronPaths.gatewayChannelEnv: TronPaths.productionGatewayChannel,
             ],
-            associatedBundleIDs: ["com.tron.mac", "com.tron.mac.dev"]
+            associatedBundleIDs: ["com.tron.mac"]
         ))
     }
 
@@ -256,26 +256,6 @@ struct ExistingInstallDetectorTests {
         #expect(!ExistingInstallDetector.launchAgentPlistIsCurrent(plistPath: plist))
     }
 
-    @Test("isolated LaunchAgent plist uses the dev helper and Tron home")
-    func isolatedLaunchAgentPlistIsCurrent() {
-        let plist = trackedLaunchAgentPlist(named: "com.tron.server.dev.plist")
-        let environment = [
-            TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue,
-            TronPaths.tronHomeNameEnv: ".tron-dev",
-            TronPaths.agentDirNameEnv: "agent-dev",
-            TronPaths.gatewayChannelEnv: TronPaths.isolatedGatewayChannel,
-        ]
-
-        #expect(ExistingInstallDetector.launchAgentPlistIsCurrent(
-            plistPath: plist,
-            label: "com.tron.server.dev",
-            port: 9848,
-            bundleProgram: "Contents/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron",
-            environmentVariables: environment,
-            associatedBundleIDs: ["com.tron.mac.dev", "com.tron.mac"]
-        ))
-    }
-
     @Test("ad-hoc helper signature is rejected before SMAppService registration")
     func adhocHelperSignatureRejected() {
         let problem = ExistingInstallDetector.codeSignatureIdentityProblem("""
@@ -288,16 +268,12 @@ struct ExistingInstallDetectorTests {
         #expect(problem?.contains("ad-hoc signed") == true)
     }
 
-    @Test("helper signature identifier is exact for each Gateway profile")
-    func helperSignatureIdentifierIsExactForProfile() {
+    @Test("helper signature identifier is exact for Stable")
+    func helperSignatureIdentifierIsExactForStable() {
         #expect(ExistingInstallDetector.codeSignatureIdentityProblem(
             "Identifier=com.tron.server.dev\nTeamIdentifier=TEAM",
             expectedBundleIdentifier: TronGatewayProfile.stable.launchAgentLabel
         ) != nil)
-        #expect(ExistingInstallDetector.codeSignatureIdentityProblem(
-            "Identifier=com.tron.server.dev\nTeamIdentifier=TEAM",
-            expectedBundleIdentifier: TronGatewayProfile.preview.launchAgentLabel
-        ) == nil)
     }
 
     @Test("team-signed helper identity is accepted")

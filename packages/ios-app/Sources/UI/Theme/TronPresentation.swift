@@ -37,6 +37,8 @@ enum TronTypography {
     static var subheadline: Font { sans(size: sizeBody) }
     static var body: Font { sans(size: sizeBody) }
     static var bodySM: Font { sans(size: sizeBodySM) }
+    static var secondaryDescription: Font { sans(size: sizeBody2) }
+    static var secondaryCodeDescription: Font { code(size: sizeBody2) }
     /// Shared section-label treatment used by every sheet and settings group.
     static var sheetSectionHeader: Font { sans(size: sizeBodySM, weight: .semibold) }
     static var caption: Font { sans(size: sizeCaption) }
@@ -730,7 +732,7 @@ struct TronSettingsGroup<Content: View>: View {
                         .accessibilityAddTraits(.isHeader)
                     Spacer(minLength: TronSpacing.sm)
                     Text(detail)
-                        .font(TronTypography.codeContent)
+                        .font(TronTypography.secondaryCodeDescription)
                         .foregroundStyle(Color.tronTextMuted)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -746,7 +748,7 @@ struct TronSettingsGroup<Content: View>: View {
                         .accessibilityAddTraits(.isHeader)
                     if let detail {
                         Text(detail)
-                            .font(TronTypography.caption)
+                            .font(TronTypography.secondaryDescription)
                             .foregroundStyle(Color.tronTextMuted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -839,6 +841,32 @@ extension TronSettingsRow where Trailing == EmptyView {
             titleColor: titleColor,
             subtitleColor: subtitleColor
         ) { EmptyView() }
+    }
+}
+
+struct TronInfoCard: View {
+    let icon: String
+    let text: String
+    var accent: Color = .tronCyan
+
+    var body: some View {
+        HStack(alignment: .center, spacing: TronSpacing.xl) {
+            Image(systemName: icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(accent)
+                .frame(width: 20, height: 20, alignment: .center)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(TronTypography.bodySM)
+                .foregroundStyle(Color.tronTextPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, TronSpacing.xl)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tronGlassSurface(accent: accent, tintOpacity: 0.09)
     }
 }
 

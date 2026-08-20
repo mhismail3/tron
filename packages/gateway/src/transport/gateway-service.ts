@@ -146,6 +146,7 @@ export class GatewayService {
       machineId: config.machineId,
       machineGroupID: config.machineGroupID,
       machineName: config.machineName,
+      gatewayChannel: this.updateService.channel,
       ...runtimeIdentity(),
       capabilities: [
         ...(process.env.TRON_GATEWAY_SUPERVISED === "1" ? ["restart-supervised.v1"] : []),
@@ -199,7 +200,7 @@ export class GatewayService {
         });
       case "gateway.update.status": {
         if (Object.keys(params).some((key) => key !== "channel")) throw new GatewayError("invalid_request", "Gateway update status accepts only channel");
-        const channel = params.channel === undefined ? "stable" : oneOf(params.channel, "channel", ["stable", "dev"] as const);
+        const channel = params.channel === undefined ? this.updateService.channel : oneOf(params.channel, "channel", ["stable", "dev"] as const);
         return safeJson(await this.updateService.status(channel));
       }
       case "gateway.update":

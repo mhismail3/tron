@@ -52,20 +52,29 @@ JSONL simultaneously in a separate Pi process.
 ### Isolated development lifecycle
 
 `~/.tron-dev/gateway` on port `9848` is the only routine agent-development
-surface. `scripts/tron dev --status --json` (or `--preflight`) is read-only and
-never builds; it reports the expected endpoint/home, PID start identities,
-lifecycle epoch, source revision, payload fingerprint, and health readiness.
-`--stop` is also build-free and refuses to trust a stale or reused PID based on
-`kill -0` alone. The supervisor atomically publishes bounded lifecycle state:
+surface. `scripts/tron dev status` (or `preflight`) is read-only and never
+builds; it reports the expected endpoint/home, PID start identities, lifecycle
+epoch, source revision, payload fingerprint, and health readiness.
+`scripts/tron dev stop` is also build-free and refuses to trust a stale or
+reused PID based on `kill -0` alone. The supervisor atomically publishes bounded lifecycle state:
 `starting`, `ready`, `draining`, `restarting`, `failed`, or `stopped`. Exit 75
 is the intentional authenticated restart drain; other exits consume a bounded
 restart budget and eventually become `failed`.
 
-After source changes, the separately approved operational step is
-`scripts/tron dev --restart --tailscale [--command-id <id>]`. It builds only for
-that restart action, persists the command ID, preserves accepted-run draining,
-and waits for a new runtime epoch plus truthful `/health` readiness and identity
-reconciliation. Do not replace `/Applications/Tron.app`, invoke production
+After source changes, use `scripts/tron dev restart` for loopback or add
+`--tailscale` when iOS must reach it. A command without a host flag inherits a
+live supervisor's recorded host; an explicit conflicting flag fails closed and
+requires `scripts/tron dev stop` before changing exposure. A fresh start without
+a flag defaults to loopback. This sole Debug supervisor uses the signed
+launcher from `/Applications/Tron.app`, builds and stages an immutable candidate,
+preserves accepted-run draining, and waits for truthful exact health identity. It
+refuses an unknown owner already listening on 9848. After testing, `scripts/tron
+dev handoff --tailscale` performs authenticated pre/post identity checks and
+copies the exact payload into Stable as an inactive candidate only after
+pre/post authenticated identity proof. Promotion still requires explicit
+iOS confirmation pinned to version plus fingerprint. Debug and Stable RPCs are
+channel-bound; neither runtime can mutate the other channel. Do not
+replace `/Applications/Tron.app`, invoke production
 deployment, or install an iOS release as part of routine agent work. The
 installed supervised app remains a frozen release image while isolated
 iteration proceeds on `9848`.
@@ -100,8 +109,9 @@ xcodebuild test-without-building -project TronMac.xcodeproj -scheme TronMac \
   -only-testing:TronMacTests/<OwningSuite>
 ```
 
-The Login Item directory names are `Tron Agent.app` and `Tron Agent Dev.app`.
-Their stable launchd labels remain `com.tron.server` and `com.tron.server.dev`.
+The Release app packages only `Tron Agent.app` under the stable
+`com.tron.server` label. Developer tooling reuses that installed signed launcher
+with the isolated Debug payload and never registers a second Login Item.
 
 ## Documentation ownership
 

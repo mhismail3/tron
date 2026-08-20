@@ -69,7 +69,7 @@ struct AgentDefaultsSettingsView: View {
                             TronValueRow(icon: "cpu", title: "Model", detail: draft.selectedModel?.displayDescription ?? "Choose model", accent: .tronPurple)
                         }
                         TronSettingsDivider(accent: .tronPurple)
-                        TronValueRow(icon: "brain", title: "Thinking", accent: .tronPurple) {
+                        TronValueRow(icon: "brain", title: "Thinking", detail: "Reasoning effort for new sessions", accent: .tronPurple) {
                             TronInlineMenu(draft.thinking.capitalized, accent: .tronPurple) {
                                 ForEach(["off", "minimal", "low", "medium", "high", "xhigh", "max"], id: \.self) { level in
                                     Button(level.capitalized) { draft.thinking = level }
@@ -80,13 +80,25 @@ struct AgentDefaultsSettingsView: View {
                 }
                 TronSettingsGroup("Context", accent: .tronTeal) {
                     VStack(spacing: 0) {
-                        TronToggleRow(icon: "arrow.triangle.2.circlepath", title: "Automatic Compaction", accent: .tronTeal, isOn: $draft.compaction)
+                        TronToggleRow(
+                            icon: "arrow.triangle.2.circlepath",
+                            title: "Automatic Compaction",
+                            detail: "Summarize context before the model window fills",
+                            accent: .tronTeal,
+                            isOn: $draft.compaction
+                        )
                         TronSettingsDivider(accent: .tronTeal)
-                        TronToggleRow(icon: "arrow.clockwise", title: "Automatic Retry", accent: .tronTeal, isOn: $draft.retry)
+                        TronToggleRow(
+                            icon: "arrow.clockwise",
+                            title: "Automatic Retry",
+                            detail: "Retry transient agent and provider failures",
+                            accent: .tronTeal,
+                            isOn: $draft.retry
+                        )
                     }
                 }
                 TronSettingsGroup("Project Resources", accent: .tronAmber) {
-                    TronValueRow(icon: "checkmark.shield", title: "Default Trust", accent: .tronAmber) {
+                    TronValueRow(icon: "checkmark.shield", title: "Default Trust", detail: "How project resources load in new workspaces", accent: .tronAmber) {
                         TronInlineMenu(draft.trust.capitalized, accent: .tronAmber) {
                             Button("Ask") { draft.trust = "ask" }
                             Button("Always") { draft.trust = "always" }

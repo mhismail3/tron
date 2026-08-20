@@ -48,7 +48,6 @@
     <key>AssociatedBundleIdentifiers</key>
     <array>
         <string>com.tron.mac</string>
-        <string>com.tron.mac.dev</string>
     </array>
 </dict>
 </plist>

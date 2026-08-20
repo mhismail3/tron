@@ -98,15 +98,16 @@ enum MacAppStartupMaintenance {
             guard reason == .versionAlreadyRecorded else { return .skipped(reason) }
             let runtime = await setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
             let currentVariant = MacRuntimeVariant.detect()
-            let helperName = setup.launchAgentLabel == TronPaths.isolatedLaunchAgentLabel ? "Tron Agent Dev" : "Tron Agent"
             let expectedHelperPath = setup.applicationBundle
-                .appendingPathComponent("Contents/Library/LoginItems/\(helperName).app/Contents/MacOS/tron")
+                .appendingPathComponent("Contents/Library/LoginItems/\(setup.profile.agentBundleName).app/Contents/MacOS/tron")
                 .path
             let registrationNeedsRepair = runtime == nil
                 || runtime?.parentBundleIdentifier != currentVariant.expectedParentBundleIdentifier
                 || runtime?.gatewaySupervisionMarker != TronPaths.gatewaySupervisionValue
+                || runtime?.gatewayChannelMarker != setup.profile.channel
                 || LiveLaunchAgentManager.runtimeRequiresReplacement(
                     runtimeInfo: runtime,
+                    profile: setup.profile,
                     expectedHelperPath: expectedHelperPath
                 )
                 || LiveLaunchAgentManager.shouldRefreshRegistrationForCurrentBundle(
@@ -119,6 +120,7 @@ enum MacAppStartupMaintenance {
                 || runtime?.needsLaunchConstraintRefresh == true
             let health = await ServerHealthAwaiter.waitForHealthy(
                 token: setup.readBearerToken(),
+                expectedChannel: setup.profile.channel,
                 attempts: 1,
                 delayNanoseconds: 0,
                 pingServer: setup.pingServer

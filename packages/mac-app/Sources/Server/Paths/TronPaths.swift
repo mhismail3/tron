@@ -1,8 +1,7 @@
 import Foundation
 
-/// Explicit runtime identity for a Gateway owned by the Mac wrapper. Product
-/// code selects a profile directly; the legacy install-mode environment remains
-/// only as a compatibility seam for the isolated-install test scheme.
+/// Explicit runtime identities for the Release-owned Stable Gateway and the
+/// read-only developer-owned Debug projection.
 struct TronGatewayProfile: Equatable, Sendable {
     let name: String
     let launchAgentLabel: String
@@ -16,8 +15,10 @@ struct TronGatewayProfile: Equatable, Sendable {
         name: "stable", launchAgentLabel: "com.tron.server", channel: "stable",
         homeName: ".tron", agentDirectoryName: "agent", port: 9847, agentBundleName: "Tron Agent"
     )
-    static let preview = TronGatewayProfile(
-        name: "preview", launchAgentLabel: "com.tron.server.dev", channel: "dev",
+    /// Developer-owned Debug Gateway. Installed Release may authenticate to
+    /// and report this profile, but no Mac wrapper manages its lifecycle.
+    static let debug = TronGatewayProfile(
+        name: "debug", launchAgentLabel: "com.tron.server.dev", channel: "dev",
         homeName: ".tron-dev", agentDirectoryName: "agent-dev", port: 9848, agentBundleName: "Tron Agent Dev"
     )
 }
@@ -33,18 +34,13 @@ enum TronPaths {
     static let tronDataDirEnv = "TRON_DATA_DIR"
     static let tronHomeNameEnv = "TRON_HOME_NAME"
     static let agentDirNameEnv = "TRON_AGENT_DIR_NAME"
-    static let isolatedInstallModeEnv = "TRON_MAC_INSTALL_MODE"
-    static let isolatedInstallModeValue = "isolated"
     static let gatewaySupervisionEnv = "TRON_GATEWAY_SUPERVISED"
     static let gatewaySupervisionValue = "1"
     /// Selects the externally staged payload namespace under the selected Tron home.
     static let gatewayChannelEnv = "TRON_GATEWAY_CHANNEL"
     static let productionGatewayChannel = TronGatewayProfile.stable.channel
-    static let isolatedGatewayChannel = TronGatewayProfile.preview.channel
     static let productionLaunchAgentLabel = TronGatewayProfile.stable.launchAgentLabel
-    static let isolatedLaunchAgentLabel = TronGatewayProfile.preview.launchAgentLabel
     static let productionServerPort = TronGatewayProfile.stable.port
-    static let isolatedServerPort = TronGatewayProfile.preview.port
 
     static let homeDirectory: URL = {
         FileManager.default.homeDirectoryForCurrentUser
@@ -62,9 +58,6 @@ enum TronPaths {
         if let homeName = environment[tronHomeNameEnv], !homeName.isEmpty {
             precondition(validHomeName(homeName), "\(tronHomeNameEnv) must be a single home-relative directory name")
             return homeDirectory.appendingPathComponent(homeName, isDirectory: true)
-        }
-        if isIsolatedInstallMode(environment: environment) {
-            return homeDirectory.appendingPathComponent(".tron-dev", isDirectory: true)
         }
         return homeDirectory.appendingPathComponent(".tron", isDirectory: true)
     }
@@ -207,7 +200,7 @@ enum TronPaths {
 
     static func launchAgentEnvironmentVariables(profile: TronGatewayProfile) -> [String: String] {
         var values = [gatewaySupervisionEnv: gatewaySupervisionValue, gatewayChannelEnv: profile.channel]
-        if profile != .stable {
+        if profile == .debug {
             values[tronHomeNameEnv] = profile.homeName
             values[agentDirNameEnv] = profile.agentDirectoryName
         }
@@ -223,13 +216,11 @@ enum TronPaths {
     }
 
     static func canManageLaunchAgent(profile: TronGatewayProfile, environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
-        guard MacRuntimeVariant.detect().canManageLaunchAgent(profile: profile, isIsolatedInstallMode: isIsolatedInstallMode(environment: environment)) else { return false }
-        if profile == .preview {
-            return environment[tronDataDirEnv] == nil
-                && (environment[tronHomeNameEnv] == nil || environment[tronHomeNameEnv] == profile.homeName)
-                && (environment[agentDirNameEnv] == nil || environment[agentDirNameEnv] == profile.agentDirectoryName)
-        }
-        return environment[tronDataDirEnv] == nil && environment[tronHomeNameEnv] == nil && environment[agentDirNameEnv] == nil
+        guard profile == .stable,
+              MacRuntimeVariant.detect().canManageLaunchAgent(profile: profile, isIsolatedInstallMode: false) else { return false }
+        return environment[tronDataDirEnv] == nil
+            && environment[tronHomeNameEnv] == nil
+            && environment[agentDirNameEnv] == nil
     }
 
     static func canManageLaunchAgent(environment: [String: String]) -> Bool {
@@ -242,33 +233,22 @@ enum TronPaths {
     static func agentBundleName(environment: [String: String]) -> String {
         activeProfile(environment: environment).agentBundleName
     }
-    /// Wrapper bundle identifiers that may own the SMAppService
-    /// registration. launchd uses the active parent bundle as the
-    /// responsible app for some TCC services, so the LaunchAgent plist
-    /// associates the service with wrapper variants instead of the helper.
+    /// Stable has exactly one wrapper parent. Debug lifecycle is CLI-owned and
+    /// has no SMAppService parent.
     static var associatedWrapperBundleIDs: [String] {
-        associatedWrapperBundleIDs(environment: ProcessInfo.processInfo.environment)
+        associatedWrapperBundleIDs(profile: activeProfile)
     }
 
-    static func associatedWrapperBundleIDs(
-        environment: [String: String]
-    ) -> [String] {
-        let release = MacRuntimeVariant.releaseBundleIdentifier
-        let debug = MacRuntimeVariant.debugBundleIdentifier
-        return activeProfile(environment: environment) == .preview ? [debug, release] : [release, debug]
+    static func associatedWrapperBundleIDs(profile: TronGatewayProfile) -> [String] {
+        profile == .stable ? [MacRuntimeVariant.releaseBundleIdentifier] : []
     }
 
     static func activeProfile(environment: [String: String] = ProcessInfo.processInfo.environment) -> TronGatewayProfile {
-        isIsolatedInstallMode(environment: environment) ? .preview : .stable
+        .stable
     }
 
     static var activeProfile: TronGatewayProfile { activeProfile(environment: ProcessInfo.processInfo.environment) }
 
-    static func isIsolatedInstallMode(
-        environment: [String: String] = ProcessInfo.processInfo.environment
-    ) -> Bool {
-        environment[isolatedInstallModeEnv] == isolatedInstallModeValue
-    }
 
     static func macWrapperLockFileName(bundleIdentifier: String?) -> String {
         let rawIdentifier = bundleIdentifier?.isEmpty == false ? bundleIdentifier! : "unknown"

@@ -40,6 +40,11 @@ enum BearerTokenReader {
             return false
         }
         let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if formatter.date(from: value) != nil {
+            return true
+        }
+        formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value) != nil
     }
 }

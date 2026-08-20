@@ -103,6 +103,23 @@ struct ProviderAuthCoordinatorTests {
         }
     }
 
+    @Test("transient disconnect retires auth ownership without blanking bounded catalogs")
+    func transientDisconnectRetainsCatalog() async throws {
+        let harness = try await makeHarness()
+        let catalog = ProviderCatalog(
+            providers: [providerSummary(id: "retained")],
+            models: []
+        )
+        harness.owner.installHostedCatalog(catalog, for: .global)
+
+        harness.owner.retireConnection()
+        #expect(harness.owner.catalog(for: .global)?.providers.first?.id == "retained")
+
+        harness.owner.clearProfile()
+        #expect(harness.owner.catalog(for: .global) == nil)
+        await harness.client.close()
+    }
+
     @Test("duplicate model identities across pages reject atomic publication")
     func duplicateModelRejected() async throws {
         try await runScenario {
@@ -1269,6 +1286,6 @@ struct ProviderAuthCoordinatorTests {
     }
 
     private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8)
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
     }
 }

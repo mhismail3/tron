@@ -193,7 +193,7 @@ final class GatewayLifecycleCoordinator {
                       self.phase.generation == generation,
                       self.foregroundReconciliationGeneration == activationGeneration else { return }
                 self.backgroundRetirementTask = nil
-                self.connectionState = .reconnecting
+                self.connectionState = self.restartRequested ? .restarting : .reconnecting
                 self.requestReconnect(immediate: true, replaceExisting: true)
             }
         }
@@ -765,7 +765,7 @@ final class GatewayLifecycleCoordinator {
                         lifecycleGeneration: lifecycleGeneration,
                         attemptGeneration: attemptGeneration
                     ) else { return }
-                    self.connectionState = .reconnecting
+                    self.connectionState = self.restartRequested ? .restarting : .reconnecting
                     var establishedConnectionID: Int?
                     do {
                         let connection = try await self.client.reconnectForLifecycle()
@@ -793,10 +793,7 @@ final class GatewayLifecycleCoordinator {
                             connectionID: connection.id
                         )
                         self.gatewayInfo = connection.info
-                        self.connectionState = .connected
-                        self.restartWatchdogTask?.cancel()
-                        self.restartWatchdogTask = nil
-                        self.restartRequested = false
+                        self.connectionState = self.restartRequested ? .restarting : .connected
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()
                         async let refresh: Void = self.delegate?.lifecycleRefreshAll(admission: admission) ?? ()
                         await self.delegate?.lifecycleRestoreMountedPresentation(admission: admission)
@@ -816,7 +813,7 @@ final class GatewayLifecycleCoordinator {
                         }
                         if self.projectionFailureGeneration == lifecycleGeneration {
                             self.projectionFailureGeneration = nil
-                            self.connectionState = .offline("Gateway projection refresh failed")
+                            self.connectionState = self.restartRequested ? .restarting : .offline("Gateway projection refresh failed")
                             self.finishReconnect(
                                 lifecycleGeneration: lifecycleGeneration,
                                 attemptGeneration: attemptGeneration
@@ -824,6 +821,10 @@ final class GatewayLifecycleCoordinator {
                             self.scheduleReconnect(immediate: true)
                             return
                         }
+                        self.restartWatchdogTask?.cancel()
+                        self.restartWatchdogTask = nil
+                        self.restartRequested = false
+                        self.connectionState = .connected
                         self.finishReconnect(
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration
@@ -838,6 +839,9 @@ final class GatewayLifecycleCoordinator {
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration
                         ) else { return }
+                        self.restartWatchdogTask?.cancel()
+                        self.restartWatchdogTask = nil
+                        self.restartRequested = false
                         self.connectionState = .unauthorized
                         self.delegate?.lifecycleSurface(failure)
                         self.finishReconnect(
@@ -860,7 +864,7 @@ final class GatewayLifecycleCoordinator {
                             lifecycleGeneration: lifecycleGeneration,
                             attemptGeneration: attemptGeneration
                         ) else { return }
-                        self.connectionState = .offline(error.localizedDescription)
+                        self.connectionState = self.restartRequested ? .restarting : .offline(error.localizedDescription)
                         self.reconnectCanBeAccelerated = true
                         try await clock.sleep(delayPolicy.delay(nominalSeconds: nominalDelay))
                         guard self.admitsReconnect(

@@ -8,25 +8,29 @@ import SwiftUI
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let setup: EnvironmentSetup
-    private let previewSetup: EnvironmentSetup
+    private let debugSetup: EnvironmentSetup
     private let poller: ServerStatusPoller
     private let actionHandler: MenuBarActionHandler
     private var statusItem: NSStatusItem?
     private var pollerTask: Task<Void, Never>?
+    private var debugRefreshTask: Task<Void, Never>?
+    private var debugRefreshGeneration: UInt64 = 0
     private var pairingInfoWindowController: NSWindowController?
-    private var previewPairingInfoWindowController: NSWindowController?
+    private var debugPairingInfoWindowController: NSWindowController?
     private var logsWindowController: NSWindowController?
-    private(set) var previewState = PreviewMenuState.unavailable
+    private(set) var debugGatewayState = DebugGatewayMenuState.unavailable
+    private(set) var debugGatewayAdmission: DebugGatewayObserver.Admission?
+    private(set) var debugPairingWindowAdmission: DebugGatewayObserver.Admission?
 
     /// Most-recent status snapshot, written by the poller and read by
     /// `rebuildMenu()`.
     private(set) var snapshot: ServerStatusSnapshot
 
-    init(setup: EnvironmentSetup) {
+    init(setup: EnvironmentSetup, debugSetup: EnvironmentSetup = .debug) {
         self.setup = setup
-        self.previewSetup = .preview
+        self.debugSetup = debugSetup
         self.poller = ServerStatusPoller(setup: setup)
-        self.actionHandler = MenuBarActionHandler(setup: setup, previewSetup: .preview)
+        self.actionHandler = MenuBarActionHandler(setup: setup)
         self.snapshot = ServerStatusSnapshot.checking
         super.init()
         self.actionHandler.menuBarController = self
@@ -44,7 +48,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.showsStateColumn = false
         item.menu = menu
         rebuildMenu()
-        refreshPreviewState()
+        refreshDebugGatewayState()
 
         // Start polling - emits a snapshot every 30 s.
         pollerTask = Task { [weak self] in
@@ -60,6 +64,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     func dispose() {
         pollerTask?.cancel()
         pollerTask = nil
+        debugRefreshGeneration &+= 1
+        debugRefreshTask?.cancel()
+        debugRefreshTask = nil
         if let item = statusItem {
             NSStatusBar.system.removeStatusItem(item)
         }
@@ -86,47 +93,56 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         applySnapshot(snapshot)
     }
 
-    func setPreviewBusy(_ busy: Bool) {
-        previewState = PreviewMenuState(
-            isRegistered: previewState.isRegistered,
-            isRunning: previewState.isRunning,
-            isBusy: busy,
-            canManage: previewSetup.canManageLaunchAgent,
-            isOwned: previewState.isOwned,
-            needsRepair: previewState.needsRepair
-        )
-        rebuildMenu()
-    }
-
-    func refreshPreviewState() {
-        Task { [weak self] in
+    @discardableResult
+    func refreshDebugGatewayState() -> Task<Void, Never> {
+        debugRefreshGeneration &+= 1
+        let generation = debugRefreshGeneration
+        debugRefreshTask?.cancel()
+        let task = Task { [weak self] in
             guard let self else { return }
-            let status = ExistingInstallDetector.serviceStatus(label: self.previewSetup.launchAgentLabel)
-            let registered = status != .notRegistered && status != .notFound
-            let snapshot = await ServerStatusPoller.singleSnapshot(setup: self.previewSetup)
-            let installedRelease = MacRuntimeVariant.detect() == .installedRelease
-            let owned = installedRelease
-                ? await self.previewSetup.runtimeOwnershipHealthy()
-                : false
-            await MainActor.run {
-                self.previewState = PreviewMenuState(
-                    isRegistered: registered,
-                    isRunning: registered && snapshot.state.isRunning,
-                    canManage: self.previewSetup.canManageLaunchAgent,
-                    isOwned: owned,
-                    needsRepair: registered && !owned
-                )
-                self.rebuildMenu()
+            let snapshot = await ServerStatusPoller.singleSnapshot(setup: self.debugSetup)
+            guard !Task.isCancelled, generation == self.debugRefreshGeneration else { return }
+            let admission = snapshot.debugAdmission
+            if let pinned = self.debugPairingWindowAdmission, pinned != admission {
+                self.debugPairingInfoWindowController?.close()
+                self.debugPairingInfoWindowController = nil
+                self.debugPairingWindowAdmission = nil
             }
+            self.debugGatewayAdmission = admission
+            self.debugGatewayState = DebugGatewayMenuState(
+                isRunning: admission != nil,
+                isPairable: admission?.pairingTransportAvailable == true,
+                isUnauthorized: snapshot.state == .unauthorized
+            )
+            self.rebuildMenu()
         }
+        debugRefreshTask = task
+        return task
     }
 
-    func showPreviewPairingInfoWindow() {
-        showPairingInfoWindow(setup: previewSetup)
+    func freshDebugPairingAdmission() async -> DebugGatewayObserver.Admission? {
+        let refresh = refreshDebugGatewayState()
+        await refresh.value
+        guard let admission = debugGatewayAdmission,
+              admission.pairingTransportAvailable else { return nil }
+        return admission
+    }
+
+    func showDebugPairingInfoWindow() async {
+        guard let admission = await freshDebugPairingAdmission() else { return }
+        if let pinned = debugPairingWindowAdmission, pinned != admission {
+            debugPairingInfoWindowController?.close()
+            debugPairingInfoWindowController = nil
+        }
+        debugPairingWindowAdmission = admission
+        showPairingInfoWindow(
+            setup: debugSetup.pinnedDebug(admission: admission),
+            title: "Debug Pairing Info"
+        )
     }
 
     private func showPairingInfoWindow(setup: EnvironmentSetup, title: String = "Pairing Info") {
-        let existing = setup.profile == .preview ? previewPairingInfoWindowController : pairingInfoWindowController
+        let existing = setup.profile == .debug ? debugPairingInfoWindowController : pairingInfoWindowController
         if let existing {
             existing.window?.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -145,14 +161,15 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         window.isReleasedWhenClosed = false
         window.setContentSize(NSSize(width: WizardLayout.width, height: 360))
         let controller = MenuBarWindowController(window: window) { [weak self] in
-            if setup.profile == .preview {
-                self?.previewPairingInfoWindowController = nil
+            if setup.profile == .debug {
+                self?.debugPairingInfoWindowController = nil
+                self?.debugPairingWindowAdmission = nil
             } else {
                 self?.pairingInfoWindowController = nil
             }
         }
-        if setup.profile == .preview {
-            previewPairingInfoWindowController = controller
+        if setup.profile == .debug {
+            debugPairingInfoWindowController = controller
         } else {
             pairingInfoWindowController = controller
         }
@@ -161,7 +178,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
-        refreshPreviewState()
+        refreshDebugGatewayState()
         Task { [weak self] in
             guard let self else { return }
             let freshSnapshot = await ServerStatusPoller.singleSnapshot(setup: self.setup)
@@ -207,7 +224,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             tronHome: setup.tronHome,
             defaultServerPort: setup.serverPort,
             canManageLaunchAgent: setup.canManageLaunchAgent,
-            preview: previewState
+            debugGateway: debugGatewayState
         )
         menu.removeAllItems()
         for descriptor in items {

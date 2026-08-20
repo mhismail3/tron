@@ -88,7 +88,7 @@ struct BoundedHTTPDataTransportTests {
                 socketFactory: factory.factory,
                 boundedHTTPDataTransport: transport
             )
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await client.connectForLifecycle(profile: profile, token: "secret")
 
             #expect(try await client.upload(name: "notes.txt", mimeType: "text/plain", data: Data("body".utf8)) == "upload-id")
@@ -121,7 +121,7 @@ struct BoundedHTTPDataTransportTests {
                 socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
                 boundedHTTPDataTransport: transport
             )
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await client.connectForLifecycle(profile: profile, token: "secret")
 
             do {
@@ -150,14 +150,14 @@ struct BoundedHTTPDataTransportTests {
                     try await gate.response(for: request)
                 }
             )
-            await oldSocket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await oldSocket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await client.connectForLifecycle(profile: profile, token: "secret")
 
             let upload = Task {
                 try await client.upload(name: "photo.jpg", mimeType: "image/jpeg", data: Data("photo".utf8))
             }
             await gate.waitUntilStarted()
-            await replacementSocket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await replacementSocket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await client.connectForLifecycle(profile: profile, token: "secret")
             await gate.succeed()
 
@@ -190,7 +190,7 @@ struct BoundedHTTPDataTransportTests {
                 socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
                 boundedHTTPUploadTransport: transport
             )
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await client.connectForLifecycle(profile: profile, token: "secret")
 
             #expect(try await client.upload(
@@ -228,7 +228,7 @@ struct BoundedHTTPDataTransportTests {
                 socketFactory: ScriptedGatewaySocketFactory(sockets: [oldSocket, replacementSocket]).factory,
                 boundedHTTPUploadTransport: transport
             )
-            await oldSocket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await oldSocket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await client.connectForLifecycle(profile: profile, token: "secret")
 
             let upload = Task {
@@ -240,7 +240,7 @@ struct BoundedHTTPDataTransportTests {
                 )
             }
             await gate.waitUntilStarted()
-            await replacementSocket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await replacementSocket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await client.connectForLifecycle(profile: profile, token: "secret")
             await gate.succeed()
 
@@ -292,7 +292,7 @@ struct BoundedHTTPDataTransportTests {
                 socketFactory: factory.factory,
                 boundedHTTPFileTransport: fileTransport
             )
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             _ = try await client.connectForLifecycle(profile: profile, token: "secret")
 
             #expect(try await client.blobFile(id: "export/id", maximumBytes: 25) == staged)
@@ -332,7 +332,7 @@ struct BoundedHTTPDataTransportTests {
                 socketFactory: factory.factory,
                 boundedHTTPDataTransport: transport
             )
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8))
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             let connection = try await client.connectForLifecycle(profile: profile, token: "secret")
 
             let value = try await client.blob(

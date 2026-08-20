@@ -108,10 +108,13 @@ Gateway updates are an explicit, bounded control-plane contract. `gateway.update
 projects only the selected channel's `deployment-state.json`, `current.json`,
 `previous.json`, and version manifests (each document is capped at 64 KiB); malformed
 or oversized state fails closed. `gateway.update` accepts only `channel` (`stable` or `dev`), `mode` (`source`,
-`artifact`, or `auto`), and an optional candidate version, and requires a command ID.
+`artifact`, or `auto`), candidate version/fingerprint, and a command ID. Artifact
+promotion requires both exact candidate fields; version-only requests fail closed.
 `gateway.rollback` is the authenticated, receipt-backed companion mutation; it accepts
 only a bounded channel and command ID and launches the supervised helper's existing
-rollback operation. Both mutations acknowledge helper admission only; status remains
+rollback operation. Each runtime is bound to `TRON_GATEWAY_CHANNEL`: Stable can
+inspect/mutate only Stable, and Debug only Debug; developer handoff is a local CLI
+operation rather than a cross-channel RPC. Both mutations acknowledge helper admission only; status remains
 authoritative and includes the active command ID and rollback availability.
 `gateway.update.config` separately accepts only a trusted repository `sourceRoot` and
 optional `artifactRoot`; both are checked as absolute, non-symlinked directories before
@@ -121,9 +124,19 @@ repository's local TypeScript compiler with its checked-in config and a private 
 `outDir` (it never writes the trusted repository's `packages/gateway/dist`), then stages
 only verified output; artifact mode only promotes a verified candidate, and auto prefers
 staged artifacts before source. A successful RPC acknowledges helper launch, not eventual
-build or promotion success; asynchronous helper failures are reported in update progress. `gateway.update.config.status` and
-`gateway.update.status` are bounded projections; the latter includes build/staging/
-promotion/rollback/failure progress. The mutation is usable only when the helper is
+build or promotion success; asynchronous helper failures are reported in update progress. A
+planned restart publishes a distinct `draining` phase and may wait without a startup deadline
+for already-accepted runs; only after the exact captured old PID/start identity disappears or
+changes does the bounded candidate health deadline begin. Listener or health loss alone is not
+transition evidence. Candidate startup uses an atomic attempt/commit marker shared
+with the launcher: an uncommitted relaunch crash-rolls back, while a committed exact selection
+and authenticated identity cannot be raced into rollback. Debug handoff is exposed as Debug
+origin only when its bounded provenance (candidate version/fingerprint, tested Debug fingerprint,
+source revision, tested runtime epoch, and candidate runtime epoch) matches the verified Stable
+candidate manifest. Generic automatic/source updates never infer a Debug-origin candidate from
+state; promotion must pin its exact candidate version and fingerprint.
+`gateway.update.config.status` and `gateway.update.status` are bounded projections; the latter
+includes build/staging/draining/promotion/rollback/failure progress. The mutation is usable only when the helper is
 configured, in which case `gateway-update.v1` appears in capabilities.
 
 Every WebSocket starts with:
@@ -132,12 +145,16 @@ Every WebSocket starts with:
 {"type":"hello","protocolVersion":3}
 ```
 
-The hello and pairing response identify the runtime with `machineId` (stable per
-Tron home) and, on current gateways, `machineGroupID` (stable across separate
-production and isolated-Dev homes on one physical Mac). Older gateways omit the
-latter; clients fall back to `machineId`. The group identifier is only a bounded
-connection-group hint and never names or shares session files, credentials, or
-other canonical runtime data.
+The hello, pairing response, and authenticated `system.info` identify the runtime
+with `machineId` (stable per Tron home), `gatewayChannel` (exactly `stable` or
+`dev`), and, on current gateways, `machineGroupID` (stable across separate
+production and isolated-Dev homes on one physical Mac). Runtime construction
+validates `TRON_GATEWAY_CHANNEL`; absence retains the launcher's stable
+compatibility default, while every other value fails closed before identity can
+be projected. Older gateways omit `machineGroupID`; clients fall back to
+`machineId`. The group identifier is only a bounded connection-group hint and
+never names or shares session files, credentials, or other canonical runtime
+data.
 
 Requests use `{type,id,method,params}` and receive `{type,id,ok,result|error}`.
 Mutations require `params.commandId`; receipts deduplicate completed commands.
@@ -444,13 +461,25 @@ allowed to read.
 Administrative restart is a drain, not an abort: the Gateway freezes new mutations,
 allows every admitted agent run to settle canonically, then exits with the supervised
 restart code. Live PTYs block restart because process replacement cannot preserve them.
-The installed release wrapper and its LaunchAgents supervise packaged Gateways; stable and
-optional dev channels may run in parallel. Payload staging, promotion, and rollback use
-`scripts/gateway-payload-deploy.mjs`; the former `scripts/tron dev` owner is deprecated and
-fails closed. Restart requests use the authenticated drain-aware Gateway protocol; direct self-stop
+The installed Release wrapper supervises Stable only. `scripts/tron dev` owns the
+separate Debug lifecycle on 9848 through the same immutable payload store and launcher.
+Its loopback-by-default handoff copies only an authenticated, selected Debug
+artifact into Stable as an inactive candidate after proving the same exact Debug
+identity before and after the copy; it never selects or restarts Stable. Compatibility
+is checked against the actual installed/active Stable runtime, and Node/helper drift
+requires a manual Mac app replacement. Promotion pins version and fingerprint,
+atomically selects, requests a real drain-aware restart, and accepts readiness only
+from the candidate's exact fingerprint, source revision, and runtime epoch. Apply and
+rollback serialize per channel; failed pointer changes perform a compensating restart
+and exact health verification. Status keeps observed live identity separate from the
+selected pointer so publication cannot report readiness early. Payload staging,
+promotion, and rollback use `scripts/gateway-payload-deploy.mjs`. Restart requests use the authenticated drain-aware Gateway protocol; direct self-stop
 is rejected. Clients receive `system.stopping`, reconnect with bounded backoff, and replace
-live state from a new authoritative snapshot. An unexpected process death remains an
-interruption represented by the durable run marker and is never automatically replayed.
+live state from a new authoritative snapshot. Staging preserves package-manager relative
+symlinks verbatim so copied artifacts remain self-contained; cleanup never follows links,
+which lets it remove a malformed failed staging tree without touching an external target.
+An unexpected process death remains an interruption represented by the durable run marker
+and is never automatically replayed.
 
 ## Session invariants
 

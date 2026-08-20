@@ -18,6 +18,10 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     var parentBundleIdentifier: String?
     var parentBundleVersion: String?
     var executablePath: String?
+    var bundleProgram: String?
+    /// Exact `ps -ww` command for the launchd-owned PID. Relative
+    /// BundleProgram metadata alone cannot prove which payload was exec'd.
+    var processCommand: String?
     var gatewaySupervisionMarker: String?
     var gatewayChannelMarker: String?
     var needsLaunchConstraintRefresh: Bool
@@ -28,6 +32,8 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
         parentBundleIdentifier: String? = nil,
         parentBundleVersion: String? = nil,
         executablePath: String? = nil,
+        bundleProgram: String? = nil,
+        processCommand: String? = nil,
         gatewaySupervisionMarker: String? = nil,
         gatewayChannelMarker: String? = nil,
         needsLaunchConstraintRefresh: Bool = false
@@ -37,6 +43,8 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
         self.parentBundleIdentifier = parentBundleIdentifier
         self.parentBundleVersion = parentBundleVersion
         self.executablePath = executablePath
+        self.bundleProgram = bundleProgram
+        self.processCommand = processCommand
         self.gatewaySupervisionMarker = gatewaySupervisionMarker
         self.gatewayChannelMarker = gatewayChannelMarker
         self.needsLaunchConstraintRefresh = needsLaunchConstraintRefresh

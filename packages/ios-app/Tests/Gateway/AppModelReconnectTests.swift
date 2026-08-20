@@ -239,6 +239,96 @@ struct AppModelReconnectTests {
         await client.close()
     }
 
+    @Test("paired Debug profile follows system stopping on 9848 with the same token and authoritative reconnect without prompt replay")
+    func debugPlannedRestartReconnectsWithoutReplay() async throws {
+        let suiteName = "GatewayDebugReconnectTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let cacheRoot = FileManager.default.temporaryDirectory.appending(path: suiteName, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: cacheRoot) }
+        let profile = GatewayProfile(
+            id: "debug", label: "Mac Debug", host: "gateway.test", port: 9_848,
+            machineId: "machine-debug", deviceId: "device-debug"
+        )
+        defaults.set(try JSONEncoder.gateway.encode([profile]), forKey: "gatewayProfiles.v1")
+        defaults.set(profile.id, forKey: "selectedGateway.v1")
+        let first = ScriptedGatewaySocket()
+        let replacement = ScriptedGatewaySocket()
+        let factory = ScriptedGatewaySocketFactory(sockets: [first, replacement])
+        let client = GatewayClient(socketFactory: factory.factory)
+        let store = GatewayProfileStore(defaults: defaults)
+        let model = AppModel(
+            client: client,
+            profiles: store,
+            cache: SnapshotCache(root: cacheRoot),
+            profileTokenLookup: { value in value.id == "debug" ? "debug-token" : nil }
+        )
+
+        let initial = Task { try await model.connectHostedGateway(profile: profile, token: "debug-token") }
+        try await first.waitUntilSent(count: 1)
+        await first.enqueue(helloFrame(runtimeEpoch: "debug-epoch-1", machineID: "machine-debug", gatewayChannel: "dev"))
+        try await initial.value
+
+        let acceptedPrompt = Task {
+            try await client.requestValue(
+                "session.prompt",
+                JSONValue.object(["sessionId": .string("accepted-session"), "text": .string("accepted prompt")]),
+                timeout: .seconds(2)
+            )
+        }
+        try await first.waitUntilSent(count: 2)
+        let promptRequest = try requestFrame(await first.sentFrames()[1])
+        #expect(promptRequest.method == "session.prompt")
+        await first.enqueue(successResponse(id: promptRequest.id, result: .object(["accepted": .bool(true)])))
+        _ = try await acceptedPrompt.value
+
+        await model.handle(GatewayEvent(type: "event", topic: "system.stopping", sessionId: nil, payload: .object([:])))
+        try await replacement.waitUntilSent(count: 1)
+        #expect(model.connectionState == .restarting)
+        await Task.yield()
+        #expect(model.connectionState == .restarting)
+        await replacement.enqueue(helloFrame(runtimeEpoch: "debug-epoch-2", machineID: "machine-debug", gatewayChannel: "dev"))
+
+        try await replacement.waitUntilSent(count: 6)
+        #expect(model.connectionState == .restarting)
+        let reconnectFrames = await replacement.sentFrames()
+        var refreshedMethods = Set<String>()
+        for frame in reconnectFrames.dropFirst() {
+            let request = try requestFrame(frame)
+            refreshedMethods.insert(request.method)
+            let result: JSONValue
+            switch request.method {
+            case "session.list":
+                result = .object(["sessions": .array([]), "nextCursor": .null, "listRevision": .number(2)])
+            case "provider.list": result = .object(["providers": .array([])])
+            case "model.list": result = .object(["models": .array([]), "nextCursor": .null])
+            case "settings.get": result = .object(["effective": .object([:])])
+            case "device.list": result = .object(["devices": .array([])])
+            default:
+                Issue.record("unexpected reconnect baseline request: \(request.method)")
+                result = .object([:])
+            }
+            await replacement.enqueue(successResponse(id: request.id, result: result))
+        }
+        for _ in 0..<80 where model.gatewayInfo?.runtimeEpoch != "debug-epoch-2" || model.connectionState != GatewayConnectionState.connected {
+            await Task.yield()
+        }
+
+        #expect(model.gatewayInfo?.runtimeEpoch == "debug-epoch-2")
+        #expect(model.connectionState == GatewayConnectionState.connected)
+        #expect(refreshedMethods.contains("session.list"))
+        #expect(store.selected?.host == "gateway.test")
+        #expect(store.selected?.port == 9_848)
+        #expect(factory.requests.count == 2)
+        #expect(factory.requests.allSatisfy { $0.url?.port == 9_848 })
+        #expect(factory.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer debug-token" })
+        let replacementText = reconnectFrames.compactMap { String(data: $0, encoding: .utf8) }.joined(separator: "\n")
+        #expect(!replacementText.contains("session.prompt"))
+
+        await model.teardown()
+        await client.close()
+    }
+
     @Test("active handshake ignores duplicate activation and stale unauthorized teardown completion")
     func activeHandshakeKeepsExactOwner() async throws {
         let units = SequenceReconnectUnits([0.5])
@@ -282,8 +372,41 @@ struct AppModelReconnectTests {
         }
     }
 
-    private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8)
+    private func helloFrame(
+        runtimeEpoch: String? = nil,
+        machineID: String = "machine",
+        gatewayChannel: String = "stable"
+    ) -> Data {
+        var value: [String: JSONValue] = [
+            "type": .string("hello"),
+            "gatewayVersion": .string("1.0.0"),
+            "piVersion": .string("1.0.0"),
+            "protocolVersion": .number(3),
+            "minProtocolVersion": .number(3),
+            "machineId": .string(machineID),
+            "machineName": .string("Mac"),
+            "capabilities": .array([.string("sessions.v1")]),
+            "gatewayChannel": .string(gatewayChannel),
+        ]
+        if let runtimeEpoch { value["runtimeEpoch"] = .string(runtimeEpoch) }
+        return try! JSONEncoder.gateway.encode(JSONValue.object(value))
+    }
+
+    private func requestFrame(_ data: Data) throws -> (id: String, method: String) {
+        let value = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
+        return (
+            try #require(value.objectValue?["id"]?.stringValue),
+            try #require(value.objectValue?["method"]?.stringValue)
+        )
+    }
+
+    private func successResponse(id: String, result: JSONValue) -> Data {
+        try! JSONEncoder.gateway.encode(JSONValue.object([
+            "type": .string("response"),
+            "id": .string(id),
+            "ok": .bool(true),
+            "result": result,
+        ]))
     }
 
     private func failHandshake(_ socket: ScriptedGatewaySocket) async throws {

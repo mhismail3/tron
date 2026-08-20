@@ -82,7 +82,7 @@ enum PermissionStatus: String, Equatable, Sendable {
 enum TailscaleStatus: Equatable, Sendable {
     case notInstalled
     case installedNotSignedIn
-    case signedIn(ipv4: String)
+    case signedIn(address: String)
 
     var isReady: Bool {
         if case .signedIn = self { return true }
@@ -110,6 +110,24 @@ enum ExistingInstallStatus: Equatable, Sendable {
 /// validates the complete required response shape.
 struct ServerPingInfo: Equatable, Sendable {
     var version: String
+    var gatewayChannel: String
+    var sourceRevision: String?
+    var buildFingerprint: String?
+    var runtimeEpoch: String?
+
+    init(
+        version: String,
+        gatewayChannel: String,
+        sourceRevision: String? = nil,
+        buildFingerprint: String? = nil,
+        runtimeEpoch: String? = nil
+    ) {
+        self.version = version
+        self.gatewayChannel = gatewayChannel
+        self.sourceRevision = sourceRevision
+        self.buildFingerprint = buildFingerprint
+        self.runtimeEpoch = runtimeEpoch
+    }
 }
 
 /// Pairing payload shared with the iOS app via the

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Bounded, atomic state/identity helper for the isolated development Gateway. */
+/** Bounded, atomic state/identity helper for the developer-owned Debug Gateway. */
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { networkInterfaces } from "node:os";
@@ -101,15 +101,34 @@ async function fingerprint(root) {
   return hash.digest("hex");
 }
 
+function isTailscaleAddress(address) {
+  if (address.toLowerCase().startsWith("fd7a:115c:a1e0:")) return true;
+  const octets = address.split(".").map(Number);
+  return octets.length === 4 && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127;
+}
+
+function selectTailscaleAddress(interfaces) {
+  const candidates = Object.entries(interfaces).flatMap(([name, addresses]) => (addresses ?? [])
+    .filter((candidate) => !candidate.internal && isTailscaleAddress(candidate.address))
+    .map((candidate) => ({ ...candidate, name })));
+  const family = (value) => value === "IPv4" || value === 4 ? 0 : 1;
+  const compare = (left, right) => {
+    const leftOctets = left.split(".").map(Number); const rightOctets = right.split(".").map(Number);
+    if (leftOctets.length === 4 && rightOctets.length === 4
+      && leftOctets.every(Number.isInteger) && rightOctets.every(Number.isInteger)) {
+      for (let index = 0; index < 4; index += 1) if (leftOctets[index] !== rightOctets[index]) return leftOctets[index] - rightOctets[index];
+      return 0;
+    }
+    return left === right ? 0 : left < right ? -1 : 1;
+  };
+  candidates.sort((left, right) => family(left.family) - family(right.family)
+    || compare(left.address, right.address) || compare(left.name, right.name));
+  return candidates[0]?.address;
+}
+
 function hostForHealth(raw) {
   if (raw !== "tailscale") return raw;
-  // Match the Gateway's conservative Tailscale address selection without
-  // importing the built Gateway (status/preflight must work before a build).
-  const interfaces = networkInterfaces();
-  for (const addresses of Object.values(interfaces)) for (const address of addresses ?? []) {
-    if (!address.internal && (address.address.toLowerCase().startsWith("fd7a:115c:a1e0:") || /^100\.(6[4-9]|[78]\d|9\d|10\d|11\d|12[0-7])\./u.test(address.address))) return address.address;
-  }
-  return raw;
+  return selectTailscaleAddress(networkInterfaces()) ?? raw;
 }
 
 async function health(host, port) {
@@ -170,6 +189,51 @@ if (command === "update" || command === "patch") {
   process.stdout.write(`${expectedIdentity !== "" && actualIdentity !== "" && actualIdentity === expectedIdentity ? "yes" : "no"}\n`);
 } else if (command === "fingerprint") {
   process.stdout.write(`${await fingerprint(args[0])}\n`);
+} else if (command === "selected-identity") {
+  const home = resolve(args[0]);
+  const channel = args[1];
+  if (channel !== "dev") throw new Error("developer selection must use the dev channel");
+  const root = join(home, "gateway", "payloads", channel);
+  const selected = await readState(join(root, "current.json"));
+  if (selected.schema !== 1 || selected.kind !== "tron-gateway-selection" || selected.channel !== channel
+    || typeof selected.version !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(selected.version)
+    || typeof selected.payloadFingerprint !== "string" || !/^[a-f0-9]{64}$/u.test(selected.payloadFingerprint)) {
+    throw new Error("Debug selection is missing or malformed");
+  }
+  const manifest = await readState(join(root, "versions", selected.version, "manifest.json"));
+  if (manifest.schema !== 1 || manifest.kind !== "tron-gateway-payload" || manifest.channel !== channel
+    || manifest.version !== selected.version || manifest.payloadFingerprint !== selected.payloadFingerprint
+    || typeof manifest.runtimeEpoch !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(manifest.runtimeEpoch)
+    || typeof manifest.sourceRevision !== "string" || !/^[A-Za-z0-9._-]{1,256}$/u.test(manifest.sourceRevision)) {
+    throw new Error("Debug selected manifest identity is missing or malformed");
+  }
+  process.stdout.write(`${manifest.runtimeEpoch} ${manifest.sourceRevision} ${manifest.payloadFingerprint}\n`);
+} else if (command === "validate-build-identity") {
+  const value = args[0] ?? "";
+  const match = /^([A-Za-z0-9._-]{1,128}) ([a-f0-9]{64})$/u.exec(value);
+  if (!match) throw new Error("Debug candidate build returned an invalid identity");
+  process.stdout.write(`${match[1]} ${match[2]}\n`);
+} else if (command === "resolve-host-fixture") {
+  const fixture = JSON.parse(args[0] ?? "{}");
+  process.stdout.write(`${selectTailscaleAddress(fixture) ?? ""}\n`);
+} else if (command === "resolve-command-host") {
+  const state = await readState(args[0]);
+  const requested = args[1] ?? "";
+  const explicit = args[2] === "yes";
+  const supervisorLive = args[3] === "yes";
+  const recorded = typeof state.expectedHost === "string" ? text(state.expectedHost) : undefined;
+  const validHost = (value) => typeof value === "string" && value.length > 0
+    && value.length <= 255 && !/[\s\u0000-\u001f\u007f/\\]/u.test(value);
+  if (requested && !validHost(requested)) throw new Error("requested Debug host is invalid");
+  if (supervisorLive) {
+    if (!validHost(recorded)) throw new Error("live Debug supervisor host is missing or invalid");
+    if (explicit && requested !== recorded) {
+      throw new Error(`live Debug supervisor uses ${recorded}; stop it before changing to ${requested}`);
+    }
+    process.stdout.write(`${recorded}\n`);
+  } else {
+    process.stdout.write(`${requested || "127.0.0.1"}\n`);
+  }
 } else if (command === "health") {
   process.stdout.write(`${JSON.stringify(await health(args[0], args[1]))}\n`);
 } else if (command === "status") {
@@ -189,7 +253,7 @@ if (command === "update" || command === "patch") {
   const activeLifecycle = new Set(["starting", "ready", "draining", "restarting"]);
   const lifecycle = !supervisorLive && activeLifecycle.has(recordedLifecycle) ? "failed" : recordedLifecycle;
   process.stdout.write(`${JSON.stringify({
-    expected: { host, port, home: state.expectedHome ?? null },
+    expected: { host, port, home: state.expectedHome ?? join(process.env.HOME ?? "", ".tron-dev") },
     lifecycle, epoch: state.epoch ?? null,
     supervisor: { pid: state.supervisorPid ?? null, startIdentity: state.supervisorStartIdentity ?? null, live: Boolean(supervisorLive) },
     child: { pid: state.childPid ?? null, startIdentity: state.childStartIdentity ?? null, live: Boolean(childLive) },

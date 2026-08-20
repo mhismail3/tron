@@ -99,7 +99,7 @@ struct PresentationStyleGuardTests {
     func noStockSettingsCollections() {
         let composedOwners = [
             "AgentDefaultsSettingsView.swift", "AppearanceSettingsView.swift", "ConnectionSettingsView.swift",
-            "CustomModelsSettingsView.swift", "GatewayDiagnosticsView.swift", "PackagesSettingsView.swift", "ProviderSettingsView.swift",
+            "CustomModelsSettingsView.swift", "GatewayDiagnosticsView.swift", "GatewayLogsSettingsView.swift", "PackagesSettingsView.swift", "ProviderSettingsView.swift",
             "ResourceSettingsView.swift", "RuntimeBehaviorSettingsView.swift", "SettingsView.swift", "ProjectResourcesView.swift", "ExtensionInteractionSheet.swift",
             "SessionContextSheet.swift", "SessionTreeSheet.swift",
         ]
@@ -307,6 +307,7 @@ struct PresentationStyleGuardTests {
         #expect(blur.contains("case .chat: 188"))
         #expect(blur.contains("case .dashboard: 176"))
         #expect(blur.contains("case .sheet: 124"))
+        #expect(blur.contains("case .logs: 184"))
         #expect(blur.contains("@Environment(\\.colorScheme) private var colorScheme"))
         #expect(blur.matches(#"Color\.black\.opacity\(0\.46\)"#) >= 2)
         #expect(chat.contains("TronTopBlurOverlay(style: .chat)"))
@@ -475,6 +476,10 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ConnectionSettingsView.swift"),
             encoding: .utf8
         )
+        let logs = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/GatewayLogsSettingsView.swift"),
+            encoding: .utf8
+        )
         let defaults = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/AgentDefaultsSettingsView.swift"),
             encoding: .utf8
@@ -524,6 +529,9 @@ struct PresentationStyleGuardTests {
         #expect(codeSlider < codePreview)
         #expect(connections.contains("struct ConnectionsSettingsView"))
         #expect(connections.contains("struct ImportSettingsView"))
+        #expect(!connections.contains("model.loadGatewayLogs"))
+        #expect(logs.contains("struct GatewayLogsSettingsView"))
+        #expect(settings.contains("GatewayLogsSettingsView()"))
         #expect(connections.contains("serverDetailDetent"))
         #expect(connections.contains(".presentationDetents([.medium, .large], selection: $serverDetailDetent)"))
         #expect(connections.contains("gatewayActionButton"))
@@ -634,6 +642,10 @@ struct PresentationStyleGuardTests {
         )
         let settings = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ConnectionSettingsView.swift"),
+            encoding: .utf8
+        )
+        let logs = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/GatewayLogsSettingsView.swift"),
             encoding: .utf8
         )
         let packages = try String(
@@ -765,10 +777,11 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/State/GatewayDiagnosticsService.swift"),
             encoding: .utf8
         )
-        #expect(settings.contains("private extension GatewayLogRecord"))
-        #expect(settings.contains("Newest entries first"))
+        #expect(logs.contains("extension GatewayLogRecord"))
+        #expect(logs.contains("Newest entries first"))
         #expect(settings.contains("await model.requestGatewayRestart(for: currentProfile)"))
-        #expect(settings.contains("records = await model.loadGatewayLogs(limit: 1_000)"))
+        #expect(logs.contains("let loaded = await model.loadGatewayLogs(limit: 1_000)"))
+        #expect(!logs.contains("while !Task.isCancelled"))
         #expect(!settings.contains("try? await model."))
         #expect(context.contains("model.gatewayDiagnostics.inspectGit"))
         #expect(context.contains("detailInline: true"))
@@ -794,9 +807,10 @@ struct PresentationStyleGuardTests {
         }
         #expect(presentationStore.contains("prepareSecondaryProjectionForRuntimeInstallation(installed)"))
         #expect(presentationStore.contains("ownsSubscription(sessionID: sessionID, requestedToken: token)"))
-        #expect(settings.contains("model.loadGatewayLogs"))
+        #expect(logs.contains("model.loadGatewayLogs"))
         #expect(!context.contains("model.client"))
         #expect(!settings.contains("model.client"))
+        #expect(!logs.contains("model.client"))
         #expect(diagnostics.contains("request(\"git.inspect\""))
         #expect(diagnostics.contains("request(\"system.logs\""))
         #expect(customModels.contains("Advanced JSON"))
@@ -1531,7 +1545,14 @@ struct PresentationStyleGuardTests {
         #expect(shell.contains(".sheet(isPresented: $showingServerFilter)"))
         #expect(shell.contains(".presentationDetents([.medium])"))
         #expect(shell.contains("private var serverFilterSheet: some View"))
-        #expect(shell.contains("Choose one or more servers"))
+        let serversHeader = try #require(shell.range(of: "Text(\"Servers\")"))
+        let serverGuidance = try #require(shell.range(of: "Text(\"Choose one or more servers"))
+        let firstServerOption = try #require(shell.range(of: "title: \"All servers\""))
+        #expect(serversHeader.lowerBound < serverGuidance.lowerBound)
+        #expect(serverGuidance.lowerBound < firstServerOption.lowerBound)
+        #expect(shell.contains("VStack(alignment: .leading, spacing: TronSpacing.xs) {\n                        Text(\"Servers\")"))
+        #expect(shell[serverGuidance.lowerBound..<firstServerOption.lowerBound].contains("TronTypography.secondaryDescription"))
+        #expect(shell[serverGuidance.lowerBound..<firstServerOption.lowerBound].contains(".padding(.top, TronSpacing.md)"))
         #expect(shell.contains("private func filterOption("))
         #expect(shell.contains("serverFilter.toggle(source.profileID)"))
         #expect(shell.contains("DashboardSessionSortMode.allCases"))

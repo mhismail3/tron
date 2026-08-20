@@ -109,7 +109,7 @@ enum ExistingInstallDetector {
     ) -> String? {
         // The canonical validator owns complete bundled payload verification,
         // including the deterministic fingerprint and symlink boundary. Keep
-        // the injectable checks below for isolated Debug fixtures only.
+        // the injectable checks below support focused validator fixtures.
         if case .failure(let error) = GatewayPayloadValidator.validate(payloadRoot: payloadRoot),
            payloadRoot.standardizedFileURL.path == TronPaths.gatewayPayloadRoot.standardizedFileURL.path {
             return "The bundled Gateway payload failed canonical validation: \(error)"
@@ -226,9 +226,7 @@ enum ExistingInstallDetector {
             port: profile.port,
             bundleProgram: TronPaths.serverHelperBundleProgram(profile: profile),
             environmentVariables: TronPaths.launchAgentEnvironmentVariables(profile: profile),
-            associatedBundleIDs: profile == .preview
-                ? [MacRuntimeVariant.debugBundleIdentifier, MacRuntimeVariant.releaseBundleIdentifier]
-                : [MacRuntimeVariant.releaseBundleIdentifier, MacRuntimeVariant.debugBundleIdentifier]
+            associatedBundleIDs: TronPaths.associatedWrapperBundleIDs(profile: profile)
         )
     }
 

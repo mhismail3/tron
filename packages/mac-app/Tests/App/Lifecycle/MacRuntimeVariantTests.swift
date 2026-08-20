@@ -15,7 +15,7 @@ struct MacRuntimeVariantTests {
         #expect(variant.expectedParentBundleIdentifier == "com.tron.mac.dev")
         #expect(variant == .xcodeDebug)
         #expect(!variant.canManageLaunchAgent(isIsolatedInstallMode: false))
-        #expect(variant.canManageLaunchAgent(isIsolatedInstallMode: true))
+        #expect(!variant.canManageLaunchAgent(isIsolatedInstallMode: true))
     }
 
     @Test("release builds must be installed at Applications")
@@ -52,7 +52,7 @@ struct MacRuntimeVariantTests {
         #expect(!MacRuntimeVariant.installedRelease.canTakeOverRegistration(ownedBy: MacRuntimeVariant.releaseBundleIdentifier))
         #expect(!MacRuntimeVariant.xcodeDebug.canTakeOverRegistration(ownedBy: MacRuntimeVariant.releaseBundleIdentifier))
         #expect(!MacRuntimeVariant.xcodeDebug.canTakeOverRegistration(ownedBy: MacRuntimeVariant.debugBundleIdentifier))
-        #expect(MacRuntimeVariant.xcodeDebug.canTakeOverRegistration(ownedBy: "other"))
+        #expect(!MacRuntimeVariant.xcodeDebug.canTakeOverRegistration(ownedBy: "other"))
     }
 }
 

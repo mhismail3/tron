@@ -30,7 +30,7 @@ enum ServerPing {
     /// failures so the caller can render the right state without
     /// guessing.
     static func ping(host: String, port: Int, token: String?, timeout: TimeInterval = 3) async -> ServerPingResult {
-        guard let url = URLComponents(string: "ws://\(host):\(port)/v1/socket")?.url else {
+        guard let url = socketURL(host: host, port: port) else {
             return .unreachable
         }
 
@@ -131,6 +131,10 @@ enum ServerPing {
         }
     }
 
+    static func socketURL(host: String, port: Int) -> URL? {
+        GatewaySocketURL.make(host: host, port: port)
+    }
+
     enum ResponseFrame: Equatable {
         case result(ServerPingInfo)
         case ignore
@@ -149,6 +153,10 @@ enum ServerPing {
             let protocolVersion: Int
             let minProtocolVersion: Int
             let machineId: String
+            let gatewayChannel: String
+            let sourceRevision: String?
+            let buildFingerprint: String?
+            let runtimeEpoch: String?
         }
     }
 
@@ -184,10 +192,20 @@ enum ServerPing {
               !value.gatewayVersion.isEmpty,
               value.protocolVersion == supportedProtocolVersion,
               value.minProtocolVersion == minimumProtocolVersion,
-              !value.machineId.isEmpty else {
+              !value.machineId.isEmpty,
+              GatewayPayloadStore.validComponent(
+                value.gatewayChannel,
+                maximumLength: GatewayPayloadStore.channelComponentLimit
+              ) else {
             return .malformed
         }
-        return .result(ServerPingInfo(version: value.gatewayVersion))
+        return .result(ServerPingInfo(
+            version: value.gatewayVersion,
+            gatewayChannel: value.gatewayChannel,
+            sourceRevision: value.sourceRevision,
+            buildFingerprint: value.buildFingerprint,
+            runtimeEpoch: value.runtimeEpoch
+        ))
     }
 
     private static func messageData(from message: URLSessionWebSocketTask.Message) -> Data? {
@@ -206,6 +224,24 @@ enum ServerPing {
             return string == expectedID
         }
         return false
+    }
+}
+
+enum GatewaySocketURL {
+    static func make(host: String, port: Int) -> URL? {
+        guard !host.isEmpty, host.utf8.count <= 255, (1...65_535).contains(port),
+              host.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return nil }
+        var components = URLComponents()
+        components.scheme = "ws"
+        if host.contains(":") {
+            guard TailscaleProbe.isIPv6(host), !host.contains("[") && !host.contains("]") else { return nil }
+            components.percentEncodedHost = "[\(host.lowercased())]"
+        } else {
+            components.host = host
+        }
+        components.port = port
+        components.path = "/v1/socket"
+        return components.url
     }
 }
 

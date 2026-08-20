@@ -1,13 +1,9 @@
 import Foundation
 
-/// The wrapper has four supported operating modes:
-/// - Debug/Xcode (`com.tron.mac.dev`) companion mode, allowed from DerivedData and
-///   meant to observe/control UI while the installed app owns production agent registration.
-/// - Debug/Xcode isolated install mode, opt-in via `TRON_MAC_INSTALL_MODE=isolated`
-///   for testing first-run/reinstall flows against a separate label, port, and data tree.
-/// - Installed release (`com.tron.mac` at `/Applications/Tron.app`), used by both
-///   a real DMG install and a local Release build copied into Applications.
-/// - Unsupported/misplaced release builds, which must fail loudly before registration.
+/// The wrapper has three supported operating modes:
+/// - Debug/Xcode (`com.tron.mac.dev`) is a companion and never manages a Gateway.
+/// - Installed Release (`com.tron.mac` at `/Applications/Tron.app`) owns Stable.
+/// - Unsupported/misplaced Release builds fail before registration.
 enum MacRuntimeVariant: Equatable, Sendable {
     case xcodeDebug
     case installedRelease
@@ -59,34 +55,23 @@ enum MacRuntimeVariant: Equatable, Sendable {
     }
 
     func canTakeOverRegistration(ownedBy bundleIdentifier: String) -> Bool {
-        switch self {
-        case .installedRelease:
-            return bundleIdentifier != Self.releaseBundleIdentifier
-        case .xcodeDebug:
-            return bundleIdentifier != Self.releaseBundleIdentifier
-                && bundleIdentifier != Self.debugBundleIdentifier
-        case .misplacedRelease, .unsupported:
-            return false
-        }
+        self == .installedRelease && bundleIdentifier != Self.releaseBundleIdentifier
     }
 
-    /// Compatibility seam for the isolated-install test scheme.
     func canManageLaunchAgent(isIsolatedInstallMode: Bool) -> Bool {
-        canManageLaunchAgent(profile: isIsolatedInstallMode ? .preview : .stable, isIsolatedInstallMode: isIsolatedInstallMode)
+        self == .installedRelease && !isIsolatedInstallMode
     }
 
-    /// Release owns both the stable and opt-in Preview profiles. Debug keeps
-    /// the isolated-install seam for focused migration tests only.
+    /// Release owns Stable only. Debug can observe Gateways but never manages
+    /// registration or process lifecycle.
     func canManageLaunchAgent(
         profile: TronGatewayProfile = .stable,
         isIsolatedInstallMode: Bool
     ) -> Bool {
         switch self {
         case .installedRelease:
-            return true
-        case .xcodeDebug:
-            return profile == .preview && isIsolatedInstallMode
-        case .misplacedRelease, .unsupported:
+            return profile == .stable && !isIsolatedInstallMode
+        case .xcodeDebug, .misplacedRelease, .unsupported:
             return false
         }
     }

@@ -343,9 +343,33 @@ struct GatewayHello: Decodable, Sendable {
     let machineGroupID: String?
     let machineName: String
     let capabilities: [String]
+    let gatewayChannel: String
     let sourceRevision: String?
     let buildFingerprint: String?
     let runtimeEpoch: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case type, gatewayVersion, piVersion, protocolVersion, minProtocolVersion,
+             machineId, machineGroupID, machineName, capabilities, gatewayChannel,
+             sourceRevision, buildFingerprint, runtimeEpoch
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        type = try values.decode(String.self, forKey: .type)
+        gatewayVersion = try values.decode(String.self, forKey: .gatewayVersion)
+        piVersion = try values.decode(String.self, forKey: .piVersion)
+        protocolVersion = try values.decode(Int.self, forKey: .protocolVersion)
+        minProtocolVersion = try values.decode(Int.self, forKey: .minProtocolVersion)
+        machineId = try values.decode(String.self, forKey: .machineId)
+        machineGroupID = try values.decodeIfPresent(String.self, forKey: .machineGroupID)
+        machineName = try values.decode(String.self, forKey: .machineName)
+        capabilities = try values.decode([String].self, forKey: .capabilities)
+        gatewayChannel = try GatewayChannelPolicy.admit(values.decode(String.self, forKey: .gatewayChannel))
+        sourceRevision = try values.decodeIfPresent(String.self, forKey: .sourceRevision)
+        buildFingerprint = try values.decodeIfPresent(String.self, forKey: .buildFingerprint)
+        runtimeEpoch = try values.decodeIfPresent(String.self, forKey: .runtimeEpoch)
+    }
 
     var info: GatewayInfo {
         GatewayInfo(
@@ -357,6 +381,7 @@ struct GatewayHello: Decodable, Sendable {
             machineGroupID: machineGroupID,
             machineName: machineName,
             capabilities: capabilities,
+            gatewayChannel: gatewayChannel,
             sourceRevision: sourceRevision,
             buildFingerprint: buildFingerprint,
             runtimeEpoch: runtimeEpoch

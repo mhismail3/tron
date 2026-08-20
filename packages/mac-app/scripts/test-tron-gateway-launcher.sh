@@ -73,4 +73,59 @@ CANDIDATE_REAL="$(cd "$CANDIDATE" && pwd -P)"
 second_attempt="$(HOME="$TMP/home" "$HELPER" --version)"
 PREVIOUS_REAL="$(cd "$PREVIOUS" && pwd -P)"
 [[ "$second_attempt" == "$PREVIOUS_REAL" ]] || { echo "pending candidate did not roll back on second launch: $second_attempt" >&2; exit 1; }
-printf 'launcher fixture: valid external fingerprint passes; tampered payload falls back safely; pending candidate gets one launch then rolls back\n'
+# Once the authenticated helper atomically commits under the shared attempt
+# lock, a concurrent/subsequent launcher must preserve the candidate.
+chmod -R u+w "$TMP/home"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
+mkdir "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json.lock"
+chmod -R a-w "$TMP/home"
+chmod u+w "$TMP/home/.tron/gateway/payloads/stable"
+HOME="$TMP/home" "$HELPER" --version > "$TMP/committed-result" &
+RACING_LAUNCHER=$!
+sleep 0.1
+kill -0 "$RACING_LAUNCHER" 2>/dev/null || { echo "launcher did not honor the shared attempt lock" >&2; exit 1; }
+printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"committed","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json.tmp-commit"
+mv "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json.tmp-commit" "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
+rmdir "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json.lock"
+wait "$RACING_LAUNCHER"
+committed_attempt="$(cat "$TMP/committed-result")"
+[[ "$committed_attempt" == "$CANDIDATE_REAL" ]] || { echo "committed candidate was incorrectly rolled back: $committed_attempt" >&2; exit 1; }
+[[ ! -e "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json" ]] || { echo "committed candidate marker was not consumed" >&2; exit 1; }
+
+# A fresh lock that remains held through the bounded wait must fail closed:
+# neither the candidate nor the bundled fallback may execute.
+chmod -R u+w "$TMP/home"
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched","version":"v3","payloadFingerprint":"%s","previousVersion":"v1","previousFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" "$PREVIOUS_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
+LOCK="$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json.lock"
+mkdir "$LOCK"
+chmod -R a-w "$TMP/home"
+chmod u+w "$TMP/home/.tron/gateway/payloads/stable"
+set +e
+HOME="$TMP/home" "$HELPER" --version > "$TMP/held-lock-result" 2> "$TMP/held-lock-error"
+HELD_LOCK_STATUS=$?
+set -e
+[[ "$HELD_LOCK_STATUS" -eq 75 ]] || { echo "held attempt lock did not return retry status: $HELD_LOCK_STATUS" >&2; exit 1; }
+[[ ! -s "$TMP/held-lock-result" ]] || { echo "held attempt lock executed a payload" >&2; exit 1; }
+grep -q 'candidate attempt is locked' "$TMP/held-lock-error" || { echo "held attempt lock failure was not diagnostic" >&2; exit 1; }
+
+# A crash-stale lock is removed under the existing policy; the launched marker
+# then rolls back before any candidate execution.
+touch -t 200001010000 "$LOCK"
+stale_recovery="$(HOME="$TMP/home" "$HELPER" --version)"
+[[ "$stale_recovery" == "$PREVIOUS_REAL" ]] || { echo "stale lock recovery did not roll back before launch: $stale_recovery" >&2; exit 1; }
+[[ ! -e "$LOCK" ]] || { echo "stale attempt lock was not removed" >&2; exit 1; }
+
+# Once a marker exists, malformed recovery metadata is never a safe no-op. The
+# launcher must fail closed rather than execute the currently selected candidate.
+printf '{"schema":1,"kind":"tron-gateway-selection","channel":"stable","version":"v3","payloadFingerprint":"%s"}\n' "$CANDIDATE_FINGERPRINT" > "$TMP/home/.tron/gateway/payloads/stable/current.json"
+printf '{"schema":1,"kind":"tron-gateway-pending-attempt","channel":"stable","attempt":"launched"}\n' > "$TMP/home/.tron/gateway/payloads/stable/pending-attempt.json"
+set +e
+HOME="$TMP/home" "$HELPER" --version > "$TMP/malformed-result" 2> "$TMP/malformed-error"
+MALFORMED_STATUS=$?
+set -e
+[[ "$MALFORMED_STATUS" -eq 75 ]] || { echo "malformed attempt marker did not return retry status: $MALFORMED_STATUS" >&2; exit 1; }
+[[ ! -s "$TMP/malformed-result" ]] || { echo "malformed attempt marker executed a payload" >&2; exit 1; }
+
+printf 'launcher fixture: valid external fingerprint passes; tampered payload falls back safely; pending candidate crash-rolls back; committed candidate persists; held locks fail closed; stale locks recover; malformed markers fail closed\n'

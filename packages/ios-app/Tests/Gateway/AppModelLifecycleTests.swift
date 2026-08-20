@@ -308,7 +308,7 @@ struct AppModelLifecycleTests {
     func settingsRestartSurfacesFailure() async throws {
         try await withFixture(socketCount: 1) { fixture in
             await fixture.model.requestGatewayRestart()
-            #expect(fixture.model.lastError == "Update the Mac Gateway before restarting it from iPhone; this version cannot preserve accepted runs during restart.")
+            #expect(fixture.model.lastError == "This Gateway is not supervised for remote restart. Install or relaunch the managed Tron Mac app, then retry; direct foreground Gateway processes must be restarted from their supervisor.")
         }
     }
 
@@ -374,7 +374,7 @@ struct AppModelLifecycleTests {
     }
 
     private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8)
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
     }
 
     private func profile(id: String, host: String) -> GatewayProfile {

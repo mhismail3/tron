@@ -68,9 +68,7 @@ struct MacSourceGuardTests {
         let trackedResources = [
             "Sources/Resources/AppIcon.icns",
             "Sources/Resources/Library/LaunchAgents/com.tron.server.plist",
-            "Sources/Resources/Library/LaunchAgents/com.tron.server.dev.plist",
             "Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Info.plist",
-            "Sources/Resources/Library/LoginItems/Tron Agent Dev.app/Contents/Info.plist",
         ]
 
         for relativePath in trackedResources {
@@ -85,7 +83,6 @@ struct MacSourceGuardTests {
 
         for (relativePath, identifier, displayName) in [
             ("Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Info.plist", "com.tron.server", "Tron Agent"),
-            ("Sources/Resources/Library/LoginItems/Tron Agent Dev.app/Contents/Info.plist", "com.tron.server.dev", "Tron Agent Dev"),
         ] {
             let info = try Self.read(macRoot, relativePath)
             #expect(info.contains("<key>CFBundleIdentifier</key>\n    <string>\(identifier)</string>"))
@@ -106,19 +103,12 @@ struct MacSourceGuardTests {
             )
         )
 
-        let devLaunchAgent = try Self.read(
-            macRoot,
-            "Sources/Resources/Library/LaunchAgents/com.tron.server.dev.plist"
-        )
-        #expect(devLaunchAgent.contains("<string>com.tron.server.dev</string>"))
-        #expect(devLaunchAgent.contains("<key>TRON_GATEWAY_SUPERVISED</key>\n        <string>1</string>"))
-        #expect(devLaunchAgent.contains("<key>TRON_GATEWAY_CHANNEL</key>\n        <string>dev</string>"))
-        #expect(devLaunchAgent.contains("<key>TRON_AGENT_DIR_NAME</key>\n        <string>agent-dev</string>"))
-        #expect(
-            devLaunchAgent.contains(
-                "<string>Contents/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron</string>"
-            )
-        )
+        #expect(!FileManager.default.fileExists(
+            atPath: macRoot.appendingPathComponent("Sources/Resources/Library/LaunchAgents/com.tron.server.dev.plist").path
+        ))
+        #expect(!FileManager.default.fileExists(
+            atPath: macRoot.appendingPathComponent("Sources/Resources/Library/LoginItems/Tron Agent Dev.app").path
+        ))
 
         let ensureScript = try Self.read(macRoot, "scripts/ensure-gateway-bundle.sh")
         #expect(ensureScript.contains("bundle-gateway.sh"))
@@ -182,9 +172,7 @@ struct MacSourceGuardTests {
             .deletingLastPathComponent()
         let ignoredPayloads = [
             "Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
-            "Sources/Resources/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron",
             "Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Resources/AppIcon.icns",
-            "Sources/Resources/Library/LoginItems/Tron Agent Dev.app/Contents/Resources/AppIcon.icns",
             "Sources/Resources/Gateway/",
         ]
         let gitignore = try Self.read(macRoot, ".gitignore")
@@ -210,6 +198,12 @@ struct MacSourceGuardTests {
         #expect(packageScript.contains("node-arm64"))
         #expect(packageScript.contains("node-x64"))
         #expect(packageScript.contains("app/node_modules"))
+        #expect(packageScript.contains("codesign --verify --deep --strict"))
+        #expect(packageScript.contains("com.apple.security.cs.allow-jit"))
+        #expect(packageScript.contains("--fingerprint"))
+        #expect(packageScript.contains("payloadFingerprint"))
+        #expect(packageScript.contains("lipo -archs"))
+        #expect(packageScript.contains("--version"))
         #expect(packageScript.contains("mounted DMG"))
         let cleanBlock = try #require(script.range(of: "if ((clean)); then"))
         let requiredSources = try #require(script.range(of: "required=("))

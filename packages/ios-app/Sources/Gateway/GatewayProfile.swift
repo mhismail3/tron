@@ -50,8 +50,9 @@ struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
         return components.url
     }
 
-    /// The managed isolated LaunchAgent uses port 9848 for the dev channel.
-    /// Profiles otherwise retain the stable channel default for older Gateways.
+    /// The endpoint selects which authenticated channel identity this saved
+    /// profile will admit. The Gateway must still assert that identity in its
+    /// pairing response, hello, and system.info projection.
     var gatewayChannel: String { port == 9848 ? "dev" : "stable" }
 
     var socketURL: URL? {
@@ -115,12 +116,41 @@ enum PairingInvitationParser {
     }
 }
 
+enum GatewayChannelPolicy {
+    static func admit(_ value: String) throws -> String {
+        guard value == "stable" || value == "dev" else {
+            throw GatewayFailure(
+                code: "invalid_response",
+                message: "The Mac returned an invalid Gateway channel identity.",
+                retryable: false,
+                details: nil
+            )
+        }
+        return value
+    }
+}
+
 struct PairingResponse: Decodable, Sendable {
     let deviceId: String
     let token: String
     let machineId: String
     let machineGroupID: String?
     let machineName: String
+    let gatewayChannel: String
+
+    private enum CodingKeys: String, CodingKey {
+        case deviceId, token, machineId, machineGroupID, machineName, gatewayChannel
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        deviceId = try values.decode(String.self, forKey: .deviceId)
+        token = try values.decode(String.self, forKey: .token)
+        machineId = try values.decode(String.self, forKey: .machineId)
+        machineGroupID = try values.decodeIfPresent(String.self, forKey: .machineGroupID)
+        machineName = try values.decode(String.self, forKey: .machineName)
+        gatewayChannel = try GatewayChannelPolicy.admit(values.decode(String.self, forKey: .gatewayChannel))
+    }
 }
 
 enum GatewayPairingPolicy {
@@ -170,6 +200,15 @@ struct GatewayPairer: Sendable {
             )
         }
         let paired = try JSONDecoder.gateway.decode(PairingResponse.self, from: data)
+        let expectedChannel = invitation.port == 9848 ? "dev" : "stable"
+        guard paired.gatewayChannel == expectedChannel else {
+            throw GatewayFailure(
+                code: "identity_mismatch",
+                message: "The paired Gateway channel does not match this endpoint.",
+                retryable: false,
+                details: nil
+            )
+        }
         let profile = GatewayProfile(
             id: uuidSource(),
             label: invitation.label ?? paired.machineName,

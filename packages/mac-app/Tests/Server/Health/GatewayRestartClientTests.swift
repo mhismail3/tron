@@ -24,6 +24,12 @@ struct GatewayRestartClientTests {
         )
         #expect(request.url?.absoluteString == "ws://127.0.0.1:9847/v1/socket")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer local-token")
+        let ipv6 = try GatewayRestartClient.makeRequest(
+            host: "fd7a:115c:a1e0::1",
+            port: 9848,
+            token: "local-token"
+        )
+        #expect(ipv6.url?.absoluteString == "ws://[fd7a:115c:a1e0::1]:9848/v1/socket")
         #expect(throws: GatewayRestartClient.Failure.missingCredential) {
             try GatewayRestartClient.makeRequest(host: "127.0.0.1", port: 9847, token: nil)
         }

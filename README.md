@@ -89,11 +89,11 @@ npm ci
 npm run build
 npm test
 
-# Isolated gateway, loopback on port 9848
-scripts/tron dev
+# Developer-owned gateway, loopback on port 9848
+scripts/tron dev start
 
-# Expose the isolated gateway on the detected Tailscale address
-scripts/tron dev --tailscale
+# Expose the Debug gateway on the detected Tailscale address
+scripts/tron dev start --tailscale
 
 # Generate native projects
 scripts/tron ios generate

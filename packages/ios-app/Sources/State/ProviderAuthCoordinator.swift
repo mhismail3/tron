@@ -477,14 +477,25 @@ final class ProviderAuthCoordinator {
         invalidationGeneration &+= 1
     }
 
+    /// Revokes transport-owned auth work while retaining the last bounded
+    /// provider/model projection for a transient reconnect. The next successful
+    /// catalog read replaces it atomically.
+    func retireConnection() {
+        revokeConnectionOwnership(clearCatalogs: false)
+    }
+
     /// Synchronously revokes suspended work and disposes all profile projections.
     func clearProfile() {
+        revokeConnectionOwnership(clearCatalogs: true)
+    }
+
+    private func revokeConnectionOwnership(clearCatalogs: Bool) {
         profileGeneration &+= 1
         invalidationGeneration &+= 1
         authBeginGeneration &+= 1
         authPresentationGeneration &+= 1
         loadGenerationByTarget = loadGenerationByTarget.mapValues { $0 &+ 1 }
-        catalogByTarget.removeAll()
+        if clearCatalogs { catalogByTarget.removeAll() }
         targetByAuthOperation.removeAll()
         activeAuthOperationID = nil
         answeringPromptID = nil

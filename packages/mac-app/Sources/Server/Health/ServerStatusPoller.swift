@@ -37,36 +37,42 @@ struct ServerStatusPoller: Sendable {
     /// the INVARIANT documented on `ServerPingResult`.
     static func singleSnapshot(setup: EnvironmentSetup) async -> ServerStatusSnapshot {
         let token = setup.readBearerToken()
+        if setup.profile == .debug {
+            switch await setup.observeDebugGateway(token) {
+            case .admitted(let admission):
+                return ServerStatusSnapshot(
+                    state: .running(version: admission.info.version, port: setup.serverPort),
+                    tailscaleIP: admission.pairingTransportAvailable ? admission.transportHost : nil,
+                    processID: admission.processID,
+                    uptime: admission.uptime,
+                    debugAdmission: admission
+                )
+            case .unauthorized:
+                return ServerStatusSnapshot(state: .unauthorized)
+            case .unavailable:
+                return ServerStatusSnapshot(state: .paused)
+            }
+        }
+
         let result = await setup.pingServer(token)
         switch result {
         case .success(let info):
-            let port = setup.serverPort
-            let runtimeInfo = await setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
+            let admission = await setup.admitStableRuntime(info)
             let installationState: ServerStatusState
-            if setup.canManageLaunchAgent,
-               let runtimeInfo,
-               runtimeInfo.parentBundleIdentifier == MacRuntimeVariant.detect().expectedParentBundleIdentifier,
-               runtimeInfo.gatewaySupervisionMarker == TronPaths.gatewaySupervisionValue,
-               runtimeInfo.gatewayChannelMarker == setup.profile.channel,
-               !LiveLaunchAgentManager.runtimeRequiresReplacement(
-                   runtimeInfo: runtimeInfo,
-                   expectedHelperPath: setup.serverHelperBinaryPath.path
-               ) {
-                installationState = .running(version: info.version, port: port)
-            } else if setup.canManageLaunchAgent {
+            if admission != nil {
+                installationState = .running(version: info.version, port: setup.serverPort)
+            } else {
                 installationState = .needsRepair(
                     version: info.version,
-                    port: port,
-                    reason: "Installed app and running LaunchAgent do not match"
+                    port: setup.serverPort,
+                    reason: "Installed app, listener, selected payload, and authenticated runtime do not match"
                 )
-            } else {
-                installationState = .running(version: info.version, port: port)
             }
             return ServerStatusSnapshot(
                 state: installationState,
                 tailscaleIP: setup.readTailscaleIPFromSettings(),
-                processID: runtimeInfo?.pid,
-                uptime: runtimeInfo?.uptime
+                processID: admission?.processID,
+                uptime: admission?.uptime
             )
         case .unauthorized:
             return ServerStatusSnapshot(

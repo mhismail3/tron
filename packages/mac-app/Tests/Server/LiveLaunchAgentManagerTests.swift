@@ -87,34 +87,90 @@ struct LiveLaunchAgentManagerTests {
         )
     }
 
-    @Test("runtime ownership requires exact profile, supervision, channel, and helper path")
+    @Test("runtime ownership requires exact Stable parent, supervision, channel, and helper path")
     func runtimeOwnershipProjectionIsExact() {
+        let helper = "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
         let runtime = LaunchAgentRuntimeInfo(
             pid: 42,
             parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
-            executablePath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron",
+            executablePath: helper,
+            processCommand: "/Applications/Tron.app/Contents/Resources/Gateway/runtime/node-arm64 /Applications/Tron.app/Contents/Resources/Gateway/app/dist/index.js --host tailscale --port 9847",
             gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
-            gatewayChannelMarker: TronGatewayProfile.preview.channel
+            gatewayChannelMarker: TronGatewayProfile.stable.channel
         )
         #expect(LiveLaunchAgentManager.runtimeOwnsProfile(
             runtimeInfo: runtime,
-            profile: .preview,
+            profile: .stable,
             expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
-            expectedHelperPath: runtime.executablePath!,
+            expectedHelperPath: helper,
+            fileExists: { _ in true }
+        ))
+        #expect(!LiveLaunchAgentManager.runtimeOwnsProfile(
+            runtimeInfo: runtime,
+            profile: .stable,
+            expectedParentBundleIdentifier: MacRuntimeVariant.debugBundleIdentifier,
+            expectedHelperPath: helper,
             fileExists: { _ in true }
         ))
         #expect(!LiveLaunchAgentManager.runtimeOwnsProfile(
             runtimeInfo: runtime,
             profile: .stable,
             expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
-            expectedHelperPath: runtime.executablePath!
+            expectedHelperPath: helper,
+            expectedSupervisionMarker: "0",
+            fileExists: { _ in true }
         ))
-        #expect(!LiveLaunchAgentManager.runtimeOwnsProfile(
-            runtimeInfo: runtime,
-            profile: .preview,
-            expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
-            expectedHelperPath: runtime.executablePath!,
-            expectedSupervisionMarker: "0"
+    }
+
+    @Test("runtime provenance requires both launchctl and exact process payload identity")
+    func runtimeProvenanceUsesLaunchctlAndProcessIdentity() {
+        let helper = "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
+        let command = "/Applications/Tron.app/Contents/Resources/Gateway/runtime/node-arm64 /Applications/Tron.app/Contents/Resources/Gateway/app/dist/index.js --host tailscale --port 9847"
+        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
+            runtimeInfo: LaunchAgentRuntimeInfo(pid: 42),
+            expectedHelperPath: helper,
+            fileExists: { _ in true }
+        ))
+        #expect(!LiveLaunchAgentManager.runtimeRequiresReplacement(
+            runtimeInfo: LaunchAgentRuntimeInfo(
+                pid: 42,
+                bundleProgram: "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
+                processCommand: command,
+                gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
+                gatewayChannelMarker: TronGatewayProfile.stable.channel
+            ),
+            expectedHelperPath: helper,
+            fileExists: { _ in true }
+        ))
+        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
+            runtimeInfo: LaunchAgentRuntimeInfo(
+                pid: 42,
+                bundleProgram: "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
+                processCommand: command,
+                gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
+                gatewayChannelMarker: "dev"
+            ),
+            expectedHelperPath: helper,
+            fileExists: { _ in true }
+        ))
+        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
+            runtimeInfo: LaunchAgentRuntimeInfo(
+                pid: 42,
+                bundleProgram: "Contents/Library/LoginItems/Other.app/Contents/MacOS/tron",
+                processCommand: command
+            ),
+            expectedHelperPath: helper,
+            fileExists: { _ in true }
+        ))
+        #expect(LiveLaunchAgentManager.runtimeRequiresReplacement(
+            runtimeInfo: LaunchAgentRuntimeInfo(
+                pid: 42,
+                bundleProgram: "Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron",
+                processCommand: "/Users/test/Library/Developer/Xcode/DerivedData/TronMac/Build/Products/Debug/TronMac.app/Contents/Resources/Gateway/runtime/node-arm64 /Users/test/Library/Developer/Xcode/DerivedData/TronMac/Build/Products/Debug/TronMac.app/Contents/Resources/Gateway/app/dist/index.js --port 9847"
+            ),
+            profile: .stable,
+            expectedHelperPath: helper,
+            fileExists: { _ in true }
         ))
     }
 
@@ -318,7 +374,7 @@ struct LiveLaunchAgentManagerTests {
             expectedHelperPath: "/tmp/Debug/TronMac.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
         )
         if case .launchdRefused(let message) = outcome {
-            #expect(message.contains("companion mode"))
+            #expect(message.contains("read-only companion"))
         } else {
             Issue.record("debug companion should refuse stale production repair")
         }

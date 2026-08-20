@@ -16,7 +16,7 @@ struct GatewayPairingTransportTests {
     func exactRequest() async throws {
         let recorder = PairingHTTPRecorder(response: Self.response(
             status: 200,
-            body: #"{"deviceId":"device-1","token":"secret-token","machineId":"machine-1","machineGroupID":"physical-1","machineName":"Runtime Mac"}"#
+            body: #"{"deviceId":"device-1","token":"secret-token","machineId":"machine-1","machineGroupID":"physical-1","machineName":"Runtime Mac","gatewayChannel":"stable"}"#
         ))
         let pairer = GatewayPairer(transport: recorder.transport, uuidSource: { "connection-1" })
 
@@ -50,7 +50,7 @@ struct GatewayPairingTransportTests {
     func machineNameFallback() async throws {
         let recorder = PairingHTTPRecorder(response: Self.response(
             status: 200,
-            body: #"{"deviceId":"device-1","token":"secret-token","machineId":"machine-1","machineGroupID":"physical-1","machineName":"Runtime Mac"}"#
+            body: #"{"deviceId":"device-1","token":"secret-token","machineId":"machine-1","machineGroupID":"physical-1","machineName":"Runtime Mac","gatewayChannel":"stable"}"#
         ))
         let pairer = GatewayPairer(transport: recorder.transport, uuidSource: { "connection-2" })
         let unlabeledInvitation = PairingInvitation(
@@ -64,6 +64,41 @@ struct GatewayPairingTransportTests {
         let (profile, _) = try await pairer.pair(unlabeledInvitation, deviceName: "Test iPhone")
 
         #expect(profile.label == "Runtime Mac")
+    }
+
+    @Test("Debug pairing admits dev and both endpoints reject missing or mismatched channel identity")
+    func channelIdentityAdmission() async throws {
+        let debugInvitation = PairingInvitation(
+            host: invitation.host,
+            port: 9_848,
+            code: invitation.code,
+            machineId: nil,
+            label: "Debug Mac"
+        )
+        let debug = GatewayPairer(transport: PairingHTTPRecorder(response: Self.response(
+            status: 200,
+            body: #"{"deviceId":"device-dev","token":"debug-token","machineId":"machine-dev","machineName":"Debug Mac","gatewayChannel":"dev"}"#
+        )).transport)
+        let (debugProfile, _) = try await debug.pair(debugInvitation, deviceName: "Test iPhone")
+        #expect(debugProfile.port == 9_848)
+        #expect(debugProfile.gatewayChannel == "dev")
+
+        for (target, body) in [
+            (invitation, #"{"deviceId":"device-1","token":"token","machineId":"machine","machineName":"Mac","gatewayChannel":"dev"}"#),
+            (debugInvitation, #"{"deviceId":"device-1","token":"token","machineId":"machine","machineName":"Mac","gatewayChannel":"stable"}"#),
+            (invitation, #"{"deviceId":"device-1","token":"token","machineId":"machine","machineName":"Mac"}"#),
+            (invitation, #"{"deviceId":"device-1","token":"token","machineId":"machine","machineName":"Mac","gatewayChannel":"preview"}"#),
+        ] {
+            let pairer = GatewayPairer(transport: PairingHTTPRecorder(
+                response: Self.response(status: 200, body: body)
+            ).transport)
+            do {
+                _ = try await pairer.pair(target, deviceName: "Test iPhone")
+                Issue.record("pairing unexpectedly admitted \(body)")
+            } catch {
+                // Missing, invalid, and endpoint-mismatched channels fail closed.
+            }
+        }
     }
 
     @Test("a non-200 structured Gateway error is preserved exactly")

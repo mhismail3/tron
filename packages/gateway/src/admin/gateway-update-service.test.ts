@@ -75,6 +75,21 @@ describe("Gateway update control plane", () => {
     } finally { await rm(value.root, { recursive: true, force: true }); }
   });
 
+  it("keeps observed live identity separate from a newly selected pointer", async () => {
+    const value = await fixture();
+    try {
+      await writeFile(join(value.state, "deployment-state.json"), `${JSON.stringify({
+        schema: 1, kind: "tron-gateway-deployment", channel: "stable", state: "published",
+        updatedAt: "2026-01-01T00:00:00Z", candidateIdentity: identity,
+      })}\n`);
+      const observed = { buildFingerprint: "b".repeat(64), sourceRevision: "old", runtimeEpoch: "old-epoch" };
+      const status = await new GatewayUpdateService({ tronHome: value.root, runtimeIdentity: observed }).status();
+      expect(status.currentIdentity).toEqual({ payloadFingerprint: observed.buildFingerprint, sourceRevision: "old", runtimeEpoch: "old-epoch" });
+      expect(status.candidateAvailable).toBe(true);
+      expect(status.candidateIdentity).toEqual(expect.objectContaining({ version: identity.version, payloadFingerprint: identity.payloadFingerprint }));
+    } finally { await rm(value.root, { recursive: true, force: true }); }
+  });
+
   it("projects terminal automatic rollback and preserves its original error", async () => {
     const value = await fixture();
     try {
@@ -100,14 +115,61 @@ describe("Gateway update control plane", () => {
       expect(status).toEqual({
         state: "unknown",
         channel: "stable",
-        currentIdentity: expect.objectContaining({ version: identity.version, payloadFingerprint: identity.payloadFingerprint }),
+        currentIdentity: null,
         candidateIdentity: null,
         candidateAvailable: false,
         error: null,
         updatedAt: null,
         commandId: null,
         rollbackAvailable: false,
+        candidateOrigin: null,
+        candidateProvenance: null,
       });
+    } finally { await rm(value.root, { recursive: true, force: true }); }
+  });
+
+  it("projects Debug provenance only when every field matches the verified candidate", async () => {
+    const value = await fixture();
+    try {
+      const provenance = {
+        version: identity.version, payloadFingerprint: identity.payloadFingerprint,
+        testedPayloadFingerprint: "d".repeat(64),
+        sourceRevision: identity.sourceRevision, testedRuntimeEpoch: "debug-epoch",
+        candidateRuntimeEpoch: identity.runtimeEpoch,
+      };
+      const writeState = async (debugOriginIdentity: Record<string, unknown>) => writeFile(join(value.state, "deployment-state.json"), `${JSON.stringify({
+        schema: 1, kind: "tron-gateway-deployment", channel: "stable", state: "prepared",
+        updatedAt: "2026-01-01T00:00:00Z", candidateOrigin: "debug", candidateIdentity: identity,
+        debugOriginIdentity,
+      })}\n`);
+      const service = new GatewayUpdateService({
+        tronHome: value.root,
+        runtimeIdentity: { buildFingerprint: "b".repeat(64), sourceRevision: "old", runtimeEpoch: "old" },
+      });
+      await writeState(provenance);
+      const status = await service.status();
+      expect(status.candidateOrigin).toBe("debug");
+      expect(status.candidateProvenance).toEqual({
+        origin: "debug", version: provenance.version, payloadFingerprint: provenance.payloadFingerprint,
+        sourceRevision: provenance.sourceRevision, testedRuntimeEpoch: provenance.testedRuntimeEpoch,
+        candidateRuntimeEpoch: provenance.candidateRuntimeEpoch,
+      });
+      await writeState({ ...provenance, testedRuntimeEpoch: "" });
+      const malformed = await service.status();
+      expect(malformed.candidateAvailable).toBe(false);
+      expect(malformed.candidateOrigin).toBeNull();
+      expect(malformed.candidateProvenance).toBeNull();
+      await writeState({ ...provenance, sourceRevision: "different" });
+      expect((await service.status()).candidateOrigin).toBeNull();
+      await writeFile(join(value.state, "deployment-state.json"), `${JSON.stringify({
+        schema: 1, kind: "tron-gateway-deployment", channel: "stable", state: "prepared",
+        updatedAt: "2026-01-01T00:00:00Z", candidateOrigin: "debug", candidateIdentity: identity,
+      })}\n`);
+      const missingProof = await service.status();
+      expect(missingProof.candidateAvailable).toBe(false);
+      expect(missingProof.candidateIdentity).toBeNull();
+      expect(missingProof.candidateOrigin).toBeNull();
+      expect(missingProof.candidateProvenance).toBeNull();
     } finally { await rm(value.root, { recursive: true, force: true }); }
   });
 
@@ -157,8 +219,8 @@ describe("Gateway update control plane", () => {
         TRON_GATEWAY_UPDATE_HELPER: helper, TRON_GATEWAY_PAYLOAD_ROOT: value,
         TRON_GATEWAY_SUPERVISED: "0",
       })).toBeUndefined();
-      expect(gatewayUpdateHelperArgs({ channel: "dev", mode: "artifact", candidateVersion: "v1", commandId: "command-1" })).toEqual([
-        "apply", "--channel", "dev", "--mode", "artifact", "--candidate-version", "v1", "--command-id", "command-1",
+      expect(gatewayUpdateHelperArgs({ channel: "dev", mode: "artifact", candidateVersion: "v1", candidateFingerprint: "a".repeat(64), commandId: "command-1" })).toEqual([
+        "apply", "--channel", "dev", "--mode", "artifact", "--candidate-version", "v1", "--candidate-fingerprint", "a".repeat(64), "--command-id", "command-1",
       ]);
       expect(() => gatewayUpdateHelperArgs({ channel: "stable", mode: "artifact", commandId: "bad" })).toThrow(GatewayError);
       expect(gatewayRollbackHelperArgs({ channel: "dev", commandId: "command-1" })).toEqual([
@@ -190,9 +252,17 @@ describe("Gateway update control plane", () => {
   it("rejects arbitrary parameters and invalid command values", () => {
     expect(() => validateGatewayUpdateRequest({ channel: "stable", mode: "auto", path: "/tmp" })).toThrow(GatewayError);
     expect(() => validateGatewayUpdateRequest({ channel: "other", mode: "auto" })).toThrow(GatewayError);
-    expect(validateGatewayUpdateRequest({ channel: "dev", mode: "artifact", candidateVersion: "v1" })).toEqual({
-      channel: "dev", mode: "artifact", candidateVersion: "v1",
+    expect(() => validateGatewayUpdateRequest({ channel: "dev", mode: "artifact", candidateVersion: "v1" })).toThrow(GatewayError);
+    expect(validateGatewayUpdateRequest({ channel: "dev", mode: "artifact", candidateVersion: "v1", candidateFingerprint: "a".repeat(64) })).toEqual({
+      channel: "dev", mode: "artifact", candidateVersion: "v1", candidateFingerprint: "a".repeat(64),
     });
+  });
+
+  it("rejects an invalid runtime channel before system identity can be projected", () => {
+    expect(() => new GatewayUpdateService({
+      tronHome: "/tmp",
+      runtimeChannel: "other" as unknown as "stable",
+    })).toThrowError("Gateway runtime channel is invalid");
   });
 
   it("gates the capability on an injected updater and validates mutation command IDs", async () => {
@@ -204,26 +274,39 @@ describe("Gateway update control plane", () => {
     } as unknown as GatewayServiceDependencies;
     const configured = new GatewayService(base).info() as Record<string, unknown>;
     expect(configured.capabilities).toContain("gateway-update.v1");
+    expect(configured.gatewayChannel).toBe("stable");
     const unsupported = new GatewayService({
       ...base,
       updateService: new GatewayUpdateService({ tronHome: "/tmp" }),
     }).info() as Record<string, unknown>;
     expect(unsupported.capabilities).not.toContain("gateway-update.v1");
+    expect(unsupported.gatewayChannel).toBe("stable");
+    const debug = new GatewayService({
+      ...base,
+      updateService: new GatewayUpdateService({ tronHome: "/tmp", runtimeChannel: "dev" }),
+    }).info() as Record<string, unknown>;
+    expect(debug.gatewayChannel).toBe("dev");
 
     const client: ClientContext = {
       id: "phone", identity: "device", isLocal: false,
       beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
       unsubscribe: () => true, attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
     };
+    await expect(new GatewayService(base).invoke(client, "system.info", {}))
+      .resolves.toMatchObject({ gatewayChannel: "stable" });
+    await expect(new GatewayService({
+      ...base,
+      updateService: new GatewayUpdateService({ tronHome: "/tmp", runtimeChannel: "dev" }),
+    }).invoke(client, "system.info", {})).resolves.toMatchObject({ gatewayChannel: "dev" });
     await expect(new GatewayService(base).invoke(client, "gateway.update", { channel: "stable", mode: "auto" }))
       .rejects.toMatchObject({ code: "invalid_request" });
     await expect(new GatewayService(base).invoke(client, "gateway.rollback", { channel: "stable", commandId: "command-1", mode: "auto" }))
       .rejects.toMatchObject({ code: "invalid_request" });
   });
 
-  it("accepts a bounded rollback request through the same receipt-gated capability", async () => {
+  it("binds update and rollback controls to the runtime-owned channel", async () => {
     const callback = vi.fn(async (request) => ({ accepted: true, request }));
-    const service = new GatewayUpdateService({ tronHome: "/tmp", updater: callback });
+    const service = new GatewayUpdateService({ tronHome: "/tmp", updater: callback, runtimeChannel: "stable" });
     const base = {
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac" }, updateService: service,
       receipts: { execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation() },
@@ -234,7 +317,20 @@ describe("Gateway update control plane", () => {
       unsubscribe: () => true, attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
     };
     await expect(new GatewayService(base).invoke(client, "gateway.rollback", { channel: "dev", commandId: "command-1" }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+    await expect(new GatewayService(base).invoke(client, "gateway.update", {
+      channel: "dev", mode: "artifact", candidateVersion: "v1",
+      candidateFingerprint: "a".repeat(64), commandId: "command-2",
+    })).rejects.toMatchObject({ code: "invalid_request" });
+    expect(callback).not.toHaveBeenCalled();
+
+    const devCallback = vi.fn(async (request) => ({ accepted: true, request }));
+    const devService = new GatewayUpdateService({ tronHome: "/tmp", updater: devCallback, runtimeChannel: "dev" });
+    const devGateway = new GatewayService({ ...base, updateService: devService });
+    await expect(devGateway.invoke(client, "gateway.rollback", { channel: "dev", commandId: "command-3" }))
       .resolves.toMatchObject({ accepted: true });
-    expect(callback).toHaveBeenCalledWith({ channel: "dev", commandId: "command-1", operation: "rollback" });
+    expect(devCallback).toHaveBeenCalledWith({ channel: "dev", commandId: "command-3", operation: "rollback" });
+    await expect(devGateway.invoke(client, "gateway.update.status", { channel: "stable" }))
+      .rejects.toMatchObject({ code: "invalid_request" });
   });
 });

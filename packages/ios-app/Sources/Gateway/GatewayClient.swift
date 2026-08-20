@@ -278,6 +278,15 @@ actor GatewayClient {
             guard decoded.type == "hello", decoded.protocolVersion == 3, decoded.minProtocolVersion == 3 else {
                 throw GatewayFailure(code: "protocol_mismatch", message: "The Mac gateway protocol is not compatible with this app.", retryable: false, details: nil)
             }
+            let admittedChannel = try GatewayChannelPolicy.admit(decoded.gatewayChannel)
+            guard admittedChannel == profile.gatewayChannel else {
+                throw GatewayFailure(
+                    code: "identity_mismatch",
+                    message: "The connected Gateway channel does not match this paired server.",
+                    retryable: false,
+                    details: nil
+                )
+            }
             guard var epoch = connection, epoch.id == epochID else { throw CancellationError() }
             epoch.info = decoded.info
             epoch.lastInboundAt = clock.now()

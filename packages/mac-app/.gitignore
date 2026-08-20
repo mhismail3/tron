@@ -8,7 +8,5 @@ build/
 
 # Generated helper payloads are staging/build outputs, never committed
 Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron
-Sources/Resources/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron
 Sources/Resources/Library/LoginItems/Tron Agent.app/Contents/Resources/AppIcon.icns
-Sources/Resources/Library/LoginItems/Tron Agent Dev.app/Contents/Resources/AppIcon.icns
 Sources/Resources/Gateway/

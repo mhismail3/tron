@@ -32,8 +32,8 @@ struct TronUninstallerTests {
         #expect(FileManager.default.fileExists(atPath: setup.bearerTokenPath.path))
     }
 
-    @Test("Release uninstall cleanup never includes Preview canonical homes")
-    func uninstallPreservesPreviewCanonicalPaths() {
+    @Test("Release uninstall cleanup never includes Debug canonical homes")
+    func uninstallPreservesDebugCanonicalPaths() {
         let setup = makeSetup(tmp: URL(fileURLWithPath: "/tmp/tron-uninstall-test"), manager: MockLaunchAgentManager())
         let paths = TronUninstaller.runtimeCleanupPaths(setup: setup)
         #expect(!paths.contains { $0.path.contains(".tron-dev") })

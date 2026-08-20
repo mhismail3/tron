@@ -101,6 +101,13 @@ struct SettingsView: View {
                             ImportSettingsView(onImported: onImported)
                         }
                     }
+                    settingsLink(
+                        "Logs",
+                        summary: "Recent diagnostics from paired Mac gateways",
+                        icon: "text.alignleft"
+                    ) {
+                        GatewayLogsSettingsView()
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 18)

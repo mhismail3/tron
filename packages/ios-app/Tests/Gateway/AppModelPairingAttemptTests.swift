@@ -300,7 +300,7 @@ struct AppModelPairingAttemptTests {
     }
 
     private func helloFrame() -> Data {
-        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","capabilities":["sessions.v1"]}"#.utf8)
+        Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8)
     }
 }
 
@@ -499,11 +499,15 @@ private actor LateResultPairingHTTPTransport {
     }
 
     func succeed(request index: Int, machineID: String, token: String) throws {
+        guard let request = pending[index]?.request else {
+            throw PairingTransportFixtureError.missingRequest(index)
+        }
+        let channel = request.url?.port == 9_848 ? "dev" : "stable"
         try resume(
             request: index,
             status: 200,
             body: """
-            {"deviceId":"device-\(machineID)","token":"\(token)","machineId":"\(machineID)","machineName":"Test Mac"}
+            {"deviceId":"device-\(machineID)","token":"\(token)","machineId":"\(machineID)","machineName":"Test Mac","gatewayChannel":"\(channel)"}
             """
         )
     }

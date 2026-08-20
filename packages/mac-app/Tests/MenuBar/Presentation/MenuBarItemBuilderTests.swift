@@ -10,14 +10,14 @@ struct MenuBarItemBuilderTests {
         tronHome: URL = URL(fileURLWithPath: "/tmp/tron", isDirectory: true),
         defaultServerPort: Int = 9847,
         canManageLaunchAgent: Bool = true,
-        preview: PreviewMenuState = .unavailable
+        debugGateway: DebugGatewayMenuState = .unavailable
     ) -> [MenuItemDescriptor] {
         MenuBarItemBuilder.build(
             snapshot: snapshot,
             tronHome: tronHome,
             defaultServerPort: defaultServerPort,
             canManageLaunchAgent: canManageLaunchAgent,
-            preview: preview
+            debugGateway: debugGateway
         )
     }
 
@@ -79,27 +79,17 @@ struct MenuBarItemBuilderTests {
         #expect(!titles.contains("Pause Tron"))
     }
 
-    @Test("Preview controls clearly distinguish enable, stop, restart, and pairing")
-    func previewControls() {
-        let absent = Self.build(
-            snapshot: .checking,
-            preview: PreviewMenuState(isRegistered: false, isRunning: false, canManage: true)
-        )
-        #expect(absent.map(\.title).contains("Enable Preview Gateway"))
-        let running = Self.build(
-            snapshot: .checking,
-            preview: PreviewMenuState(isRegistered: true, isRunning: true, canManage: true)
-        )
-        #expect(running.map(\.title).contains("Stop Preview Gateway"))
-        #expect(running.map(\.title).contains("Restart Preview Gateway"))
-        #expect(running.map(\.title).contains("Show Preview pairing info"))
-        let repair = Self.build(
-            snapshot: .checking,
-            preview: PreviewMenuState(isRegistered: true, isRunning: true, canManage: true, isOwned: false, needsRepair: true)
-        )
-        #expect(repair.map(\.title).contains("Repair Preview"))
-        #expect(!repair.map(\.title).contains("Show Preview pairing info"))
-        #expect(!repair.map(\.title).contains("Stop Preview Gateway"))
+    @Test("Debug Gateway is read-only and pairing appears only after authenticated health")
+    func debugObservation() {
+        let absent = Self.build(snapshot: .checking, debugGateway: .unavailable)
+        #expect(!absent.map(\.title).contains(where: { $0.contains("Debug") }))
+        let loopback = Self.build(snapshot: .checking, debugGateway: DebugGatewayMenuState(isRunning: true))
+        #expect(!loopback.map(\.title).contains("Show Debug pairing info"))
+        #expect(loopback.map(\.title).contains("Debug Gateway running on 9848"))
+        let running = Self.build(snapshot: .checking, debugGateway: DebugGatewayMenuState(isRunning: true, isPairable: true))
+        #expect(running.map(\.title).contains("Show Debug pairing info"))
+        #expect(running.map(\.title).contains("Debug Gateway running on 9848"))
+        #expect(!running.map(\.title).contains(where: { $0.contains("Stop Debug") || $0.contains("Restart Debug") || $0.contains("Repair Debug") }))
     }
 
     @Test("menu always has pairing, folder, logs, feedback, server controls, uninstall, quit")

@@ -47,6 +47,22 @@ final class ChatMediaMemoryPressureObserver: @unchecked Sendable {
     deinit { task.cancel() }
 }
 
+private struct GatewayUpdateAcknowledgement: Codable {
+    let accepted: Bool
+    let commandId: String
+
+    func require(commandID: String) throws {
+        guard accepted, commandId == commandID else {
+            throw GatewayFailure(
+                code: "invalid_response",
+                message: "The Gateway update acknowledgement did not match the submitted command.",
+                retryable: false,
+                details: nil
+            )
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -1147,8 +1163,8 @@ final class AppModel {
 
     func requestGatewayUpdate(
         for profile: GatewayProfile,
-        mode: String = "auto",
-        candidateVersion: String? = nil
+        mode: String = "source",
+        debugCandidate: GatewayDebugPromotionCandidate? = nil
     ) async -> String? {
         guard profiles.selected?.id == profile.id,
               let admission = lifecycle.generationAdmission else { return nil }
@@ -1162,23 +1178,38 @@ final class AppModel {
                     details: nil
                 )
             }
-            guard ["source", "artifact", "auto"].contains(mode) else {
+            guard ["source", "artifact"].contains(mode) else {
                 throw GatewayFailure(code: "invalid_request", message: "The Gateway update mode is invalid.", retryable: false, details: nil)
             }
+            if mode == "artifact" {
+                guard profile.gatewayChannel == "stable", debugCandidate != nil else {
+                    throw GatewayFailure(code: "invalid_request", message: "A tested Debug promotion requires complete verified provenance for its exact Stable candidate.", retryable: false, details: nil)
+                }
+            } else if debugCandidate != nil {
+                throw GatewayFailure(code: "invalid_request", message: "Debug candidate provenance is valid only for exact artifact promotion.", retryable: false, details: nil)
+            }
+            let candidateVersion = debugCandidate?.version
+            let candidateFingerprint = debugCandidate?.payloadFingerprint
             struct Params: Codable {
                 let commandId: String
                 let channel: String
                 let mode: String
                 let candidateVersion: String?
+                let candidateFingerprint: String?
             }
             let commandID = uuidSource.next().uuidString
-            _ = try await mutationExecutor.performValue(method: "gateway.update", commandID: commandID) {
-                try await self.client.requestValue(
+            let acknowledgement: GatewayUpdateAcknowledgement = try await mutationExecutor.perform(
+                method: "gateway.update",
+                commandID: commandID
+            ) {
+                try await self.client.request(
                     "gateway.update",
-                    Params(commandId: commandID, channel: profile.gatewayChannel, mode: mode, candidateVersion: candidateVersion),
+                    Params(commandId: commandID, channel: profile.gatewayChannel, mode: mode, candidateVersion: candidateVersion, candidateFingerprint: candidateFingerprint),
+                    as: GatewayUpdateAcknowledgement.self,
                     timeout: .seconds(30)
                 )
             }
+            try acknowledgement.require(commandID: commandID)
             try requireLifecycle(admission)
             // The helper acknowledgement only means the detached updater was
             // admitted. Enter restarting when the Gateway emits
@@ -1203,13 +1234,18 @@ final class AppModel {
             }
             struct Params: Codable { let commandId: String; let channel: String }
             let commandID = uuidSource.next().uuidString
-            _ = try await mutationExecutor.performValue(method: "gateway.rollback", commandID: commandID) {
-                try await self.client.requestValue(
+            let acknowledgement: GatewayUpdateAcknowledgement = try await mutationExecutor.perform(
+                method: "gateway.rollback",
+                commandID: commandID
+            ) {
+                try await self.client.request(
                     "gateway.rollback",
                     Params(commandId: commandID, channel: profile.gatewayChannel),
+                    as: GatewayUpdateAcknowledgement.self,
                     timeout: .seconds(30)
                 )
             }
+            try acknowledgement.require(commandID: commandID)
             try requireLifecycle(admission)
             postNotice("Gateway rollback accepted. Tron will reconnect automatically.", replacing: .gatewayRestart)
             return commandID
@@ -2207,10 +2243,13 @@ final class AppModel {
             // AuthBroker operations belong to the current transport client.
             // Retire any visible prompt before reconnect can expose a new
             // client, so the UI never submits a stale operation ID.
-            providerAuth.clearProfile()
+            providerAuth.retireConnection()
             invalidateSessionConnectionOwnership()
             sessionCatalog.markDisconnected()
-            lifecycle.requestReconnect(immediate: event.topic == "system.stopping", replaceExisting: event.topic == "system.stopping")
+            // An established mobile connection ending is already the first
+            // failure signal. Retry once immediately; the reconnect loop keeps
+            // its bounded jittered backoff if the Gateway is genuinely down.
+            lifecycle.requestReconnect(immediate: true, replaceExisting: event.topic == "system.stopping")
         case "transport.resyncRequired":
             await sessionPresentation.handleResyncRequired(sessionID: event.sessionId)
         case "session.summary":

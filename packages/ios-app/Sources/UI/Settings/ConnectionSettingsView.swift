@@ -43,35 +43,12 @@ struct GatewayConnectionStatusBadge: View {
     }
 }
 
-private extension GatewayLogRecord {
-    var date: Date? { GatewayTimestamp.parse(timestamp) }
-    var levelTitle: String { level.capitalized }
-    var icon: String {
-        switch level {
-        case "error": "exclamationmark.octagon.fill"
-        case "warning": "exclamationmark.triangle.fill"
-        default: "info.circle.fill"
-        }
-    }
-    var accent: Color {
-        switch level {
-        case "error": .tronError
-        case "warning": .tronAmber
-        default: .tronCyan
-        }
-    }
-}
-
 struct ConnectionsSettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var selectedProfile: GatewayProfile?
     @State private var serverDetailDetent: PresentationDetent = .medium
     @State private var deviceToRevoke: GatewayAuthorizedDevice?
     @State private var authorizedDevices: [GatewayAuthorizedDevice] = []
-    @State private var records: [GatewayProfileLogRecord] = []
-    @State private var selectedLog: GatewayProfileLogRecord?
-    @State private var logLevel = "all"
-    @State private var loadingLogs = false
     @State private var dataLoadGeneration = 0
     @State private var showAddServer = false
     @State private var addServerDetent: PresentationDetent = .medium
@@ -81,24 +58,9 @@ struct ConnectionsSettingsView: View {
         return model.profiles.profiles
     }
 
-    private var visibleRecords: [GatewayProfileLogRecord] {
-        records.filter { logLevel == "all" || $0.record.level == logLevel }
-    }
-
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
-                Button {
-                    model.isAddingServer = true
-                    showAddServer = true
-                } label: {
-                    Label("Connect New Server", systemImage: "plus.circle.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                }
-                .buttonStyle(TronActionButtonStyle())
-                .accessibilityHint("Opens the Connect a Mac pairing screen")
-
                 TronSettingsGroup("Paired Macs") {
                     VStack(spacing: 0) {
                         ForEach(Array(pairedProfiles.enumerated()), id: \.element.id) { index, profile in
@@ -163,63 +125,22 @@ struct ConnectionsSettingsView: View {
                     }
                 }
 
-                TronSettingsGroup(
-                    "Logs",
-                    detail: "\(visibleRecords.count) entries · Newest entries first",
-                    accent: .tronSlate
-                ) {
-                    VStack(spacing: 0) {
-                        TronValueRow(icon: "line.3.horizontal.decrease.circle", title: "Level", accent: .tronSlate) {
-                            TronInlineMenu(logLevel.capitalized, accent: .tronSlate) {
-                                Button("All") { logLevel = "all" }
-                                Button("Info") { logLevel = "info" }
-                                Button("Warnings") { logLevel = "warning" }
-                                Button("Errors") { logLevel = "error" }
-                            }
-                        }
-                        if loadingLogs && records.isEmpty {
-                            TronSettingsDivider(accent: .tronSlate)
-                            TronValueRow(icon: "arrow.clockwise", title: "Loading logs…", accent: .tronSlate) {
-                                ProgressView().controlSize(.small).tint(Color.tronSlate)
-                            }
-                        } else if visibleRecords.isEmpty {
-                            TronSettingsDivider(accent: .tronSlate)
-                            TronValueRow(
-                                icon: "text.page.badge.magnifyingglass",
-                                title: "No matching logs",
-                                detail: "Try another level or refresh.",
-                                accent: .tronSlate
-                            )
-                        } else {
-                            ForEach(Array(visibleRecords.enumerated()), id: \.offset) { _, record in
-                                TronSettingsDivider(accent: .tronSlate)
-                                Button { selectedLog = record } label: {
-                                    TronValueRow(
-                                        icon: record.record.icon,
-                                        title: "\(record.profileLabel) · \(record.record.event ?? record.record.levelTitle)",
-                                        detail: record.record.source.map { "\($0) · \(record.record.message)" } ?? record.record.message,
-                                        accent: record.record.accent
-                                    ) {
-                                        Text(logTimestamp(record.record))
-                                            .font(TronTypography.caption2)
-                                            .foregroundStyle(Color.tronTextMuted)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                    }
-                }
-
-                Button(loadingLogs ? "Refreshing…" : "Refresh Logs") { Task { await refreshLogs() } }
-                    .buttonStyle(TronActionButtonStyle(role: .primary))
-                    .disabled(loadingLogs)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
         }
         .tronScrollEdgeChrome()
         .tronNavigationTitle("Connections")
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Add Server", systemImage: "plus") {
+                    model.isAddingServer = true
+                    showAddServer = true
+                }
+                .tronToolbarAction()
+                .accessibilityHint("Opens the Connect a Mac pairing screen")
+            }
+        }
         .sheet(item: $selectedProfile) { profile in
             NavigationStack {
                 GatewayConnectionDetailView(profile: profile)
@@ -238,9 +159,6 @@ struct ConnectionsSettingsView: View {
             .presentationDetents([.medium, .large], selection: $addServerDetent)
             .presentationDragIndicator(.hidden)
             .presentationContentInteraction(.resizes)
-        }
-        .sheet(item: $selectedLog) { record in
-            GatewayLogDetailView(record: record)
         }
         .alert(
             "Revoke \(deviceToRevoke?.device.name ?? "device")?",
@@ -261,13 +179,6 @@ struct ConnectionsSettingsView: View {
             Text("This removes \(authorized.device.name)'s access to \(authorized.profileLabel).")
         }
         .task(id: model.profileRevision) { await reload() }
-        .task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
-                guard !Task.isCancelled else { return }
-                await refreshLogs()
-            }
-        }
     }
 
     private func deviceDetail(_ authorized: GatewayAuthorizedDevice) -> String {
@@ -280,7 +191,6 @@ struct ConnectionsSettingsView: View {
         let loadedDevices = await model.loadAuthorizedDevices()
         guard generation == dataLoadGeneration else { return }
         authorizedDevices = loadedDevices
-        await loadLogs(generation: generation)
     }
 
     private func revoke(_ authorized: GatewayAuthorizedDevice) async {
@@ -293,24 +203,38 @@ struct ConnectionsSettingsView: View {
             model.lastError = error.localizedDescription
         }
     }
+}
 
-    private func refreshLogs() async {
-        dataLoadGeneration &+= 1
-        await loadLogs(generation: dataLoadGeneration)
-    }
+enum GatewayUpdateIntent: Identifiable, Equatable {
+    case debug(GatewayDebugPromotionCandidate)
+    case source
 
-    private func loadLogs(generation: Int) async {
-        loadingLogs = true
-        defer {
-            if generation == dataLoadGeneration { loadingLogs = false }
+    var id: String {
+        switch self {
+        case .debug(let candidate): return "debug:\(candidate.version):\(candidate.payloadFingerprint)"
+        case .source: return "source"
         }
-        let loaded = await model.loadGatewayLogs(limit: 1_000)
-        guard generation == dataLoadGeneration else { return }
-        records = loaded
     }
 
-    private func logTimestamp(_ record: GatewayLogRecord) -> String {
-        record.date?.formatted(date: .omitted, time: .shortened) ?? record.timestamp
+    var actionTitle: String {
+        switch self {
+        case .debug: return "Promote Debug Gateway to Stable"
+        case .source: return "Build and update Gateway from source"
+        }
+    }
+
+    static func admitted(
+        info: GatewayInfo?,
+        status: GatewayUpdateStatus,
+        config: GatewayUpdateConfig?
+    ) -> GatewayUpdateIntent? {
+        guard let info, AppModel.supportsGatewayUpdate(capabilities: info.capabilities) else { return nil }
+        if status.candidateOrigin == "debug" {
+            return status.debugPromotionCandidate.map(GatewayUpdateIntent.debug)
+        }
+        // Generic artifact availability is informational only. The generic
+        // action exists solely for an explicitly configured source build.
+        return config == nil ? nil : .source
     }
 }
 
@@ -324,7 +248,7 @@ struct GatewayConnectionDetailView: View {
     @State private var loadingInfo = false
     @State private var infoLoadGeneration = 0
     @State private var confirmingRestart = false
-    @State private var confirmingUpdate = false
+    @State private var updateIntent: GatewayUpdateIntent?
     @State private var confirmingRollback = false
     @State private var activeUpdateCommandID: String?
     @State private var acceptedOperationLabel: String?
@@ -482,19 +406,28 @@ struct GatewayConnectionDetailView: View {
                 return true
             }
         }
-        .sheet(isPresented: $confirmingUpdate) {
+        .sheet(item: $updateIntent) { intent in
+            let presentation = updatePresentation(for: intent)
             TronConfirmationSheet(
-                title: updateStatus?.candidateAvailable == true ? "Update Tron Gateway?" : "Build and update Tron Gateway?",
-                message: updateStatus?.candidateAvailable
-                    == true
-                    ? "The verified candidate will be promoted after accepted runs finish. Tron reconnects automatically."
-                    : "The configured Mac repository will be built, verified, and promoted after accepted runs finish. Tron reconnects automatically.",
-                confirmTitle: updateStatus?.candidateAvailable == true ? "Update and restart" : "Build and update",
+                title: presentation.title,
+                message: presentation.message,
+                confirmTitle: presentation.confirmTitle,
                 destructive: false,
                 icon: "arrow.down.circle",
                 onConfirm: {
                     Task {
-                        if let commandID = await model.requestGatewayUpdate(for: currentProfile) {
+                        let request: (mode: String, debugCandidate: GatewayDebugPromotionCandidate?)
+                        switch intent {
+                        case .debug(let candidate):
+                            request = ("artifact", candidate)
+                        case .source:
+                            request = ("source", nil)
+                        }
+                        if let commandID = await model.requestGatewayUpdate(
+                            for: currentProfile,
+                            mode: request.mode,
+                            debugCandidate: request.debugCandidate
+                        ) {
                             activeUpdateCommandID = commandID
                             acceptedOperationLabel = "Update accepted · waiting for Gateway progress"
                         }
@@ -556,6 +489,15 @@ struct GatewayConnectionDetailView: View {
                         TronSettingsDivider(accent: .tronEmerald)
                         infoRow("number", "Payload identity", status.currentIdentity?.payloadFingerprint.map { String($0.prefix(12)) } ?? "", numeric: true)
                     }
+                    if let candidate = status.debugPromotionCandidate {
+                        TronSettingsDivider(accent: .tronEmerald)
+                        infoRow(
+                            "hammer",
+                            "Tested Debug candidate",
+                            Self.candidateSummary(candidate),
+                            numeric: true
+                        )
+                    }
                 }
                 if let config {
                     if status != nil { TronSettingsDivider(accent: .tronEmerald) }
@@ -597,14 +539,18 @@ struct GatewayConnectionDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(updateIsActive)
-                if let status, Self.canShowGatewayUpdate(info: info, status: status, config: config) {
+                if let status, let admittedIntent = GatewayUpdateIntent.admitted(
+                    info: info,
+                    status: status,
+                    config: config
+                ) {
                     TronSettingsDivider(accent: .tronEmerald)
                     gatewayActionButton(
-                        status.candidateAvailable ? "Update and restart Gateway" : "Build and update Gateway",
+                        admittedIntent.actionTitle,
                         accent: .tronEmerald,
                         disabled: updateIsActive
                     ) {
-                        confirmingUpdate = true
+                        updateIntent = admittedIntent
                     }
                 }
                 if let status, Self.canShowGatewayRollback(info: info, status: status) {
@@ -643,19 +589,31 @@ struct GatewayConnectionDetailView: View {
         .disabled(disabled)
     }
 
+    private static func candidateSummary(_ candidate: GatewayDebugPromotionCandidate) -> String {
+        [candidate.version, String(candidate.payloadFingerprint.prefix(12)), String(candidate.sourceRevision.prefix(12))]
+            .joined(separator: " · ")
+    }
+
+    private func updatePresentation(for intent: GatewayUpdateIntent) -> (title: String, message: String, confirmTitle: String) {
+        switch intent {
+        case .debug(let candidate):
+            return (
+                "Promote Debug Gateway to Stable?",
+                "Promote exact version \(candidate.version) (fingerprint \(candidate.payloadFingerprint.prefix(12))) after accepted runs finish. Tron reconnects automatically.",
+                "Promote and restart"
+            )
+        case .source:
+            return (
+                "Build and update Tron Gateway from source?",
+                "The configured Mac repository will be built into a new verified candidate and promoted after accepted runs finish. Tron reconnects automatically.",
+                "Build and update from source"
+            )
+        }
+    }
+
     private var supportsSafeRestart: Bool {
         guard let info else { return false }
         return AppModel.supportsSafeGatewayRestart(capabilities: info.capabilities)
-    }
-
-    private static func canShowGatewayUpdate(
-        info: GatewayInfo?,
-        status: GatewayUpdateStatus,
-        config: GatewayUpdateConfig?
-    ) -> Bool {
-        guard let info else { return false }
-        return AppModel.supportsGatewayUpdate(capabilities: info.capabilities)
-            && (status.candidateAvailable && status.candidateIdentity != nil || config != nil)
     }
 
     private static func canShowGatewayRollback(info: GatewayInfo?, status: GatewayUpdateStatus) -> Bool {
@@ -782,57 +740,6 @@ private struct GatewayUpdateConfigSheet: View {
                 if saving { ProgressView().tint(Color.tronEmerald) }
             }
         }
-    }
-}
-
-struct GatewayLogDetailView: View {
-    @Environment(\.dismiss) private var dismiss
-    let record: GatewayProfileLogRecord
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 8) {
-                        Label(record.record.event ?? record.record.levelTitle, systemImage: record.record.icon)
-                            .foregroundStyle(record.record.accent)
-                        Spacer()
-                        Text(record.profileLabel)
-                            .foregroundStyle(Color.tronTextMuted)
-                        Text(record.record.date?.formatted(date: .abbreviated, time: .standard) ?? record.record.timestamp)
-                            .foregroundStyle(Color.tronTextMuted)
-                    }
-                    .font(TronTypography.bodySM)
-                    if let source = record.record.source {
-                        Text("Source: \(source)")
-                            .font(TronTypography.caption)
-                            .foregroundStyle(Color.tronTextMuted)
-                    }
-                    Text(record.record.message)
-                        .font(TronTypography.codeContent)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .textSelection(.enabled)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .tronGlassSurface(accent: record.record.accent, tintOpacity: 0.08)
-                }
-                .padding(18)
-            }
-            .tronScrollEdgeChrome()
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: "Log Entry", accent: record.record.accent) }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "checkmark").foregroundStyle(Color.tronEmerald)
-                    }
-                    .accessibilityLabel("Done")
-                }
-            }
-        }
-        .tronTopBlur(.sheet)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.hidden)
     }
 }
 

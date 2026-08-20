@@ -96,12 +96,11 @@ struct PackagesSettingsView: View {
                     }
                 }
 
-                Label("Agent packages and extensions run with your Mac user authority. Review their source before installing.", systemImage: "exclamationmark.shield")
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.09)
+                TronInfoCard(
+                    icon: "exclamationmark.shield",
+                    text: "Agent packages and extensions run with your Mac user authority. Review their source before installing.",
+                    accent: .tronAmber
+                )
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)

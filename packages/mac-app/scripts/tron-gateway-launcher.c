@@ -1,11 +1,13 @@
 #include <fcntl.h>
 #include <mach-o/dyld.h>
 #include <dirent.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #include <CommonCrypto/CommonDigest.h>
 
@@ -411,37 +413,46 @@ static int read_selection(const char *path, const char *channel, char *version, 
     return 0;
 }
 
-static int recover_pending_attempt(const char *home, const char *channel) {
+static int recover_pending_attempt_unlocked(const char *home, const char *channel) {
     char markerPath[PATH_MAX], marker[MAX_MANIFEST_BYTES + 1];
-    if (snprintf(markerPath, sizeof(markerPath), "%s/gateway/payloads/%s/pending-attempt.json", home, channel) >= (int)sizeof(markerPath)
-        || bounded_file(markerPath, marker, sizeof(marker)) != 0) return 0;
+    if (snprintf(markerPath, sizeof(markerPath), "%s/gateway/payloads/%s/pending-attempt.json", home, channel) >= (int)sizeof(markerPath)) return -1;
+    if (bounded_file(markerPath, marker, sizeof(marker)) != 0) {
+        return access(markerPath, F_OK) != 0 && errno == ENOENT ? 0 : -1;
+    }
     const char *keys[] = {"schema", "kind", "channel", "attempt", "version", "payloadFingerprint", "previousVersion", "previousFingerprint"};
     for (size_t index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index) {
-        if (json_key_count(marker, keys[index]) != 1) return 0;
+        if (json_key_count(marker, keys[index]) != 1) return -1;
     }
     char kind[64], markerChannel[64], attempt[32], candidateVersion[MAX_COMPONENT_BYTES], candidateFingerprint[65];
     char previousVersion[MAX_COMPONENT_BYTES], previousFingerprint[65];
     if (json_schema_one(marker) != 0 || json_string(marker, "kind", kind, sizeof(kind)) != 0 ||
         strcmp(kind, "tron-gateway-pending-attempt") != 0 || json_string(marker, "channel", markerChannel, sizeof(markerChannel)) != 0 ||
         strcmp(markerChannel, channel) != 0 || json_string(marker, "attempt", attempt, sizeof(attempt)) != 0 ||
-        (strcmp(attempt, "pending") != 0 && strcmp(attempt, "launched") != 0) ||
+        (strcmp(attempt, "pending") != 0 && strcmp(attempt, "launched") != 0 && strcmp(attempt, "committed") != 0) ||
         json_string(marker, "version", candidateVersion, sizeof(candidateVersion)) != 0 ||
         json_string(marker, "payloadFingerprint", candidateFingerprint, sizeof(candidateFingerprint)) != 0 ||
         json_string(marker, "previousVersion", previousVersion, sizeof(previousVersion)) != 0 ||
         json_string(marker, "previousFingerprint", previousFingerprint, sizeof(previousFingerprint)) != 0 ||
         !valid_component(candidateVersion, MAX_COMPONENT_BYTES - 1) || !valid_component(previousVersion, MAX_COMPONENT_BYTES - 1) ||
-        !valid_fingerprint(candidateFingerprint) || !valid_fingerprint(previousFingerprint)) return 0;
+        !valid_fingerprint(candidateFingerprint) || !valid_fingerprint(previousFingerprint)) return -1;
     char currentPath[PATH_MAX], currentVersion[MAX_COMPONENT_BYTES], currentFingerprint[65];
     if (snprintf(currentPath, sizeof(currentPath), "%s/gateway/payloads/%s/current.json", home, channel) >= (int)sizeof(currentPath)
         || read_selection(currentPath, channel, currentVersion, sizeof(currentVersion), currentFingerprint, sizeof(currentFingerprint)) != 0
-        || strcmp(currentVersion, candidateVersion) != 0 || strcmp(currentFingerprint, candidateFingerprint) != 0) return 0;
+        || strcmp(currentVersion, candidateVersion) != 0 || strcmp(currentFingerprint, candidateFingerprint) != 0) return -1;
+
+    // A committed candidate was authenticated and selected by the helper.
+    // Removing the marker under the shared lock makes relaunch idempotent.
+    if (strcmp(attempt, "committed") == 0) {
+        if (unlink(markerPath) != 0 && errno != ENOENT) return -1;
+        return 0;
+    }
 
     // The candidate gets exactly one launch. Atomically consume that attempt;
-    // only a subsequent launcher invocation while the helper has not cleared
+    // only a subsequent launcher invocation while the helper has not committed
     // the marker is evidence that startup failed and requires rollback.
     if (strcmp(attempt, "pending") == 0) {
         char temporary[PATH_MAX], launched[1024];
-        if (snprintf(temporary, sizeof(temporary), "%s.tmp-attempt-%ld", markerPath, (long)getpid()) >= (int)sizeof(temporary)) return 0;
+        if (snprintf(temporary, sizeof(temporary), "%s.tmp-attempt-%ld", markerPath, (long)getpid()) >= (int)sizeof(temporary)) return -1;
         int length = snprintf(launched, sizeof(launched),
             "{\"schema\":1,\"kind\":\"tron-gateway-pending-attempt\",\"channel\":\"%s\",\"attempt\":\"launched\",\"version\":\"%s\",\"payloadFingerprint\":\"%s\",\"previousVersion\":\"%s\",\"previousFingerprint\":\"%s\"}\n",
             channel, candidateVersion, candidateFingerprint, previousVersion, previousFingerprint);
@@ -449,25 +460,51 @@ static int recover_pending_attempt(const char *home, const char *channel) {
             ? open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600) : -1;
         int written = fd >= 0 && write(fd, launched, (size_t)length) == length && fsync(fd) == 0;
         if (fd >= 0 && close(fd) != 0) written = 0;
-        if (!written || rename(temporary, markerPath) != 0) { unlink(temporary); return 0; }
+        if (!written || rename(temporary, markerPath) != 0) { unlink(temporary); return -1; }
         return 0;
     }
 
     char previousPath[PATH_MAX], node[PATH_MAX], entrypoint[PATH_MAX], helper[PATH_MAX];
     PayloadIdentity previousIdentity;
     if (snprintf(previousPath, sizeof(previousPath), "%s/gateway/payloads/%s/versions/%s", home, channel, previousVersion) >= (int)sizeof(previousPath)
-        || validate_payload(previousPath, channel, previousVersion, previousFingerprint, node, entrypoint, helper, &previousIdentity) != 0) return 0;
+        || validate_payload(previousPath, channel, previousVersion, previousFingerprint, node, entrypoint, helper, &previousIdentity) != 0) return -1;
     char temporary[PATH_MAX];
-    if (snprintf(temporary, sizeof(temporary), "%s.tmp-recovery-%ld", currentPath, (long)getpid()) >= (int)sizeof(temporary)) return 0;
+    if (snprintf(temporary, sizeof(temporary), "%s.tmp-recovery-%ld", currentPath, (long)getpid()) >= (int)sizeof(temporary)) return -1;
     int fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0600);
-    if (fd < 0) return 0;
+    if (fd < 0) return -1;
     char selection[512];
     int length = snprintf(selection, sizeof(selection), "{\"schema\":1,\"kind\":\"tron-gateway-selection\",\"channel\":\"%s\",\"version\":\"%s\",\"payloadFingerprint\":\"%s\"}\n", channel, previousVersion, previousFingerprint);
     int result = length > 0 && length < (int)sizeof(selection) && write(fd, selection, (size_t)length) == length;
     if (close(fd) != 0) result = 0;
-    if (!result || rename(temporary, currentPath) != 0) { unlink(temporary); return 0; }
-    unlink(markerPath);
+    if (!result || rename(temporary, currentPath) != 0) { unlink(temporary); return -1; }
+    if (unlink(markerPath) != 0 && errno != ENOENT) return -1;
     return 1;
+}
+
+static int recover_pending_attempt(const char *home, const char *channel) {
+    char markerPath[PATH_MAX], lockPath[PATH_MAX];
+    if (snprintf(markerPath, sizeof(markerPath), "%s/gateway/payloads/%s/pending-attempt.json", home, channel) >= (int)sizeof(markerPath)
+        || access(markerPath, F_OK) != 0
+        || snprintf(lockPath, sizeof(lockPath), "%s.lock", markerPath) >= (int)sizeof(lockPath)) return 0;
+    for (int attempt = 0; attempt < 200; ++attempt) {
+        if (mkdir(lockPath, 0700) == 0) {
+            int result = recover_pending_attempt_unlocked(home, channel);
+            (void)rmdir(lockPath);
+            return result;
+        }
+        if (errno != EEXIST) return -1;
+        struct stat info;
+        if (stat(lockPath, &info) == 0 && time(NULL) - info.st_mtime > 30) {
+            (void)rmdir(lockPath);
+            continue;
+        }
+        struct timespec delay = { .tv_sec = 0, .tv_nsec = 25000000 };
+        (void)nanosleep(&delay, NULL);
+    }
+    // A pending candidate is not admissible without exclusive ownership of
+    // its attempt marker. Exit and let the supervisor retry; a later launch
+    // can remove a stale lock and run the existing rollback/commit recovery.
+    return -1;
 }
 
 static int external_payload(const char *home, const char *channel, char *node, char *entrypoint, char *helper, char *selectedRoot, PayloadIdentity *selectedIdentity) {
@@ -539,7 +576,10 @@ int main(int argc, char **argv) {
     char selectedPayloadRoot[PATH_MAX];
     const char *channel = getenv("TRON_GATEWAY_CHANNEL");
     if (channel == NULL || channel[0] == '\0') channel = "stable";
-    if (selected_home(home, sizeof(home)) == 0) (void)recover_pending_attempt(home, channel);
+    if (selected_home(home, sizeof(home)) == 0 && recover_pending_attempt(home, channel) < 0) {
+        fprintf(stderr, "Tron Gateway candidate attempt is locked; retrying without launching an uncommitted payload.\n");
+        return 75;
+    }
     int external = selected_home(home, sizeof(home)) == 0 && external_payload(home, channel, node, entrypoint, helper, selectedPayloadRoot, &selectedIdentity) == 0;
     if (!external && snprintf(selectedPayloadRoot, sizeof(selectedPayloadRoot), "%s", bundledRoot) >= (int)sizeof(selectedPayloadRoot)) return 70;
     if (!external && validate_payload(bundledRoot, NULL, NULL, NULL, node, entrypoint, helper, &selectedIdentity) != 0) {

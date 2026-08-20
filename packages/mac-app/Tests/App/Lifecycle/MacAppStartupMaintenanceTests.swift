@@ -18,6 +18,9 @@ struct MacAppStartupMaintenanceTests {
         if let recordedVersion {
             try? MacAppVersionMarkerStore.write(recordedVersion, at: marker)
         }
+        let helper = tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron")
+        try? FileManager.default.createDirectory(at: helper.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: helper.path, contents: Data("helper".utf8))
         return EnvironmentSetup(
             tronHome: tmp,
             applicationBundle: tmp.appendingPathComponent("Tron.app", isDirectory: true),
@@ -39,7 +42,7 @@ struct MacAppStartupMaintenanceTests {
             validateApplicationLocation: { nil },
             validateBundledHelper: { nil },
             pingServer: { _ in
-                pingResult ?? .success(ServerPingInfo(version: currentVersion.canonicalVersion))
+                pingResult ?? .success(ServerPingInfo(version: currentVersion.canonicalVersion, gatewayChannel: "stable"))
             },
             serverStartHealthCheckAttempts: 1,
             serverStartHealthCheckDelayNanoseconds: 0,
@@ -83,7 +86,7 @@ struct MacAppStartupMaintenanceTests {
         )
 
         #expect(result == .restarted(.ok))
-        #expect(mock.calls.map(\.kind) == [.load, .restart, .runtimeInfo])
+        #expect(mock.calls.map(\.kind) == [.load, .restart])
         #expect(setup.readRecordedAppVersion() == current)
     }
 
@@ -118,9 +121,16 @@ struct MacAppStartupMaintenanceTests {
         defer { TestTempDir.cleanup(tmp) }
         let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
         let mock = MockLaunchAgentManager()
+        let helper = tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron").path
+        let payload = tmp.appendingPathComponent("Tron.app/Contents/Resources/Gateway").path
         mock.runtimeInfo = LaunchAgentRuntimeInfo(
+            pid: 42,
             parentBundleIdentifier: MacRuntimeVariant.detect().expectedParentBundleIdentifier,
-            gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue
+            parentBundleVersion: current.buildNumber,
+            executablePath: helper,
+            processCommand: "\(payload)/runtime/node-arm64 \(payload)/app/dist/index.js --host tailscale --port 9847",
+            gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
+            gatewayChannelMarker: TronGatewayProfile.stable.channel
         )
         let setup = Self.makeSetup(
             tmp: tmp,
@@ -137,6 +147,40 @@ struct MacAppStartupMaintenanceTests {
 
         #expect(result == .skipped(.versionAlreadyRecorded))
         #expect(mock.calls.map(\.kind) == [.runtimeInfo])
+    }
+
+    @Test("same-version marker repairs a registration with the wrong channel marker")
+    func recordedVersionRepairsWrongChannelRegistration() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
+        let mock = MockLaunchAgentManager()
+        let helper = tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron").path
+        let payload = tmp.appendingPathComponent("Tron.app/Contents/Resources/Gateway").path
+        mock.runtimeInfo = LaunchAgentRuntimeInfo(
+            pid: 42,
+            parentBundleIdentifier: MacRuntimeVariant.detect().expectedParentBundleIdentifier,
+            parentBundleVersion: current.buildNumber,
+            executablePath: helper,
+            processCommand: "\(payload)/runtime/node-arm64 \(payload)/app/dist/index.js --host tailscale --port 9847",
+            gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
+            gatewayChannelMarker: "dev"
+        )
+        let setup = Self.makeSetup(
+            tmp: tmp,
+            currentVersion: current,
+            recordedVersion: current,
+            launchAgentManager: mock
+        )
+
+        let result = await MacAppStartupMaintenance.run(
+            setup: setup,
+            controller: nil,
+            context: .existingOnboardedLaunch
+        )
+
+        #expect(result == .restarted(.ok))
+        #expect(mock.calls.map(\.kind) == [.runtimeInfo, .load])
     }
 
     @Test("same-version marker does not suppress repair after an unhealthy probe")

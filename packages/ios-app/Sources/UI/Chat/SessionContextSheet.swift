@@ -354,7 +354,7 @@ struct SessionContextSheet: View {
                     .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(Color.tronTextPrimary)
                 Text("A fresh assistant response will provide the current token-window estimate.")
-                    .font(TronTypography.caption)
+                    .font(TronTypography.secondaryDescription)
                     .foregroundStyle(Color.tronTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -399,7 +399,7 @@ struct SessionContextSheet: View {
                 "Automatic Compaction: \(SessionCompactionControlPolicy.automaticStatus(snapshot.automaticCompactionEnabled))",
                 systemImage: "arrow.triangle.2.circlepath"
             )
-            .font(TronTypography.caption)
+            .font(TronTypography.secondaryDescription)
             .foregroundStyle(Color.tronTextSecondary)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
@@ -421,7 +421,7 @@ struct SessionContextSheet: View {
                 .multilineTextAlignment(.center)
                 .minimumScaleFactor(0.75)
             Text(label)
-                .font(TronTypography.caption)
+                .font(TronTypography.secondaryDescription)
                 .foregroundStyle(Color.tronTextSecondary)
         }
         .frame(maxWidth: .infinity, minHeight: 42)

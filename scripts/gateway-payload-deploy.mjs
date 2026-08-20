@@ -196,6 +196,19 @@ export async function payloadFingerprint(root) {
   return createHash("sha256").update(lines.join("")).digest("hex");
 }
 
+async function payloadSubtreeFingerprint(root, prefix) {
+  const files = (await regularFiles(root, prefix))
+    .sort((a, b) => Buffer.from(a.path).compare(Buffer.from(b.path)));
+  const lines = [];
+  for (const entry of files) {
+    const digest = entry.target !== undefined
+      ? createHash("sha256").update(`${entry.target}\n`).digest("hex")
+      : createHash("sha256").update(await readFile(join(root, entry.path))).digest("hex");
+    lines.push(`${entry.target !== undefined ? "symlink:" : ""}${digest}  ${entry.path}\n`);
+  }
+  return createHash("sha256").update(lines.join("")).digest("hex");
+}
+
 async function json(path, maximum = MAX_MANIFEST_BYTES) {
   const info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink()) throw new Error(`${path} is not a regular file`);
@@ -295,10 +308,9 @@ function store(home, channel) {
     pending: join(channelRoot, "pending-attempt.json"),
     config: join(home, "gateway", "update-config.json"),
     lock: join(channelRoot, ".update.lock"),
-    // Apply operations hold this distinct lock for their full lifetime. Stage
-    // and promote still take the channel lock internally, so an apply can
-    // compose them without recursively acquiring the same lock.
-    applyLock: join(channelRoot, ".apply.lock"),
+    // Complete apply, direct promotion, rollback, and handoff operations share
+    // one lock. Fine-grained publication still uses the store lock.
+    operationLock: join(channelRoot, ".operation.lock"),
   };
 }
 
@@ -369,25 +381,87 @@ async function atomicJson(path, value) {
   return atomicBytes(path, `${JSON.stringify(value)}\n`);
 }
 
+async function withPendingAttemptLock(paths, operation) {
+  const lock = `${paths.pending ?? join(paths.channelRoot, "pending-attempt.json")}.lock`;
+  const deadline = Date.now() + 5_000;
+  while (true) {
+    try { await mkdir(lock, { mode: 0o700 }); break; } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      const info = await lstat(lock).catch(() => undefined);
+      if (info?.isDirectory() && Date.now() - info.mtimeMs > 30_000) {
+        await rm(lock, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() >= deadline) throw new Error("timed out waiting for candidate attempt lock");
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 25));
+    }
+  }
+  try { return await operation(); } finally { await rm(lock, { recursive: true, force: true }); }
+}
+
 async function writePendingAttempt(paths, candidate, previous) {
   if (!previous) return;
   selection(previous, paths.channel);
-  await atomicJson(paths.pending ?? join(paths.channelRoot, "pending-attempt.json"), {
+  await withPendingAttemptLock(paths, () => atomicJson(paths.pending ?? join(paths.channelRoot, "pending-attempt.json"), {
     schema: SCHEMA, kind: "tron-gateway-pending-attempt", channel: paths.channel,
     attempt: "pending",
     version: candidate.version, payloadFingerprint: candidate.payloadFingerprint,
     previousVersion: previous.version, previousFingerprint: previous.payloadFingerprint,
+  }));
+}
+
+function matchingPendingAttempt(value, paths, identity) {
+  return value?.schema === SCHEMA && value.kind === "tron-gateway-pending-attempt"
+    && value.channel === paths.channel && value.version === identity.version
+    && value.payloadFingerprint === identity.payloadFingerprint;
+}
+
+async function commitPendingAttempt(paths, identity) {
+  return withPendingAttemptLock(paths, async () => {
+    const pending = paths.pending ?? join(paths.channelRoot, "pending-attempt.json");
+    const value = await readOptional(pending);
+    if (!matchingPendingAttempt(value, paths, identity)
+      || (value.attempt !== "pending" && value.attempt !== "launched")) {
+      throw new Error("candidate startup attempt marker is missing or inconsistent");
+    }
+    await atomicJson(pending, { ...value, attempt: "committed" });
   });
 }
 
-async function clearPendingAttempt(paths, identity) {
-  const pending = paths.pending ?? join(paths.channelRoot, "pending-attempt.json");
-  const value = await readOptional(pending);
-  if (!value) return;
-  if (value.schema !== SCHEMA || value.kind !== "tron-gateway-pending-attempt"
-    || value.channel !== paths.channel || value.version !== identity.version
-    || value.payloadFingerprint !== identity.payloadFingerprint) return;
-  await rm(pending, { force: true });
+export async function clearPendingAttempt(paths, identity, allowConsumedCommittedMarker = false) {
+  return withPendingAttemptLock(paths, async () => {
+    const pending = paths.pending ?? join(paths.channelRoot, "pending-attempt.json");
+    const value = await readOptional(pending);
+    // The launcher is the recovery consumer and may atomically remove a
+    // committed marker after it has admitted the candidate. The helper may
+    // accept that exact interleaving only after its caller has independently
+    // revalidated current.json and authenticated the live candidate identity.
+    if (value === undefined && allowConsumedCommittedMarker) return;
+    if (!matchingPendingAttempt(value, paths, identity) || value.attempt !== "committed") {
+      throw new Error("candidate startup commit marker is missing or inconsistent");
+    }
+    await rm(pending, { force: true });
+  });
+}
+
+export async function confirmAndClearPendingAttempt(
+  paths,
+  target,
+  manifest,
+  oldEpoch,
+  options,
+  readHealth = health,
+) {
+  const selected = await currentSelection(paths);
+  if (!selected || selected.version !== target.version || selected.payloadFingerprint !== target.payloadFingerprint) {
+    throw new Error("candidate selection changed before startup commit");
+  }
+  const confirmed = await readHealth(options.host, options.port, Math.min(2_000, options.timeoutMs));
+  if (!healthMatchesCandidate(confirmed, manifest, oldEpoch)) {
+    throw new Error("candidate identity changed before startup commit");
+  }
+  await clearPendingAttempt(paths, target, true);
+  return confirmed;
 }
 
 async function captureSelectionState(paths) {
@@ -416,13 +490,12 @@ async function restoreSelectionState(paths, state) {
 }
 
 async function makeMutable(root) {
-  const payloadRoot = await realpath(root);
   const visit = async (path) => {
     const info = await lstat(path);
-    if (info.isSymbolicLink()) {
-      await validatePayloadSymlink(payloadRoot, path, relative(payloadRoot, path));
-      return;
-    }
+    // Cleanup never follows links. Admission validates live payload links;
+    // malformed failed staging trees must still be removable without
+    // traversing a target outside the store.
+    if (info.isSymbolicLink()) return;
     if (info.isDirectory()) {
       await chmod(path, 0o755);
       for (const entry of await readdir(path, { withFileTypes: true })) await visit(join(path, entry.name));
@@ -489,15 +562,14 @@ async function withStoreLock(paths, operation) {
   try { return await operation(); } finally { await release(); }
 }
 
-async function withApplyLock(paths, operation) {
-  // This lock is intentionally separate from the channel publication lock:
-  // apply composes stage/build/promote, each of which takes withStoreLock.
+async function withOperationLock(paths, operation) {
   await assertStoreRoots(paths);
   await mkdir(paths.channelRoot, { recursive: true, mode: 0o700 });
   await assertStoreRoots(paths);
-  const handle = await open(paths.applyLock, "a", 0o600);
+  const lockPath = paths.operationLock ?? join(paths.channelRoot, ".operation.lock");
+  const handle = await open(lockPath, "a", 0o600);
   await handle.close();
-  const release = await lockfile.lock(paths.applyLock, {
+  const release = await lockfile.lock(lockPath, {
     realpath: false,
     retries: { retries: 100, minTimeout: 25, maxTimeout: 250 },
   });
@@ -592,18 +664,23 @@ function validCommandId(value) {
 export function validateApplyRequest(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Gateway update apply request is malformed");
   const keys = Object.keys(value);
-  if (keys.some((key) => !["channel", "mode", "candidateVersion", "commandId"].includes(key))) {
+  if (keys.some((key) => !["channel", "mode", "candidateVersion", "candidateFingerprint", "commandId"].includes(key))) {
     throw new Error("Gateway update apply request contains an unsupported field");
   }
   const channel = value.channel === undefined ? "stable" : value.channel;
   const mode = value.mode === undefined ? "auto" : value.mode;
   const candidateVersion = value.candidateVersion;
+  const candidateFingerprint = value.candidateFingerprint;
   const commandId = value.commandId;
   if (channel !== "stable" && channel !== "dev") throw new Error("invalid update channel");
   if (mode !== "source" && mode !== "artifact" && mode !== "auto") throw new Error("invalid update mode");
   if (candidateVersion !== undefined && !validComponent(candidateVersion, 128)) throw new Error("invalid candidate version");
+  if (candidateFingerprint !== undefined && !fingerprint(candidateFingerprint)) throw new Error("invalid candidate fingerprint");
+  if (mode === "artifact" && (candidateVersion === undefined || candidateFingerprint === undefined)) {
+    throw new Error("artifact update requires candidate version and fingerprint");
+  }
   if (!validCommandId(commandId)) throw new Error("invalid update command ID");
-  return { channel, mode, ...(candidateVersion === undefined ? {} : { candidateVersion }), commandId };
+  return { channel, mode, ...(candidateVersion === undefined ? {} : { candidateVersion }), ...(candidateFingerprint === undefined ? {} : { candidateFingerprint }), commandId };
 }
 
 function suffixedCommandId(value, suffix) {
@@ -614,14 +691,14 @@ function applyArguments() {
   const values = {};
   const names = new Map([
     ["--channel", "channel"], ["--mode", "mode"],
-    ["--candidate-version", "candidateVersion"], ["--command-id", "commandId"],
+    ["--candidate-version", "candidateVersion"], ["--candidate-fingerprint", "candidateFingerprint"], ["--command-id", "commandId"],
   ]);
   for (let index = 3; index < process.argv.length; index += 1) {
     const raw = process.argv[index];
     const equals = raw.indexOf("=");
     const flag = equals >= 0 ? raw.slice(0, equals) : raw;
     const name = names.get(flag);
-    if (!name) throw new Error("apply accepts only channel, mode, candidateVersion, and commandId");
+    if (!name) throw new Error("apply accepts only channel, mode, candidateVersion, candidateFingerprint, and commandId");
     const value = equals >= 0 ? raw.slice(equals + 1) : process.argv[++index];
     if (value === undefined || value.startsWith("--")) throw new Error(`missing value for ${flag}`);
     values[name] = value;
@@ -815,7 +892,7 @@ export async function cleanupPayloadVersions(paths, maximum = MAX_RETAINED_VERSI
   return withStoreLock(paths, () => cleanupPayloadVersionsUnlocked(paths, maximum));
 }
 
-export async function stagePayload({ home, channel, source, version, sourceRevision }) {
+export async function stagePayload({ home, channel, source, version, sourceRevision, markCandidate = true }) {
   const paths = store(home, channel);
   const sourceRoot = resolve(source);
   const sourceManifest = await validatePayload(sourceRoot, {}, true);
@@ -823,7 +900,8 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
   if (!validComponent(targetVersion, 128)) throw new Error("invalid payload version");
   const target = join(paths.versionsRoot, targetVersion);
   return withStoreLock(paths, async () => {
-    const markCandidate = async (result) => {
+    const markCandidateResult = async (result) => {
+      if (!markCandidate) return result;
       await writeState(paths, {
         state: "prepared", channel, version: result.manifest.version,
         payloadFingerprint: result.manifest.payloadFingerprint,
@@ -842,43 +920,51 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
     try {
       await access(target);
       const existing = await validatePayload(target, { channel, version: targetVersion }, true);
-      if (existing.payloadFingerprint === sourceManifest.payloadFingerprint) return markCandidate({ root: target, manifest: existing, reused: true });
+      if (existing.payloadFingerprint === sourceManifest.payloadFingerprint) return markCandidateResult({ root: target, manifest: existing, reused: true });
       throw new Error(`version ${targetVersion} already exists with a different payload`);
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
     }
     const temporary = join(paths.versionsRoot, `.staging-${targetVersion}-${process.pid}-${randomUUID()}`);
     await rm(temporary, { recursive: true, force: true });
-    await cp(sourceRoot, temporary, { recursive: true, errorOnExist: true, force: false });
-    await makeMutable(temporary);
-    const stagedFingerprint = await payloadFingerprint(temporary);
-    if (stagedFingerprint !== sourceManifest.payloadFingerprint) throw new Error("staged payload fingerprint changed during copy");
-    const manifest = {
-      ...sourceManifest,
-      channel,
-      version: targetVersion,
-      sourceRevision: sourceRevision ?? sourceManifest.sourceRevision ?? await gitRevision(),
-      runtimeEpoch: randomUUID(),
-      payloadFingerprint: stagedFingerprint,
-    };
-    payloadManifest(manifest, { channel, version: targetVersion });
-    await atomicJson(join(temporary, "manifest.json"), manifest);
-    await validatePayload(temporary, { channel, version: targetVersion, payloadFingerprint: stagedFingerprint }, true);
-    await makeImmutable(temporary);
-    try { await rename(temporary, target); } catch (error) {
+    try {
+      // Node otherwise rewrites relative links to absolute source paths. Keep
+      // package-manager links byte-for-byte relative so the immutable staged
+      // tree remains self-contained and passes the same containment proof.
+      await cp(sourceRoot, temporary, {
+        recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true,
+      });
+      await makeMutable(temporary);
+      const stagedFingerprint = await payloadFingerprint(temporary);
+      if (stagedFingerprint !== sourceManifest.payloadFingerprint) throw new Error("staged payload fingerprint changed during copy");
+      const manifest = {
+        ...sourceManifest,
+        channel,
+        version: targetVersion,
+        sourceRevision: sourceRevision ?? sourceManifest.sourceRevision ?? await gitRevision(),
+        runtimeEpoch: randomUUID(),
+        payloadFingerprint: stagedFingerprint,
+      };
+      payloadManifest(manifest, { channel, version: targetVersion });
+      await atomicJson(join(temporary, "manifest.json"), manifest);
+      await validatePayload(temporary, { channel, version: targetVersion, payloadFingerprint: stagedFingerprint }, true);
+      await makeImmutable(temporary);
+      await rename(temporary, target);
+      return markCandidateResult({ root: target, manifest, reused: false });
+    } catch (error) {
+      await makeMutable(temporary).catch(() => {});
       await rm(temporary, { recursive: true, force: true });
       throw error;
     }
-    return markCandidate({ root: target, manifest, reused: false });
   });
 }
 
-async function requestRestart({ host, port, token, timeoutMs, commandId }) {
+async function authenticatedRequest({ host, port, token, timeoutMs, method, params = {} }) {
   const ws = new WebSocket(`ws://${host.includes(":") ? `[${host}]` : host}:${port}/v1/socket`, {
     headers: { authorization: `Bearer ${token}` }, perMessageDeflate: false,
   });
-  const response = await new Promise((resolveResponse, reject) => {
-    const timer = setTimeout(() => { ws.terminate(); reject(new Error("gateway restart request timed out")); }, timeoutMs);
+  return new Promise((resolveResponse, reject) => {
+    const timer = setTimeout(() => { ws.terminate(); reject(new Error(`Gateway ${method} request timed out`)); }, timeoutMs);
     ws.once("error", (error) => { clearTimeout(timer); reject(error); });
     const requestId = randomUUID();
     ws.once("open", () => ws.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, clientId: randomUUID() })));
@@ -887,22 +973,22 @@ async function requestRestart({ host, port, token, timeoutMs, commandId }) {
       try { frame = JSON.parse(raw.toString()); } catch { return; }
       if (frame.type === "hello") {
         if (!protocolHandshakeCompatible(frame)) {
-          clearTimeout(timer);
-          ws.terminate();
-          reject(new Error("Gateway protocol handshake is not compatible"));
-          return;
+          clearTimeout(timer); ws.terminate(); reject(new Error("Gateway protocol handshake is not compatible")); return;
         }
-        ws.send(JSON.stringify({ type: "request", id: requestId, method: "gateway.restart", params: { commandId } }));
+        ws.send(JSON.stringify({ type: "request", id: requestId, method, params }));
         return;
       }
       if (frame.type !== "response" || frame.id !== requestId) return;
       clearTimeout(timer);
       if (frame.ok === true) resolveResponse(frame.result ?? null);
-      else reject(new Error(frame.error?.message ?? "authenticated gateway.restart failed"));
+      else reject(new Error(frame.error?.message ?? `authenticated ${method} failed`));
       ws.close();
     });
   });
-  return response;
+}
+
+async function requestRestart({ host, port, token, timeoutMs, commandId }) {
+  return authenticatedRequest({ host, port, token, timeoutMs, method: "gateway.restart", params: { commandId } });
 }
 
 async function health(host, port, timeoutMs) {
@@ -952,19 +1038,123 @@ export async function preflightPayload(root, runCommand = runBounded, timeoutMs 
   return manifest;
 }
 
-async function waitHealth(options, expected, oldEpoch) {
+export function healthMatchesCandidate(value, expected, oldEpoch, requireEpochChange = true) {
+  return value.buildFingerprint === expected.payloadFingerprint
+    && value.sourceRevision === expected.sourceRevision
+    && value.runtimeEpoch === expected.runtimeEpoch
+    && (!requireEpochChange || oldEpoch === undefined || value.runtimeEpoch !== oldEpoch);
+}
+
+async function waitHealth(options, expected, oldEpoch, requireEpochChange = true) {
   const deadline = Date.now() + options.timeoutMs;
   let last;
   while (Date.now() < deadline) {
     try {
       const value = await health(options.host, options.port, Math.min(2_000, options.timeoutMs));
       last = value;
-      if (value.buildFingerprint === expected.payloadFingerprint && value.sourceRevision === expected.sourceRevision
-        && value.runtimeEpoch !== oldEpoch) return value;
+      if (healthMatchesCandidate(value, expected, oldEpoch, requireEpochChange)) return value;
     } catch { /* restart window */ }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
   }
   throw new Error(`Gateway did not become ready with the expected payload identity${last ? ` (observed ${JSON.stringify(last)})` : ""}`);
+}
+
+export async function captureLocalProcess(pid, runCommand = runBounded) {
+  if (!Number.isSafeInteger(pid) || pid < 1) throw new Error("invalid Gateway PID");
+  let startIdentity;
+  try {
+    startIdentity = (await runCommand("/bin/ps", ["-o", "lstart=", "-p", String(pid)], {
+      timeoutMs: 2_000, maxOutputBytes: 4 * 1024,
+    })).output.trim();
+  } catch {
+    return undefined;
+  }
+  if (!startIdentity || Buffer.byteLength(startIdentity) > 512) return undefined;
+  return { pid, startIdentity };
+}
+
+export async function captureLocalListenerProcess(port, runCommand = runBounded) {
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid Gateway port");
+  let output;
+  try {
+    output = (await runCommand("/usr/sbin/lsof", ["-nP", "-Fp", `-iTCP:${port}`, "-sTCP:LISTEN"], {
+      timeoutMs: 2_000, maxOutputBytes: 8 * 1024,
+    })).output;
+  } catch {
+    return undefined;
+  }
+  const pids = [...new Set(output.split(/\r?\n/u)
+    .filter((line) => /^p[1-9][0-9]*$/u.test(line))
+    .map((line) => Number(line.slice(1))))];
+  if (pids.length === 0) return undefined;
+  if (pids.length !== 1) throw new Error(`Gateway port ${port} has multiple listeners`);
+  return captureLocalProcess(pids[0], runCommand);
+}
+
+/** A planned restart may drain accepted work without a deadline. Health,
+ * listener, and port state are never transition evidence after capture: the
+ * candidate startup deadline begins only after the exact old PID/start pair is
+ * gone or replaced. */
+export async function waitForDrainCompletion(
+  oldProcess,
+  readExactProcess,
+  sleep = (milliseconds) => new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds)),
+) {
+  if (!oldProcess || !Number.isSafeInteger(oldProcess.pid) || oldProcess.pid < 1 || !oldProcess.startIdentity) {
+    throw new Error("old Gateway listener process identity is unavailable");
+  }
+  while (true) {
+    const current = await readExactProcess(oldProcess.pid);
+    if (!current || current.pid !== oldProcess.pid || current.startIdentity !== oldProcess.startIdentity) return current;
+    await sleep(500);
+  }
+}
+
+async function captureRestartBoundary(port) {
+  const processIdentity = await captureLocalListenerProcess(port);
+  if (!processIdentity) throw new Error("Gateway listener process identity is unavailable before restart");
+  return processIdentity;
+}
+
+function requireAuthenticatedRuntimeInfo(value, channel) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || value.gatewayChannel !== channel
+    || !fingerprint(value.buildFingerprint)
+    || typeof value.sourceRevision !== "string" || Buffer.byteLength(value.sourceRevision) === 0
+    || Buffer.byteLength(value.sourceRevision) > 256 || /[\u0000-\u001f\u007f]/u.test(value.sourceRevision)
+    || !validComponent(value.runtimeEpoch, 128)) {
+    throw new Error(`authenticated ${channel} Gateway identity is incomplete or has the wrong channel`);
+  }
+  return value;
+}
+
+async function captureAuthenticatedRestartBoundary({ host, port, token, timeoutMs, channel }) {
+  const info = requireAuthenticatedRuntimeInfo(
+    await authenticatedRequest({ host, port, token, timeoutMs, method: "system.info" }),
+    channel,
+  );
+  const process = await captureRestartBoundary(port);
+  return { info, process };
+}
+
+async function awaitLocalRestartTransition(_port, processIdentity) {
+  return waitForDrainCompletion(processIdentity, (pid) => captureLocalProcess(pid));
+}
+
+export async function verifyIdempotentPromotion({ paths, channel, manifest, current, requestInfo }) {
+  if (current?.version !== manifest.version || current.payloadFingerprint !== manifest.payloadFingerprint) return undefined;
+  const [stateValue, pending] = await Promise.all([
+    readOptional(paths.state),
+    readOptional(paths.pending ?? join(paths.channelRoot, "pending-attempt.json")),
+  ]);
+  if (pending !== undefined || !stateValue || typeof stateValue !== "object" || Array.isArray(stateValue)
+    || stateValue.state !== "ready" || stateValue.channel !== channel
+    || stateValue.version !== manifest.version || stateValue.payloadFingerprint !== manifest.payloadFingerprint
+    || stateValue.sourceRevision !== manifest.sourceRevision || stateValue.runtimeEpoch !== manifest.runtimeEpoch) return undefined;
+  if (stateValue.candidateOrigin !== undefined) validateDebugCandidateState(stateValue, manifest);
+  const info = requireAuthenticatedRuntimeInfo(await requestInfo(), channel);
+  if (!healthMatchesCandidate(info, manifest, undefined, false)) return undefined;
+  return { state: "ready", manifest, health: info, idempotent: true };
 }
 
 async function promote({ paths, channel, version, expectedFingerprint, host, port, token, timeoutMs, commandId }) {
@@ -974,6 +1164,11 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
     if (expectedFingerprint && expectedFingerprint !== manifest.payloadFingerprint) throw new Error("requested fingerprint does not match staged manifest");
     const priorState = await captureSelectionState(paths);
     const prior = priorState.current === undefined ? undefined : selection(JSON.parse(priorState.current), channel);
+    const idempotent = await verifyIdempotentPromotion({
+      paths, channel, manifest, current: prior,
+      requestInfo: () => authenticatedRequest({ host, port, token, timeoutMs, method: "system.info" }),
+    });
+    if (idempotent) return idempotent;
     // If current already names the candidate, publication happened before a
     // crash and `previous` is the real rollback pointer. Otherwise recovery
     // must target the selection that was current before this promotion.
@@ -987,13 +1182,23 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
         channel, version: recoverySelectionValue.version, payloadFingerprint: recoverySelectionValue.payloadFingerprint,
       }, true);
     }
-    const before = await health(host, port, timeoutMs);
+    const boundary = await captureAuthenticatedRestartBoundary({ host, port, token, timeoutMs, channel });
+    const before = boundary.info;
+    const oldProcess = boundary.process;
     await preflightPayload(targetRoot, runBounded, Math.min(timeoutMs, 30_000));
     const target = { schema: SCHEMA, kind: SELECTION_KIND, channel, version, payloadFingerprint: manifest.payloadFingerprint };
+    const priorDeploymentState = await readOptional(paths.state);
+    const debugProvenance = priorDeploymentState?.candidateOrigin === "debug"
+      ? (validateDebugCandidateState(priorDeploymentState, manifest), {
+          candidateOrigin: "debug",
+          debugOriginIdentity: priorDeploymentState.debugOriginIdentity,
+        })
+      : {};
     const stateBase = {
       channel, version, payloadFingerprint: manifest.payloadFingerprint, sourceRevision: manifest.sourceRevision,
       runtimeEpoch: manifest.runtimeEpoch, commandId: commandId ?? `gateway-payload-${randomUUID()}`,
       previousSelection: prior,
+      ...debugProvenance,
       candidateIdentity: {
         version: manifest.version, gatewayVersion: manifest.gatewayVersion,
         sourceRevision: manifest.sourceRevision, runtimeEpoch: manifest.runtimeEpoch,
@@ -1002,22 +1207,6 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
     };
     await writeState(paths, { ...stateBase, state: "prepared" });
     const unchanged = prior?.version === version && prior.payloadFingerprint === manifest.payloadFingerprint;
-    if (before.buildFingerprint === manifest.payloadFingerprint && before.sourceRevision === manifest.sourceRevision) {
-      if (!unchanged) {
-        try {
-          await publishSelection(paths, target);
-          await writeState(paths, { ...stateBase, state: "ready" });
-        } catch (error) {
-          try { await restoreSelectionState(paths, priorState); } catch (restoreError) {
-            error.message += `; selection restoration failed: ${restoreError.message}`;
-          }
-          throw error;
-        }
-      } else {
-        await writeState(paths, { ...stateBase, state: "ready" });
-      }
-      return { state: "ready", manifest, health: before, unchanged };
-    }
 
     // A crash can occur after current.json is published but before the new
     // process is healthy. In that case current already names the candidate;
@@ -1033,22 +1222,37 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
       }
       await writeState(paths, { ...stateBase, state: deploymentTransition("prepared", "published") });
       await requestRestart({ host, port, token, timeoutMs, commandId: stateBase.commandId });
-      await writeState(paths, { ...stateBase, state: deploymentTransition("published", "restartRequested") });
+      await writeState(paths, { ...stateBase, state: "draining" });
+      await writeProgress(paths, "draining", stateBase.commandId);
+      await awaitLocalRestartTransition(port, oldProcess);
       const ready = await waitHealth({ host, port, timeoutMs }, manifest, before.runtimeEpoch);
+      // Commit startup before publishing success. A concurrent launcher sees
+      // committed and must preserve the candidate rather than crash-rollback.
+      if (prior) await commitPendingAttempt(paths, target);
+      const confirmed = prior
+        ? await confirmAndClearPendingAttempt(paths, target, manifest, before.runtimeEpoch, { host, port, timeoutMs })
+        : await health(host, port, Math.min(2_000, timeoutMs));
+      if (!prior && !healthMatchesCandidate(confirmed, manifest, before.runtimeEpoch)) {
+        throw new Error("candidate identity changed before startup commit");
+      }
       await writeState(paths, { ...stateBase, state: "ready" });
-      await clearPendingAttempt(paths, target);
-      return { state: "ready", manifest, health: ready };
+      return { state: "ready", manifest, health: confirmed };
     } catch (error) {
       if (published) {
         try {
           if (unchanged) await rollbackSelection(paths);
           else await restoreSelectionState(paths, priorState);
           await writeState(paths, { ...stateBase, state: deploymentTransition("published", "failed"), error: String(error?.message ?? error) });
+          const recoveryBoundary = await captureAuthenticatedRestartBoundary({ host, port, token, timeoutMs, channel });
+          const recoveryBefore = recoveryBoundary.info;
+          const recoveryProcess = recoveryBoundary.process;
           await requestRestart({ host, port, token, timeoutMs, commandId: suffixedCommandId(stateBase.commandId, "-rollback") });
+          await awaitLocalRestartTransition(port, recoveryProcess);
           const recoveryTarget = recoveryManifest ?? {
             payloadFingerprint: before.buildFingerprint, sourceRevision: before.sourceRevision,
+            runtimeEpoch: before.runtimeEpoch,
           };
-          await waitHealth({ host, port, timeoutMs }, recoveryTarget, before.runtimeEpoch);
+          await waitHealth({ host, port, timeoutMs }, recoveryTarget, recoveryBefore.runtimeEpoch, false);
           await writeState(paths, { ...stateBase, state: deploymentTransition("failed", "rollbackRequested") });
           await writeState(paths, { ...stateBase, state: deploymentTransition("rollback-requested", "rolledBack") });
           // Preserve terminal automatic rollback through the outer apply
@@ -1067,23 +1271,90 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
   });
 }
 
-async function stagedCandidate(paths, requestedVersion) {
+export async function selectInitialDevCandidate({ home, version, expectedFingerprint }) {
+  const paths = store(resolve(home), "dev");
+  return withStoreLock(paths, async () => {
+    const prior = await currentSelection(paths);
+    if (prior && process.env.TRON_DEV_STOPPED !== "1") throw new Error("changing a selected dev payload requires authenticated promote or a proven stopped supervisor");
+    const root = join(paths.versionsRoot, version);
+    const manifest = await validatePayload(root, { channel: "dev", version, payloadFingerprint: expectedFingerprint }, true);
+    if (prior) await atomicJson(paths.previous, prior);
+    await atomicJson(paths.current, {
+      schema: SCHEMA, kind: SELECTION_KIND, channel: "dev",
+      version: manifest.version, payloadFingerprint: manifest.payloadFingerprint,
+    });
+    await writeState(paths, {
+      state: "ready", channel: "dev", version: manifest.version,
+      payloadFingerprint: manifest.payloadFingerprint, sourceRevision: manifest.sourceRevision,
+      runtimeEpoch: manifest.runtimeEpoch,
+    });
+    return manifest;
+  });
+}
+
+export function validateDebugCandidateState(value, candidateManifest) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.candidateOrigin !== "debug") {
+    throw new Error("Debug candidate provenance is missing");
+  }
+  const candidate = value.candidateIdentity;
+  const origin = value.debugOriginIdentity;
+  const candidateFields = ["version", "gatewayVersion", "sourceRevision", "runtimeEpoch", "payloadFingerprint"];
+  const originFields = ["version", "payloadFingerprint", "testedPayloadFingerprint", "sourceRevision", "testedRuntimeEpoch", "candidateRuntimeEpoch"];
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)
+    || Object.keys(candidate).some((key) => !candidateFields.includes(key))
+    || candidate.version !== candidateManifest.version
+    || candidate.gatewayVersion !== candidateManifest.gatewayVersion
+    || candidate.sourceRevision !== candidateManifest.sourceRevision
+    || candidate.runtimeEpoch !== candidateManifest.runtimeEpoch
+    || candidate.payloadFingerprint !== candidateManifest.payloadFingerprint
+    || !origin || typeof origin !== "object" || Array.isArray(origin)
+    || Object.keys(origin).some((key) => !originFields.includes(key))
+    || origin.version !== candidateManifest.version
+    || origin.payloadFingerprint !== candidateManifest.payloadFingerprint
+    || !fingerprint(origin.testedPayloadFingerprint)
+    || origin.sourceRevision !== candidateManifest.sourceRevision
+    || !validComponent(origin.testedRuntimeEpoch, 128)
+    || origin.candidateRuntimeEpoch !== candidateManifest.runtimeEpoch) {
+    throw new Error("Debug candidate provenance does not match the verified candidate");
+  }
+  return true;
+}
+
+export async function stagedCandidate(paths, requestedVersion, expectedFingerprint) {
+  const stateValue = await readOptional(paths.state);
+  const raw = stateValue && typeof stateValue === "object" && !Array.isArray(stateValue) ? stateValue : undefined;
+  const declaresDebugOrigin = raw?.candidateOrigin === "debug";
+  if (raw?.candidateOrigin !== undefined && !declaresDebugOrigin) throw new Error("candidate origin is invalid");
+
   let candidate = requestedVersion;
   if (candidate === undefined) {
-    const stateValue = await readOptional(paths.state);
-    if (!stateValue || typeof stateValue !== "object" || Array.isArray(stateValue)) return undefined;
-    const raw = stateValue;
-    candidate = raw.candidateIdentity && typeof raw.candidateIdentity === "object"
-      ? raw.candidateIdentity.version : raw.candidateVersion;
+    // Automatic/source updates must never infer a Debug-origin artifact from
+    // mutable deployment state. Debug promotion is admitted only by an exact
+    // version+fingerprint request from the verified control-plane projection.
+    if (declaresDebugOrigin) return undefined;
+    candidate = raw?.candidateIdentity && typeof raw.candidateIdentity === "object"
+      ? raw.candidateIdentity.version : raw?.candidateVersion;
   }
   if (!validComponent(candidate, 128)) return undefined;
   try {
-    await validatePayload(join(paths.versionsRoot, candidate), { channel: paths.channel, version: candidate }, true);
+    const manifest = await validatePayload(join(paths.versionsRoot, candidate), {
+      channel: paths.channel, version: candidate,
+      ...(expectedFingerprint === undefined ? {} : { payloadFingerprint: expectedFingerprint }),
+    }, true);
+    if (declaresDebugOrigin) {
+      if (requestedVersion === undefined || !fingerprint(expectedFingerprint)) {
+        throw new Error("Debug candidate promotion requires an exact version and fingerprint");
+      }
+      validateDebugCandidateState(raw, manifest);
+    }
     return candidate;
-  } catch { return undefined; }
+  } catch (error) {
+    if (declaresDebugOrigin) throw error;
+    return undefined;
+  }
 }
 
-async function currentPayload(paths) {
+async function currentPayload(paths, bundledCandidatesOverride) {
   try {
     const selected = await currentSelection(paths);
     if (selected) {
@@ -1094,7 +1365,7 @@ async function currentPayload(paths) {
       return { root, manifest };
     }
   } catch { /* fall through to the validated bundled payload */ }
-  const bundledCandidates = [
+  const bundledCandidates = bundledCandidatesOverride ?? [
     resolve(scriptDirectory, "..", ".."),
     resolve(scriptDirectory, "../packages/mac-app/Sources/Resources/Gateway"),
   ];
@@ -1141,7 +1412,9 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
     const temporaryParent = await mkdtemp(join(tmpdir(), "tron-gateway-source-staging-"));
     const temporary = join(temporaryParent, "payload");
     try {
-      await cp(active.root, temporary, { recursive: true, errorOnExist: true, force: false });
+      await cp(active.root, temporary, {
+        recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true,
+      });
       await makeMutable(temporary);
       await rm(join(temporary, "app", "dist"), { recursive: true, force: true });
       await verifiedSourceCompilerOutput(compilerOutput);
@@ -1176,7 +1449,7 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
       // hold the channel lock. Publication is one serialized transaction:
       // immutable finalization, rename, candidate state, and retention all
       // observe the same channel snapshot. applyPayload holds only the
-      // distinct apply lock, so this cannot recursively deadlock it.
+      // distinct operation lock, so this cannot recursively deadlock it.
       return await withStoreLock(paths, async () => {
         try {
           await access(target);
@@ -1186,7 +1459,9 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
         }
         privateStaging = join(paths.versionsRoot, `.source-staging-${version}-${process.pid}-${randomUUID()}`);
         await mkdir(paths.versionsRoot, { recursive: true, mode: 0o700 });
-        await cp(temporary, privateStaging, { recursive: true, errorOnExist: true, force: false });
+        await cp(temporary, privateStaging, {
+          recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true,
+        });
         await makeImmutable(privateStaging);
         try { await rename(privateStaging, target); } catch (error) {
           if (error?.code === "EEXIST") throw new Error(`version ${version} already exists`);
@@ -1214,8 +1489,120 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
   }
 }
 
+function authenticatedIdentity(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || value.gatewayChannel !== "dev"
+    || !fingerprint(value.buildFingerprint)
+    || typeof value.sourceRevision !== "string" || Buffer.byteLength(value.sourceRevision) === 0
+    || Buffer.byteLength(value.sourceRevision) > 256 || /[\u0000-\u001f\u007f]/u.test(value.sourceRevision)
+    || !validComponent(value.runtimeEpoch, 128)) {
+    throw new Error("authenticated Debug system.info identity is incomplete or has the wrong channel");
+  }
+  return {
+    payloadFingerprint: value.buildFingerprint,
+    sourceRevision: value.sourceRevision,
+    runtimeEpoch: value.runtimeEpoch,
+  };
+}
+
+export function proveDebugHandoffIdentity(before, after, manifest) {
+  const first = authenticatedIdentity(before);
+  const second = authenticatedIdentity(after);
+  if (first.payloadFingerprint !== manifest.payloadFingerprint
+    || first.sourceRevision !== manifest.sourceRevision
+    || first.runtimeEpoch !== manifest.runtimeEpoch) {
+    throw new Error("running Debug identity does not match the selected immutable payload");
+  }
+  if (second.payloadFingerprint !== first.payloadFingerprint
+    || second.sourceRevision !== first.sourceRevision
+    || second.runtimeEpoch !== first.runtimeEpoch) {
+    throw new Error("Debug Gateway changed while its candidate was copied");
+  }
+  return first;
+}
+
+/** Copy the exact selected and authenticated Debug payload into Stable as an
+ * inactive candidate. Stable current.json and the 9847 process are untouched. */
+export async function handoffDebugCandidate({
+  devHome, stableHome, stableBundledRoot, host, port = 9848, token,
+  timeoutMs = 10_000, requestInfo, preflight = preflightPayload,
+}) {
+  if (!isAbsolute(stableBundledRoot ?? "")) throw new Error("Debug handoff requires the installed Stable bundled payload root");
+  const devPaths = store(resolve(devHome), "dev");
+  const stablePaths = store(resolve(stableHome), "stable");
+  return withOperationLock(devPaths, () => withOperationLock(stablePaths, async () => {
+    const selected = await currentSelection(devPaths);
+    if (!selected) throw new Error("Debug handoff requires a selected immutable dev payload");
+    const devRoot = join(devPaths.versionsRoot, selected.version);
+    const devManifest = await validatePayload(devRoot, {
+      channel: "dev", version: selected.version, payloadFingerprint: selected.payloadFingerprint,
+    }, true);
+    await preflight(devRoot);
+    const readInfo = requestInfo ?? (() => authenticatedRequest({ host, port, token, timeoutMs, method: "system.info" }));
+    const beforeRaw = await readInfo();
+    const testedIdentity = proveDebugHandoffIdentity(beforeRaw, beforeRaw, devManifest);
+    const stableActive = await currentPayload(stablePaths, [resolve(stableBundledRoot)]);
+    if (stableActive.manifest.nodeVersion !== devManifest.nodeVersion
+      || await payloadSubtreeFingerprint(stableActive.root, "runtime") !== await payloadSubtreeFingerprint(devRoot, "runtime")) {
+      throw new Error("Debug Node runtime differs from the installed Stable runtime; replace Tron.app manually before promotion");
+    }
+    try {
+      // Copy and validate first, but do not advertise a candidate until the
+      // same authenticated Debug runtime proves it did not change mid-copy.
+      const staged = await stagePayload({
+        home: stablePaths.home, channel: "stable", source: devRoot,
+        version: devManifest.version, sourceRevision: devManifest.sourceRevision,
+        markCandidate: false,
+      });
+      const afterRaw = await readInfo();
+      proveDebugHandoffIdentity(beforeRaw, afterRaw, devManifest);
+      await withStoreLock(stablePaths, async () => {
+        await validatePayload(staged.root, {
+          channel: "stable", version: staged.manifest.version,
+          payloadFingerprint: staged.manifest.payloadFingerprint,
+        }, true);
+        await writeState(stablePaths, {
+          state: "prepared", channel: "stable", candidateOrigin: "debug",
+          version: staged.manifest.version, payloadFingerprint: staged.manifest.payloadFingerprint,
+          sourceRevision: staged.manifest.sourceRevision, runtimeEpoch: staged.manifest.runtimeEpoch,
+          debugOriginIdentity: {
+            version: staged.manifest.version,
+            payloadFingerprint: staged.manifest.payloadFingerprint,
+            testedPayloadFingerprint: testedIdentity.payloadFingerprint,
+            sourceRevision: testedIdentity.sourceRevision,
+            testedRuntimeEpoch: testedIdentity.runtimeEpoch,
+            candidateRuntimeEpoch: staged.manifest.runtimeEpoch,
+          },
+          candidateIdentity: {
+            version: staged.manifest.version, gatewayVersion: staged.manifest.gatewayVersion,
+            sourceRevision: staged.manifest.sourceRevision, runtimeEpoch: staged.manifest.runtimeEpoch,
+            payloadFingerprint: staged.manifest.payloadFingerprint,
+          },
+        });
+        await cleanupPayloadVersionsUnlocked(stablePaths);
+      });
+      return {
+        version: staged.manifest.version, payloadFingerprint: staged.manifest.payloadFingerprint,
+        sourceRevision: staged.manifest.sourceRevision,
+        debugOriginIdentity: {
+          version: staged.manifest.version,
+          payloadFingerprint: staged.manifest.payloadFingerprint,
+          testedPayloadFingerprint: testedIdentity.payloadFingerprint,
+          sourceRevision: testedIdentity.sourceRevision,
+          testedRuntimeEpoch: testedIdentity.runtimeEpoch,
+          candidateRuntimeEpoch: staged.manifest.runtimeEpoch,
+        },
+      };
+    } catch (error) {
+      // A failed post-copy proof must not publish a candidate marker. Existing
+      // stable selection and process are deliberately untouched.
+      throw error;
+    }
+  }));
+}
+
 /**
- * LaunchAgent-only update entrypoint. It deliberately has no source/path,
+ * Supervised-runtime update entrypoint. It deliberately has no source/path,
  * executable, host, or port arguments. Source and artifact roots are read only
  * from the validated home projection; request parameters select policy only.
  */
@@ -1223,7 +1610,7 @@ async function applyPayloadInternal(request) {
   const value = validateApplyRequest(request);
   const home = homeForChannel(value.channel, process.env.TRON_DATA_DIR);
   const paths = store(home, value.channel);
-  let version = value.mode === "source" ? undefined : await stagedCandidate(paths, value.candidateVersion);
+  let version = value.mode === "source" ? undefined : await stagedCandidate(paths, value.candidateVersion, value.candidateFingerprint);
   let selectedMode = "artifact";
   const config = version === undefined || value.mode === "source" ? await readUpdateConfig(paths) : undefined;
   if (!version && value.mode !== "source") {
@@ -1258,8 +1645,8 @@ async function applyPayloadInternal(request) {
   let result;
   try {
     result = await promote({
-      paths, channel: value.channel, version, host, port, token, timeoutMs,
-      commandId: value.commandId,
+      paths, channel: value.channel, version, expectedFingerprint: value.candidateFingerprint,
+      host, port, token, timeoutMs, commandId: value.commandId,
     });
   } catch (error) {
     if (error?.automaticRollbackCompleted === true) {
@@ -1278,9 +1665,11 @@ export async function applyPayload(request) {
   if (process.env.TRON_GATEWAY_SUPERVISED !== "1") {
     throw new Error("Gateway updates require the supervised LaunchAgent runtime");
   }
+  const runtimeChannel = process.env.TRON_GATEWAY_CHANNEL;
+  if (runtimeChannel !== value.channel) throw new Error(`Gateway ${runtimeChannel ?? "unknown"} runtime cannot update ${value.channel}`);
   const home = homeForChannel(value.channel, process.env.TRON_DATA_DIR);
   const paths = store(home, value.channel);
-  return withApplyLock(paths, async () => {
+  return withOperationLock(paths, async () => {
     await writeProgress(paths, "starting", value.commandId);
     try {
       return await applyPayloadInternal(value);
@@ -1306,19 +1695,29 @@ export async function loadRollbackTarget(paths) {
   const manifest = await validatePayload(join(paths.versionsRoot, priorSelection.version), {
     channel: paths.channel, version: priorSelection.version, payloadFingerprint: priorSelection.payloadFingerprint,
   }, true);
-  return { priorState, priorSelection, manifest };
+  const currentSelectionValue = priorState.current === undefined ? undefined : selection(JSON.parse(priorState.current), paths.channel);
+  const currentManifest = currentSelectionValue === undefined ? undefined : await validatePayload(
+    join(paths.versionsRoot, currentSelectionValue.version),
+    { channel: paths.channel, version: currentSelectionValue.version, payloadFingerprint: currentSelectionValue.payloadFingerprint }, true,
+  );
+  return { priorState, priorSelection, manifest, currentManifest };
 }
 
 async function rollback({ paths, host, port, token, timeoutMs, commandId }) {
   return withStoreLock(paths, async () => {
-    const { priorState, manifest: target } = await loadRollbackTarget(paths);
-    const before = await health(host, port, timeoutMs);
+    const { priorState, manifest: target, currentManifest } = await loadRollbackTarget(paths);
+    const boundary = await captureAuthenticatedRestartBoundary({
+      host, port, token, timeoutMs, channel: paths.channel,
+    });
+    const before = boundary.info;
+    const oldProcess = boundary.process;
     let switched = false;
     const restartCommandId = commandId ?? `gateway-payload-rollback-${randomUUID()}`;
     try {
       await rollbackSelection(paths);
       switched = true;
       await requestRestart({ host, port, token, timeoutMs, commandId: restartCommandId });
+      await awaitLocalRestartTransition(port, oldProcess);
       const ready = await waitHealth({ host, port, timeoutMs }, target, before.runtimeEpoch);
       await writeState(paths, {
         state: "rolled-back", channel: paths.channel, version: target.version,
@@ -1328,8 +1727,20 @@ async function rollback({ paths, host, port, token, timeoutMs, commandId }) {
       return { state: "rolled-back", manifest: target, health: ready };
     } catch (error) {
       if (switched) {
-        try { await restoreSelectionState(paths, priorState); } catch (restoreError) {
-          error.message += `; rollback selection restoration failed: ${restoreError.message}`;
+        try {
+          await restoreSelectionState(paths, priorState);
+          if (currentManifest) {
+            const compensationBoundary = await captureAuthenticatedRestartBoundary({
+              host, port, token, timeoutMs, channel: paths.channel,
+            });
+            const compensationBefore = compensationBoundary.info;
+            const compensationProcess = compensationBoundary.process;
+            await requestRestart({ host, port, token, timeoutMs, commandId: suffixedCommandId(restartCommandId, "-compensate") });
+            await awaitLocalRestartTransition(port, compensationProcess);
+            await waitHealth({ host, port, timeoutMs }, currentManifest, compensationBefore.runtimeEpoch, false);
+          }
+        } catch (restoreError) {
+          error.message += `; rollback compensation failed: ${restoreError.message}`;
         }
       }
       throw error;
@@ -1351,6 +1762,26 @@ async function main() {
     console.log(JSON.stringify({ command, channel, home, ...result }));
     return;
   }
+  if (command === "select-dev") {
+    if (channel !== "dev") throw new Error("select-dev requires --channel dev");
+    const version = argument("--version");
+    const expectedFingerprint = argument("--fingerprint");
+    if (!validComponent(version, 128) || !fingerprint(expectedFingerprint)) throw new Error("select-dev requires exact --version and --fingerprint");
+    const result = await selectInitialDevCandidate({ home, version, expectedFingerprint });
+    console.log(JSON.stringify({ command, channel, home, version: result.version, payloadFingerprint: result.payloadFingerprint }));
+    return;
+  }
+  if (command === "handoff-debug") {
+    const devHome = resolve(argument("--dev-home") ?? join(homedir(), ".tron-dev"));
+    const stableHome = resolve(argument("--stable-home") ?? join(homedir(), ".tron"));
+    const stableBundledRoot = resolve(argument("--stable-bundled-root") ?? "/Applications/Tron.app/Contents/Resources/Gateway");
+    const requested = argument("--host") ?? "127.0.0.1";
+    const host = resolveDeploymentHost(requested);
+    const token = await readLocalCredential(join(devHome, "gateway", "local-auth.json"));
+    const result = await handoffDebugCandidate({ devHome, stableHome, stableBundledRoot, host, token });
+    console.log(JSON.stringify({ command, ...result }));
+    return;
+  }
   const requestedHost = argument("--host") ?? process.env.TRON_GATEWAY_HEALTH_HOST ?? process.env.TRON_GATEWAY_HOST ?? "tailscale";
   const host = resolveDeploymentHost(requestedHost);
   const port = Number(argument("--port") ?? process.env.TRON_GATEWAY_PORT ?? (channel === "dev" ? "9848" : "9847"));
@@ -1366,19 +1797,25 @@ async function main() {
   if (command === "promote") {
     const version = argument("--version");
     if (!version || !validComponent(version, 128)) throw new Error("promote requires a valid --version");
-    result = await promote({ ...options, version, expectedFingerprint: argument("--fingerprint"), commandId: callerCommandId });
+    if (process.env.TRON_GATEWAY_SUPERVISED === "1" && process.env.TRON_GATEWAY_CHANNEL !== channel) {
+      throw new Error(`Gateway ${process.env.TRON_GATEWAY_CHANNEL ?? "unknown"} runtime cannot promote ${channel}`);
+    }
+    result = await withOperationLock(paths, () => promote({ ...options, version, expectedFingerprint: argument("--fingerprint"), commandId: callerCommandId }));
   } else if (command === "rollback") {
     if (!callerCommandId) throw new Error("rollback requires --command-id");
+    if (process.env.TRON_GATEWAY_SUPERVISED === "1" && process.env.TRON_GATEWAY_CHANNEL !== channel) {
+      throw new Error(`Gateway ${process.env.TRON_GATEWAY_CHANNEL ?? "unknown"} runtime cannot roll back ${channel}`);
+    }
     await writeProgress(paths, "rollback", callerCommandId);
     try {
-      result = await rollback({ ...options, commandId: callerCommandId });
+      result = await withOperationLock(paths, () => rollback({ ...options, commandId: callerCommandId }));
       await writeProgress(paths, "rolled-back", callerCommandId);
     } catch (error) {
       await writeProgress(paths, "failure", callerCommandId, error?.message ?? error).catch(() => {});
       throw error;
     }
   } else {
-    throw new Error("usage: gateway-payload-deploy.mjs stage|promote|rollback [options]");
+    throw new Error("usage: gateway-payload-deploy.mjs stage|select-dev|promote|rollback|handoff-debug [options]");
   }
   console.log(JSON.stringify({ command, channel, home, ...result }));
 }

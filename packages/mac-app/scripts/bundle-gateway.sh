@@ -18,7 +18,6 @@ APP_DIR="$PAYLOAD_DIR/app"
 RUNTIME_DIR="$PAYLOAD_DIR/runtime"
 LIBRARY_DIR="$RESOURCES_DIR/Library"
 HELPER_DIR="$LIBRARY_DIR/LoginItems/Tron Agent.app/Contents"
-DEV_HELPER_DIR="$LIBRARY_DIR/LoginItems/Tron Agent Dev.app/Contents"
 NODE_VERSION="22.22.0"
 NODE_ARM64_SHA256="5ed4db0fcf1eaf84d91ad12462631d73bf4576c1377e192d222e48026a902640"
 NODE_X64_SHA256="5ea50c9d6dea3dfa3abb66b2656f7a4e1c8cef23432b558d45fb538c7b5dedce"
@@ -39,13 +38,11 @@ done
 
 launchers=(
     "$HELPER_DIR/MacOS/tron"
-    "$DEV_HELPER_DIR/MacOS/tron"
 )
 if ((clean)); then
     rm -rf "$PAYLOAD_DIR"
     rm -f "${launchers[@]}" \
-        "$HELPER_DIR/Resources/AppIcon.icns" \
-        "$DEV_HELPER_DIR/Resources/AppIcon.icns"
+        "$HELPER_DIR/Resources/AppIcon.icns"
     echo "cleaned generated Tron Gateway payloads"
     exit 0
 fi
@@ -56,9 +53,7 @@ required=(
     "$REPO_ROOT/scripts/gateway-payload-deploy.mjs"
     "$SCRIPT_DIR/tron-gateway-launcher.c"
     "$HELPER_DIR/Info.plist"
-    "$DEV_HELPER_DIR/Info.plist"
     "$LIBRARY_DIR/LaunchAgents/com.tron.server.plist"
-    "$LIBRARY_DIR/LaunchAgents/com.tron.server.dev.plist"
 )
 for path in "${required[@]}"; do
     [[ -f "$path" ]] || { echo "missing required source: $path" >&2; exit 3; }
@@ -144,8 +139,7 @@ stage_node() {
 }
 
 mkdir -p "$APP_DIR/dist" "$APP_DIR/scripts" "$RUNTIME_DIR" \
-    "$HELPER_DIR/MacOS" "$HELPER_DIR/Resources" \
-    "$DEV_HELPER_DIR/MacOS" "$DEV_HELPER_DIR/Resources"
+    "$HELPER_DIR/MacOS" "$HELPER_DIR/Resources"
 # Permit replacing a previously staged immutable payload during an explicit
 # bundle operation; publication directories remain read-only afterward.
 chmod -R u+w "$PAYLOAD_DIR" 2>/dev/null || true
@@ -177,7 +171,6 @@ for required_payload in \
 done
 
 cp "$RESOURCES_DIR/AppIcon.icns" "$HELPER_DIR/Resources/AppIcon.icns"
-cp "$RESOURCES_DIR/AppIcon.icns" "$DEV_HELPER_DIR/Resources/AppIcon.icns"
 
 GATEWAY_VERSION="$("$NODE_BIN" -p "require('$GATEWAY_DIR/package.json').version")"
 SOURCE_REVISION="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"

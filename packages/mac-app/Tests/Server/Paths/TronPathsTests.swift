@@ -4,39 +4,32 @@ import Testing
 
 @Suite("TronPaths constants")
 struct TronPathsTests {
-    @Test("Release profiles have independent canonical identities")
-    func releaseProfilesAreIndependent() {
+    @Test("Stable and Debug profiles have independent canonical identities")
+    func profilesAreIndependent() {
         #expect(TronPaths.launchAgentLabel(profile: .stable) == "com.tron.server")
-        #expect(TronPaths.launchAgentLabel(profile: .preview) == "com.tron.server.dev")
+        #expect(TronPaths.launchAgentLabel(profile: .debug) == "com.tron.server.dev")
         #expect(TronPaths.defaultServerPort(profile: .stable) == 9847)
-        #expect(TronPaths.defaultServerPort(profile: .preview) == 9848)
-        #expect(TronPaths.tronHome(profile: .preview).path.hasSuffix("/.tron-dev"))
-        #expect(TronPaths.agentHome(profile: .preview).path.hasSuffix("/.pi/agent-dev"))
-        #expect(TronPaths.bearerTokenPath(profile: .preview).path.hasSuffix("/.tron-dev/gateway/local-auth.json"))
-        #expect(TronPaths.serverHelperBinary(profile: .preview).path.hasSuffix("LoginItems/Tron Agent Dev.app/Contents/MacOS/tron"))
-        #expect(TronPaths.launchAgentPlistPath(profile: .preview).path.hasSuffix("LaunchAgents/com.tron.server.dev.plist"))
-        #expect(TronPaths.launchAgentEnvironmentVariables(profile: .preview) == [
-            TronPaths.gatewaySupervisionEnv: "1",
-            TronPaths.gatewayChannelEnv: "dev",
-            TronPaths.tronHomeNameEnv: ".tron-dev",
-            TronPaths.agentDirNameEnv: "agent-dev",
-        ])
+        #expect(TronPaths.defaultServerPort(profile: .debug) == 9848)
+        #expect(TronPaths.tronHome(profile: .debug).path.hasSuffix("/.tron-dev"))
+        #expect(TronPaths.agentHome(profile: .debug).path.hasSuffix("/.pi/agent-dev"))
+        #expect(TronPaths.bearerTokenPath(profile: .debug).path.hasSuffix("/.tron-dev/gateway/local-auth.json"))
     }
 
-    @Test("Release can manage both profiles without install-mode environment")
-    func releaseOwnsBothProfiles() {
-        let variant = MacRuntimeVariant.installedRelease
-        #expect(variant.canManageLaunchAgent(profile: .stable, isIsolatedInstallMode: false))
-        #expect(variant.canManageLaunchAgent(profile: .preview, isIsolatedInstallMode: false))
+    @Test("Release manages Stable only; no wrapper manages Debug")
+    func lifecycleOwnershipIsDisjoint() {
+        #expect(MacRuntimeVariant.installedRelease.canManageLaunchAgent(profile: .stable, isIsolatedInstallMode: false))
+        #expect(!MacRuntimeVariant.installedRelease.canManageLaunchAgent(profile: .debug, isIsolatedInstallMode: false))
+        #expect(!MacRuntimeVariant.xcodeDebug.canManageLaunchAgent(profile: .debug, isIsolatedInstallMode: true))
     }
 
-    @Test("Preview pairing setup uses separate credential and enrollment paths")
-    func previewPairingSetupIsSeparate() {
+    @Test("Debug observation uses separate credential and enrollment paths")
+    func debugObservationIsSeparate() {
         #expect(EnvironmentSetup.live.profile == .stable)
-        #expect(EnvironmentSetup.preview.profile == .preview)
-        #expect(EnvironmentSetup.live.bearerTokenPath != EnvironmentSetup.preview.bearerTokenPath)
-        #expect(EnvironmentSetup.live.enrollmentCodePath != EnvironmentSetup.preview.enrollmentCodePath)
-        #expect(EnvironmentSetup.preview.serverPort == 9848)
+        #expect(EnvironmentSetup.debug.profile == .debug)
+        #expect(EnvironmentSetup.live.bearerTokenPath != EnvironmentSetup.debug.bearerTokenPath)
+        #expect(EnvironmentSetup.live.enrollmentCodePath != EnvironmentSetup.debug.enrollmentCodePath)
+        #expect(EnvironmentSetup.debug.serverPort == 9848)
+        #expect(!EnvironmentSetup.debug.canManageLaunchAgent)
     }
 
     @Test("LaunchAgent label matches the canonical label")
@@ -49,18 +42,12 @@ struct TronPathsTests {
         #expect(TronPaths.defaultServerPort(environment: [:]) == 9847)
     }
 
-    @Test("LaunchAgent associates with wrapper variants")
-    func associatedWrapperBundleIDsMatchVariants() {
-        #expect(TronPaths.associatedWrapperBundleIDs(environment: [:]) == [
-            MacRuntimeVariant.releaseBundleIdentifier,
-            MacRuntimeVariant.debugBundleIdentifier,
-        ])
-        #expect(TronPaths.associatedWrapperBundleIDs(
-            environment: [TronPaths.isolatedInstallModeEnv: TronPaths.isolatedInstallModeValue]
-        ) == [
-            MacRuntimeVariant.debugBundleIdentifier,
+    @Test("Stable has one wrapper parent and Debug has none")
+    func associatedWrapperBundleIDsAreDisjoint() {
+        #expect(TronPaths.associatedWrapperBundleIDs(profile: .stable) == [
             MacRuntimeVariant.releaseBundleIdentifier,
         ])
+        #expect(TronPaths.associatedWrapperBundleIDs(profile: .debug).isEmpty)
     }
 
     @Test("server helper binary lives inside the bundled Login Item")
@@ -76,33 +63,16 @@ struct TronPathsTests {
         ])
     }
 
-    @Test("isolated install mode uses the dev helper, port, home, and supervision")
-    func isolatedInstallModeShape() {
-        let environment = [TronPaths.isolatedInstallModeEnv: TronPaths.isolatedInstallModeValue]
-
-        #expect(TronPaths.launchAgentLabel(environment: environment) == "com.tron.server.dev")
-        #expect(TronPaths.defaultServerPort(environment: environment) == 9848)
-        #expect(TronPaths.agentBundleName(environment: environment) == "Tron Agent Dev")
-        #expect(TronPaths.serverHelperBundleProgram(environment: environment) == "Contents/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron")
-        #expect(TronPaths.launchAgentEnvironmentVariables(environment: environment) == [
-            TronPaths.gatewaySupervisionEnv: TronPaths.gatewaySupervisionValue,
+    @Test("Debug environment cannot change wrapper lifecycle ownership")
+    func debugEnvironmentDoesNotChangeOwnership() {
+        let environment = [
             TronPaths.tronHomeNameEnv: ".tron-dev",
             TronPaths.agentDirNameEnv: "agent-dev",
-            TronPaths.gatewayChannelEnv: TronPaths.isolatedGatewayChannel,
-        ])
-        #expect(TronPaths.tronHome(environment: environment).path.hasSuffix("/.tron-dev"))
-        #expect(TronPaths.canManageLaunchAgent(environment: environment))
-        #expect(!TronPaths.canManageLaunchAgent(environment: environment.merging([TronPaths.tronDataDirEnv: "/tmp/custom"]) { _, value in value }))
-    }
-
-    @Test("TRON_HOME_NAME overrides isolated install home with a single directory name")
-    func tronHomeNameOverridesIsolatedHome() {
-        let environment = [
-            TronPaths.isolatedInstallModeEnv: TronPaths.isolatedInstallModeValue,
-            TronPaths.tronHomeNameEnv: ".tron-sandbox",
         ]
-
-        #expect(TronPaths.tronHome(environment: environment).path.hasSuffix("/.tron-sandbox"))
+        #expect(TronPaths.launchAgentLabel(environment: environment) == "com.tron.server")
+        #expect(TronPaths.defaultServerPort(environment: environment) == 9847)
+        #expect(!TronPaths.canManageLaunchAgent(environment: environment))
+        #expect(TronPaths.tronHome(environment: environment).path.hasSuffix("/.tron-dev"))
     }
 
     @Test("runtime locks live in internal/run")
@@ -113,7 +83,7 @@ struct TronPathsTests {
     @Test("LaunchAgent plist is bundled in Contents/Library/LaunchAgents")
     func launchAgentPlistShape() {
         #expect(TronPaths.launchAgentLabel(environment: [:]) == "com.tron.server")
-        #expect(TronPaths.launchAgentLabel(environment: [TronPaths.isolatedInstallModeEnv: TronPaths.isolatedInstallModeValue]) == "com.tron.server.dev")
+        #expect(TronPaths.launchAgentLabel(environment: [TronPaths.tronHomeNameEnv: ".tron-dev"]) == "com.tron.server")
     }
 
     @Test("wrapper credential lives in gateway-owned state")

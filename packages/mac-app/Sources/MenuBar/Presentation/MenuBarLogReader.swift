@@ -30,7 +30,7 @@ enum MenuBarLogReader {
         limit: Int = defaultLimit,
         timeout: TimeInterval = 5
     ) async -> Result<String, MenuBarLogReadError> {
-        guard let url = URLComponents(string: "ws://\(host):\(port)/v1/socket")?.url else {
+        guard let url = GatewaySocketURL.make(host: host, port: port) else {
             return .failure(.serverUnavailable)
         }
 
