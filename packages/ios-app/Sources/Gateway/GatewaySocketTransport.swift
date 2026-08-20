@@ -11,6 +11,10 @@ enum GatewaySocketPolicy {
     // monotonic. CFNetwork's inactivity timeout must not retire a healthy
     // long-lived WebSocket before those owners can make a decision.
     static let requestTimeout: TimeInterval = 60
+    // A graceful close is best effort. A dead path must not retain an invalid
+    // URLSession and its WebSocket buffers for the full inactivity timeout as
+    // reconnect epochs accumulate.
+    static let gracefulCloseLimit: Duration = .seconds(1)
 }
 
 struct GatewaySocketFactory: Sendable {
@@ -57,9 +61,14 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
         guard !closed else { return }
         closed = true
         task.cancel(with: .goingAway, reason: nil)
-        // Do not immediately hard-cancel the session after asking CFNetwork to
-        // send the WebSocket close frame. Graceful invalidation releases the
-        // one-task session after that task settles.
+        // Allow a close frame a short opportunity to leave, then force release
+        // of the one-task session. This preserves graceful teardown on healthy
+        // paths without retaining dead CFNetwork epochs during reconnect loops.
         session.finishTasksAndInvalidate()
+        let retiringSession = session
+        Task.detached {
+            try? await Task.sleep(for: GatewaySocketPolicy.gracefulCloseLimit)
+            retiringSession.invalidateAndCancel()
+        }
     }
 }

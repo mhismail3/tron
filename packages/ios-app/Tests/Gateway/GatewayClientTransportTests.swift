@@ -178,6 +178,8 @@ struct GatewayClientTransportTests {
                 GatewaySocketPolicy.requestTimeout,
             ])
             #expect(GatewaySocketPolicy.requestTimeout > 18)
+            #expect(GatewaySocketPolicy.gracefulCloseLimit == .seconds(1))
+            #expect(GatewaySocketPolicy.gracefulCloseLimit < .seconds(60))
             await client.close()
         }
     }
@@ -894,7 +896,7 @@ struct GatewayClientTransportTests {
             let events = try await valueOfOwnedTask(consumer)
             #expect(events.count == 1_025)
             #expect(events.dropLast().map(\.topic).allSatisfy { $0 == "test.changed" })
-            #expect(events.dropLast().compactMap { $0.payload.intValue } == Array(1...1_024))
+            #expect(events.dropLast().compactMap { $0.payload.intValue } == Array(0..<1_024))
             #expect(events.last?.topic == "transport.disconnected")
             #expect(events.filter { $0.topic == "transport.disconnected" }.count == 1)
             #expect(await socket.closeInvocationCount() == 1)
