@@ -170,6 +170,7 @@ actor ScriptedGatewaySocket: GatewaySocketConnection {
 
     func sentFrames() -> [Data] { sent }
     func sendInvocationCount() -> Int { sendInvocations }
+    func pendingReceiverCount() -> Int { receivers.count }
     func closeInvocationCount() -> Int { closeInvocations }
     func closeTransitionCount() -> Int { closeTransitions }
     func closed() -> Bool { isClosed }

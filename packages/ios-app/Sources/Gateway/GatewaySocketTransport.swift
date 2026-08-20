@@ -6,6 +6,13 @@ protocol GatewaySocketConnection: Sendable {
     func close() async
 }
 
+enum GatewaySocketPolicy {
+    // Application-owned handshake and liveness deadlines are shorter and
+    // monotonic. CFNetwork's inactivity timeout must not retire a healthy
+    // long-lived WebSocket before those owners can make a decision.
+    static let requestTimeout: TimeInterval = 60
+}
+
 struct GatewaySocketFactory: Sendable {
     let makeConnection: @Sendable (URLRequest) -> any GatewaySocketConnection
 
@@ -24,7 +31,7 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
     init(request: URLRequest) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = true
-        configuration.timeoutIntervalForRequest = 15
+        configuration.timeoutIntervalForRequest = GatewaySocketPolicy.requestTimeout
         let session = URLSession(configuration: configuration)
         self.session = session
         task = session.webSocketTask(with: request)
@@ -50,6 +57,9 @@ private actor URLSessionGatewaySocketConnection: GatewaySocketConnection {
         guard !closed else { return }
         closed = true
         task.cancel(with: .goingAway, reason: nil)
-        session.invalidateAndCancel()
+        // Do not immediately hard-cancel the session after asking CFNetwork to
+        // send the WebSocket close frame. Graceful invalidation releases the
+        // one-task session after that task settles.
+        session.finishTasksAndInvalidate()
     }
 }

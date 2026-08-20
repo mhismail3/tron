@@ -159,6 +159,7 @@ actor GatewayClient {
         let socket: any GatewaySocketConnection
         var receiveTask: Task<Void, Never>?
         var livenessTask: Task<Void, Never>?
+        var eventsActivated = false
         var pending: [String: PendingRequest] = [:]
         var lastInboundAt: ContinuousClock.Instant?
         var overflowResyncSignaled = false
@@ -267,7 +268,10 @@ actor GatewayClient {
         self.profile = profile
         self.token = token
         let handshakeTimeout: Duration = isReconnect ? .seconds(5) : .seconds(15)
-        var request = URLRequest(url: socketURL, timeoutInterval: isReconnect ? 5 : 15)
+        // The actor-owned 5/15-second watchdog bounds the handshake. Keep the
+        // URL loading inactivity timeout above the 10+8-second application
+        // liveness decision so CFNetwork cannot pre-empt it after upgrade.
+        var request = URLRequest(url: socketURL, timeoutInterval: GatewaySocketPolicy.requestTimeout)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let socket = socketFactory.makeConnection(request)
         connection = ConnectionEpoch(id: epochID, socket: socket)
@@ -302,10 +306,7 @@ actor GatewayClient {
             epoch.info = decoded.info
             epoch.lastInboundAt = clock.now()
             connection = epoch
-            if activateEvents {
-                startReceive(epochID: epochID)
-                startLivenessWait(epochID: epochID)
-            }
+            if activateEvents { try activateEventDelivery(connectionID: epochID) }
             return GatewayConnectionIdentity(id: epochID, info: decoded.info)
         } catch {
             await detachConnection(epochID: epochID, reason: Self.transportFailure(error))
@@ -325,7 +326,15 @@ actor GatewayClient {
     }
 
     func activateEvents(connectionID: Int) throws {
+        try activateEventDelivery(connectionID: connectionID)
+    }
+
+    private func activateEventDelivery(connectionID: Int) throws {
         try requireEpoch(connectionID)
+        guard var epoch = connection, epoch.id == connectionID,
+              !epoch.eventsActivated else { return }
+        epoch.eventsActivated = true
+        connection = epoch
         startReceive(epochID: connectionID)
         startLivenessWait(epochID: connectionID)
     }
@@ -701,7 +710,8 @@ actor GatewayClient {
     }
 
     private func startReceive(epochID: Int) {
-        guard var epoch = connection, epoch.id == epochID else { return }
+        guard var epoch = connection, epoch.id == epochID,
+              epoch.receiveTask == nil else { return }
         let socket = epoch.socket
         epoch.receiveTask = Task { [weak self, socket] in
             let result: Result<Data, Error>
@@ -713,7 +723,9 @@ actor GatewayClient {
     }
 
     private func receiveCompleted(_ result: Result<Data, Error>, epochID: Int) async {
-        guard ownsEpoch(epochID) else { return }
+        guard var completedEpoch = connection, completedEpoch.id == epochID else { return }
+        completedEpoch.receiveTask = nil
+        connection = completedEpoch
         switch result {
         case .success(let data):
             guard var current = connection, current.id == epochID else { return }
@@ -731,7 +743,8 @@ actor GatewayClient {
     }
 
     private func startLivenessWait(epochID: Int) {
-        guard var epoch = connection, epoch.id == epochID else { return }
+        guard var epoch = connection, epoch.id == epochID,
+              epoch.livenessTask == nil else { return }
         let clock = self.clock
         epoch.livenessTask = Task { [weak self, clock] in
             do { try await clock.sleep(GatewayLivenessPolicy.probeInterval) }
@@ -743,7 +756,9 @@ actor GatewayClient {
     }
 
     private func livenessWaitCompleted(epochID: Int) async {
-        guard ownsEpoch(epochID) else { return }
+        guard var completedEpoch = connection, completedEpoch.id == epochID else { return }
+        completedEpoch.livenessTask = nil
+        connection = completedEpoch
         do {
             guard let lastInboundAt = connection?.lastInboundAt else { return }
             if clock.now() - lastInboundAt >= GatewayLivenessPolicy.probeAfterSilence {

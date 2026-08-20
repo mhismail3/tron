@@ -60,6 +60,8 @@ describe("gateway configuration", () => {
     expect(second.agentDir).toBe(join(root, "agent"));
     expect(second.host).toBe("127.0.0.2");
     expect(second.port).toBe(12_345);
+    expect(second.maxFrameBytes).toBe(1_048_576);
+    expect(second.maxOutboundBytes).toBe(8 * 1_048_576);
   });
 
   it.each([

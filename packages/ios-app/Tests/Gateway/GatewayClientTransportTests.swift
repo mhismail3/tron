@@ -125,7 +125,7 @@ struct GatewayClientTransportTests {
             #expect(info.machineId == "machine")
             #expect(factory.requests.count == 1)
             #expect(factory.requests[0].url == profile.socketURL)
-            #expect(factory.requests[0].timeoutInterval == 15)
+            #expect(factory.requests[0].timeoutInterval == GatewaySocketPolicy.requestTimeout)
             #expect(factory.requests[0].value(forHTTPHeaderField: "Authorization") == "Bearer token")
 
             let sentHello = try await decodedValue(in: socket, index: 0)
@@ -157,6 +157,48 @@ struct GatewayClientTransportTests {
                 .begin(.gatewayConnect),
                 .end(.gatewayConnect, .success, .none),
             ])
+            await client.close()
+        }
+    }
+
+    @Test("initial and reconnect URL loading timeouts stay above application liveness")
+    func websocketRequestTimeouts() async throws {
+        try await withTestWatchdog {
+            let initial = ScriptedGatewaySocket()
+            let replacement = ScriptedGatewaySocket()
+            let factory = ScriptedGatewaySocketFactory(sockets: [initial, replacement])
+            let client = GatewayClient(socketFactory: factory.factory)
+            await initial.enqueue(helloFrame())
+            _ = try await client.connect(profile: profile, token: "token")
+            await replacement.enqueue(helloFrame())
+            _ = try await client.reconnect()
+
+            #expect(factory.requests.map(\.timeoutInterval) == [
+                GatewaySocketPolicy.requestTimeout,
+                GatewaySocketPolicy.requestTimeout,
+            ])
+            #expect(GatewaySocketPolicy.requestTimeout > 18)
+            await client.close()
+        }
+    }
+
+    @Test("event activation is idempotent for one connection epoch")
+    func eventActivationIsIdempotent() async throws {
+        try await withTestWatchdog {
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory,
+                clock: clock.clock
+            )
+            await socket.enqueue(helloFrame())
+            let identity = try await client.connectForLifecycle(profile: profile, token: "token")
+            try await client.activateEvents(connectionID: identity.id)
+            try await client.activateEvents(connectionID: identity.id)
+            try await clock.waitUntilSleeping(count: 1)
+
+            #expect(await socket.pendingReceiverCount() == 1)
+            #expect(clock.activeSleeperCount() == 1)
             await client.close()
         }
     }

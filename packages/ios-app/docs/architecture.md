@@ -43,12 +43,8 @@ it can become a secondary connection. Connect and close invalidate older attempt
 late hello, frame, failure, liveness, completion, and close callbacks can only detach or publish
 for their captured epoch. Event deliveries carry that non-wire connection identity. App lifecycle
 connects prepare the epoch without starting receive/liveness work, install the returned identity,
-then activate delivery; buffered events from a retired profile therefore cannot cross a switch.
-Idle transport tasks do not retain an otherwise unowned client. While foregrounded, ten seconds of inbound silence triggers a bounded `system.info` liveness request. That application frame is deliberately earlier than the Gateway's 25-second heartbeat and keeps older URLSession/Tailscale paths alive even when automatic WebSocket pong handling is not surfaced reliably. Its
-injectable transport ends at WebSocket bytes, and its monotonic-clock and UUID inputs control only time and
-identity generation. The production transport is an actor-confined ephemeral
-`URLSession` owner and preserves the existing data frames, headers, deadlines, and
-random UUID behavior. Scripted test sockets contain no protocol, session, receipt,
+then idempotently activate one receive owner and one liveness owner; buffered events from a retired profile therefore cannot cross a switch.
+Idle transport tasks do not retain an otherwise unowned client. While foregrounded, ten seconds of inbound silence triggers a bounded `system.info` liveness request with an eight-second deadline. That application frame is deliberately earlier than the Gateway's 25-second heartbeat and keeps older URLSession/Tailscale paths alive even when automatic WebSocket pong handling is not surfaced reliably. WebSocket URL loading inactivity remains at 60 seconds for both initial and reconnect requests; the actor's monotonic 15/5-second handshake watchdog and application liveness—not CFNetwork's transport timeout—own those decisions. Intentional closure requests a `goingAway` frame and gracefully invalidates the one-task session rather than immediately hard-cancelling it. Its injectable transport ends at WebSocket bytes, and its monotonic-clock and UUID inputs control only time and identity generation. The production transport is an actor-confined ephemeral `URLSession` owner and preserves the existing data frames, headers, deadlines, and random UUID behavior. Scripted test sockets contain no protocol, session, receipt,
 or event-admission policy; `GatewayClient` remains the only decoder and client
 runtime. Each inbound response/event frame crosses one discriminated `JSONDecoder`
 entry point. Typed event views decode directly from that original decoder's payload

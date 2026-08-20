@@ -94,6 +94,133 @@ export function clearRequestSynchronizations(
   }
 }
 
+export interface OrderedOutboundQueueSnapshot {
+  queuedFrames: number;
+  queuedBytes: number;
+  writeActive: boolean;
+  acceptedFrames: number;
+  completedFrames: number;
+}
+
+interface QueuedOutboundFrame {
+  encoded: string;
+  bytes: number;
+}
+
+type OutboundWrite = (encoded: string, completion: (error?: Error) => void) => void;
+
+/**
+ * A connection-local ordered writer. Encoded frames remain bounded in
+ * application memory and exactly one frame is handed to ws at a time, so a
+ * legitimate same-turn synchronization burst cannot fill ws.bufferedAmount.
+ */
+export class OrderedOutboundQueue {
+  private readonly frames: QueuedOutboundFrame[] = [];
+  private head = 0;
+  private queuedBytes = 0;
+  private writeActive = false;
+  private retired = false;
+  private acceptedFrames = 0;
+  private completedFrames = 0;
+  private readonly idleWaiters: Array<() => void> = [];
+
+  constructor(
+    private readonly maximumBytes: number,
+    private readonly write: OutboundWrite,
+    private readonly overflow: (snapshot: OrderedOutboundQueueSnapshot, nextBytes: number) => void,
+    private readonly writeFailed: (error: Error, snapshot: OrderedOutboundQueueSnapshot) => void,
+  ) {}
+
+  enqueue(encoded: string): boolean {
+    if (this.retired) return false;
+    const bytes = Buffer.byteLength(encoded, "utf8");
+    if (bytes > this.maximumBytes || this.queuedBytes > this.maximumBytes - bytes) {
+      const snapshot = this.snapshot();
+      this.retire();
+      this.overflow(snapshot, bytes);
+      return false;
+    }
+    this.frames.push({ encoded, bytes });
+    this.queuedBytes += bytes;
+    this.acceptedFrames += 1;
+    this.drain();
+    return true;
+  }
+
+  snapshot(): OrderedOutboundQueueSnapshot {
+    return {
+      queuedFrames: this.frames.length - this.head,
+      queuedBytes: this.queuedBytes,
+      writeActive: this.writeActive,
+      acceptedFrames: this.acceptedFrames,
+      completedFrames: this.completedFrames,
+    };
+  }
+
+  whenIdle(waiter: () => void): void {
+    if (this.retired || (!this.writeActive && this.head === this.frames.length)) {
+      waiter();
+      return;
+    }
+    this.idleWaiters.push(waiter);
+  }
+
+  retire(): void {
+    if (this.retired) return;
+    this.retired = true;
+    this.frames.length = 0;
+    this.head = 0;
+    this.queuedBytes = 0;
+    this.writeActive = false;
+    this.finishIdleWaiters();
+  }
+
+  private drain(): void {
+    if (this.retired || this.writeActive) return;
+    const frame = this.frames[this.head];
+    if (!frame) return;
+    this.writeActive = true;
+    let completed = false;
+    const completion = (error?: Error): void => {
+      if (completed) return;
+      completed = true;
+      if (this.retired) return;
+      this.head += 1;
+      this.queuedBytes = Math.max(0, this.queuedBytes - frame.bytes);
+      this.writeActive = false;
+      if (this.head === this.frames.length) {
+        this.frames.length = 0;
+        this.head = 0;
+      } else if (this.head >= 1_024 && this.head * 2 >= this.frames.length) {
+        // A continuously busy connection may never become fully idle. Compact
+        // consumed entries periodically so completed encoded frames cannot stay
+        // retained outside the byte accounting bound.
+        this.frames.splice(0, this.head);
+        this.head = 0;
+      }
+      if (error) {
+        const snapshot = this.snapshot();
+        this.retire();
+        this.writeFailed(error, snapshot);
+        return;
+      }
+      this.completedFrames += 1;
+      this.drain();
+      if (!this.writeActive && this.head === this.frames.length) this.finishIdleWaiters();
+    };
+    try {
+      this.write(frame.encoded, completion);
+    } catch (error) {
+      completion(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private finishIdleWaiters(): void {
+    const waiters = this.idleWaiters.splice(0);
+    for (const waiter of waiters) waiter();
+  }
+}
+
 interface Connection {
   id: string;
   identity: string;
@@ -114,7 +241,9 @@ interface Connection {
   // Reserved before asynchronous service invocation so overlapping opens for
   // the same connection/session are rejected deterministically.
   pendingSessionOpens: Map<string, string>;
-  outboundFrames: number;
+  outbound: OrderedOutboundQueue;
+  closeInitiated: boolean;
+  admittedAt: number;
   helloTimer: NodeJS.Timeout;
 }
 
@@ -490,7 +619,33 @@ export class GatewayServer {
   }
 
   private admit(socket: WebSocket, identity: string, isLocal: boolean): void {
-    const connection: Connection = {
+    let connection: Connection;
+    const maximumOutboundBytes = this.options.maximumOutboundBytes ?? 8 * 1_048_576;
+    const outbound = new OrderedOutboundQueue(
+      maximumOutboundBytes,
+      (encoded, completion) => socket.send(encoded, completion),
+      (snapshot, nextBytes) => {
+        if (connection.closeInitiated) return;
+        connection.closeInitiated = true;
+        this.options.logger.log(
+          "warning",
+          `Closing client ${connection.id} at outbound queue capacity (${snapshot.queuedFrames} queued frames, ${snapshot.queuedBytes} queued bytes, ${socket.bufferedAmount} ws buffered bytes, ${nextBytes} next bytes)`,
+          { event: "connection.outbound-capacity", source: "transport" },
+        );
+        socket.close(1013, "client outbound capacity exceeded");
+      },
+      (error, snapshot) => {
+        if (connection.closeInitiated) return;
+        connection.closeInitiated = true;
+        this.options.logger.log(
+          "error",
+          `Client ${connection.id} outbound write failed after ${snapshot.completedFrames}/${snapshot.acceptedFrames} frames: ${error.message}`,
+          { event: "connection.write-error", source: "transport" },
+        );
+        socket.terminate();
+      },
+    );
+    connection = {
       id: randomUUID(),
       identity,
       isLocal,
@@ -506,11 +661,13 @@ export class GatewayServer {
       rekeyedSessionIds: new Map(),
       synchronizationBytes: 0,
       pendingSessionOpens: new Map(),
-      outboundFrames: 0,
+      outbound,
+      closeInitiated: false,
+      admittedAt: performance.now(),
       helloTimer: setTimeout(() => socket.close(1008, "hello required"), 5_000),
     };
     this.clients.set(connection.id, connection);
-    this.options.logger.log("info", `Client connection admitted (${isLocal ? "local" : "paired"})`, { event: "connection.admitted", source: "transport" });
+    this.options.logger.log("info", `Client ${connection.id} connection admitted (${isLocal ? "local" : "paired"})`, { event: "connection.admitted", source: "transport" });
     socket.on("message", (data, binary) => {
       connection.alive = true;
       void this.onMessage(connection, binary ? data : data.toString());
@@ -540,7 +697,7 @@ export class GatewayServer {
       if (protocol < MIN_PROTOCOL_VERSION || protocol > PROTOCOL_VERSION) return connection.socket.close(1008, "protocol version mismatch");
       connection.ready = true;
       connection.presentationOnly = (frame as Record<string, unknown>).clientRole === "mobile";
-      this.options.logger.log("info", `Client handshake accepted (${connection.presentationOnly ? "mobile" : "local"})`, { event: "connection.handshake", source: "transport" });
+      this.options.logger.log("info", `Client ${connection.id} handshake accepted (${connection.presentationOnly ? "mobile" : "local"})`, { event: "connection.handshake", source: "transport" });
       clearTimeout(connection.helloTimer);
       this.send(connection, { type: "hello", ...this.options.service.info() as Record<string, JsonValue> });
       return;
@@ -931,27 +1088,11 @@ export class GatewayServer {
         : encodeOutboundFrame(value, this.options.maxFrameBytes);
       if (!encoded) return "failed";
 
-      const bytes = Buffer.byteLength(encoded, "utf8");
-      const maximumBytes = this.options.maximumOutboundBytes ?? 2 * 1_048_576;
-      if (bytes > maximumBytes
-        || connection.socket.bufferedAmount > maximumBytes - bytes) {
-        // Never silently drop a sequenced live event. Force the established
-        // reconnect/snapshot path when this client cannot drain its stream.
-        this.options.logger.log(
-          "warning",
-          `Closing client at outbound capacity (${connection.outboundFrames} pending frames, ${connection.socket.bufferedAmount} buffered bytes, ${bytes} next bytes)`,
-          { event: "connection.outbound-capacity", source: "transport" },
-        );
-        connection.socket.close(1013, "client outbound capacity exceeded");
-        return "failed";
-      }
-      // Send callbacks run on a later event-loop turn, so their count cannot
-      // distinguish a healthy synchronous catch-up burst from a stalled peer.
-      // `bufferedAmount` is the ordered writer's byte-backed pressure signal.
-      connection.outboundFrames += 1;
-      connection.socket.send(encoded, () => {
-        connection.outboundFrames = Math.max(0, connection.outboundFrames - 1);
-      });
+      // Enqueue acceptance is the ordering boundary. The connection-local
+      // writer hands exactly one encoded frame to ws at a time, preserving a
+      // response before its synchronization suffix without manufacturing
+      // transport pressure from concurrent bounded RPC completions.
+      if (!connection.outbound.enqueue(encoded)) return "failed";
       return encoded === direct ? "sent" : "fallback";
     } catch {
       // Broadcast payloads are supplied by runtime projections. A malformed
@@ -962,7 +1103,13 @@ export class GatewayServer {
 
   private disconnect(connection: Connection, detail = "WebSocket closed"): void {
     if (!this.clients.delete(connection.id)) return;
-    this.options.logger.log("info", `Client connection closed (${detail})`, { event: "connection.closed", source: "transport" });
+    const outbound = connection.outbound.snapshot();
+    connection.outbound.retire();
+    this.options.logger.log(
+      "info",
+      `Client ${connection.id} connection closed after ${Math.max(0, Math.round(performance.now() - connection.admittedAt))}ms (${detail}; ${outbound.completedFrames}/${outbound.acceptedFrames} outbound frames completed, ${outbound.queuedBytes} queued bytes)`,
+      { event: "connection.closed", source: "transport" },
+    );
     clearTimeout(connection.helloTimer);
     for (const synchronization of connection.synchronizations.values()) {
       clearTimeout(synchronization.timeout);
@@ -981,8 +1128,26 @@ export class GatewayServer {
     this.ready = false;
     clearInterval(this.heartbeat);
     for (const client of this.clients.values()) {
-      this.send(client, { type: "event", topic: "system.stopping", payload: {} });
-      client.socket.close(1012, "gateway restarting");
+      const stoppingAccepted = this.send(client, { type: "event", topic: "system.stopping", payload: {} });
+      if (!stoppingAccepted) {
+        client.socket.close(1012, "gateway restarting");
+        continue;
+      }
+      // The ordered queue's acceptance boundary may be ahead of an active
+      // frame. Give the stopping event a short bounded flush opportunity, but
+      // never let one stalled peer prevent supervised shutdown indefinitely.
+      let closeRequested = false;
+      const requestClose = (): void => {
+        if (closeRequested) return;
+        closeRequested = true;
+        client.socket.close(1012, "gateway restarting");
+      };
+      const deadline = setTimeout(requestClose, 1_000);
+      deadline.unref();
+      client.outbound.whenIdle(() => {
+        clearTimeout(deadline);
+        requestClose();
+      });
     }
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
     this.sockets.close();
