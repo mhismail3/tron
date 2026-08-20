@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { test } from "node:test";
 import {
   deploymentTransition,
+  deploymentTimeoutMs,
   publishSelection,
   rollbackSelection,
   resolveDeploymentHost,
@@ -29,6 +30,13 @@ import {
   stagedCandidate,
   runBounded,
 } from "./gateway-payload-deploy.mjs";
+
+test("deployment timeout defaults to a valid bounded millisecond value", () => {
+  assert.equal(deploymentTimeoutMs({}), 60_000);
+  assert.equal(deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "120000" }), 120_000);
+  assert.throws(() => deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "60_000" }), /invalid update timeout/);
+  assert.throws(() => deploymentTimeoutMs({ TRON_GATEWAY_UPDATE_TIMEOUT_MS: "1999" }), /invalid update timeout/);
+});
 
 function selection(version, payloadFingerprint = "a".repeat(64)) {
   return { schema: 1, kind: "tron-gateway-selection", channel: "stable", version, payloadFingerprint };

@@ -137,7 +137,7 @@ candidate manifest. Generic automatic/source updates never infer a Debug-origin 
 state; promotion must pin its exact candidate version and fingerprint.
 `gateway.update.config.status` and `gateway.update.status` are bounded projections; the latter
 includes build/staging/draining/promotion/rollback/failure progress. The mutation is usable only when the helper is
-configured, in which case `gateway-update.v1` appears in capabilities.
+configured, in which case `gateway-update.v1` appears in capabilities. Candidate transition health uses a 60-second default deadline; an owned decimal-millisecond override is admitted only from 2,000 through 300,000 milliseconds.
 
 Every WebSocket starts with:
 

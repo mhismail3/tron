@@ -1606,6 +1606,14 @@ export async function handoffDebugCandidate({
  * executable, host, or port arguments. Source and artifact roots are read only
  * from the validated home projection; request parameters select policy only.
  */
+export function deploymentTimeoutMs(environment = process.env) {
+  const timeoutMs = Number(environment.TRON_GATEWAY_UPDATE_TIMEOUT_MS ?? "60000");
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 2_000 || timeoutMs > 300_000) {
+    throw new Error("invalid update timeout");
+  }
+  return timeoutMs;
+}
+
 async function applyPayloadInternal(request) {
   const value = validateApplyRequest(request);
   const home = homeForChannel(value.channel, process.env.TRON_DATA_DIR);
@@ -1638,8 +1646,7 @@ async function applyPayloadInternal(request) {
   const host = resolveDeploymentHost(requestedHost);
   const port = Number(process.env.TRON_GATEWAY_PORT ?? (value.channel === "dev" ? "9848" : "9847"));
   if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid Gateway port");
-  const timeoutMs = Number(process.env.TRON_GATEWAY_UPDATE_TIMEOUT_MS ?? "60_000");
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 2_000 || timeoutMs > 300_000) throw new Error("invalid update timeout");
+  const timeoutMs = deploymentTimeoutMs();
   const token = await readLocalCredential(join(home, "gateway", "local-auth.json"));
   await writeProgress(paths, "promoting", value.commandId);
   let result;
