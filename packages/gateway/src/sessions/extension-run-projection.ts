@@ -133,6 +133,8 @@ export function projectExtensionRunActivity(
     source: ExtensionToolOrigin;
     title: string;
     status: ExtensionRunStatus;
+    /** Lifecycle terminal events outrank advisory artifact/detail state. */
+    authoritativeStatus?: boolean;
     startedAt: string;
     updatedAt: string;
     completedAt?: string;
@@ -159,10 +161,20 @@ export function projectExtensionRunActivity(
     : (explicitStatus === "completed" || explicitStatus === "complete" || explicitStatus === "stopped")
       ? "completed"
       : undefined;
+  const priorTerminal = previous?.status === "completed" || previous?.status === "failed";
   const detachedRun = typeof details?.asyncId === "string"
     && detailsResults.length === 0
-    && terminalStatus === undefined;
-  const activityStatus: ExtensionRunStatus = terminalStatus ?? (detachedRun ? "running" : base.status);
+    && terminalStatus === undefined
+    && !priorTerminal
+    && !base.authoritativeStatus;
+  // A launcher result carrying only asyncId is an acknowledgement, not the
+  // delegated run's terminal result. It may keep a non-terminal activity live,
+  // but never outranks an explicit terminal lifecycle/detail state.
+  const activityStatus: ExtensionRunStatus = base.authoritativeStatus
+    ? base.status
+    : terminalStatus
+      ?? (priorTerminal ? previous!.status : detachedRun ? "running" : base.status);
+  const completedAt = activityStatus === "running" ? undefined : base.completedAt ?? previous?.completedAt;
   const children = candidates
     .slice(0, MAX_CHILDREN)
     .map((item, index) => child(item, index, activityStatus, 0, { remaining: MAX_CHILDREN_TOTAL }))
@@ -198,7 +210,7 @@ export function projectExtensionRunActivity(
     status: activityStatus,
     startedAt: base.startedAt,
     updatedAt: base.updatedAt,
-    ...(base.completedAt ? { completedAt: base.completedAt } : {}),
+    ...(completedAt ? { completedAt } : {}),
     ...(lastActivityAt ? { lastActivityAt } : {}),
     ...(currentTool ? { currentTool } : {}),
     ...(currentToolStartedAt ? { currentToolStartedAt } : {}),

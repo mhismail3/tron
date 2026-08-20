@@ -485,11 +485,11 @@ snapshot replaces the whole projection. Unknown surface kinds decode to a readab
 surface, and removal is an explicit ID list. Native rendering admits only read-only widget surfaces through deterministic, horizontally-scrolling
 composer pills (one opaque live pill per attributed extension; semantic widgets merge with their
 host surface representation when its public surface ID decodes to the same key, while explicit provenance
-provides source grouping and labels); a pill with one live run opens that run's bounded native detail sheet,
-while a multi-run group opens a compact run chooser. Structured extension-owned run projections carry stable
+provides explicit source grouping and labels without inferring ownership from the newest live run); a pill with one live run opens that run's bounded native detail sheet,
+while a multi-run group opens a compact run chooser. Every detail route is created from the stable activity ID (group IDs and toolCallId/runId aliases are lookup compatibility only), so source-label changes and artifact enrichment cannot retarget a sheet. Structured extension-owned run projections carry stable
 child IDs, active time, tool/turn counts, current work, and bounded output independently of rendered widget text.
 Completed run/tool history is retained as a bounded snapshot projection and is shown in the Manage Session
-Extension History container; live work is intentionally not duplicated there. Run detail resolves by stable
+Extension History container; live work is intentionally not duplicated there. Terminal activity rows remain history even when their live composer pill is removed; they are never removed merely because a surface settles or disappears. Run detail resolves by stable
 activity ID against the newest authoritative snapshot, so active time, child progress, current tool, and output
 continue updating while the sheet is presented. The live run detail sheet is read-only and never opens a child
 canonical session concurrently.

@@ -6,7 +6,7 @@ import { getExamplesPath, ModelRuntime, SessionManager } from "@earendil-works/p
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TrustService } from "../admin/trust-service.js";
-import type { SessionSummaryUpdate } from "../protocol/types.js";
+import type { ExtensionRunActivity, SessionSummaryUpdate } from "../protocol/types.js";
 import { RuntimeRegistry } from "./runtime-registry.js";
 
 async function waitUntil(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
@@ -990,6 +990,144 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(summaryUpdates.filter((update) => update.phase === "idle").map((update) => update.sessionId)).toEqual(
       expect.arrayContaining([first.id, second.id]),
     );
+  });
+
+  it("fails closed on a stale running artifact after canonical completion", async () => {
+    const fixture = await coldFixture("stale-subagent-artifact");
+    fixture.manager.appendMessage({
+      role: "toolResult",
+      toolCallId: "stale-tool-call",
+      toolName: "subagent",
+      content: [{ type: "text", text: "acknowledged" }],
+      details: { runId: "stale-run", state: "completed" },
+      isError: false,
+      timestamp: Date.now(),
+    });
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "stale-run");
+    await mkdir(asyncDir, { recursive: true });
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      runId: "stale-run",
+      cwd: fixture.cwd,
+      sessionId: slot.id,
+      state: "running",
+      startedAt: Date.now() - 1_000,
+      lastUpdate: Date.now(),
+    }));
+    const internal = slot as unknown as { refreshSubagentActivityFromArtifact: (path: string) => Promise<void> };
+    await internal.refreshSubagentActivityFromArtifact(asyncDir);
+    expect(slot.snapshot().extensionActivities ?? []).toEqual([]);
+
+    const projectRoot = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs");
+    const pathPolicy = slot as unknown as { extensionArtifactPathAllowed: (path: string) => boolean };
+    expect(pathPolicy.extensionArtifactPathAllowed(projectRoot)).toBe(false);
+    expect(pathPolicy.extensionArtifactPathAllowed(`${projectRoot}/.`)).toBe(false);
+    expect(pathPolicy.extensionArtifactPathAllowed(`${projectRoot}/../escape`)).toBe(false);
+
+    // A non-extension tool result carrying an arbitrary runId is not ownership
+    // evidence, even when the artifact claims this exact session and cwd.
+    fixture.manager.appendMessage({
+      role: "toolResult",
+      toolCallId: "ordinary-tool-call",
+      toolName: "read",
+      content: [{ type: "text", text: "ordinary" }],
+      details: { runId: "ordinary-run", state: "completed" },
+      isError: false,
+      timestamp: Date.now(),
+    });
+    const ordinaryDir = join(projectRoot, "ordinary-run");
+    await mkdir(ordinaryDir, { recursive: true });
+    await writeFile(join(ordinaryDir, "status.json"), JSON.stringify({
+      runId: "ordinary-run",
+      cwd: fixture.cwd,
+      sessionId: slot.id,
+      state: "running",
+      startedAt: Date.now() - 1_000,
+      lastUpdate: Date.now(),
+    }));
+    await internal.refreshSubagentActivityFromArtifact(ordinaryDir);
+    expect(slot.snapshot().extensionActivities ?? []).toEqual([]);
+  });
+
+  it("binds artifact refresh to the canonical run directory and preserves terminal completion time", async () => {
+    const fixture = await coldFixture("artifact-binding-integrity");
+    for (const duplicateToolCallId of ["canonical-first", "canonical-second"]) {
+      fixture.manager.appendMessage({
+        role: "toolResult",
+        toolCallId: duplicateToolCallId,
+        toolName: "subagent",
+        content: [{ type: "text", text: "duplicate" }],
+        details: { runId: "duplicate-canonical-run", state: "running" },
+        isError: false,
+        timestamp: Date.now(),
+      });
+    }
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const runId = "bound-run";
+    const toolCallId = "real-tool-call";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    const activity: ExtensionRunActivity = {
+      id: toolCallId,
+      runId,
+      toolCallId,
+      source: { source: "pi-subagents" },
+      title: "Pi Subagents",
+      status: "running",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:01.000Z",
+      children: [],
+    };
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+      refreshSubagentActivityFromArtifact: (path: string) => Promise<void>;
+      refreshExtensionActivityFromArtifact: (toolCallId: string, path: string) => Promise<void>;
+      bindExtensionRunOwnership: (runId: string, binding: { toolCallId: string; asyncDir?: string; terminal: boolean }) => boolean;
+      canonicalExtensionRunFacts: () => Map<string, { toolCallId?: string; terminal: boolean; ambiguous: boolean }>;
+    };
+    internal.extensionActivities.set(toolCallId, activity);
+    internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      runId,
+      state: "completed",
+      startedAt: Date.parse(activity.startedAt),
+      lastUpdate: Date.parse("2026-01-01T00:00:04.000Z"),
+    }));
+    await internal.refreshSubagentActivityFromArtifact(asyncDir);
+    expect(slot.snapshot().extensionActivities).toMatchObject([{
+      toolCallId,
+      status: "completed",
+      completedAt: "2026-01-01T00:00:04.000Z",
+    }]);
+
+    const foreignDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "foreign-run");
+    await mkdir(foreignDir, { recursive: true });
+    await writeFile(join(foreignDir, "status.json"), JSON.stringify({
+      runId,
+      state: "running",
+      lastUpdate: Date.parse("2026-01-01T00:00:05.000Z"),
+    }));
+    await internal.refreshSubagentActivityFromArtifact(foreignDir);
+    await internal.refreshExtensionActivityFromArtifact(toolCallId, foreignDir);
+    expect(slot.snapshot().extensionActivities).toMatchObject([{
+      toolCallId,
+      status: "completed",
+      completedAt: "2026-01-01T00:00:04.000Z",
+    }]);
+
+    expect(internal.bindExtensionRunOwnership(runId, {
+      toolCallId: "second-real-tool-call",
+      asyncDir: foreignDir,
+      terminal: false,
+    })).toBe(false);
+    expect(internal.extensionRunOwnership.get(runId)?.toolCallId).toBe(toolCallId);
+
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+    const duplicateFact = internal.canonicalExtensionRunFacts().get("duplicate-canonical-run");
+    expect(duplicateFact?.toolCallId).toBeUndefined();
+    expect(duplicateFact?.ambiguous).toBe(true);
   });
 
   it("runs the unchanged official status and working-indicator examples with the baseline theme", async () => {

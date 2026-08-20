@@ -52,6 +52,12 @@ struct MessageTranscriptItem: TranscriptPayload {
     let lastProgressAt: String?
     let progressSequence: Int?
     let extensionOrigin: ExtensionToolOrigin? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, parentId, timestamp, kind, role, content, provider, modelId, stopReason,
+             errorMessage, toolCallId, toolName, isError, details, usage, startedAt,
+             completedAt, durationMs, lastProgressAt, progressSequence, extensionOrigin
+    }
 }
 
 struct BashTranscriptItem: TranscriptPayload {

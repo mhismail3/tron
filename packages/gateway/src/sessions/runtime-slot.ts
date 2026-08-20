@@ -154,6 +154,13 @@ export class RuntimeSlot {
   /** Bounded, disposable extension-owned run projections retain completed work
    * for Manage Session while the owning tool carries the live copy. */
   private readonly extensionActivities = new Map<string, ExtensionRunActivity>();
+  /** Gateway-owned correlation keeps one activity identity across Pi lifecycle
+   * payloads and independently-written async artifacts. */
+  private readonly extensionRunOwnership = new Map<string, {
+    toolCallId: string;
+    asyncDir?: string;
+    terminal: boolean;
+  }>();
   private readonly extensionActivityWatchers = new Map<string, { watcher: FSWatcher; timer: NodeJS.Timeout | undefined; asyncDir: string }>();
   private readonly extensionActivityReadGenerations = new Map<string, number>();
   private subagentArtifactScanTimer: NodeJS.Timeout | undefined;
@@ -417,6 +424,7 @@ export class RuntimeSlot {
     if (previousId !== nextId) {
       this.clearExtensionActivityWatchers();
       this.extensionActivities.clear();
+      this.extensionRunOwnership.clear();
       this.hooks.rekey(previousId, nextId, this);
     }
     this.revision += 1;
@@ -824,14 +832,43 @@ export class RuntimeSlot {
     }
   }
 
-  private extensionArtifactPathAllowed(asyncDir: string): boolean {
-    if (!isAbsolute(asyncDir)) return false;
-    const candidate = resolve(asyncDir);
-    const roots = [resolve(tmpdir()), resolve(this.cwd, ".pi", "subagents")];
-    return roots.some((root) => {
-      const remainder = relative(root, candidate);
-      return remainder === "" || (!remainder.startsWith("..") && !isAbsolute(remainder));
-    });
+  private extensionArtifactPathAllowed(asyncPath: string): boolean {
+    if (!isAbsolute(asyncPath)) return false;
+    // Do not normalize away traversal before applying the allowlist. The only
+    // accepted inputs are the run directory or its direct status file.
+    const lexicalParts = asyncPath.split(/[\\/]/u).filter(Boolean);
+    if (lexicalParts.some((part) => part === "." || part === "..")) return false;
+    const canonicalRoot = (value: string): string => {
+      try { return realpathSync(value); } catch { return resolve(value); }
+    };
+    const temporaryRoot = canonicalRoot(tmpdir());
+    const projectRoot = join(canonicalRoot(this.cwd), ".pi", "subagents", "async-subagent-runs");
+    const isAllowedShape = (value: string): boolean => {
+      const temporaryParts = relative(temporaryRoot, value).split(/[\\/]/u).filter(Boolean);
+      const temporaryRun = temporaryParts[0]?.startsWith("pi-subagents-")
+        && temporaryParts[1] === "async-subagent-runs"
+        && temporaryParts.length >= 3
+        && temporaryParts.length <= 4
+        && temporaryParts[2] !== ""
+        && (temporaryParts.length === 3 || temporaryParts[3] === "status.json");
+      if (temporaryRun) return true;
+
+      const projectParts = relative(projectRoot, value)
+        .split(/[\\/]/u).filter(Boolean);
+      return projectParts.length >= 1
+        && projectParts.length <= 2
+        && projectParts[0] !== ""
+        && (projectParts.length === 1 || projectParts[1] === "status.json");
+    };
+    const candidate = resolve(asyncPath);
+    // Validate the canonical target. The lexical segment check above rejects
+    // traversal before realpath normalization; the canonical shape rejects
+    // symlinked run directories and status files escaping the exact roots.
+    try {
+      return isAllowedShape(realpathSync(candidate));
+    } catch {
+      return false;
+    }
   }
 
   private startSubagentArtifactScan(): void {
@@ -867,16 +904,44 @@ export class RuntimeSlot {
           // The per-user runtime directory may disappear during cleanup.
         }
       }
-      for (const root of roots) {
+      // Project-local artifacts are an equally canonical producer surface. Keep
+      // the same status-file/path validation used for temporary runtime roots.
+      const projectRoot = resolve(this.cwd, ".pi", "subagents", "async-subagent-runs");
+      try {
+        if ((await stat(projectRoot)).isDirectory()) roots.push(projectRoot);
+      } catch {
+        // A project without local subagent artifacts is normal.
+      }
+      const uniqueRoots = [...new Set(roots.map((root) => resolve(root)))];
+      for (const root of uniqueRoots) {
         let runs: import("node:fs").Dirent[];
         try {
           runs = await readdir(root, { withFileTypes: true });
         } catch {
           continue;
         }
-        for (const run of runs.slice(-64)) {
-          if (!run.isDirectory()) continue;
-          await this.refreshSubagentActivityFromArtifact(join(root, run.name));
+        const candidates: Array<{ asyncDir: string; state: number; timestamp: number }> = [];
+        for (const run of runs.filter((entry) => entry.isDirectory())) {
+          const asyncDir = join(root, run.name);
+          try {
+            const raw = await this.readExtensionStatusArtifact(asyncDir);
+            if (!raw || typeof raw.runId !== "string") continue;
+            const status = raw.state === "running" || raw.status === "running" ? 1 : 0;
+            const statusTimestamp = [raw.lastUpdate, raw.startedAt, raw.endedAt]
+              .filter((value): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
+              .reduce((latest, value) => Math.max(latest, value), 0);
+            const metadata = await stat(join(asyncDir, "status.json"));
+            candidates.push({ asyncDir, state: status, timestamp: Math.max(statusTimestamp, metadata.mtimeMs) });
+          } catch {
+            // The runner may be replacing or removing status.json.
+          }
+        }
+        // Directory names are UUIDs and have no activity ordering. Validate all
+        // status files first, then retain the newest lifecycle timestamps so a
+        // recent active run cannot be omitted by lexical slicing.
+        candidates.sort((left, right) => right.state - left.state || right.timestamp - left.timestamp);
+        for (const candidate of candidates.slice(0, 64)) {
+          await this.refreshSubagentActivityFromArtifact(candidate.asyncDir);
         }
       }
     } finally {
@@ -915,25 +980,85 @@ export class RuntimeSlot {
 
   private async refreshSubagentActivityFromArtifact(asyncDir: string): Promise<void> {
     try {
-      const raw = await this.readExtensionStatusArtifact(asyncDir);
+      const realAsyncDir = this.canonicalExtensionArtifactDirectory(asyncDir);
+      if (!realAsyncDir) return;
+      const raw = await this.readExtensionStatusArtifact(realAsyncDir);
       if (!raw) return;
       const runId = typeof raw.runId === "string" ? raw.runId : undefined;
       if (!runId) return;
-      const existingEntry = [...this.extensionActivities.entries()].find(([, activity]) => activity.runId === runId);
+      // The file's declared directory is advisory. If present, it must agree
+      // with the directory that was actually discovered/read.
+      if (typeof raw.asyncDir === "string") {
+        const declaredAsyncDir = this.canonicalExtensionArtifactDirectory(raw.asyncDir);
+        if (!declaredAsyncDir || declaredAsyncDir !== realAsyncDir) return;
+      }
+      const ownership = this.extensionRunOwnership.get(runId);
+      const canonical = this.canonicalExtensionRunFacts().get(runId);
+      // A duplicated runId in canonical JSONL has no safe artifact owner.
+      if (canonical?.ambiguous) return;
+      if (ownership?.asyncDir) {
+        const ownershipAsyncDir = this.canonicalExtensionArtifactDirectory(ownership.asyncDir);
+        if (!ownershipAsyncDir || ownershipAsyncDir !== realAsyncDir) return;
+      }
+      if (canonical?.asyncDir) {
+        const canonicalAsyncDir = this.canonicalExtensionArtifactDirectory(canonical.asyncDir);
+        if (!canonicalAsyncDir || canonicalAsyncDir !== realAsyncDir) return;
+      }
+      if (canonical?.toolCallId && ownership && ownership.toolCallId !== canonical.toolCallId) {
+        // A synthetic artifact row may be re-keyed to its first real tool call,
+        // but a real ownership binding must never switch to another call.
+        if (!ownership.toolCallId.startsWith("subagent:") || ownership.toolCallId === canonical.toolCallId) return;
+      }
+      const matchingEntries = [...this.extensionActivities.entries()].filter(([, activity]) => activity.runId === runId);
+      // Correlation is Gateway-owned; never pick an arbitrary activity when a
+      // malformed or legacy payload has produced duplicate run identities.
+      if (!ownership && !canonical?.toolCallId && matchingEntries.length > 1) return;
+      const boundToolCallId = canonical?.toolCallId ?? ownership?.toolCallId;
+      let existingEntry: readonly [string, ExtensionRunActivity | undefined] | undefined = boundToolCallId
+        ? ([boundToolCallId, this.extensionActivities.get(boundToolCallId)] as const)
+        : matchingEntries[0];
+      // Synthetic rows are placeholders only. Re-key one to the first real
+      // canonical tool call instead of retaining two rows for the same run.
+      if (canonical?.toolCallId && !existingEntry?.[1]) {
+        const synthetic = matchingEntries.find(([id]) => id.startsWith("subagent:"));
+        if (synthetic) existingEntry = [canonical.toolCallId, synthetic[1]];
+      }
       // A tool result is the ownership proof for an activity. Once that proof
-      // exists, the artifact may enrich it even when the producer's session
-      // path differs from the Gateway's canonical JSONL path. Unmatched
-      // artifacts still require the exact cwd/session guard.
-      const ownsUnmatchedArtifact = raw.cwd === this.cwd && raw.sessionId === this.sessionFile;
-      if (!ownsUnmatchedArtifact && !existingEntry) return;
+      // exists, the artifact may enrich it. Unmatched artifacts still require
+      // the exact cwd/session guard.
+      const ownsUnmatchedArtifact = typeof raw.cwd === "string"
+        && typeof raw.sessionId === "string"
+        && raw.cwd === this.cwd
+        && raw.sessionId === this.sessionFile;
+      if (!ownsUnmatchedArtifact && !existingEntry?.[1] && !canonical) return;
+      if (!existingEntry?.[1]) {
+        // After disposal/reacquisition, cwd and sessionId alone are not proof
+        // of ownership: a completed run can leave its status file behind.
+        if (canonical?.terminal) return;
+        if (!canonical) {
+          const runningExtensionTools = [...this.toolExecutions.values()]
+            .filter((tool) => tool.status === "running" && tool.extensionOrigin)
+            .map((tool) => tool.toolCallId);
+          if (runningExtensionTools.length !== 1) return;
+          existingEntry = [runningExtensionTools[0]!, this.extensionActivities.get(runningExtensionTools[0]!)];
+        } else if (canonical.toolCallId) {
+          existingEntry = [canonical.toolCallId, this.extensionActivities.get(canonical.toolCallId)];
+        }
+      }
       const toolCallId = existingEntry?.[0] ?? `subagent:${runId}`;
       const previous = existingEntry?.[1];
       const state = raw.state === "failed" ? "failed" : raw.state === "complete" || raw.state === "completed" || raw.state === "stopped" ? "completed" : "running";
+      // A terminal lifecycle event is authoritative; a late running artifact
+      // enriches neither status nor ownership and must not resurrect the pill.
+      if (ownership?.terminal && state === "running") return;
       const startedAt = this.artifactTime(raw.startedAt) ?? previous?.startedAt ?? new Date().toISOString();
       const updatedAt = this.artifactTime(raw.lastUpdate) ?? previous?.updatedAt ?? startedAt;
-      const completedAt = this.artifactTime(raw.endedAt);
+      const completedAt = state === "running" ? undefined : this.artifactTime(raw.endedAt) ?? updatedAt;
       const durationMs = typeof raw.durationMs === "number" && Number.isSafeInteger(raw.durationMs) && raw.durationMs >= 0 ? raw.durationMs : undefined;
-      const activity = projectExtensionRunActivity(raw, {
+      const artifactValue = ownership?.terminal
+        ? { ...raw, state: previous?.status === "failed" ? "failed" : "completed" }
+        : raw;
+      const activity = projectExtensionRunActivity(artifactValue, {
         id: previous?.id ?? toolCallId,
         toolCallId,
         source: previous?.source ?? this.subagentExtensionOrigin(),
@@ -947,12 +1072,28 @@ export class RuntimeSlot {
       });
       if (previous?.updatedAt && previous.updatedAt > activity.updatedAt) return;
       if (existingEntry) this.extensionActivities.delete(existingEntry[0]);
+      const syntheticToolCallId = matchingEntries.find(([id]) => id.startsWith("subagent:") && id !== toolCallId)?.[0];
+      if (syntheticToolCallId) this.extensionActivities.delete(syntheticToolCallId);
       this.extensionActivities.delete(toolCallId);
       this.extensionActivities.set(toolCallId, activity);
+      const ownershipAccepted = this.bindExtensionRunOwnership(runId, {
+        toolCallId,
+        asyncDir: realAsyncDir,
+        terminal: activity.status !== "running" || Boolean(ownership?.terminal),
+      });
+      if (activity.status === "running" && ownershipAccepted) {
+        this.startExtensionActivityWatcher(toolCallId, realAsyncDir);
+      } else {
+        this.stopExtensionActivityWatcher(toolCallId);
+      }
       while (this.extensionActivities.size > 64) {
         const oldest = this.extensionActivities.keys().next().value as string | undefined;
         if (!oldest) break;
+        this.stopExtensionActivityWatcher(oldest);
         this.extensionActivities.delete(oldest);
+        for (const [runId, binding] of this.extensionRunOwnership) {
+          if (binding.toolCallId === oldest) this.extensionRunOwnership.delete(runId);
+        }
       }
       this.scheduleSnapshot();
     } catch {
@@ -982,21 +1123,137 @@ export class RuntimeSlot {
     return new Date(value).toISOString();
   }
 
+  private canonicalExtensionArtifactDirectory(asyncDir: string): string | undefined {
+    if (!isAbsolute(asyncDir) || !this.extensionArtifactPathAllowed(asyncDir)) return undefined;
+    try {
+      const realAsyncDir = realpathSync(asyncDir);
+      return this.extensionArtifactPathAllowed(realAsyncDir) ? realAsyncDir : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private bindExtensionRunOwnership(
+    runId: string,
+    binding: { toolCallId: string; asyncDir?: string; terminal: boolean },
+  ): boolean {
+    const existing = this.extensionRunOwnership.get(runId);
+    if (existing && existing.toolCallId !== binding.toolCallId) {
+      // Only a synthetic placeholder may be replaced by a real Pi identity.
+      if (!existing.toolCallId.startsWith("subagent:") || binding.toolCallId.startsWith("subagent:")) return false;
+    }
+    const asyncDir = existing?.asyncDir ?? binding.asyncDir;
+    this.extensionRunOwnership.set(runId, {
+      toolCallId: binding.toolCallId,
+      ...(asyncDir ? { asyncDir } : {}),
+      terminal: Boolean(existing?.terminal || binding.terminal),
+    });
+    return true;
+  }
+
+  /** Canonical JSONL facts are the only reacquisition evidence for an
+   * artifact-created activity. Runtime maps are intentionally disposable. */
+  private canonicalExtensionRunFacts(): Map<string, { toolCallId?: string; asyncDir?: string; terminal: boolean; ambiguous: boolean }> {
+    const facts = new Map<string, { toolCallId?: string; asyncDir?: string; terminal: boolean; ambiguous: boolean }>();
+    for (const entry of this.runtime.session.sessionManager.getEntries()) {
+      if (entry.type !== "message") continue;
+      const message = entry.message as unknown as Record<string, unknown>;
+      if (message.role !== "toolResult") continue;
+      // Details.runId is untrusted presentation data. Require the canonical
+      // tool identity and prove that its tool is currently extension-owned;
+      // otherwise arbitrary tool results must not claim an artifact run.
+      const toolCallId = typeof message.toolCallId === "string" ? message.toolCallId : undefined;
+      const toolName = typeof message.toolName === "string" ? message.toolName : undefined;
+      if (!toolCallId || !toolName || !this.extensionToolOrigin(toolName)) continue;
+      const details = message.details !== null && typeof message.details === "object" && !Array.isArray(message.details)
+        ? message.details as Record<string, unknown>
+        : undefined;
+      const runId = typeof details?.runId === "string"
+        ? details.runId
+        : typeof details?.asyncId === "string" ? details.asyncId : undefined;
+      if (!runId) continue;
+      const explicitTerminal = details?.state === "failed"
+        || details?.state === "complete"
+        || details?.state === "completed"
+        || details?.state === "stopped"
+        || details?.status === "failed"
+        || details?.status === "complete"
+        || details?.status === "completed"
+        || details?.status === "stopped";
+      // An async launcher acknowledgement has no child results and no explicit
+      // terminal state; it remains live after the foreground tool returns.
+      const detached = typeof details?.asyncId === "string"
+        && (!Array.isArray(details.results) || details.results.length === 0)
+        && !explicitTerminal;
+      const asyncDir = typeof details?.asyncDir === "string" ? details.asyncDir : undefined;
+      const terminal = !detached && (explicitTerminal || typeof details?.runId === "string");
+      const previous = facts.get(runId);
+      if (!previous) {
+        facts.set(runId, { toolCallId, ...(asyncDir ? { asyncDir } : {}), terminal, ambiguous: false });
+      } else if (previous.ambiguous) {
+        previous.terminal ||= terminal;
+      } else if (previous.toolCallId === toolCallId) {
+        if (previous.asyncDir && asyncDir && previous.asyncDir !== asyncDir) previous.ambiguous = true;
+        if (!previous.asyncDir && asyncDir) previous.asyncDir = asyncDir;
+        previous.terminal ||= terminal;
+      } else if (previous.toolCallId?.startsWith("subagent:") && !toolCallId.startsWith("subagent:")) {
+        previous.toolCallId = toolCallId;
+        if (!previous.asyncDir && asyncDir) previous.asyncDir = asyncDir;
+        previous.terminal ||= terminal;
+      } else if (toolCallId.startsWith("subagent:") && previous.toolCallId && !previous.toolCallId.startsWith("subagent:")) {
+        previous.terminal ||= terminal;
+      } else {
+        // Distinct real tool calls sharing a runId are ambiguous. Retaining an
+        // arbitrary last writer would let a foreign artifact rebind the first.
+        delete previous.toolCallId;
+        previous.ambiguous = true;
+        previous.terminal ||= terminal;
+      }
+    }
+    return facts;
+  }
+
   private async refreshExtensionActivityFromArtifact(toolCallId: string, asyncDir: string): Promise<void> {
     const previous = this.extensionActivities.get(toolCallId);
-    if (!previous || this.disposed || !this.extensionArtifactPathAllowed(asyncDir)) return;
+    const realAsyncDir = this.canonicalExtensionArtifactDirectory(asyncDir);
+    if (!previous || this.disposed || !realAsyncDir) return;
     const generation = (this.extensionActivityReadGenerations.get(toolCallId) ?? 0) + 1;
     this.extensionActivityReadGenerations.set(toolCallId, generation);
     try {
-      const raw = await this.readExtensionStatusArtifact(asyncDir);
+      const raw = await this.readExtensionStatusArtifact(realAsyncDir);
       if (!raw) return;
       if (this.disposed || this.extensionActivityReadGenerations.get(toolCallId) !== generation) return;
+      const runId = typeof raw.runId === "string" ? raw.runId : undefined;
+      if (!runId || runId !== previous.runId) return;
+      if (typeof raw.asyncDir === "string") {
+        const declaredAsyncDir = this.canonicalExtensionArtifactDirectory(raw.asyncDir);
+        if (!declaredAsyncDir || declaredAsyncDir !== realAsyncDir) return;
+      }
+      const canonical = this.canonicalExtensionRunFacts().get(runId);
+      const ownership = this.extensionRunOwnership.get(runId);
+      // Watcher refresh is bound to one tool and one canonical directory. A
+      // duplicate canonical runId or either mismatch fails closed.
+      if (canonical?.ambiguous || (canonical?.toolCallId && canonical.toolCallId !== toolCallId)) return;
+      if (!ownership || ownership.toolCallId !== toolCallId) return;
+      if (ownership.asyncDir) {
+        const ownershipAsyncDir = this.canonicalExtensionArtifactDirectory(ownership.asyncDir);
+        if (!ownershipAsyncDir || ownershipAsyncDir !== realAsyncDir) return;
+      }
+      if (canonical?.asyncDir) {
+        const canonicalAsyncDir = this.canonicalExtensionArtifactDirectory(canonical.asyncDir);
+        if (!canonicalAsyncDir || canonicalAsyncDir !== realAsyncDir) return;
+      }
       const updatedAt = this.artifactTime(raw.lastUpdate) ?? new Date().toISOString();
-      const completedAt = this.artifactTime(raw.endedAt);
+      const artifactState = raw.state === "failed" ? "failed" : raw.state === "complete" || raw.state === "completed" || raw.state === "stopped" ? "completed" : "running";
+      if (ownership.terminal && artifactState === "running") return;
+      const completedAt = artifactState === "running" ? undefined : this.artifactTime(raw.endedAt) ?? updatedAt;
       const durationMs = typeof raw.durationMs === "number" && Number.isSafeInteger(raw.durationMs) && raw.durationMs >= 0
         ? raw.durationMs
         : undefined;
-      const activity = projectExtensionRunActivity(raw, {
+      const artifactValue = ownership.terminal
+        ? { ...raw, state: previous.status === "failed" ? "failed" : "completed" }
+        : raw;
+      const activity = projectExtensionRunActivity(artifactValue, {
         id: previous.id,
         toolCallId,
         source: previous.source,
@@ -1018,6 +1275,11 @@ export class RuntimeSlot {
         this.toolExecutions.set(toolCallId, nextTool);
         this.publishToolProgress(nextTool, true);
       }
+      this.bindExtensionRunOwnership(runId, {
+        toolCallId,
+        asyncDir: realAsyncDir,
+        terminal: activity.status !== "running" || Boolean(ownership.terminal),
+      });
       if (activity.status !== "running") this.stopExtensionActivityWatcher(toolCallId);
       this.scheduleSnapshot();
     } catch {
@@ -1073,6 +1335,7 @@ export class RuntimeSlot {
     durationMs?: number,
   ): ExtensionRunActivity | undefined {
     if (!extensionOrigin) return undefined;
+    const current = this.extensionActivities.get(toolCallId);
     const activity = projectExtensionRunActivity(value, {
       id: toolCallId,
       toolCallId,
@@ -1083,22 +1346,67 @@ export class RuntimeSlot {
       updatedAt,
       ...(completedAt ? { completedAt } : {}),
       ...(durationMs === undefined ? {} : { durationMs }),
-      ...(this.extensionActivities.has(toolCallId)
-        ? { previous: this.extensionActivities.get(toolCallId)! }
-        : {}),
+      ...(current ? { previous: current } : {}),
     });
-    this.extensionActivities.delete(toolCallId);
-    this.extensionActivities.set(toolCallId, activity);
+    // A synchronous result can be the first lifecycle payload carrying runId.
+    // Re-key any artifact-created synthetic row to the real Pi tool call.
+    const ownership = activity.runId ? this.extensionRunOwnership.get(activity.runId) : undefined;
+    const syntheticToolCallId = ownership?.toolCallId?.startsWith("subagent:")
+      ? ownership.toolCallId
+      : undefined;
+    const synthetic = syntheticToolCallId && syntheticToolCallId !== toolCallId
+      ? this.extensionActivities.get(syntheticToolCallId)
+      : undefined;
+    if (synthetic) {
+      this.stopExtensionActivityWatcher(syntheticToolCallId!);
+      this.extensionActivities.delete(syntheticToolCallId!);
+      const merged = projectExtensionRunActivity(value, {
+        id: toolCallId,
+        toolCallId,
+        source: extensionOrigin,
+        title: toolName,
+        status,
+        startedAt,
+        updatedAt,
+        ...(completedAt ? { completedAt } : {}),
+        ...(durationMs === undefined ? {} : { durationMs }),
+        previous: current
+          ? {
+              ...synthetic,
+              ...current,
+              children: current.children.length > 0 ? current.children : synthetic.children,
+            }
+          : synthetic,
+      });
+      this.extensionActivities.delete(toolCallId);
+      this.extensionActivities.set(toolCallId, merged);
+    } else {
+      this.extensionActivities.delete(toolCallId);
+      this.extensionActivities.set(toolCallId, activity);
+    }
+    const retainedActivity = this.extensionActivities.get(toolCallId)!;
+    const requestedAsyncDir = extensionRunAsyncDir(value);
+    const asyncDir = requestedAsyncDir ? this.canonicalExtensionArtifactDirectory(requestedAsyncDir) : undefined;
+    let ownershipAccepted = true;
+    if (retainedActivity.runId) {
+      ownershipAccepted = this.bindExtensionRunOwnership(retainedActivity.runId, {
+        toolCallId,
+        ...(asyncDir === undefined ? {} : { asyncDir }),
+        terminal: retainedActivity.status !== "running",
+      });
+    }
     while (this.extensionActivities.size > 64) {
       const oldest = this.extensionActivities.keys().next().value as string | undefined;
       if (!oldest) break;
       this.stopExtensionActivityWatcher(oldest);
       this.extensionActivities.delete(oldest);
+      for (const [runId, binding] of this.extensionRunOwnership) {
+        if (binding.toolCallId === oldest) this.extensionRunOwnership.delete(runId);
+      }
     }
-    const asyncDir = extensionRunAsyncDir(value);
-    if (asyncDir && activity.status === "running") this.startExtensionActivityWatcher(toolCallId, asyncDir);
-    if (activity.status !== "running") this.stopExtensionActivityWatcher(toolCallId);
-    return activity;
+    if (asyncDir && retainedActivity.status === "running" && ownershipAccepted) this.startExtensionActivityWatcher(toolCallId, asyncDir);
+    if (retainedActivity.status !== "running") this.stopExtensionActivityWatcher(toolCallId);
+    return retainedActivity;
   }
 
   private measureToolDuration(
@@ -2259,6 +2567,7 @@ export class RuntimeSlot {
     this.stopSubagentArtifactScan();
     this.clearToolProgressTimers();
     this.clearExtensionActivityWatchers();
+    this.extensionRunOwnership.clear();
     this.unsubscribe?.();
     this.ui.cancelAll();
     this.extensionHost.retire("Session runtime disposed");

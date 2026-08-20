@@ -283,14 +283,38 @@ struct ExtensionRunDetailsSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
+    static func resolveActivity(
+        activityID: String,
+        extensionActivities: [ExtensionRunActivity],
+        toolExecutions: [ToolExecutionState]
+    ) -> ExtensionRunActivity? {
+        let allActivities = extensionActivities + toolExecutions.compactMap(\.extensionActivity)
+        // Routes are created with activity.id. Canonical identity always wins,
+        // even when an older projection also exposes a matching alias.
+        if let canonical = allActivities.first(where: { $0.id == activityID }) { return canonical }
+
+        let legacySyntheticID = activityID.hasPrefix("subagent:") ? activityID : nil
+        let aliases = allActivities.filter { activity in
+            activity.toolCallId == activityID
+                || activity.runId == activityID
+                || (legacySyntheticID != nil && activity.runId == String(activityID.dropFirst("subagent:".count)))
+        }
+        // Compatibility aliases are not ownership proof. Two distinct Gateway
+        // records sharing a runId must fail closed rather than pick an arbitrary
+        // activity (including one chosen by array order).
+        var uniqueByID: [String: ExtensionRunActivity] = [:]
+        for activity in aliases { uniqueByID[activity.id] = activity }
+        guard uniqueByID.count == 1 else { return nil }
+        return uniqueByID.values.first
+    }
+
     private var activity: ExtensionRunActivity? {
         guard let snapshot = model.authoritativeSnapshot(for: sessionID) else { return nil }
-        return snapshot.extensionActivities?.first(where: {
-            $0.id == activityID || $0.toolCallId == activityID || $0.runId == activityID
-        })
-        ?? snapshot.toolExecutions.compactMap(\.extensionActivity).first(where: {
-            $0.id == activityID || $0.toolCallId == activityID || $0.runId == activityID
-        })
+        return Self.resolveActivity(
+            activityID: activityID,
+            extensionActivities: snapshot.extensionActivities ?? [],
+            toolExecutions: snapshot.toolExecutions
+        )
     }
 
     var body: some View {

@@ -431,6 +431,23 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(incremental.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
     }
 
+    @Test("completed extension tool results retain provenance in the canonical row")
+    func completedExtensionToolResultRetainsProvenance() throws {
+        var snapshot = try fixture(transcript: """
+        [{"id":"result","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"toolResult","content":[{"id":"text","type":"text","text":"done"}],"toolCallId":"extension-call","toolName":"subagent","isError":false,"extensionOrigin":{"source":"pi-subagents"}}]
+        """)
+        snapshot.transcriptTotal = 1
+        #expect(snapshot.transcript.first?.extensionOrigin == ExtensionToolOrigin(source: "pi-subagents"))
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        guard case .toolRun(let run) = candidate.timeline.items.first,
+              let tool = run.tools.first else {
+            Issue.record("Expected canonical extension tool result row")
+            return
+        }
+        #expect(tool.extensionOrigin == ExtensionToolOrigin(source: "pi-subagents"))
+        #expect(tool.title == "subagent")
+    }
+
     @Test("canonical result changes always globally assemble")
     func canonicalResultChangeAssembles() throws {
         var snapshot = try fixture(transcript: """

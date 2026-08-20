@@ -51,9 +51,49 @@ describe("projectExtensionRunActivity", () => {
   it("keeps detached async work live after the launching tool returns", () => {
     const activity = projectExtensionRunActivity({
       details: { mode: "single", asyncId: "async-1", results: [] },
-    }, { ...base, status: "completed" });
+    }, {
+      ...base,
+      status: "completed",
+      completedAt: "2026-01-01T00:00:03.000Z",
+    });
     expect(activity.status).toBe("running");
+    expect(activity.completedAt).toBeUndefined();
     expect(activity.runId).toBe("async-1");
+  });
+
+  it("does not resurrect a terminal activity from a late async acknowledgement", () => {
+    const activity = projectExtensionRunActivity({
+      details: { mode: "single", asyncId: "async-1", results: [] },
+    }, {
+      ...base,
+      status: "running",
+      completedAt: "2026-01-01T00:00:03.000Z",
+      previous: {
+        ...base,
+        status: "completed",
+        completedAt: "2026-01-01T00:00:03.000Z",
+      },
+    });
+    expect(activity).toMatchObject({ status: "completed", completedAt: "2026-01-01T00:00:03.000Z" });
+  });
+
+  it("keeps the real tool-call identity when a runId arrives in a terminal result", () => {
+    const activity = projectExtensionRunActivity({
+      details: { runId: "run-1", state: "completed", results: [] },
+    }, {
+      ...base,
+      id: "pi-tool-call-1",
+      toolCallId: "pi-tool-call-1",
+      status: "completed",
+      completedAt: "2026-01-01T00:00:03.000Z",
+    });
+    expect(activity).toMatchObject({
+      id: "pi-tool-call-1",
+      toolCallId: "pi-tool-call-1",
+      runId: "run-1",
+      status: "completed",
+      completedAt: "2026-01-01T00:00:03.000Z",
+    });
   });
 
   it("drops unsafe numeric fields instead of breaking native integer decoding", () => {

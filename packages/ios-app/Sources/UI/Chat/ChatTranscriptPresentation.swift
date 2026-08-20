@@ -203,11 +203,6 @@ enum ChatExtensionWidgetPolicy {
             else { ownerBySource[owner.source] = owner }
         }
         for source in ambiguousSources { ownerBySource[source] = nil }
-        let hasLocalStructuredActivity = admittedActivities.contains { $0.source.source == "local" }
-        let dominantLiveActivitySource = admittedActivities
-            .filter { $0.isLive }
-            .sorted { ($0.lastActivityAt ?? $0.updatedAt) > ($1.lastActivityAt ?? $1.updatedAt) }
-            .first?.source.source
         var matchedStatusKeys = Set<String>()
         var matchedServiceIDs = Set<String>()
         var groups: [String: ExtensionWidgetGroup] = [:]
@@ -243,17 +238,19 @@ enum ChatExtensionWidgetPolicy {
         let surfaces = visibleSurfaces(presentation.surfaces, placement: .aboveEditor)
             + visibleSurfaces(presentation.surfaces, placement: .belowEditor)
         for surface in surfaces.sorted(by: { $0.id < $1.id }) {
-            // When the surface has no provenance, attribute it to the dominant live activity's source
-            // so they merge into the same group (fixes the "Local" / "Pi Subagents" split).
+            // A surface without Gateway provenance remains independently
+            // addressable; never infer ownership from whichever activity is
+            // newest, or create a competing Local group.
             let source = admittedSource(surface.provenance?.source)
-                ?? dominantLiveActivitySource
-                ?? (hasLocalStructuredActivity ? "local" : nil)
             let canonicalKey = canonicalWidgetKey(for: surface.id)
             let owner = canonicalKey.flatMap { semanticGroups[$0].flatMap { groups[$0] }?.items.compactMap { item in
                 if case .semantic(let widget) = item.content { return widget.owner }
                 return nil
             }.first } ?? source.flatMap { ownerBySource[$0] }
-            let groupID = canonicalKey.flatMap { semanticGroups[$0] } ?? owner.map(ownerID) ?? source.map { "source:\($0)" } ?? "surface:\(surface.id)"
+            let groupID = canonicalKey.flatMap { semanticGroups[$0] }
+                ?? owner.map(ownerID)
+                ?? source.map { "source:\($0)" }
+                ?? "surface:\(surface.id)"
             let status = canonicalKey.flatMap { key in statuses.first { $0.key == key } }
             if let status { matchedStatusKeys.insert(status.key) }
             let exactServices = (owner?.source ?? source).map { source in services.filter { $0.matchingSource == source } } ?? []

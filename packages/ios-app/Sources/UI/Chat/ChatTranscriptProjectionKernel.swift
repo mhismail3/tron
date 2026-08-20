@@ -1078,7 +1078,8 @@ enum ChatTranscriptProjectionKernel {
             response: item.details, content: item.text, fallbackContent: item.text.isEmpty ? item.details : nil,
             error: item.isError == true, startedAt: item.startedAt,
             completedAt: item.completedAt ?? item.timestamp, durationMs: item.durationMs,
-            lastProgressAt: item.lastProgressAt, progressSequence: item.progressSequence
+            lastProgressAt: item.lastProgressAt, progressSequence: item.progressSequence,
+            extensionOrigin: item.extensionOrigin
         )
     }
 }

@@ -153,6 +153,7 @@ export interface ExtensionRunActivity {
   status: ExtensionRunStatus;
   startedAt: string;
   updatedAt: string;
+  completedAt?: string;
   lastActivityAt?: string;
   currentTool?: string;
   currentToolStartedAt?: string;

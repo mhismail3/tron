@@ -150,6 +150,36 @@ struct ChatTranscriptPresentationTests {
         #expect(live.first?.liveActivityCount == 1)
     }
 
+    @Test("distinct Gateway activity identities are not merged by run ID")
+    @MainActor
+    func distinctActivityIdentitiesRemainDeterministic() throws {
+        var snapshot = try fixture(transcript: "[]")
+        let local = ExtensionRunActivity(
+            id: "tool-call", runId: "run-shared", toolCallId: "tool-call",
+            source: ExtensionToolOrigin(source: "local"), title: "subagent", mode: "single",
+            status: .running, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
+            completedAt: nil, lastActivityAt: nil, currentTool: nil, currentToolStartedAt: nil,
+            currentPath: nil, toolCount: nil, turnCount: nil, durationMs: nil, output: nil, children: []
+        )
+        let artifact = ExtensionRunActivity(
+            id: "subagent:run-shared", runId: "run-shared", toolCallId: "subagent:run-shared",
+            source: ExtensionToolOrigin(source: "pi-subagents"), title: "subagent", mode: "single",
+            status: .running, startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:02Z",
+            completedAt: nil, lastActivityAt: nil, currentTool: nil, currentToolStartedAt: nil,
+            currentPath: nil, toolCount: nil, turnCount: nil, durationMs: nil, output: nil, children: []
+        )
+        snapshot.extensionActivities = [local, artifact]
+        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? [])
+        #expect(groups.count == 2)
+        #expect(groups.map(\.id) == ["source:local", "source:pi-subagents"])
+        #expect(groups.flatMap(\.activities).map(\.id) == ["tool-call", "subagent:run-shared"])
+        #expect(ExtensionRunDetailsSheet.resolveActivity(
+            activityID: "run-shared",
+            extensionActivities: [local, artifact],
+            toolExecutions: []
+        ) == nil)
+    }
+
     @Test("activity groups put live runs before settled runs")
     func activityGroupsPutLiveRunsFirst() throws {
         var snapshot = try fixture(transcript: "[]")
@@ -197,9 +227,10 @@ struct ChatTranscriptPresentationTests {
             inputMode: .none,
             frame: ExtensionFrame(width: 4, height: 1, lines: [], plainText: "raw")
         )]
-        let group = try #require(ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? []).first)
-        #expect(group.label == "Pi Subagents")
-        #expect(group.items.count == 1)
+        let groups = ChatExtensionWidgetPolicy.groups(snapshot.extensionPresentation, activities: snapshot.extensionActivities ?? [])
+        #expect(groups.map(\.id) == ["source:local", "surface:surface"])
+        #expect(groups.first?.label == "Pi Subagents")
+        #expect(groups.last?.items.count == 1)
     }
 
     @Test("extension source labels omit package transport and versions")
