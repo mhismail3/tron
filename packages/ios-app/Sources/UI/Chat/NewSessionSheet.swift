@@ -37,7 +37,7 @@ struct NewSessionSheet: View {
                                                 .foregroundStyle(Color.tronAccentText)
                                                 .lineLimit(1)
                                             Text(shortcut.serverName)
-                                                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                                                .font(TronTypography.secondaryDescription)
                                                 .foregroundStyle(Color.tronTextSecondary)
                                                 .lineLimit(1)
                                         }
@@ -314,7 +314,7 @@ struct NewSessionSheet: View {
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
                     Spacer(minLength: 10)
                     Text(value)
-                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+                        .font(TronTypography.code(size: TronTypography.sizeXL, weight: .bold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.55)
                         .truncationMode(.middle)
@@ -323,7 +323,7 @@ struct NewSessionSheet: View {
                 HStack(alignment: .top, spacing: 8) {
                     Color.clear.frame(width: 16, height: 1)
                     Text(caption)
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
+                        .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronTextMuted)
                         .fixedSize(horizontal: false, vertical: true)
                 }

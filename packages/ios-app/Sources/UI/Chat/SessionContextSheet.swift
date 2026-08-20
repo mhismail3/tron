@@ -337,12 +337,12 @@ struct SessionContextSheet: View {
                 let remaining = max(0, contextWindow - used)
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text("\(remaining.formatted(.number.notation(.compactName))) tokens left")
-                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
+                        .font(TronTypography.code(size: TronTypography.sizeXL, weight: .bold))
                         .foregroundStyle(Color.tronTextPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
                     Text("\(Int(percent.rounded()))% used")
-                        .font(TronTypography.bodySM)
+                        .font(TronTypography.secondaryCodeDescription)
                         .foregroundStyle(Color.tronTextSecondary)
                 }
                 ProgressView(value: percent, total: 100)
@@ -386,7 +386,7 @@ struct SessionContextSheet: View {
     private func contextAndCompactionRow(contextValue: String, snapshot: SessionSnapshot) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Text(contextValue)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .regular))
+                .font(TronTypography.secondaryCodeDescription)
                 .foregroundStyle(Color.tronTextSecondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -399,7 +399,7 @@ struct SessionContextSheet: View {
                 "Automatic Compaction: \(SessionCompactionControlPolicy.automaticStatus(snapshot.automaticCompactionEnabled))",
                 systemImage: "arrow.triangle.2.circlepath"
             )
-            .font(TronTypography.secondaryDescription)
+            .font(TronTypography.secondaryCodeDescription)
             .foregroundStyle(Color.tronTextSecondary)
             .lineLimit(1)
             .minimumScaleFactor(0.75)
@@ -415,7 +415,7 @@ struct SessionContextSheet: View {
     private func metric(_ value: String, _ label: String) -> some View {
         VStack(spacing: 3) {
             Text(value)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                .font(TronTypography.code(size: TronTypography.sizeBody2, weight: .semibold))
                 .foregroundStyle(Color.tronTextPrimary)
                 .lineLimit(1)
                 .multilineTextAlignment(.center)
@@ -467,6 +467,7 @@ struct SessionContextSheet: View {
                                 icon: group.hasLiveContent ? "circle.dotted" : "clock.arrow.circlepath",
                                 title: group.label,
                                 subtitle: extensionActivitySubtitle(group),
+                                subtitleRole: .dynamicValue,
                                 accent: .tronEmerald
                             ) {
                                 Image(systemName: "chevron.right")
@@ -512,10 +513,10 @@ struct SessionContextSheet: View {
                         }
                     }
                 } label: {
-                    TronSettingsRow(
+                    TronValueRow(
                         icon: "cpu",
                         title: "Model",
-                        subtitle: snapshot.model?.displayDescription ?? "Not selected",
+                        value: snapshot.model?.displayDescription ?? "Not selected",
                         accent: configurationRowAccent
                     )
                     .accessibilityHidden(true)
@@ -535,16 +536,13 @@ struct SessionContextSheet: View {
                         }
                     }
                 } label: {
-                    TronSettingsRow(
+                    TronValueRow(
                         icon: "brain",
                         title: "Thinking",
-                        subtitle: "Reasoning effort for this session",
+                        detail: "Reasoning effort for this session",
+                        value: snapshot.thinkingLevel.capitalized,
                         accent: configurationRowAccent
-                    ) {
-                        Text(snapshot.thinkingLevel.capitalized)
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronTextPrimary)
-                    }
+                    )
                     .accessibilityHidden(true)
                 }
                 .accessibilityLabel("Thinking: \(snapshot.thinkingLevel.capitalized)")
@@ -624,7 +622,13 @@ struct SessionContextSheet: View {
         Group {
             switch gitPresentation {
             case .loading:
-                TronSettingsRow(icon: "arrow.triangle.branch", title: "Current Branch", subtitle: "Checking workspace…", accent: sessionRowAccent) {
+                TronSettingsRow(
+                    icon: "arrow.triangle.branch",
+                    title: "Current Branch",
+                    subtitle: "Checking workspace…",
+                    subtitleRole: .dynamicValue,
+                    accent: sessionRowAccent
+                ) {
                     ProgressView().controlSize(.small)
                 }
             case .notRepository:
@@ -636,6 +640,7 @@ struct SessionContextSheet: View {
                     icon: "arrow.triangle.branch",
                     title: "Current Branch",
                     subtitle: dirty ? "Uncommitted changes" : "Working tree clean",
+                    subtitleRole: .dynamicValue,
                     accent: sessionRowAccent
                 ) {
                     Text(branch)
@@ -644,7 +649,13 @@ struct SessionContextSheet: View {
                         .lineLimit(1)
                 }
             case .failed:
-                TronSettingsRow(icon: "exclamationmark.triangle", title: "Current Branch", subtitle: "Unable to inspect this workspace", accent: sessionRowAccent) {
+                TronSettingsRow(
+                    icon: "exclamationmark.triangle",
+                    title: "Current Branch",
+                    subtitle: "Unable to inspect this workspace",
+                    subtitleRole: .dynamicValue,
+                    accent: sessionRowAccent
+                ) {
                     Text("Unavailable").font(TronTypography.caption).foregroundStyle(Color.tronTextSecondary)
                 }
             }
@@ -905,11 +916,6 @@ private struct AgentContextSheet: View {
     private func countLabel(_ count: Int?) -> String { count?.formatted() ?? "Unavailable" }
 
     private func contextMetricRow(icon: String, title: String, value: String) -> some View {
-        TronSettingsRow(icon: icon, title: title, accent: .tronCyan) {
-            Text(value)
-                .font(TronTypography.bodySM)
-                .foregroundStyle(Color.tronTextPrimary)
-                .multilineTextAlignment(.trailing)
-        }
+        TronValueRow(icon: icon, title: title, value: value, accent: .tronCyan)
     }
 }

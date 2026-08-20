@@ -22,7 +22,7 @@ struct ProviderSetupRow: View {
                     .foregroundStyle(Color.tronTextPrimary)
                     .lineLimit(1)
                 Text(connectionDetail)
-                    .font(TronTypography.code(size: TronTypography.sizeBodySM))
+                    .font(TronTypography.secondaryCodeDescription)
                     .foregroundStyle(Color.tronTextSecondary)
                     .lineLimit(1)
             }
@@ -109,7 +109,7 @@ struct ModelPicker: View {
                                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                                     .foregroundStyle(Color.tronTextPrimary)
                                 Text(model.displayDescription)
-                                    .font(TronTypography.codeContent)
+                                    .font(TronTypography.secondaryDescription)
                                     .foregroundStyle(Color.tronTextPrimary)
                             }
                             Spacer(minLength: 8)

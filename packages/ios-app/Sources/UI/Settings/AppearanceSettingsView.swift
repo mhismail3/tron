@@ -26,7 +26,7 @@ struct AppearanceSettingsView: View {
                         TronProgressiveSheetLink(accessibilityLabel: "Text Font") {
                             FontFamilySelectionView(title: "Text Font", selection: $fonts.selectedFamily, families: FontFamily.textFamilies)
                         } label: {
-                            TronSettingsRow(icon: "textformat", title: "Font", subtitle: fonts.selectedFamily.displayName, accent: .tronPurple)
+                            TronValueRow(icon: "textformat", title: "Font", value: fonts.selectedFamily.displayName, accent: .tronPurple)
                         }
                         if fonts.selectedFamily.isVariable {
                             TronSettingsDivider(accent: .tronPurple)
@@ -64,7 +64,7 @@ struct AppearanceSettingsView: View {
                         TronProgressiveSheetLink(accessibilityLabel: "Code Font") {
                             FontFamilySelectionView(title: "Code Font", selection: $fonts.selectedMonoFamily, families: FontFamily.monoFamilies)
                         } label: {
-                            TronSettingsRow(icon: "curlybraces", title: "Font", subtitle: fonts.selectedMonoFamily.displayName, accent: .tronCyan)
+                            TronValueRow(icon: "curlybraces", title: "Font", value: fonts.selectedMonoFamily.displayName, accent: .tronCyan)
                         }
                         if fonts.selectedMonoFamily.isVariable {
                             TronSettingsDivider(accent: .tronCyan)

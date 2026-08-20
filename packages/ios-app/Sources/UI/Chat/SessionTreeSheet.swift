@@ -259,7 +259,7 @@ struct SessionTreeSheet: View {
 
     private func runtimeStatistics(_ snapshot: SessionSnapshot) -> some View {
         Text("\(snapshot.stats.totalMessages.formatted()) messages · \(snapshot.stats.toolCalls.formatted()) tool calls")
-            .font(TronTypography.bodySM)
+            .font(TronTypography.secondaryCodeDescription)
             .foregroundStyle(Color.tronTextSecondary)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
@@ -267,7 +267,7 @@ struct SessionTreeSheet: View {
 
     private func runtimePhase(_ snapshot: SessionSnapshot) -> some View {
         Text(snapshot.phase.rawValue.capitalized)
-            .font(TronTypography.bodySM)
+            .font(TronTypography.secondaryCodeDescription)
             .foregroundStyle(Color.tronTextSecondary)
     }
 
@@ -311,28 +311,12 @@ struct SessionTreeSheet: View {
                     }
                 }
             } label: {
-                HStack(alignment: .center, spacing: SessionHistoryCardMetrics.contentSpacing) {
-                    Image(systemName: mode.icon)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                        .foregroundStyle(Color.tronCyan)
-                        .frame(width: SessionHistoryCardMetrics.iconWidth, height: 20, alignment: .center)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(mode.rawValue)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .multilineTextAlignment(.leading)
-                        Text(mode.explanation)
-                            .font(TronTypography.bodySM)
-                            .foregroundStyle(Color.tronTextSecondary)
-                            .multilineTextAlignment(.leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.horizontal, SessionHistoryCardMetrics.horizontalPadding)
-                .padding(.vertical, SessionHistoryCardMetrics.verticalPadding)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                TronValueRow(
+                    icon: mode.icon,
+                    title: "Selected View",
+                    value: mode.rawValue,
+                    accent: .tronCyan
+                )
                 .contentShape(Rectangle())
             }
         }
@@ -429,7 +413,7 @@ private struct TreeNodeRow: View {
                             if node.childCount > 1 { Text("\(node.childCount) branches") }
                             Text(relativeTimestamp)
                         }
-                        .font(TronTypography.caption)
+                        .font(TronTypography.secondaryCodeDescription)
                         .foregroundStyle(Color.tronTextMuted)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

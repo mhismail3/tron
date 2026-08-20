@@ -90,7 +90,7 @@ struct RuntimeBehaviorSettingsView: View {
                 scopeGroup
                 TronSettingsGroup("Provider Transport", accent: .tronCyan) {
                     VStack(spacing: 0) {
-                        choiceRow("network", "Transport", transportLabel, detail: "Protocol used for provider connections", accent: .tronCyan) {
+                        choiceRow("network", "Transport", transportLabel, accent: .tronCyan) {
                             Button("Automatic") { draft.transport = "auto" }
                             Button("Server-Sent Events") { draft.transport = "sse" }
                             Button("WebSocket") { draft.transport = "websocket" }
@@ -104,12 +104,12 @@ struct RuntimeBehaviorSettingsView: View {
                 }
                 TronSettingsGroup("Message Queue", accent: .tronPurple) {
                     VStack(spacing: 0) {
-                        choiceRow("arrow.turn.up.right", "Steering delivery", queueLabel(draft.steeringMode), detail: "How steering messages reach active work", accent: .tronPurple) {
+                        choiceRow("arrow.turn.up.right", "Steering delivery", queueLabel(draft.steeringMode), accent: .tronPurple) {
                             Button("Deliver all") { draft.steeringMode = "all" }
                             Button("One at a time") { draft.steeringMode = "one-at-a-time" }
                         }
                         TronSettingsDivider(accent: .tronPurple)
-                        choiceRow("clock.arrow.circlepath", "Follow-up delivery", queueLabel(draft.followUpMode), detail: "How queued follow-ups start after a response", accent: .tronPurple) {
+                        choiceRow("clock.arrow.circlepath", "Follow-up delivery", queueLabel(draft.followUpMode), accent: .tronPurple) {
                             Button("Deliver all") { draft.followUpMode = "all" }
                             Button("One at a time") { draft.followUpMode = "one-at-a-time" }
                         }
@@ -213,16 +213,24 @@ struct RuntimeBehaviorSettingsView: View {
     }
 
     private var scopeGroup: some View {
-        TronSettingsGroup("Scope") {
-            choiceRow("scope", "Settings Scope", scope == .project ? "Current Project" : "Global Defaults") {
-                Button("Global Defaults") { selectScope(.global) }
-                if allowsProjectScope { Button("Current Project") { selectScope(.project) } }
+        TronSettingsGroup(
+            "Scope",
+            detail: scope == .project
+                ? "These overrides apply only to the trusted current workspace."
+                : "These defaults apply to every workspace on this Mac."
+        ) {
+            if allowsProjectScope {
+                choiceRow("scope", "Settings Scope", scope == .project ? "Current Project" : "Global Defaults") {
+                    Button("Global Defaults") { selectScope(.global) }
+                    Button("Current Project") { selectScope(.project) }
+                }
+            } else {
+                TronValueRow(
+                    icon: "scope",
+                    title: "Settings Scope",
+                    value: "Global Defaults"
+                )
             }
-            Text(scope == .project ? "These overrides apply only to the trusted current workspace." : "These defaults apply to every workspace on this Mac.")
-                .font(TronTypography.bodySM)
-                .foregroundStyle(Color.tronTextPrimary)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 12)
         }
     }
 
@@ -238,9 +246,9 @@ struct RuntimeBehaviorSettingsView: View {
         TronToggleRow(icon: "command", title: "Enable skill commands", detail: "Expose installed skills as slash commands", isOn: $draft.skillCommands)
     }
 
-    private func choiceRow<Content: View>(_ icon: String, _ title: String, _ value: String, detail: String? = nil, accent: Color = .tronEmerald, @ViewBuilder choices: () -> Content) -> some View {
-        TronValueRow(icon: icon, title: title, detail: detail, accent: accent) {
-            TronInlineMenu(value, accent: accent, content: choices)
+    private func choiceRow<Content: View>(_ icon: String, _ title: String, _ value: String, accent: Color = .tronEmerald, @ViewBuilder choices: () -> Content) -> some View {
+        TronValueRow(icon: icon, title: title, value: value, accent: accent) {
+            TronInlineMenu("Change", accent: accent, content: choices)
         }
     }
 

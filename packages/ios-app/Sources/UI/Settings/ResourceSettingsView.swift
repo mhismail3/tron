@@ -171,14 +171,24 @@ struct ResourceSettingsView: View {
     }
 
     private var scopeGroup: some View {
-        TronSettingsGroup("Applies To") {
-            TronValueRow(icon: "scope", title: scope == .project ? "Current Project" : "Every Project", detail: scopeExplanation) {
-                if allowsProjectScope {
-                    TronInlineMenu(scope == .project ? "Project" : "Global") {
+        TronSettingsGroup("Applies To", detail: scopeExplanation) {
+            if allowsProjectScope {
+                TronValueRow(
+                    icon: "scope",
+                    title: "Settings Scope",
+                    value: scope == .project ? "Current Project" : "Every Project"
+                ) {
+                    TronInlineMenu("Change") {
                         Button("Every Project") { selectScope(.global) }
                         Button("Current Project") { selectScope(.project) }
                     }
                 }
+            } else {
+                TronValueRow(
+                    icon: "scope",
+                    title: "Settings Scope",
+                    value: "Every Project"
+                )
             }
         }
     }
@@ -189,7 +199,12 @@ struct ResourceSettingsView: View {
 
     private func editorRow(_ value: Editor, icon: String, value text: String, accent: Color) -> some View {
         Button { editor = value } label: {
-            TronSettingsRow(icon: icon, title: value.title, subtitle: summary(value, text: text), accent: accent)
+            TronValueRow(
+                icon: icon,
+                title: value.title,
+                value: summary(value, text: text),
+                accent: accent
+            )
         }
         .buttonStyle(.plain)
         .accessibilityHint("Opens an editor with an explanation and examples")

@@ -86,10 +86,10 @@ struct PackagesSettingsView: View {
                         ) {
                             PackageResolvedResourcesView(resources: resources)
                         } label: {
-                            TronSettingsRow(
+                            TronValueRow(
                                 icon: "magnifyingglass.circle.fill",
                                 title: "Inspect Resolved Resources",
-                                subtitle: summary,
+                                value: summary,
                                 accent: .tronTeal
                             )
                         }
@@ -197,7 +197,7 @@ struct PackagesSettingsView: View {
         TronValueRow(
             icon: "shippingbox.fill",
             title: package.source,
-            detail: [package.scope == .project ? "Project" : "Global", package.filtered ? "Filtered" : nil, updates.contains { $0.id == package.id } ? "Update available" : nil]
+            value: [package.scope == .project ? "Project" : "Global", package.filtered ? "Filtered" : nil, updates.contains { $0.id == package.id } ? "Update available" : nil]
                 .compactMap { $0 }.joined(separator: " · ")
         ) {
             if workingSources.contains(package.id) {

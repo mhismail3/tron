@@ -32,7 +32,7 @@ struct GatewayConnectionStatusBadge: View {
                 .fill(state.color)
                 .frame(width: 8, height: 8)
             Text(state.label)
-                .font(TronTypography.caption)
+                .font(TronTypography.secondaryCodeDescription)
                 .foregroundStyle(state.color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
@@ -360,7 +360,7 @@ struct GatewayConnectionDetailView: View {
                             TronSettingsDivider(accent: .tronCyan)
                             infoRow("cpu", "Agent runtime", info.piVersion)
                             TronSettingsDivider(accent: .tronCyan)
-                            infoRow("point.3.connected.trianglepath.dotted", "Protocol", String(info.protocolVersion), numeric: true)
+                            infoRow("point.3.connected.trianglepath.dotted", "Protocol", String(info.protocolVersion))
                             TronSettingsDivider(accent: .tronCyan)
                             infoRow(
                                 "lock.shield",
@@ -552,8 +552,8 @@ struct GatewayConnectionDetailView: View {
             : .tronError
         return TronValueRow(
             icon: updateStatus.state == "rolled-back" ? "arrow.uturn.backward.circle" : "arrow.down.circle",
-            title: acceptedOperationLabel ?? updateStatus.presentationTitle,
-            detail: "Gateway update · \(updateStatus.channel.capitalized) channel",
+            title: "Gateway Update · \(updateStatus.channel.capitalized)",
+            value: acceptedOperationLabel ?? updateStatus.presentationTitle,
             accent: accent
         ) {
             if active {
@@ -567,7 +567,7 @@ struct GatewayConnectionDetailView: View {
             TronValueRow(
                 icon: "folder",
                 title: "Source repository",
-                detail: GatewayConnectionDetailPresentation.sourceRepositoryDetail(config),
+                value: GatewayConnectionDetailPresentation.sourceRepositoryDetail(config),
                 accent: .tronEmerald
             ) {
                 Button("Configure") { configuringSourceRepository = true }
@@ -684,13 +684,8 @@ struct GatewayConnectionDetailView: View {
         }
     }
 
-    private func infoRow(_ icon: String, _ title: String, _ value: String, numeric: Bool = false) -> some View {
-        TronValueRow(icon: icon, title: title, accent: .tronCyan) {
-            Text(value)
-                .font(numeric ? TronTypography.numericValue : TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(Color.tronTextPrimary)
-                .multilineTextAlignment(.trailing)
-        }
+    private func infoRow(_ icon: String, _ title: String, _ value: String) -> some View {
+        TronValueRow(icon: icon, title: title, value: value, accent: .tronCyan)
     }
 }
 
@@ -712,7 +707,7 @@ private struct GatewayTechnicalDetailsSheet: View {
                             TronValueRow(
                                 icon: detail.icon,
                                 title: detail.title,
-                                detail: detail.value,
+                                value: detail.value,
                                 accent: .tronCyan
                             )
                         }

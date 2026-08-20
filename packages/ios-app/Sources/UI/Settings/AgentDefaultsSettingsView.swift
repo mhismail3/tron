@@ -42,20 +42,30 @@ struct AgentDefaultsSettingsView: View {
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
-                TronSettingsGroup("Scope") {
-                    TronValueRow(icon: "scope", title: "Settings Scope") {
-                        TronInlineMenu(scope == .project ? "Current Project" : "Global Defaults") {
-                            Button("Global Defaults") { selectScope(.global) }
-                            if allowsProjectScope {
+                TronSettingsGroup(
+                    "Scope",
+                    detail: scope == .project
+                        ? "Overrides apply only to the trusted current workspace."
+                        : "Defaults apply to every Tron workspace on this Mac."
+                ) {
+                    if allowsProjectScope {
+                        TronValueRow(
+                            icon: "scope",
+                            title: "Settings Scope",
+                            value: scope == .project ? "Current Project" : "Global Defaults"
+                        ) {
+                            TronInlineMenu("Change") {
+                                Button("Global Defaults") { selectScope(.global) }
                                 Button("Current Project") { selectScope(.project) }
                             }
                         }
+                    } else {
+                        TronValueRow(
+                            icon: "scope",
+                            title: "Settings Scope",
+                            value: "Global Defaults"
+                        )
                     }
-                    Text(scope == .project ? "Overrides apply only to the trusted current workspace." : "Defaults apply to every Tron workspace on this Mac.")
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 12)
                 }
                 TronSettingsGroup("Default Model", accent: .tronPurple) {
                     VStack(spacing: 0) {
@@ -66,11 +76,21 @@ struct AgentDefaultsSettingsView: View {
                             )
                                 .tronNavigationTitle("Default Model", accent: .tronPurple)
                         } label: {
-                            TronValueRow(icon: "cpu", title: "Model", detail: draft.selectedModel?.displayDescription ?? "Choose model", accent: .tronPurple)
+                            TronValueRow(
+                                icon: "cpu",
+                                title: "Model",
+                                value: draft.selectedModel?.displayDescription ?? "Choose model",
+                                accent: .tronPurple
+                            )
                         }
                         TronSettingsDivider(accent: .tronPurple)
-                        TronValueRow(icon: "brain", title: "Thinking", detail: "Reasoning effort for new sessions", accent: .tronPurple) {
-                            TronInlineMenu(draft.thinking.capitalized, accent: .tronPurple) {
+                        TronValueRow(
+                            icon: "brain",
+                            title: "Thinking",
+                            value: draft.thinking.capitalized,
+                            accent: .tronPurple
+                        ) {
+                            TronInlineMenu("Change", accent: .tronPurple) {
                                 ForEach(["off", "minimal", "low", "medium", "high", "xhigh", "max"], id: \.self) { level in
                                     Button(level.capitalized) { draft.thinking = level }
                                 }
@@ -97,19 +117,23 @@ struct AgentDefaultsSettingsView: View {
                         )
                     }
                 }
-                TronSettingsGroup("Project Resources", accent: .tronAmber) {
-                    TronValueRow(icon: "checkmark.shield", title: "Default Trust", detail: "How project resources load in new workspaces", accent: .tronAmber) {
-                        TronInlineMenu(draft.trust.capitalized, accent: .tronAmber) {
+                TronSettingsGroup(
+                    "Project Resources",
+                    detail: "Trust controls project resource loading; it is not a sandbox.",
+                    accent: .tronAmber
+                ) {
+                    TronValueRow(
+                        icon: "checkmark.shield",
+                        title: "Default Trust",
+                        value: draft.trust.capitalized,
+                        accent: .tronAmber
+                    ) {
+                        TronInlineMenu("Change", accent: .tronAmber) {
                             Button("Ask") { draft.trust = "ask" }
                             Button("Always") { draft.trust = "always" }
                             Button("Never") { draft.trust = "never" }
                         }
                     }
-                    Text("Trust controls project resource loading; it is not a sandbox.")
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .padding(.horizontal, 14)
-                        .padding(.bottom, 12)
                 }
             }
             .padding(.horizontal, 20)

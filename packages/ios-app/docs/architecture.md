@@ -804,7 +804,13 @@ chips and details, structured-data rows, Manage Session content, and
 settings groups use Tron's tinted Liquid Glass surfaces. The main Settings sheet is a single
 list of separated row containers rather than category headers; each row carries a concise secondary
 summary while retaining progressive destination construction and exact dashboard/project scope
-admission. The dashboard keeps search as an explicit toolbar action, aligns workspace headers to the session
+admission. Settings rows share one semantic value policy rather than sheet-local typography: stable
+explanations and identities use the selected reading family; live or user-selectable values use the
+code family. A row with a distinct trailing control places its value on the secondary line and gives
+the control a stable reading-family action label. Without a trailing control, the dynamic value is
+right aligned. Main Settings summaries, server addresses, and model/provider descriptions are stable
+copy; connection/provider state and editable selections are dynamic values. The same policy owns New
+Session, Manage Session, history, and their progressively presented subsheets. The dashboard keeps search as an explicit toolbar action, aligns workspace headers to the session
 status column, uses compact separated session cards, and keeps relative activity
 time at each row's trailing edge. Workspace headers and session cards share the
 same 28-point status-icon anchor: 16 points of outer row inset plus 12 points of

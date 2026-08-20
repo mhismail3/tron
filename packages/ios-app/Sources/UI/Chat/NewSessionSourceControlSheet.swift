@@ -22,6 +22,7 @@ struct NewSessionSourceControlSheet: View {
                     TronSettingsGroup(
                         "Checkout Strategy",
                         detail: inspectionDetail,
+                        detailRole: .dynamicValue,
                         accent: .tronTeal
                     ) {
                         VStack(spacing: 0) {
@@ -38,7 +39,7 @@ struct NewSessionSourceControlSheet: View {
                                                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                                                 .foregroundStyle(Color.tronTextPrimary)
                                             Text(mode.summary)
-                                                .font(TronTypography.code(size: TronTypography.sizeCaption))
+                                                .font(TronTypography.secondaryDescription)
                                                 .foregroundStyle(Color.tronTextSecondary)
                                                 .fixedSize(horizontal: false, vertical: true)
                                         }
@@ -102,7 +103,7 @@ struct NewSessionSourceControlSheet: View {
                             "The selected checkout has uncommitted changes. Choose a committed base branch before creating a worktree.",
                             systemImage: "exclamationmark.triangle.fill"
                         )
-                        .font(TronTypography.code(size: TronTypography.sizeCaption))
+                        .font(TronTypography.secondaryDescription)
                         .foregroundStyle(Color.tronAmber)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 12)

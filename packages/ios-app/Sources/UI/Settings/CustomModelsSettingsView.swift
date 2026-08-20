@@ -283,8 +283,13 @@ struct CustomModelsSettingsView: View {
                         "Protocol",
                         detail: "Choose the protocol used by this endpoint."
                     )
-                    TronValueRow(icon: "network", title: "API format", accent: .tronEmerald) {
-                        TronInlineMenu(apiTitle(provider.wrappedValue.api), accent: .tronEmerald) {
+                    TronValueRow(
+                        icon: "network",
+                        title: "API format",
+                        value: apiTitle(provider.wrappedValue.api),
+                        accent: .tronEmerald
+                    ) {
+                        TronInlineMenu("Change", accent: .tronEmerald) {
                             Button("Inherited / per model") { provider.wrappedValue.api = "" }
                             Button("OpenAI Chat Completions") { provider.wrappedValue.api = "openai-completions" }
                             Button("OpenAI Responses") { provider.wrappedValue.api = "openai-responses" }
