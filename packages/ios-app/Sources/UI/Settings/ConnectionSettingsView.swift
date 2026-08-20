@@ -205,6 +205,40 @@ struct ConnectionsSettingsView: View {
     }
 }
 
+struct GatewayTechnicalDetail: Identifiable, Equatable {
+    let icon: String
+    let title: String
+    let value: String
+    var id: String { title }
+}
+
+enum GatewayConnectionDetailPresentation {
+    static func technicalDetails(
+        info: GatewayInfo?,
+        updateStatus: GatewayUpdateStatus?
+    ) -> [GatewayTechnicalDetail] {
+        let identity = updateStatus?.currentIdentity
+        return [
+            (info?.sourceRevision ?? identity?.sourceRevision)
+                .map { GatewayTechnicalDetail(icon: "number", title: "Source revision", value: $0) },
+            (info?.runtimeEpoch ?? identity?.runtimeEpoch)
+                .map { GatewayTechnicalDetail(icon: "clock", title: "Runtime epoch", value: $0) },
+            identity?.payloadFingerprint
+                .map { GatewayTechnicalDetail(icon: "number", title: "Payload identity", value: $0) },
+        ].compactMap { $0 }
+    }
+
+    static func sourceRepositoryDetail(_ config: GatewayUpdateConfig?) -> String {
+        config.map { redactedMacPath($0.sourceRoot) } ?? "Not configured"
+    }
+
+    static func redactedMacPath(_ path: String) -> String {
+        let components = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard components.count > 3 else { return path }
+        return "…/" + components.suffix(3).joined(separator: "/")
+    }
+}
+
 enum GatewayUpdateIntent: Identifiable, Equatable {
     case debug(GatewayDebugPromotionCandidate)
     case source
@@ -253,6 +287,7 @@ struct GatewayConnectionDetailView: View {
     @State private var activeUpdateCommandID: String?
     @State private var acceptedOperationLabel: String?
     @State private var configuringSourceRepository = false
+    @State private var showingTechnicalDetails = false
     @State private var confirmingForget = false
 
     private var currentProfile: GatewayProfile {
@@ -266,6 +301,10 @@ struct GatewayConnectionDetailView: View {
 
     private var statusColor: Color { status.color }
 
+    private var technicalDetails: [GatewayTechnicalDetail] {
+        GatewayConnectionDetailPresentation.technicalDetails(info: info, updateStatus: updateStatus)
+    }
+
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(alignment: .leading, spacing: 18) {
@@ -278,6 +317,19 @@ struct GatewayConnectionDetailView: View {
                             accent: statusColor
                         ) {
                             GatewayConnectionStatusBadge(state: status)
+                        }
+                        if let updateStatus {
+                            TronSettingsDivider(accent: statusColor)
+                            gatewayUpdateStatusRow(updateStatus)
+                            if let error = updateStatus.error {
+                                TronSettingsDivider(accent: .tronError)
+                                Text(String(error.prefix(2_048)))
+                                    .font(TronTypography.caption)
+                                    .foregroundStyle(Color.tronError)
+                                    .textSelection(.enabled)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                            }
                         }
                         if model.profiles.selected?.id != currentProfile.id {
                             TronSettingsDivider(accent: statusColor)
@@ -315,13 +367,22 @@ struct GatewayConnectionDetailView: View {
                                 "Restart supervision",
                                 info.capabilities.contains("restart-supervised.v1") ? "Managed LaunchAgent" : "Unavailable"
                             )
-                            if let sourceRevision = info.sourceRevision {
+                            if !technicalDetails.isEmpty {
                                 TronSettingsDivider(accent: .tronCyan)
-                                infoRow("number", "Source revision", sourceRevision)
-                            }
-                            if let runtimeEpoch = info.runtimeEpoch {
-                                TronSettingsDivider(accent: .tronCyan)
-                                infoRow("clock", "Runtime epoch", runtimeEpoch)
+                                Button { showingTechnicalDetails = true } label: {
+                                    TronValueRow(
+                                        icon: "info.circle",
+                                        title: "Technical details",
+                                        detail: "Runtime and deployment identities",
+                                        accent: .tronCyan
+                                    ) {
+                                        Image(systemName: "chevron.right")
+                                            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                                            .foregroundStyle(Color.tronTextMuted)
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
                             }
                         } else {
                             TronValueRow(
@@ -336,15 +397,30 @@ struct GatewayConnectionDetailView: View {
                     }
                 }
 
-                if let updateStatus, let updateConfig {
-                    gatewayUpdateGroup(status: updateStatus, config: updateConfig)
-                } else if let updateStatus {
-                    gatewayUpdateGroup(status: updateStatus, config: nil)
-                } else if let updateConfig {
-                    gatewayUpdateGroup(status: nil, config: updateConfig)
+                if updateStatus != nil || updateConfig != nil {
+                    gatewayUpdateGroup(config: updateConfig)
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
+                    if let updateStatus,
+                       let admittedIntent = GatewayUpdateIntent.admitted(
+                        info: info,
+                        status: updateStatus,
+                        config: updateConfig
+                       ) {
+                        gatewayActionButton(
+                            admittedIntent.actionTitle,
+                            accent: .tronEmerald,
+                            disabled: updateIsActive
+                        ) { updateIntent = admittedIntent }
+                    }
+
+                    if let updateStatus, Self.canShowGatewayRollback(info: info, status: updateStatus) {
+                        gatewayActionButton("Roll Back Gateway", accent: .tronAmber, disabled: updateIsActive) {
+                            confirmingRollback = true
+                        }
+                    }
+
                     gatewayActionButton(
                         "Restart Gateway",
                         accent: .tronCyan,
@@ -395,16 +471,20 @@ struct GatewayConnectionDetailView: View {
             Text("The pairing token will be removed from this iPhone. You must pair again to reconnect.")
         }
         .sheet(isPresented: $configuringSourceRepository) {
-            GatewayUpdateConfigSheet(initialSourceRoot: updateConfig?.sourceRoot ?? "") { sourceRoot in
-                guard let saved = await model.configureGatewayUpdate(
-                    for: currentProfile,
-                    sourceRoot: sourceRoot,
-                    artifactRoot: updateConfig?.artifactRoot
-                ) else { return false }
-                updateConfig = saved
-                await loadInfo()
-                return true
+            WorkspaceBrowser(initialPath: updateConfig?.sourceRoot) { sourceRoot in
+                Task {
+                    guard let saved = await model.configureGatewayUpdate(
+                        for: currentProfile,
+                        sourceRoot: sourceRoot,
+                        artifactRoot: updateConfig?.artifactRoot
+                    ) else { return }
+                    updateConfig = saved
+                    await loadInfo()
+                }
             }
+        }
+        .sheet(isPresented: $showingTechnicalDetails) {
+            GatewayTechnicalDetailsSheet(details: technicalDetails)
         }
         .sheet(item: $updateIntent) { intent in
             let presentation = updatePresentation(for: intent)
@@ -465,109 +545,45 @@ struct GatewayConnectionDetailView: View {
         }
     }
 
-    @ViewBuilder
-    private func gatewayUpdateGroup(status: GatewayUpdateStatus?, config: GatewayUpdateConfig?) -> some View {
-        TronSettingsGroup("Gateway Update", accent: .tronEmerald) {
-            VStack(spacing: 0) {
-                if let status {
-                    TronValueRow(
-                        icon: status.state == "rolled-back" ? "arrow.uturn.backward.circle" : "arrow.down.circle",
-                        title: acceptedOperationLabel ?? status.presentationTitle,
-                        detail: status.currentIdentity?.version.map { "Current \($0) · \(status.channel)" } ?? "Channel \(status.channel)",
-                        accent: .tronEmerald
-                    )
-                    if let error = status.error {
-                        TronSettingsDivider(accent: .tronError)
-                        Text(String(error.prefix(2_048)))
-                            .font(TronTypography.caption)
-                            .foregroundStyle(Color.tronError)
-                            .textSelection(.enabled)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                    }
-                    if status.currentIdentity?.payloadFingerprint != nil {
-                        TronSettingsDivider(accent: .tronEmerald)
-                        infoRow("number", "Payload identity", status.currentIdentity?.payloadFingerprint.map { String($0.prefix(12)) } ?? "", numeric: true)
-                    }
-                    if let candidate = status.debugPromotionCandidate {
-                        TronSettingsDivider(accent: .tronEmerald)
-                        infoRow(
-                            "hammer",
-                            "Tested Debug candidate",
-                            Self.candidateSummary(candidate),
-                            numeric: true
-                        )
-                    }
-                }
-                if let config {
-                    if status != nil { TronSettingsDivider(accent: .tronEmerald) }
-                    TronValueRow(
-                        icon: "folder",
-                        title: "Source repository",
-                        detail: Self.redactedMacPath(config.sourceRoot),
-                        accent: .tronEmerald
-                    )
-                    if let artifactRoot = config.artifactRoot {
-                        TronSettingsDivider(accent: .tronEmerald)
-                        TronValueRow(
-                            icon: "shippingbox",
-                            title: "Artifact root",
-                            detail: Self.redactedMacPath(artifactRoot),
-                            accent: .tronEmerald
-                        )
-                    }
-                }
-                if config == nil {
-                    if status != nil { TronSettingsDivider(accent: .tronEmerald) }
-                    TronValueRow(
-                        icon: "folder.badge.gearshape",
-                        title: "Source repository not configured",
-                        detail: "Choose a path on the Mac, not the iPhone",
-                        accent: .tronEmerald
-                    )
-                }
-                TronSettingsDivider(accent: .tronEmerald)
-                Button {
-                    configuringSourceRepository = true
-                } label: {
-                    TronValueRow(
-                        icon: "folder.badge.gearshape",
-                        title: "Configure Source Repository",
-                        detail: "Mac path · not an iPhone path",
-                        accent: .tronEmerald
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(updateIsActive)
-                if let status, let admittedIntent = GatewayUpdateIntent.admitted(
-                    info: info,
-                    status: status,
-                    config: config
-                ) {
-                    TronSettingsDivider(accent: .tronEmerald)
-                    gatewayActionButton(
-                        admittedIntent.actionTitle,
-                        accent: .tronEmerald,
-                        disabled: updateIsActive
-                    ) {
-                        updateIntent = admittedIntent
-                    }
-                }
-                if let status, Self.canShowGatewayRollback(info: info, status: status) {
-                    TronSettingsDivider(accent: .tronEmerald)
-                    gatewayActionButton("Roll Back Gateway", accent: .tronAmber, disabled: updateIsActive) {
-                        confirmingRollback = true
-                    }
-                }
+    private func gatewayUpdateStatusRow(_ updateStatus: GatewayUpdateStatus) -> some View {
+        let active = ["starting", "building", "staging", "draining", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].contains(updateStatus.state)
+        let accent: Color = updateStatus.error == nil
+            ? (active ? .tronAmber : .tronEmerald)
+            : .tronError
+        return TronValueRow(
+            icon: updateStatus.state == "rolled-back" ? "arrow.uturn.backward.circle" : "arrow.down.circle",
+            title: acceptedOperationLabel ?? updateStatus.presentationTitle,
+            detail: "Gateway update · \(updateStatus.channel.capitalized) channel",
+            accent: accent
+        ) {
+            if active {
+                ProgressView().controlSize(.small).tint(accent)
             }
-            .padding(12)
         }
     }
 
-    private static func redactedMacPath(_ path: String) -> String {
-        let components = path.split(separator: "/", omittingEmptySubsequences: true)
-        guard components.count > 3 else { return path }
-        return "…/" + components.suffix(3).joined(separator: "/")
+    private func gatewayUpdateGroup(config: GatewayUpdateConfig?) -> some View {
+        TronSettingsGroup("Gateway Update", accent: .tronEmerald) {
+            TronValueRow(
+                icon: "folder",
+                title: "Source repository",
+                detail: GatewayConnectionDetailPresentation.sourceRepositoryDetail(config),
+                accent: .tronEmerald
+            ) {
+                Button("Configure") { configuringSourceRepository = true }
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(Color.tronEmerald)
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 36)
+                    .buttonStyle(.plain)
+                    .glassEffect(
+                        .regular.tint(Color.tronEmerald.opacity(0.10)).interactive(),
+                        in: Capsule()
+                    )
+                    .disabled(updateIsActive)
+            }
+            .padding(12)
+        }
     }
 
     private func gatewayActionButton(
@@ -587,11 +603,6 @@ struct GatewayConnectionDetailView: View {
         .tronGlassSurface(accent: accent, tintOpacity: 0.16, interactive: true)
         .opacity(disabled ? 0.48 : 1)
         .disabled(disabled)
-    }
-
-    private static func candidateSummary(_ candidate: GatewayDebugPromotionCandidate) -> String {
-        [candidate.version, String(candidate.payloadFingerprint.prefix(12)), String(candidate.sourceRevision.prefix(12))]
-            .joined(separator: " · ")
     }
 
     private func updatePresentation(for intent: GatewayUpdateIntent) -> (title: String, message: String, confirmTitle: String) {
@@ -683,33 +694,30 @@ struct GatewayConnectionDetailView: View {
     }
 }
 
-private struct GatewayUpdateConfigSheet: View {
+private struct GatewayTechnicalDetailsSheet: View {
     @Environment(\.dismiss) private var dismiss
-    let onSave: (String) async -> Bool
-    @State private var sourceRoot: String
-    @State private var saving = false
-
-    init(initialSourceRoot: String, onSave: @escaping (String) async -> Bool) {
-        self.onSave = onSave
-        _sourceRoot = State(initialValue: initialSourceRoot)
-    }
+    let details: [GatewayTechnicalDetail]
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("This path is on the Mac running the Gateway, not on the iPhone. It must be a trusted Tron source repository.")
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextSecondary)
-                    TextField("/Users/name/Workspace/tron", text: $sourceRoot)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                        .tronField(monospaced: true)
-                        .disabled(saving)
-                    Text("The Gateway validates the repository before saving. Updates continue to use the configured channel and verified candidate.")
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextMuted)
+            ScrollView(.vertical, showsIndicators: true) {
+                TronSettingsGroup(
+                    "Runtime identities",
+                    detail: "Diagnostic values for the active Gateway payload.",
+                    accent: .tronCyan
+                ) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(details.enumerated()), id: \.element.id) { index, detail in
+                            if index > 0 { TronSettingsDivider(accent: .tronCyan) }
+                            TronValueRow(
+                                icon: detail.icon,
+                                title: detail.title,
+                                detail: detail.value,
+                                accent: .tronCyan
+                            )
+                        }
+                    }
+                    .textSelection(.enabled)
                 }
                 .padding(20)
             }
@@ -717,29 +725,21 @@ private struct GatewayUpdateConfigSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    TronSheetTitle(title: "Source Repository", accent: .tronEmerald)
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                        .disabled(saving)
+                    TronSheetTitle(title: "Technical Details", accent: .tronCyan)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        let path = sourceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
-                        guard !path.isEmpty else { return }
-                        saving = true
-                        Task {
-                            if await onSave(path) { dismiss() }
-                            saving = false
-                        }
+                    Button { dismiss() } label: {
+                        Image(systemName: "checkmark")
+                            .font(TronTypography.buttonSM)
+                            .foregroundStyle(Color.tronCyan)
                     }
-                    .disabled(saving || sourceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("Done")
                 }
             }
-            .overlay {
-                if saving { ProgressView().tint(Color.tronEmerald) }
-            }
         }
+        .tronTopBlur(.sheet)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.hidden)
     }
 }
 

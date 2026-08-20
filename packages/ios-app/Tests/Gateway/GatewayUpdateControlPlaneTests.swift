@@ -43,6 +43,33 @@ struct GatewayUpdateControlPlaneTests {
         }
     }
 
+    @Test("server detail keeps opaque identities behind technical details and unifies source configuration")
+    func serverDetailPresentation() throws {
+        let info = GatewayInfo(
+            gatewayVersion: "1", piVersion: "2", protocolVersion: 3, minProtocolVersion: 3,
+            machineId: "machine", machineName: "Mac", capabilities: ["gateway-update.v1"],
+            sourceRevision: "source-revision", runtimeEpoch: "runtime-epoch"
+        )
+        let status = GatewayUpdateStatus(
+            state: "ready", channel: "stable",
+            currentIdentity: GatewayUpdateIdentity(
+                version: "candidate", gatewayVersion: "1", sourceRevision: "fallback-revision",
+                runtimeEpoch: "fallback-epoch", payloadFingerprint: "payload-identity"
+            ),
+            candidateIdentity: nil, candidateAvailable: false, error: nil, updatedAt: nil
+        )
+        let details = GatewayConnectionDetailPresentation.technicalDetails(info: info, updateStatus: status)
+        #expect(details.map(\.title) == ["Source revision", "Runtime epoch", "Payload identity"])
+        #expect(details.map(\.value) == ["source-revision", "runtime-epoch", "payload-identity"])
+        #expect(GatewayConnectionDetailPresentation.sourceRepositoryDetail(nil) == "Not configured")
+
+        let config = try GatewayUpdateConfig(
+            sourceRoot: "/Users/name/Workspace/tron",
+            updatedAt: "2026-01-01T00:00:00Z"
+        )
+        #expect(GatewayConnectionDetailPresentation.sourceRepositoryDetail(config) == "…/name/Workspace/tron")
+    }
+
     @Test("status presentation is bounded and candidate availability is explicit")
     func statusPresentation() throws {
         let available = GatewayUpdateStatus(
