@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum ProjectResourceKind: String, CaseIterable, Identifiable {
+enum ProjectResourceKind: String, CaseIterable, Identifiable, Sendable {
     case extensions = "Extensions"
     case prompts = "Prompts"
     case skills = "Skills"
@@ -59,6 +59,19 @@ struct ProjectResourceSelection: Identifiable {
     let kind: ProjectResourceKind
     let title: String
     let value: JSONValue
+}
+
+private struct ProjectResourceOverviewRow: Identifiable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let subtitle: String?
+    let value: JSONValue
+}
+
+private struct ProjectResourceOverviewSection: Identifiable, Equatable, Sendable {
+    var id: ProjectResourceKind { kind }
+    let kind: ProjectResourceKind
+    let rows: [ProjectResourceOverviewRow]
 }
 
 enum ProjectResourceTextPresentation {
@@ -174,24 +187,25 @@ struct ProjectResourcesView: View {
     @State private var reloading = false
     @State private var loadGeneration = 0
     @State private var selected: ProjectResourceSelection?
+    @State private var overviewSections: [ProjectResourceOverviewSection] = []
+    @State private var diagnostics: JSONValue = .array([])
 
     var body: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    if let root = model.resources?.objectValue {
+                    if model.resources?.objectValue != nil {
                         Label("These are resolved resources actually available to this session. Open a row to inspect its source, path, capabilities, or schema.", systemImage: "info.circle")
                             .font(TronTypography.bodySM)
                             .foregroundStyle(Color.tronTextPrimary)
                             .padding(14)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
-                        ForEach(ProjectResourceKind.allCases) { kind in
-                            resourceGroup(kind, values: values(for: kind, root: root))
+                        ForEach(overviewSections) { section in
+                            resourceGroup(section)
                         }
-                        let diagnostics = resourceDiagnostics(root)
                         if diagnostics != .array([]) {
-                            TronSettingsGroup("Diagnostics", accent: .tronError) {
+                            TronSettingsGroup("Diagnostics", accent: .tronError, surfaceStyle: .scrollOptimized) {
                                 TronStructuredJSONView(value: diagnostics, title: "Resource Diagnostics", accent: .tronError)
                                     .padding(12)
                             }
@@ -242,7 +256,10 @@ struct ProjectResourcesView: View {
                     .accessibilityLabel("Done")
                 }
             }
-            .task(id: model.sessionResourceRevision(for: sessionID)) { await load() }
+            .task(id: model.sessionResourceRevision(for: sessionID)) {
+                if overviewSections.isEmpty { installOverview() }
+                await load()
+            }
             .sheet(item: $selected) { selection in
                 ProjectResourceDetailSheet(selection: selection) {
                     selected = nil
@@ -255,9 +272,15 @@ struct ProjectResourcesView: View {
         .tint(Color.tronEmerald)
     }
 
-    private func resourceGroup(_ kind: ProjectResourceKind, values: [JSONValue]) -> some View {
-        TronSettingsGroup(kind.rawValue, detail: "\(values.count) loaded · \(kind.explanation)", accent: kind.accent) {
-            if values.isEmpty {
+    private func resourceGroup(_ section: ProjectResourceOverviewSection) -> some View {
+        let kind = section.kind
+        return TronSettingsGroup(
+            kind.rawValue,
+            detail: "\(section.rows.count) loaded · \(kind.explanation)",
+            accent: kind.accent,
+            surfaceStyle: .scrollOptimized
+        ) {
+            if section.rows.isEmpty {
                 TronSettingsRow(
                     icon: kind.icon,
                     title: "None loaded",
@@ -266,19 +289,19 @@ struct ProjectResourcesView: View {
                 )
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(values.enumerated()), id: \.offset) { index, value in
+                    ForEach(Array(section.rows.enumerated()), id: \.element.id) { index, row in
                         if index > 0 { TronSettingsDivider(accent: kind.accent) }
                         Button {
                             selected = ProjectResourceSelection(
                                 kind: kind,
-                                title: resourceTitle(value, fallback: "Unnamed \(kind.rawValue.dropLast())"),
-                                value: value
+                                title: row.title,
+                                value: row.value
                             )
                         } label: {
                             TronSettingsRow(
                                 icon: kind.icon,
-                                title: resourceTitle(value, fallback: "Unnamed \(kind.rawValue.dropLast())"),
-                                subtitle: resourceSubtitle(value),
+                                title: row.title,
+                                subtitle: row.subtitle,
                                 subtitleLineLimit: 1,
                                 accent: kind.accent
                             )
@@ -289,13 +312,6 @@ struct ProjectResourcesView: View {
                 }
             }
         }
-    }
-
-    private func values(for kind: ProjectResourceKind, root: [String: JSONValue]) -> [JSONValue] {
-        guard let raw = root[kind.key] else { return [] }
-        if let collectionKey = kind.collectionKey,
-           let nested = raw.objectValue?[collectionKey]?.arrayValue { return nested }
-        return raw.arrayValue ?? []
     }
 
     private func resourceDiagnostics(_ root: [String: JSONValue]) -> JSONValue {
@@ -327,6 +343,40 @@ struct ProjectResourcesView: View {
         return scope ?? object["path"]?.stringValue
     }
 
+    private func installOverview() {
+        guard let root = model.resources?.objectValue else {
+            overviewSections = []
+            diagnostics = .array([])
+            return
+        }
+        overviewSections = ProjectResourceKind.allCases.map { kind in
+            let raw = root[kind.key]
+            let values: [JSONValue]
+            if let collectionKey = kind.collectionKey,
+               let nested = raw?.objectValue?[collectionKey]?.arrayValue {
+                values = nested
+            } else {
+                values = raw?.arrayValue ?? []
+            }
+            let rows = values.enumerated().map { index, value in
+                let fallback = "Unnamed \(kind.rawValue.dropLast())"
+                let title = resourceTitle(value, fallback: fallback)
+                let semanticID = value.objectValue?["id"]?.stringValue
+                    ?? value.objectValue?["path"]?.stringValue
+                    ?? value.objectValue?["name"]?.stringValue
+                    ?? title
+                return ProjectResourceOverviewRow(
+                    id: "\(kind.key):\(semanticID):\(index)",
+                    title: title,
+                    subtitle: resourceSubtitle(value),
+                    value: value
+                )
+            }
+            return ProjectResourceOverviewSection(kind: kind, rows: rows)
+        }
+        diagnostics = resourceDiagnostics(root)
+    }
+
     private func reload() {
         guard !loading, !reloading else { return }
         reloading = true
@@ -344,6 +394,7 @@ struct ProjectResourcesView: View {
         loading = true
         await model.loadResources(sessionID: sessionID)
         guard generation == loadGeneration else { return }
+        installOverview()
         loading = false
     }
 }

@@ -811,8 +811,12 @@ is explicitly bounded from the mounted chat viewport and clipped after tail trun
 so a cancelled interactive-pop transition cannot temporarily restore intrinsic-width text
 across the back or Settings controls. App-owned workspace
 rows, session cards, setup cards, composer surfaces, attachment chips, tool
-chips and details, structured-data rows, Manage Session content, and
-settings groups use Tron's tinted Liquid Glass surfaces. The main Settings sheet is a single
+chips and details, structured-data rows, Manage Session content, and ordinary
+settings groups use Tron's tinted Liquid Glass surfaces. High-cardinality or
+very tall scrolling collections use the shared static scroll surface instead:
+it preserves tint, border, geometry, and hit regions without installing a live
+backdrop filter for every row or a multi-screen card. Long settings screens use
+lazy outer stacks, while their small divider-owned sections remain eager. The main Settings sheet is a single
 list of separated row containers rather than category headers; each row carries a concise secondary
 summary while retaining progressive destination construction and exact dashboard/project scope
 admission. Settings rows share one semantic value policy rather than sheet-local typography: stable
@@ -858,8 +862,12 @@ floating bottom safe-area bar immediately above the keyboard. The dashboard show
 user sessions, including ordinary user forks; classified subagent backing sessions remain hidden.
 Disposable caches from before session-kind classification are invalidated rather than briefly
 presenting backing-process sessions as user sessions. Modal detail flows dismiss
-with the native top-right check action; top-left dismissal controls are reserved
-for navigation, not app-owned sheets. Settings containers and their nested font
+with the native top-right check action. Shared confirmation sheets use a red
+leading cancellation action; a short primary label remains in system-owned
+trailing toolbar glass, while a label that exceeds the measured toolbar budget,
+contains a line break, or appears at an accessibility Dynamic Type size moves to
+the shared Liquid Glass action container below the confirmation content. Other
+top-left dismissal controls are reserved for navigation, not app-owned sheets. Settings containers and their nested font
 or model choices disclose as progressively stacked sub-sheets rather than
 horizontal navigation pushes; Appearance uses the custom Liquid Glass segmented
 color-mode control and keeps font axes directly beneath each font choice before its
@@ -1051,7 +1059,10 @@ value kept to one visual line. When the runtime has reset its usage estimate, th
 qualified zero-percent fresh state instead of an unavailable headline; a trailing canonical compaction
 entry adds concise “Compacted” context, and the copy makes clear that the next response refreshes the
 estimate. History owns the concise runtime
-phase/message/tool summary. Its compact toolbar action invokes Pi's
+phase/message/tool summary. History row previews and relative timestamps are
+prepared once off the main actor when the bounded tree or selected mode changes;
+live session-state updates reuse those immutable rows, and dense cards use the
+static scroll surface rather than one live glass filter per event. Its compact toolbar action invokes Pi's
 canonical compaction through Gateway and can leave one authoritative request queued
 behind an active turn. Project Resources presents resolved extensions, prompts, skills,
 context files, and tools as named rows over the canonical projection; each detail sheet
@@ -1061,7 +1072,9 @@ state card with an explicit status icon and decision actions before deferring th
 Extension tools and commands use
 separate adaptive collections instead of comma-delimited prose, while resource descriptions
 keep compound words together for natural line wrapping. Arbitrary arrays derive labels from stable name/path/source fields instead of exposing
-positional “Item” labels. Reload is owned by that sheet and publishes visible progress; the canonical
+positional “Item” labels. The overview derives stable row titles, subtitles,
+and identities once per admitted resource revision, then reuses that projection
+while scrolling; large resource groups use the static scroll surface. Reload is owned by that sheet and publishes visible progress; the canonical
 `session.resourcesChanged` revision is the sole post-mutation read owner, so mutation and projection loads cannot race one shared busy flag.
 Resource Locations separates
 optional discovery paths from advanced Mac runtime overrides and explains each
@@ -1086,11 +1099,16 @@ Gateway produces that audit by copying the
 canonical append-only JSONL under the existing idle/file/concurrency bounds rather than linearizing only the active branch.
 Agent Context summarizes assembled instructions, context accounting, and capability
 counts without duplicating the detailed Project Resources inventory; full instructions
-open from a separate matching row. Every raw technical JSON affordance is the same
-non-disclosing row and opens selectable, vertically scrollable protocol evidence in a
-wrapping single-column medium/large sheet; technical JSON never creates a horizontal
-viewport; selectable raw JSON uses the shared readable code scale across every
-standardized JSON sheet. A same-session reconnect that
+open from a separate matching row. Full instructions and raw technical JSON use
+the shared read-only TextKit document viewer so selectable large documents lay out
+for their native viewport instead of requiring one monolithic SwiftUI `Text` to be
+measured before presentation. JSON serialization is prepared off the main actor.
+Every raw technical JSON affordance is the same non-disclosing row and opens selectable,
+vertically scrollable protocol evidence in a wrapping single-column medium/large sheet;
+technical JSON never creates a horizontal viewport; selectable raw JSON uses the shared
+readable code scale across every standardized JSON sheet. Gateway runtime identities
+use a protected title followed by a full-width selectable code value, so long hashes
+cannot collapse the label column. A same-session reconnect that
 installs a replacement Gateway runtime clears every secondary projection, advances its reload revisions, and rejects both
 stale completions and stale failures by exact subscription token plus request generation.
 Manage Session displays the runtime-projected latest cache-hit rate—the

@@ -638,7 +638,7 @@ struct GatewayConnectionDetailView: View {
     }
 
     private var detailLoadIdentity: String {
-        "\(currentProfile.id):\(model.profiles.selected?.id ?? "none")"
+        "\(currentProfile.id):\(model.profiles.selected?.id ?? "none"):\(status.label)"
     }
 
     private var updatePollIdentity: String {
@@ -676,6 +676,7 @@ struct GatewayConnectionDetailView: View {
                 acceptedOperationLabel = nil
                 if ["ready", "failed", "failure", "rolled-back"].contains(latest.state) {
                     activeUpdateCommandID = nil
+                    await loadInfo()
                     return
                 }
             }
@@ -704,12 +705,7 @@ private struct GatewayTechnicalDetailsSheet: View {
                     VStack(spacing: 0) {
                         ForEach(Array(details.enumerated()), id: \.element.id) { index, detail in
                             if index > 0 { TronSettingsDivider(accent: .tronCyan) }
-                            TronValueRow(
-                                icon: detail.icon,
-                                title: detail.title,
-                                value: detail.value,
-                                accent: .tronCyan
-                            )
+                            GatewayTechnicalIdentityRow(detail: detail)
                         }
                     }
                     .textSelection(.enabled)
@@ -735,6 +731,36 @@ private struct GatewayTechnicalDetailsSheet: View {
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+    }
+}
+
+private struct GatewayTechnicalIdentityRow: View {
+    let detail: GatewayTechnicalDetail
+
+    var body: some View {
+        HStack(alignment: .top, spacing: TronSpacing.xl) {
+            Image(systemName: detail.icon)
+                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                .foregroundStyle(Color.tronCyan)
+                .frame(width: 22, height: 20)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(detail.title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                    .foregroundStyle(Color.tronTextPrimary)
+                Text(detail.value)
+                    .font(TronTypography.codeContent)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 

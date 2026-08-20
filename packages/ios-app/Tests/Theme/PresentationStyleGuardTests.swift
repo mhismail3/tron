@@ -158,6 +158,10 @@ struct PresentationStyleGuardTests {
         #expect(presentation.contains(".presentationDetents([.medium])"))
         #expect(presentation.contains("ToolbarItem(placement: .topBarLeading)"))
         #expect(presentation.contains("ToolbarItem(placement: .topBarTrailing)"))
+        #expect(presentation.contains("if placement == .toolbar"))
+        #expect(presentation.contains("if placement == .content"))
+        #expect(presentation.contains(".tronToolbarAction(accent: .tronError)"))
+        #expect(presentation.contains("TronActionButtonStyle(role: destructive ? .destructive : .primary)"))
 
         for (url, source) in uiSources {
             #expect(
@@ -178,6 +182,70 @@ struct PresentationStyleGuardTests {
                 )
             }
         }
+    }
+
+    @Test("confirmation actions use adaptive toolbar placement")
+    func confirmationActionPlacement() {
+        #expect(TronConfirmationActionPlacementPolicy.placement(
+            measuredTitleWidth: 80,
+            toolbarBudget: 100,
+            isAccessibilitySize: false,
+            containsLineBreak: false
+        ) == .toolbar)
+        #expect(TronConfirmationActionPlacementPolicy.placement(
+            measuredTitleWidth: 101,
+            toolbarBudget: 100,
+            isAccessibilitySize: false,
+            containsLineBreak: false
+        ) == .content)
+        #expect(TronConfirmationActionPlacementPolicy.placement(
+            measuredTitleWidth: 80,
+            toolbarBudget: 100,
+            isAccessibilitySize: true,
+            containsLineBreak: false
+        ) == .content)
+        #expect(TronConfirmationActionPlacementPolicy.placement(
+            measuredTitleWidth: 80,
+            toolbarBudget: 100,
+            isAccessibilitySize: false,
+            containsLineBreak: true
+        ) == .content)
+    }
+
+    @Test("jitter-prone sheets use lazy or static scrolling presentation")
+    func denseSheetPerformancePolicy() throws {
+        let presentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Theme/TronPresentation.swift"),
+            encoding: .utf8
+        )
+        let context = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionContextSheet.swift"),
+            encoding: .utf8
+        )
+        let history = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionTreeSheet.swift"),
+            encoding: .utf8
+        )
+        let resources = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ProjectResourcesView.swift"),
+            encoding: .utf8
+        )
+        let runtime = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/RuntimeBehaviorSettingsView.swift"),
+            encoding: .utf8
+        )
+        let connections = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/ConnectionSettingsView.swift"),
+            encoding: .utf8
+        )
+        #expect(presentation.contains("struct TronScrollSurfaceModifier"))
+        #expect(context.contains("TronReadOnlyTextView(text: summary.instructions)"))
+        #expect(history.contains("Task.detached(priority: .userInitiated)"))
+        #expect(history.contains(".tronScrollSurface(accent: accent"))
+        #expect(resources.contains("overviewSections"))
+        #expect(resources.contains("surfaceStyle: .scrollOptimized"))
+        #expect(runtime.contains("LazyVStack(alignment: .leading, spacing: 18)"))
+        #expect(connections.contains("GatewayTechnicalIdentityRow(detail: detail)"))
     }
 
     @Test("workspace folder rows own their complete glass hit region")
@@ -701,9 +769,9 @@ struct PresentationStyleGuardTests {
         #expect(history.contains("LazyVStack(alignment: .leading, spacing: TronSpacing.md)"))
         let eventRows = (history.components(separatedBy: "private struct TreeNodeRow").dropFirst().first ?? "")
             .components(separatedBy: "private struct HistoryEntryDetailsSheet").first ?? ""
-        #expect(eventRows.contains("Text(title)\n                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))"))
-        #expect(!eventRows.contains("Text(title)\n                                .font(TronTypography.body)"))
-        #expect(!eventRows.contains("Text(title)\n                                .font(TronTypography.headline)"))
+        #expect(eventRows.contains("Text(row.title)\n                                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))"))
+        #expect(!eventRows.contains("Text(row.title)\n                                .font(TronTypography.body)"))
+        #expect(!eventRows.contains("Text(row.title)\n                                .font(TronTypography.headline)"))
         #expect(!history.contains(".glassEffect(.regular.tint(accent.opacity(0.14)).interactive(), in: .circle)"))
         #expect(history.contains(".frame(width: 44, height: 44)\n                    .contentShape(Rectangle())"))
         let detailActions = (history.components(separatedBy: "TronSettingsGroup(\"Actions\"").dropFirst().first ?? "")

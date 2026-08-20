@@ -93,10 +93,14 @@ struct ExtensionInteractionSheet: View {
         .onAppear { resetState() }
         .onChange(of: interactionScope) { _, _ in resetState() }
         .task(id: interaction.id) {
-            while !Task.isCancelled {
+            guard let expiresAt = interaction.expiresAt,
+                  let expiration = GatewayTimestamp.parse(expiresAt) else { return }
+            while !Task.isCancelled, currentDate < expiration {
                 currentDate = Date()
-                try? await Task.sleep(for: .seconds(1))
+                do { try await Task.sleep(for: .seconds(1)) }
+                catch { return }
             }
+            currentDate = Date()
         }
     }
 
@@ -122,15 +126,13 @@ struct ExtensionInteractionSheet: View {
     @ViewBuilder
     private var expirationView: some View {
         if let expiresAt = interaction.expiresAt, let expiration = GatewayTimestamp.parse(expiresAt) {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                let remaining = Int(expiration.timeIntervalSince(context.date))
-                TronValueRow(
-                    icon: "timer",
-                    title: remaining > 0 ? "Expires in \(remaining)s" : "Expired",
-                    accent: remaining > 0 ? .tronAmber : .tronError
-                )
-                .tronGlassSurface(accent: remaining > 0 ? .tronAmber : .tronError, tintOpacity: 0.10)
-            }
+            let remaining = Int(expiration.timeIntervalSince(currentDate))
+            TronValueRow(
+                icon: "timer",
+                title: remaining > 0 ? "Expires in \(remaining)s" : "Expired",
+                accent: remaining > 0 ? .tronAmber : .tronError
+            )
+            .tronScrollSurface(accent: remaining > 0 ? .tronAmber : .tronError, tintOpacity: 0.10)
             .accessibilityLabel("Question expiration")
             .accessibilityValue(isExpired ? "Expired; waiting for the Gateway" : "Question is still available")
         }

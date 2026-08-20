@@ -118,6 +118,30 @@ private struct TronGlassSurfaceModifier: ViewModifier {
     }
 }
 
+/// A glass-colored static surface for high-cardinality scrolling content.
+/// Repeated or very tall live backdrop filters are substantially more costly
+/// than their row content on device, so dense collections keep the same tint,
+/// border, and geometry without installing a filter for every visible row.
+private struct TronScrollSurfaceModifier: ViewModifier {
+    let accent: Color
+    let cornerRadius: CGFloat
+    let tintOpacity: Double
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .contentShape(shape)
+            .background {
+                shape
+                    .fill(Color.tronSurfaceElevated.opacity(0.78))
+                    .overlay { shape.fill(accent.opacity(tintOpacity)) }
+            }
+            .overlay {
+                shape.stroke(accent.opacity(0.22), lineWidth: 0.5)
+            }
+    }
+}
+
 extension View {
     /// Required at the app root so controls created by system containers inherit
     /// Tron's selected family and emerald interaction color.
@@ -150,6 +174,18 @@ extension View {
             cornerRadius: cornerRadius,
             tintOpacity: tintOpacity,
             interactive: interactive
+        ))
+    }
+
+    func tronScrollSurface(
+        accent: Color = .tronEmerald,
+        cornerRadius: CGFloat = 12,
+        tintOpacity: Double = 0.10
+    ) -> some View {
+        modifier(TronScrollSurfaceModifier(
+            accent: accent,
+            cornerRadius: cornerRadius,
+            tintOpacity: tintOpacity
         ))
     }
 
@@ -397,6 +433,59 @@ extension View {
     }
 }
 
+// MARK: - Read-only documents
+
+enum TronReadOnlyTextStyle: Equatable, Sendable {
+    case body
+    case code
+}
+
+/// Native TextKit-backed document scrolling avoids asking SwiftUI to measure a
+/// multi-hundred-kilobyte selectable `Text` before a sheet can present.
+struct TronReadOnlyTextView: UIViewRepresentable {
+    let text: String
+    var style: TronReadOnlyTextStyle = .body
+    var inset: CGFloat = 18
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.isEditable = false
+        view.isSelectable = true
+        view.alwaysBounceVertical = true
+        view.backgroundColor = .clear
+        view.adjustsFontForContentSizeCategory = true
+        view.textContainer.lineFragmentPadding = 0
+        return view
+    }
+
+    func updateUIView(_ view: UITextView, context: Context) {
+        if view.text != text { view.text = text }
+        let size = style == .code ? TronTypography.sizeBody3 : TronTypography.sizeBody
+        let base = TronFontLoader.createUIFont(
+            size: size,
+            mono: style == .code
+        )
+        let font = UIFontMetrics(forTextStyle: style == .code ? .callout : .body)
+            .scaledFont(for: base)
+        if view.font?.fontName != font.fontName || view.font?.pointSize != font.pointSize {
+            view.font = font
+        }
+        let textColor = UIColor(Color.tronTextPrimary)
+        if view.textColor != textColor { view.textColor = textColor }
+        let tintColor = UIColor(Color.tronEmerald)
+        if view.tintColor != tintColor { view.tintColor = tintColor }
+        let contentInset = UIEdgeInsets(
+            top: inset,
+            left: inset,
+            bottom: max(24, inset),
+            right: inset
+        )
+        if view.textContainerInset != contentInset {
+            view.textContainerInset = contentInset
+        }
+    }
+}
+
 // MARK: - Search and selection controls
 
 struct TronSearchBar: View {
@@ -516,6 +605,48 @@ struct TronSheetTitle: View {
     }
 }
 
+enum TronConfirmationActionPlacement: Equatable, Sendable {
+    case toolbar
+    case content
+}
+
+enum TronConfirmationActionPlacementPolicy {
+    static func placement(
+        measuredTitleWidth: CGFloat,
+        toolbarBudget: CGFloat,
+        isAccessibilitySize: Bool,
+        containsLineBreak: Bool
+    ) -> TronConfirmationActionPlacement {
+        guard !isAccessibilitySize, !containsLineBreak,
+              measuredTitleWidth <= toolbarBudget else { return .content }
+        return .toolbar
+    }
+
+    @MainActor
+    static func placement(
+        for title: String,
+        containerWidth: CGFloat,
+        dynamicTypeSize: DynamicTypeSize
+    ) -> TronConfirmationActionPlacement {
+        let baseFont = TronFontLoader.createUIFont(
+            size: TronTypography.sizeBody,
+            weight: .semibold
+        )
+        let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: baseFont)
+        let measuredWidth = ceil((title as NSString).size(withAttributes: [.font: font]).width)
+        // Reserve the center title and leading cancellation control. Capping
+        // the trailing budget also prevents a wide device from turning a
+        // sentence-length action back into toolbar chrome.
+        let toolbarBudget = min(150, max(72, containerWidth * 0.33))
+        return placement(
+            measuredTitleWidth: measuredWidth,
+            toolbarBudget: toolbarBudget,
+            isAccessibilitySize: dynamicTypeSize.isAccessibilitySize,
+            containsLineBreak: title.contains(where: \.isNewline)
+        )
+    }
+}
+
 struct TronConfirmationSheet: View {
     let title: String
     let message: String
@@ -527,6 +658,7 @@ struct TronConfirmationSheet: View {
     let icon: String
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         title: String,
@@ -549,49 +681,70 @@ struct TronConfirmationSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .center, spacing: 16) {
-                    Image(systemName: icon)
-                        .font(TronTypography.sans(size: TronTypography.sizeHero, weight: .semibold))
-                        .foregroundStyle(accent)
-                        .accessibilityHidden(true)
-                    Text(title)
-                        .font(TronTypography.largeTitle)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(message)
-                        .font(TronTypography.body)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, minHeight: 280, alignment: .center)
-                .padding(24)
-            }
-            .tronScrollEdgeChrome()
-            .tronNavigationTitle("Confirm", accent: .tronEmerald)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button(secondaryTitle ?? "Cancel") {
-                        dismiss()
-                        onSecondary?()
+        GeometryReader { geometry in
+            let placement = TronConfirmationActionPlacementPolicy.placement(
+                for: confirmTitle,
+                containerWidth: geometry.size.width,
+                dynamicTypeSize: dynamicTypeSize
+            )
+            NavigationStack {
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(alignment: .center, spacing: 16) {
+                        Image(systemName: icon)
+                            .font(TronTypography.sans(size: TronTypography.sizeHero, weight: .semibold))
+                            .foregroundStyle(accent)
+                            .accessibilityHidden(true)
+                        Text(title)
+                            .font(TronTypography.largeTitle)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(message)
+                            .font(TronTypography.body)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if placement == .content {
+                            confirmButton
+                                .buttonStyle(TronActionButtonStyle(role: destructive ? .destructive : .primary))
+                                .padding(.top, 8)
+                                .accessibilityIdentifier("confirmation-primary-content")
+                        }
                     }
-                    .tronToolbarAction(accent: .tronTextSecondary)
+                    .frame(maxWidth: .infinity, minHeight: 280, alignment: .center)
+                    .padding(24)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(confirmTitle, role: destructive ? .destructive : nil) {
-                        dismiss()
-                        onConfirm()
+                .tronScrollEdgeChrome()
+                .tronNavigationTitle("Confirm", accent: .tronEmerald)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button(secondaryTitle ?? "Cancel") {
+                            dismiss()
+                            onSecondary?()
+                        }
+                        .tronToolbarAction(accent: .tronError)
+                        .accessibilityIdentifier("confirmation-cancel")
                     }
-                    .tronToolbarAction(accent: accent)
+                    if placement == .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            confirmButton
+                                .tronToolbarAction(accent: accent)
+                                .accessibilityIdentifier("confirmation-primary-toolbar")
+                        }
+                    }
                 }
             }
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium])
         .presentationDragIndicator(.hidden)
+    }
+
+    private var confirmButton: some View {
+        Button(confirmTitle, role: destructive ? .destructive : nil) {
+            dismiss()
+            onConfirm()
+        }
     }
 
     private var accent: Color { destructive ? .tronError : .tronEmerald }
@@ -705,12 +858,18 @@ struct TronGlassCard<Content: View>: View {
     }
 }
 
+enum TronSettingsGroupSurfaceStyle: Equatable, Sendable {
+    case glass
+    case scrollOptimized
+}
+
 struct TronSettingsGroup<Content: View>: View {
     let title: String
     let detail: String?
     let detailRole: TronSettingsSecondaryRole
     let detailInline: Bool
     let accent: Color
+    let surfaceStyle: TronSettingsGroupSurfaceStyle
     let content: Content
 
     init(
@@ -719,6 +878,7 @@ struct TronSettingsGroup<Content: View>: View {
         detailRole: TronSettingsSecondaryRole = .informational,
         detailInline: Bool = false,
         accent: Color = .tronEmerald,
+        surfaceStyle: TronSettingsGroupSurfaceStyle = .glass,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
@@ -726,6 +886,7 @@ struct TronSettingsGroup<Content: View>: View {
         self.detailRole = detailRole
         self.detailInline = detailInline
         self.accent = accent
+        self.surfaceStyle = surfaceStyle
         self.content = content()
     }
 
@@ -761,7 +922,14 @@ struct TronSettingsGroup<Content: View>: View {
                     }
                 }
             }
-            TronGlassCard(accent: accent) { content }
+            switch surfaceStyle {
+            case .glass:
+                TronGlassCard(accent: accent) { content }
+            case .scrollOptimized:
+                VStack(alignment: .leading, spacing: 0) { content }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tronScrollSurface(accent: accent, tintOpacity: 0.10)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

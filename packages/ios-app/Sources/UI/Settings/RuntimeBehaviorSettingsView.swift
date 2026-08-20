@@ -86,9 +86,9 @@ struct RuntimeBehaviorSettingsView: View {
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 18) {
+            LazyVStack(alignment: .leading, spacing: 18) {
                 scopeGroup
-                TronSettingsGroup("Provider Transport", accent: .tronCyan) {
+                TronSettingsGroup("Provider Transport", accent: .tronCyan, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
                         choiceRow("network", "Transport", transportLabel, accent: .tronCyan) {
                             Button("Automatic") { draft.transport = "auto" }
@@ -102,7 +102,7 @@ struct RuntimeBehaviorSettingsView: View {
                         numberRow("bolt.horizontal", "WebSocket timeout", "Milliseconds", value: $draft.websocketTimeout, accent: .tronCyan)
                     }
                 }
-                TronSettingsGroup("Message Queue", accent: .tronPurple) {
+                TronSettingsGroup("Message Queue", accent: .tronPurple, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
                         choiceRow("arrow.turn.up.right", "Steering delivery", queueLabel(draft.steeringMode), accent: .tronPurple) {
                             Button("Deliver all") { draft.steeringMode = "all" }
@@ -115,7 +115,7 @@ struct RuntimeBehaviorSettingsView: View {
                         }
                     }
                 }
-                TronSettingsGroup("Compaction", accent: .tronTeal) {
+                TronSettingsGroup("Compaction", accent: .tronTeal, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
                         TronToggleRow(
                             icon: "arrow.triangle.2.circlepath",
@@ -140,7 +140,7 @@ struct RuntimeBehaviorSettingsView: View {
                         )
                     }
                 }
-                TronSettingsGroup("Retry", accent: .tronAmber) {
+                TronSettingsGroup("Retry", accent: .tronAmber, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
                         TronToggleRow(
                             icon: "arrow.clockwise",
@@ -161,12 +161,12 @@ struct RuntimeBehaviorSettingsView: View {
                         numberRow("timer", "Maximum provider delay", "Delay cap in milliseconds", value: $draft.providerRetryDelay, accent: .tronAmber)
                     }
                 }
-                TronSettingsGroup("Conversation") {
+                TronSettingsGroup("Conversation", surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
                         toggleRows
                     }
                 }
-                TronSettingsGroup("Markdown", accent: .tronPurple) {
+                TronSettingsGroup("Markdown", accent: .tronPurple, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
                         choiceRow("flowchart", "Mermaid diagrams", draft.mermaid.capitalized, accent: .tronPurple) {
                             Button("Off") { draft.mermaid = "off" }
@@ -181,7 +181,7 @@ struct RuntimeBehaviorSettingsView: View {
                         }
                     }
                 }
-                TronSettingsGroup("Privacy and Warnings", accent: .tronSlate) {
+                TronSettingsGroup("Privacy and Warnings", accent: .tronSlate, surfaceStyle: .scrollOptimized) {
                     VStack(spacing: 0) {
                         TronToggleRow(icon: "chart.bar", title: "Installation telemetry", accent: .tronSlate, isOn: $draft.installTelemetry)
                         TronSettingsDivider(accent: .tronSlate)
@@ -217,7 +217,8 @@ struct RuntimeBehaviorSettingsView: View {
             "Scope",
             detail: scope == .project
                 ? "These overrides apply only to the trusted current workspace."
-                : "These defaults apply to every workspace on this Mac."
+                : "These defaults apply to every workspace on this Mac.",
+            surfaceStyle: .scrollOptimized
         ) {
             if allowsProjectScope {
                 choiceRow("scope", "Settings Scope", scope == .project ? "Current Project" : "Global Defaults") {

@@ -68,7 +68,7 @@ struct ProviderSetupRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-        .tronGlassSurface(
+        .tronScrollSurface(
             accent: .tronEmerald,
             cornerRadius: 12,
             tintOpacity: provider.configured ? 0.14 : 0.08
@@ -120,11 +120,10 @@ struct ModelPicker: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .tronGlassSurface(
+                    .tronScrollSurface(
                         accent: selection == model.ref ? .tronEmerald : .tronSlate,
                         cornerRadius: 14,
-                        tintOpacity: selection == model.ref ? 0.18 : 0.08,
-                        interactive: true
+                        tintOpacity: selection == model.ref ? 0.18 : 0.08
                     )
                     .accessibilityLabel(model.displayName)
                     .accessibilityValue(selection == model.ref ? "Selected" : "")

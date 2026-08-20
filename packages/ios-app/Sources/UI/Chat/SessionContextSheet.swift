@@ -821,9 +821,8 @@ private struct AgentContextSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showInstructions = false
 
-    private var summary: AgentContextSummary { AgentContextSummary(context: model.context) }
-
     var body: some View {
+        let summary = AgentContextSummary(context: model.context)
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: 18) {
@@ -832,10 +831,15 @@ private struct AgentContextSheet: View {
                         .foregroundStyle(Color.tronTextPrimary)
                         .padding(14)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .tronGlassSurface(accent: .tronPurple, tintOpacity: 0.08)
+                        .tronScrollSurface(accent: .tronPurple, tintOpacity: 0.08)
 
                     VStack(alignment: .leading, spacing: 10) {
-                        TronSettingsGroup("Instructions", detail: "Assembled runtime guidance", accent: .tronPurple) {
+                        TronSettingsGroup(
+                            "Instructions",
+                            detail: "Assembled runtime guidance",
+                            accent: .tronPurple,
+                            surfaceStyle: .scrollOptimized
+                        ) {
                             Text(summary.instructionPreview)
                                 .font(TronTypography.bodySM)
                                 .foregroundStyle(Color.tronTextPrimary)
@@ -857,12 +861,12 @@ private struct AgentContextSheet: View {
                         .accessibilityIdentifier("agent-context-full-instructions")
                     }
 
-                    TronSettingsGroup("Current Context", accent: .tronCyan) {
+                    TronSettingsGroup("Current Context", accent: .tronCyan, surfaceStyle: .scrollOptimized) {
                         VStack(spacing: 0) {
                             contextMetricRow(
                                 icon: "gauge.with.dots.needle.50percent",
                                 title: "Context Window",
-                                value: contextWindowLabel
+                                value: contextWindowLabel(summary)
                             )
                             TronSettingsDivider(accent: .tronCyan)
                             contextMetricRow(icon: "bubble.left.and.bubble.right", title: "Session Messages", value: countLabel(summary.messageCount))
@@ -871,7 +875,12 @@ private struct AgentContextSheet: View {
                         }
                     }
 
-                    TronSettingsGroup("Capabilities", detail: "Detailed inventory lives in Project Resources", accent: .tronTeal) {
+                    TronSettingsGroup(
+                        "Capabilities",
+                        detail: "Detailed inventory lives in Project Resources",
+                        accent: .tronTeal,
+                        surfaceStyle: .scrollOptimized
+                    ) {
                         VStack(spacing: 0) {
                             contextMetricRow(
                                 icon: "wrench.and.screwdriver",
@@ -916,23 +925,15 @@ private struct AgentContextSheet: View {
             }
             .sheet(isPresented: $showInstructions) {
                 NavigationStack {
-                    ScrollView {
-                        Text(summary.instructions)
-                            .font(TronTypography.body)
-                            .foregroundStyle(Color.tronTextPrimary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(18)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .tronScrollEdgeChrome()
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .principal) { TronSheetTitle(title: "Instructions", accent: .tronPurple) }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { showInstructions = false }.tronToolbarAction()
+                    TronReadOnlyTextView(text: summary.instructions)
+                        .tronTopBlurSurface()
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .principal) { TronSheetTitle(title: "Instructions", accent: .tronPurple) }
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { showInstructions = false }.tronToolbarAction()
+                            }
                         }
-                    }
                 }
                 .tronTopBlur(.sheet)
                 .presentationDetents([.medium, .large])
@@ -945,7 +946,7 @@ private struct AgentContextSheet: View {
         .tint(Color.tronEmerald)
     }
 
-    private var contextWindowLabel: String {
+    private func contextWindowLabel(_ summary: AgentContextSummary) -> String {
         guard let tokens = summary.contextTokens, let window = summary.contextWindow else { return "Unavailable" }
         return "\(tokens.formatted(.number.notation(.compactName))) of \(window.formatted(.number.notation(.compactName)))"
     }

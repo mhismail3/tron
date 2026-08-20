@@ -108,6 +108,42 @@ private struct SessionHistorySelection: Identifiable {
     let action: Action
 }
 
+private struct SessionHistoryRowPresentation: Identifiable, Hashable, Sendable {
+    var id: String { node.id }
+    let node: SessionTreeNode
+    let title: String
+    let kindLabel: String
+    let relativeTimestamp: String
+    let icon: String
+
+    init(node: SessionTreeNode) {
+        self.node = node
+        title = SessionHistoryPreview.plain(node.label ?? node.preview.ifEmpty(node.kind.humanized))
+        if node.role == .user { kindLabel = "Prompt" }
+        else if node.role == .assistant { kindLabel = "Response" }
+        else if node.role == .toolResult { kindLabel = "Tool result" }
+        else { kindLabel = node.kind.humanized }
+        if let date = GatewayTimestamp.parse(node.timestamp) {
+            relativeTimestamp = date.formatted(.relative(presentation: .named))
+        } else {
+            relativeTimestamp = node.timestamp
+        }
+        if node.role == .user { icon = "person.crop.circle" }
+        else if node.role == .assistant { icon = "sparkles" }
+        else {
+            icon = switch node.kind {
+            case "bash": "terminal"
+            case "compaction": "arrow.down.right.and.arrow.up.left"
+            case "branchSummary": "arrow.triangle.branch"
+            case "modelChange": "cpu"
+            case "thinkingChange": "brain"
+            case "label": "bookmark"
+            default: "wrench.and.screwdriver"
+            }
+        }
+    }
+}
+
 private enum SessionHistoryCardMetrics {
     // Match TronSettingsRow's compact settings rhythm so history cards do not
     // grow larger than the surrounding sheets.
@@ -128,10 +164,9 @@ struct SessionTreeSheet: View {
     @State private var labelNode: SessionTreeNode?
     @State private var label = ""
     @State private var reloading = false
-
-    private var visibleNodes: [SessionTreeNode] {
-        SessionHistoryPolicy.nodes(model.sessionTree, mode: mode)
-    }
+    @State private var visibleRows: [SessionHistoryRowPresentation] = []
+    @State private var rowPreparationGeneration = 0
+    @State private var rowPreparationTask: Task<[SessionHistoryRowPresentation], Never>?
 
     var body: some View {
         NavigationStack {
@@ -148,22 +183,22 @@ struct SessionTreeSheet: View {
                                 .padding(TronSpacing.xl)
                                 .frame(maxWidth: .infinity)
                         }
-                    } else if visibleNodes.isEmpty {
+                    } else if visibleRows.isEmpty {
                         emptyState
                     } else {
-                        ForEach(visibleNodes) { node in
+                        ForEach(visibleRows) { row in
                             TreeNodeRow(
-                                node: node,
+                                row: row,
                                 leafID: model.authoritativeSnapshot(for: sessionID)?.leafEntryId,
                                 select: {
-                                    selection = SessionHistorySelection(node: node, action: .details)
+                                    selection = SessionHistorySelection(node: row.node, action: .details)
                                 },
                                 fork: {
-                                    selection = SessionHistorySelection(node: node, action: .fork)
+                                    selection = SessionHistorySelection(node: row.node, action: .fork)
                                 },
                                 bookmark: {
-                                    label = node.label ?? ""
-                                    labelNode = node
+                                    label = row.node.label ?? ""
+                                    labelNode = row.node
                                 }
                             )
                         }
@@ -197,6 +232,11 @@ struct SessionTreeSheet: View {
                 }
             }
             .task(id: model.sessionStructureRevision(for: sessionID)) { await load() }
+            .onDisappear {
+                rowPreparationGeneration &+= 1
+                rowPreparationTask?.cancel()
+                rowPreparationTask = nil
+            }
             .sheet(item: $selection) { selection in
                 switch selection.action {
                 case .details:
@@ -244,7 +284,7 @@ struct SessionTreeSheet: View {
         }
         .padding(.horizontal, SessionHistoryCardMetrics.horizontalPadding)
         .padding(.vertical, SessionHistoryCardMetrics.verticalPadding)
-        .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.09)
+        .tronScrollSurface(accent: .tronAmber, tintOpacity: 0.09)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("session-history-runtime-summary")
     }
@@ -293,15 +333,21 @@ struct SessionTreeSheet: View {
         }
         .padding(.horizontal, SessionHistoryCardMetrics.horizontalPadding)
         .padding(.vertical, SessionHistoryCardMetrics.verticalPadding)
-        .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.09)
+        .tronScrollSurface(accent: .tronCyan, tintOpacity: 0.09)
     }
 
     private var modeChooser: some View {
-        TronSettingsGroup("History View", detail: mode.explanation, accent: .tronCyan) {
+        TronSettingsGroup(
+            "History View",
+            detail: mode.explanation,
+            accent: .tronCyan,
+            surfaceStyle: .scrollOptimized
+        ) {
             Menu {
                 ForEach(SessionHistoryMode.allCases) { candidate in
                     Button {
                         mode = candidate
+                        Task { await installRows(for: candidate) }
                     } label: {
                         if mode == candidate {
                             Label(candidate.rawValue, systemImage: "checkmark")
@@ -347,9 +393,39 @@ struct SessionTreeSheet: View {
     }
 
     private func load() async {
+        if visibleRows.isEmpty { await installRows(for: mode) }
         reloading = true
         defer { reloading = false }
         await model.loadTree(sessionID: sessionID)
+        await installRows(for: mode)
+    }
+
+    private func installRows(for requestedMode: SessionHistoryMode) async {
+        rowPreparationGeneration &+= 1
+        let generation = rowPreparationGeneration
+        let nodes = model.sessionTree
+        rowPreparationTask?.cancel()
+        let worker = Task.detached(priority: .userInitiated) { () -> [SessionHistoryRowPresentation] in
+            let admitted = SessionHistoryPolicy.nodes(nodes, mode: requestedMode)
+            var rows: [SessionHistoryRowPresentation] = []
+            rows.reserveCapacity(admitted.count)
+            for node in admitted {
+                guard !Task.isCancelled else { return [] }
+                rows.append(SessionHistoryRowPresentation(node: node))
+            }
+            return rows
+        }
+        rowPreparationTask = worker
+        let prepared = await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
+        guard !Task.isCancelled,
+              generation == rowPreparationGeneration,
+              requestedMode == mode else { return }
+        rowPreparationTask = nil
+        visibleRows = prepared
     }
 
     private func reload() {
@@ -377,11 +453,13 @@ struct SessionTreeSheet: View {
 }
 
 private struct TreeNodeRow: View {
-    let node: SessionTreeNode
+    let row: SessionHistoryRowPresentation
     let leafID: String?
     let select: () -> Void
     let fork: () -> Void
     let bookmark: () -> Void
+
+    private var node: SessionTreeNode { row.node }
 
     var body: some View {
         HStack(alignment: .center, spacing: TronSpacing.md) {
@@ -394,7 +472,7 @@ private struct TreeNodeRow: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(title)
+                            Text(row.title)
                                 .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                                 .foregroundStyle(Color.tronTextPrimary)
                                 .multilineTextAlignment(.leading)
@@ -409,9 +487,9 @@ private struct TreeNodeRow: View {
                             }
                         }
                         HStack(spacing: 7) {
-                            Text(kindLabel)
+                            Text(row.kindLabel)
                             if node.childCount > 1 { Text("\(node.childCount) branches") }
-                            Text(relativeTimestamp)
+                            Text(row.relativeTimestamp)
                         }
                         .font(TronTypography.secondaryCodeDescription)
                         .foregroundStyle(Color.tronTextMuted)
@@ -434,40 +512,15 @@ private struct TreeNodeRow: View {
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
-            .accessibilityLabel("Actions for \(title)")
+            .accessibilityLabel("Actions for \(row.title)")
         }
         .padding(.horizontal, SessionHistoryCardMetrics.horizontalPadding)
         .padding(.vertical, SessionHistoryCardMetrics.verticalPadding)
-        .tronGlassSurface(accent: accent, tintOpacity: node.id == leafID ? 0.15 : 0.07)
+        .tronScrollSurface(accent: accent, tintOpacity: node.id == leafID ? 0.15 : 0.07)
     }
 
-    private var title: String {
-        SessionHistoryPreview.plain(node.label ?? node.preview.ifEmpty(node.kind.humanized))
-    }
     private var accent: Color { node.isCurrentPath ? .tronEmerald : .tronPurple }
-    private var kindLabel: String {
-        if node.role == .user { return "Prompt" }
-        if node.role == .assistant { return "Response" }
-        if node.role == .toolResult { return "Tool result" }
-        return node.kind.humanized
-    }
-    private var relativeTimestamp: String {
-        guard let date = GatewayTimestamp.parse(node.timestamp) else { return node.timestamp }
-        return date.formatted(.relative(presentation: .named))
-    }
-    private var icon: String {
-        if node.role == .user { return "person.crop.circle" }
-        if node.role == .assistant { return "sparkles" }
-        return switch node.kind {
-        case "bash": "terminal"
-        case "compaction": "arrow.down.right.and.arrow.up.left"
-        case "branchSummary": "arrow.triangle.branch"
-        case "modelChange": "cpu"
-        case "thinkingChange": "brain"
-        case "label": "bookmark"
-        default: "wrench.and.screwdriver"
-        }
-    }
+    private var icon: String { row.icon }
 }
 
 private struct HistoryEntryDetailsSheet: View {

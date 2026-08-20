@@ -541,7 +541,13 @@ that the signed app installs and launches on the connected device after the focu
 pass; interactive PTY input remains a manual device check. Compare captures to the historical
 references before declaring parity. A signed install, launch, and screenshot are
 required together because default toolbar Liquid Glass can differ materially
-between the simulator and physical hardware. Chat checkpoints must also verify
+between the simulator and physical hardware. Sheet checkpoints must fling-scroll
+Agent Context, Project Resources, Session History, Runtime Behavior, Providers,
+and model selection; dense rows must retain static tinted geometry without visible
+material churn. Open a large instructions/JSON document and verify immediate native
+scrolling. Confirmation checkpoints verify red cancellation text, a short trailing
+toolbar action, and a sentence-length action in the Liquid Glass container below
+content at both default and accessibility Dynamic Type sizes. Chat checkpoints must also verify
 trailing alignment for user turns, historical transcript/tool insertion motion,
 the Settings gear in the chat toolbar, the context ring at the trailing edge of
 an empty idle composer, the nonstructural short bottom blur at default running state, its background-layer

@@ -306,20 +306,17 @@ private struct TechnicalJSONSheet: View {
     @Binding var detent: PresentationDetent
     let onEdit: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
+    @State private var document: String?
 
     var body: some View {
         NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
-                Text(value.prettyPrinted)
-                    .font(TronTypography.codeJSON)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .textSelection(.enabled)
-                    .padding(18)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            ZStack {
+                TronReadOnlyTextView(text: document ?? "", style: .code)
+                    .tronTopBlurSurface()
+                if document == nil {
+                    TronLoadingState(label: "Preparing JSON…", accent: accent)
+                }
             }
-            .defaultScrollAnchor(.top)
-            .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -343,6 +340,22 @@ private struct TechnicalJSONSheet: View {
                     .accessibilityLabel("Done")
                 }
             }
+        }
+        .task(id: value) {
+            document = nil
+            let source = value
+            let worker = Task.detached(priority: .userInitiated) { () -> String in
+                guard !Task.isCancelled else { return "" }
+                let rendered = source.prettyPrinted
+                return Task.isCancelled ? "" : rendered
+            }
+            let rendered = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard !Task.isCancelled else { return }
+            document = rendered
         }
         .accessibilityIdentifier("technical-json-sheet")
         .tronTopBlur(.sheet)

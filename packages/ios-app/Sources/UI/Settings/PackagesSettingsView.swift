@@ -45,7 +45,7 @@ struct PackagesSettingsView: View {
                     .tronGlassSurface(accent: .tronAmber, tintOpacity: 0.09)
                 }
 
-                TronSettingsGroup("Installed") {
+                TronSettingsGroup("Installed", surfaceStyle: .scrollOptimized) {
                     if let packages = inventory?.packages, !packages.isEmpty {
                         VStack(spacing: 0) {
                             ForEach(Array(packages.enumerated()), id: \.element.id) { index, package in
