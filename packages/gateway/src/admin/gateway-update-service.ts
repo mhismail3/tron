@@ -26,6 +26,12 @@ export interface GatewayUpdateRequest {
   commandId?: string;
 }
 
+export interface GatewayRollbackRequest {
+  channel: GatewayUpdateChannel;
+  /** Gateway-owned receipt identity, never accepted from the update helper's options. */
+  commandId: string;
+}
+
 export interface GatewayUpdateIdentity {
   version?: string;
   gatewayVersion?: string;
@@ -50,9 +56,11 @@ export interface GatewayUpdateStatus {
   candidateAvailable: boolean;
   error: string | null;
   updatedAt: string | null;
+  commandId: string | null;
+  rollbackAvailable: boolean;
 }
 
-export type GatewayUpdateCallback = (request: GatewayUpdateRequest) => Promise<JsonValue>;
+export type GatewayUpdateCallback = (request: GatewayUpdateRequest | (GatewayRollbackRequest & { operation?: "rollback" })) => Promise<JsonValue>;
 type RuntimeIdentityFallback = GatewayUpdateIdentity & { buildFingerprint?: string };
 
 /** Convert the launcher's health-era buildFingerprint into update identity form. */
@@ -69,15 +77,31 @@ export function normalizeRuntimeIdentity(value: RuntimeIdentityFallback | undefi
 /** The helper is trusted only when LaunchAgent exported an absolute, non-link file. */
 export function gatewayUpdateHelperPath(environment: NodeJS.ProcessEnv = process.env): string | undefined {
   const value = environment.TRON_GATEWAY_UPDATE_HELPER;
-  if (!value || !isAbsolute(value) || /[\u0000-\u001f\u007f]/u.test(value)) return undefined;
+  const payloadRoot = environment.TRON_GATEWAY_PAYLOAD_ROOT;
+  if (environment.TRON_GATEWAY_SUPERVISED !== "1" || !value || !payloadRoot
+    || !isAbsolute(value) || !isAbsolute(payloadRoot)
+    || /[\u0000-\u001f\u007f]/u.test(value) || /[\u0000-\u001f\u007f]/u.test(payloadRoot)) return undefined;
   try {
-    const info = lstatSync(value);
-    if (!info.isFile() || info.isSymbolicLink()) return undefined;
-    // Resolve only to prove the path is available; retain the LaunchAgent's
-    // absolute spelling so helper argument construction remains deterministic.
-    realpathSync(value);
+    const rootInfo = lstatSync(payloadRoot);
+    const helperInfo = lstatSync(value);
+    if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink() || !helperInfo.isFile() || helperInfo.isSymbolicLink()) return undefined;
+    const root = realpathSync(payloadRoot);
+    const helper = realpathSync(value);
+    if (helper !== root && !helper.startsWith(`${root}/`)) return undefined;
+    // Retain the LaunchAgent's absolute spelling so helper argument
+    // construction remains deterministic after containment is proven.
     return value;
   } catch { return undefined; }
+}
+
+export function gatewayRollbackHelperArgs(request: GatewayRollbackRequest): string[] {
+  if (request.channel !== "stable" && request.channel !== "dev") {
+    throw new GatewayError("invalid_request", "Gateway update channel must be stable or dev");
+  }
+  if (typeof request.commandId !== "string" || !/^[A-Za-z0-9._:-]{8,160}$/u.test(request.commandId)) {
+    throw new GatewayError("invalid_request", "Gateway update command ID is invalid");
+  }
+  return ["rollback", "--channel", request.channel, "--command-id", request.commandId];
 }
 
 export function gatewayUpdateHelperArgs(request: GatewayUpdateRequest): string[] {
@@ -117,8 +141,24 @@ export function updaterFailureProgress(
 
 async function recordUpdaterFailure(tronHome: string, channel: GatewayUpdateChannel, commandId: string, error: unknown): Promise<void> {
   if (!isAbsolute(tronHome)) return;
-  const path = join(tronHome, "gateway", "payloads", channel, "update-progress.json");
-  await mkdir(join(tronHome, "gateway", "payloads", channel), { recursive: true, mode: 0o700 });
+  const directory = join(tronHome, "gateway", "payloads", channel);
+  const root = parse(tronHome).root;
+  let cursor = root;
+  for (const component of tronHome.slice(root.length).split(/[\\/]+/u).filter(Boolean)) {
+    cursor = join(cursor, component);
+    const info = await lstat(cursor).catch(() => undefined);
+    if (info?.isSymbolicLink() || info && !info.isDirectory()) return;
+    const uid = process.getuid?.();
+    if (info && cursor !== root && uid !== undefined && info.uid !== uid) return;
+  }
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  for (const component of ["gateway", "payloads", channel]) {
+    cursor = join(cursor, component);
+    const info = await lstat(cursor).catch(() => undefined);
+    const uid = process.getuid?.();
+    if (!info?.isDirectory() || info.isSymbolicLink() || uid !== undefined && info.uid !== uid) return;
+  }
+  const path = join(directory, "update-progress.json");
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
   await writeFile(temporary, `${JSON.stringify(updaterFailureProgress(channel, commandId, error))}\n`, { mode: 0o600, flag: "wx" });
   try { await rename(temporary, path); } catch (renameError) {
@@ -132,7 +172,9 @@ function launchAgentUpdater(environment: NodeJS.ProcessEnv = process.env, tronHo
   if (!helper) return undefined;
   return async (request) => {
     const commandId = request.commandId ?? `gateway-update-${randomUUID()}`;
-    const args = gatewayUpdateHelperArgs({ ...request, commandId });
+    const args = "operation" in request && request.operation === "rollback"
+      ? gatewayRollbackHelperArgs({ channel: request.channel, commandId })
+      : gatewayUpdateHelperArgs({ ...(request as GatewayUpdateRequest), commandId });
     try {
       const child = spawn(process.execPath, [helper, ...args], {
         detached: true,
@@ -300,13 +342,19 @@ export class GatewayUpdateService {
     const value = await readBounded(path);
     if (value === undefined) return null;
     const config = configDocument(value);
-    await validateTrustedDirectory(config.sourceRoot, "sourceRoot", ["packages/gateway/package.json", "packages/gateway/package-lock.json"]);
+    await validateTrustedDirectory(config.sourceRoot, "sourceRoot", [
+      "packages/gateway/package.json", "packages/gateway/package-lock.json",
+      "packages/gateway/scripts/ensure-node-pty-helper.mjs", "scripts/gateway-payload-deploy.mjs",
+    ]);
     if (config.artifactRoot !== undefined) await validateTrustedDirectory(config.artifactRoot, "artifactRoot");
     return config;
   }
 
   async configure(value: { sourceRoot: unknown; artifactRoot?: unknown }): Promise<GatewayUpdateConfig> {
-    const sourceRoot = await validateTrustedDirectory(value.sourceRoot, "sourceRoot", ["packages/gateway/package.json", "packages/gateway/package-lock.json"]);
+    const sourceRoot = await validateTrustedDirectory(value.sourceRoot, "sourceRoot", [
+      "packages/gateway/package.json", "packages/gateway/package-lock.json",
+      "packages/gateway/scripts/ensure-node-pty-helper.mjs", "scripts/gateway-payload-deploy.mjs",
+    ]);
     let artifactRoot: string | undefined;
     if (value.artifactRoot !== undefined && value.artifactRoot !== null) {
       artifactRoot = await validateTrustedDirectory(value.artifactRoot, "artifactRoot");
@@ -336,6 +384,7 @@ export class GatewayUpdateService {
     let state = "unknown";
     let error: string | null = null;
     let updatedAt: string | null = null;
+    let commandId: string | null = null;
 
     if (currentSelectionValue !== undefined) {
       const selected = selection(currentSelectionValue, channel);
@@ -343,6 +392,7 @@ export class GatewayUpdateService {
       if (selectedManifest === undefined) throw new GatewayError("conflict", "Gateway payload manifest is missing");
       currentIdentity = manifest(selectedManifest, channel, selected);
     }
+    const rollbackAvailable = previousSelectionValue !== undefined;
     if (previousSelectionValue !== undefined) {
       const previous = selection(previousSelectionValue, channel);
       const previousManifest = await readBounded(join(root, "versions", previous.version, "manifest.json"));
@@ -364,6 +414,11 @@ export class GatewayUpdateService {
         throw new GatewayError("conflict", "Gateway deployment state is malformed");
       }
       updatedAt = stateUpdatedAt;
+      const stateCommandId = boundedString(raw.commandId, "commandId", 160);
+      if (stateCommandId !== undefined && !/^[A-Za-z0-9._:-]{8,160}$/u.test(stateCommandId)) {
+        throw new GatewayError("conflict", "Gateway deployment command ID is malformed");
+      }
+      commandId = stateCommandId ?? null;
       if (raw.error !== undefined) error = boundedString(raw.error, "error", 2_048) ?? null;
       let candidateReference: GatewayUpdateIdentity | null = null;
       if (raw.candidateIdentity !== undefined) {
@@ -417,15 +472,30 @@ export class GatewayUpdateService {
         || typeof raw.state !== "string" || raw.state.length === 0 || raw.state.length > 64) {
         throw new GatewayError("conflict", "Gateway update progress is malformed");
       }
-      state = raw.state;
       const progressUpdatedAt = boundedString(raw.updatedAt, "updatedAt", 64);
       if (progressUpdatedAt === undefined || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(progressUpdatedAt)) {
         throw new GatewayError("conflict", "Gateway update progress is malformed");
       }
-      updatedAt = progressUpdatedAt;
-      if (raw.error !== undefined) error = boundedString(raw.error, "error", 2_048) ?? null;
+      // A delayed helper write must not regress an authoritative terminal
+      // deployment state. Timestamps are validated ISO-8601 strings, so their
+      // epoch comparison is deterministic and bounded.
+      const progressCommandId = boundedString(raw.commandId, "commandId", 160);
+      if (progressCommandId !== undefined && !/^[A-Za-z0-9._:-]{8,160}$/u.test(progressCommandId)) {
+        throw new GatewayError("conflict", "Gateway update progress command ID is malformed");
+      }
+      if (updatedAt === null || Date.parse(progressUpdatedAt) >= Date.parse(updatedAt)) {
+        state = raw.state;
+        updatedAt = progressUpdatedAt;
+        commandId = progressCommandId ?? null;
+        if (raw.error !== undefined) error = boundedString(raw.error, "error", 2_048) ?? null;
+      }
     }
-    return { state, channel, currentIdentity, candidateIdentity, candidateAvailable, error, updatedAt };
+    return { state, channel, currentIdentity, candidateIdentity, candidateAvailable, error, updatedAt, commandId, rollbackAvailable };
+  }
+
+  async rollback(request: GatewayRollbackRequest): Promise<JsonValue> {
+    if (!this.updater) throw new GatewayError("unsupported", "Gateway updates require the LaunchAgent-owned update helper");
+    return this.updater({ ...request, operation: "rollback" });
   }
 
   async update(request: GatewayUpdateRequest): Promise<JsonValue> {

@@ -225,6 +225,13 @@ struct PairingInfoStep: View {
             if Task.isCancelled { return }
         }
 
+        // Pairing is exposed only from the authoritative owner projection;
+        // health alone must not disclose a QR for a foreign helper.
+        guard await setup.runtimeOwnershipHealthy() else {
+            fail(.serverUnreachable)
+            return
+        }
+
         // Fresh installs may not have a settings file yet. Prefer live and
         // current-session state, then fall back to server/settings state;
         // cache the selected host for later wrapper and server reads.
@@ -270,7 +277,10 @@ struct PairingInfoStep: View {
             host: host,
             port: setup.serverPort,
             code: code,
-            label: LocalComputerName.currentPairingName()
+            label: LocalComputerName.pairingName(
+                LocalComputerName.current(),
+                isDev: setup.profile == .preview
+            )
         )
         guard let url = PairingURLBuilder.makeURL(payload),
               let qrImage = QRCodeGenerator.makeImage(payload: url.absoluteString, size: PairingInfoStepLayout.qrSize) else {
@@ -380,11 +390,17 @@ enum PairingInfoStepLayout {
 }
 
 struct PairingInfoWindowView: View {
+    var title: String = "Pairing Info"
+    @Environment(\.environmentSetup) private var setup
     @State private var state = WizardState(initialStep: .pairingInfo)
+
+    private var displayedTitle: String {
+        setup.profile == .preview ? "\(title) (Dev)" : title
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Pairing Info")
+            Text(displayedTitle)
                 .font(TronTypography.wizardTitle)
                 .foregroundStyle(Color.tronEmerald)
 

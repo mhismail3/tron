@@ -9,13 +9,15 @@ struct MenuBarItemBuilderTests {
         snapshot: ServerStatusSnapshot,
         tronHome: URL = URL(fileURLWithPath: "/tmp/tron", isDirectory: true),
         defaultServerPort: Int = 9847,
-        canManageLaunchAgent: Bool = true
+        canManageLaunchAgent: Bool = true,
+        preview: PreviewMenuState = .unavailable
     ) -> [MenuItemDescriptor] {
         MenuBarItemBuilder.build(
             snapshot: snapshot,
             tronHome: tronHome,
             defaultServerPort: defaultServerPort,
-            canManageLaunchAgent: canManageLaunchAgent
+            canManageLaunchAgent: canManageLaunchAgent,
+            preview: preview
         )
     }
 
@@ -75,6 +77,29 @@ struct MenuBarItemBuilderTests {
         let titles = items.map(\.title)
         #expect(titles.contains("Resume Tron"))
         #expect(!titles.contains("Pause Tron"))
+    }
+
+    @Test("Preview controls clearly distinguish enable, stop, restart, and pairing")
+    func previewControls() {
+        let absent = Self.build(
+            snapshot: .checking,
+            preview: PreviewMenuState(isRegistered: false, isRunning: false, canManage: true)
+        )
+        #expect(absent.map(\.title).contains("Enable Preview Gateway"))
+        let running = Self.build(
+            snapshot: .checking,
+            preview: PreviewMenuState(isRegistered: true, isRunning: true, canManage: true)
+        )
+        #expect(running.map(\.title).contains("Stop Preview Gateway"))
+        #expect(running.map(\.title).contains("Restart Preview Gateway"))
+        #expect(running.map(\.title).contains("Show Preview pairing info"))
+        let repair = Self.build(
+            snapshot: .checking,
+            preview: PreviewMenuState(isRegistered: true, isRunning: true, canManage: true, isOwned: false, needsRepair: true)
+        )
+        #expect(repair.map(\.title).contains("Repair Preview"))
+        #expect(!repair.map(\.title).contains("Show Preview pairing info"))
+        #expect(!repair.map(\.title).contains("Stop Preview Gateway"))
     }
 
     @Test("menu always has pairing, folder, logs, feedback, server controls, uninstall, quit")

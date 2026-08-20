@@ -4,6 +4,41 @@ import Testing
 
 @Suite("TronPaths constants")
 struct TronPathsTests {
+    @Test("Release profiles have independent canonical identities")
+    func releaseProfilesAreIndependent() {
+        #expect(TronPaths.launchAgentLabel(profile: .stable) == "com.tron.server")
+        #expect(TronPaths.launchAgentLabel(profile: .preview) == "com.tron.server.dev")
+        #expect(TronPaths.defaultServerPort(profile: .stable) == 9847)
+        #expect(TronPaths.defaultServerPort(profile: .preview) == 9848)
+        #expect(TronPaths.tronHome(profile: .preview).path.hasSuffix("/.tron-dev"))
+        #expect(TronPaths.agentHome(profile: .preview).path.hasSuffix("/.pi/agent-dev"))
+        #expect(TronPaths.bearerTokenPath(profile: .preview).path.hasSuffix("/.tron-dev/gateway/local-auth.json"))
+        #expect(TronPaths.serverHelperBinary(profile: .preview).path.hasSuffix("LoginItems/Tron Agent Dev.app/Contents/MacOS/tron"))
+        #expect(TronPaths.launchAgentPlistPath(profile: .preview).path.hasSuffix("LaunchAgents/com.tron.server.dev.plist"))
+        #expect(TronPaths.launchAgentEnvironmentVariables(profile: .preview) == [
+            TronPaths.gatewaySupervisionEnv: "1",
+            TronPaths.gatewayChannelEnv: "dev",
+            TronPaths.tronHomeNameEnv: ".tron-dev",
+            TronPaths.agentDirNameEnv: "agent-dev",
+        ])
+    }
+
+    @Test("Release can manage both profiles without install-mode environment")
+    func releaseOwnsBothProfiles() {
+        let variant = MacRuntimeVariant.installedRelease
+        #expect(variant.canManageLaunchAgent(profile: .stable, isIsolatedInstallMode: false))
+        #expect(variant.canManageLaunchAgent(profile: .preview, isIsolatedInstallMode: false))
+    }
+
+    @Test("Preview pairing setup uses separate credential and enrollment paths")
+    func previewPairingSetupIsSeparate() {
+        #expect(EnvironmentSetup.live.profile == .stable)
+        #expect(EnvironmentSetup.preview.profile == .preview)
+        #expect(EnvironmentSetup.live.bearerTokenPath != EnvironmentSetup.preview.bearerTokenPath)
+        #expect(EnvironmentSetup.live.enrollmentCodePath != EnvironmentSetup.preview.enrollmentCodePath)
+        #expect(EnvironmentSetup.preview.serverPort == 9848)
+    }
+
     @Test("LaunchAgent label matches the canonical label")
     func launchAgentLabelMatches() {
         #expect(TronPaths.launchAgentLabel(environment: [:]) == "com.tron.server")

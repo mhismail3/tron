@@ -34,13 +34,25 @@ struct GatewayUpdateControlPlaneTests {
     }
 
     @Test("status presentation is bounded and candidate availability is explicit")
-    func statusPresentation() {
+    func statusPresentation() throws {
         let available = GatewayUpdateStatus(
             state: "ready", channel: "stable", currentIdentity: nil,
             candidateIdentity: GatewayUpdateIdentity(version: "2026.01", gatewayVersion: nil, sourceRevision: nil, runtimeEpoch: nil, payloadFingerprint: nil),
             candidateAvailable: true, error: nil, updatedAt: "2026-01-01T00:00:00Z"
         )
-        #expect(available.presentationTitle == "Update available")
+        #expect(available.presentationTitle == "Ready")
+        let failed = GatewayUpdateStatus(
+            state: "failed", channel: "stable", currentIdentity: nil, candidateIdentity: available.candidateIdentity,
+            candidateAvailable: true, error: "health check failed", updatedAt: nil,
+            commandId: "command-failed", rollbackAvailable: true
+        )
+        #expect(failed.presentationTitle == "Update failed")
+        let rolledBack = GatewayUpdateStatus(
+            state: "rolled-back", channel: "stable", currentIdentity: nil, candidateIdentity: available.candidateIdentity,
+            candidateAvailable: true, error: "health check failed", updatedAt: nil,
+            commandId: "command-failed", rollbackAvailable: true
+        )
+        #expect(rolledBack.presentationTitle == "Rolled back")
         let unavailable = GatewayUpdateStatus(
             state: "unknown", channel: "stable", currentIdentity: nil, candidateIdentity: nil,
             candidateAvailable: false, error: "unsupported", updatedAt: nil
@@ -48,5 +60,11 @@ struct GatewayUpdateControlPlaneTests {
         #expect(unavailable.presentationTitle == "Unavailable")
         #expect(AppModel.supportsGatewayUpdate(capabilities: ["restart-drain.v1"]) == false)
         #expect(AppModel.supportsGatewayUpdate(capabilities: ["gateway-update.v1"]))
+        let legacy = try JSONDecoder.gateway.decode(
+            GatewayUpdateStatus.self,
+            from: Data(#"{"state":"ready","channel":"stable","currentIdentity":null,"candidateIdentity":null,"candidateAvailable":false,"error":null,"updatedAt":null}"#.utf8)
+        )
+        #expect(legacy.commandId == nil)
+        #expect(legacy.rollbackAvailable == false)
     }
 }

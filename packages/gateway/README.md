@@ -109,6 +109,10 @@ projects only the selected channel's `deployment-state.json`, `current.json`,
 `previous.json`, and version manifests (each document is capped at 64 KiB); malformed
 or oversized state fails closed. `gateway.update` accepts only `channel` (`stable` or `dev`), `mode` (`source`,
 `artifact`, or `auto`), and an optional candidate version, and requires a command ID.
+`gateway.rollback` is the authenticated, receipt-backed companion mutation; it accepts
+only a bounded channel and command ID and launches the supervised helper's existing
+rollback operation. Both mutations acknowledge helper admission only; status remains
+authoritative and includes the active command ID and rollback availability.
 `gateway.update.config` separately accepts only a trusted repository `sourceRoot` and
 optional `artifactRoot`; both are checked as absolute, non-symlinked directories before
 being stored in `gateway/update-config.json`. It invokes no client-supplied command or

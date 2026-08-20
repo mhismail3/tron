@@ -5,12 +5,32 @@ import ServiceManagement
 /// `SMAppService`; `launchctl` is used only for diagnostics and explicit
 /// restart/kickstart.
 struct LiveLaunchAgentManager: LaunchAgentManaging {
+    let profile: TronGatewayProfile
+
+    init(profile: TronGatewayProfile = .stable) {
+        self.profile = profile
+    }
+
     func load(plistPath: URL, label: String) async -> LaunchAgentOutcome {
+        guard label == profile.launchAgentLabel,
+              plistPath.standardizedFileURL.path == TronPaths.launchAgentPlistPath(profile: profile).standardizedFileURL.path else {
+            return .launchdRefused(message: "LaunchAgent profile arguments do not match the requested Gateway profile.")
+        }
         guard FileManager.default.fileExists(atPath: plistPath.path) else {
             return .binaryMissing(path: plistPath.path)
         }
-        guard FileManager.default.fileExists(atPath: TronPaths.serverHelperBinary.path) else {
-            return .binaryMissing(path: TronPaths.serverHelperBinary.path)
+        let helperBinary = TronPaths.serverHelperBinary(profile: profile)
+        guard FileManager.default.fileExists(atPath: helperBinary.path) else {
+            return .binaryMissing(path: helperBinary.path)
+        }
+        guard ExistingInstallDetector.launchAgentPlistIsCurrent(profile: profile, plistPath: plistPath) else {
+            return .launchdRefused(message: "The bundled LaunchAgent plist does not match the requested Gateway profile.")
+        }
+        if let signatureProblem = ExistingInstallDetector.bundleSignatureProblem(
+            of: TronPaths.serverHelperBundle(profile: profile),
+            expectedBundleIdentifier: profile.launchAgentLabel
+        ) {
+            return .launchdRefused(message: signatureProblem)
         }
 
         let service = SMAppService.agent(plistName: "\(label).plist")
@@ -20,31 +40,31 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         let runningParent = runtime?.parentBundleIdentifier
         let shouldReplaceStaleRuntime = Self.runtimeRequiresReplacement(
             runtimeInfo: runtime,
-            expectedHelperPath: TronPaths.serverHelperBinary.path
+            expectedHelperPath: helperBinary.path
         )
         let shouldTakeOverRuntime = Self.shouldBootoutForTakeover(
             status: status,
             currentVariant: currentVariant,
             runningParentBundleIdentifier: runningParent,
-            canManageLaunchAgent: TronPaths.canManageLaunchAgent
+            canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile)
         )
         let shouldRefreshCurrentRegistration = Self.shouldRefreshRegistrationForCurrentBundle(
             status: status,
             currentVariant: currentVariant,
             runtimeInfo: runtime,
             currentParentBundleVersion: Self.currentParentBundleVersion(),
-            canManageLaunchAgent: TronPaths.canManageLaunchAgent
+            canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile)
         ) || Self.shouldRefreshRegistrationForLaunchConstraints(
             status: status,
             currentVariant: currentVariant,
             runtimeInfo: runtime,
-            canManageLaunchAgent: TronPaths.canManageLaunchAgent
+            canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile)
         ) || Self.shouldRefreshRegistrationForGatewaySupervision(
             status: status,
             currentVariant: currentVariant,
             runtimeInfo: runtime,
             expectedMarker: TronPaths.gatewaySupervisionValue,
-            canManageLaunchAgent: TronPaths.canManageLaunchAgent
+            canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile)
         )
 
         if let outcome = Self.preRegistrationOutcome(
@@ -52,8 +72,8 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             currentVariant: currentVariant,
             runtimeInfo: runtime,
             runningParentBundleIdentifier: runningParent,
-            canManageLaunchAgent: TronPaths.canManageLaunchAgent,
-            expectedHelperPath: TronPaths.serverHelperBinary.path,
+            canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile),
+            expectedHelperPath: helperBinary.path,
             shouldRefreshCurrentRegistration: shouldRefreshCurrentRegistration
         ) {
             return outcome
@@ -71,13 +91,13 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
                 )
             }
         }
-        let externalPortBound = await isPortBound(TronPaths.defaultServerPort)
+        let externalPortBound = await isPortBound(profile.port)
         if Self.shouldRefuseExternalServer(
             status: status,
             runningParentBundleIdentifier: runningParent,
             portBound: externalPortBound
         ) {
-            return .launchdRefused(message: "Another Tron is already running on port \(TronPaths.defaultServerPort). Stop it before installing Tron Agent.")
+            return .launchdRefused(message: "Another Tron is already running on port \(profile.port). Stop it before installing this Gateway profile.")
         }
 
         if Self.shouldUnregisterBeforeRegister(
@@ -203,7 +223,14 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         shouldTakeOverRuntime: Bool,
         shouldRefreshCurrentRegistration: Bool
     ) -> Bool {
-        status == .enabled
+        let registrationMayExist: Bool
+        switch status {
+        case .enabled, .unknown:
+            registrationMayExist = true
+        case .requiresApproval, .notRegistered, .notFound:
+            registrationMayExist = false
+        }
+        return registrationMayExist
             && (runningParentBundleIdentifier == nil
                 || shouldReplaceStaleRuntime
                 || shouldTakeOverRuntime
@@ -265,6 +292,26 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
     }
 
+    static func runtimeOwnsProfile(
+        runtimeInfo: LaunchAgentRuntimeInfo?,
+        profile: TronGatewayProfile,
+        expectedParentBundleIdentifier: String?,
+        expectedHelperPath: String,
+        expectedSupervisionMarker: String = TronPaths.gatewaySupervisionValue,
+        fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> Bool {
+        guard let runtimeInfo,
+              runtimeInfo.pid != nil,
+              runtimeInfo.parentBundleIdentifier == expectedParentBundleIdentifier,
+              runtimeInfo.gatewaySupervisionMarker == expectedSupervisionMarker,
+              runtimeInfo.gatewayChannelMarker == profile.channel else { return false }
+        return !runtimeRequiresReplacement(
+            runtimeInfo: runtimeInfo,
+            expectedHelperPath: expectedHelperPath,
+            fileExists: fileExists
+        )
+    }
+
     static func runtimeRequiresReplacement(
         runtimeInfo: LaunchAgentRuntimeInfo?,
         expectedHelperPath: String,
@@ -282,8 +329,13 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
     }
 
     func unload(label: String) async -> LaunchAgentOutcome {
+        guard label == profile.launchAgentLabel else {
+            return .launchdRefused(message: "LaunchAgent label does not match the requested Gateway profile.")
+        }
         let service = SMAppService.agent(plistName: "\(label).plist")
-        if let outcome = Self.preUnregistrationOutcome(for: ExistingInstallDetector.serviceStatus(label: label)) {
+        if let outcome = Self.preUnregistrationOutcome(
+            for: ExistingInstallDetector.serviceStatus(label: label), profile: profile
+        ) {
             return outcome
         }
         do {
@@ -295,19 +347,23 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
     }
 
     static func preUnregistrationOutcome(
-        for status: ExistingInstallDetector.ServiceRegistrationStatus
+        for status: ExistingInstallDetector.ServiceRegistrationStatus,
+        profile: TronGatewayProfile = .stable
     ) -> LaunchAgentOutcome? {
         switch status {
         case .notRegistered:
             return .ok
         case .notFound:
-            return .binaryMissing(path: TronPaths.launchAgentPlistPath.path)
+            return .binaryMissing(path: TronPaths.launchAgentPlistPath(profile: profile).path)
         case .enabled, .requiresApproval, .unknown:
             return nil
         }
     }
 
     func restart(label: String) async -> LaunchAgentOutcome {
+        guard label == profile.launchAgentLabel else {
+            return .launchdRefused(message: "LaunchAgent label does not match the requested Gateway profile.")
+        }
         let result = await Subprocess.run(
             executable: URL(fileURLWithPath: "/bin/launchctl"),
             arguments: ["kickstart", "-k", "gui/\(currentUID())/\(label)"]
@@ -315,6 +371,13 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         return result.exitCode == 0
             ? .ok
             : .launchdRefused(message: result.stderr.isEmpty ? result.stdout : result.stderr)
+    }
+
+    func isRegistered(label: String) async -> Bool {
+        switch ExistingInstallDetector.serviceStatus(label: label) {
+        case .enabled, .requiresApproval: return true
+        case .notRegistered, .notFound, .unknown: return false
+        }
     }
 
     func isLoaded(label: String) async -> Bool {
@@ -349,6 +412,10 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             executablePath: parseLaunchctlDictionaryValue(named: "Executable", from: result.stdout),
             gatewaySupervisionMarker: parseLaunchctlEnvironmentValue(
                 named: TronPaths.gatewaySupervisionEnv,
+                from: result.stdout
+            ),
+            gatewayChannelMarker: parseLaunchctlEnvironmentValue(
+                named: TronPaths.gatewayChannelEnv,
                 from: result.stdout
             ),
             needsLaunchConstraintRefresh: result.stdout.contains("needs LWCR update")

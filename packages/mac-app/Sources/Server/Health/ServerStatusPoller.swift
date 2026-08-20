@@ -47,9 +47,10 @@ struct ServerStatusPoller: Sendable {
                let runtimeInfo,
                runtimeInfo.parentBundleIdentifier == MacRuntimeVariant.detect().expectedParentBundleIdentifier,
                runtimeInfo.gatewaySupervisionMarker == TronPaths.gatewaySupervisionValue,
+               runtimeInfo.gatewayChannelMarker == setup.profile.channel,
                !LiveLaunchAgentManager.runtimeRequiresReplacement(
                    runtimeInfo: runtimeInfo,
-                   expectedHelperPath: TronPaths.serverHelperBinary.path
+                   expectedHelperPath: setup.serverHelperBinaryPath.path
                ) {
                 installationState = .running(version: info.version, port: port)
             } else if setup.canManageLaunchAgent {

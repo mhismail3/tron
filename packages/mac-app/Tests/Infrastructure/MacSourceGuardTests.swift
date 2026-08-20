@@ -132,9 +132,19 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("NODE_VERSION=\"22.22.0\""))
         #expect(bundleScript.contains("NODE_ARM64_SHA256="))
         #expect(bundleScript.contains("NODE_X64_SHA256="))
-        #expect(bundleScript.contains("npm ci --omit=dev"))
+        #expect(bundleScript.contains("TRON_NODE_BIN"))
+        #expect(bundleScript.contains("TRON_NPM_BIN"))
+        #expect(bundleScript.contains("override\" != /* || ! -x \"$override\""))
+        #expect(bundleScript.contains("command -v \"$tool\""))
+        #expect(bundleScript.contains("${NVM_DIR:-${HOME:-}/.nvm}/versions/node"))
+        #expect(bundleScript.contains("/opt/homebrew/bin/$tool"))
+        #expect(bundleScript.contains("/usr/local/bin/$tool"))
+        #expect(bundleScript.contains("\"$NPM_BIN\" ci --omit=dev"))
+        #expect(bundleScript.contains("\"$NODE_BIN\" -p"))
+        #expect(!bundleScript.contains("&& npm "))
+        #expect(!bundleScript.contains("$(node "))
         #expect(bundleScript.contains("tron-gateway-launcher.c"))
-        #expect(bundleScript.contains("hash-gateway-payload.sh"))
+        #expect(bundleScript.contains("--fingerprint \"$PAYLOAD_DIR\""))
         #expect(bundleScript.contains("gateway-payload-deploy.mjs"))
         #expect(bundleScript.contains("dependencyTreeCoverage"))
         #expect(bundleScript.contains("runtimeEpoch"))
@@ -142,11 +152,12 @@ struct MacSourceGuardTests {
         #expect(!bundleScript.contains("cargo build"))
 
         let hashScript = try Self.read(macRoot, "scripts/hash-gateway-payload.sh")
-        #expect(hashScript.contains("find app runtime -type f"))
+        #expect(hashScript.contains("find \"$ROOT/app\" \"$ROOT/runtime\""))
+        #expect(hashScript.contains("-type f -o -type l"))
         #expect(hashScript.contains("shasum -a 256"))
 
         let launcher = try Self.read(macRoot, "scripts/tron-gateway-launcher.c")
-        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "immutable_tree", "S_IWUSR"] {
+        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "immutable_tree", "CC_SHA256", "S_IWUSR"] {
             #expect(launcher.contains(required), "launcher missing external payload safety marker: \(required)")
         }
 
@@ -154,7 +165,7 @@ struct MacSourceGuardTests {
         #expect(project.contains("name: Ensure Bundled Gateway Payload"))
         #expect(project.contains("ensure-gateway-bundle.sh"))
         #expect(project.contains("- \"Gateway/**\""))
-        #expect(project.contains("ditto \"$GATEWAY_SRC\" \"$GATEWAY_DST\""))
+        #expect(project.contains("/usr/bin/rsync -a \"$GATEWAY_SRC/\" \"$GATEWAY_DST/\""))
         #expect(project.contains("find \"$GATEWAY_DST\" -type f"))
         #expect(project.contains("NODE_ENTITLEMENTS=\"$SRCROOT/TronNode.entitlements\""))
         #expect(project.contains("--entitlements \"$NODE_ENTITLEMENTS\""))

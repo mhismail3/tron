@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
@@ -14,9 +14,12 @@ import {
   validateApplyRequest,
   applyPayload,
   sourceBuildCommands,
+  resolveNpmCommand,
   validateUpdateConfigDocument,
   payloadFingerprint,
   buildSourcePayload,
+  preflightPayload,
+  runBounded,
 } from "./gateway-payload-deploy.mjs";
 
 function selection(version, payloadFingerprint = "a".repeat(64)) {
@@ -92,6 +95,34 @@ test("rollback target validation fails before changing current selection", async
   }
 });
 
+test("payload fingerprints include safe internal node_modules symlinks", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-payload-symlink-"));
+  try {
+    const versionRoot = join(root, "payload");
+    await mkdir(join(versionRoot, "app", "dist"), { recursive: true });
+    await mkdir(join(versionRoot, "app", "scripts"), { recursive: true });
+    await mkdir(join(versionRoot, "app", "node_modules", ".bin"), { recursive: true });
+    await mkdir(join(versionRoot, "runtime"), { recursive: true });
+    await writeFile(join(versionRoot, "app", "dist", "index.js"), `${"x".repeat(1_024)}\n`);
+    await writeFile(join(versionRoot, "app", "package.json"), "{}\n");
+    await writeFile(join(versionRoot, "app", "package-lock.json"), "{}\n");
+    await writeFile(join(versionRoot, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
+    await writeFile(join(versionRoot, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
+    await writeFile(join(versionRoot, "runtime", "node-arm64"), "n".repeat(1_048_576));
+    await writeFile(join(versionRoot, "runtime", "node-x64"), "n".repeat(1_048_576));
+    await chmod(join(versionRoot, "runtime", "node-arm64"), 0o755);
+    await chmod(join(versionRoot, "runtime", "node-x64"), 0o755);
+    await writeFile(join(versionRoot, "manifest.json"), "{}\n");
+    await symlink("../../dist/index.js", join(versionRoot, "app", "node_modules", ".bin", "tron"));
+    const withLink = await payloadFingerprint(versionRoot);
+    await rm(join(versionRoot, "app", "node_modules", ".bin", "tron"));
+    const withoutLink = await payloadFingerprint(versionRoot);
+    assert.notEqual(withLink, withoutLink);
+    await symlink("../../../../../outside", join(versionRoot, "app", "node_modules", ".bin", "escape"));
+    await assert.rejects(payloadFingerprint(versionRoot), /dangling|escapes root/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("source build failure leaves active selection and deployment state unchanged", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-source-failure-"));
   try {
@@ -130,6 +161,10 @@ test("source builds compile privately and leave the trusted source tree unchange
     const sourceRoot = join(root, "source");
     const gatewayRoot = join(sourceRoot, "packages", "gateway");
     await mkdir(join(gatewayRoot, "src"), { recursive: true });
+    await mkdir(join(sourceRoot, "scripts"), { recursive: true });
+    await mkdir(join(gatewayRoot, "scripts"), { recursive: true });
+    await writeFile(join(sourceRoot, "scripts", "gateway-payload-deploy.mjs"), "// trusted updater\n");
+    await writeFile(join(gatewayRoot, "scripts", "ensure-node-pty-helper.mjs"), "// trusted helper\n");
     const sourceFiles = {
       "package.json": JSON.stringify({ version: "1.0.0" }),
       "package-lock.json": "{}\n",
@@ -164,7 +199,7 @@ test("source builds compile privately and leave the trusted source tree unchange
       paths: store, config: { sourceRoot }, candidateVersion: "candidate",
       runCommand: async (tool, args, options) => {
         commands.push({ tool, args, options });
-        if (tool === process.execPath) {
+        if (tool === process.execPath && args[0].endsWith("/tsc")) {
           await mkdir(args.at(-1), { recursive: true });
           await writeFile(join(args.at(-1), "index.js"), `${"c".repeat(1_024)}\n`);
         } else await mkdir(join(options.cwd, "node_modules"), { recursive: true });
@@ -175,12 +210,66 @@ test("source builds compile privately and leave the trusted source tree unchange
     assert.equal(commands[0].args.includes("run"), false);
     assert.equal(await readFile(join(gatewayRoot, "dist", "index.js")).catch(() => undefined), undefined);
     for (const [path, content] of before) assert.deepEqual(await readFile(join(gatewayRoot, path)), content);
+    assert.equal(await readFile(join(result.root, "app", "scripts", "gateway-payload-deploy.mjs"), "utf8"), "// trusted updater\n");
+    assert.equal(await readFile(join(result.root, "app", "scripts", "ensure-node-pty-helper.mjs"), "utf8"), "// trusted helper\n");
     for (const directory of [
       join(store.versionsRoot, "candidate"), join(store.versionsRoot, "candidate", "app"),
       join(store.versionsRoot, "candidate", "app", "dist"), join(store.versionsRoot, "candidate", "app", "scripts"),
       join(store.versionsRoot, "candidate", "app", "node_modules"), join(store.versionsRoot, "candidate", "runtime"),
     ]) await chmod(directory, 0o755);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+async function makePreflightFixture(root) {
+  const payload = join(root, "payload");
+  await mkdir(join(payload, "app", "dist"), { recursive: true });
+  await mkdir(join(payload, "app", "scripts"), { recursive: true });
+  await mkdir(join(payload, "app", "node_modules"), { recursive: true });
+  await mkdir(join(payload, "runtime"), { recursive: true });
+  await writeFile(join(payload, "app", "dist", "index.js"), "x".repeat(1_024));
+  await writeFile(join(payload, "app", "dist", "version.js"), "export const PROTOCOL_VERSION = 3; export const MIN_PROTOCOL_VERSION = 3;\n");
+  await writeFile(join(payload, "app", "package.json"), "{}\n");
+  await writeFile(join(payload, "app", "package-lock.json"), "{}\n");
+  await writeFile(join(payload, "app", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
+  await writeFile(join(payload, "app", "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
+  await writeFile(join(payload, "runtime", "node-arm64"), "n".repeat(1_048_576));
+  await writeFile(join(payload, "runtime", "node-x64"), "n".repeat(1_048_576));
+  await chmod(join(payload, "runtime", "node-arm64"), 0o755);
+  await chmod(join(payload, "runtime", "node-x64"), 0o755);
+  const fingerprint = await payloadFingerprint(payload);
+  await writeFile(join(payload, "manifest.json"), JSON.stringify({
+    schema: 1, kind: "tron-gateway-payload", channel: "stable", version: "preflight",
+    gatewayVersion: "1", nodeVersion: "22", sourceRevision: "source", runtimeEpoch: "epoch",
+    payloadFingerprint: fingerprint,
+  }));
+  return payload;
+}
+
+test("preflight imports candidate protocol values and rejects incompatible ranges", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-preflight-protocol-"));
+  try {
+    const payload = await makePreflightFixture(root);
+    const run = async (_tool, args) => args[0] === "-e"
+      ? { code: 0, output: JSON.stringify({ protocolVersion: 3, minProtocolVersion: 3 }) }
+      : { code: 0, output: "" };
+    await preflightPayload(payload, run);
+    await assert.rejects(
+      preflightPayload(payload, async (_tool, args) => args[0] === "-e"
+        ? { code: 0, output: JSON.stringify({ protocolVersion: 4, minProtocolVersion: 4 }) }
+        : { code: 0, output: "" }),
+      /protocol range is incompatible/
+    );
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("source npm resolution uses the exact Node runtime", () => {
+  const command = resolveNpmCommand({
+    HOME: process.env.HOME,
+    PATH: process.env.PATH,
+    NVM_DIR: process.env.NVM_DIR,
+  });
+  assert.equal(command.tool, process.execPath);
+  assert.match(command.script, /npm-cli\.js$/u);
 });
 
 test("trusted source policy is stored-only and source commands are bounded", async () => {
@@ -206,7 +295,23 @@ test("apply accepts only bounded update controls and fails closed for source mod
   });
   assert.throws(() => validateApplyRequest({ channel: "stable", mode: "artifact", commandId: "command-1", source: "/tmp" }), /unsupported field/);
   assert.throws(() => validateApplyRequest({ channel: "stable", mode: "source", commandId: "short" }), /command ID/);
-  await assert.rejects(applyPayload({ channel: "stable", mode: "source", commandId: "command-1" }), /trusted Gateway update config/);
+  const supervised = process.env.TRON_GATEWAY_SUPERVISED;
+  process.env.TRON_GATEWAY_SUPERVISED = "1";
+  try {
+    await assert.rejects(applyPayload({ channel: "stable", mode: "source", commandId: "command-1" }), /trusted Gateway update config/);
+  } finally {
+    if (supervised === undefined) delete process.env.TRON_GATEWAY_SUPERVISED;
+    else process.env.TRON_GATEWAY_SUPERVISED = supervised;
+  }
+});
+
+test("runBounded settles at the kill deadline when a descendant retains pipes", async () => {
+  const started = Date.now();
+  await assert.rejects(
+    runBounded(process.execPath, ["-e", "require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},100000)'],{stdio:'inherit'}); setInterval(()=>{},100000)"], { timeoutMs: 50, maxOutputBytes: 1024 }),
+    /timed out/
+  );
+  assert.ok(Date.now() - started < 4_000);
 });
 
 test("deployment transitions reject skipping identity proof", () => {

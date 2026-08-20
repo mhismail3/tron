@@ -64,9 +64,60 @@ for path in "${required[@]}"; do
     [[ -f "$path" ]] || { echo "missing required source: $path" >&2; exit 3; }
 done
 
+# Xcode and LaunchAgents may provide a sanitized PATH. Resolve the development
+# toolchain once, before any install/build work, and use the same paths for all
+# subsequent invocations. The fallback is intentionally bounded: only the
+# user's standard nvm directory and the two conventional Homebrew prefixes are
+# considered.
+resolve_tool() {
+    local tool="$1" override_name="$2" override="${!2:-}" candidate nvm_root version_dir
+    if [[ -n "$override" ]]; then
+        if [[ "$override" != /* || ! -x "$override" ]]; then
+            echo "$override_name must be an absolute path to an executable (got: $override)" >&2
+            exit 127
+        fi
+        printf '%s\n' "$override"
+        return
+    fi
+
+    candidate="$(command -v "$tool" 2>/dev/null || true)"
+    if [[ "$candidate" == /* && -x "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return
+    fi
+
+    nvm_root="${NVM_DIR:-${HOME:-}/.nvm}/versions/node"
+    if [[ -d "$nvm_root" ]]; then
+        # Sorting makes selection stable when multiple nvm versions are present.
+        while IFS= read -r version_dir; do
+            candidate="$version_dir/bin/$tool"
+            if [[ -x "$candidate" ]]; then
+                printf '%s\n' "$candidate"
+                return
+            fi
+        done < <(find "$nvm_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | LC_ALL=C sort -r)
+    fi
+
+    for candidate in "/opt/homebrew/bin/$tool" "/usr/local/bin/$tool"; do
+        if [[ -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return
+        fi
+    done
+
+    echo "unable to find executable $tool; set $override_name to an absolute path, put $tool on PATH, or install it under \$HOME/.nvm or Homebrew" >&2
+    exit 127
+}
+
+NODE_BIN="$(resolve_tool node TRON_NODE_BIN)"
+NPM_BIN="$(resolve_tool npm TRON_NPM_BIN)"
+# npm's launcher commonly uses /usr/bin/env node; make the resolved Node
+# directory available even when Xcode supplied no useful PATH.
+export PATH="$(dirname "$NODE_BIN")${PATH:+:$PATH}"
+
 if ((!skip_install)); then
     echo "==> installing locked gateway dependencies"
-    (cd "$GATEWAY_DIR" && npm ci --ignore-scripts=false && npm run build)
+    (cd "$GATEWAY_DIR" && "$NPM_BIN" ci --ignore-scripts=false && "$NPM_BIN" run build)
 else
     [[ -d "$GATEWAY_DIR/node_modules" && -f "$GATEWAY_DIR/dist/index.js" ]] || {
         echo "--skip-install requires packages/gateway/node_modules and dist/index.js" >&2
@@ -105,7 +156,7 @@ cp "$GATEWAY_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/"
 cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
 # npm prune in the source tree would damage developer dependencies. Install an
 # independent production tree directly into the generated app payload.
-(cd "$APP_DIR" && npm ci --omit=dev --ignore-scripts=false)
+(cd "$APP_DIR" && "$NPM_BIN" ci --omit=dev --ignore-scripts=false)
 
 stage_node arm64 "$NODE_ARM64_SHA256"
 stage_node x64 "$NODE_X64_SHA256"
@@ -128,12 +179,15 @@ done
 cp "$RESOURCES_DIR/AppIcon.icns" "$HELPER_DIR/Resources/AppIcon.icns"
 cp "$RESOURCES_DIR/AppIcon.icns" "$DEV_HELPER_DIR/Resources/AppIcon.icns"
 
-GATEWAY_VERSION="$(node -p "require('$GATEWAY_DIR/package.json').version")"
+GATEWAY_VERSION="$("$NODE_BIN" -p "require('$GATEWAY_DIR/package.json').version")"
 SOURCE_REVISION="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf 'unknown')"
 RUNTIME_EPOCH="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 # Hash the complete staged dependency tree, not merely the compiled entrypoint.
 # The helper is standalone so release validation can exercise the same coverage.
-PAYLOAD_FINGERPRINT="$($SCRIPT_DIR/hash-gateway-payload.sh "$PAYLOAD_DIR")"
+# The signed launcher hashes the complete tree in-process; the shell helper
+# remains the readable cross-implementation fixture but is intentionally not
+# process-per-file on this large build path.
+PAYLOAD_FINGERPRINT="$("${launchers[0]}" --fingerprint "$PAYLOAD_DIR")"
 printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"%s","nodeVersion":"%s","sourceRevision":"%s","runtimeEpoch":"%s","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' \
     "$GATEWAY_VERSION" "$GATEWAY_VERSION" "$NODE_VERSION" "$SOURCE_REVISION" "$RUNTIME_EPOCH" "$PAYLOAD_FINGERPRINT" \
     > "$PAYLOAD_DIR/manifest.json"

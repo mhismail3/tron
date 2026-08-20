@@ -94,14 +94,54 @@ struct GatewayUpdateStatus: Codable, Hashable, Sendable {
     let candidateAvailable: Bool
     let error: String?
     let updatedAt: String?
+    let commandId: String?
+    let rollbackAvailable: Bool
+
+    init(
+        state: String, channel: String, currentIdentity: GatewayUpdateIdentity?,
+        candidateIdentity: GatewayUpdateIdentity?, candidateAvailable: Bool,
+        error: String?, updatedAt: String?, commandId: String? = nil,
+        rollbackAvailable: Bool = false
+    ) {
+        self.state = state
+        self.channel = channel
+        self.currentIdentity = currentIdentity
+        self.candidateIdentity = candidateIdentity
+        self.candidateAvailable = candidateAvailable
+        self.error = error
+        self.updatedAt = updatedAt
+        self.commandId = commandId
+        self.rollbackAvailable = rollbackAvailable
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case state, channel, currentIdentity, candidateIdentity, candidateAvailable, error, updatedAt, commandId, rollbackAvailable
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            state: try values.decode(String.self, forKey: .state),
+            channel: try values.decode(String.self, forKey: .channel),
+            currentIdentity: try values.decodeIfPresent(GatewayUpdateIdentity.self, forKey: .currentIdentity),
+            candidateIdentity: try values.decodeIfPresent(GatewayUpdateIdentity.self, forKey: .candidateIdentity),
+            candidateAvailable: try values.decode(Bool.self, forKey: .candidateAvailable),
+            error: try values.decodeIfPresent(String.self, forKey: .error),
+            updatedAt: try values.decodeIfPresent(String.self, forKey: .updatedAt),
+            commandId: try values.decodeIfPresent(String.self, forKey: .commandId),
+            rollbackAvailable: try values.decodeIfPresent(Bool.self, forKey: .rollbackAvailable) ?? false
+        )
+    }
 
     var presentationTitle: String {
-        if candidateAvailable { return "Update available" }
         switch state {
+        case "failed", "failure": return "Update failed"
+        case "rolled-back": return "Rolled back"
         case "ready": return "Ready"
-        case "failed": return "Update failed"
+        case "starting", "building", "staging", "promoting", "restart", "rollback", "rollback-requested":
+            return state.replacingOccurrences(of: "-", with: " ").capitalized
         case "unknown": return "Unavailable"
-        default: return state.replacingOccurrences(of: "-", with: " ").capitalized
+        default: return candidateAvailable ? "Update available" : state.replacingOccurrences(of: "-", with: " ").capitalized
         }
     }
 }

@@ -13,7 +13,7 @@ registrations.
 | Variant | Login Item | Label | Home | Port |
 |---|---|---|---|---|
 | Installed | `Tron Agent.app` | `com.tron.server` | `~/.tron` | 9847 |
-| Isolated Xcode install | `Tron Agent Dev.app` | `com.tron.server.dev` | `~/.tron-dev` + `~/.pi/agent-dev` | 9848 |
+| Preview (opt-in, Release-owned) | `Tron Agent Dev.app` | `com.tron.server.dev` | `~/.tron-dev` + `~/.pi/agent-dev` | 9848 |
 | Debug companion | regular companion window; observes installed agent only | none owned | `~/.tron` | 9847 |
 
 The LaunchAgent passes `--host tailscale`; gateway startup resolves and binds the
@@ -21,10 +21,8 @@ actual Tailscale interface rather than all interfaces, choosing the lowest IPv4
 address (then deterministic IPv6/address/interface order). Deployment health and
 restart traffic resolve the same name; an explicit host always overrides it.
 Developer CLI operation
-is loopback unless `--tailscale` is explicit. Isolated pairing invitations append
-`(Dev)` to the Mac's friendly name so the `9848` profile is distinct from the
-production connection; production invitations keep the unchanged name. The two
-homes share only the random physical-machine group hint at
+is loopback unless `--tailscale` is explicit. Preview pairing appends `(Dev)` to
+the Mac's friendly name so the `9848` profile is distinct from the stable connection. The two homes share only the random physical-machine group hint at
 `~/.tron-machine-group-id`; their gateway machine IDs, agent directories, JSONL
 sessions, credentials, and runtime markers remain separate.
 
@@ -46,8 +44,9 @@ worker host.
 
 ## Pairing
 
-The gateway creates `~/.tron/gateway/enrollment.json` with mode `0600`, a
-10-minute expiry, and a one-time code. The wrapper accepts the gateway's
+Each profile's gateway creates `<profile home>/gateway/enrollment.json` (stable
+`~/.tron`, Preview `~/.tron-dev`) with mode `0600`, a 10-minute expiry, and a
+one-time code. The wrapper accepts the gateway's
 RFC3339 expiration timestamp with or without fractional seconds.
 `PairingInfoStep` first authenticates a local `system.info` request using
 `gateway/local-auth.json`, then reads the current enrollment file and emits:
@@ -69,17 +68,13 @@ Gateway protocol and combines health with registration state. Menu controls can
 pause, resume, restart, inspect bounded persisted Gateway logs, show a fresh
 pairing invitation, and uninstall.
 
-The repository's isolated development supervisor is deliberately a separate
-boundary: it owns `~/.tron-dev/gateway` and port `9848`, not the installed
-`com.tron.server` image on `9847`. Its atomic manifest distinguishes starting,
-ready, draining, restarting, failed, and stopped, matches PID start identities
-before trusting a process, and publishes a runtime epoch plus optional source
-revision/build fingerprint. `/health` reports those optional identities while
-remaining truthful (`200/ok` only after the Gateway is ready; `503` while
-starting or stopping). This manifest is bounded projection state, not a runtime
-or session mirror. Status/preflight and stop never build. Isolated updates must
-not copy an app into `/Applications`, alter production registration, or install
-an iOS release; release replacement is a separate manual maintainer action.
+The payload/store contract and Release wrapper support independent stable and
+Preview channels. Preview is opt-in: the menu registers `com.tron.server.dev`
+only when the user chooses **Enable Preview Gateway**. **Stop Preview Gateway**
+unregisters it without deleting `~/.tron-dev` or `~/.pi/agent-dev`; **Restart
+Preview Gateway** uses the authenticated drain command and never force-kickstarts.
+Preview health is reported only when registration and authenticated health both
+succeed. Stable ownership remains independent on `com.tron.server`/9847.
 
 The wrapper and gateway share no in-memory state. Their only shared secrets are
 owner-only gateway files. Legacy `~/.tron/auth.json` is neither wrapper nor
@@ -87,18 +82,18 @@ gateway authentication and is left untouched for explicit migration.
 
 ## Gateway payload selection
 
-The installed release wrapper is one launcher image and LaunchAgent owner for
-both the stable and optional dev channels; the channels may run in parallel on
-9847 and 9848. It first checks the selected channel (`TRON_GATEWAY_CHANNEL`,
-with `stable` as the compatibility default) under the selected Tron home:
+The installed release wrapper owns the stable launcher and the opt-in Preview
+LaunchAgent. It first
+checks the selected channel (`TRON_GATEWAY_CHANNEL`, with `stable` as the
+compatibility default) under the selected Tron home:
 
 ```
 ~/.tron/gateway/payloads/<channel>/current.json
 ~/.tron/gateway/payloads/<channel>/versions/<version>/manifest.json
 ```
 
-The isolated LaunchAgent supplies `.tron-dev` and the `dev` channel. The
-agent-manageable command is explicit:
+The Preview descriptor supplies `.tron-dev`, `.pi/agent-dev`, and the `dev`
+channel when explicitly registered by the Release control. The agent-manageable command is explicit:
 
 ```text
 scripts/gateway-payload-deploy.mjs stage --channel stable --source <payload>
@@ -118,11 +113,13 @@ may run concurrently. The pointer has schema `1`, kind
 `tron-gateway-selection`, and fields `channel`, `version`, and
 `payloadFingerprint`. Each version manifest also carries source revision,
 runtime epoch, and the complete fingerprint coverage declaration. Staging,
-promotion, and the Swift payload validator verify every regular file under
-`app/` and `runtime/`. The small C launcher does not re-hash that tree; it
-bounds manifest reads, rejects symlinks and writable payload entries, resolves
-every executable/resource path with `realpath`, and exports provenance before
-`exec`. Invalid or absent external
+promotion, and the Swift payload validator verify every regular file and
+internal symlink under `app/` and `runtime/`; links must resolve to regular
+files/directories beneath the payload root, and their targets are covered by
+the deterministic fingerprint. The small C launcher also recomputes the complete
+fingerprint before exporting identity; it bounds manifest reads, rejects
+escaping/dangling/special links and writable payload entries, resolves every
+executable/resource path with `realpath`, and exports provenance before `exec`. Invalid or absent external
 selection falls back to the bundled payload only after validating its
 authoritative manifest. The LaunchAgent exports the selected payload's validated
 `app/scripts/gateway-payload-deploy.mjs` as the only update helper; verified

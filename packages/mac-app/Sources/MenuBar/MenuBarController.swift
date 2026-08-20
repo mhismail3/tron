@@ -8,12 +8,15 @@ import SwiftUI
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let setup: EnvironmentSetup
+    private let previewSetup: EnvironmentSetup
     private let poller: ServerStatusPoller
     private let actionHandler: MenuBarActionHandler
     private var statusItem: NSStatusItem?
     private var pollerTask: Task<Void, Never>?
     private var pairingInfoWindowController: NSWindowController?
+    private var previewPairingInfoWindowController: NSWindowController?
     private var logsWindowController: NSWindowController?
+    private(set) var previewState = PreviewMenuState.unavailable
 
     /// Most-recent status snapshot, written by the poller and read by
     /// `rebuildMenu()`.
@@ -21,8 +24,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     init(setup: EnvironmentSetup) {
         self.setup = setup
+        self.previewSetup = .preview
         self.poller = ServerStatusPoller(setup: setup)
-        self.actionHandler = MenuBarActionHandler(setup: setup)
+        self.actionHandler = MenuBarActionHandler(setup: setup, previewSetup: .preview)
         self.snapshot = ServerStatusSnapshot.checking
         super.init()
         self.actionHandler.menuBarController = self
@@ -40,6 +44,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.showsStateColumn = false
         item.menu = menu
         rebuildMenu()
+        refreshPreviewState()
 
         // Start polling - emits a snapshot every 30 s.
         pollerTask = Task { [weak self] in
@@ -81,7 +86,82 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         applySnapshot(snapshot)
     }
 
+    func setPreviewBusy(_ busy: Bool) {
+        previewState = PreviewMenuState(
+            isRegistered: previewState.isRegistered,
+            isRunning: previewState.isRunning,
+            isBusy: busy,
+            canManage: previewSetup.canManageLaunchAgent,
+            isOwned: previewState.isOwned,
+            needsRepair: previewState.needsRepair
+        )
+        rebuildMenu()
+    }
+
+    func refreshPreviewState() {
+        Task { [weak self] in
+            guard let self else { return }
+            let status = ExistingInstallDetector.serviceStatus(label: self.previewSetup.launchAgentLabel)
+            let registered = status != .notRegistered && status != .notFound
+            let snapshot = await ServerStatusPoller.singleSnapshot(setup: self.previewSetup)
+            let installedRelease = MacRuntimeVariant.detect() == .installedRelease
+            let owned = installedRelease
+                ? await self.previewSetup.runtimeOwnershipHealthy()
+                : false
+            await MainActor.run {
+                self.previewState = PreviewMenuState(
+                    isRegistered: registered,
+                    isRunning: registered && snapshot.state.isRunning,
+                    canManage: self.previewSetup.canManageLaunchAgent,
+                    isOwned: owned,
+                    needsRepair: registered && !owned
+                )
+                self.rebuildMenu()
+            }
+        }
+    }
+
+    func showPreviewPairingInfoWindow() {
+        showPairingInfoWindow(setup: previewSetup)
+    }
+
+    private func showPairingInfoWindow(setup: EnvironmentSetup, title: String = "Pairing Info") {
+        let existing = setup.profile == .preview ? previewPairingInfoWindowController : pairingInfoWindowController
+        if let existing {
+            existing.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let view = PairingInfoWindowView(title: title)
+            .environment(\.environmentSetup, setup)
+            .tint(Color.tronEmerald)
+            .containerBackground(.regularMaterial, for: .window)
+        let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+        window.title = title
+        window.styleMask = [.titled, .closable, .fullSizeContentView]
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: WizardLayout.width, height: 360))
+        let controller = MenuBarWindowController(window: window) { [weak self] in
+            if setup.profile == .preview {
+                self?.previewPairingInfoWindowController = nil
+            } else {
+                self?.pairingInfoWindowController = nil
+            }
+        }
+        if setup.profile == .preview {
+            previewPairingInfoWindowController = controller
+        } else {
+            pairingInfoWindowController = controller
+        }
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     func menuWillOpen(_ menu: NSMenu) {
+        refreshPreviewState()
         Task { [weak self] in
             guard let self else { return }
             let freshSnapshot = await ServerStatusPoller.singleSnapshot(setup: self.setup)
@@ -92,29 +172,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     func showPairingInfoWindow() {
-        if let pairingInfoWindowController {
-            pairingInfoWindowController.window?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return
-        }
-
-        let view = PairingInfoWindowView()
-            .environment(\.environmentSetup, setup)
-            .tint(Color.tronEmerald)
-            .containerBackground(.regularMaterial, for: .window)
-        let window = NSWindow(contentViewController: NSHostingController(rootView: view))
-        window.title = "Pairing Info"
-        window.styleMask = [.titled, .closable, .fullSizeContentView]
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: WizardLayout.width, height: 360))
-        let controller = MenuBarWindowController(window: window) { [weak self] in
-            self?.pairingInfoWindowController = nil
-        }
-        pairingInfoWindowController = controller
-        controller.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        showPairingInfoWindow(setup: setup)
     }
 
     func showLogsWindow() {
@@ -148,7 +206,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             snapshot: snapshot,
             tronHome: setup.tronHome,
             defaultServerPort: setup.serverPort,
-            canManageLaunchAgent: setup.canManageLaunchAgent
+            canManageLaunchAgent: setup.canManageLaunchAgent,
+            preview: previewState
         )
         menu.removeAllItems()
         for descriptor in items {

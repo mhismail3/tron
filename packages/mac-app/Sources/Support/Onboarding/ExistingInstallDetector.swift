@@ -10,7 +10,7 @@ enum ExistingInstallDetector {
         helperBinary: URL = TronPaths.serverHelperBinary,
         plistPath: URL = TronPaths.launchAgentPlistPath,
         bundleVersionResolver: (URL) -> String? = ExistingInstallDetector.readMarketingVersion,
-        bundleSignatureProblemResolver: (URL) -> String? = ExistingInstallDetector.bundleSignatureProblem,
+        bundleSignatureProblemResolver: (URL) -> String? = { ExistingInstallDetector.bundleSignatureProblem(of: $0) },
         gatewayPayloadProblemResolver: () -> String? = { nil },
         serviceStatusResolver: () -> ServiceRegistrationStatus = { ExistingInstallDetector.serviceStatus() }
     ) -> ExistingInstallStatus {
@@ -78,7 +78,8 @@ enum ExistingInstallDetector {
         helperBundle: URL = TronPaths.serverHelperBundle,
         helperBinary: URL = TronPaths.serverHelperBinary,
         plistPath: URL = TronPaths.launchAgentPlistPath,
-        signatureProblemResolver: (URL) -> String? = ExistingInstallDetector.bundleSignatureProblem
+        profile: TronGatewayProfile = .stable,
+        signatureProblemResolver: ((URL) -> String?)? = nil
     ) -> String? {
         let fm = FileManager.default
         let helperName = helperBundle.lastPathComponent
@@ -91,7 +92,10 @@ enum ExistingInstallDetector {
         guard fm.fileExists(atPath: plistPath.path) else {
             return "The bundled LaunchAgent plist is missing."
         }
-        return signatureProblemResolver(helperBundle)
+        if let signatureProblemResolver {
+            return signatureProblemResolver(helperBundle)
+        }
+        return bundleSignatureProblem(of: helperBundle, expectedBundleIdentifier: profile.launchAgentLabel)
     }
 
     static func validateGatewayPayload(
@@ -103,6 +107,13 @@ enum ExistingInstallDetector {
         },
         readData: (String) -> Data? = { try? Data(contentsOf: URL(fileURLWithPath: $0)) }
     ) -> String? {
+        // The canonical validator owns complete bundled payload verification,
+        // including the deterministic fingerprint and symlink boundary. Keep
+        // the injectable checks below for isolated Debug fixtures only.
+        if case .failure(let error) = GatewayPayloadValidator.validate(payloadRoot: payloadRoot),
+           payloadRoot.standardizedFileURL.path == TronPaths.gatewayPayloadRoot.standardizedFileURL.path {
+            return "The bundled Gateway payload failed canonical validation: \(error)"
+        }
         func usableFile(_ url: URL, minimumBytes: Int64 = 1) -> Bool {
             fileExists(url.path) && (fileSize(url.path) ?? 0) >= minimumBytes
         }
@@ -205,6 +216,22 @@ enum ExistingInstallDetector {
             && associatedBundleIDs == expectedAssociatedBundleIDs
     }
 
+    static func launchAgentPlistIsCurrent(
+        profile: TronGatewayProfile,
+        plistPath: URL? = nil
+    ) -> Bool {
+        launchAgentPlistIsCurrent(
+            plistPath: plistPath ?? TronPaths.launchAgentPlistPath(profile: profile),
+            label: profile.launchAgentLabel,
+            port: profile.port,
+            bundleProgram: TronPaths.serverHelperBundleProgram(profile: profile),
+            environmentVariables: TronPaths.launchAgentEnvironmentVariables(profile: profile),
+            associatedBundleIDs: profile == .preview
+                ? [MacRuntimeVariant.debugBundleIdentifier, MacRuntimeVariant.releaseBundleIdentifier]
+                : [MacRuntimeVariant.releaseBundleIdentifier, MacRuntimeVariant.debugBundleIdentifier]
+        )
+    }
+
     /// Reads `CFBundleShortVersionString` from `<Bundle>/Contents/Info.plist`.
     /// Returns nil if the file doesn't exist or can't be parsed.
     static func readMarketingVersion(of bundle: URL) -> String? {
@@ -217,7 +244,10 @@ enum ExistingInstallDetector {
     }
 
     /// Returns nil when the helper app's code signature is suitable for TCC.
-    static func bundleSignatureProblem(of bundle: URL) -> String? {
+    static func bundleSignatureProblem(
+        of bundle: URL,
+        expectedBundleIdentifier: String = TronPaths.launchAgentLabel
+    ) -> String? {
         let helperName = bundle.lastPathComponent
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
@@ -256,7 +286,11 @@ enum ExistingInstallDetector {
         guard identity.terminationStatus == 0 else {
             return "\(helperName) is present but its code signature identity is invalid"
         }
-        if let problem = codeSignatureIdentityProblem(identityText) {
+        if let problem = codeSignatureIdentityProblem(
+            identityText,
+            expectedBundleIdentifier: expectedBundleIdentifier,
+            helperName: helperName
+        ) {
             return problem
         }
         _ = text
@@ -268,7 +302,12 @@ enum ExistingInstallDetector {
         expectedBundleIdentifier: String = TronPaths.launchAgentLabel,
         helperName: String = "\(TronPaths.agentBundleName).app"
     ) -> String? {
-        guard identityText.contains("Identifier=\(expectedBundleIdentifier)") else {
+        let identifier = identityText
+            .split(whereSeparator: \.isNewline)
+            .map(String.init)
+            .first(where: { $0.hasPrefix("Identifier=") })
+            .map { String($0.dropFirst("Identifier=".count)) }
+        guard identifier == expectedBundleIdentifier else {
             return "\(helperName) is present but its code signature is not bound to \(expectedBundleIdentifier)"
         }
         if identityText.contains("Signature=adhoc")

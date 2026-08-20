@@ -288,6 +288,18 @@ struct ExistingInstallDetectorTests {
         #expect(problem?.contains("ad-hoc signed") == true)
     }
 
+    @Test("helper signature identifier is exact for each Gateway profile")
+    func helperSignatureIdentifierIsExactForProfile() {
+        #expect(ExistingInstallDetector.codeSignatureIdentityProblem(
+            "Identifier=com.tron.server.dev\nTeamIdentifier=TEAM",
+            expectedBundleIdentifier: TronGatewayProfile.stable.launchAgentLabel
+        ) != nil)
+        #expect(ExistingInstallDetector.codeSignatureIdentityProblem(
+            "Identifier=com.tron.server.dev\nTeamIdentifier=TEAM",
+            expectedBundleIdentifier: TronGatewayProfile.preview.launchAgentLabel
+        ) == nil)
+    }
+
     @Test("team-signed helper identity is accepted")
     func teamSignedHelperIdentityAccepted() {
         let problem = ExistingInstallDetector.codeSignatureIdentityProblem("""

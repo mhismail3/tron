@@ -87,6 +87,37 @@ struct LiveLaunchAgentManagerTests {
         )
     }
 
+    @Test("runtime ownership requires exact profile, supervision, channel, and helper path")
+    func runtimeOwnershipProjectionIsExact() {
+        let runtime = LaunchAgentRuntimeInfo(
+            pid: 42,
+            parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+            executablePath: "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent Dev.app/Contents/MacOS/tron",
+            gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
+            gatewayChannelMarker: TronGatewayProfile.preview.channel
+        )
+        #expect(LiveLaunchAgentManager.runtimeOwnsProfile(
+            runtimeInfo: runtime,
+            profile: .preview,
+            expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+            expectedHelperPath: runtime.executablePath!,
+            fileExists: { _ in true }
+        ))
+        #expect(!LiveLaunchAgentManager.runtimeOwnsProfile(
+            runtimeInfo: runtime,
+            profile: .stable,
+            expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+            expectedHelperPath: runtime.executablePath!
+        ))
+        #expect(!LiveLaunchAgentManager.runtimeOwnsProfile(
+            runtimeInfo: runtime,
+            profile: .preview,
+            expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+            expectedHelperPath: runtime.executablePath!,
+            expectedSupervisionMarker: "0"
+        ))
+    }
+
     @Test("stale missing runtime is repaired by a manager build")
     func staleRuntimeIsRepairedByManagerBuild() {
         let runtime = LaunchAgentRuntimeInfo(
@@ -150,6 +181,15 @@ struct LiveLaunchAgentManagerTests {
                 runningParentBundleIdentifier: "com.tron.mac",
                 shouldReplaceStaleRuntime: false,
                 shouldTakeOverRuntime: false,
+                shouldRefreshCurrentRegistration: false
+            )
+        )
+        #expect(
+            LiveLaunchAgentManager.shouldUnregisterBeforeRegister(
+                status: .unknown("foreign registration"),
+                runningParentBundleIdentifier: "com.tron.mac.dev",
+                shouldReplaceStaleRuntime: false,
+                shouldTakeOverRuntime: true,
                 shouldRefreshCurrentRegistration: false
             )
         )

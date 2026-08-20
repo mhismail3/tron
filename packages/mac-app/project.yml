@@ -76,10 +76,19 @@ targets:
           GATEWAY_DST="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/Gateway"
           test -d "$SRC" || { echo "Missing bundled Library resources at $SRC" >&2; exit 1; }
           test -d "$GATEWAY_SRC" || { echo "Missing bundled Gateway resources at $GATEWAY_SRC; run scripts/bundle-gateway.sh" >&2; exit 1; }
+          # A previous build may contain the deliberately read-only payload.
+          # Make only that generated destination removable before replacing it.
+          chmod -R u+w "$GATEWAY_DST" 2>/dev/null || true
           rm -rf "$DST" "$GATEWAY_DST"
           mkdir -p "$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources"
           ditto "$SRC" "$DST"
-          ditto "$GATEWAY_SRC" "$GATEWAY_DST"
+          # ditto/cp can fail while materializing symlinks inside a 0555 source
+          # tree because they apply directory modes before populating children.
+          # rsync defers final directory modes and preserves the internal links.
+          /usr/bin/rsync -a "$GATEWAY_SRC/" "$GATEWAY_DST/"
+          # Signing rewrites Mach-O files, so the copied payload must be
+          # writable until signatures and its final fingerprint are complete.
+          chmod -R u+w "$GATEWAY_DST"
           if [ -d "$DST/LoginItems" ] && [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ]; then
             SIGN_IDENTITY="${EXPANDED_CODE_SIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
             NODE_ENTITLEMENTS="$SRCROOT/TronNode.entitlements"
@@ -99,6 +108,12 @@ targets:
               [ -d "$HELPER" ] || continue
               codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$HELPER"
             done
+            # Native signing changes payload bytes. Recompute the selected
+            # bundle fingerprint before the outer app seals its resources.
+            PAYLOAD_HASHER="$DST/LoginItems/Tron Agent.app/Contents/MacOS/tron"
+            PAYLOAD_FINGERPRINT="$("$PAYLOAD_HASHER" --fingerprint "$GATEWAY_DST")"
+            /usr/bin/plutil -replace payloadFingerprint -string "$PAYLOAD_FINGERPRINT" "$GATEWAY_DST/manifest.json"
+            chmod -R a-w "$GATEWAY_DST"
             if [ -n "${CODESIGNING_FOLDER_PATH:-}" ] \
               && [ -d "$CODESIGNING_FOLDER_PATH" ] \
               && [ ! -d "$CODESIGNING_FOLDER_PATH/Contents/PlugIns" ]; then
@@ -114,6 +129,8 @@ targets:
                 codesign --force --sign "$SIGN_IDENTITY" --options runtime --timestamp=none "$CODESIGNING_FOLDER_PATH"
               fi
             fi
+          else
+            chmod -R a-w "$GATEWAY_DST"
           fi
 
   TronMacTests:

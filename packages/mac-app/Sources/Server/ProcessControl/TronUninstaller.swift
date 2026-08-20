@@ -26,6 +26,12 @@ enum TronUninstaller {
             return outcome
         }
 
+        // Removing the Release wrapper also unregisters an enabled Preview
+        // service, but deliberately leaves ~/.tron-dev and ~/.pi/agent-dev.
+        let previewOutcome = await setup.unregisterPreviewIfEnabled()
+        guard previewOutcome.isSuccessfulUninstall else {
+            return previewOutcome
+        }
         cleanLocalState(setup: setup, options: options)
         return outcome
     }

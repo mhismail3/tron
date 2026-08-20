@@ -70,12 +70,22 @@ enum MacRuntimeVariant: Equatable, Sendable {
         }
     }
 
+    /// Compatibility seam for the isolated-install test scheme.
     func canManageLaunchAgent(isIsolatedInstallMode: Bool) -> Bool {
+        canManageLaunchAgent(profile: isIsolatedInstallMode ? .preview : .stable, isIsolatedInstallMode: isIsolatedInstallMode)
+    }
+
+    /// Release owns both the stable and opt-in Preview profiles. Debug keeps
+    /// the isolated-install seam for focused migration tests only.
+    func canManageLaunchAgent(
+        profile: TronGatewayProfile = .stable,
+        isIsolatedInstallMode: Bool
+    ) -> Bool {
         switch self {
         case .installedRelease:
             return true
         case .xcodeDebug:
-            return isIsolatedInstallMode
+            return profile == .preview && isIsolatedInstallMode
         case .misplacedRelease, .unsupported:
             return false
         }

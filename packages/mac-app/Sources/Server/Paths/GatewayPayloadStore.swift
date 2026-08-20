@@ -55,8 +55,9 @@ struct GatewayPayloadStore {
     static func validComponent(_ value: String, maximumLength: Int) -> Bool {
         guard !value.isEmpty, value.utf8.count <= maximumLength,
               value != ".", value != ".." else { return false }
-        return value.unicodeScalars.allSatisfy {
-            CharacterSet.alphanumerics.contains($0) || $0 == "." || $0 == "-" || $0 == "_"
+        return value.utf8.allSatisfy {
+            ($0 >= 0x41 && $0 <= 0x5a) || ($0 >= 0x61 && $0 <= 0x7a)
+                || ($0 >= 0x30 && $0 <= 0x39) || $0 == 0x2e || $0 == 0x2d || $0 == 0x5f
         }
     }
 }
@@ -163,12 +164,16 @@ enum GatewayPayloadValidator {
         expectedFingerprint: String? = nil,
         fileManager: FileManager = .default
     ) -> Result<GatewayPayloadValidationResult, GatewayPayloadValidationError> {
+        var rootInfo = stat()
+        guard lstat(payloadRoot.path, &rootInfo) == 0, (rootInfo.st_mode & S_IFMT) == S_IFDIR else {
+            return .failure(.missing("payload root"))
+        }
         let root = payloadRoot.resolvingSymlinksInPath().standardizedFileURL
         guard isDirectory(root, fileManager: fileManager) else {
             return .failure(.missing("payload root"))
         }
 
-        guard let manifestURL = containedURL("manifest.json", under: root),
+        guard let manifestURL = containedRegularURL("manifest.json", under: root, directory: false),
               let data = boundedData(at: manifestURL, fileManager: fileManager) else {
             return .failure(.missing("manifest.json"))
         }
@@ -185,7 +190,7 @@ enum GatewayPayloadValidator {
               !manifest.gatewayVersion.isEmpty,
               !manifest.nodeVersion.isEmpty,
               manifest.sourceRevision.map({ !$0.isEmpty }) == true,
-              manifest.runtimeEpoch.map({ validComponent($0, maximumLength: versionComponentLimit) }) == true,
+              manifest.runtimeEpoch.map({ GatewayPayloadStore.validComponent($0, maximumLength: GatewayPayloadStore.versionComponentLimit) }) == true,
               isFingerprint(manifest.payloadFingerprint) else {
             return .failure(.invalidManifest("manifest identity"))
         }
@@ -207,18 +212,18 @@ enum GatewayPayloadValidator {
             ("app/scripts/gateway-payload-deploy.mjs", 1),
         ]
         for (relativePath, minimumBytes) in requiredFiles {
-            guard let url = containedURL(relativePath, under: root),
+            guard let url = containedRegularURL(relativePath, under: root, directory: false),
                   usableFile(url, minimumBytes: minimumBytes, fileManager: fileManager) else {
                 return .failure(.incomplete(relativePath))
             }
         }
-        guard let dependencies = containedURL("app/node_modules", under: root),
+        guard let dependencies = containedRegularURL("app/node_modules", under: root, directory: true),
               isDirectory(dependencies, fileManager: fileManager) else {
             return .failure(.incomplete("app/node_modules"))
         }
 
         for architecture in ["arm64", "x64"] {
-            guard let runtime = containedURL("runtime/node-\(architecture)", under: root),
+            guard let runtime = containedRegularURL("runtime/node-\(architecture)", under: root, directory: false),
                   usableFile(runtime, minimumBytes: minimumRuntimeBytes, fileManager: fileManager),
                   fileManager.isExecutableFile(atPath: runtime.path) else {
                 return .failure(.incomplete("runtime/node-\(architecture)"))
@@ -240,8 +245,25 @@ enum GatewayPayloadValidator {
         guard GatewayPayloadStore.validComponent(store.channel, maximumLength: GatewayPayloadStore.channelComponentLimit) else {
             return .failure(.invalidManifest("channel"))
         }
+        var currentInfo = stat()
+        guard lstat(store.currentManifestURL.path, &currentInfo) == 0,
+              (currentInfo.st_mode & S_IFMT) == S_IFREG else {
+            return .failure(.missing("current.json"))
+        }
+        var payloadsInfo = stat()
+        var channelInfo = stat()
+        var versionsInfo = stat()
+        guard lstat(store.payloadsRoot.path, &payloadsInfo) == 0,
+              lstat(store.channelRoot.path, &channelInfo) == 0,
+              lstat(store.versionsRoot.path, &versionsInfo) == 0,
+              (payloadsInfo.st_mode & S_IFMT) == S_IFDIR,
+              (channelInfo.st_mode & S_IFMT) == S_IFDIR,
+              (versionsInfo.st_mode & S_IFMT) == S_IFDIR else {
+            return .failure(.missing("payload store roots"))
+        }
         let payloadsRoot = store.payloadsRoot.resolvingSymlinksInPath().standardizedFileURL
         let channelRoot = store.channelRoot.resolvingSymlinksInPath().standardizedFileURL
+        let versionsRoot = store.versionsRoot.resolvingSymlinksInPath().standardizedFileURL
         guard isContained(channelRoot, under: payloadsRoot),
               let currentManifest = containedURL("current.json", under: channelRoot),
               let data = boundedData(at: currentManifest, fileManager: fileManager) else {
@@ -261,7 +283,6 @@ enum GatewayPayloadValidator {
             return .failure(.invalidManifest("selection identity"))
         }
         let versionRoot = store.versionRoot(selection.version).resolvingSymlinksInPath().standardizedFileURL
-        let versionsRoot = store.versionsRoot.resolvingSymlinksInPath().standardizedFileURL
         guard isContained(versionsRoot, under: channelRoot),
               isContained(versionRoot, under: versionsRoot) else {
             return .failure(.identityMismatch("version path"))
@@ -284,35 +305,50 @@ enum GatewayPayloadValidator {
     }
 
     /// Matches hash-gateway-payload.sh: sorted UTF-8 relative paths, each
-    /// `sha256  path\\n` line, then SHA-256 of the complete line stream.
+    /// regular-file `sha256  path\\n` or symlink `symlink:sha256(target + LF)  path\\n` line,
+    /// then SHA-256 of the complete line stream.
     private static func payloadFingerprint(_ root: URL, fileManager: FileManager) -> String? {
-        var files: [(String, URL)] = []
+        var files: [(String, URL, String?)] = []
         for prefix in ["app", "runtime"] {
-            guard collectRegularFiles(root.appendingPathComponent(prefix, isDirectory: true), relativePrefix: prefix, files: &files) else { return nil }
+            guard collectRegularFiles(root.appendingPathComponent(prefix, isDirectory: true), relativePrefix: prefix, root: root, files: &files) else { return nil }
         }
         files.sort { Data($0.0.utf8).lexicographicallyPrecedes(Data($1.0.utf8)) }
         var lines = Data()
-        for (relativePath, url) in files {
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-            lines.append(contentsOf: Data("\(digest)  \(relativePath)\n".utf8))
+        for (relativePath, url, linkTarget) in files {
+            if let linkTarget {
+                let targetDigest = SHA256.hash(data: Data((linkTarget + "\n").utf8)).map { String(format: "%02x", $0) }.joined()
+                lines.append(contentsOf: Data("symlink:\(targetDigest)  \(relativePath)\n".utf8))
+            } else {
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+                lines.append(contentsOf: Data("\(digest)  \(relativePath)\n".utf8))
+            }
         }
         return SHA256.hash(data: lines).map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func collectRegularFiles(_ directory: URL, relativePrefix: String, files: inout [(String, URL)]) -> Bool {
+    private static func collectRegularFiles(_ directory: URL, relativePrefix: String, root: URL, files: inout [(String, URL, String?)]) -> Bool {
         var info = stat()
         guard lstat(directory.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
               let entries = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: []) else { return false }
         for entry in entries {
             var entryInfo = stat()
-            guard lstat(entry.path, &entryInfo) == 0,
-                  (entryInfo.st_mode & S_IFMT) != S_IFLNK else { return false }
+            guard lstat(entry.path, &entryInfo) == 0 else { return false }
             let relative = "\(relativePrefix)/\(entry.lastPathComponent)"
-            if (entryInfo.st_mode & S_IFMT) == S_IFDIR {
-                guard collectRegularFiles(entry, relativePrefix: relative, files: &files) else { return false }
+            guard entry.lastPathComponent.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7f }) else { return false }
+            if (entryInfo.st_mode & S_IFMT) == S_IFLNK {
+                guard let linkTarget = try? FileManager.default.destinationOfSymbolicLink(atPath: entry.path),
+                      !linkTarget.isEmpty,
+                      linkTarget.unicodeScalars.allSatisfy({ $0.value >= 0x20 && $0.value != 0x7f }) else { return false }
+                let resolved = entry.resolvingSymlinksInPath().standardizedFileURL
+                var targetInfo = stat()
+                guard isContained(resolved, under: root), lstat(resolved.path, &targetInfo) == 0,
+                      (targetInfo.st_mode & S_IFMT) == S_IFREG || (targetInfo.st_mode & S_IFMT) == S_IFDIR else { return false }
+                files.append((relative, entry, linkTarget))
+            } else if (entryInfo.st_mode & S_IFMT) == S_IFDIR {
+                guard collectRegularFiles(entry, relativePrefix: relative, root: root, files: &files) else { return false }
             } else if (entryInfo.st_mode & S_IFMT) == S_IFREG {
-                files.append((relative, entry))
+                files.append((relative, entry, nil))
             } else { return false }
         }
         return true
@@ -334,6 +370,15 @@ enum GatewayPayloadValidator {
     private static func containedURL(_ relativePath: String, under root: URL) -> URL? {
         let candidate = root.appendingPathComponent(relativePath, isDirectory: false).resolvingSymlinksInPath().standardizedFileURL
         return isContained(candidate, under: root) ? candidate : nil
+    }
+
+    private static func containedRegularURL(_ relativePath: String, under root: URL, directory: Bool) -> URL? {
+        let candidate = root.appendingPathComponent(relativePath, isDirectory: directory)
+        var info = stat()
+        guard lstat(candidate.path, &info) == 0,
+              directory ? (info.st_mode & S_IFMT) == S_IFDIR : (info.st_mode & S_IFMT) == S_IFREG,
+              isContained(candidate.resolvingSymlinksInPath().standardizedFileURL, under: root) else { return nil }
+        return candidate
     }
 
     private static func isContained(_ candidate: URL, under root: URL) -> Bool {

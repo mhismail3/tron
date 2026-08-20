@@ -18,7 +18,9 @@ struct ServerStatusPollerTests {
             pid: 16027,
             uptime: "01:07:42",
             parentBundleIdentifier: MacRuntimeVariant.detect().expectedParentBundleIdentifier,
-            gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue
+            executablePath: TronPaths.serverHelperBinary(profile: .stable).path,
+            gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
+            gatewayChannelMarker: TronGatewayProfile.stable.channel
         )
         return EnvironmentSetup(
             tronHome: tmp,

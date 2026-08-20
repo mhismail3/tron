@@ -56,7 +56,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "command.status", "gateway.update.config.status", "gateway.update.config", "gateway.update.status", "gateway.update", "gateway.restart",
+  "system.info", "system.logs", "command.status", "gateway.update.config.status", "gateway.update.config", "gateway.update.status", "gateway.update", "gateway.rollback", "gateway.restart",
   "session.list", "session.open", "session.sync", "session.close", "session.transcript",
   "session.abort", "session.clearQueue", "session.queue.replace", "extension.respond", "extension.editor.update", "extension.toolsExpanded",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
@@ -209,6 +209,15 @@ export class GatewayService {
             ...validateGatewayUpdateRequest(params),
             commandId,
           }));
+        });
+      case "gateway.rollback":
+        return this.mutation(client, method, params, async () => {
+          if (Object.keys(params).some((key) => !["commandId", "channel"].includes(key))) {
+            throw new GatewayError("invalid_request", "Gateway rollback accepts only channel and commandId");
+          }
+          const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
+          const channel = oneOf(params.channel === undefined ? "stable" : params.channel, "channel", ["stable", "dev"] as const);
+          return safeJson(await this.updateService.rollback({ channel, commandId }));
         });
       case "device.list":
         return safeJson({ devices: await this.dependencies.devices.listDevices() });

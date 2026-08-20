@@ -177,7 +177,10 @@ enum GatewayRestartClient {
             return .error(.gateway(code: code, message: message, retryable: error["retryable"] as? Bool ?? false))
         }
         guard json["error"] == nil,
-              let result = try? JSONDecoder().decode(Response.self, from: data),
+              let resultObject = json["result"],
+              JSONSerialization.isValidJSONObject(resultObject),
+              let resultData = try? JSONSerialization.data(withJSONObject: resultObject),
+              let result = try? JSONDecoder().decode(Response.self, from: resultData),
               result.activeSessionIds.allSatisfy({ !$0.isEmpty }) else { return .malformed }
         return .result(result)
     }
@@ -187,7 +190,7 @@ enum GatewayRestartClient {
         timeout: TimeInterval
     ) async throws -> URLSessionWebSocketTask.Message {
         guard timeout.isFinite, timeout > 0 else { throw Failure.invalidURL }
-        try await withThrowingTaskGroup(of: URLSessionWebSocketTask.Message.self) { group in
+        return try await withThrowingTaskGroup(of: URLSessionWebSocketTask.Message.self) { group in
             group.addTask { try await task.receive() }
             group.addTask {
                 try await Task.sleep(nanoseconds: UInt64(max(1, timeout) * 1_000_000_000))

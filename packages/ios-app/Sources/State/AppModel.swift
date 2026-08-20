@@ -1051,7 +1051,8 @@ final class AppModel {
     }
 
     func loadGatewayUpdateConfig(for profile: GatewayProfile) async -> GatewayUpdateConfig? {
-        if profiles.selected?.id != profile.id { await switchGateway(profile) }
+        // Update metadata is control-plane state. Never reading it may change
+        // the focused chat server; the user must explicitly choose this server.
         guard profiles.selected?.id == profile.id,
               let admission = lifecycle.generationAdmission else { return nil }
         do {
@@ -1079,7 +1080,6 @@ final class AppModel {
         sourceRoot: String,
         artifactRoot: String? = nil
     ) async -> GatewayUpdateConfig? {
-        if profiles.selected?.id != profile.id { await switchGateway(profile) }
         guard profiles.selected?.id == profile.id,
               let admission = lifecycle.generationAdmission else { return nil }
         do {
@@ -1121,7 +1121,8 @@ final class AppModel {
     }
 
     func loadGatewayUpdateStatus(for profile: GatewayProfile) async -> GatewayUpdateStatus? {
-        if profiles.selected?.id != profile.id { await switchGateway(profile) }
+        // See loadGatewayUpdateConfig: status reads must not retarget the
+        // focused profile as a side effect.
         guard profiles.selected?.id == profile.id,
               let admission = lifecycle.generationAdmission else { return nil }
         do {
@@ -1148,10 +1149,9 @@ final class AppModel {
         for profile: GatewayProfile,
         mode: String = "auto",
         candidateVersion: String? = nil
-    ) async {
-        if profiles.selected?.id != profile.id { await switchGateway(profile) }
+    ) async -> String? {
         guard profiles.selected?.id == profile.id,
-              let admission = lifecycle.generationAdmission else { return }
+              let admission = lifecycle.generationAdmission else { return nil }
         do {
             try requireLifecycle(admission)
             guard Self.supportsGatewayUpdate(capabilities: gatewayInfo?.capabilities ?? []) else {
@@ -1180,11 +1180,43 @@ final class AppModel {
                 )
             }
             try requireLifecycle(admission)
-            lifecycle.beginRestarting()
+            // The helper acknowledgement only means the detached updater was
+            // admitted. Enter restarting when the Gateway emits
+            // system.stopping, so an accepted update cannot make iOS look
+            // offline while the old process is still serving sessions.
             postNotice("Gateway update accepted. Tron will reconnect automatically.", replacing: .gatewayRestart)
+            return commandID
         } catch {
-            guard admitsLifecycle(admission) else { return }
+            guard admitsLifecycle(admission) else { return nil }
             surface(error)
+            return nil
+        }
+    }
+
+    func requestGatewayRollback(for profile: GatewayProfile) async -> String? {
+        guard profiles.selected?.id == profile.id,
+              let admission = lifecycle.generationAdmission else { return nil }
+        do {
+            try requireLifecycle(admission)
+            guard Self.supportsGatewayUpdate(capabilities: gatewayInfo?.capabilities ?? []) else {
+                throw GatewayFailure(code: "unsupported", message: "This Gateway does not support supervised payload rollback.", retryable: false, details: nil)
+            }
+            struct Params: Codable { let commandId: String; let channel: String }
+            let commandID = uuidSource.next().uuidString
+            _ = try await mutationExecutor.performValue(method: "gateway.rollback", commandID: commandID) {
+                try await self.client.requestValue(
+                    "gateway.rollback",
+                    Params(commandId: commandID, channel: profile.gatewayChannel),
+                    timeout: .seconds(30)
+                )
+            }
+            try requireLifecycle(admission)
+            postNotice("Gateway rollback accepted. Tron will reconnect automatically.", replacing: .gatewayRestart)
+            return commandID
+        } catch {
+            guard admitsLifecycle(admission) else { return nil }
+            surface(error)
+            return nil
         }
     }
 
@@ -2170,6 +2202,7 @@ final class AppModel {
     private func handleDeliveredEvent(_ event: GatewayEvent, connectionID: Int?) async {
         switch event.topic {
         case "transport.disconnected", "system.stopping":
+            if event.topic == "system.stopping" { lifecycle.beginRestarting() }
             lifecycle.noteDisconnected(connectionID: connectionID)
             // AuthBroker operations belong to the current transport client.
             // Retire any visible prompt before reconnect can expose a new

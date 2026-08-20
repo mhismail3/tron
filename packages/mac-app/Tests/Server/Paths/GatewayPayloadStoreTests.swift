@@ -91,12 +91,16 @@ struct GatewayPayloadStoreTests {
             try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: runtime.path)
         }
         var lines = Data()
+        let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
+        func relativePath(_ url: URL) -> String {
+            String(url.resolvingSymlinksInPath().standardizedFileURL.path.dropFirst(resolvedRoot.path.count + 1))
+        }
         let payloadFiles = try fm.enumerator(at: root, includingPropertiesForKeys: nil)!.compactMap { $0 as? URL }
             .filter { $0.path.contains("/app/") || $0.path.contains("/runtime/") }
             .filter { (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true }
-            .sorted { Data($0.path.replacingOccurrences(of: root.path + "/", with: "").utf8).lexicographicallyPrecedes(Data($1.path.replacingOccurrences(of: root.path + "/", with: "").utf8)) }
+            .sorted { Data(relativePath($0).utf8).lexicographicallyPrecedes(Data(relativePath($1).utf8)) }
         for file in payloadFiles {
-            let relative = file.path.replacingOccurrences(of: root.path + "/", with: "")
+            let relative = relativePath(file)
             let digest = SHA256.hash(data: try Data(contentsOf: file)).map { String(format: "%02x", $0) }.joined()
             lines.append(contentsOf: Data("\(digest)  \(relative)\n".utf8))
         }
@@ -110,7 +114,7 @@ struct GatewayPayloadStoreTests {
                 sourceRevision: "test-revision",
                 runtimeEpoch: "test-epoch",
                 payloadFingerprint: actualFingerprint,
-                dependencyTreeCoverage: "app/** and runtime/** regular files"
+                dependencyTreeCoverage: "app/** and runtime/** files and internal symlinks"
             ),
             to: root.appendingPathComponent("manifest.json")
         )

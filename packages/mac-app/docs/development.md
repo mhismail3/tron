@@ -16,6 +16,15 @@ packages/mac-app/scripts/ensure-gateway-bundle.sh
 packages/mac-app/scripts/bundle-gateway.sh
 ```
 
+Staging resolves `node` and `npm` independently before installing anything. This
+works with Xcode's sanitized `PATH`: set `TRON_NODE_BIN` and/or `TRON_NPM_BIN`
+to absolute executable paths to override resolution. Without overrides, the
+script checks `PATH`, then the bounded nvm tree under `$HOME` (or `NVM_DIR`),
+then `/opt/homebrew/bin` and `/usr/local/bin`. It fails with the override and
+installation guidance if either tool is unavailable. These variables affect
+staging only; the completed app uses its embedded Node runtimes and does not
+consult this toolchain.
+
 The script:
 
 1. runs locked gateway install and TypeScript build;
@@ -25,8 +34,9 @@ The script:
 4. checks hard-coded SHA-256 values;
 5. compiles `tron-gateway-launcher.c` as a universal macOS executable;
 6. stages the launcher into both tracked Login Item skeletons;
-7. hashes every regular file under `app/**` (including the complete production
-   `node_modules` tree) and `runtime/**` with `hash-gateway-payload.sh`, then
+7. hashes every regular file and safe internal symlink under `app/**` (including
+the complete production `node_modules` tree) and `runtime/**` with
+`hash-gateway-payload.sh`, then
    writes that fingerprint into the bundled `manifest.json` and stamps a
    runtime epoch. Use `scripts/gateway-payload-deploy.mjs` to stage, promote,
    or roll back immutable stable/dev payload versions; do not use `scripts/tron
@@ -82,9 +92,9 @@ can bind its port.
 
 ### Gateway payload promotion
 
-The installed release wrapper owns the stable LaunchAgent and the optional dev
-LaunchAgent; they use separate homes and ports and can run in parallel. Without
-building, bundling, installing, or restarting during preparation, an operator
+The installed release wrapper owns the stable LaunchAgent and the opt-in Preview
+LaunchAgent. Preview is enabled only from the Release menu; the isolated Debug
+scheme remains a focused testing seam. Without building, bundling, installing, or restarting during preparation, an operator
 can stage and then explicitly promote a complete payload:
 
 ```bash
@@ -146,18 +156,18 @@ reset options, then launch the replacement and complete the Install step; that
 preserves canonical sessions and credentials but stops the Gateway during the
 transition.
 
-Use `TronMac Isolated Install` to own `com.tron.server.dev`, `~/.tron-dev`,
-`~/.pi/agent-dev`, and port 9848 without replacing the installed production app.
-The isolated Gateway shares only the physical-machine group hint stored at
-`~/.tron-machine-group-id`; it does not share canonical JSONL sessions or
-credentials. Ordinary Debug runs as a regular companion window and do not
-install a second production menu-bar item or manage production registration.
+The Release menu exposes **Enable Preview Gateway**, **Stop Preview Gateway**,
+**Restart Preview Gateway**, and **Show Preview pairing info**. Preview is opt-in
+and never auto-started. Stop/uninstall unregisters the Preview service but never
+deletes its canonical `~/.tron-dev` or `~/.pi/agent-dev` data. Stable remains
+independently owned by `com.tron.server` on port 9847; Preview uses
+`com.tron.server.dev` on port 9848 and its own credential and pairing files.
 
 ### Gateway payload operations
 
-The installed `Tron.app` wrapper owns the stable LaunchAgent and optional dev
-LaunchAgent. Their `.tron`/`.tron-dev` homes and ports 9847/9848 are independent
-and may run in parallel. `scripts/tron dev` is deprecated and fail-closed; it
+The installed `Tron.app` wrapper owns the stable LaunchAgent and opt-in Preview
+LaunchAgent. `.tron`/`.tron-dev` and ports 9847/9848 remain independent.
+`scripts/tron dev` is deprecated and fail-closed; it
 must not become a second Gateway supervisor. Use the explicit deployment core:
 
 ```bash

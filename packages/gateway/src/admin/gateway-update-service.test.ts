@@ -2,11 +2,12 @@ import { mkdir, rm, writeFile, symlink, realpath } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { GatewayError } from "../errors.js";
 import { GatewayService, type ClientContext, type GatewayServiceDependencies } from "../transport/gateway-service.js";
 import {
   GatewayUpdateService,
+  gatewayRollbackHelperArgs,
   gatewayUpdateHelperArgs,
   gatewayUpdateHelperPath,
   normalizeRuntimeIdentity,
@@ -74,6 +75,24 @@ describe("Gateway update control plane", () => {
     } finally { await rm(value.root, { recursive: true, force: true }); }
   });
 
+  it("projects terminal automatic rollback and preserves its original error", async () => {
+    const value = await fixture();
+    try {
+      await writeFile(join(value.state, "deployment-state.json"), `${JSON.stringify({
+        schema: 1, kind: "tron-gateway-deployment", channel: "stable", state: "rolled-back",
+        commandId: "command-1", error: "candidate health timed out", updatedAt: "2026-01-01T00:00:02Z",
+      })}\n`);
+      await writeFile(join(value.state, "update-progress.json"), `${JSON.stringify({
+        schema: 1, kind: "tron-gateway-update-progress", channel: "stable", state: "rolled-back",
+        commandId: "command-1", error: "candidate health timed out", updatedAt: "2026-01-01T00:00:01Z",
+      })}\n`);
+      const status = await new GatewayUpdateService({ tronHome: value.root }).status();
+      expect(status.state).toBe("rolled-back");
+      expect(status.error).toBe("candidate health timed out");
+      expect(status.commandId).toBe("command-1");
+    } finally { await rm(value.root, { recursive: true, force: true }); }
+  });
+
   it("returns a bounded projection and reports unavailable candidates explicitly", async () => {
     const value = await fixture();
     try {
@@ -86,6 +105,8 @@ describe("Gateway update control plane", () => {
         candidateAvailable: false,
         error: null,
         updatedAt: null,
+        commandId: null,
+        rollbackAvailable: false,
       });
     } finally { await rm(value.root, { recursive: true, force: true }); }
   });
@@ -123,13 +144,26 @@ describe("Gateway update control plane", () => {
     try {
       const helper = join(value, "gateway-payload-deploy.mjs");
       await writeFile(helper, "#!/usr/bin/env node\n");
-      expect(gatewayUpdateHelperPath({ TRON_GATEWAY_UPDATE_HELPER: helper })).toBe(helper);
-      expect(gatewayUpdateHelperPath({ TRON_GATEWAY_UPDATE_HELPER: "relative-helper.mjs" })).toBeUndefined();
+      expect(gatewayUpdateHelperPath({
+        TRON_GATEWAY_UPDATE_HELPER: helper, TRON_GATEWAY_PAYLOAD_ROOT: value,
+        TRON_GATEWAY_SUPERVISED: "1",
+      })).toBe(helper);
+      expect(gatewayUpdateHelperPath({
+        TRON_GATEWAY_UPDATE_HELPER: "relative-helper.mjs", TRON_GATEWAY_PAYLOAD_ROOT: value,
+        TRON_GATEWAY_SUPERVISED: "1",
+      })).toBeUndefined();
       expect(gatewayUpdateHelperPath({})).toBeUndefined();
+      expect(gatewayUpdateHelperPath({
+        TRON_GATEWAY_UPDATE_HELPER: helper, TRON_GATEWAY_PAYLOAD_ROOT: value,
+        TRON_GATEWAY_SUPERVISED: "0",
+      })).toBeUndefined();
       expect(gatewayUpdateHelperArgs({ channel: "dev", mode: "artifact", candidateVersion: "v1", commandId: "command-1" })).toEqual([
         "apply", "--channel", "dev", "--mode", "artifact", "--candidate-version", "v1", "--command-id", "command-1",
       ]);
       expect(() => gatewayUpdateHelperArgs({ channel: "stable", mode: "artifact", commandId: "bad" })).toThrow(GatewayError);
+      expect(gatewayRollbackHelperArgs({ channel: "dev", commandId: "command-1" })).toEqual([
+        "rollback", "--channel", "dev", "--command-id", "command-1",
+      ]);
     } finally { await rm(value, { recursive: true, force: true }); }
   });
 
@@ -137,9 +171,12 @@ describe("Gateway update control plane", () => {
     const home = await mkdtemp(join(tmpdir(), "tron-update-config-"));
     const source = join(home, "repo");
     try {
-      await mkdir(join(source, "packages", "gateway"), { recursive: true });
+      await mkdir(join(source, "packages", "gateway", "scripts"), { recursive: true });
+      await mkdir(join(source, "scripts"), { recursive: true });
       await writeFile(join(source, "packages", "gateway", "package.json"), "{}\n");
       await writeFile(join(source, "packages", "gateway", "package-lock.json"), "{}\n");
+      await writeFile(join(source, "packages", "gateway", "scripts", "ensure-node-pty-helper.mjs"), "// helper\n");
+      await writeFile(join(source, "scripts", "gateway-payload-deploy.mjs"), "// updater\n");
       const service = new GatewayUpdateService({ tronHome: home });
       const configured = await service.configure({ sourceRoot: await realpath(source) });
       expect(configured).toEqual(expect.objectContaining({ schema: 1, kind: "tron-gateway-update-config", sourceRoot: await realpath(source) }));
@@ -163,6 +200,7 @@ describe("Gateway update control plane", () => {
     const base = {
       config: { machineId: "machine", machineGroupID: "group", machineName: "Mac" },
       updateService: new GatewayUpdateService({ tronHome: "/tmp", updater: callback }),
+      receipts: { execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation() },
     } as unknown as GatewayServiceDependencies;
     const configured = new GatewayService(base).info() as Record<string, unknown>;
     expect(configured.capabilities).toContain("gateway-update.v1");
@@ -179,5 +217,24 @@ describe("Gateway update control plane", () => {
     };
     await expect(new GatewayService(base).invoke(client, "gateway.update", { channel: "stable", mode: "auto" }))
       .rejects.toMatchObject({ code: "invalid_request" });
+    await expect(new GatewayService(base).invoke(client, "gateway.rollback", { channel: "stable", commandId: "command-1", mode: "auto" }))
+      .rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("accepts a bounded rollback request through the same receipt-gated capability", async () => {
+    const callback = vi.fn(async (request) => ({ accepted: true, request }));
+    const service = new GatewayUpdateService({ tronHome: "/tmp", updater: callback });
+    const base = {
+      config: { machineId: "machine", machineGroupID: "group", machineName: "Mac" }, updateService: service,
+      receipts: { execute: async (_identity: string, _method: string, _commandId: string, operation: () => Promise<unknown>) => operation() },
+    } as unknown as GatewayServiceDependencies;
+    const client: ClientContext = {
+      id: "phone", identity: "device", isLocal: false,
+      beginSynchronization: () => "sync", establishSynchronization: () => {}, completeSynchronization: () => {},
+      unsubscribe: () => true, attachTerminal: () => {}, detachTerminal: () => {}, ownsTerminal: () => false,
+    };
+    await expect(new GatewayService(base).invoke(client, "gateway.rollback", { channel: "dev", commandId: "command-1" }))
+      .resolves.toMatchObject({ accepted: true });
+    expect(callback).toHaveBeenCalledWith({ channel: "dev", commandId: "command-1", operation: "rollback" });
   });
 });

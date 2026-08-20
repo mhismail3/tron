@@ -325,6 +325,9 @@ struct GatewayConnectionDetailView: View {
     @State private var infoLoadGeneration = 0
     @State private var confirmingRestart = false
     @State private var confirmingUpdate = false
+    @State private var confirmingRollback = false
+    @State private var activeUpdateCommandID: String?
+    @State private var acceptedOperationLabel: String?
     @State private var configuringSourceRepository = false
     @State private var confirmingForget = false
 
@@ -421,7 +424,7 @@ struct GatewayConnectionDetailView: View {
                     gatewayActionButton(
                         "Restart Gateway",
                         accent: .tronCyan,
-                        disabled: !currentProfile.isEnabled || !supportsSafeRestart
+                        disabled: !currentProfile.isEnabled || !supportsSafeRestart || updateIsActive
                     ) { confirmingRestart = true }
 
                     if currentProfile.isEnabled {
@@ -454,7 +457,8 @@ struct GatewayConnectionDetailView: View {
                 .accessibilityLabel("Done")
             }
         }
-        .task(id: currentProfile.id) { await loadInfo() }
+        .task(id: detailLoadIdentity) { await loadInfo() }
+        .task(id: updatePollIdentity) { await pollGatewayUpdate() }
         .alert("Forget \(currentProfile.label)?", isPresented: $confirmingForget) {
             Button("Cancel", role: .cancel) {}
             Button("Forget Server", role: .destructive) {
@@ -480,7 +484,7 @@ struct GatewayConnectionDetailView: View {
         }
         .sheet(isPresented: $confirmingUpdate) {
             TronConfirmationSheet(
-                title: updateStatus?.candidateAvailable ? "Update Tron Gateway?" : "Build and update Tron Gateway?",
+                title: updateStatus?.candidateAvailable == true ? "Update Tron Gateway?" : "Build and update Tron Gateway?",
                 message: updateStatus?.candidateAvailable
                     == true
                     ? "The verified candidate will be promoted after accepted runs finish. Tron reconnects automatically."
@@ -490,9 +494,28 @@ struct GatewayConnectionDetailView: View {
                 icon: "arrow.down.circle",
                 onConfirm: {
                     Task {
-                        await model.requestGatewayUpdate(for: currentProfile)
+                        if let commandID = await model.requestGatewayUpdate(for: currentProfile) {
+                            activeUpdateCommandID = commandID
+                            acceptedOperationLabel = "Update accepted · waiting for Gateway progress"
+                        }
                         updateConfig = await model.loadGatewayUpdateConfig(for: currentProfile)
-                        updateStatus = await model.loadGatewayUpdateStatus(for: currentProfile)
+                    }
+                }
+            )
+        }
+        .sheet(isPresented: $confirmingRollback) {
+            TronConfirmationSheet(
+                title: "Roll Back Tron Gateway?",
+                message: "The Gateway will restore the previous verified payload and reconnect automatically.",
+                confirmTitle: "Roll Back",
+                destructive: true,
+                icon: "arrow.uturn.backward.circle",
+                onConfirm: {
+                    Task {
+                        if let commandID = await model.requestGatewayRollback(for: currentProfile) {
+                            activeUpdateCommandID = commandID
+                            acceptedOperationLabel = "Rollback accepted · waiting for Gateway progress"
+                        }
                     }
                 }
             )
@@ -515,11 +538,20 @@ struct GatewayConnectionDetailView: View {
             VStack(spacing: 0) {
                 if let status {
                     TronValueRow(
-                        icon: "arrow.down.circle",
-                        title: status.presentationTitle,
+                        icon: status.state == "rolled-back" ? "arrow.uturn.backward.circle" : "arrow.down.circle",
+                        title: acceptedOperationLabel ?? status.presentationTitle,
                         detail: status.currentIdentity?.version.map { "Current \($0) · \(status.channel)" } ?? "Channel \(status.channel)",
                         accent: .tronEmerald
                     )
+                    if let error = status.error {
+                        TronSettingsDivider(accent: .tronError)
+                        Text(String(error.prefix(2_048)))
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronError)
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                    }
                     if status.currentIdentity?.payloadFingerprint != nil {
                         TronSettingsDivider(accent: .tronEmerald)
                         infoRow("number", "Payload identity", status.currentIdentity?.payloadFingerprint.map { String($0.prefix(12)) } ?? "", numeric: true)
@@ -564,13 +596,21 @@ struct GatewayConnectionDetailView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(updateIsActive)
                 if let status, Self.canShowGatewayUpdate(info: info, status: status, config: config) {
                     TronSettingsDivider(accent: .tronEmerald)
                     gatewayActionButton(
                         status.candidateAvailable ? "Update and restart Gateway" : "Build and update Gateway",
-                        accent: .tronEmerald
+                        accent: .tronEmerald,
+                        disabled: updateIsActive
                     ) {
                         confirmingUpdate = true
+                    }
+                }
+                if let status, Self.canShowGatewayRollback(info: info, status: status) {
+                    TronSettingsDivider(accent: .tronEmerald)
+                    gatewayActionButton("Roll Back Gateway", accent: .tronAmber, disabled: updateIsActive) {
+                        confirmingRollback = true
                     }
                 }
             }
@@ -618,6 +658,24 @@ struct GatewayConnectionDetailView: View {
             && (status.candidateAvailable && status.candidateIdentity != nil || config != nil)
     }
 
+    private static func canShowGatewayRollback(info: GatewayInfo?, status: GatewayUpdateStatus) -> Bool {
+        guard let info else { return false }
+        return AppModel.supportsGatewayUpdate(capabilities: info.capabilities)
+            && status.rollbackAvailable
+    }
+
+    private var updateIsActive: Bool {
+        activeUpdateCommandID != nil || ["starting", "building", "staging", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].contains(updateStatus?.state)
+    }
+
+    private var detailLoadIdentity: String {
+        "\(currentProfile.id):\(model.profiles.selected?.id ?? "none")"
+    }
+
+    private var updatePollIdentity: String {
+        "\(detailLoadIdentity):\(status.label):\(activeUpdateCommandID ?? "none")"
+    }
+
     private func loadInfo() async {
         infoLoadGeneration &+= 1
         let generation = infoLoadGeneration
@@ -628,8 +686,33 @@ struct GatewayConnectionDetailView: View {
         let loaded = await model.gatewayInfo(for: currentProfile.id)
         guard generation == infoLoadGeneration else { return }
         info = loaded
+        guard model.profiles.selected?.id == currentProfile.id else {
+            updateConfig = nil
+            updateStatus = nil
+            activeUpdateCommandID = nil
+            acceptedOperationLabel = nil
+            return
+        }
         updateConfig = await model.loadGatewayUpdateConfig(for: currentProfile)
         updateStatus = await model.loadGatewayUpdateStatus(for: currentProfile)
+    }
+
+    private func pollGatewayUpdate() async {
+        while !Task.isCancelled {
+            guard let commandID = activeUpdateCommandID,
+                  model.profiles.selected?.id == currentProfile.id,
+                  status == .connected else { return }
+            if let latest = await model.loadGatewayUpdateStatus(for: currentProfile), latest.commandId == commandID {
+                updateStatus = latest
+                acceptedOperationLabel = nil
+                if ["ready", "failed", "failure", "rolled-back"].contains(latest.state) {
+                    activeUpdateCommandID = nil
+                    return
+                }
+            }
+            do { try await Task.sleep(for: .seconds(1)) }
+            catch { return }
+        }
     }
 
     private func infoRow(_ icon: String, _ title: String, _ value: String, numeric: Bool = false) -> some View {

@@ -23,6 +23,19 @@ enum MenuItemDescriptor: Equatable {
     }
 }
 
+struct PreviewMenuState: Equatable, Sendable {
+    var isRegistered: Bool
+    var isRunning: Bool
+    var isBusy: Bool = false
+    var canManage: Bool
+    /// True only when the running Preview job belongs to the installed
+    /// Release wrapper and its exact Preview helper path.
+    var isOwned: Bool = true
+    var needsRepair: Bool = false
+
+    static let unavailable = PreviewMenuState(isRegistered: false, isRunning: false, canManage: false)
+}
+
 enum MenuBarItemBuilder {
     /// Builds the menu sequence for a given snapshot. Order matches
     /// plan §A "Menu bar" layout. Tests in
@@ -31,7 +44,8 @@ enum MenuBarItemBuilder {
         snapshot: ServerStatusSnapshot,
         tronHome: URL,
         defaultServerPort: Int,
-        canManageLaunchAgent: Bool
+        canManageLaunchAgent: Bool,
+        preview: PreviewMenuState = .unavailable
     ) -> [MenuItemDescriptor] {
         var items: [MenuItemDescriptor] = []
 
@@ -45,6 +59,24 @@ enum MenuBarItemBuilder {
         items.append(.separator)
 
         items.append(.action(title: "Show pairing info", isEnabled: true, action: .showPairingInfo))
+        if preview.canManage {
+            let previewEnabled = !preview.isBusy
+            if preview.isRegistered && !preview.needsRepair && preview.isOwned {
+                items.append(.action(title: "Show Preview pairing info", isEnabled: true, action: .showPreviewPairingInfo))
+                if preview.isRunning {
+                    items.append(.action(title: "Restart Preview Gateway", isEnabled: previewEnabled, action: .restartPreviewGateway))
+                }
+                items.append(.action(title: "Stop Preview Gateway", isEnabled: previewEnabled, action: .stopPreviewGateway))
+            } else {
+                // A Debug-owned or partially registered job is repairable, not
+                // pairable and not a stop-only state.
+                items.append(.action(
+                    title: preview.isRegistered || preview.needsRepair ? "Repair Preview" : "Enable Preview Gateway",
+                    isEnabled: previewEnabled,
+                    action: .enablePreviewGateway
+                ))
+            }
+        }
 
         items.append(.openLink(title: "Open Tron folder", url: tronHome))
 

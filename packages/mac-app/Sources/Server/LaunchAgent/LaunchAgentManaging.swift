@@ -19,6 +19,7 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     var parentBundleVersion: String?
     var executablePath: String?
     var gatewaySupervisionMarker: String?
+    var gatewayChannelMarker: String?
     var needsLaunchConstraintRefresh: Bool
 
     init(
@@ -28,6 +29,7 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
         parentBundleVersion: String? = nil,
         executablePath: String? = nil,
         gatewaySupervisionMarker: String? = nil,
+        gatewayChannelMarker: String? = nil,
         needsLaunchConstraintRefresh: Bool = false
     ) {
         self.pid = pid
@@ -36,6 +38,7 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
         self.parentBundleVersion = parentBundleVersion
         self.executablePath = executablePath
         self.gatewaySupervisionMarker = gatewaySupervisionMarker
+        self.gatewayChannelMarker = gatewayChannelMarker
         self.needsLaunchConstraintRefresh = needsLaunchConstraintRefresh
     }
 }
@@ -61,6 +64,10 @@ protocol LaunchAgentManaging: Sendable {
     /// Cheaper than load+ping when you only need a yes/no.
     func isLoaded(label: String) async -> Bool
 
+    /// True when ServiceManagement still has a registration, even if launchd
+    /// has not loaded the process yet.
+    func isRegistered(label: String) async -> Bool
+
     /// Best-effort process metadata from launchd/ps for diagnostics UI.
     /// Returns nil when launchd has no loaded service or does not expose a pid.
     func runtimeInfo(label: String) async -> LaunchAgentRuntimeInfo?
@@ -69,6 +76,12 @@ protocol LaunchAgentManaging: Sendable {
 /// Applies the shared service-start policy for registration/start flows.
 /// The menu-bar Restart action deliberately does not use this helper: it asks
 /// the supervised Gateway to drain and lets launchd perform relaunch.
+extension LaunchAgentManaging {
+    func isRegistered(label: String) async -> Bool {
+        await isLoaded(label: label)
+    }
+}
+
 enum LaunchAgentLoader {
     static func ensureLoaded(
         manager: LaunchAgentManaging,

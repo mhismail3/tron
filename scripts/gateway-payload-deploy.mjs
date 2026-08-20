@@ -5,8 +5,9 @@
  * supervisor and canonical Gateway state is never modified.
  */
 import { createHash, randomUUID } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import { createRequire } from "node:module";
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -16,6 +17,7 @@ import {
   chmod,
   cp,
   lstat,
+  readlink,
   mkdir,
   mkdtemp,
   open,
@@ -47,6 +49,7 @@ const KIND = "tron-gateway-payload";
 const SELECTION_KIND = "tron-gateway-selection";
 const PROTOCOL_VERSION = 3;
 const LOCAL_CREDENTIAL_MAX_BYTES = 64 * 1024;
+const MAX_RETAINED_VERSIONS = 8;
 const REQUIREMENTS = [
   ["app/dist/index.js", 1_024, false],
   ["app/package.json", 1, false],
@@ -117,17 +120,32 @@ async function regular(path, minimum = 1) {
   return info.isFile() && info.size >= minimum;
 }
 
+async function validatePayloadSymlink(root, path, relativePath) {
+  if (/[\u0000-\u001f\u007f]/u.test(relativePath)) throw new Error(`payload path contains control bytes: ${relativePath}`);
+  const targetText = await readlink(path);
+  if (!targetText || /[\u0000-\u001f\u007f]/u.test(targetText)) throw new Error(`payload symlink target contains control bytes: ${relativePath}`);
+  const target = await realpath(path).catch(() => { throw new Error(`payload contains a dangling symlink: ${relativePath}`); });
+  if (!under(root, target)) throw new Error(`payload symlink escapes root: ${relativePath}`);
+  const targetInfo = await stat(target);
+  if (!targetInfo.isFile() && !targetInfo.isDirectory()) throw new Error(`payload symlink targets a special entry: ${relativePath}`);
+  return readlink(path);
+}
+
 async function completePayload(root) {
   const requested = resolve(root);
   if ((await lstat(requested)).isSymbolicLink()) throw new Error("payload root must not be a symlink");
   const resolved = await realpath(requested);
   const rootInfo = await stat(resolved);
   if (!rootInfo.isDirectory()) throw new Error("payload root is not a directory");
+  for (const directory of ["app", "runtime"]) {
+    const directoryInfo = await lstat(join(resolved, directory));
+    if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink()) throw new Error(`payload root is not a regular directory: ${directory}`);
+  }
   for (const [path, minimum, directory] of REQUIREMENTS) {
     const candidate = join(resolved, path);
     if (!under(resolved, candidate)) throw new Error(`payload path escapes root: ${path}`);
     const linkInfo = await lstat(candidate);
-    if (linkInfo.isSymbolicLink()) throw new Error(`payload contains a symlink: ${path}`);
+    if (linkInfo.isSymbolicLink()) throw new Error(`payload required entry is not regular: ${path}`);
     const info = await stat(candidate);
     if (directory ? !info.isDirectory() : !info.isFile() || info.size < minimum) {
       throw new Error(`payload is incomplete: ${path}`);
@@ -140,13 +158,18 @@ async function completePayload(root) {
 
 async function regularFiles(root, prefix) {
   const output = [];
+  const payloadRoot = await realpath(root);
   async function visit(directory, relativePath) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const entryRelative = relativePath ? join(relativePath, entry.name) : entry.name;
+      if (/[\u0000-\u001f\u007f]/u.test(entry.name)) throw new Error(`payload path contains control bytes: ${entryRelative}`);
       const path = join(directory, entry.name);
       if (entry.isDirectory()) await visit(path, entryRelative);
-      else if (entry.isFile()) output.push(entryRelative);
-      else throw new Error(`payload contains unsupported entry: ${entryRelative}`);
+      else if (entry.isFile()) output.push({ path: entryRelative, target: undefined });
+      else if (entry.isSymbolicLink()) {
+        const target = await validatePayloadSymlink(payloadRoot, path, entryRelative);
+        output.push({ path: entryRelative, target });
+      } else throw new Error(`payload contains unsupported entry: ${entryRelative}`);
     }
   }
   await visit(join(root, prefix), prefix);
@@ -159,16 +182,23 @@ export async function payloadFingerprint(root) {
   const files = [
     ...(await regularFiles(root, "app")),
     ...(await regularFiles(root, "runtime")),
-  ].sort((a, b) => Buffer.from(a).compare(Buffer.from(b)));
+  ].sort((a, b) => Buffer.from(a.path).compare(Buffer.from(b.path)));
   const lines = [];
-  for (const path of files) {
-    const digest = createHash("sha256").update(await readFile(join(root, path))).digest("hex");
-    lines.push(`${digest}  ${path}\n`);
+  for (const entry of files) {
+    if (entry.target !== undefined) {
+      const digest = createHash("sha256").update(`${entry.target}\n`).digest("hex");
+      lines.push(`symlink:${digest}  ${entry.path}\n`);
+    } else {
+      const digest = createHash("sha256").update(await readFile(join(root, entry.path))).digest("hex");
+      lines.push(`${digest}  ${entry.path}\n`);
+    }
   }
   return createHash("sha256").update(lines.join("")).digest("hex");
 }
 
 async function json(path, maximum = MAX_MANIFEST_BYTES) {
+  const info = await lstat(path);
+  if (!info.isFile() || info.isSymbolicLink()) throw new Error(`${path} is not a regular file`);
   const data = await readFile(path);
   if (data.length === 0 || data.length > maximum) throw new Error(`${path} is missing, empty, or oversized`);
   try { return JSON.parse(data); } catch { throw new Error(`${path} is not valid JSON`); }
@@ -201,22 +231,39 @@ export function validateLocalCredentialDocument(document) {
 }
 
 async function readLocalCredential(path) {
-  const info = await lstat(path);
-  if (!info.isFile() || info.isSymbolicLink() || info.size <= 0 || info.size > LOCAL_CREDENTIAL_MAX_BYTES
-    || (info.mode & 0o077) !== 0) throw new Error("local Gateway credential is missing or unsafe");
-  const document = await json(path, LOCAL_CREDENTIAL_MAX_BYTES);
-  if (!validateLocalCredentialDocument(document)) throw new Error("local Gateway credential has an invalid shape");
-  return document.bearerToken;
+  // lstat followed by readFile leaves a replacement race. Keep the descriptor
+  // open while checking ownership/mode and reading the bounded bytes.
+  const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW).catch(() => { throw new Error("local Gateway credential is missing or unsafe"); });
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size <= 0 || info.size > LOCAL_CREDENTIAL_MAX_BYTES
+      || (info.mode & 0o077) !== 0) throw new Error("local Gateway credential is missing or unsafe");
+    const chunks = [];
+    let remaining = info.size;
+    while (remaining > 0) {
+      const chunk = Buffer.alloc(Math.min(16 * 1024, remaining));
+      const result = await handle.read(chunk, 0, chunk.length, null);
+      if (result.bytesRead <= 0) throw new Error("local Gateway credential is truncated");
+      chunks.push(chunk.subarray(0, result.bytesRead));
+      remaining -= result.bytesRead;
+    }
+    const document = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (!validateLocalCredentialDocument(document)) throw new Error("local Gateway credential has an invalid shape");
+    return document.bearerToken;
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error("local Gateway credential has an invalid shape");
+    throw error;
+  } finally { await handle.close(); }
 }
 
 function payloadManifest(value, expected = {}) {
+  const safeIdentity = (item, maximum = 256) => typeof item === "string" && item.length > 0
+    && Buffer.byteLength(item) <= maximum && !/[\u0000-\u001f\u007f]/u.test(item);
   if (!value || typeof value !== "object" || Array.isArray(value)
     || value.schema !== SCHEMA || value.kind !== KIND
     || !validComponent(value.channel, 64) || !validComponent(value.version, 128)
-    || typeof value.gatewayVersion !== "string" || value.gatewayVersion.length === 0
-    || typeof value.nodeVersion !== "string" || value.nodeVersion.length === 0
-    || typeof value.sourceRevision !== "string" || value.sourceRevision.length === 0
-    || !validComponent(value.runtimeEpoch, 128) || !fingerprint(value.payloadFingerprint)) {
+    || !safeIdentity(value.gatewayVersion) || !safeIdentity(value.nodeVersion)
+    || !safeIdentity(value.sourceRevision) || !validComponent(value.runtimeEpoch, 128) || !fingerprint(value.payloadFingerprint)) {
     throw new Error("payload manifest identity is invalid");
   }
   for (const [key, expectedValue] of Object.entries(expected)) {
@@ -245,8 +292,13 @@ function store(home, channel) {
     previous: join(channelRoot, "previous.json"),
     state: join(channelRoot, "deployment-state.json"),
     progress: join(channelRoot, "update-progress.json"),
+    pending: join(channelRoot, "pending-attempt.json"),
     config: join(home, "gateway", "update-config.json"),
     lock: join(channelRoot, ".update.lock"),
+    // Apply operations hold this distinct lock for their full lifetime. Stage
+    // and promote still take the channel lock internally, so an apply can
+    // compose them without recursively acquiring the same lock.
+    applyLock: join(channelRoot, ".apply.lock"),
   };
 }
 
@@ -293,7 +345,10 @@ async function noSymlinkDirectory(path, markers = []) {
 async function readUpdateConfig(paths) {
   const value = await readOptional(paths.config);
   if (value === undefined || !validateUpdateConfigDocument(value)) throw new Error("trusted Gateway update config is missing or malformed");
-  const sourceRoot = await noSymlinkDirectory(value.sourceRoot, ["packages/gateway/package.json", "packages/gateway/package-lock.json"]);
+  const sourceRoot = await noSymlinkDirectory(value.sourceRoot, [
+    "packages/gateway/package.json", "packages/gateway/package-lock.json",
+    "packages/gateway/scripts/ensure-node-pty-helper.mjs", "scripts/gateway-payload-deploy.mjs",
+  ]);
   const artifactRoot = value.artifactRoot === undefined ? undefined : await noSymlinkDirectory(value.artifactRoot);
   return { ...value, sourceRoot, ...(artifactRoot === undefined ? {} : { artifactRoot }) };
 }
@@ -314,9 +369,32 @@ async function atomicJson(path, value) {
   return atomicBytes(path, `${JSON.stringify(value)}\n`);
 }
 
+async function writePendingAttempt(paths, candidate, previous) {
+  if (!previous) return;
+  selection(previous, paths.channel);
+  await atomicJson(paths.pending ?? join(paths.channelRoot, "pending-attempt.json"), {
+    schema: SCHEMA, kind: "tron-gateway-pending-attempt", channel: paths.channel,
+    attempt: "pending",
+    version: candidate.version, payloadFingerprint: candidate.payloadFingerprint,
+    previousVersion: previous.version, previousFingerprint: previous.payloadFingerprint,
+  });
+}
+
+async function clearPendingAttempt(paths, identity) {
+  const pending = paths.pending ?? join(paths.channelRoot, "pending-attempt.json");
+  const value = await readOptional(pending);
+  if (!value) return;
+  if (value.schema !== SCHEMA || value.kind !== "tron-gateway-pending-attempt"
+    || value.channel !== paths.channel || value.version !== identity.version
+    || value.payloadFingerprint !== identity.payloadFingerprint) return;
+  await rm(pending, { force: true });
+}
+
 async function captureSelectionState(paths) {
   const read = async (path) => {
     try {
+      const info = await lstat(path);
+      if (!info.isFile() || info.isSymbolicLink()) throw new Error(`selection pointer is not a regular file: ${path}`);
       const bytes = await readFile(path);
       selection(JSON.parse(bytes), paths.channel);
       return bytes;
@@ -338,32 +416,88 @@ async function restoreSelectionState(paths, state) {
 }
 
 async function makeMutable(root) {
-  const info = await lstat(root);
-  if (info.isSymbolicLink()) throw new Error("payload contains a symlink");
-  if (info.isDirectory()) {
-    await chmod(root, 0o755);
-    for (const entry of await readdir(root, { withFileTypes: true })) await makeMutable(join(root, entry.name));
-  } else if (info.isFile()) {
-    await chmod(root, (info.mode & 0o111) !== 0 ? 0o755 : 0o644);
-  } else throw new Error("payload contains unsupported entry");
+  const payloadRoot = await realpath(root);
+  const visit = async (path) => {
+    const info = await lstat(path);
+    if (info.isSymbolicLink()) {
+      await validatePayloadSymlink(payloadRoot, path, relative(payloadRoot, path));
+      return;
+    }
+    if (info.isDirectory()) {
+      await chmod(path, 0o755);
+      for (const entry of await readdir(path, { withFileTypes: true })) await visit(join(path, entry.name));
+    } else if (info.isFile()) {
+      await chmod(path, (info.mode & 0o111) !== 0 ? 0o755 : 0o644);
+    } else throw new Error("payload contains unsupported entry");
+  };
+  const rootInfo = await lstat(root);
+  if (rootInfo.isSymbolicLink()) throw new Error("payload root must not be a symlink");
+  await visit(root);
 }
 
 async function makeImmutable(root) {
-  const info = await lstat(root);
-  if (info.isSymbolicLink()) throw new Error("payload contains a symlink");
-  if (info.isDirectory()) {
-    for (const entry of await readdir(root, { withFileTypes: true })) await makeImmutable(join(root, entry.name));
-    await chmod(root, 0o555);
-  } else if (info.isFile()) {
-    await chmod(root, (info.mode & 0o111) !== 0 ? 0o555 : 0o444);
-  } else throw new Error("payload contains unsupported entry");
+  const payloadRoot = await realpath(root);
+  const visit = async (path) => {
+    const info = await lstat(path);
+    if (info.isSymbolicLink()) {
+      await validatePayloadSymlink(payloadRoot, path, relative(payloadRoot, path));
+      return;
+    }
+    if (info.isDirectory()) {
+      for (const entry of await readdir(path, { withFileTypes: true })) await visit(join(path, entry.name));
+      await chmod(path, 0o555);
+    } else if (info.isFile()) {
+      await chmod(path, (info.mode & 0o111) !== 0 ? 0o555 : 0o444);
+    } else throw new Error("payload contains unsupported entry");
+  };
+  const rootInfo = await lstat(root);
+  if (rootInfo.isSymbolicLink()) throw new Error("payload root must not be a symlink");
+  await visit(root);
+}
+
+async function assertStoreRoots(paths) {
+  // Never let mkdir/read/lock follow an attacker-created projection link. The
+  // updater is not a sandbox, but its owned roots must not silently redirect
+  // selection or payload writes outside the selected home.
+  const home = paths.home ?? resolve(paths.channelRoot, "../../..");
+  const roots = [join(home, "gateway"), join(home, "gateway", "payloads"), paths.channelRoot, paths.versionsRoot];
+  for (const root of roots) {
+    const components = resolve(root).split("/").filter(Boolean);
+    let cursor = "/";
+    for (const component of components) {
+      cursor = join(cursor, component);
+      const info = await lstat(cursor).catch(() => undefined);
+      const uid = process.getuid?.();
+      const ownedRoot = cursor === resolve(home) || cursor.startsWith(`${resolve(home)}/`);
+      if (info?.isSymbolicLink() && ownedRoot) throw new Error(`Gateway payload store contains a symlinked root: ${cursor}`);
+      if (info && ownedRoot && !info.isDirectory()) throw new Error(`Gateway payload store root is not a directory: ${cursor}`);
+      if (info && ownedRoot && uid !== undefined && info.uid !== uid) throw new Error(`Gateway payload store root is not owned by the updater: ${cursor}`);
+    }
+  }
 }
 
 async function withStoreLock(paths, operation) {
+  await assertStoreRoots(paths);
   await mkdir(paths.channelRoot, { recursive: true, mode: 0o700 });
+  await assertStoreRoots(paths);
   const handle = await open(paths.lock, "a", 0o600);
   await handle.close();
   const release = await lockfile.lock(paths.lock, {
+    realpath: false,
+    retries: { retries: 100, minTimeout: 25, maxTimeout: 250 },
+  });
+  try { return await operation(); } finally { await release(); }
+}
+
+async function withApplyLock(paths, operation) {
+  // This lock is intentionally separate from the channel publication lock:
+  // apply composes stage/build/promote, each of which takes withStoreLock.
+  await assertStoreRoots(paths);
+  await mkdir(paths.channelRoot, { recursive: true, mode: 0o700 });
+  await assertStoreRoots(paths);
+  const handle = await open(paths.applyLock, "a", 0o600);
+  await handle.close();
+  const release = await lockfile.lock(paths.applyLock, {
     realpath: false,
     retries: { retries: 100, minTimeout: 25, maxTimeout: 250 },
   });
@@ -389,7 +523,9 @@ export async function publishSelection(paths, next) {
   const state = await captureSelectionState(paths);
   const prior = state.current === undefined ? undefined : selection(JSON.parse(state.current), paths.channel);
   try {
-    if (prior) await atomicJson(paths.previous, prior);
+    const same = prior && prior.version === next.version && prior.payloadFingerprint === next.payloadFingerprint;
+    if (prior && !same) await atomicJson(paths.previous, prior);
+    else if (!prior) await rm(paths.previous, { force: true });
     await atomicJson(paths.current, next);
   } catch (error) {
     try { await restoreSelectionState(paths, state); } catch (restoreError) {
@@ -437,6 +573,7 @@ async function writeState(paths, value) {
 }
 
 async function writeProgress(paths, state, commandId, error) {
+  await assertStoreRoots(paths);
   await atomicJson(paths.progress, {
     schema: SCHEMA, kind: "tron-gateway-update-progress", channel: paths.channel, state,
     commandId, ...(error ? { error: String(error).slice(0, 2_048) } : {}), updatedAt: new Date().toISOString(),
@@ -515,16 +652,62 @@ async function gitRevision(cwd) {
   } catch { return "unknown"; }
 }
 
-export function sourceBuildCommands(sourceRoot, compilerOutput = "<private-output>") {
+export function sourceBuildCommands(sourceRoot, compilerOutput = "<private-output>", npmCommand = { tool: "npm", script: undefined }) {
   const gatewayRoot = join(sourceRoot, "packages", "gateway");
+  const npm = npmCommand.script ? { tool: npmCommand.tool, args: [npmCommand.script, "ci", "--omit=dev", "--ignore-scripts=false"] } : { tool: npmCommand.tool, args: ["ci", "--omit=dev", "--ignore-scripts=false"] };
   return [
     {
       tool: process.execPath,
       args: [join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"), "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput],
       cwd: gatewayRoot,
     },
-    { tool: "npm", args: ["ci", "--omit=dev", "--ignore-scripts=false"], cwd: "<candidate>/app" },
+    { ...npm, cwd: "<candidate>/app" },
   ];
+}
+
+/** Resolve npm without trusting launchd's usually-minimal PATH. The returned
+ * command always invokes npm's JS CLI through this exact Node runtime. */
+export function resolveNpmCommand(environment = process.env) {
+  const candidates = [];
+  const configured = environment.TRON_NPM_BIN;
+  if (configured) candidates.push(configured);
+  if (environment.PATH) candidates.push(...environment.PATH.split(":").filter((value) => value.startsWith("/")).map((value) => join(value, "npm")));
+  const home = environment.HOME ?? homedir();
+  for (const root of [join(environment.NVM_DIR ?? join(home, ".nvm"), "versions", "node"), "/opt/homebrew/bin", "/usr/local/bin"]) {
+    if (root.endsWith("/node")) {
+      try { candidates.push(...readdirSync(root).map((version) => join(root, version, "bin", "npm"))); } catch { /* unavailable */ }
+    } else candidates.push(join(root, "npm"));
+  }
+  for (const candidate of candidates) {
+    if (!candidate.startsWith("/") || /[\u0000-\u001f\u007f]/u.test(candidate)) continue;
+    let resolvedCandidate;
+    try {
+      resolvedCandidate = realpathSync(candidate);
+      const candidateInfo = lstatSync(resolvedCandidate);
+      if (!candidateInfo.isFile() || (candidateInfo.mode & 0o111) === 0) continue;
+    } catch { continue; }
+    const prefix = dirname(dirname(candidate));
+    const script = join(prefix, "lib", "node_modules", "npm", "bin", "npm-cli.js");
+    try {
+      const scriptInfo = lstatSync(script);
+      if (scriptInfo.isFile() && !scriptInfo.isSymbolicLink()) return { tool: process.execPath, script, bin: candidate };
+    } catch { /* next candidate */ }
+  }
+  throw new Error("npm is unavailable under the sanitized launchd PATH; configure TRON_NPM_BIN or install npm with Node");
+}
+
+async function copyTrustedSourceScripts(sourceRoot, candidateRoot) {
+  const files = [
+    [join(sourceRoot, "scripts", "gateway-payload-deploy.mjs"), join(candidateRoot, "app", "scripts", "gateway-payload-deploy.mjs")],
+    [join(sourceRoot, "packages", "gateway", "scripts", "ensure-node-pty-helper.mjs"), join(candidateRoot, "app", "scripts", "ensure-node-pty-helper.mjs")],
+  ];
+  for (const [source, destination] of files) {
+    const info = await lstat(source).catch(() => undefined);
+    if (!info?.isFile() || info.isSymbolicLink()) throw new Error(`trusted source script is missing or unsafe: ${source}`);
+    await cp(source, destination, { force: true, errorOnExist: false });
+    const copied = await lstat(destination);
+    if (!copied.isFile() || copied.isSymbolicLink()) throw new Error(`trusted source script copy is unsafe: ${destination}`);
+  }
 }
 
 async function verifiedSourceCompilerOutput(root) {
@@ -535,33 +718,101 @@ async function verifiedSourceCompilerOutput(root) {
   return root;
 }
 
-function runBounded(tool, args, options = {}) {
+export function runBounded(tool, args, options = {}) {
   const timeoutMs = options.timeoutMs ?? 120_000;
   const maxOutputBytes = options.maxOutputBytes ?? 128 * 1_024;
   return new Promise((resolvePromise, rejectPromise) => {
     let output = "";
     let settled = false;
-    const child = spawn(tool, args, { cwd: options.cwd, shell: false, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let terminating = false;
+    let timer;
+    const child = spawn(tool, args, {
+      cwd: options.cwd, env: options.env, shell: false, detached: true,
+      stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
+    });
+    const terminateGroup = (signal) => {
+      if (child.pid === undefined) return;
+      try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch { /* already exited */ } }
+    };
     const finish = (error, result) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       if (error) rejectPromise(error); else resolvePromise(result);
     };
+    const failAndTerminate = (message) => {
+      if (terminating) return;
+      terminating = true;
+      terminateGroup("SIGTERM");
+      const killTimer = setTimeout(() => {
+        terminateGroup("SIGKILL");
+        // Descendants can retain inherited pipes after the process group is
+        // killed. Destroy them and settle at the bounded deadline instead of
+        // waiting forever for Node's close event.
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        finish(new Error(message));
+      }, 2_000);
+      killTimer.unref?.();
+      child.once("close", () => { clearTimeout(killTimer); finish(new Error(message)); });
+    };
     const collect = (chunk) => {
+      if (terminating) return;
       output += chunk.toString();
-      if (Buffer.byteLength(output) > maxOutputBytes) finish(new Error("Gateway source build output exceeded the limit"));
+      if (Buffer.byteLength(output) > maxOutputBytes) failAndTerminate("Gateway source build output exceeded the limit");
     };
     child.stdout.on("data", collect);
     child.stderr.on("data", collect);
-    child.once("error", (error) => finish(error));
-    child.once("exit", (code, signal) => {
+    child.once("error", (error) => { if (!terminating) finish(error); });
+    child.once("close", (code, signal) => {
+      if (terminating) return;
       if (code === 0) finish(undefined, { code, signal, output });
       else finish(new Error(`Gateway source build failed (${signal ?? `exit ${code}`}): ${output.slice(-2_048)}`));
     });
-    const timer = setTimeout(() => { child.kill("SIGTERM"); finish(new Error("Gateway source build timed out")); }, timeoutMs);
+    timer = setTimeout(() => failAndTerminate("Gateway source build timed out"), timeoutMs);
     timer.unref?.();
   });
+}
+
+async function cleanupPayloadVersionsUnlocked(paths, maximum = MAX_RETAINED_VERSIONS) {
+  const protectedVersions = new Set();
+  for (const pointer of [paths.current, paths.previous]) {
+    const value = await readOptional(pointer);
+    if (value) protectedVersions.add(selection(value, paths.channel).version);
+  }
+  const stateValue = await readOptional(paths.state);
+  const candidate = stateValue?.candidateIdentity?.version ?? stateValue?.candidateVersion;
+  if (validComponent(candidate, 128)) protectedVersions.add(candidate);
+  const entries = await readdir(paths.versionsRoot, { withFileTypes: true }).catch((error) => error?.code === "ENOENT" ? [] : Promise.reject(error));
+  const versions = [];
+  const removed = [];
+  for (const entry of entries) {
+    if (entry.isDirectory() && !entry.isSymbolicLink() && (entry.name.startsWith(".staging-") || entry.name.startsWith(".source-staging-"))) {
+      await makeMutable(join(paths.versionsRoot, entry.name));
+      await rm(join(paths.versionsRoot, entry.name), { recursive: true, force: true });
+      removed.push(entry.name);
+      continue;
+    }
+    if (!entry.isDirectory() || entry.isSymbolicLink() || entry.name.startsWith(".")) continue;
+    if (!validComponent(entry.name, 128)) continue;
+    const path = join(paths.versionsRoot, entry.name);
+    const info = await lstat(path);
+    versions.push({ name: entry.name, path, mtime: Number(info.mtimeMs) });
+  }
+  versions.sort((left, right) => right.mtime - left.mtime || left.name.localeCompare(right.name));
+  const keep = new Set(versions.slice(0, Math.max(0, maximum)).map((entry) => entry.name));
+  for (const version of protectedVersions) keep.add(version);
+  for (const entry of versions) {
+    if (keep.has(entry.name)) continue;
+    await makeMutable(entry.path);
+    await rm(entry.path, { recursive: true, force: true });
+    removed.push(entry.name);
+  }
+  return removed;
+}
+
+export async function cleanupPayloadVersions(paths, maximum = MAX_RETAINED_VERSIONS) {
+  return withStoreLock(paths, () => cleanupPayloadVersionsUnlocked(paths, maximum));
 }
 
 export async function stagePayload({ home, channel, source, version, sourceRevision }) {
@@ -571,7 +822,6 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
   const targetVersion = version ?? sourceManifest.version;
   if (!validComponent(targetVersion, 128)) throw new Error("invalid payload version");
   const target = join(paths.versionsRoot, targetVersion);
-  await mkdir(paths.versionsRoot, { recursive: true, mode: 0o700 });
   return withStoreLock(paths, async () => {
     const markCandidate = async (result) => {
       await writeState(paths, {
@@ -584,6 +834,9 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
           payloadFingerprint: result.manifest.payloadFingerprint,
         },
       });
+      // State now protects the candidate; cleanup is safe at this terminal
+      // staging point and remains under the channel lock.
+      await cleanupPayloadVersionsUnlocked(paths);
       return result;
     };
     try {
@@ -659,12 +912,44 @@ async function health(host, port, timeoutMs) {
     const response = await fetch(`http://${host.includes(":") ? `[${host}]` : host}:${port}/health`, { signal: controller.signal });
     if (!response.ok) throw new Error(`Gateway health returned HTTP ${response.status}`);
     const value = await response.json();
-    if (!value || value.status !== "ok" || typeof value.runtimeEpoch !== "string"
+    if (!value || value.status !== "ok" || value.protocolVersion !== PROTOCOL_VERSION
+      || value.minProtocolVersion !== PROTOCOL_VERSION || typeof value.runtimeEpoch !== "string"
       || typeof value.buildFingerprint !== "string" || typeof value.sourceRevision !== "string") {
       throw new Error("Gateway health identity is incomplete");
     }
     return value;
   } finally { clearTimeout(timer); }
+}
+
+export async function preflightPayload(root, runCommand = runBounded, timeoutMs = 30_000) {
+  const manifest = await validatePayload(root, {}, true);
+  const runtime = join(root, process.arch === "arm64" ? "runtime/node-arm64" : "runtime/node-x64");
+  const entrypoint = join(root, "app", "dist", "index.js");
+  await runCommand(runtime, ["--check", entrypoint], { timeoutMs, maxOutputBytes: 64 * 1024 });
+  // Protocol values are deliberately read from the candidate's compiled
+  // module with the candidate runtime. Manifests do not carry these fields;
+  // defaulting them here would turn a preflight into a self-assertion.
+  const versionModule = join(root, "app", "dist", "version.js");
+  const probe = "import(process.env.TRON_CANDIDATE_VERSION_URL).then(({PROTOCOL_VERSION, MIN_PROTOCOL_VERSION}) => { if (!Number.isSafeInteger(PROTOCOL_VERSION) || !Number.isSafeInteger(MIN_PROTOCOL_VERSION)) process.exit(2); process.stdout.write(JSON.stringify({ protocolVersion: PROTOCOL_VERSION, minProtocolVersion: MIN_PROTOCOL_VERSION })); }).catch(() => process.exit(3));";
+  const probeResult = await runCommand(runtime, ["-e", probe], {
+    timeoutMs, maxOutputBytes: 8 * 1024,
+    env: { ...process.env, TRON_CANDIDATE_VERSION_URL: pathToFileURL(versionModule).href },
+  });
+  let protocol;
+  let minimum;
+  try {
+    const value = JSON.parse(probeResult?.output ?? "");
+    protocol = value.protocolVersion;
+    minimum = value.minProtocolVersion;
+  } catch {
+    throw new Error("candidate Gateway did not emit a valid protocol version range");
+  }
+  // The installed client speaks PROTOCOL_VERSION. The candidate must both
+  // understand that version and not require a newer one.
+  if (protocol < PROTOCOL_VERSION || minimum > PROTOCOL_VERSION || minimum < 1 || protocol < minimum) {
+    throw new Error("candidate Gateway protocol range is incompatible");
+  }
+  return manifest;
 }
 
 async function waitHealth(options, expected, oldEpoch) {
@@ -689,13 +974,21 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
     if (expectedFingerprint && expectedFingerprint !== manifest.payloadFingerprint) throw new Error("requested fingerprint does not match staged manifest");
     const priorState = await captureSelectionState(paths);
     const prior = priorState.current === undefined ? undefined : selection(JSON.parse(priorState.current), channel);
-    let priorManifest;
-    if (prior) {
-      priorManifest = await validatePayload(join(paths.versionsRoot, prior.version), {
-        channel, version: prior.version, payloadFingerprint: prior.payloadFingerprint,
+    // If current already names the candidate, publication happened before a
+    // crash and `previous` is the real rollback pointer. Otherwise recovery
+    // must target the selection that was current before this promotion.
+    const candidateAlreadyPublished = prior?.version === version && prior.payloadFingerprint === manifest.payloadFingerprint;
+    const recoverySelectionValue = candidateAlreadyPublished
+      ? (priorState.previous === undefined ? undefined : selection(JSON.parse(priorState.previous), channel))
+      : prior;
+    let recoveryManifest;
+    if (recoverySelectionValue) {
+      recoveryManifest = await validatePayload(join(paths.versionsRoot, recoverySelectionValue.version), {
+        channel, version: recoverySelectionValue.version, payloadFingerprint: recoverySelectionValue.payloadFingerprint,
       }, true);
     }
     const before = await health(host, port, timeoutMs);
+    await preflightPayload(targetRoot, runBounded, Math.min(timeoutMs, 30_000));
     const target = { schema: SCHEMA, kind: SELECTION_KIND, channel, version, payloadFingerprint: manifest.payloadFingerprint };
     const stateBase = {
       channel, version, payloadFingerprint: manifest.payloadFingerprint, sourceRevision: manifest.sourceRevision,
@@ -726,32 +1019,48 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
       return { state: "ready", manifest, health: before, unchanged };
     }
 
-    let published = false;
+    // A crash can occur after current.json is published but before the new
+    // process is healthy. In that case current already names the candidate;
+    // publishing again would overwrite the real rollback pointer with itself.
+    let published = candidateAlreadyPublished;
     try {
-      await publishSelection(paths, target);
-      published = true;
+      if (!unchanged) {
+        await writePendingAttempt(paths, target, prior);
+        await publishSelection(paths, target);
+        // Set ownership immediately after atomic publication. A later failure
+        // must not skip recovery because this flag remained false.
+        published = true;
+      }
       await writeState(paths, { ...stateBase, state: deploymentTransition("prepared", "published") });
       await requestRestart({ host, port, token, timeoutMs, commandId: stateBase.commandId });
       await writeState(paths, { ...stateBase, state: deploymentTransition("published", "restartRequested") });
       const ready = await waitHealth({ host, port, timeoutMs }, manifest, before.runtimeEpoch);
       await writeState(paths, { ...stateBase, state: "ready" });
+      await clearPendingAttempt(paths, target);
       return { state: "ready", manifest, health: ready };
     } catch (error) {
       if (published) {
         try {
-          await restoreSelectionState(paths, priorState);
+          if (unchanged) await rollbackSelection(paths);
+          else await restoreSelectionState(paths, priorState);
           await writeState(paths, { ...stateBase, state: deploymentTransition("published", "failed"), error: String(error?.message ?? error) });
           await requestRestart({ host, port, token, timeoutMs, commandId: suffixedCommandId(stateBase.commandId, "-rollback") });
-          const recoveryTarget = priorManifest ?? {
+          const recoveryTarget = recoveryManifest ?? {
             payloadFingerprint: before.buildFingerprint, sourceRevision: before.sourceRevision,
           };
           await waitHealth({ host, port, timeoutMs }, recoveryTarget, before.runtimeEpoch);
           await writeState(paths, { ...stateBase, state: deploymentTransition("failed", "rollbackRequested") });
           await writeState(paths, { ...stateBase, state: deploymentTransition("rollback-requested", "rolledBack") });
+          // Preserve terminal automatic rollback through the outer apply
+          // boundary; callers still receive the original bounded failure.
+          await rm(paths.pending ?? join(paths.channelRoot, "pending-attempt.json"), { force: true });
+          if (error && typeof error === "object") error.automaticRollbackCompleted = true;
         } catch (recoveryError) {
           try { await restoreSelectionState(paths, priorState); } catch { /* best effort, keep original error */ }
           error.message += `; deployment recovery failed: ${recoveryError.message}`;
         }
+      } else {
+        await rm(paths.pending ?? join(paths.channelRoot, "pending-attempt.json"), { force: true }).catch(() => {});
       }
       throw error;
     }
@@ -809,13 +1118,14 @@ async function stageConfiguredArtifact(paths, config, requestedVersion) {
   return result.manifest.version;
 }
 
-export async function buildSourcePayload({ paths, config, candidateVersion, timeoutMs = 120_000, runCommand = runBounded }) {
+export async function buildSourcePayload({ paths, config, candidateVersion, timeoutMs = 120_000, runCommand = runBounded, npmCommand = resolveNpmCommand() }) {
   const active = await currentPayload(paths);
   const gatewayRoot = join(config.sourceRoot, "packages", "gateway");
   // Compile into a private temporary directory. In particular, never invoke
   // the package build script here: its configured outDir is the trusted source
   // tree's packages/gateway/dist, which must remain byte-for-byte unchanged.
   const compilerOutput = await mkdtemp(join(tmpdir(), "tron-gateway-source-build-"));
+  let privateStaging;
   try {
     await runCommand(process.execPath, [
       join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"),
@@ -825,10 +1135,12 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
     const version = candidateVersion ?? `${sourcePackage.version}-source-${Date.now()}`;
     if (!validComponent(version, 128)) throw new Error("source build produced an invalid candidate version");
     const target = join(paths.versionsRoot, version);
-    const temporary = join(paths.versionsRoot, `.source-staging-${version}-${process.pid}-${randomUUID()}`);
-    await rm(temporary, { recursive: true, force: true });
+    // Keep the expensive private install outside the channel projection. A
+    // staging directory under versionsRoot would be visible to retention and
+    // could be removed by a concurrent updater.
+    const temporaryParent = await mkdtemp(join(tmpdir(), "tron-gateway-source-staging-"));
+    const temporary = join(temporaryParent, "payload");
     try {
-      await mkdir(paths.versionsRoot, { recursive: true, mode: 0o700 });
       await cp(active.root, temporary, { recursive: true, errorOnExist: true, force: false });
       await makeMutable(temporary);
       await rm(join(temporary, "app", "dist"), { recursive: true, force: true });
@@ -836,9 +1148,19 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
       await cp(compilerOutput, join(temporary, "app", "dist"), { recursive: true, errorOnExist: true, force: false });
       await cp(join(gatewayRoot, "package.json"), join(temporary, "app", "package.json"));
       await cp(join(gatewayRoot, "package-lock.json"), join(temporary, "app", "package-lock.json"));
+      // The updater and helper are part of the trusted source revision, not
+      // stale files inherited from whichever payload happened to be active.
+      await copyTrustedSourceScripts(config.sourceRoot, temporary);
       await rm(join(temporary, "app", "node_modules"), { recursive: true, force: true });
-      await runCommand("npm", ["ci", "--omit=dev", "--ignore-scripts=false"], {
+      await runCommand(npmCommand.tool, [
+        ...(npmCommand.script ? [npmCommand.script] : []),
+        "ci", "--omit=dev", "--ignore-scripts=false",
+      ], {
         cwd: join(temporary, "app"), timeoutMs,
+        env: {
+          ...process.env,
+          PATH: npmCommand.bin ? `${dirname(npmCommand.bin)}:/usr/bin:/bin` : process.env.PATH,
+        },
       });
       const fingerprint = await payloadFingerprint(temporary);
       const manifest = {
@@ -850,23 +1172,42 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
       payloadManifest(manifest, { channel: paths.channel, version });
       await atomicJson(join(temporary, "manifest.json"), manifest);
       await validatePayload(temporary, { channel: paths.channel, version, payloadFingerprint: fingerprint }, true);
-      await makeImmutable(temporary);
-      try { await rename(temporary, target); } catch (error) {
-        if (error?.code === "EEXIST") throw new Error(`version ${version} already exists`);
-        throw error;
-      }
-      await writeState(paths, {
-        state: "prepared", channel: paths.channel, version, payloadFingerprint: fingerprint,
-        sourceRevision: manifest.sourceRevision, runtimeEpoch: manifest.runtimeEpoch,
-        candidateIdentity: {
-          version, gatewayVersion: manifest.gatewayVersion, sourceRevision: manifest.sourceRevision,
-          runtimeEpoch: manifest.runtimeEpoch, payloadFingerprint: fingerprint,
-        },
+      // Compilation and dependency installation above are private and do not
+      // hold the channel lock. Publication is one serialized transaction:
+      // immutable finalization, rename, candidate state, and retention all
+      // observe the same channel snapshot. applyPayload holds only the
+      // distinct apply lock, so this cannot recursively deadlock it.
+      return await withStoreLock(paths, async () => {
+        try {
+          await access(target);
+          throw new Error(`version ${version} already exists`);
+        } catch (error) {
+          if (error?.code !== "ENOENT") throw error;
+        }
+        privateStaging = join(paths.versionsRoot, `.source-staging-${version}-${process.pid}-${randomUUID()}`);
+        await mkdir(paths.versionsRoot, { recursive: true, mode: 0o700 });
+        await cp(temporary, privateStaging, { recursive: true, errorOnExist: true, force: false });
+        await makeImmutable(privateStaging);
+        try { await rename(privateStaging, target); } catch (error) {
+          if (error?.code === "EEXIST") throw new Error(`version ${version} already exists`);
+          throw error;
+        }
+        await writeState(paths, {
+          state: "prepared", channel: paths.channel, version, payloadFingerprint: fingerprint,
+          sourceRevision: manifest.sourceRevision, runtimeEpoch: manifest.runtimeEpoch,
+          candidateIdentity: {
+            version, gatewayVersion: manifest.gatewayVersion, sourceRevision: manifest.sourceRevision,
+            runtimeEpoch: manifest.runtimeEpoch, payloadFingerprint: fingerprint,
+          },
+        });
+        await cleanupPayloadVersionsUnlocked(paths);
+        return { root: target, manifest };
       });
-      return { root: target, manifest };
     } catch (error) {
-      await rm(temporary, { recursive: true, force: true });
+      if (privateStaging) await rm(privateStaging, { recursive: true, force: true });
       throw error;
+    } finally {
+      await rm(temporaryParent, { recursive: true, force: true });
     }
   } finally {
     await rm(compilerOutput, { recursive: true, force: true });
@@ -878,7 +1219,7 @@ export async function buildSourcePayload({ paths, config, candidateVersion, time
  * executable, host, or port arguments. Source and artifact roots are read only
  * from the validated home projection; request parameters select policy only.
  */
-export async function applyPayload(request) {
+async function applyPayloadInternal(request) {
   const value = validateApplyRequest(request);
   const home = homeForChannel(value.channel, process.env.TRON_DATA_DIR);
   const paths = store(home, value.channel);
@@ -904,7 +1245,6 @@ export async function applyPayload(request) {
     }
     await writeProgress(paths, "staging", value.commandId);
     version = built.manifest.version;
-    version = built.manifest.version;
   }
   if (!version) throw new Error("artifact update requires an available staged candidate version");
   const requestedHost = process.env.TRON_GATEWAY_HEALTH_HOST ?? process.env.TRON_GATEWAY_HOST ?? "tailscale";
@@ -922,11 +1262,39 @@ export async function applyPayload(request) {
       commandId: value.commandId,
     });
   } catch (error) {
-    await writeProgress(paths, "rollback", value.commandId, error?.message ?? error).catch(() => {});
+    if (error?.automaticRollbackCompleted === true) {
+      await writeProgress(paths, "rolled-back", value.commandId, error?.message ?? error).catch(() => {});
+    } else {
+      await writeProgress(paths, "rollback", value.commandId, error?.message ?? error).catch(() => {});
+    }
     throw error;
   }
   await writeProgress(paths, result.state, value.commandId);
   return { accepted: true, channel: value.channel, mode: selectedMode === "source" ? "source" : value.mode, commandId: value.commandId, state: result.state, version };
+}
+
+export async function applyPayload(request) {
+  const value = validateApplyRequest(request);
+  if (process.env.TRON_GATEWAY_SUPERVISED !== "1") {
+    throw new Error("Gateway updates require the supervised LaunchAgent runtime");
+  }
+  const home = homeForChannel(value.channel, process.env.TRON_DATA_DIR);
+  const paths = store(home, value.channel);
+  return withApplyLock(paths, async () => {
+    await writeProgress(paths, "starting", value.commandId);
+    try {
+      return await applyPayloadInternal(value);
+    } catch (error) {
+      // Every acknowledged detached request gets one terminal bounded result,
+      // including malformed config, unavailable npm, and pre-build failures.
+      // Automatic rollback is already terminal and must retain its original
+      // bounded error rather than being overwritten by generic failure.
+      if (error?.automaticRollbackCompleted !== true) {
+        await writeProgress(paths, "failure", value.commandId, error?.message ?? error).catch(() => {});
+      }
+      throw error;
+    }
+  });
 }
 
 export async function loadRollbackTarget(paths) {
@@ -1000,7 +1368,15 @@ async function main() {
     if (!version || !validComponent(version, 128)) throw new Error("promote requires a valid --version");
     result = await promote({ ...options, version, expectedFingerprint: argument("--fingerprint"), commandId: callerCommandId });
   } else if (command === "rollback") {
-    result = await rollback({ ...options, commandId: callerCommandId });
+    if (!callerCommandId) throw new Error("rollback requires --command-id");
+    await writeProgress(paths, "rollback", callerCommandId);
+    try {
+      result = await rollback({ ...options, commandId: callerCommandId });
+      await writeProgress(paths, "rolled-back", callerCommandId);
+    } catch (error) {
+      await writeProgress(paths, "failure", callerCommandId, error?.message ?? error).catch(() => {});
+      throw error;
+    }
   } else {
     throw new Error("usage: gateway-payload-deploy.mjs stage|promote|rollback [options]");
   }
