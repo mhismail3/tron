@@ -314,7 +314,7 @@ struct NewSessionSheet: View {
                         .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
                     Spacer(minLength: 10)
                     Text(value)
-                        .font(TronTypography.code(size: TronTypography.sizeXL, weight: .bold))
+                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.55)
                         .truncationMode(.middle)

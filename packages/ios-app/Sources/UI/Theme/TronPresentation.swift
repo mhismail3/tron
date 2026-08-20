@@ -12,6 +12,7 @@ enum TronTypography {
     static let sizeSM: CGFloat = 9
     static let sizeCaption: CGFloat = 10
     static let sizeBody2: CGFloat = 11
+    static let sizeSecondary: CGFloat = 11.5
     static let sizeBodySM: CGFloat = 12
     static let sizeBody3: CGFloat = 13
     static let sizeBody: CGFloat = 14
@@ -38,10 +39,10 @@ enum TronTypography {
     static var body: Font { sans(size: sizeBody) }
     static var bodySM: Font { sans(size: sizeBodySM) }
     /// Stable explanatory copy and labels use the selected reading family.
-    static var secondaryDescription: Font { sans(size: sizeBody2) }
+    static var secondaryDescription: Font { sans(size: sizeSecondary) }
     /// Live or user-selectable values use the selected code family so state is
     /// visually distinct from stable explanatory copy.
-    static var secondaryCodeDescription: Font { code(size: sizeBody2) }
+    static var secondaryCodeDescription: Font { code(size: sizeSecondary) }
     /// Shared section-label treatment used by every sheet and settings group.
     static var sheetSectionHeader: Font { sans(size: sizeBodySM, weight: .semibold) }
     static var caption: Font { sans(size: sizeCaption) }

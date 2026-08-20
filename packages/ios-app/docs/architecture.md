@@ -809,8 +809,11 @@ explanations and identities use the selected reading family; live or user-select
 code family. A row with a distinct trailing control places its value on the secondary line and gives
 the control a stable reading-family action label. Without a trailing control, the dynamic value is
 right aligned. Main Settings summaries, server addresses, and model/provider descriptions are stable
-copy; connection/provider state and editable selections are dynamic values. The same policy owns New
-Session, Manage Session, history, and their progressively presented subsheets. The dashboard keeps search as an explicit toolbar action, aligns workspace headers to the session
+copy; connection/provider state and editable selections are dynamic values. Both secondary roles share
+an 11.5-point scale. Deliberately prominent summary values—such as New Session card selections and
+Manage Session’s large remaining-token headline—remain bold reading-family exceptions rather than
+code-family secondary values. The same policy owns New Session, Manage Session, history, and their
+progressively presented subsheets. The dashboard keeps search as an explicit toolbar action, aligns workspace headers to the session
 status column, uses compact separated session cards, and keeps relative activity
 time at each row's trailing edge. Workspace headers and session cards share the
 same 28-point status-icon anchor: 16 points of outer row inset plus 12 points of

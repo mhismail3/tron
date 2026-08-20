@@ -337,7 +337,7 @@ struct SessionContextSheet: View {
                 let remaining = max(0, contextWindow - used)
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text("\(remaining.formatted(.number.notation(.compactName))) tokens left")
-                        .font(TronTypography.code(size: TronTypography.sizeXL, weight: .bold))
+                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                         .foregroundStyle(Color.tronTextPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)
