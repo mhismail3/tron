@@ -35,10 +35,10 @@ The script:
 5. compiles `tron-gateway-launcher.c` as a universal macOS executable;
 6. stages the launcher into both tracked Login Item skeletons;
 7. hashes every regular file and safe internal symlink under `app/**` (including
-the complete production `node_modules` tree) and `runtime/**` with
-`hash-gateway-payload.sh`, then
-   writes that fingerprint into the bundled `manifest.json` and stamps a
-   runtime epoch. Use `scripts/gateway-payload-deploy.mjs` to stage, promote,
+   the complete production `node_modules` tree) and `runtime/**` with the
+   launcher's bounded in-process hasher, then writes that fingerprint into the
+   bundled `manifest.json` and stamps a runtime epoch. The shell hash helper
+   remains the readable cross-implementation test fixture. Use `scripts/gateway-payload-deploy.mjs` to stage, promote,
    or roll back immutable stable/dev payload versions; do not use `scripts/tron
    dev` as a Gateway owner (it is deprecated/fail-closed for this architecture).
 
@@ -120,7 +120,10 @@ through bounded update progress. The Mac menu Restart seam uses the same authent
 This is a manual developer installation, not a production deployment command.
 Do not remove `~/.tron`; it contains canonical sessions and owned credentials.
 When replacing an already-installed app, first wait for active runs to finish,
-choose **Pause Tron** from the Mac menu bar, and quit the wrapper. Then build a
+choose **Pause Tron** from the Mac menu bar, and quit the wrapper. During the
+one-time migration from a DerivedData-owned Preview, also quit that Debug
+wrapper before replacement; after installation, enable Preview from the Release
+menu instead. Then build a
 Release app with an explicit derived-data directory:
 
 ```bash
