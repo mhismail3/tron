@@ -550,6 +550,23 @@ export class GatewayServer {
         });
         return;
       }
+      if (request.method === "GET" && url.pathname.startsWith("/v1/uploads/")) {
+        const id = decodeURIComponent(url.pathname.slice("/v1/uploads/".length));
+        const lease = await this.options.uploads.acquire(id);
+        try {
+          response.writeHead(200, {
+            "content-type": lease.mimeType,
+            "content-length": lease.size,
+            "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(lease.name)}`,
+            "cache-control": "private, max-age=300",
+            "x-content-type-options": "nosniff",
+          });
+          await pipeline(lease.stream, response);
+        } finally {
+          await lease.release();
+        }
+        return;
+      }
       if (request.method === "GET" && url.pathname.startsWith("/v1/blobs/")) {
         const id = decodeURIComponent(url.pathname.slice("/v1/blobs/".length));
         const lease = await this.options.sessions.acquireBlob(id);

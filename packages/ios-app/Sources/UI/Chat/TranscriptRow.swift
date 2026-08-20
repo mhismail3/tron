@@ -179,7 +179,8 @@ struct TranscriptRow: View, Equatable {
                         TranscriptFileChip(
                             name: attachment.name,
                             mimeType: attachment.mimeType,
-                            size: attachment.size
+                            size: attachment.size,
+                            blobID: part.blobId
                         )
                     }
                 }
@@ -690,36 +691,54 @@ private struct TranscriptImageChip: View {
 }
 
 struct TranscriptFileChip: View {
+    @Environment(AppModel.self) private var model
     let name: String
     let mimeType: String
     let size: Int?
+    let blobID: String?
+    @State private var thumbnail: UIImage?
+    @State private var thumbnailIdentity: ChatMediaIdentity?
+    @State private var showPreview = false
+
+    private var identity: ChatMediaIdentity? {
+        blobID.flatMap { model.chatMediaIdentity(blobID: $0) }
+    }
+
+    private var currentThumbnail: UIImage? {
+        thumbnailIdentity == identity ? thumbnail : nil
+    }
 
     var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: "doc.text.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
-                .foregroundStyle(Color.tronBlue)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(name)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody2, weight: .semibold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(detail)
-                    .font(TronTypography.code(size: TronTypography.sizeCaption))
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .lineLimit(1)
+        Group {
+            if let currentThumbnail {
+                Button { showPreview = true } label: {
+                    AttachmentThumbnailSurface(image: currentThumbnail, name: name, mimeType: mimeType)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens the first-page preview")
+            } else {
+                AttachmentThumbnailSurface(image: nil, name: name, mimeType: mimeType)
             }
         }
-        .padding(.horizontal, 11)
-        .frame(width: 176, height: 64, alignment: .leading)
-        .glassEffect(
-            .regular.tint(Color.tronBlue.opacity(0.18)),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("File attachment, \(name), \(detail)")
+        .task(id: identity) {
+            guard let identity,
+                  thumbnailIdentity != identity || thumbnail == nil else { return }
+            guard let loaded = try? await model.chatMedia.fileThumbnail(
+                for: identity,
+                name: name,
+                mimeType: mimeType
+            ), !Task.isCancelled, self.identity == identity else { return }
+            thumbnail = loaded
+            thumbnailIdentity = identity
+        }
+        .onChange(of: identity) { _, _ in showPreview = false }
+        .sheet(isPresented: $showPreview) {
+            if let currentThumbnail {
+                AttachmentImagePreviewSheet(image: currentThumbnail, title: name)
+            }
+        }
     }
 
     private var detail: String {

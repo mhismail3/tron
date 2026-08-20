@@ -672,7 +672,7 @@ actor GatewayClient {
         token: String,
         maximumBytes: Int
     ) async throws -> (Data, String) {
-        guard let url = profile.httpURL(path: "/v1/blobs/\(id)") else {
+        guard let url = mediaURL(id: id, profile: profile) else {
             throw Self.invalidProfileEndpoint()
         }
         var request = URLRequest(url: url, timeoutInterval: 30)
@@ -693,7 +693,7 @@ actor GatewayClient {
         token: String,
         maximumBytes: Int
     ) async throws -> BoundedHTTPDownloadedFile {
-        guard let url = profile.httpURL(path: "/v1/blobs/\(id)") else {
+        guard let url = mediaURL(id: id, profile: profile) else {
             throw Self.invalidProfileEndpoint()
         }
         var request = URLRequest(url: url, timeoutInterval: 30)
@@ -707,6 +707,19 @@ actor GatewayClient {
             throw GatewayFailure(code: "blob_failed", message: "The export is no longer available. Try exporting again.", retryable: true, details: nil)
         }
         return downloaded
+    }
+
+    private func mediaURL(id: String, profile: GatewayProfile) -> URL? {
+        Self.mediaPath(id: id).flatMap { profile.httpURL(path: $0) }
+    }
+
+    nonisolated static func mediaPath(id: String) -> String? {
+        if id.hasPrefix("upload:") {
+            let uploadID = String(id.dropFirst("upload:".count))
+            guard UUID(uuidString: uploadID) != nil else { return nil }
+            return "/v1/uploads/\(uploadID)"
+        }
+        return "/v1/blobs/\(id)"
     }
 
     private func startReceive(epochID: Int) {

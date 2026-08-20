@@ -146,7 +146,7 @@ describe("transcript projection", () => {
     const manager = SessionManager.inMemory("/tmp/project");
     const entry = manager.appendMessage({
       role: "user",
-      content: `Review this\n\n<attachment name="Boarding &amp; notes.pdf" mime-type="application/pdf" size="55972" path="/Users/private/content.pdf" />`,
+      content: `Review this\n\n<attachment name="Boarding &amp; notes.pdf" mime-type="application/pdf" size="55972" path="/Users/private/00000000-0000-4000-8000-000000000001/content.pdf" />`,
       timestamp: 1,
     });
 
@@ -160,6 +160,7 @@ describe("transcript projection", () => {
         {
           id: `${entry}:1`, type: "text", text: "Boarding & notes.pdf",
           attachment: { name: "Boarding & notes.pdf", mimeType: "application/pdf", size: 55_972 },
+          blobId: "upload:00000000-0000-4000-8000-000000000001",
         },
       ],
     });
@@ -170,7 +171,7 @@ describe("transcript projection", () => {
     const manager = SessionManager.inMemory("/tmp/project");
     manager.appendMessage({
       role: "user",
-      content: `Literal <attachment name="unfinished" path="/Users/private/content.pdf" />`,
+      content: `Literal <attachment name="unfinished" upload-id="00000000-0000-4000-8000-000000000001" path="/Users/private/content.pdf" />`,
       timestamp: 1,
     });
     const projected = projectTranscript(manager, new BlobStore())[0];

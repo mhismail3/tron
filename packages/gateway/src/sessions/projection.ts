@@ -354,10 +354,10 @@ type ProjectableContent = string | Array<
 const ATTACHMENT_TAG = /<attachment\b([^<>]*?)\s*\/>/g;
 const ATTACHMENT_ATTRIBUTE = /([a-z-]+)="([^"]*)"/g;
 const ATTACHMENT_LIKE_TAG = /<attachment\b[^>]*>/gi;
-const ATTACHMENT_PATH_ATTRIBUTE = /\s+path\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi;
+const ATTACHMENT_PRIVATE_ATTRIBUTE = /\s+(?:path|upload-id)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi;
 
 function safeAttachmentFallback(value: string): string {
-  return value.replace(ATTACHMENT_LIKE_TAG, (tag) => tag.replace(ATTACHMENT_PATH_ATTRIBUTE, ""));
+  return value.replace(ATTACHMENT_LIKE_TAG, (tag) => tag.replace(ATTACHMENT_PRIVATE_ATTRIBUTE, ""));
 }
 
 function unescapeXML(value: string): string {
@@ -366,6 +366,12 @@ function unescapeXML(value: string): string {
     .replaceAll("&gt;", ">")
     .replaceAll("&lt;", "<")
     .replaceAll("&amp;", "&");
+}
+
+const OWNED_UPLOAD_PATH = /\/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/[^/]+$/i;
+
+function uploadIdentity(path: string): string | undefined {
+  return OWNED_UPLOAD_PATH.exec(path)?.[1];
 }
 
 function projectUserText(text: string, ownerId: string, nextIndex: () => number): ContentPart[] {
@@ -383,6 +389,7 @@ function projectUserText(text: string, ownerId: string, nextIndex: () => number)
     const mimeType = attributes.get("mime-type");
     const size = Number(attributes.get("size"));
     const path = attributes.get("path");
+    const uploadId = attributes.get("upload-id") ?? (path ? uploadIdentity(path) : undefined);
     if (!name || !mimeType || !path || !Number.isSafeInteger(size) || size < 0) continue;
 
     const leading = safeAttachmentFallback(text.slice(cursor, match.index)).replace(/\s+$/, "");
@@ -392,6 +399,7 @@ function projectUserText(text: string, ownerId: string, nextIndex: () => number)
       type: "text",
       text: name,
       attachment: { name, mimeType, size },
+      ...(uploadId ? { blobId: `upload:${uploadId}` } : {}),
     });
     cursor = match.index + match[0].length;
   }

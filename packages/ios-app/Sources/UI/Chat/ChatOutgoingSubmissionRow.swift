@@ -59,23 +59,13 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(attachments) { attachment in
-                                if attachment.mimeType.hasPrefix("image/"),
-                                   let data = attachment.previewData,
-                                   let image = UIImage(data: data) {
-                                    Image(uiImage: image)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 64, height: 64)
-                                        .clipped()
-                                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                                        .glassEffect(
-                                            .regular.tint(Color.tronBlue.opacity(0.18)),
-                                            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                                        )
-                                        .accessibilityLabel("Image attachment")
-                                } else {
-                                    TranscriptFileChip(name: attachment.name, mimeType: attachment.mimeType, size: attachment.size)
-                                }
+                                AttachmentThumbnailSurface(
+                                    image: attachment.previewData.flatMap(UIImage.init(data:)),
+                                    name: attachment.name,
+                                    mimeType: attachment.mimeType
+                                )
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("Attachment \(attachment.name)")
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .trailing)

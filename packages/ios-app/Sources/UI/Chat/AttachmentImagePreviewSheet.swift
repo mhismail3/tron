@@ -54,6 +54,9 @@ struct AttachmentImagePreviewSheet: View {
             Text(title)
                 .font(TronTypography.button)
                 .foregroundStyle(Color.tronEmerald)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.horizontal, AttachmentImagePreviewLayout.dismissButtonDiameter + edgeInset)
                 .frame(
                     maxWidth: .infinity,
                     minHeight: AttachmentImagePreviewLayout.dismissButtonDiameter

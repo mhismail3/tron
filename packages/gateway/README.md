@@ -71,6 +71,7 @@ before the index rename remains outside that cleanup.
 - `GET /health` — unauthenticated readiness and compatibility metadata
 - `POST /v1/pair` — rate-limited one-time enrollment exchange
 - `POST /v1/uploads` — authenticated bounded upload
+- `GET /v1/uploads/:id` — authenticated stream for a prompt-owned canonical attachment
 - `GET /v1/blobs/:id` — authenticated transient projected blob
 - `GET /v1/socket` — authenticated protocol version 2 WebSocket
 
@@ -87,7 +88,12 @@ chunks stream directly into protected store-owned files; exact declared and obse
 metadata publication. Persisted upload metadata is limited to an exact 64 KiB document with canonical timestamps and fields; malformed or oversized entries self-clean before quota admission or direct materialization. Every success, rejection, overflow, truncation, or disconnect removes uncommitted staging
 and releases its slot. Unclaimed uploads
 expire after 24 hours, malformed/partial folders self-clean, prompt attachment IDs are unique, and
-one prompt cannot materialize more than the per-request byte ceiling. Successful imports remove
+one prompt cannot materialize more than the per-request byte ceiling. Mobile projection derives the
+opaque upload identity from the validated store-owned canonical path, strips that private path, and
+exposes the identity solely as an authenticated preview route; no extra identifier is added to the model
+prompt. Unclaimed staging is never readable, while a prompt-owned file streams from its already-open
+descriptor with its exact declared size and MIME type.
+Successful imports remove
 their staging folder; deleting a canonical session removes its claimed attachment folders. Cleanup
 failure is best effort after canonical import/deletion success and cannot turn that success into an
 ambiguous command receipt; failed session-folder cleanup remains pending in the live store and retries

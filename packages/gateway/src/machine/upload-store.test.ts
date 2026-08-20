@@ -21,15 +21,23 @@ describe("UploadStore", () => {
     const store = new UploadStore(await root(), 1024);
     const image = await store.save("photo.png", "image/png", Buffer.from("image"));
     const document = await store.save("notes.txt", "text/plain", Buffer.from("text"));
+    await expect(store.acquire(document.id)).rejects.toMatchObject({ code: "not_found" });
     const materialized = await store.materialize([image.id, document.id], "session");
     expect(materialized.images[0]?.mimeType).toBe("image/png");
     expect(materialized.photoCount).toBe(1);
     expect(materialized.fileAttachmentCount).toBe(1);
     expect(materialized.envelope).toContain("<attachment");
     expect(materialized.envelope).toContain("notes.txt");
+    const lease = await store.acquire(document.id);
+    const chunks: Buffer[] = [];
+    for await (const chunk of lease.stream) chunks.push(Buffer.from(chunk));
+    await lease.release();
+    expect(Buffer.concat(chunks).toString("utf8")).toBe("text");
+    expect(lease).toMatchObject({ name: "notes.txt", mimeType: "text/plain", size: 4 });
     await expect(store.materialize([image.id], "other-session")).rejects.toMatchObject({ code: "conflict" });
 
     await store.removeSession("session");
+    await expect(store.acquire(document.id)).rejects.toMatchObject({ code: "not_found" });
     await expect(store.materialize([image.id], "session")).rejects.toMatchObject({ code: "not_found" });
   });
 

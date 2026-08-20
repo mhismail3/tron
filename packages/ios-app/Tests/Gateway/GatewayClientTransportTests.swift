@@ -161,6 +161,15 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("canonical file preview identities route only valid upload UUIDs")
+    func canonicalFilePreviewRoutes() {
+        #expect(GatewayClient.mediaPath(id: "blob-value") == "/v1/blobs/blob-value")
+        #expect(GatewayClient.mediaPath(id: "upload:00000000-0000-4000-8000-000000000001")
+            == "/v1/uploads/00000000-0000-4000-8000-000000000001")
+        #expect(GatewayClient.mediaPath(id: "upload:") == nil)
+        #expect(GatewayClient.mediaPath(id: "upload:../../private") == nil)
+    }
+
     @Test("initial and reconnect URL loading timeouts stay above application liveness")
     func websocketRequestTimeouts() async throws {
         try await withTestWatchdog {

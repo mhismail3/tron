@@ -66,6 +66,21 @@ struct ChatMediaLoaderTests {
         #expect(decoded.1 <= 192 * 192 * 4)
     }
 
+    @Test("file thumbnails render bounded first-page text through the shared cache")
+    func fileThumbnail() async throws {
+        let loader = ChatMediaLoader(
+            fetch: { _ in .init(data: Data("line one\nline two".utf8), mimeType: "text/plain") },
+            admits: { _ in true }
+        )
+        let image = try await loader.fileThumbnail(
+            for: mediaIdentity(blobID: "document"),
+            name: "notes.txt",
+            mimeType: "text/plain"
+        )
+        #expect(image.cgImage?.width == ComposerAttachmentPreviewPolicy.maximumPixelDimension)
+        #expect(loader.metrics().thumbnailCount == 1)
+    }
+
     @Test("concurrent requests share one exact identity fetch and decode")
     func singleFlight() async throws {
         let fixture = try SessionScenarioBuilder(seed: 6_302).generatedImageFixture(

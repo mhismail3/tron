@@ -192,6 +192,35 @@ final class ChatMediaLoader {
     }
 
     func thumbnail(for identity: ChatMediaIdentity) async throws -> UIImage {
+        try await thumbnail(for: identity, decode: thumbnailDecode)
+    }
+
+    func fileThumbnail(
+        for identity: ChatMediaIdentity,
+        name: String,
+        mimeType: String
+    ) async throws -> UIImage {
+        try await thumbnail(for: identity) { data in
+            guard let preview = ComposerAttachmentPreviewPolicy.prepareSynchronously(
+                data,
+                mimeType: mimeType,
+                name: name
+            ), let image = UIImage(data: preview), let cgImage = image.cgImage,
+                  let decodedBytes = ChatMediaPolicy.decodedByteCount(
+                    bytesPerRow: cgImage.bytesPerRow,
+                    height: cgImage.height,
+                    maximum: ChatMediaPolicy.maximumDecodedThumbnailBytes
+                  ) else {
+                throw ChatMediaLoadError.invalidImage
+            }
+            return (image, decodedBytes)
+        }
+    }
+
+    private func thumbnail(
+        for identity: ChatMediaIdentity,
+        decode: @escaping ChatMediaThumbnailDecode
+    ) async throws -> UIImage {
         guard admits(identity) else { throw ChatMediaLoadError.staleIdentity }
         if var cached = thumbnails[identity] {
             ordinal &+= 1
@@ -211,7 +240,6 @@ final class ChatMediaLoader {
             let token = ordinal
             let invalidationGeneration = self.invalidationGeneration
             let fetch = self.fetch
-            let thumbnailDecode = self.thumbnailDecode
             let workLimiter = self.workLimiter
             let task = Task {
                 try await workLimiter.run {
@@ -219,7 +247,7 @@ final class ChatMediaLoader {
                     guard ChatMediaPolicy.admitsEncodedByteCount(payload.data.count) else {
                         throw ChatMediaLoadError.encodedPayloadTooLarge
                     }
-                    return try await thumbnailDecode(payload.data)
+                    return try await decode(payload.data)
                 }
             }
             flight = ThumbnailFlight(

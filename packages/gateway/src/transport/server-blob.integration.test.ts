@@ -16,13 +16,17 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-function makeServer(acquireBlob: (id: string) => Promise<BlobLease>, port = 0): GatewayServer {
+function makeServer(
+  acquireBlob: (id: string) => Promise<BlobLease>,
+  port = 0,
+  acquireUpload: (id: string) => Promise<unknown> = async () => { throw new GatewayError("not_found", "missing"); },
+): GatewayServer {
   return new GatewayServer({
     host: "127.0.0.1",
     port,
     maxFrameBytes: 64 * 1_024,
     devices: { authenticate: async () => ({ id: "device" }) } as never,
-    uploads: {} as never,
+    uploads: { acquire: acquireUpload } as never,
     sessions: { acquireBlob } as never,
     auth: {} as never,
     service: {} as never,
@@ -39,7 +43,7 @@ async function server(acquireBlob: (id: string) => Promise<BlobLease>): Promise<
   return address.port;
 }
 
-function download(port: number, id: string): Promise<{
+function download(port: number, id: string, route = "blobs"): Promise<{
   status: number;
   headers: Record<string, string | string[] | undefined>;
   body: Buffer;
@@ -48,7 +52,7 @@ function download(port: number, id: string): Promise<{
     const outgoing = request({
       host: "127.0.0.1",
       port,
-      path: `/v1/blobs/${encodeURIComponent(id)}`,
+      path: `/v1/${route}/${encodeURIComponent(id)}`,
       headers: { authorization: "Bearer paired" },
     }, (response) => {
       const chunks: Buffer[] = [];
@@ -149,6 +153,31 @@ describe("Gateway blob HTTP leases", () => {
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
     expect(response.body.toString()).toBe("file-backed");
     await store.dispose();
+  });
+
+  it("streams prompt-owned uploads through the same authenticated bounded contract", async () => {
+    const gateway = makeServer(
+      async () => { throw new GatewayError("not_found", "missing"); },
+      0,
+      async () => ({
+        name: "notes.txt",
+        mimeType: "text/plain",
+        size: 5,
+        stream: Readable.from([Buffer.from("notes")]),
+        release: async () => {},
+      }),
+    );
+    servers.push(gateway);
+    await gateway.listen();
+    const address = (gateway as unknown as { server: { address(): AddressInfo | null } }).server.address();
+    if (!address) throw new Error("Gateway did not bind");
+
+    const response = await download(address.port, "00000000-0000-4000-8000-000000000001", "uploads");
+    expect(response.status).toBe(200);
+    expect(response.headers["content-type"]).toBe("text/plain");
+    expect(response.headers["content-length"]).toBe("5");
+    expect(response.headers["content-disposition"]).toContain("notes.txt");
+    expect(response.body.toString()).toBe("notes");
   });
 
   it("returns JSON before headers for an unavailable blob", async () => {

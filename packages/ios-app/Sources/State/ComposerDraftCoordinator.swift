@@ -468,9 +468,11 @@ final class ComposerDraftCoordinator {
             try require(admission)
             throw error
         }
-        let previewData = mimeType.hasPrefix("image/")
-            ? await ComposerAttachmentPreviewPolicy.prepare(data)
-            : nil
+        let previewData = await ComposerAttachmentPreviewPolicy.prepare(
+            data,
+            mimeType: mimeType,
+            name: name
+        )
         try require(admission)
         attachmentsByTarget[target, default: []].append(PendingAttachment(
             id: id,
@@ -478,7 +480,7 @@ final class ComposerDraftCoordinator {
             mimeType: mimeType,
             size: data.count,
             previewData: previewData,
-            fullPreviewData: previewData == nil ? nil : data
+            fullPreviewData: mimeType.hasPrefix("image/") && previewData != nil ? data : nil
         ))
     }
 
@@ -567,16 +569,13 @@ final class ComposerDraftCoordinator {
             try require(admission)
             throw error
         }
-        let fullPreviewData: Data?
-        let previewData: Data?
-        if mimeType.hasPrefix("image/") {
-            let data = try await attachmentFileAccess.previewData(staged, size)
-            fullPreviewData = data
-            previewData = await ComposerAttachmentPreviewPolicy.prepare(data)
-        } else {
-            fullPreviewData = nil
-            previewData = nil
-        }
+        let data = try await attachmentFileAccess.previewData(staged, size)
+        let previewData = await ComposerAttachmentPreviewPolicy.prepare(
+            data,
+            mimeType: mimeType,
+            name: name
+        )
+        let fullPreviewData = mimeType.hasPrefix("image/") && previewData != nil ? data : nil
         try require(admission)
         attachmentsByTarget[target, default: []].append(PendingAttachment(
             id: id,

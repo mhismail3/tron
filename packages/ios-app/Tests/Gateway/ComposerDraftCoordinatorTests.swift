@@ -164,7 +164,7 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
-    @Test("document file upload stages bytes without preview materialization")
+    @Test("document file upload stages bytes and retains only a bounded preview")
     func documentFileUpload() async throws {
         try await withTestWatchdog { @MainActor in
             let data = Data("document".utf8)
@@ -193,11 +193,11 @@ struct ComposerDraftCoordinatorTests {
             #expect(uploaded.value == data)
             #expect(access.startCount == 1)
             #expect(access.stopCount == 1)
-            #expect(access.previewCount == 0)
+            #expect(access.previewCount == 1)
             #expect(access.stagingIsClean)
             let attachment = try #require(coordinator.pendingAttachments(for: target).first)
             #expect(attachment.id == "document-id")
-            #expect(attachment.previewData == nil)
+            #expect(try #require(attachment.previewData).count <= ComposerAttachmentPreviewPolicy.maximumEncodedBytes)
             #expect(attachment.fullPreviewData == nil)
         }
     }

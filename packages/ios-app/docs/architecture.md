@@ -695,13 +695,16 @@ exercise the same owner without camera hardware and do not model a second captur
 Images become native image input. Other files remain agent-readable
 through a deterministic canonical path envelope, while the mobile projection
 removes that path and exposes only display-safe name/type/size metadata. Sent
-images and files share one attachment strip above—and structurally outside—the prompt's Liquid Glass:
-images use the same square previews as pending photos and files use named chips. Transcript images resolve through one
-`ChatMediaLoader` keyed by profile, lifecycle generation, and blob ID; views never fetch blobs
-directly. Authenticated blob reads and upload staging are paired-profile HTTP operations rather than disposable WebSocket-epoch operations, so a same-profile reconnect neither dismisses an open preview nor replaces its thumbnail with a retry state. Thumbnail fetch/decode is identity-single-flight behind one shared preparation slot and a
+images and files share one attachment strip above—and structurally outside—the prompt's Liquid Glass.
+Every attachment uses the same 64-point rounded-square surface as a pending photo. ImageIO renders index
+zero for supported images and paged documents, while bounded UTF-8 text files render a first-page text
+preview; unsupported formats fall back to a file glyph and middle-truncated filename inside that square.
+Pending, optimistic outgoing, and canonical transcript attachments reuse this primitive rather than
+introducing file-only capsules. Transcript media resolves through one `ChatMediaLoader` keyed by profile,
+lifecycle generation, and blob ID; views never fetch blobs directly. Authenticated blob reads and upload staging are paired-profile HTTP operations rather than disposable WebSocket-epoch operations, so a same-profile reconnect neither dismisses an open preview nor replaces its thumbnail with a retry state. Thumbnail fetch/decode is identity-single-flight behind one shared preparation slot and a
 32-flight admission ceiling. Its bounded HTTP delegate rejects declared or streamed bodies over 25 MiB
-while receiving them, then applies image orientation while downsampling off-main to at most 192 pixels
-and retains at most 64 items/4 MiB decoded under deterministic LRU. Uploads publish an explicit
+while receiving them, then applies image orientation or first-page file rendering off-main at no more than
+192 pixels and retains at most 64 items/4 MiB decoded under deterministic LRU. Uploads publish an explicit
 content length, accept a same-profile WebSocket reconnect while the independent HTTP upload completes,
 and preserve bounded Gateway error envelopes instead of collapsing quota or body-admission failures into
 a generic photo error. Lifecycle replacement and the

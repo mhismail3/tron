@@ -78,6 +78,51 @@ enum PendingPhotoRemoveLayoutPolicy {
     }
 }
 
+struct AttachmentThumbnailSurface: View {
+    let image: UIImage?
+    let name: String
+    let mimeType: String
+
+    var body: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                VStack(spacing: 4) {
+                    Image(systemName: fallbackIcon)
+                        .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
+                        .foregroundStyle(Color.tronBlue)
+                    Text(name)
+                        .font(TronTypography.secondaryCodeDescription)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .padding(.horizontal, 5)
+                }
+            }
+        }
+        .frame(
+            width: PendingPhotoRemoveLayoutPolicy.previewSide,
+            height: PendingPhotoRemoveLayoutPolicy.previewSide
+        )
+        .clipped()
+        .glassEffect(
+            .regular.tint(Color.tronBlue.opacity(0.18)),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var fallbackIcon: String {
+        if mimeType.hasPrefix("image/") { return "photo.fill" }
+        if mimeType == "application/pdf" { return "doc.richtext.fill" }
+        return "doc.text.fill"
+    }
+}
+
 struct PendingAttachmentChip: View {
     let attachment: PendingAttachment
     let onRemove: () -> Void
@@ -85,123 +130,81 @@ struct PendingAttachmentChip: View {
     @State private var showPreview = false
 
     var body: some View {
-        Group {
-            if attachment.mimeType.hasPrefix("image/") {
-                imagePreview
-            } else {
-                fileChip
-            }
-        }
-        .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottom)))
+        previewBase
+            .overlay(alignment: .topTrailing) { removeButton }
+            .sheet(isPresented: $showPreview) { previewSheet }
+            .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottom)))
     }
 
-    private var imagePreview: some View {
-        imageBase
-            .overlay(alignment: .topTrailing) {
-                Button(action: onRemove) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.tronBackground.opacity(0.92))
-                        Circle()
-                            .stroke(Color.tronTextMuted.opacity(0.35), lineWidth: 0.5)
-                        Image(systemName: "xmark")
-                            .font(TronTypography.sans(
-                                size: TronTypography.sizeCaption,
-                                weight: .bold
-                            ))
-                            .foregroundStyle(Color.tronTextPrimary)
-                    }
-                    .frame(
-                        width: PendingPhotoRemoveLayoutPolicy.visibleDiameter,
-                        height: PendingPhotoRemoveLayoutPolicy.visibleDiameter
-                    )
-                    .frame(
-                        width: PendingPhotoRemoveLayoutPolicy.touchTarget,
-                        height: PendingPhotoRemoveLayoutPolicy.touchTarget
-                    )
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Remove \(attachment.name)")
-                .offset(
-                    x: PendingPhotoRemoveLayoutPolicy.centerOnTopTrailingCornerOffset.width,
-                    y: PendingPhotoRemoveLayoutPolicy.centerOnTopTrailingCornerOffset.height
+    @ViewBuilder
+    private var previewBase: some View {
+        if let decodedPreviewImage {
+            Button { showPreview = true } label: {
+                AttachmentThumbnailSurface(
+                    image: decodedPreviewImage,
+                    name: attachment.name,
+                    mimeType: attachment.mimeType
                 )
             }
-            .sheet(isPresented: $showPreview) {
-                if let thumbnail = decodedPreviewImage,
-                   let fullPreviewData = attachment.fullPreviewData {
-                    PendingAttachmentImagePreviewSheet(
-                        thumbnail: thumbnail,
-                        fullPreviewData: fullPreviewData,
-                        prepareFullPreview: model.chatMedia.prepareLocalFullPreview
-                    )
-                }
-            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Preview \(attachment.name)")
+            .accessibilityHint(attachment.mimeType.hasPrefix("image/") ? "Opens a photo preview" : "Opens the file preview")
+        } else {
+            AttachmentThumbnailSurface(
+                image: nil,
+                name: attachment.name,
+                mimeType: attachment.mimeType
+            )
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(attachment.mimeType.hasPrefix("image/")
+                ? "Attached photo \(attachment.name)"
+                : "Attached file \(attachment.name)")
+        }
     }
 
-    private var imageBase: some View {
-        ZStack {
-            if let image = decodedPreviewImage {
-                Button { showPreview = true } label: {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(
-                            width: PendingPhotoRemoveLayoutPolicy.previewSide,
-                            height: PendingPhotoRemoveLayoutPolicy.previewSide
-                        )
-                        .clipped()
-                        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                }
-                // Plain button semantics plus noninteractive glass keep a tap
-                // from pulsing or morphing the staged photo.
-                .buttonStyle(.plain)
-                .accessibilityLabel("Preview \(attachment.name)")
-                .accessibilityHint("Opens a photo preview")
-            } else {
-                Image(systemName: "photo.fill")
-                    .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .semibold))
-                    .foregroundStyle(Color.tronBlue)
-                    .accessibilityLabel("Attached \(attachment.name)")
+    private var removeButton: some View {
+        Button(action: onRemove) {
+            ZStack {
+                Circle().fill(Color.tronBackground.opacity(0.92))
+                Circle().stroke(Color.tronTextMuted.opacity(0.35), lineWidth: 0.5)
+                Image(systemName: "xmark")
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
+                    .foregroundStyle(Color.tronTextPrimary)
             }
+            .frame(
+                width: PendingPhotoRemoveLayoutPolicy.visibleDiameter,
+                height: PendingPhotoRemoveLayoutPolicy.visibleDiameter
+            )
+            .frame(
+                width: PendingPhotoRemoveLayoutPolicy.touchTarget,
+                height: PendingPhotoRemoveLayoutPolicy.touchTarget
+            )
+            .contentShape(Rectangle())
         }
-        .frame(
-            width: PendingPhotoRemoveLayoutPolicy.previewSide,
-            height: PendingPhotoRemoveLayoutPolicy.previewSide
+        .buttonStyle(.plain)
+        .accessibilityLabel("Remove \(attachment.name)")
+        .offset(
+            x: PendingPhotoRemoveLayoutPolicy.centerOnTopTrailingCornerOffset.width,
+            y: PendingPhotoRemoveLayoutPolicy.centerOnTopTrailingCornerOffset.height
         )
-        .glassEffect(
-            .regular.tint(Color.tronBlue.opacity(0.18)),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var previewSheet: some View {
+        if let thumbnail = decodedPreviewImage,
+           let fullPreviewData = attachment.fullPreviewData {
+            PendingAttachmentImagePreviewSheet(
+                thumbnail: thumbnail,
+                fullPreviewData: fullPreviewData,
+                prepareFullPreview: model.chatMedia.prepareLocalFullPreview
+            )
+        } else if let decodedPreviewImage {
+            AttachmentImagePreviewSheet(image: decodedPreviewImage, title: attachment.name)
+        }
     }
 
     private var decodedPreviewImage: UIImage? {
         attachment.previewData.flatMap(UIImage.init(data:))
-    }
-
-    private var fileChip: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "doc.text.fill").foregroundStyle(Color.tronBlue)
-            Text(attachment.name)
-                .font(TronTypography.code(size: TronTypography.sizeBody2))
-                .foregroundStyle(Color.tronTextPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 100)
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(Color.tronTextMuted)
-                    .frame(width: 28, height: 28)
-            }
-            .accessibilityLabel("Remove \(attachment.name)")
-        }
-        .font(TronTypography.caption)
-        .padding(.leading, 9)
-        .padding(.trailing, 4)
-        .padding(.vertical, 5)
-        .glassEffect(.regular.tint(Color.tronBlue.opacity(0.22)).interactive(), in: Capsule())
     }
 }
 

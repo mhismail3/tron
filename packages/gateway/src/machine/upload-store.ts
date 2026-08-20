@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, createReadStream, type ReadStream } from "node:fs";
 import { copyFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join } from "node:path";
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -26,6 +26,14 @@ interface StagedUpload {
   folder: string;
   path: string;
   reservedBytes: number;
+}
+
+export interface UploadLease {
+  name: string;
+  mimeType: string;
+  size: number;
+  stream: ReadStream;
+  release(): Promise<void>;
 }
 
 interface UploadStoreOptions {
@@ -325,6 +333,45 @@ export class UploadStore {
       const uploadDirectory = await this.ensureUploadDirectory();
       await rm(join(uploadDirectory, id), { recursive: true, force: true });
     }).catch(() => {});
+  }
+
+  async acquire(id: string): Promise<UploadLease> {
+    this.validateID(id);
+    const metadata = await this.metadata(id);
+    // Unclaimed uploads are private staging state and cannot become arbitrary
+    // authenticated file reads. Only a prompt-owned canonical attachment is
+    // eligible for its bounded mobile preview.
+    if (!metadata.sessionId) throw new GatewayError("not_found", "Attachment is not available");
+    const owned = await this.ownedPath(metadata);
+    const handle = await open(owned.actual, "r");
+    let released = false;
+    try {
+      const actual = await handle.stat();
+      if (!actual.isFile() || actual.size !== metadata.size) {
+        throw new GatewayError("conflict", "Attachment changed after prompt admission");
+      }
+      const stream = createReadStream(owned.actual, {
+        fd: handle.fd,
+        autoClose: false,
+        start: 0,
+        end: Math.max(0, metadata.size - 1),
+      });
+      return {
+        name: metadata.name,
+        mimeType: metadata.mimeType,
+        size: metadata.size,
+        stream,
+        release: async () => {
+          if (released) return;
+          released = true;
+          stream.destroy();
+          await handle.close().catch(() => {});
+        },
+      };
+    } catch (error) {
+      await handle.close().catch(() => {});
+      throw error;
+    }
   }
 
   async removeSession(sessionId: string): Promise<void> {
