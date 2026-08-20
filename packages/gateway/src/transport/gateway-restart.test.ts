@@ -24,16 +24,28 @@ function service(options: { activeSessions?: string[]; activeTerminals?: string[
   return new GatewayService(dependencies);
 }
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
 
 describe("Gateway administrative restart", () => {
+  it("fails closed when the Gateway is not externally supervised", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "0");
+    const gateway = service();
+    await expect(gateway.invoke(client, "gateway.restart", { commandId: "restart-command" }))
+      .rejects.toMatchObject({ code: "unsupported" });
+  });
+
   it("refuses process replacement while a terminal PTY is alive", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
     const gateway = service({ activeTerminals: ["terminal-1"] });
     await expect(gateway.invoke(client, "gateway.restart", { commandId: "restart-command" }))
       .rejects.toMatchObject({ code: "busy" });
   });
 
   it("schedules one restart after active agents settle and freezes new mutations", async () => {
+    vi.stubEnv("TRON_GATEWAY_SUPERVISED", "1");
     vi.useFakeTimers();
     const requestRestart = vi.fn();
     const gateway = service({ activeSessions: ["session-1"], requestRestart });

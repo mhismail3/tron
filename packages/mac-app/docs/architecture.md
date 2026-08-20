@@ -66,6 +66,18 @@ Gateway protocol and combines health with registration state. Menu controls can
 pause, resume, restart, inspect bounded persisted Gateway logs, show a fresh
 pairing invitation, and uninstall.
 
+The repository's isolated development supervisor is deliberately a separate
+boundary: it owns `~/.tron-dev/gateway` and port `9848`, not the installed
+`com.tron.server` image on `9847`. Its atomic manifest distinguishes starting,
+ready, draining, restarting, failed, and stopped, matches PID start identities
+before trusting a process, and publishes a runtime epoch plus optional source
+revision/build fingerprint. `/health` reports those optional identities while
+remaining truthful (`200/ok` only after the Gateway is ready; `503` while
+starting or stopping). This manifest is bounded projection state, not a runtime
+or session mirror. Status/preflight and stop never build. Isolated updates must
+not copy an app into `/Applications`, alter production registration, or install
+an iOS release; release replacement is a separate manual maintainer action.
+
 The wrapper and gateway share no in-memory state. Their only shared secrets are
 owner-only gateway files. Legacy `~/.tron/auth.json` is neither wrapper nor
 gateway authentication and is left untouched for explicit migration.

@@ -111,6 +111,44 @@ The isolated Gateway shares only the physical-machine group hint stored at
 credentials. Ordinary Debug runs as a regular companion window and do not
 install a second production menu-bar item or manage production registration.
 
+### Automated isolated development versus release replacement
+
+Routine agent-driven Gateway changes stay isolated: use `~/.tron-dev/gateway`,
+port `9848`, and the repository supervisor. `scripts/tron dev --status --json`
+is a deterministic, read-only preflight; it does not build, restart, or touch
+the installed app. `scripts/tron dev --stop` is likewise build-free. The
+supervisor's atomic lifecycle manifest records PID start identities, epoch,
+revision, payload fingerprint, bounded restart state, and `/health` readiness.
+Status/preflight probes the manifest's expected host and port (an explicit
+`--tailscale` selection remains an override). Exit 75 means the authenticated
+Gateway drain completed intentionally. A
+restart action reconciles a new epoch and health identity before it succeeds.
+
+The installed `Tron.app` and its supervised `9847` Gateway are a frozen release
+image during this workflow. Never automate copying into `/Applications`,
+production deployment, launchd/SMAppService operations, or iOS release
+installation from the isolated development command. Release replacement remains
+the manual runbook above, including the explicit Finder replacement and the
+read-only `scripts/tron mac verify` check afterward.
+
+### Separate-terminal stopping point
+
+When implementation and allowed static validation are complete, stop before
+operating the Gateway and give the maintainer this exact separate-terminal
+sequence:
+
+1. From the repository root run `scripts/tron dev --preflight --json` and inspect
+   endpoint/home, lifecycle, PID identities, epoch, revision/fingerprint, and
+   readiness. This command does not build.
+2. In that separate terminal, run exactly
+   `scripts/tron dev --restart --tailscale --command-id <new-unique-command-id>`.
+   This is the single approved rebuild/restart operation; do not run `bundle`,
+   launchd/SMAppService commands, or replace `/Applications/Tron.app`.
+3. Wait for the command to report the new runtime epoch and ready health, then
+   verify with `scripts/tron dev --status --json` (and retain the bounded log path
+   if it fails).
+4. Return to the agent terminal with the preflight and readiness output.
+
 ## Efficient focused tests
 
 ```bash

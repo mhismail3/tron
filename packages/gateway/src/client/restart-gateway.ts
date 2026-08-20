@@ -10,6 +10,11 @@ function argument(name: string): string | undefined {
   return index >= 0 ? process.argv[index + 1] : undefined;
 }
 
+const commandId = argument("--command-id") ?? randomUUID();
+if (commandId.length < 8 || commandId.length > 160 || /[\u0000-\u001f\u007f]/u.test(commandId)) {
+  throw new Error("Restart command ID must be 8–160 printable characters");
+}
+
 const rawHost = argument("--host") ?? process.env.TRON_GATEWAY_HOST ?? "127.0.0.1";
 const host = resolveBindHost(rawHost);
 const port = Number(argument("--port") ?? process.env.TRON_GATEWAY_PORT ?? "9848");
@@ -22,7 +27,7 @@ const client = new GatewayProtocolClient(
 );
 try {
   await client.connect();
-  const result = await client.request("gateway.restart", { commandId: randomUUID() }) as {
+  const result = await client.request("gateway.restart", { commandId }) as {
     restarting: boolean;
     scheduled: boolean;
     activeSessionIds: string[];

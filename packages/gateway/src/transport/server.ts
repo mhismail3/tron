@@ -371,6 +371,9 @@ export class GatewayServer {
             gatewayVersion: info.gatewayVersion,
             protocolVersion: info.protocolVersion,
             minProtocolVersion: info.minProtocolVersion,
+            ...(typeof info.sourceRevision === "string" ? { sourceRevision: info.sourceRevision } : {}),
+            ...(typeof info.buildFingerprint === "string" ? { buildFingerprint: info.buildFingerprint } : {}),
+            ...(typeof info.runtimeEpoch === "string" ? { runtimeEpoch: info.runtimeEpoch } : {}),
           });
         }
         return sendJson(response, 503, { error: { code: "busy", message: "Gateway is starting", retryable: true } });
@@ -382,6 +385,9 @@ export class GatewayServer {
           gatewayVersion: info.gatewayVersion,
           protocolVersion: info.protocolVersion,
           minProtocolVersion: info.minProtocolVersion,
+          ...(typeof info.sourceRevision === "string" ? { sourceRevision: info.sourceRevision } : {}),
+          ...(typeof info.buildFingerprint === "string" ? { buildFingerprint: info.buildFingerprint } : {}),
+          ...(typeof info.runtimeEpoch === "string" ? { runtimeEpoch: info.runtimeEpoch } : {}),
         });
       }
       if (request.method === "POST" && url.pathname === "/v1/pair") {

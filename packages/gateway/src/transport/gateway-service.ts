@@ -2,6 +2,7 @@ import type { AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { GatewayConfig } from "../config.js";
 import { GatewayError } from "../errors.js";
+import { runtimeIdentity } from "./runtime-identity.js";
 import type { JsonValue } from "../protocol/types.js";
 import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } from "../version.js";
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text } from "../util/validation.js";
@@ -137,6 +138,7 @@ export class GatewayService {
       machineId: config.machineId,
       machineGroupID: config.machineGroupID,
       machineName: config.machineName,
+      ...runtimeIdentity(),
       capabilities: [
         ...(process.env.TRON_GATEWAY_SUPERVISED === "1" ? ["restart-supervised.v1"] : []),
         "sessions.v1",
@@ -181,6 +183,9 @@ export class GatewayService {
           return { revoked };
         });
       case "gateway.restart":
+        if (process.env.TRON_GATEWAY_SUPERVISED !== "1") {
+          throw new GatewayError("unsupported", "Gateway restart requires an external supervisor");
+        }
         return this.mutation(client, method, params, async () => {
           const terminalIds = this.dependencies.terminals.activeTerminalIds();
           if (terminalIds.length > 0) {

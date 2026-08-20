@@ -47,10 +47,28 @@ Gateway mutations require `commandId`. Distinct sessions may run concurrently;
 all mutations for one session stay serialized. A disconnect must not abort an
 accepted run. Use `scripts/tron chat --session <id>` when testing terminal/mobile
 handoff: it attaches to the Gateway-owned runtime. Never open the same canonical
-JSONL simultaneously in a separate Pi process. `scripts/tron dev --background`
-runs the isolated Gateway behind a restart supervisor. After rebuilding Gateway
-source, use `scripts/tron dev --restart --tailscale`; it drains admitted agent
-runs and reconnects clients. Never stop the Gateway from one of its own tools.
+JSONL simultaneously in a separate Pi process.
+
+### Isolated development lifecycle
+
+`~/.tron-dev/gateway` on port `9848` is the only routine agent-development
+surface. `scripts/tron dev --status --json` (or `--preflight`) is read-only and
+never builds; it reports the expected endpoint/home, PID start identities,
+lifecycle epoch, source revision, payload fingerprint, and health readiness.
+`--stop` is also build-free and refuses to trust a stale or reused PID based on
+`kill -0` alone. The supervisor atomically publishes bounded lifecycle state:
+`starting`, `ready`, `draining`, `restarting`, `failed`, or `stopped`. Exit 75
+is the intentional authenticated restart drain; other exits consume a bounded
+restart budget and eventually become `failed`.
+
+After source changes, the separately approved operational step is
+`scripts/tron dev --restart --tailscale [--command-id <id>]`. It builds only for
+that restart action, persists the command ID, preserves accepted-run draining,
+and waits for a new runtime epoch plus truthful `/health` readiness and identity
+reconciliation. Do not replace `/Applications/Tron.app`, invoke production
+deployment, or install an iOS release as part of routine agent work. The
+installed supervised app remains a frozen release image while isolated
+iteration proceeds on `9848`.
 
 ### iOS
 
