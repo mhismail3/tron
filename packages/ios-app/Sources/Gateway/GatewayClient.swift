@@ -13,11 +13,22 @@ enum GatewayUploadPolicy {
     static let maximumResponseBytes = 64 * 1_024
 }
 
+enum GatewayLivenessPolicy {
+    /// Must remain comfortably below the Gateway's 25-second heartbeat. A
+    /// request frame refreshes old Gateway versions even when their WebSocket
+    /// stack does not surface an automatic pong from URLSession.
+    static let probeInterval: Duration = .seconds(10)
+    static let probeAfterSilence: Duration = .seconds(10)
+    static let probeTimeout: Duration = .seconds(8)
+}
+
 struct GatewayEventBufferPolicy: Sendable {
     let maximumEvents: Int
     let maximumBytes: Int
 
-    static let `default` = Self(maximumEvents: 512, maximumBytes: 2 * 1_024 * 1_024)
+    // Matches the Gateway synchronization quarantine count while the byte cap
+    // remains the stricter cross-session memory bound.
+    static let `default` = Self(maximumEvents: 1_024, maximumBytes: 2 * 1_024 * 1_024)
 }
 
 private actor GatewayEventHub {
@@ -408,7 +419,7 @@ actor GatewayClient {
     ) async throws -> JSONValue {
         guard let epoch = connection,
               expectedEpochID == nil || expectedEpochID == epoch.id else {
-            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
+            throw Self.definitelyNotSentFailure()
         }
         let epochID = epoch.id
         let socket = epoch.socket
@@ -418,11 +429,9 @@ actor GatewayClient {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 guard var current = connection, current.id == epochID else {
-                    continuation.resume(throwing: GatewayFailure(
+                    continuation.resume(throwing: Self.definitelyNotSentFailure(
                         code: "replaced",
-                        message: "Connection replaced",
-                        retryable: true,
-                        details: nil
+                        message: "Connection replaced"
                     ))
                     return
                 }
@@ -505,15 +514,10 @@ actor GatewayClient {
             for: request,
             maximumBytes: GatewayUploadPolicy.maximumResponseBytes
         )
-        return try admitUploadResponse(
-            responseData,
-            http: http,
-            context: context,
-            // The upload is an independently staged HTTP resource. A WebSocket
-            // reconnect while the bytes are in flight must not discard a
-            // successful photo upload or turn it into a misleading failure.
-            requireConnectionEpoch: false
-        )
+        // The upload is an independently staged HTTP resource. A WebSocket
+        // reconnect while the bytes are in flight must not discard a
+        // successful photo upload or turn it into a misleading failure.
+        return try admitUploadResponse(responseData, http: http, context: context)
     }
 
     func upload(
@@ -531,23 +535,20 @@ actor GatewayClient {
             fileURL: fileURL,
             maximumBytes: GatewayUploadPolicy.maximumResponseBytes
         )
-        return try admitUploadResponse(
-            responseData,
-            http: http,
-            context: context,
-            requireConnectionEpoch: false
-        )
+        return try admitUploadResponse(responseData, http: http, context: context)
     }
 
     private struct UploadContext {
         let profileID: String
-        let connectionID: Int
         let request: URLRequest
     }
 
     private func uploadContext(name: String, mimeType: String) throws -> UploadContext {
-        guard let profile, let token, let connectionID = connection?.id else {
-            throw GatewayFailure(code: "disconnected", message: "The Mac gateway is offline.", retryable: true, details: nil)
+        // Upload staging is an authenticated HTTP operation owned by the paired
+        // profile, not by a disposable WebSocket epoch. A brief socket
+        // reconnect must not prevent selecting or staging an attachment.
+        guard let profile, let token else {
+            throw GatewayFailure(code: "not_paired", message: "No paired gateway is selected.", retryable: false, details: nil)
         }
         guard let url = profile.httpURL(
             path: "/v1/uploads",
@@ -557,7 +558,7 @@ actor GatewayClient {
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(mimeType, forHTTPHeaderField: "Content-Type")
-        return UploadContext(profileID: profile.id, connectionID: connectionID, request: request)
+        return UploadContext(profileID: profile.id, request: request)
     }
 
     private func requireUploadSize(_ byteCount: Int) throws {
@@ -574,10 +575,8 @@ actor GatewayClient {
     private func admitUploadResponse(
         _ data: Data,
         http: HTTPURLResponse,
-        context: UploadContext,
-        requireConnectionEpoch: Bool
+        context: UploadContext
     ) throws -> String {
-        if requireConnectionEpoch { try requireEpoch(context.connectionID) }
         guard profile?.id == context.profileID else { throw CancellationError() }
         guard http.statusCode == 201 else {
             struct FailureEnvelope: Decodable { let error: GatewayFailure }
@@ -620,11 +619,12 @@ actor GatewayClient {
     func blob(
         id: String,
         profileID: String,
-        connectionID: Int,
         maximumBytes: Int
     ) async throws -> (Data, String) {
-        guard let profile, profile.id == profileID,
-              let token, connection?.id == connectionID else {
+        // Transcript blobs remain profile-owned across disposable WebSocket
+        // epochs. This keeps thumbnails and an open preview stable while the
+        // event channel reconnects and rebaselines.
+        guard let profile, profile.id == profileID, let token else {
             throw CancellationError()
         }
         let value = try await boundedBlob(
@@ -633,7 +633,6 @@ actor GatewayClient {
             token: token,
             maximumBytes: maximumBytes
         )
-        try requireEpoch(connectionID)
         guard self.profile?.id == profileID else { throw CancellationError() }
         return value
     }
@@ -735,7 +734,7 @@ actor GatewayClient {
         guard var epoch = connection, epoch.id == epochID else { return }
         let clock = self.clock
         epoch.livenessTask = Task { [weak self, clock] in
-            do { try await clock.sleep(.seconds(20)) }
+            do { try await clock.sleep(GatewayLivenessPolicy.probeInterval) }
             catch { return }
             guard !Task.isCancelled else { return }
             await self?.livenessWaitCompleted(epochID: epochID)
@@ -747,12 +746,12 @@ actor GatewayClient {
         guard ownsEpoch(epochID) else { return }
         do {
             guard let lastInboundAt = connection?.lastInboundAt else { return }
-            if clock.now() - lastInboundAt > .seconds(35) {
+            if clock.now() - lastInboundAt >= GatewayLivenessPolicy.probeAfterSilence {
                 struct Response: Decodable { let protocolVersion: Int }
                 let _: Response = try await request(
                     "system.info",
                     EmptyParams(),
-                    timeout: .seconds(8),
+                    timeout: GatewayLivenessPolicy.probeTimeout,
                     expectedEpochID: epochID
                 )
             }
@@ -863,7 +862,7 @@ actor GatewayClient {
             waiter.send?.cancel()
             waiter.continuation.resume(throwing: waiter.transmission.mayHaveBeenSent
                 ? Self.possiblySentFailure(cause: reason)
-                : reason)
+                : Self.definitelyNotSentFailure(cause: reason))
         }
         await epoch.socket.close()
         return generation == epoch.id && connection == nil
@@ -886,6 +885,19 @@ actor GatewayClient {
         )
     }
 
+    private nonisolated static func definitelyNotSentFailure(
+        code: String = "disconnected",
+        message: String = "The Mac gateway is offline.",
+        cause: Error? = nil
+    ) -> GatewayDefinitelyNotSentError {
+        GatewayDefinitelyNotSentError(failure: GatewayFailure(
+            code: code,
+            message: message,
+            retryable: true,
+            details: cause.map { .object(["cause": .string(transportFailure($0).code)]) }
+        ))
+    }
+
     private nonisolated static func possiblySentFailure(
         message: String = "The request may have reached the Mac before the connection ended.",
         cause: Error? = nil
@@ -900,6 +912,8 @@ actor GatewayClient {
 
     private nonisolated static func transportFailure(_ error: Error) -> GatewayFailure {
         if let failure = error as? GatewayFailure { return failure }
+        if let definitelyNotSent = error as? GatewayDefinitelyNotSentError { return definitelyNotSent.failure }
+        if let possiblySent = error as? GatewayPossiblySentError { return possiblySent.failure }
         return GatewayFailure(code: "disconnected", message: error.localizedDescription, retryable: true, details: nil)
     }
 

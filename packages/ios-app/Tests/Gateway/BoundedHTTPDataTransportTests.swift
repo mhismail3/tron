@@ -66,7 +66,7 @@ struct BoundedHTTPDataTransportTests {
         }
     }
 
-    @Test("uploads bound response accumulation and retain request bytes")
+    @Test("profile-owned uploads remain available during a WebSocket reconnect")
     func gatewayUploadBoundary() async throws {
         try await withTestWatchdog {
             let profile = GatewayProfile(
@@ -89,7 +89,8 @@ struct BoundedHTTPDataTransportTests {
                 boundedHTTPDataTransport: transport
             )
             await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
-            _ = try await client.connectForLifecycle(profile: profile, token: "secret")
+            let connection = try await client.connectForLifecycle(profile: profile, token: "secret")
+            await client.closeIfCurrent(connectionID: connection.id)
 
             #expect(try await client.upload(name: "notes.txt", mimeType: "text/plain", data: Data("body".utf8)) == "upload-id")
             let recorded = try #require(await recorder.value)
@@ -304,7 +305,7 @@ struct BoundedHTTPDataTransportTests {
         }
     }
 
-    @Test("epoch-bound blob reads pass the limit into the streaming transport")
+    @Test("profile-bound blob reads survive a WebSocket epoch handoff")
     func gatewayBlobBoundary() async throws {
         try await withTestWatchdog {
             let profile = GatewayProfile(
@@ -334,11 +335,11 @@ struct BoundedHTTPDataTransportTests {
             )
             await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
             let connection = try await client.connectForLifecycle(profile: profile, token: "secret")
+            await client.closeIfCurrent(connectionID: connection.id)
 
             let value = try await client.blob(
                 id: "blob/id",
                 profileID: profile.id,
-                connectionID: connection.id,
                 maximumBytes: 25
             )
             #expect(value.0 == Data([1, 2, 3]))
@@ -352,7 +353,6 @@ struct BoundedHTTPDataTransportTests {
                 try await client.blob(
                     id: "blob",
                     profileID: "replacement",
-                    connectionID: connection.id,
                     maximumBytes: 25
                 )
             }

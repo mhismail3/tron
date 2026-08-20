@@ -345,9 +345,11 @@ export class GatewayUpdateService {
     runtimeIdentity?: RuntimeIdentityFallback;
     updater?: GatewayUpdateCallback;
     runtimeChannel?: GatewayUpdateChannel;
+    environment?: NodeJS.ProcessEnv;
   }) {
-    this.updater = options.updater ?? launchAgentUpdater(process.env, options.tronHome);
-    const configuredChannel = options.runtimeChannel ?? process.env.TRON_GATEWAY_CHANNEL ?? "stable";
+    const environment = options.environment ?? process.env;
+    this.updater = options.updater ?? launchAgentUpdater(environment, options.tronHome);
+    const configuredChannel = options.runtimeChannel ?? environment.TRON_GATEWAY_CHANNEL ?? "stable";
     if (configuredChannel !== "stable" && configuredChannel !== "dev") {
       throw new GatewayError("conflict", "Gateway runtime channel is invalid");
     }

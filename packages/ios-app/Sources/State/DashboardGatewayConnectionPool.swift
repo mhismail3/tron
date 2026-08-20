@@ -28,9 +28,14 @@ final class DashboardGatewayConnectionPool {
     }
 
     weak var delegate: (any DashboardGatewayConnectionPoolDelegate)?
+    private let clientFactory: @MainActor () -> GatewayClient
     private var entries: [String: Entry] = [:]
     private var generation = 0
     private var retirementTask: Task<Void, Never>?
+
+    init(clientFactory: @escaping @MainActor () -> GatewayClient = { GatewayClient() }) {
+        self.clientFactory = clientFactory
+    }
 
     func reconcile(
         profiles: [GatewayProfile],
@@ -160,7 +165,7 @@ final class DashboardGatewayConnectionPool {
 
     private func start(profile: GatewayProfile, token: String?, generation: Int) {
         guard let token else { return }
-        let client = GatewayClient()
+        let client = clientFactory()
         entries[profile.id] = Entry(
             profile: profile,
             token: token,
@@ -331,17 +336,25 @@ final class DashboardGatewayConnectionPool {
                 } catch {
                     self.entries[profileID]?.state = .reconnecting
                     self.publish(profileID: profileID)
-                    delay = min(delay * 2, .seconds(15))
+                    delay = Self.nextReconnectDelay(after: delay)
                 }
             }
         }
         entries[profileID]?.reconnectTask = task
     }
 
-    private func scheduleRefresh(profileID: String, generation: Int) {
+    nonisolated static func nextReconnectDelay(after current: Duration) -> Duration {
+        current == .zero ? .seconds(2) : min(current * 2, .seconds(15))
+    }
+
+    private func scheduleRefresh(
+        profileID: String,
+        generation: Int,
+        delay: Duration = .milliseconds(250)
+    ) {
         entries[profileID]?.refreshTask?.cancel()
         let task = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
             guard let expectedConnectionID = self.entries[profileID]?.connectionID else { return }
             await self.refresh(
@@ -404,9 +417,25 @@ final class DashboardGatewayConnectionPool {
         } catch {
             guard isCurrent(profileID: profileID, client: entry.client, generation: generation),
                   entries[profileID]?.connectionID == expectedConnectionID else { return }
-            entries[profileID]?.state = .reconnecting
-            publish(profileID: profileID)
-            scheduleReconnect(profileID: profileID, generation: generation)
+            do {
+                // A catalog/schema/application error arrived over a responsive
+                // socket and must not replace that transport. Probe the exact
+                // epoch, retain its bounded catalog, and retry only the read.
+                try await entry.client.ensureResponsive(maximumSilence: .zero)
+                let activeConnectionID = await entry.client.activeConnectionID()
+                guard isCurrent(profileID: profileID, client: entry.client, generation: generation),
+                      activeConnectionID == expectedConnectionID else { return }
+                entries[profileID]?.state = .connected
+                publish(profileID: profileID)
+                scheduleRefresh(profileID: profileID, generation: generation, delay: .seconds(2))
+            } catch {
+                guard isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
+                await entry.client.closeIfCurrent(connectionID: expectedConnectionID)
+                entries[profileID]?.connectionID = nil
+                entries[profileID]?.state = .reconnecting
+                publish(profileID: profileID)
+                scheduleReconnect(profileID: profileID, generation: generation)
+            }
         }
     }
 

@@ -188,7 +188,7 @@ describe("Gateway update control plane", () => {
   });
 
   it("fails truthfully without the LaunchAgent-owned updater", async () => {
-    await expect(new GatewayUpdateService({ tronHome: "/tmp" }).update({ channel: "stable", mode: "auto" }))
+    await expect(new GatewayUpdateService({ tronHome: "/tmp", environment: {} }).update({ channel: "stable", mode: "auto" }))
       .rejects.toMatchObject({ code: "unsupported" });
   });
 
@@ -277,13 +277,13 @@ describe("Gateway update control plane", () => {
     expect(configured.gatewayChannel).toBe("stable");
     const unsupported = new GatewayService({
       ...base,
-      updateService: new GatewayUpdateService({ tronHome: "/tmp" }),
+      updateService: new GatewayUpdateService({ tronHome: "/tmp", environment: {} }),
     }).info() as Record<string, unknown>;
     expect(unsupported.capabilities).not.toContain("gateway-update.v1");
     expect(unsupported.gatewayChannel).toBe("stable");
     const debug = new GatewayService({
       ...base,
-      updateService: new GatewayUpdateService({ tronHome: "/tmp", runtimeChannel: "dev" }),
+      updateService: new GatewayUpdateService({ tronHome: "/tmp", runtimeChannel: "dev", environment: {} }),
     }).info() as Record<string, unknown>;
     expect(debug.gatewayChannel).toBe("dev");
 

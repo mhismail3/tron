@@ -435,7 +435,16 @@ final class GatewayLifecycleCoordinator {
     ) async -> Bool {
         while clock.now() < deadline {
             guard !Task.isCancelled, admitsGeneration(admission.generation) else { return false }
-            if connectionState == .connected { return true }
+            if connectionState == .connected {
+                let activeConnectionID = await client.activeConnectionID()
+                guard !Task.isCancelled, admitsGeneration(admission.generation) else { return false }
+                if let connectionID, activeConnectionID == connectionID { return true }
+                // The client actor can observe transport death before its
+                // MainActor event is reduced. Close that race synchronously so
+                // a user mutation never receives a false connected admission.
+                connectionID = nil
+                connectionState = .reconnecting
+            }
             if connectionState == .unauthorized || connectionState == .unpaired { return false }
             if reconnectTask == nil { scheduleReconnect(immediate: true) }
             do { try await clock.sleep(.milliseconds(100)) }

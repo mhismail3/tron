@@ -1,5 +1,11 @@
 import Foundation
 
+enum ConfirmedMutationConnectionPolicy {
+    /// A user action may begin during a short transport handoff. Waiting before
+    /// the first byte is sent is safe: it is not mutation replay.
+    static let initialConnectionDeadline: Duration = .seconds(8)
+}
+
 /// Resolves one command mutation against the exact gateway lifecycle generation
 /// that admitted it. A possibly-sent command is replayed only after the Gateway
 /// authoritatively reports that the stable command ID is missing.
@@ -49,11 +55,36 @@ final class ConfirmedMutationExecutor {
     ) async throws -> JSONValue {
         guard let admission = lifecycle.generationAdmission else { throw CancellationError() }
         try lifecycle.require(admission)
-        do {
-            let value = try await send()
-            try lifecycle.require(admission)
-            return value
-        } catch let uncertain as GatewayPossiblySentError {
+        guard await lifecycle.waitForConnected(
+            until: clock.now() + ConfirmedMutationConnectionPolicy.initialConnectionDeadline,
+            admission: admission
+        ) else {
+            throw GatewayFailure(
+                code: "disconnected",
+                message: "The Mac gateway is still reconnecting. Your change was not sent.",
+                retryable: true,
+                details: nil
+            )
+        }
+
+        var retriedBeforeTransmission = false
+        while true {
+            do {
+                let value = try await send()
+                try lifecycle.require(admission)
+                return value
+            } catch let definitelyNotSent as GatewayDefinitelyNotSentError where
+                !retriedBeforeTransmission {
+                // Local non-Codable provenance proves that no request byte left
+                // the queued client state. A wire GatewayFailure with the same
+                // code can never authorize this retry.
+                retriedBeforeTransmission = true
+                guard await lifecycle.waitForConnected(
+                    until: clock.now() + ConfirmedMutationConnectionPolicy.initialConnectionDeadline,
+                    admission: admission
+                ) else { throw definitelyNotSent.failure }
+                continue
+            } catch let uncertain as GatewayPossiblySentError {
             let original = uncertain.failure
             if Task.isCancelled || !lifecycle.admits(admission) {
                 throw Self.uncertainMutationOutcome(
@@ -140,11 +171,12 @@ final class ConfirmedMutationExecutor {
                 catch { break }
             }
             if Task.isCancelled { result = .cancelled }
-            throw Self.uncertainMutationOutcome(
-                method: method,
-                commandID: commandID,
-                lastFailure: lastFailure
-            )
+                throw Self.uncertainMutationOutcome(
+                    method: method,
+                    commandID: commandID,
+                    lastFailure: lastFailure
+                )
+            }
         }
     }
 

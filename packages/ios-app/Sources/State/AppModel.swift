@@ -330,7 +330,6 @@ final class AppModel {
                 let value = try await client.blob(
                     id: identity.blobID,
                     profileID: identity.profileID,
-                    connectionID: identity.connectionID,
                     maximumBytes: ChatMediaPolicy.maximumEncodedBytes
                 )
                 return ChatMediaPayload(data: value.0, mimeType: value.1)
@@ -339,7 +338,7 @@ final class AppModel {
                 lifecycle.selectedProfileID == identity.profileID
                     && lifecycle.admits(.init(
                         generation: identity.lifecycleGeneration,
-                        connectionID: identity.connectionID
+                        connectionID: nil
                     ))
             }
         )
@@ -405,13 +404,11 @@ final class AppModel {
     }
 
     func chatMediaIdentity(blobID: String) -> ChatMediaIdentity? {
-        guard let admission = lifecycle.admission,
-              let connectionID = admission.connectionID,
+        guard let admission = lifecycle.generationAdmission,
               let profileID = lifecycle.selectedProfileID else { return nil }
         return ChatMediaIdentity(
             profileID: profileID,
             lifecycleGeneration: admission.generation,
-            connectionID: connectionID,
             blobID: blobID
         )
     }
@@ -1004,7 +1001,16 @@ final class AppModel {
             } catch {
                 guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
                       sessionCatalog.admits(loadAdmission, key: key) else { return .retained }
-                return Self.catalogFailureOutcome(error)
+                let outcome = Self.catalogFailureOutcome(error)
+                let activeConnectionID = await client.activeConnectionID()
+                if outcome == .transportFailure,
+                   activeConnectionID == key.connectionID {
+                    // An RPC timeout or application-level "disconnected" error
+                    // does not prove that the shared WebSocket epoch died.
+                    // Transport receive failure owns epoch retirement.
+                    return .retained
+                }
+                return outcome
             }
         }
         return .retained
@@ -1514,7 +1520,9 @@ final class AppModel {
 
     private func invalidateSessionConnectionOwnership() {
         cancelAllExtensionEditorSynchronization()
-        chatMedia.removeAll()
+        // Transcript media is profile/lifecycle-owned HTTP state. A disposable
+        // WebSocket epoch handoff must not cancel an open preview or evict its
+        // thumbnail flight.
         sessionPresentation.retireConnection()
     }
 
@@ -2702,6 +2710,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         dashboardConnections.retire()
         await dashboardConnections.waitForRetirement()
         invalidateSessionConnectionOwnership()
+        chatMedia.removeAll()
         clearGatewayProjection()
 
         _ = await catalog?.value

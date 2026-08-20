@@ -28,12 +28,13 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
 }
 
 describe("WebSocket connection and outbound capacity", () => {
-  it("rejects connections at capacity and closes slow outbound clients without dropping events", async () => {
+  it("admits same-turn ordered bursts, rejects connection overflow, and closes byte-oversized output", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-server-capacity-"));
     const devices = new DeviceStore(root, "machine");
     await devices.initialize();
     const token = JSON.parse(await readFile(join(root, "gateway", "local-auth.json"), "utf8")).bearerToken;
     const port = await unusedPort();
+    const logger = { log: vi.fn() };
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: () => false,
@@ -46,14 +47,13 @@ describe("WebSocket connection and outbound capacity", () => {
       maxFrameBytes: 16_384,
       maximumConnections: 1,
       maximumConnectionsPerIdentity: 1,
-      maximumOutboundFrames: 1,
-      maximumOutboundBytes: 16_384,
+      maximumOutboundBytes: 1_024,
       devices,
       uploads: {} as any,
       sessions: { unsubscribeClient: vi.fn() } as any,
       auth: { cancelClient: vi.fn() } as any,
       service: service as any,
-      logger: { log: vi.fn() } as any,
+      logger: logger as any,
     });
     await gateway.listen();
     cleanups.push(async () => { await gateway.close(); });
@@ -75,9 +75,20 @@ describe("WebSocket connection and outbound capacity", () => {
     });
     expect(rejectedStatus).toBe(503);
 
+    for (let sequence = 1; sequence <= 64; sequence += 1) {
+      gateway.broadcast("test.event", { sequence });
+    }
+    await waitUntil(() => frames.filter((frame) => frame.topic === "test.event").length === 64);
+    expect(first.readyState).toBe(WebSocket.OPEN);
+
     const closed = new Promise<number>((resolve) => first.once("close", (code) => resolve(code)));
-    gateway.broadcast("test.event", { sequence: 1 });
-    gateway.broadcast("test.event", { sequence: 2 });
+    gateway.broadcast("test.event", { oversized: "x".repeat(2_000) });
     expect(await closed).toBe(1013);
+    await waitUntil(() => logger.log.mock.calls.some((call) => call[2]?.event === "connection.closed"));
+    expect(logger.log).toHaveBeenCalledWith(
+      "info",
+      "Client connection closed (WebSocket close 1013: client outbound capacity exceeded)",
+      { event: "connection.closed", source: "transport" },
+    );
   });
 });

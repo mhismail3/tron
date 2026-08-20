@@ -22,7 +22,6 @@ export interface GatewayConfig {
   readonly maxConnectionsPerIdentity: number;
   readonly maxSubscriptionsPerConnection: number;
   readonly maxLiveRuntimes: number;
-  readonly maxOutboundFrames: number;
   readonly maxOutboundBytes: number;
   readonly maxSynchronizationBytes: number;
 }
@@ -250,7 +249,6 @@ export async function loadConfig(
     maxConnectionsPerIdentity: 4,
     maxSubscriptionsPerConnection: 64,
     maxLiveRuntimes: 16,
-    maxOutboundFrames: 32,
     maxOutboundBytes: 2 * 1_048_576,
     maxSynchronizationBytes: 2 * 1_048_576,
   };

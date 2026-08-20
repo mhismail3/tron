@@ -6,7 +6,6 @@ import UIKit
 struct ChatMediaIdentity: Hashable, Sendable {
     let profileID: String
     let lifecycleGeneration: Int
-    let connectionID: Int
     let blobID: String
 }
 
@@ -193,6 +192,7 @@ final class ChatMediaLoader {
     }
 
     func thumbnail(for identity: ChatMediaIdentity) async throws -> UIImage {
+        guard admits(identity) else { throw ChatMediaLoadError.staleIdentity }
         if var cached = thumbnails[identity] {
             ordinal &+= 1
             cached.accessOrdinal = ordinal
@@ -474,9 +474,6 @@ final class ChatMediaLoader {
                 }
                 if $0.key.lifecycleGeneration != $1.key.lifecycleGeneration {
                     return $0.key.lifecycleGeneration < $1.key.lifecycleGeneration
-                }
-                if $0.key.connectionID != $1.key.connectionID {
-                    return $0.key.connectionID < $1.key.connectionID
                 }
                 return $0.key.blobID < $1.key.blobID
             })?.key, let removed = thumbnails.removeValue(forKey: oldest) else { return }

@@ -176,9 +176,10 @@ a ten-minute receipt window because newer revisions supersede them. Pending,
 malformed, oversized, or identity-mismatched evidence remains outcome-unknown, is
 never pruned, and can never authorize replay. Receipt execution serializes identical command keys only;
 unrelated commands and sessions remain concurrent.
+Outbound WebSocket admission is bounded by each encoded frame and the socket's ordered byte backlog. Pending send-callback count is diagnostic only: callbacks run on a later event-loop turn, so treating their count as backpressure would disconnect a healthy client while flushing a valid 1,024-event synchronization quarantine.
 The gateway sends WebSocket ping control frames every 25 seconds and terminates
 connections that fail the next heartbeat, so half-open Tailscale/iOS paths are
-observable. Reconnect and foreground activation converge through an authoritative
+observable. Pong, ping, and application frames all refresh liveness; mobile clients also issue an application-level probe before that interval for compatibility with URLSession paths that do not reliably surface automatic pong handling. Heartbeat timeouts and bounded WebSocket close codes/reasons are recorded without device credentials so transient transport failures remain diagnosable. Reconnect and foreground activation converge through an authoritative
 snapshot. `session.summary` is a bounded, per-session revisioned global projection
 of phase, name, activity time, message count, and first-message title. It updates every connected
 dashboard immediately without broadcasting full transcripts; clients subscribe

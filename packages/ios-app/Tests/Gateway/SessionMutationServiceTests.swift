@@ -405,6 +405,41 @@ struct SessionMutationServiceTests {
         }
     }
 
+    @Test("wire disconnected response is definitive and never authorizes retry")
+    func wireDisconnectedIsNotDefinitelyUnsent() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let mutation = Task {
+                try await harness.service.setModel(
+                    ModelRef(provider: "provider", id: "model"),
+                    sessionID: "session"
+                )
+            }
+            let request = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(request.id),
+                "ok": .bool(false),
+                "error": .object([
+                    "code": .string("disconnected"),
+                    "message": .string("runtime projection unavailable"),
+                    "retryable": .bool(true),
+                    "details": .null,
+                ]),
+            ])))
+
+            do {
+                try await valueOfOwnedTask(mutation)
+                Issue.record("wire failure unexpectedly succeeded")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "disconnected")
+                #expect(failure.message == "runtime projection unavailable")
+            }
+            #expect(await harness.socket.sentFrames().count == 2)
+            await harness.client.close()
+        }
+    }
+
     @Test("confirmed missing replays the exact command ID once")
     func stableCommandIDReplay() async throws {
         try await withTestWatchdog {

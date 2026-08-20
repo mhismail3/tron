@@ -44,7 +44,7 @@ late hello, frame, failure, liveness, completion, and close callbacks can only d
 for their captured epoch. Event deliveries carry that non-wire connection identity. App lifecycle
 connects prepare the epoch without starting receive/liveness work, install the returned identity,
 then activate delivery; buffered events from a retired profile therefore cannot cross a switch.
-Idle transport tasks do not retain an otherwise unowned client. Its
+Idle transport tasks do not retain an otherwise unowned client. While foregrounded, ten seconds of inbound silence triggers a bounded `system.info` liveness request. That application frame is deliberately earlier than the Gateway's 25-second heartbeat and keeps older URLSession/Tailscale paths alive even when automatic WebSocket pong handling is not surfaced reliably. Its
 injectable transport ends at WebSocket bytes, and its monotonic-clock and UUID inputs control only time and
 identity generation. The production transport is an actor-confined ephemeral
 `URLSession` owner and preserves the existing data frames, headers, deadlines, and
@@ -56,7 +56,7 @@ container; network bytes are not serialized and parsed again. The client actor b
 prepares large session snapshots, summaries, envelopes, streaming items, tool states, unified extension-presentation mutations, and terminal output/exit payloads before delivery, so
 the MainActor reducer installs typed `Sendable` values instead of re-encoding and
 decoding dynamic payloads. Raw event payloads remain attached for global extension
-points and unknown topics. Every Gateway coder is fresh per operation; shared static Foundation
+points and unknown topics. The ordered client event hub admits the Gateway's complete 1,024-event synchronization quarantine under a stricter 2 MiB aggregate byte ceiling; overflow retires the epoch and rebaselines rather than silently dropping sequence. Every Gateway coder is fresh per operation; shared static Foundation
 coder instances are forbidden across concurrent frame preparation. Inbound bytes reject frames above
 the Gateway's 1 MiB protocol ceiling before JSON parsing. Dynamic `JSONValue` admission
 is capped at depth 64, 32,768 nodes, 8,192 members per collection, 1 MiB per UTF-8 string, and
@@ -130,13 +130,10 @@ independently sampled within 80–120% of its nominal value with a hard 15-secon
 injected unit-interval source and monotonic clock make the exact schedule deterministic in tests.
 Foreground activation may cancel only a delay-owned retry and start one immediate attempt; repeated
 activation cannot replace an active handshake, and exact attempt generations reject stale cancellation
-or unauthorized completion. Background scene transition cancels only disposable foreground/catalog
-reconciliation, leaves the route and responsive socket intact, and gates event-triggered catalog reads
-until the next active scene starts a fresh shared pass. After event activation, reconnect and foreground
+or unauthorized completion. Background scene transition cancels disposable foreground/catalog reconciliation, preserves the route and bounded profile-owned projections, retires the transport epoch before suspension, and gates event-triggered catalog reads until the next active scene starts one authoritative reconnect pass. After event activation, reconnect and foreground
 reconciliation starts dashboard convergence concurrently with mounted-session restoration; terminal
 reattachment follows exact mounted-session synchronization because the Gateway requires that connection's
-subscription before terminal attach. Provider/settings/device reads cannot delay mounted chat restoration,
-and a retained catalog failure never replaces an otherwise responsive socket. Final teardown cancels and joins the event listener and shares one
+subscription before terminal attach. Provider/settings/device reads cannot delay mounted chat restoration, and focused or background dashboard catalog/schema/application failures retry their projection read without replacing an otherwise responsive exact socket; only observed transport epoch loss enters reconnect. Final teardown cancels and joins the event listener and shares one
 completion across concurrent callers; scene backgrounding deliberately does not tear down accepted
 Gateway-owned work. It shares the clock/UUID seams for Gateway reconnect, receipt, debounce,
 and command-ID work. Its visible-open interval
@@ -608,7 +605,7 @@ non-Codable possibly-sent error that a Gateway response cannot forge. Mutations 
 provenance wait for reconnect and poll the bounded command receipt: completed results are reused,
 only confirmed-missing commands are retried with the same ID after rechecking cancellation, and
 pending or cancelled uncertain outcomes are never replayed automatically. Definitive retryable
-application responses remain ordinary errors rather than receipt uncertainty.
+application responses remain ordinary errors rather than receipt uncertainty. Before any first transmission, the executor may wait up to eight seconds for a same-generation transient reconnect and retry one definitely-unsent `disconnected`/`replaced` attempt; this is admission delay, never command replay.
 `ConfirmedMutationExecutor` is the single lifecycle-generation-bound owner of that receipt policy
 for every mutation domain. `SessionMutationService` owns explicit session command IDs, DTOs, wire
 methods, timeouts, and typed outcomes without reading presentation, catalog, cache, drafts, or route
@@ -704,8 +701,8 @@ through a deterministic canonical path envelope, while the mobile projection
 removes that path and exposes only display-safe name/type/size metadata. Sent
 images and files share one attachment strip above—and structurally outside—the prompt's Liquid Glass:
 images use the same square previews as pending photos and files use named chips. Transcript images resolve through one
-`ChatMediaLoader` keyed by profile, lifecycle generation, connection, and blob ID; views never fetch blobs
-directly. Thumbnail fetch/decode is identity-single-flight behind one shared preparation slot and a
+`ChatMediaLoader` keyed by profile, lifecycle generation, and blob ID; views never fetch blobs
+directly. Authenticated blob reads and upload staging are paired-profile HTTP operations rather than disposable WebSocket-epoch operations, so a same-profile reconnect neither dismisses an open preview nor replaces its thumbnail with a retry state. Thumbnail fetch/decode is identity-single-flight behind one shared preparation slot and a
 32-flight admission ceiling. Its bounded HTTP delegate rejects declared or streamed bodies over 25 MiB
 while receiving them, then applies image orientation while downsampling off-main to at most 192 pixels
 and retains at most 64 items/4 MiB decoded under deterministic LRU. Uploads publish an explicit

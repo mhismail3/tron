@@ -206,7 +206,7 @@ struct ChatMediaLoaderTests {
         #expect(loader.metrics().thumbnailCount == 1)
     }
 
-    @Test("profile, lifecycle, and connection identity isolate equal blob IDs")
+    @Test("profile and lifecycle identity isolate equal blob IDs across reconnects")
     func identityIsolation() async throws {
         let fixture = try SessionScenarioBuilder(seed: 6_305).generatedImageFixture(
             format: .png,
@@ -219,12 +219,11 @@ struct ChatMediaLoaderTests {
             fetch: { identity in await counter.fetch(identity) },
             admits: { _ in true }
         )
-        let first = mediaIdentity(profileID: "first", connectionID: 1, blobID: "same")
-        let second = mediaIdentity(profileID: "second", connectionID: 2, blobID: "same")
+        let first = mediaIdentity(profileID: "first", blobID: "same")
+        let second = mediaIdentity(profileID: "second", blobID: "same")
         let nextLifecycle = mediaIdentity(
             profileID: "second",
             lifecycleGeneration: 8,
-            connectionID: 2,
             blobID: "same"
         )
 
@@ -233,6 +232,30 @@ struct ChatMediaLoaderTests {
         _ = try await loader.thumbnail(for: nextLifecycle)
         #expect(await counter.count == 3)
         #expect(loader.metrics().thumbnailCount == 3)
+    }
+
+    @Test("cached thumbnail hits revalidate profile and lifecycle admission")
+    func cachedThumbnailRevalidatesAdmission() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_306).generatedImageFixture(
+            format: .png,
+            pixelWidth: 32,
+            pixelHeight: 32,
+            orientation: .up
+        )
+        var admitted = true
+        let loader = ChatMediaLoader(
+            fetch: { _ in .init(data: fixture.encodedData, mimeType: "image/png") },
+            admits: { _ in admitted }
+        )
+        let identity = mediaIdentity(blobID: "cached")
+        _ = try await loader.thumbnail(for: identity)
+        #expect(loader.metrics().thumbnailCount == 1)
+
+        admitted = false
+        await #expect(throws: ChatMediaLoadError.staleIdentity) {
+            try await loader.thumbnail(for: identity)
+        }
+        #expect(loader.metrics().thumbnailCount == 1)
     }
 
     @Test("stale identity never installs fetched media")
@@ -437,13 +460,11 @@ struct ChatMediaLoaderTests {
     private func mediaIdentity(
         profileID: String = "profile",
         lifecycleGeneration: Int = 7,
-        connectionID: Int = 9,
         blobID: String
     ) -> ChatMediaIdentity {
         ChatMediaIdentity(
             profileID: profileID,
             lifecycleGeneration: lifecycleGeneration,
-            connectionID: connectionID,
             blobID: blobID
         )
     }

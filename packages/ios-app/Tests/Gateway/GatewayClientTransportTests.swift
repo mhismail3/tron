@@ -481,7 +481,7 @@ struct GatewayClientTransportTests {
         }
     }
 
-    @Test("liveness checks at 20 seconds and enforces the 8-second system info deadline")
+    @Test("idle liveness probes precede the Gateway heartbeat and enforce an 8-second deadline")
     func deterministicLivenessTiming() async throws {
         try await withTestWatchdog {
             let clock = ManualClock()
@@ -498,11 +498,7 @@ struct GatewayClientTransportTests {
             _ = try await client.connect(profile: profile, token: "token")
             try await clock.waitUntilSleeping(count: 1)
 
-            clock.advance(by: .seconds(20))
-            try await clock.waitUntilSleeping(count: 1)
-            #expect(await socket.sentFrames().count == 1)
-
-            clock.advance(by: .seconds(20))
+            clock.advance(by: .seconds(10))
             try await socket.waitUntilSent(count: 2)
             #expect(try await decodedValue(in: socket, index: 1) == .object([
                 "type": .string("request"),
@@ -825,7 +821,7 @@ struct GatewayClientTransportTests {
             await socket.enqueue(helloFrame())
             _ = try await client.connect(profile: profile, token: "token")
 
-            for revision in 0..<513 {
+            for revision in 0..<1_025 {
                 await socket.enqueue(eventFrame(topic: "test.changed", payload: .number(Double(revision))))
             }
             try await socket.waitUntilCloseInvoked()
@@ -837,10 +833,10 @@ struct GatewayClientTransportTests {
             let consumer = Task { () -> [GatewayEvent] in
                 var iterator = client.events.makeAsyncIterator()
                 var events: [GatewayEvent] = []
-                for index in 0..<513 {
+                for index in 0..<1_025 {
                     guard let delivery = await iterator.next() else { break }
                     events.append(delivery.event)
-                    if index == 511 {
+                    if index == 1_023 {
                         bufferDrainedContinuation.yield(())
                         bufferDrainedContinuation.finish()
                     }
@@ -854,9 +850,9 @@ struct GatewayClientTransportTests {
             await socket.releaseClose()
 
             let events = try await valueOfOwnedTask(consumer)
-            #expect(events.count == 513)
+            #expect(events.count == 1_025)
             #expect(events.dropLast().map(\.topic).allSatisfy { $0 == "test.changed" })
-            #expect(events.dropLast().compactMap { $0.payload.intValue } == Array(1...512))
+            #expect(events.dropLast().compactMap { $0.payload.intValue } == Array(1...1_024))
             #expect(events.last?.topic == "transport.disconnected")
             #expect(events.filter { $0.topic == "transport.disconnected" }.count == 1)
             #expect(await socket.closeInvocationCount() == 1)

@@ -208,7 +208,6 @@ export class GatewayServer {
       maximumConnections?: number;
       maximumConnectionsPerIdentity?: number;
       maximumSubscriptionsPerConnection?: number;
-      maximumOutboundFrames?: number;
       maximumOutboundBytes?: number;
       maximumSynchronizationBytes?: number;
       synchronizationTimeoutMs?: number;
@@ -227,6 +226,10 @@ export class GatewayServer {
       for (const connection of this.clients.values()) {
         if (connection.socket.readyState !== WebSocket.OPEN) continue;
         if (!connection.alive) {
+          this.options.logger.log("warning", "Closing an unresponsive client after a missed heartbeat", {
+            event: "connection.heartbeat-timeout",
+            source: "transport",
+          });
           connection.socket.terminate();
           continue;
         }
@@ -512,9 +515,13 @@ export class GatewayServer {
       connection.alive = true;
       void this.onMessage(connection, binary ? data : data.toString());
     });
+    socket.on("ping", () => { connection.alive = true; });
     socket.on("pong", () => { connection.alive = true; });
-    socket.on("close", () => this.disconnect(connection));
-    socket.on("error", () => this.disconnect(connection));
+    socket.on("close", (code, reason) => {
+      const suffix = reason.length > 0 ? `: ${reason.toString("utf8")}` : "";
+      this.disconnect(connection, `WebSocket close ${code}${suffix}`);
+    });
+    socket.on("error", (error) => this.disconnect(connection, `WebSocket error: ${error.message}`));
   }
 
   private async onMessage(connection: Connection, raw: unknown): Promise<void> {
@@ -925,16 +932,22 @@ export class GatewayServer {
       if (!encoded) return "failed";
 
       const bytes = Buffer.byteLength(encoded, "utf8");
-      const maximumFrames = this.options.maximumOutboundFrames ?? 32;
       const maximumBytes = this.options.maximumOutboundBytes ?? 2 * 1_048_576;
-      if (connection.outboundFrames >= maximumFrames
-        || bytes > maximumBytes
+      if (bytes > maximumBytes
         || connection.socket.bufferedAmount > maximumBytes - bytes) {
         // Never silently drop a sequenced live event. Force the established
         // reconnect/snapshot path when this client cannot drain its stream.
+        this.options.logger.log(
+          "warning",
+          `Closing client at outbound capacity (${connection.outboundFrames} pending frames, ${connection.socket.bufferedAmount} buffered bytes, ${bytes} next bytes)`,
+          { event: "connection.outbound-capacity", source: "transport" },
+        );
         connection.socket.close(1013, "client outbound capacity exceeded");
         return "failed";
       }
+      // Send callbacks run on a later event-loop turn, so their count cannot
+      // distinguish a healthy synchronous catch-up burst from a stalled peer.
+      // `bufferedAmount` is the ordered writer's byte-backed pressure signal.
       connection.outboundFrames += 1;
       connection.socket.send(encoded, () => {
         connection.outboundFrames = Math.max(0, connection.outboundFrames - 1);
@@ -947,9 +960,9 @@ export class GatewayServer {
     }
   }
 
-  private disconnect(connection: Connection): void {
+  private disconnect(connection: Connection, detail = "WebSocket closed"): void {
     if (!this.clients.delete(connection.id)) return;
-    this.options.logger.log("info", "Client connection closed", { event: "connection.closed", source: "transport" });
+    this.options.logger.log("info", `Client connection closed (${detail})`, { event: "connection.closed", source: "transport" });
     clearTimeout(connection.helloTimer);
     for (const synchronization of connection.synchronizations.values()) {
       clearTimeout(synchronization.timeout);

@@ -72,6 +72,70 @@ struct DashboardStateOwnerTests {
         ))
     }
 
+    @MainActor
+    @Test("dashboard catalog errors retain a responsive socket")
+    func dashboardCatalogErrorRetainsSocket() async throws {
+        try await withTestWatchdog { @MainActor in
+            let selected = GatewayProfile(
+                id: "selected", label: "Selected", host: "selected.test", port: 9_847,
+                machineId: "selected-runtime", machineGroupID: "selected-machine", deviceId: "device"
+            )
+            let remote = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let socket = ScriptedGatewaySocket()
+            let socketFactory = ScriptedGatewaySocketFactory(socket: socket)
+            let pool = DashboardGatewayConnectionPool(clientFactory: {
+                GatewayClient(socketFactory: socketFactory.factory)
+            })
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":3,"minProtocolVersion":3,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+
+            pool.reconcile(
+                profiles: [selected, remote],
+                selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+            try await socket.waitUntilSent(count: 2)
+            let catalogRequest = try Self.requestFrame(await socket.sentFrames()[1])
+            #expect(catalogRequest.method == "session.list")
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(catalogRequest.id),
+                "ok": .bool(false),
+                "error": .object([
+                    "code": .string("invalid_dashboard_catalog"),
+                    "message": .string("synthetic catalog failure"),
+                    "retryable": .bool(true),
+                    "details": .null,
+                ]),
+            ])))
+
+            try await socket.waitUntilSent(count: 3)
+            let probe = try Self.requestFrame(await socket.sentFrames()[2])
+            #expect(probe.method == "system.info")
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(probe.id),
+                "ok": .bool(true),
+                "result": .object(["protocolVersion": .number(3)]),
+            ])))
+            try await Self.waitUntil { pool.state(for: remote.id) == .connected }
+
+            #expect(socketFactory.requests.count == 1)
+            #expect(!(await socket.closed()))
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @Test("dashboard reconnect backoff advances after an immediate failed attempt")
+    func dashboardReconnectBackoff() {
+        #expect(DashboardGatewayConnectionPool.nextReconnectDelay(after: .zero) == .seconds(2))
+        #expect(DashboardGatewayConnectionPool.nextReconnectDelay(after: .seconds(2)) == .seconds(4))
+        #expect(DashboardGatewayConnectionPool.nextReconnectDelay(after: .seconds(10)) == .seconds(15))
+    }
+
     @Test("connection status labels cover live, restart, and failure states")
     func connectionStatusLabels() {
         #expect(DashboardServerConnectionState.connected.label == "Connected")
@@ -113,6 +177,31 @@ struct DashboardStateOwnerTests {
             incomingSessionCount: 0,
             state: .stale
         ))
+    }
+
+    private struct RequestFrame {
+        let id: String
+        let method: String
+    }
+
+    private static func requestFrame(_ data: Data) throws -> RequestFrame {
+        let value = try JSONDecoder.gateway.decode(JSONValue.self, from: data)
+        let object = try #require(value.objectValue)
+        return RequestFrame(
+            id: try #require(object["id"]?.stringValue),
+            method: try #require(object["method"]?.stringValue)
+        )
+    }
+
+    @MainActor
+    private static func waitUntil(_ predicate: @MainActor () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !predicate() {
+            guard ContinuousClock.now < deadline else {
+                throw GatewayFailure(code: "timeout", message: "condition timed out", retryable: true, details: nil)
+            }
+            try await Task.sleep(for: .milliseconds(1))
+        }
     }
 
     @Test("server filter defaults to all and preserves explicit selections")
