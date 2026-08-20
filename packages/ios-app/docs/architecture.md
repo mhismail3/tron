@@ -664,9 +664,11 @@ motion; their height changes explicitly arm the sole scroll coordinator's viewpo
 Authoritative queued entries render after any explicit runtime detail as right-anchored compact cards
 that hug their content and wrap at the same 364-point maximum as a user prompt. They retain stable
 identity, delivery stage, position, text, total attachment count, and optional photo/file counts. The
-steer card keeps its delivery detail and behavior icon together at the trailing edge, leaving the
-message and attachment rows on the full card width; photo counts use a photo label while file counts
-retain the attachment label. Queue cards and the transcript
+steer card keeps its delivery detail and smaller behavior icon together at the trailing edge, leaving the
+message and attachment row on the full card width. Its compact top inset matches the reduced gap before
+the message. Typed attachment counts render as one inert miniature rounded-square photo or file chip per
+item rather than a prose count; the Gateway's ten-item prompt bound keeps this row intrinsically bounded.
+Queue cards and the transcript
 timeline are installed from the same exact tagged source, so consuming a queued entry cannot remove
 its card one frame before the corresponding canonical prompt installs. Manageable cards use one
 interactive, accent-tinted Liquid Glass surface with an explicit full-shape hit region; tapping
@@ -1039,7 +1041,10 @@ exports. Configuration row icons use the section's purple palette, while every S
 icon—including Git states, exports, sharing, and diagnostics—uses the section's blue palette.
 The compact top summary owns automatic-compaction status beside a single-line context
 value, followed by the cache-hit/read-write/input/output/cost statistics row, with every
-value kept to one visual line, while History owns the concise runtime
+value kept to one visual line. When the runtime has reset its usage estimate, the card presents a
+qualified zero-percent fresh state instead of an unavailable headline; a trailing canonical compaction
+entry adds concise “Compacted” context, and the copy makes clear that the next response refreshes the
+estimate. History owns the concise runtime
 phase/message/tool summary. Its compact toolbar action invokes Pi's
 canonical compaction through Gateway and can leave one authoritative request queued
 behind an active turn. Project Resources presents resolved extensions, prompts, skills,

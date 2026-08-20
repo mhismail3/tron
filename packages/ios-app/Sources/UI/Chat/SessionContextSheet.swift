@@ -49,6 +49,33 @@ enum SessionCompactionControlPolicy {
     }
 }
 
+enum SessionContextUsageRefreshPresentation: Equatable {
+    case compacted
+    case awaitingFirstResponse
+    case awaitingRefresh
+
+    init(lastTranscriptKind: TranscriptItem.Kind?, assistantMessages: Int) {
+        if lastTranscriptKind == .compaction {
+            self = .compacted
+        } else if assistantMessages == 0 {
+            self = .awaitingFirstResponse
+        } else {
+            self = .awaitingRefresh
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .compacted:
+            "Compacted to a fresh window. The next response will refresh the estimate."
+        case .awaitingFirstResponse:
+            "The first assistant response will provide the usage estimate."
+        case .awaitingRefresh:
+            "The next assistant response will refresh the usage estimate."
+        }
+    }
+}
+
 enum SessionExportPresentationPolicy {
     static func canStart(activeFormat: String?) -> Bool { activeFormat == nil }
     static func showsProgress(rowFormat: String, activeFormat: String?) -> Bool {
@@ -85,7 +112,7 @@ enum SessionContextUsagePresentation: Equatable {
             let remaining = max(0, window - used)
             return "Context usage: \(Int(percent.rounded())) percent used, \(remaining.formatted(.number.notation(.compactName))) tokens left, \(used.formatted(.number.notation(.compactName))) used of \(window.formatted(.number.notation(.compactName)))"
         case .unavailable:
-            return "Context usage: unavailable until fresh usage is reported"
+            return "Context usage: estimate pending, displayed as zero percent until fresh usage is reported"
         }
     }
 }
@@ -317,12 +344,16 @@ struct SessionContextSheet: View {
         let cacheValue = snapshot.stats.latestCacheHitRate.map {
             "\($0.formatted(.number.precision(.fractionLength(1))))%"
         } ?? "—"
-        let contextValue: String = switch usage {
+        let contextValue: String? = switch usage {
         case .available(let used, let window, _):
             "\(used.formatted(.number.notation(.compactName)))/\(window.formatted(.number.notation(.compactName)))"
         case .unavailable:
-            "—"
+            nil
         }
+        let refreshPresentation = SessionContextUsageRefreshPresentation(
+            lastTranscriptKind: snapshot.transcript.last?.kind,
+            assistantMessages: snapshot.stats.assistantMessages
+        )
         let statistics = [
             (cacheValue, "Cache Hit"),
             ("\(snapshot.stats.tokens.cacheRead.formatted(.number.notation(.compactName))) / \(snapshot.stats.tokens.cacheWrite.formatted(.number.notation(.compactName)))", "Read / Write"),
@@ -350,13 +381,17 @@ struct SessionContextSheet: View {
                     .accessibilityLabel("Context used")
                     .accessibilityValue("\(Int(percent.rounded())) percent")
             case .unavailable:
-                Text("Context usage unavailable")
+                Text("0% used")
                     .font(TronTypography.sans(size: TronTypography.sizeXL, weight: .bold))
                     .foregroundStyle(Color.tronTextPrimary)
-                Text("A fresh assistant response will provide the current token-window estimate.")
+                Text(refreshPresentation.detail)
                     .font(TronTypography.secondaryDescription)
                     .foregroundStyle(Color.tronTextSecondary)
                     .fixedSize(horizontal: false, vertical: true)
+                ProgressView(value: 0, total: 100)
+                    .tint(Color.tronEmerald)
+                    .accessibilityLabel("Context estimate pending")
+                    .accessibilityValue("Displayed as zero percent until refreshed")
             }
 
             contextAndCompactionRow(contextValue: contextValue, snapshot: snapshot)
@@ -383,15 +418,17 @@ struct SessionContextSheet: View {
         .accessibilityLabel(usage.accessibilityLabel)
     }
 
-    private func contextAndCompactionRow(contextValue: String, snapshot: SessionSnapshot) -> some View {
+    private func contextAndCompactionRow(contextValue: String?, snapshot: SessionSnapshot) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(contextValue)
-                .font(TronTypography.secondaryCodeDescription)
-                .foregroundStyle(Color.tronTextSecondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .layoutPriority(1)
-                .accessibilityLabel("Context usage: \(contextValue)")
+            if let contextValue {
+                Text(contextValue)
+                    .font(TronTypography.secondaryCodeDescription)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .layoutPriority(1)
+                    .accessibilityLabel("Context usage: \(contextValue)")
+            }
 
             Spacer(minLength: 8)
 

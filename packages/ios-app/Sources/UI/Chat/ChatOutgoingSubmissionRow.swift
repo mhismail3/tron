@@ -22,14 +22,16 @@ struct ChatPendingPromptRow: View, Equatable {
                         .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
                         .modifier(UserPromptGlassModifier())
                 }
-                ForEach(QueuedMessageAttachmentPresentation.lines(
+                let attachmentChips = QueuedMessageAttachmentPresentation.chips(
                     attachmentCount: presentation.attachmentCount,
                     photoCount: presentation.photoCount,
                     fileAttachmentCount: presentation.fileAttachmentCount
-                )) { line in
-                    Label("\(line.text) pending", systemImage: line.iconName)
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextSecondary)
+                )
+                if !attachmentChips.isEmpty {
+                    QueuedMessageAttachmentChipRow(
+                        chips: attachmentChips,
+                        accent: presentation.behavior == .followUp ? .tronPurple : .tronEmerald
+                    )
                 }
             }
         }

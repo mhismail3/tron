@@ -25,48 +25,87 @@ enum QueuedMessageManagementPolicy {
     }
 }
 
-struct QueuedMessageAttachmentLine: Equatable, Identifiable, Sendable {
+struct QueuedMessageAttachmentChip: Equatable, Identifiable, Sendable {
+    enum Kind: Equatable, Sendable { case photo, file }
+
     let id: String
-    let iconName: String
-    let text: String
+    let kind: Kind
+
+    var iconName: String {
+        switch kind {
+        case .photo: "photo.fill"
+        case .file: "doc.fill"
+        }
+    }
 }
 
 enum QueuedMessageAttachmentPresentation {
-    static func lines(for message: SessionSnapshot.QueuedMessage) -> [QueuedMessageAttachmentLine] {
-        lines(
+    static func chips(for message: SessionSnapshot.QueuedMessage) -> [QueuedMessageAttachmentChip] {
+        chips(
             attachmentCount: message.attachmentCount,
             photoCount: message.photoCount,
             fileAttachmentCount: message.fileAttachmentCount
         )
     }
 
-    static func lines(
+    static func chips(
         attachmentCount: Int,
         photoCount: Int?,
         fileAttachmentCount: Int?
-    ) -> [QueuedMessageAttachmentLine] {
+    ) -> [QueuedMessageAttachmentChip] {
         let typedCountsAvailable = photoCount != nil || fileAttachmentCount != nil
         let photos = max(0, photoCount ?? 0)
-        let files = max(
-            0,
-            fileAttachmentCount ?? (typedCountsAvailable ? 0 : attachmentCount)
-        )
-        var result: [QueuedMessageAttachmentLine] = []
-        if photos > 0 {
-            result.append(.init(
-                id: "photos",
-                iconName: "photo.on.rectangle",
-                text: "\(photos) \(photos == 1 ? "photo" : "photos")"
-            ))
+        let files = max(0, fileAttachmentCount ?? (typedCountsAvailable ? 0 : attachmentCount))
+        return (0..<photos).map { .init(id: "photo-\($0)", kind: .photo) }
+            + (0..<files).map { .init(id: "file-\($0)", kind: .file) }
+    }
+
+    static func accessibilityLabel(for message: SessionSnapshot.QueuedMessage) -> String {
+        accessibilityLabel(chips: chips(for: message))
+    }
+
+    static func accessibilityLabel(chips: [QueuedMessageAttachmentChip]) -> String {
+        let photos = chips.count { $0.kind == .photo }
+        let files = chips.count { $0.kind == .file }
+        return [
+            photos > 0 ? "\(photos) \(photos == 1 ? "photo" : "photos")" : nil,
+            files > 0 ? "\(files) \(files == 1 ? "file" : "files")" : nil,
+        ].compactMap(\.self).joined(separator: ", ")
+    }
+}
+
+enum QueuedMessageCardLayout {
+    static let contentSpacing: CGFloat = 6
+    static let arrowContainerSize: CGFloat = 24
+    static let attachmentChipSize: CGFloat = 22
+    static let attachmentChipCornerRadius: CGFloat = 6
+}
+
+struct QueuedMessageAttachmentChipRow: View {
+    let chips: [QueuedMessageAttachmentChip]
+    let accent: Color
+
+    var body: some View {
+        ToolChipFlowLayout(spacing: 4) {
+            ForEach(chips) { chip in
+                Image(systemName: chip.iconName)
+                    .font(TronTypography.sans(size: 9, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(
+                        width: QueuedMessageCardLayout.attachmentChipSize,
+                        height: QueuedMessageCardLayout.attachmentChipSize
+                    )
+                    .background(
+                        accent.opacity(0.13),
+                        in: RoundedRectangle(
+                            cornerRadius: QueuedMessageCardLayout.attachmentChipCornerRadius,
+                            style: .continuous
+                        )
+                    )
+            }
         }
-        if files > 0 {
-            result.append(.init(
-                id: "attachments",
-                iconName: "paperclip",
-                text: "\(files) \(files == 1 ? "attachment" : "attachments")"
-            ))
-        }
-        return result
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(QueuedMessageAttachmentPresentation.accessibilityLabel(chips: chips))
     }
 }
 
@@ -126,7 +165,7 @@ struct QueuedMessageRow: View {
             cornerRadius: ChatPromptContainerStyle.cornerRadius,
             style: .continuous
         )
-        return VStack(alignment: .leading, spacing: 8) {
+        return VStack(alignment: .leading, spacing: QueuedMessageCardLayout.contentSpacing) {
             HStack(alignment: .center, spacing: 10) {
                 Text(title)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
@@ -148,7 +187,10 @@ struct QueuedMessageRow: View {
                         : "text.line.last.and.arrowtriangle.forward")
                         .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
                         .foregroundStyle(accent)
-                        .frame(width: 28, height: 28)
+                        .frame(
+                            width: QueuedMessageCardLayout.arrowContainerSize,
+                            height: QueuedMessageCardLayout.arrowContainerSize
+                        )
                         .background(accent.opacity(0.13), in: Circle())
 
                     trailingStatus
@@ -159,14 +201,13 @@ struct QueuedMessageRow: View {
                 UserPromptText(text: message.text)
             }
 
-            ForEach(QueuedMessageAttachmentPresentation.lines(for: message)) { line in
-                Label(line.text, systemImage: line.iconName)
-                    .font(TronTypography.caption)
-                    .foregroundStyle(Color.tronTextSecondary)
+            let attachmentChips = QueuedMessageAttachmentPresentation.chips(for: message)
+            if !attachmentChips.isEmpty {
+                QueuedMessageAttachmentChipRow(chips: attachmentChips, accent: accent)
             }
         }
         .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
-        .padding(.top, ChatPromptContainerStyle.topPadding)
+        .padding(.top, QueuedMessageCardLayout.contentSpacing)
         .padding(.bottom, ChatPromptContainerStyle.queuedMessageBottomPadding)
         .contentShape(shape)
         .glassEffect(

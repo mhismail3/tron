@@ -34,28 +34,39 @@ struct QueuedMessagePresentationTests {
         #expect(!QueuedMessageManagementAvailability.invalidProjection.isManageable)
     }
 
-    @Test("typed photo counts use photo presentation while file counts retain attachment presentation")
+    @Test("queued attachments become one inert mini chip per typed item")
     func attachmentPresentation() {
-        #expect(QueuedMessageAttachmentPresentation.lines(
+        #expect(QueuedMessageAttachmentPresentation.chips(
             attachmentCount: 3,
             photoCount: 3,
             fileAttachmentCount: 0
         ) == [
-            .init(id: "photos", iconName: "photo.on.rectangle", text: "3 photos"),
+            .init(id: "photo-0", kind: .photo),
+            .init(id: "photo-1", kind: .photo),
+            .init(id: "photo-2", kind: .photo),
         ])
-        #expect(QueuedMessageAttachmentPresentation.lines(
+        #expect(QueuedMessageAttachmentPresentation.chips(
             attachmentCount: 2,
             photoCount: 0,
             fileAttachmentCount: 2
         ) == [
-            .init(id: "attachments", iconName: "paperclip", text: "2 attachments"),
+            .init(id: "file-0", kind: .file),
+            .init(id: "file-1", kind: .file),
         ])
-        #expect(QueuedMessageAttachmentPresentation.lines(
+        #expect(QueuedMessageAttachmentPresentation.chips(
             attachmentCount: 1,
             photoCount: nil,
             fileAttachmentCount: nil
         ) == [
-            .init(id: "attachments", iconName: "paperclip", text: "1 attachment"),
+            .init(id: "file-0", kind: .file),
         ])
+    }
+
+    @Test("queued card geometry keeps compact balanced header spacing")
+    func compactCardGeometry() {
+        #expect(QueuedMessageCardLayout.contentSpacing == 6)
+        #expect(QueuedMessageCardLayout.arrowContainerSize == 24)
+        #expect(QueuedMessageCardLayout.attachmentChipSize == 22)
+        #expect(QueuedMessageCardLayout.attachmentChipCornerRadius == 6)
     }
 }

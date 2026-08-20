@@ -66,12 +66,24 @@ struct ChatCompactPillTests {
         #expect(SessionCompactionControlPolicy.automaticStatus(nil) == "Unavailable")
     }
 
-    @Test("Manage Session context usage never fabricates missing evidence")
+    @Test("Manage Session distinguishes compacted and pending usage refresh states")
     func sessionContextUsage() {
         #expect(SessionContextUsagePresentation(nil) == .unavailable)
         #expect(SessionContextUsagePresentation(.init(tokens: nil, contextWindow: 1_000, percent: nil)) == .unavailable)
         #expect(SessionContextUsagePresentation(.init(tokens: 250, contextWindow: 1_000, percent: 25)) == .available(used: 250, window: 1_000, percent: 25))
         #expect(SessionContextUsagePresentation(nil).accessibilityLabel.hasPrefix("Context usage:"))
+        #expect(SessionContextUsageRefreshPresentation(
+            lastTranscriptKind: .compaction,
+            assistantMessages: 3
+        ) == .compacted)
+        #expect(SessionContextUsageRefreshPresentation(
+            lastTranscriptKind: nil,
+            assistantMessages: 0
+        ) == .awaitingFirstResponse)
+        #expect(SessionContextUsageRefreshPresentation(
+            lastTranscriptKind: .message,
+            assistantMessages: 3
+        ) == .awaitingRefresh)
     }
 
     @Test("Manage Session export rows keep stable identities and one progress owner")
