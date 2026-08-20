@@ -91,7 +91,7 @@ struct TranscriptRow: View, Equatable {
                                 MarkdownText(
                                     text: part.text ?? "",
                                     document: preparedText.markdownDocument(
-                                        identity: part.id,
+                                        identity: ChatTextPreparationKey.content(part),
                                         source: part.text ?? ""
                                     ),
                                     streaming: streaming

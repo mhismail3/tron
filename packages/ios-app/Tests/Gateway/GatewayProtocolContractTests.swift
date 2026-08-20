@@ -19,7 +19,7 @@ struct GatewayProtocolContractTests {
           "pendingPrompt":{"id":"prompt-1","createdAt":"2026-01-01T00:00:02Z","behavior":"steer","text":"waiting","attachmentCount":1},
           "compactionQueued":true,"automaticCompactionEnabled":false,
           "transcript":[
-            {"id":"entry-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"entry-1:0","type":"text","text":"hello"},{"id":"entry-1:1","type":"text","text":"notes.pdf","attachment":{"name":"notes.pdf","mimeType":"application/pdf","size":2048}}]},
+            {"id":"entry-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","presentationId":"entry-1","content":[{"id":"entry-1:0","ordinal":0,"type":"text","text":"hello"},{"id":"entry-1:1","ordinal":1,"type":"text","text":"notes.pdf","attachment":{"name":"notes.pdf","mimeType":"application/pdf","size":2048}}]},
             {"id":"entry-2","parentId":"entry-1","timestamp":"2026-01-01T00:00:01Z","kind":"modelChange","modelRef":{"provider":"openai","id":"next"}}
           ],"transcriptStart":10,"transcriptTotal":12,
           "leafEntryId":"entry-2","toolExecutions":[],
@@ -32,7 +32,9 @@ struct GatewayProtocolContractTests {
         #expect(snapshot.model == ModelRef(provider: "anthropic", id: "model"))
         #expect(snapshot.transcript.first?.text == "hello")
         #expect(snapshot.transcript.last?.modelRef == ModelRef(provider: "openai", id: "next"))
+        #expect(snapshot.transcript.first?.presentationId == "entry-1")
         #expect(snapshot.transcript.first?.content?.first?.id == "entry-1:0")
+        #expect(snapshot.transcript.first?.content?.first?.ordinal == 0)
         #expect(snapshot.transcript.first?.content?.last?.type == .text)
         #expect(snapshot.transcript.first?.content?.last?.attachment?.name == "notes.pdf")
         #expect(snapshot.transcript.first?.content?.last?.attachment?.size == 2048)
@@ -62,6 +64,55 @@ struct GatewayProtocolContractTests {
         )
         #expect(legacy.compactionQueued == nil)
         #expect(legacy.automaticCompactionEnabled == nil)
+    }
+
+    @Test("message presentation identity and content ordinals are required")
+    func transcriptIdentityIsRequired() throws {
+        let valid: [String: Any] = [
+            "id": "assistant", "parentId": NSNull(),
+            "timestamp": "2026-01-01T00:00:00Z", "kind": "message", "role": "assistant",
+            "presentationId": "stream:turn",
+            "content": [[
+                "id": "stream:turn:0", "ordinal": 0, "thinkingRunOrdinal": 0,
+                "type": "thinking", "text": "working",
+            ]],
+        ]
+        func decode(_ object: [String: Any]) throws {
+            _ = try JSONDecoder.gateway.decode(
+                TranscriptItem.self,
+                from: JSONSerialization.data(withJSONObject: object)
+            )
+        }
+        try decode(valid)
+
+        var missingPresentation = valid
+        missingPresentation.removeValue(forKey: "presentationId")
+        #expect(throws: DecodingError.self) { try decode(missingPresentation) }
+
+        var emptyPresentation = valid
+        emptyPresentation["presentationId"] = ""
+        #expect(throws: DecodingError.self) { try decode(emptyPresentation) }
+
+        var missingOrdinal = valid
+        var missingOrdinalContent = try #require(missingOrdinal["content"] as? [[String: Any]])
+        missingOrdinalContent[0].removeValue(forKey: "ordinal")
+        missingOrdinal["content"] = missingOrdinalContent
+        #expect(throws: DecodingError.self) { try decode(missingOrdinal) }
+
+        var duplicateOrdinal = valid
+        var duplicateOrdinalContent = try #require(duplicateOrdinal["content"] as? [[String: Any]])
+        duplicateOrdinalContent.append([
+            "id": "stream:turn:duplicate", "ordinal": 0,
+            "type": "text", "text": "duplicate",
+        ])
+        duplicateOrdinal["content"] = duplicateOrdinalContent
+        #expect(throws: DecodingError.self) { try decode(duplicateOrdinal) }
+
+        var missingThinkingRun = valid
+        var missingThinkingContent = try #require(missingThinkingRun["content"] as? [[String: Any]])
+        missingThinkingContent[0].removeValue(forKey: "thinkingRunOrdinal")
+        missingThinkingRun["content"] = missingThinkingContent
+        #expect(throws: DecodingError.self) { try decode(missingThinkingRun) }
     }
 
     @Test("dashboard summary update carries a monotonic revision")

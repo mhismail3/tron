@@ -20,7 +20,12 @@ struct SharedProtocolFixtureTests {
         #expect(snapshot.transcriptTotal == snapshot.transcript.count)
         #expect(snapshot.transcriptTotal == 11)
         #expect(Set(snapshot.transcript.map(\.kind)) == Set(TranscriptItem.Kind.allFixtureKinds))
+        #expect(snapshot.transcript.first?.presentationId == "user-entry")
         #expect(snapshot.transcript.first?.content?.map(\.id) == ["user-entry:0", "user-entry:1", "user-entry:2"])
+        #expect(snapshot.transcript.first?.content?.map(\.ordinal) == [0, 1, 2])
+        let assistant = snapshot.transcript.first { $0.role == .assistant }
+        #expect(assistant?.presentationId == "assistant-entry")
+        #expect(assistant?.content?.first?.thinkingRunOrdinal == 0)
         #expect(snapshot.transcript.first?.content?.last?.type == .text)
         #expect(snapshot.transcript.first?.content?.last?.attachment?.name == "fixture.pdf")
         #expect(snapshot.transcript.first?.content?.last?.attachment?.size == 55_972)

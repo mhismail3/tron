@@ -172,8 +172,14 @@ containing session, mounted presentation, runtime, canonical/timeline generation
 bounds/edge identity. It retains at most one installed, one building, and one pending immutable
 snapshot/timeline; it is disposable projection state, not a session mirror or event journal.
 One deterministic `ChatTranscriptProjectionKernel` converts exact canonical entries into ordered
-raw atoms and then globally assembles call/result joins, bootstrap filtering, ordinals, barriers,
-grouping, compatibility normalization, and semantic maps. `ToolExecutionStatePolicy` is shared with
+raw atoms and then globally assembles call/result joins, bootstrap filtering, barriers, grouping,
+and semantic maps. Message presentation IDs and required content/thinking-run ordinals arrive from
+the Gateway and are never rewritten: the same semantic row, thinking run, and prepared-text source
+therefore survive live-to-canonical settlement even though the canonical entry ID changes. Rendered
+IDs are deterministically collision-disambiguated only for SwiftUI uniqueness; semantic identity
+continues to own entrance and resilience state. The projection worker prepares immutable row-local
+markdown/thinking slices with entry-local revision tokens, so render rows perform only cheap revision
+equality and never reslice the transcript-wide cache. `ToolExecutionStatePolicy` is shared with
 `SessionPresentationStore`, so progress-sequence, timestamp, status-tie, explicit-order, start-time,
 and call-ID rules cannot drift between canonical event reduction and sparse rendering. Raw fragments retain the complete
 currently visible disposable history—even beyond one 512-item page—because explicitly loaded

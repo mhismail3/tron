@@ -19,11 +19,13 @@ struct ChatHostedObservation: Sendable {
     let animatedEntranceCount: Int
     let lastAnimatedEntranceSourceOrdinal: Int?
     let offscreenEntranceResolutionCount: Int
+    let entranceFailsafeRevealCount: Int
     let geometryCallbackCount: Int
     let semanticFrameCallbackCount: Int
     let projectionSubmitCount: Int
     let projectionWorkAdmissionCount: Int
     let projectionInstallCount: Int
+    let remountedWhileSemanticIDDisplayed: Int
     let installedProjectionRowCount: Int
     let installedProjectionSourceOrdinal: Int?
     let maximumSemanticExcursion: CGFloat
@@ -49,11 +51,14 @@ final class ChatHostedProbe {
     private var animatedEntranceCount = 0
     private var lastAnimatedEntranceSourceOrdinal: Int?
     private var offscreenEntranceResolutionCount = 0
+    private var entranceFailsafeRevealCount = 0
     private var geometryCallbackCount = 0
     private var semanticFrameCallbackCount = 0
     private var projectionSubmitCount = 0
     private var projectionWorkAdmissionCount = 0
     private var projectionInstallCount = 0
+    private var remountedWhileSemanticIDDisplayed = 0
+    private var renderedIDBySemanticID: [String: String] = [:]
     private var installedProjectionRowCount = 0
     private var installedProjectionSourceOrdinal: Int?
     private var maximumSemanticExcursion: CGFloat = 0
@@ -101,11 +106,13 @@ final class ChatHostedProbe {
             animatedEntranceCount: animatedEntranceCount,
             lastAnimatedEntranceSourceOrdinal: lastAnimatedEntranceSourceOrdinal,
             offscreenEntranceResolutionCount: offscreenEntranceResolutionCount,
+            entranceFailsafeRevealCount: entranceFailsafeRevealCount,
             geometryCallbackCount: geometryCallbackCount,
             semanticFrameCallbackCount: semanticFrameCallbackCount,
             projectionSubmitCount: projectionSubmitCount,
             projectionWorkAdmissionCount: projectionWorkAdmissionCount,
             projectionInstallCount: projectionInstallCount,
+            remountedWhileSemanticIDDisplayed: remountedWhileSemanticIDDisplayed,
             installedProjectionRowCount: installedProjectionRowCount,
             installedProjectionSourceOrdinal: installedProjectionSourceOrdinal,
             maximumSemanticExcursion: maximumSemanticExcursion,
@@ -156,6 +163,11 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
+    func recordEntranceFailsafeReveal() {
+        entranceFailsafeRevealCount &+= 1
+        revision &+= 1
+    }
+
     func recordEntranceResolution(animated: Bool, sourceOrdinal: Int) {
         if animated {
             animatedEntranceCount &+= 1
@@ -172,7 +184,18 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
-    func recordProjectionInstall(rowCount: Int, sourceOrdinal: Int) {
+    func recordProjectionInstall(
+        rowCount: Int,
+        sourceOrdinal: Int,
+        nextRenderedIDBySemanticID: [String: String]
+    ) {
+        for (semanticID, previousRenderedID) in renderedIDBySemanticID {
+            if let nextRenderedID = nextRenderedIDBySemanticID[semanticID],
+               nextRenderedID != previousRenderedID {
+                remountedWhileSemanticIDDisplayed &+= 1
+            }
+        }
+        renderedIDBySemanticID = nextRenderedIDBySemanticID
         projectionInstallCount &+= 1
         installedProjectionRowCount = max(0, rowCount)
         installedProjectionSourceOrdinal = max(0, sourceOrdinal)

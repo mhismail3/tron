@@ -75,6 +75,6 @@ struct ChatContentTransitionTests {
 
     private func transcriptItem(role: String, id: String) throws -> TranscriptItem {
         let data = Data(#"{"id":"\#(id)","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"\#(role)","content":[{"id":"\#(id):0","type":"text","text":"hello"}]}"#.utf8)
-        return try JSONDecoder.gateway.decode(TranscriptItem.self, from: data)
+        return try decodeTranscriptFixture(TranscriptItem.self, from: data)
     }
 }

@@ -192,9 +192,15 @@ dashboard immediately without broadcasting full transcripts; clients subscribe
 to `session.snapshot`, progress, tool, queue, and extension events only for chats
 they actually open. Streaming progress republishes the cumulative live message, so
 updates are coalesced to one frame per short window (the first update stays
-immediate) and each frame is bounded to a marked live tail; intermediate frames
-are presentation-identical and the settled canonical message always pages through
-transcript projection. Active operations also emit a bounded sequenced heartbeat, so
+immediate) and each frame is bounded by exact encoded bytes to a marked live tail.
+At assistant-message start the runtime captures one opaque presentation ID, fixed
+canonical parent anchor, and fixed timestamp. Every projected content part carries
+its required source ordinal; adjacent thinking parts also carry their fixed run
+ordinal, including after leading live-tail trimming. Pi's `message_end` callback
+precedes canonical append, so the runtime binds that same presentation ID to the
+new canonical entry in the following microtask before publishing the settled
+snapshot. The binding ledger is capped beyond the maximum mobile transcript page;
+canonical entry IDs and JSONL remain authoritative and unmodified. Active operations also emit a bounded sequenced heartbeat, so
 a long tool with no output remains distinguishable from a broken mobile stream.
 The embedded runtime's active-run flag outranks an older settlement callback when
 an extension completion immediately triggers a continuation, so phase, operation,

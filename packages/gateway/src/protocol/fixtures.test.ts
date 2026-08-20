@@ -20,11 +20,21 @@ describe("shared protocol-v3 fixtures", () => {
     expect(snapshot.transcript[0]).toMatchObject({
       content: expect.arrayContaining([
         {
-          id: "user-entry:2", type: "text", text: "fixture.pdf",
+          id: "user-entry:2", ordinal: 2, type: "text", text: "fixture.pdf",
           attachment: { name: "fixture.pdf", mimeType: "application/pdf", size: 55_972 },
         },
       ]),
     });
+    const assistant = snapshot.transcript.find(
+      (item) => item.kind === "message" && item.role === "assistant",
+    );
+    expect(assistant).toMatchObject({
+      presentationId: "assistant-entry",
+      content: expect.arrayContaining([
+        expect.objectContaining({ ordinal: 0, thinkingRunOrdinal: 0, type: "thinking" }),
+      ]),
+    });
+    expect(snapshot.streaming).toMatchObject({ presentationId: "streaming" });
     expect(snapshot.toolExecutions[0]).toMatchObject({
       toolCallId: "live-tool",
       order: 0,

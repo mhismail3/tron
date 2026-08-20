@@ -9,6 +9,8 @@ struct ContentPart: Codable, Hashable, Sendable, Identifiable {
 
     enum Kind: String, Codable, Sendable { case text, thinking, image, toolCall }
     let id: String
+    let ordinal: Int
+    let thinkingRunOrdinal: Int?
     let type: Kind
     let text: String?
     let attachment: Attachment?
@@ -18,6 +20,54 @@ struct ContentPart: Codable, Hashable, Sendable, Identifiable {
     let toolCallId: String?
     let name: String?
     let arguments: JSONValue?
+}
+
+extension ContentPart {
+    private enum CodingKeys: String, CodingKey {
+        case id, ordinal, thinkingRunOrdinal, type, text, attachment, redacted,
+             mimeType, blobId, toolCallId, name, arguments
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        ordinal = try values.decode(Int.self, forKey: .ordinal)
+        type = try values.decode(Kind.self, forKey: .type)
+        thinkingRunOrdinal = try values.decodeIfPresent(Int.self, forKey: .thinkingRunOrdinal)
+        if type == .thinking, thinkingRunOrdinal == nil {
+            throw DecodingError.keyNotFound(
+                CodingKeys.thinkingRunOrdinal,
+                .init(
+                    codingPath: values.codingPath,
+                    debugDescription: "Thinking content requires a stable run ordinal"
+                )
+            )
+        }
+        text = try values.decodeIfPresent(String.self, forKey: .text)
+        attachment = try values.decodeIfPresent(Attachment.self, forKey: .attachment)
+        redacted = try values.decodeIfPresent(Bool.self, forKey: .redacted)
+        mimeType = try values.decodeIfPresent(String.self, forKey: .mimeType)
+        blobId = try values.decodeIfPresent(String.self, forKey: .blobId)
+        toolCallId = try values.decodeIfPresent(String.self, forKey: .toolCallId)
+        name = try values.decodeIfPresent(String.self, forKey: .name)
+        arguments = try values.decodeIfPresent(JSONValue.self, forKey: .arguments)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(id, forKey: .id)
+        try values.encode(ordinal, forKey: .ordinal)
+        try values.encodeIfPresent(thinkingRunOrdinal, forKey: .thinkingRunOrdinal)
+        try values.encode(type, forKey: .type)
+        try values.encodeIfPresent(text, forKey: .text)
+        try values.encodeIfPresent(attachment, forKey: .attachment)
+        try values.encodeIfPresent(redacted, forKey: .redacted)
+        try values.encodeIfPresent(mimeType, forKey: .mimeType)
+        try values.encodeIfPresent(blobId, forKey: .blobId)
+        try values.encodeIfPresent(toolCallId, forKey: .toolCallId)
+        try values.encodeIfPresent(name, forKey: .name)
+        try values.encodeIfPresent(arguments, forKey: .arguments)
+    }
 }
 
 private protocol TranscriptPayload: Codable, Hashable, Sendable {
@@ -36,6 +86,7 @@ struct MessageTranscriptItem: TranscriptPayload {
     let timestamp: String
     let kind: TranscriptItem.Kind
     let role: TranscriptItem.Role
+    let presentationId: String
     let content: [ContentPart]
     let provider: String?
     let modelId: String?
@@ -54,7 +105,7 @@ struct MessageTranscriptItem: TranscriptPayload {
     let extensionOrigin: ExtensionToolOrigin? = nil
 
     private enum CodingKeys: String, CodingKey {
-        case id, parentId, timestamp, kind, role, content, provider, modelId, stopReason,
+        case id, parentId, timestamp, kind, role, presentationId, content, provider, modelId, stopReason,
              errorMessage, toolCallId, toolName, isError, details, usage, startedAt,
              completedAt, durationMs, lastProgressAt, progressSequence, extensionOrigin
     }
@@ -152,14 +203,42 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(Kind.self, forKey: .kind) {
-        case .message: self = .message(try MessageTranscriptItem(from: decoder))
+        case .message:
+            let message = try MessageTranscriptItem(from: decoder)
+            guard !message.presentationId.isEmpty else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .kind,
+                    in: container,
+                    debugDescription: "Message presentation identity cannot be empty"
+                )
+            }
+            try Self.validateContentOrdinals(message.content, container: container)
+            self = .message(message)
         case .bash: self = .bash(try BashTranscriptItem(from: decoder))
-        case .customMessage: self = .customMessage(try CustomMessageTranscriptItem(from: decoder))
+        case .customMessage:
+            let message = try CustomMessageTranscriptItem(from: decoder)
+            try Self.validateContentOrdinals(message.content, container: container)
+            self = .customMessage(message)
         case .customEntry: self = .customEntry(try CustomEntryTranscriptItem(from: decoder))
         case .compaction, .branchSummary: self = .summary(try SummaryTranscriptItem(from: decoder))
         case .modelChange: self = .modelChange(try ModelChangeTranscriptItem(from: decoder))
         case .thinkingChange: self = .thinkingChange(try ThinkingChangeTranscriptItem(from: decoder))
         case .label: self = .label(try LabelTranscriptItem(from: decoder))
+        }
+    }
+
+    private static func validateContentOrdinals(
+        _ content: [ContentPart],
+        container: KeyedDecodingContainer<CodingKeys>
+    ) throws {
+        let ordinals = content.map(\.ordinal)
+        guard ordinals.allSatisfy({ $0 >= 0 }), Set(ordinals).count == ordinals.count,
+              content.allSatisfy({ ($0.thinkingRunOrdinal ?? 0) >= 0 }) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .kind,
+                in: container,
+                debugDescription: "Projected content ordinals must be unique and nonnegative"
+            )
         }
     }
 
@@ -192,6 +271,7 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
         }
     }
     var role: Role? { if case .message(let value) = self { value.role } else { nil } }
+    var presentationId: String { if case .message(let value) = self { value.presentationId } else { id } }
     var content: [ContentPart]? {
         switch self {
         case .message(let value): value.content

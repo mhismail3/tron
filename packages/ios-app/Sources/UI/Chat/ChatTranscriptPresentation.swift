@@ -1172,9 +1172,6 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
         self.init(tools: tools.map(\.descriptor), anchorID: anchorID)
     }
 
-    func replacingAnchorID(_ anchorID: String) -> Self {
-        Self(tools: tools, anchorID: anchorID)
-    }
 
     var id: String { "tool-run-" + anchorID }
     var reverseChronologicalTools: [ChatToolDescriptor] {
@@ -1209,11 +1206,27 @@ struct ChatThinkingSegment: Hashable, Identifiable, Sendable {
 }
 
 struct ChatThinkingRun: Hashable, Identifiable, Sendable {
-    /// The first canonical thinking part anchors the run while later lines
-    /// arrive. Word-level reveal is a presentation concern owned by the row,
-    /// so projection identity remains segment-stable and authoritative.
+    /// The contiguous-run ordinal is stable when bounded live frames drop
+    /// leading thinking parts. Word-level reveal remains row-local state.
     let id: String
     let segments: [ChatThinkingSegment]
+}
+
+enum ChatTranscriptRowIdentity {
+    static func assistantMessage(_ item: TranscriptItem) -> String {
+        item.role == .assistant ? item.presentationId : item.id
+    }
+
+    static func messageSlice(
+        _ item: TranscriptItem,
+        parts: [ChatMessagePart],
+        slice: Int
+    ) -> String {
+        let first = assistantMessage(item)
+        if slice == 0 { return first }
+        if let part = parts.first { return "\(first)-slice-\(part.id)" }
+        return "\(first)-footer-\(slice)"
+    }
 }
 
 enum ChatMessagePart: Hashable, Identifiable, Sendable {
@@ -1222,7 +1235,7 @@ enum ChatMessagePart: Hashable, Identifiable, Sendable {
 
     var id: String {
         switch self {
-        case .content(let part): "content-\(part.id)"
+        case .content(let part): "content-\(part.ordinal)"
         case .thinking(let run): "thinking-\(run.id)"
         }
     }
@@ -1230,20 +1243,12 @@ enum ChatMessagePart: Hashable, Identifiable, Sendable {
 
 struct ChatMessagePresentation: Hashable, Identifiable, Sendable {
     let id: String
+    let semanticID: String
     let item: TranscriptItem
     let parts: [ChatMessagePart]
     let streaming: Bool
     let showsFooter: Bool
 
-    func replacingID(_ id: String) -> Self {
-        Self(
-            id: id,
-            item: item,
-            parts: parts,
-            streaming: streaming,
-            showsFooter: showsFooter
-        )
-    }
 }
 
 enum ChatTranscriptRenderItem: Hashable, Identifiable, Sendable {
@@ -1526,92 +1531,6 @@ struct ChatTranscriptTimeline: Hashable, Sendable {
         canonicalRenderedIDSet.contains(id) || liveRenderedIDSet.contains(id)
     }
 
-    /// Rewrites only presentation row IDs while retaining canonical semantic
-    /// identities. This is used for a live-to-canonical handoff so SwiftUI
-    /// updates one mounted row instead of removing and reinserting it.
-    func replacingRenderedIDs(_ replacements: [String: String]) -> ChatTranscriptTimeline {
-        guard !replacements.isEmpty else { return self }
-        let canonical = items.canonical.map { item in
-            Self.replacingRenderedID(item, replacements: replacements)
-        }
-        let live = items.live.map { item in
-            Self.replacingRenderedID(item, replacements: replacements)
-        }
-        let rewrittenIDs = canonical.map(\.id) + live.map(\.id)
-        guard Set(rewrittenIDs).count == rewrittenIDs.count,
-              let preferredCanonical = Self.replacingRenderedIDKeys(
-                preferredSemanticIDByRenderedID.canonical,
-                replacements: replacements
-              ),
-              let preferredLive = Self.replacingRenderedIDKeys(
-                preferredSemanticIDByRenderedID.live,
-                replacements: replacements
-              ) else {
-            // A reconnect snapshot can temporarily contain both the settled
-            // canonical row and the still-projected live row. Continuity is a
-            // visual optimization; if reusing the old ID would collide with an
-            // existing row, keep the authoritative next timeline unchanged.
-            return self
-        }
-        let preferred = ChatSemanticIndex(
-            canonical: preferredCanonical,
-            live: preferredLive
-        )
-        let reverse = ChatSemanticIndex(
-            canonical: Self.replacingRenderedIDValues(
-                renderedIDBySemanticID.canonical,
-                replacements: replacements
-            ),
-            live: Self.replacingRenderedIDValues(
-                renderedIDBySemanticID.live,
-                replacements: replacements
-            )
-        )
-        return ChatTranscriptTimeline(
-            items: ChatTranscriptItems(canonical: canonical, live: live),
-            preferredSemanticIDByRenderedID: preferred,
-            renderedIDBySemanticID: reverse
-        )
-    }
-
-    private static func replacingRenderedID(
-        _ item: ChatTranscriptRenderItem,
-        replacements: [String: String]
-    ) -> ChatTranscriptRenderItem {
-        guard let replacement = replacements[item.id], replacement != item.id else { return item }
-        switch item {
-        case .message(let message):
-            return .message(message.replacingID(replacement))
-        case .toolRun(let run):
-            guard replacement.hasPrefix("tool-run-") else { return item }
-            return .toolRun(run.replacingAnchorID(String(replacement.dropFirst("tool-run-".count))))
-        case .transcript, .notification:
-            return item
-        }
-    }
-
-    private static func replacingRenderedIDKeys(
-        _ values: [String: String],
-        replacements: [String: String]
-    ) -> [String: String]? {
-        var rewritten: [String: String] = [:]
-        rewritten.reserveCapacity(values.count)
-        for (key, value) in values {
-            let rewrittenKey = replacements[key] ?? key
-            guard rewritten.updateValue(value, forKey: rewrittenKey) == nil else {
-                return nil
-            }
-        }
-        return rewritten
-    }
-
-    private static func replacingRenderedIDValues(
-        _ values: [String: String],
-        replacements: [String: String]
-    ) -> [String: String] {
-        values.mapValues { replacements[$0] ?? $0 }
-    }
-
     /// Sparse replacements are permitted only after the kernel proves every row
     /// identity unchanged, so the cached identity spine and semantic maps remain
     /// the exact canonical values rather than being rebuilt or guessed.
@@ -1631,27 +1550,31 @@ struct ChatTranscriptTimeline: Hashable, Sendable {
 
     func appendingLive(_ live: ChatTranscriptTimeline) -> ChatTranscriptTimeline {
         precondition(live.items.canonicalCount == 0)
-        let ids = renderedIDs.replacingLive(live.renderedIDs.live)
         let canonicalIDSet = canonicalRenderedIDSet
-        let liveIDSet = live.liveRenderedIDSet
+        // A reconnect can briefly project the just-persisted assistant both as
+        // canonical history and as the retained live handoff. Canonical wins;
+        // never publish two SwiftUI rows with the same presentation identity.
+        let admitsLive = canonicalIDSet.isDisjoint(with: live.liveRenderedIDSet)
+        let admittedLiveItems = admitsLive ? live.items.live : []
+        let admittedLiveIDs = admitsLive ? live.renderedIDs.live : []
+        let liveIDSet = admitsLive ? live.liveRenderedIDSet : []
+        let ids = renderedIDs.replacingLive(admittedLiveIDs)
         let preferred = ChatSemanticIndex(
             canonical: preferredSemanticIDByRenderedID.canonical,
-            live: live.preferredSemanticIDByRenderedID.live
+            live: admitsLive ? live.preferredSemanticIDByRenderedID.live : [:]
         )
         let reverse = ChatSemanticIndex(
             canonical: renderedIDBySemanticID.canonical,
-            live: live.renderedIDBySemanticID.live
+            live: admitsLive ? live.renderedIDBySemanticID.live : [:]
         )
         return ChatTranscriptTimeline(
-            items: items.replacingLive(live.items.live),
+            items: items.replacingLive(admittedLiveItems),
             preferredSemanticIDByRenderedID: preferred,
             renderedIDBySemanticID: reverse,
             renderedIDs: ids,
             canonicalRenderedIDSet: canonicalIDSet,
             liveRenderedIDSet: liveIDSet,
-            internallyConsistent: internallyConsistent
-                && live.internallyConsistent
-                && canonicalIDSet.isDisjoint(with: liveIDSet)
+            internallyConsistent: internallyConsistent && live.internallyConsistent
         )
     }
 
@@ -1770,26 +1693,30 @@ enum ChatTranscriptPresentation {
     /// one readable paragraph while preserving stable identities for animation.
     static func messageParts(in item: TranscriptItem) -> [ChatMessagePart] {
         var projected: [ChatMessagePart] = []
-        var thinkingID: String?
         var thinkingSegments: [ChatThinkingSegment] = []
+        var thinkingRunID: String?
 
         func flushThinking() {
-            guard let thinkingID, !thinkingSegments.isEmpty else { return }
-            projected.append(.thinking(ChatThinkingRun(id: thinkingID, segments: thinkingSegments)))
+            guard let thinkingRunID, !thinkingSegments.isEmpty else { return }
+            projected.append(.thinking(ChatThinkingRun(id: thinkingRunID, segments: thinkingSegments)))
             thinkingSegments.removeAll(keepingCapacity: true)
         }
 
         for part in item.content ?? [] {
             guard part.type == .thinking else {
                 flushThinking()
-                thinkingID = nil
+                thinkingRunID = nil
                 projected.append(.content(part))
                 continue
             }
-
+            guard let runOrdinal = part.thinkingRunOrdinal else { continue }
+            let runID = "thinking-run-\(runOrdinal)"
+            if let thinkingRunID, thinkingRunID != runID {
+                flushThinking()
+            }
+            thinkingRunID = runID
             let segments = normalizedThinkingSegments(in: part)
             guard !segments.isEmpty else { continue }
-            if thinkingID == nil { thinkingID = part.id }
             thinkingSegments.append(contentsOf: segments)
         }
         flushThinking()
@@ -1806,7 +1733,7 @@ enum ChatTranscriptPresentation {
                 var text = words.joined(separator: " ")
                 while text.last == "." || text.last == "…" { text.removeLast() }
                 let presentation = text.isEmpty ? "…" : text + "…"
-                return ChatThinkingSegment(id: "\(part.id):line:\(lineIndex)", text: presentation)
+                return ChatThinkingSegment(id: "thinking-\(part.ordinal):line:\(lineIndex)", text: presentation)
             }
     }
 

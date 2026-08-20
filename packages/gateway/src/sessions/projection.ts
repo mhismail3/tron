@@ -155,6 +155,7 @@ export function boundStreamingProgressItem(
   item: TranscriptItem,
   maximumBytes = STREAMING_PROGRESS_BYTES,
 ): TranscriptItem {
+  if (definitelyFitsStreamingFrame(item, maximumBytes)) return item;
   if (frameBytes(item) <= maximumBytes) return item;
   if (item.kind !== "message") return item;
   const envelopeBytes = frameBytes({ ...item, content: [] });
@@ -170,19 +171,84 @@ export function boundStreamingProgressItem(
     }
     if (part.type === "text" || part.type === "thinking") {
       const marker = "…";
-      const available = maximumBytes - bytes - Buffer.byteLength(marker) - 64;
-      if (available > 256) kept.unshift({ ...part, text: `${marker}${utf8Suffix(part.text, available)}` });
+      let lower = 0;
+      let upper = Math.max(0, Math.min(Buffer.byteLength(part.text), maximumBytes - bytes));
+      let best: ContentPart | undefined;
+      while (lower <= upper) {
+        const candidateBytes = Math.floor((lower + upper) / 2);
+        const candidate = { ...part, text: `${marker}${utf8Suffix(part.text, candidateBytes)}` };
+        const projected = { ...item, content: [candidate, ...kept] };
+        if (frameBytes(projected) <= maximumBytes) {
+          best = candidate;
+          lower = candidateBytes + 1;
+        } else {
+          upper = candidateBytes - 1;
+        }
+      }
+      if (best) kept.unshift(best);
     }
     break;
   }
+  const fallbackOrdinal = item.content.reduce(
+    (maximum, part) => Math.max(maximum, part.ordinal), -1,
+  ) + 1;
   if (kept.length === 0) {
-    kept.push({ id: `${item.id}:truncated`, type: "text", text: "…" });
+    kept.push({ id: `${item.id}:truncated:${fallbackOrdinal}`, ordinal: fallbackOrdinal, type: "text", text: "…" });
   }
-  return { ...item, content: kept };
+  const bounded = { ...item, content: kept };
+  if (frameBytes(bounded) <= maximumBytes) return bounded;
+
+  // Optional assistant metadata can itself exceed the live-frame budget. Keep
+  // only the stable handoff envelope and an explicit marker; canonical history
+  // remains complete and is published immediately after persistence.
+  const minimal: TranscriptItem = {
+    id: item.id,
+    parentId: item.parentId,
+    timestamp: item.timestamp,
+    kind: "message",
+    role: item.role,
+    presentationId: item.presentationId,
+    content: [{
+      id: `${item.id}:truncated:${fallbackOrdinal}`,
+      ordinal: fallbackOrdinal,
+      type: "text",
+      text: "…",
+    }],
+  };
+  return minimal;
 }
 
 function frameBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value));
+}
+
+function definitelyFitsStreamingFrame(item: TranscriptItem, maximumBytes: number): boolean {
+  if (item.kind !== "message") return false;
+  // JSON control characters can expand to six bytes. This deliberately loose
+  // upper bound avoids allocating/stringifying the cumulative content only
+  // when the result is provably below the wire limit; exact sizing remains the
+  // authority for every near-limit or structured part.
+  let maximum = frameBytes({ ...item, content: [] }) + 2;
+  const escapedUpperBound = (value: string): number => 2 + (6 * Buffer.byteLength(value));
+  for (const part of item.content) {
+    maximum += 128 + escapedUpperBound(part.id);
+    switch (part.type) {
+      case "text":
+        if (part.attachment) return false;
+        maximum += escapedUpperBound(part.text);
+        break;
+      case "thinking":
+        maximum += escapedUpperBound(part.text);
+        break;
+      case "image":
+        maximum += escapedUpperBound(part.mimeType) + escapedUpperBound(part.blobId);
+        break;
+      case "toolCall":
+        return false;
+    }
+    if (maximum > maximumBytes) return false;
+  }
+  return maximum <= maximumBytes;
 }
 
 /**
@@ -393,9 +459,14 @@ function projectUserText(text: string, ownerId: string, nextIndex: () => number)
     if (!name || !mimeType || !path || !Number.isSafeInteger(size) || size < 0) continue;
 
     const leading = safeAttachmentFallback(text.slice(cursor, match.index)).replace(/\s+$/, "");
-    if (leading) projected.push({ id: `${ownerId}:${nextIndex()}`, type: "text", text: boundedText(leading) });
+    if (leading) {
+      const ordinal = nextIndex();
+      projected.push({ id: `${ownerId}:${ordinal}`, ordinal, type: "text", text: boundedText(leading) });
+    }
+    const ordinal = nextIndex();
     projected.push({
-      id: `${ownerId}:${nextIndex()}`,
+      id: `${ownerId}:${ordinal}`,
+      ordinal,
       type: "text",
       text: name,
       attachment: { name, mimeType, size },
@@ -404,10 +475,14 @@ function projectUserText(text: string, ownerId: string, nextIndex: () => number)
     cursor = match.index + match[0].length;
   }
   if (projected.length === 0) {
-    return [{ id: `${ownerId}:${nextIndex()}`, type: "text", text: boundedText(safeAttachmentFallback(text)) }];
+    const ordinal = nextIndex();
+    return [{ id: `${ownerId}:${ordinal}`, ordinal, type: "text", text: boundedText(safeAttachmentFallback(text)) }];
   }
   const trailing = safeAttachmentFallback(text.slice(cursor)).replace(/^\s+/, "");
-  if (trailing) projected.push({ id: `${ownerId}:${nextIndex()}`, type: "text", text: boundedText(trailing) });
+  if (trailing) {
+    const ordinal = nextIndex();
+    projected.push({ id: `${ownerId}:${ordinal}`, ordinal, type: "text", text: boundedText(trailing) });
+  }
   return projected;
 }
 
@@ -416,40 +491,60 @@ function projectContent(content: ProjectableContent, blobs: BlobStore, ownerId: 
   const projected: ContentPart[] = [];
   let bytes = 2;
   let outputIndex = 0;
+  let activeThinkingRunOrdinal: number | undefined;
   const nextIndex = () => outputIndex++;
   for (const part of source) {
     let candidates: ContentPart[] = [];
+    if (part.type !== "thinking") activeThinkingRunOrdinal = undefined;
     switch (part.type) {
       case "text":
         candidates = extractAttachments
           ? projectUserText(part.text, ownerId, nextIndex)
-          : [{ id: `${ownerId}:${nextIndex()}`, type: "text", text: boundedText(part.text) }];
+          : (() => {
+            const ordinal = nextIndex();
+            return [{ id: `${ownerId}:${ordinal}`, ordinal, type: "text", text: boundedText(part.text) }];
+          })();
         break;
       case "image": {
-        const id = `${ownerId}:${nextIndex()}`;
+        const ordinal = nextIndex();
+        const id = `${ownerId}:${ordinal}`;
         try {
-          candidates = [{ id, type: "image", mimeType: part.mimeType, blobId: blobs.register(part.data, part.mimeType) }];
+          candidates = [{ id, ordinal, type: "image", mimeType: part.mimeType, blobId: blobs.register(part.data, part.mimeType) }];
         } catch (error) {
           if (!(error instanceof GatewayError) || (error.code !== "conflict" && error.code !== "busy")) throw error;
-          candidates = [{ id, type: "text", text: "Image omitted from this bounded mobile projection" }];
+          candidates = [{ id, ordinal, type: "text", text: "Image omitted from this bounded mobile projection" }];
         }
         break;
       }
-      case "thinking":
-        candidates = [{ id: `${ownerId}:${nextIndex()}`, type: "thinking", text: boundedText(part.thinking), ...(part.redacted ? { redacted: true } : {}) }];
+      case "thinking": {
+        const ordinal = nextIndex();
+        activeThinkingRunOrdinal ??= ordinal;
+        candidates = [{
+          id: `${ownerId}:${ordinal}`,
+          ordinal,
+          thinkingRunOrdinal: activeThinkingRunOrdinal,
+          type: "thinking",
+          text: boundedText(part.thinking),
+          ...(part.redacted ? { redacted: true } : {}),
+        }];
         break;
-      case "toolCall":
-        candidates = [{ id: `${ownerId}:${nextIndex()}`, type: "toolCall", toolCallId: part.id, name: part.name, arguments: projectJson(part.arguments) }];
+      }
+      case "toolCall": {
+        const ordinal = nextIndex();
+        candidates = [{ id: `${ownerId}:${ordinal}`, ordinal, type: "toolCall", toolCallId: part.id, name: part.name, arguments: projectJson(part.arguments) }];
         break;
+      }
     }
     for (const candidate of candidates) {
       if (projected.length >= MAX_CONTENT_PARTS - 1) {
-        projected.push({ id: `${ownerId}:truncated`, type: "text", text: "… additional content omitted from this mobile projection" });
+        const ordinal = nextIndex();
+        projected.push({ id: `${ownerId}:truncated:${ordinal}`, ordinal, type: "text", text: "… additional content omitted from this mobile projection" });
         return projected;
       }
       const candidateBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
       if (bytes + candidateBytes > MAX_CONTENT_BYTES) {
-        projected.push({ id: `${ownerId}:truncated`, type: "text", text: "… additional content omitted from this mobile projection" });
+        const ordinal = nextIndex();
+        projected.push({ id: `${ownerId}:truncated:${ordinal}`, ordinal, type: "text", text: "… additional content omitted from this mobile projection" });
         return projected;
       }
       projected.push(candidate);
@@ -475,10 +570,14 @@ export function projectMessage(
   message: AgentMessage,
   blobs: BlobStore,
   toolMetadata?: ToolProjectionMetadata,
+  presentationId = id,
 ): TranscriptItem | undefined {
   switch (message.role) {
     case "user":
-      return { id, parentId, timestamp, kind: "message", role: "user", content: projectContent(message.content, blobs, id, true) };
+      return {
+        id, parentId, timestamp, kind: "message", role: "user", presentationId,
+        content: projectContent(message.content, blobs, presentationId, true),
+      };
     case "assistant":
       return {
         id,
@@ -486,7 +585,8 @@ export function projectMessage(
         timestamp,
         kind: "message",
         role: "assistant",
-        content: projectContent(message.content, blobs, id),
+        presentationId,
+        content: projectContent(message.content, blobs, presentationId),
         provider: message.provider,
         modelId: message.model,
         stopReason: message.stopReason,
@@ -500,7 +600,8 @@ export function projectMessage(
         timestamp,
         kind: "message",
         role: "toolResult",
-        content: projectContent(message.content, blobs, id),
+        presentationId,
+        content: projectContent(message.content, blobs, presentationId),
         toolCallId: message.toolCallId,
         toolName: message.toolName,
         isError: message.isError,
@@ -565,6 +666,7 @@ export function projectEntry(
   entry: SessionEntry,
   blobs: BlobStore,
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
+  presentationIDs?: ReadonlyMap<string, string>,
 ): TranscriptItem | undefined {
   switch (entry.type) {
     case "message":
@@ -575,6 +677,7 @@ export function projectEntry(
         entry.message,
         blobs,
         entry.message.role === "toolResult" ? toolMetadata?.get(entry.message.toolCallId) : undefined,
+        entry.message.role === "assistant" ? (presentationIDs?.get(entry.id) ?? entry.id) : entry.id,
       );
     case "custom_message":
       if (!entry.display) return undefined;
@@ -807,6 +910,7 @@ export function projectTranscriptPage(
   byteBudget = TRANSCRIPT_PAGE_BYTES,
   expectedNextEntryId?: string,
   toolMetadata?: ReadonlyMap<string, ToolProjectionMetadata>,
+  presentationIDs?: ReadonlyMap<string, string>,
 ): TranscriptPage {
   const entries = projectableTranscriptEntries(manager);
   const end = Math.max(0, Math.min(before ?? entries.length, entries.length));
@@ -817,7 +921,7 @@ export function projectTranscriptPage(
   let bytes = 2;
   const selected: TranscriptItem[] = [];
   while (start > 0 && selected.length < TRANSCRIPT_PAGE_ITEMS) {
-    const item = projectEntry(entries[start - 1]!, blobs, toolMetadata);
+    const item = projectEntry(entries[start - 1]!, blobs, toolMetadata, presentationIDs);
     if (!item) throw new Error("projectable transcript entry produced no item");
     const itemBytes = Buffer.byteLength(JSON.stringify(item)) + 1;
     if (bytes + itemBytes > byteBudget && selected.length > 0) break;
@@ -869,6 +973,7 @@ function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number): Tr
     timestamp: item.timestamp,
     kind: "message",
     role: "assistant",
-    content: [{ id: `${item.id}:truncated`, type: "text", text: "… transcript item omitted from this mobile page" }],
+    presentationId: item.kind === "message" ? item.presentationId : item.id,
+    content: [{ id: `${item.id}:truncated:0`, ordinal: 0, type: "text", text: "… transcript item omitted from this mobile page" }],
   };
 }

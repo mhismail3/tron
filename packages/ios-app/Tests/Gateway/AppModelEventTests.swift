@@ -476,7 +476,7 @@ struct AppModelEventTests {
         let current = try loadSnapshot()
         var branch = current
         branch.eventSequence += 1
-        branch.transcript = [try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data("""
+        branch.transcript = [try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
         {"id":"new-root","parentId":null,"timestamp":"2026-01-02T00:00:00Z","kind":"message","role":"user","content":[{"id":"new-root:0","type":"text","text":"new branch"}]}
         """.utf8))]
         branch.transcriptStart = 0

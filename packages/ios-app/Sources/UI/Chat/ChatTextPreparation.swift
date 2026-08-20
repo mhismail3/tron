@@ -22,21 +22,56 @@ struct ChatTextPreparationSource: Hashable, Sendable {
     let source: String
 }
 
+enum ChatTextPreparationKey {
+    static func content(_ part: ContentPart) -> String { "content:\(part.ordinal)" }
+    static func thinking(_ segment: ChatThinkingSegment) -> String { segment.id }
+    static func global(item: TranscriptItem, local: String) -> String {
+        "\(item.presentationId):\(local)"
+    }
+}
+
 struct ChatTextPreparationSnapshot: Hashable, Sendable {
     struct MarkdownEntry: Hashable, Sendable {
         let source: String
         let document: MarkdownPresentation.Document
+        let revision: UInt64
+
+        init(source: String, document: MarkdownPresentation.Document, revision: UInt64 = 0) {
+            self.source = source
+            self.document = document
+            self.revision = revision
+        }
     }
 
     struct ThinkingEntry: Hashable, Sendable {
         let source: String
         let inline: MarkdownPresentation.Inline
+        let revision: UInt64
+
+        init(source: String, inline: MarkdownPresentation.Inline, revision: UInt64 = 0) {
+            self.source = source
+            self.inline = inline
+            self.revision = revision
+        }
     }
 
-    static let empty = ChatTextPreparationSnapshot(markdown: [:], thinking: [:])
+    static let empty = ChatTextPreparationSnapshot(markdown: [:], thinking: [:], revision: [])
 
     let markdown: [String: MarkdownEntry]
     let thinking: [String: ThinkingEntry]
+    /// Globally unique cache-entry revisions make this sorted membership token
+    /// exact while keeping render-row equality independent of prepared payloads.
+    let revision: [UInt64]
+
+    init(
+        markdown: [String: MarkdownEntry],
+        thinking: [String: ThinkingEntry],
+        revision: [UInt64] = []
+    ) {
+        self.markdown = markdown
+        self.thinking = thinking
+        self.revision = revision
+    }
 
     func markdownDocument(identity: String, source: String) -> MarkdownPresentation.Document? {
         guard let entry = markdown[identity], entry.source == source else { return nil }
@@ -49,11 +84,14 @@ struct ChatTextPreparationSnapshot: Hashable, Sendable {
     }
 
     func slice(for item: ChatTranscriptRenderItem) -> ChatTextPreparationSnapshot {
+        let sourceItem: TranscriptItem
         let parts: [ChatMessagePart]
         switch item {
         case .transcript(let transcript):
+            sourceItem = transcript
             parts = ChatTranscriptPresentation.messageParts(in: transcript)
         case .message(let message):
+            sourceItem = message.item
             parts = message.parts
         case .toolRun, .notification:
             return .empty
@@ -64,16 +102,24 @@ struct ChatTextPreparationSnapshot: Hashable, Sendable {
         for part in parts {
             switch part {
             case .content(let content):
-                if let entry = markdown[content.id] { markdownSlice[content.id] = entry }
+                let local = ChatTextPreparationKey.content(content)
+                let global = ChatTextPreparationKey.global(item: sourceItem, local: local)
+                if let entry = markdown[global] { markdownSlice[local] = entry }
             case .thinking(let run):
                 for segment in run.segments {
-                    if let entry = thinking[segment.id] { thinkingSlice[segment.id] = entry }
+                    let local = ChatTextPreparationKey.thinking(segment)
+                    let global = ChatTextPreparationKey.global(item: sourceItem, local: local)
+                    if let entry = thinking[global] { thinkingSlice[local] = entry }
                 }
             }
         }
+        let sliceRevision = (
+            markdownSlice.values.map(\.revision) + thinkingSlice.values.map(\.revision)
+        ).sorted()
         return ChatTextPreparationSnapshot(
             markdown: markdownSlice,
-            thinking: thinkingSlice
+            thinking: thinkingSlice,
+            revision: sliceRevision
         )
     }
 }
@@ -114,14 +160,22 @@ enum ChatTextPreparationPolicy {
                 case .content(let content):
                     guard content.type == .text, content.attachment == nil,
                           let text = content.text, !text.isEmpty else { continue }
+                    let local = ChatTextPreparationKey.content(content)
                     admit(ChatTextPreparationSource(
-                        identity: .init(kind: .markdown, value: content.id),
+                        identity: .init(
+                            kind: .markdown,
+                            value: ChatTextPreparationKey.global(item: item, local: local)
+                        ),
                         source: text
                     ))
                 case .thinking(let run):
                     for segment in run.segments {
+                        let local = ChatTextPreparationKey.thinking(segment)
                         admit(ChatTextPreparationSource(
-                            identity: .init(kind: .thinking, value: segment.id),
+                            identity: .init(
+                                kind: .thinking,
+                                value: ChatTextPreparationKey.global(item: item, local: local)
+                            ),
                             source: segment.text
                         ))
                     }
@@ -150,6 +204,7 @@ actor ChatTextPreparationCache {
         let source: String
         let value: Value
         let accountedBytes: Int
+        let contentRevision: UInt64
         var accessOrdinal: UInt64
     }
 
@@ -164,6 +219,7 @@ actor ChatTextPreparationCache {
     private var entries: [ChatTextPreparationIdentity: Entry] = [:]
     private var accountedBytes = 0
     private var accessOrdinal: UInt64 = 0
+    private var nextContentRevision: UInt64 = 0
 
     init(
         maximumNewMarkdownPreparations: Int = ChatTextPreparationPolicy.maximumNewMarkdownPreparationsPerProjection,
@@ -294,10 +350,12 @@ actor ChatTextPreparationCache {
         guard prepared.accountedBytes <= ChatTextPreparationPolicy.maximumAccountedBytes else { return }
         remove(prepared.source.identity)
         accessOrdinal &+= 1
+        nextContentRevision &+= 1
         let entry = Entry(
             source: prepared.source.source,
             value: prepared.value,
             accountedBytes: prepared.accountedBytes,
+            contentRevision: nextContentRevision,
             accessOrdinal: accessOrdinal
         )
         entries[prepared.source.identity] = entry
@@ -341,11 +399,26 @@ actor ChatTextPreparationCache {
             guard let entry = entries[source.identity], entry.source == source.source else { continue }
             switch entry.value {
             case .markdown(let document):
-                markdown[source.identity.value] = .init(source: source.source, document: document)
+                markdown[source.identity.value] = .init(
+                    source: source.source,
+                    document: document,
+                    revision: entry.contentRevision
+                )
             case .thinking(let inline):
-                thinking[source.identity.value] = .init(source: source.source, inline: inline)
+                thinking[source.identity.value] = .init(
+                    source: source.source,
+                    inline: inline,
+                    revision: entry.contentRevision
+                )
             }
         }
-        return ChatTextPreparationSnapshot(markdown: markdown, thinking: thinking)
+        let snapshotRevision = (
+            markdown.values.map(\.revision) + thinking.values.map(\.revision)
+        ).sorted()
+        return ChatTextPreparationSnapshot(
+            markdown: markdown,
+            thinking: thinking,
+            revision: snapshotRevision
+        )
     }
 }

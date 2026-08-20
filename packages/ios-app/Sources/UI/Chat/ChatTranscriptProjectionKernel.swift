@@ -363,16 +363,19 @@ enum ChatTranscriptProjectionKernel {
         if parts.isEmpty, !hasFooter {
             rendered = []
         } else {
+            let semanticID = ChatTranscriptRowIdentity.messageSlice(item, parts: parts, slice: 0)
             rendered = [.message(ChatMessagePresentation(
-                id: "streaming",
+                id: semanticID,
+                semanticID: semanticID,
                 item: item,
                 parts: parts,
                 streaming: true,
                 showsFooter: true
             ))]
         }
-        let preferred = rendered.isEmpty ? [:] : ["streaming": "streaming"]
-        let reverse = rendered.isEmpty ? [:] : ["streaming": "streaming"]
+        let semanticID = rendered.first?.id
+        let preferred = semanticID.map { [$0: $0] } ?? [:]
+        let reverse = preferred
         return ChatTranscriptTimeline(
             items: ChatTranscriptItems(canonical: [], live: rendered),
             preferredSemanticIDByRenderedID: ChatSemanticIndex(canonical: [:], live: preferred),
@@ -503,8 +506,9 @@ enum ChatTranscriptProjectionKernel {
             // streaming message. It must use the common assembler so status
             // changes cannot move that row across the streaming boundary.
             if !hasUnanchoredRuntimeTool(metadata: base.patchMetadata) {
+                let overlapsCanonical = live.ids.contains { base.timeline.containsID($0) }
                 return AssembledProjection(
-                    timeline: base.timeline.appendingLive(live),
+                    timeline: overlapsCanonical ? base.timeline : base.timeline.appendingLive(live),
                     toolPayloads: base.toolPayloads,
                     toolsInspected: base.toolsInspected,
                     patchMetadata: base.patchMetadata,
@@ -795,10 +799,10 @@ enum ChatTranscriptProjectionKernel {
             slice: Int,
             showsFooter: Bool
         ) {
-            let firstID = streaming ? "streaming" : item.id
-            let id = slice == 0 ? firstID : "\(firstID)-slice-\(parts.first?.id ?? String(slice))"
+            let semanticID = ChatTranscriptRowIdentity.messageSlice(item, parts: parts, slice: slice)
             rendered.append(.message(ChatMessagePresentation(
-                id: id,
+                id: semanticID,
+                semanticID: semanticID,
                 item: item,
                 parts: parts,
                 streaming: streaming,
@@ -934,6 +938,66 @@ enum ChatTranscriptProjectionKernel {
         }
         flushTools()
 
+        var seenRenderedIDs = Set<String>()
+        var collisionSafe: [ChatTranscriptRenderItem] = []
+        collisionSafe.reserveCapacity(rendered.count)
+        for (index, original) in rendered.enumerated() {
+            guard !seenRenderedIDs.insert(original.id).inserted else {
+                collisionSafe.append(original)
+                continue
+            }
+            switch original {
+            case .message(let message):
+                var disambiguated = "\(message.id)#\(message.item.id)"
+                if seenRenderedIDs.contains(disambiguated) { disambiguated += "#\(index)" }
+                guard seenRenderedIDs.insert(disambiguated).inserted else { continue }
+                collisionSafe.append(.message(ChatMessagePresentation(
+                    id: disambiguated,
+                    semanticID: message.semanticID,
+                    item: message.item,
+                    parts: message.parts,
+                    streaming: message.streaming,
+                    showsFooter: message.showsFooter
+                )))
+            case .notification(let notification):
+                var disambiguated = "\(notification.id)#\(notification.semanticID ?? String(index))"
+                if seenRenderedIDs.contains(disambiguated) { disambiguated += "#\(index)" }
+                guard seenRenderedIDs.insert(disambiguated).inserted else { continue }
+                collisionSafe.append(.notification(ChatNotificationPresentation(
+                    id: disambiguated,
+                    semanticID: notification.semanticID,
+                    icon: notification.icon,
+                    title: notification.title,
+                    detail: notification.detail,
+                    body: notification.body,
+                    tone: notification.tone,
+                    material: notification.material
+                )))
+            case .transcript, .toolRun:
+                // Canonical entry and tool-call IDs are protocol identities.
+                // Malformed duplicates fail closed instead of reaching SwiftUI.
+                continue
+            }
+        }
+        rendered = collisionSafe
+
+        // Collision admission can remove malformed canonical rows. Patch sites
+        // are recorded while assembling, so rebase them onto the admitted row
+        // spine before a later sparse tool update indexes the timeline.
+        var rebasedSitesByCallID: [String: [ChatToolPatchSite]] = [:]
+        for (renderedIndex, item) in rendered.enumerated() {
+            guard case .toolRun(let run) = item else { continue }
+            for (toolIndex, tool) in run.tools.enumerated() {
+                guard let previousSite = sitesByCallID[tool.id]?.first else { continue }
+                rebasedSitesByCallID[tool.id, default: []].append(ChatToolPatchSite(
+                    renderedIndex: renderedIndex,
+                    toolIndex: toolIndex,
+                    canonicalBase: previousSite.canonicalBase,
+                    classification: previousSite.classification
+                ))
+            }
+        }
+
         var preferredSemanticIDByRenderedID: [String: String] = [:]
         var renderedIDBySemanticID: [String: String] = [:]
         for item in rendered {
@@ -942,18 +1006,17 @@ enum ChatTranscriptProjectionKernel {
                 preferredSemanticIDByRenderedID[item.id] = transcript.id
                 renderedIDBySemanticID[transcript.id] = item.id
             case .message(let message):
-                preferredSemanticIDByRenderedID[item.id] = message.id
-                renderedIDBySemanticID[message.id] = item.id
+                preferredSemanticIDByRenderedID[item.id] = message.semanticID
+                renderedIDBySemanticID[message.semanticID] = item.id
             case .toolRun(let run):
-                if let semanticID = run.tools.last?.id {
-                    preferredSemanticIDByRenderedID[item.id] = semanticID
-                }
+                let semanticID = run.tools.first?.id ?? item.id
+                preferredSemanticIDByRenderedID[item.id] = semanticID
+                renderedIDBySemanticID[semanticID] = item.id
                 for tool in run.tools { renderedIDBySemanticID[tool.id] = item.id }
             case .notification(let notification):
-                if let semanticID = notification.semanticID {
-                    preferredSemanticIDByRenderedID[item.id] = semanticID
-                    renderedIDBySemanticID[semanticID] = item.id
-                }
+                let semanticID = notification.semanticID ?? item.id
+                preferredSemanticIDByRenderedID[item.id] = semanticID
+                renderedIDBySemanticID[semanticID] = item.id
             }
         }
         return Assembly(
@@ -964,7 +1027,7 @@ enum ChatTranscriptProjectionKernel {
             ),
             toolPayloads: ChatToolPayloadIndex(payloadsByCallID),
             toolsInspected: toolsInspected,
-            patchMetadata: ChatToolPatchMetadata(sitesByCallID: sitesByCallID)
+            patchMetadata: ChatToolPatchMetadata(sitesByCallID: rebasedSitesByCallID)
         )
     }
 
@@ -1043,7 +1106,7 @@ enum ChatTranscriptProjectionKernel {
         case .message where item.role == .toolResult:
             return [toolResultPresentation(item)]
         case .message:
-            let parts: [ContentPart] = (item.content ?? []) ?? []
+            let parts: [ContentPart] = item.content ?? []
             return parts.compactMap { part -> ChatToolPresentation? in
                 guard part.type == .toolCall else { return nil }
                 if let callID = part.toolCallId, let result = results[callID] {

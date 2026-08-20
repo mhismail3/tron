@@ -382,11 +382,11 @@ struct ComposerDraftCoordinatorTests {
 
             let canonical = TranscriptItem.message(MessageTranscriptItem(
                 id: "canonical-user", parentId: nil, timestamp: "2025-01-01T00:00:00Z",
-                kind: .message, role: .user,
+                kind: .message, role: .user, presentationId: "canonical-user",
                 content: [
-                    ContentPart(id: "text", type: .text, text: "outgoing", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
-                    ContentPart(id: "image-one", type: .image, text: nil, attachment: .init(name: "a", mimeType: "image/jpeg", size: 1), redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob-a", toolCallId: nil, name: nil, arguments: nil),
-                    ContentPart(id: "image-two", type: .image, text: nil, attachment: .init(name: "b", mimeType: "image/jpeg", size: 1), redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob-b", toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "text", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "outgoing", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "image-one", ordinal: 1, thinkingRunOrdinal: nil, type: .image, text: nil, attachment: .init(name: "a", mimeType: "image/jpeg", size: 1), redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob-a", toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "image-two", ordinal: 2, thinkingRunOrdinal: nil, type: .image, text: nil, attachment: .init(name: "b", mimeType: "image/jpeg", size: 1), redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob-b", toolCallId: nil, name: nil, arguments: nil),
                 ],
                 provider: nil, modelId: nil, stopReason: nil, errorMessage: nil, toolCallId: nil,
                 toolName: nil, isError: nil, details: nil, usage: nil, startedAt: nil,
@@ -411,8 +411,8 @@ struct ComposerDraftCoordinatorTests {
             func user(_ id: String) -> TranscriptItem {
                 .message(MessageTranscriptItem(
                     id: id, parentId: nil, timestamp: "2025-01-01T00:00:00Z",
-                    kind: .message, role: .user,
-                    content: [ContentPart(id: "text", type: .text, text: "same", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil)],
+                    kind: .message, role: .user, presentationId: id,
+                    content: [ContentPart(id: "text", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "same", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil)],
                     provider: nil, modelId: nil, stopReason: nil, errorMessage: nil, toolCallId: nil,
                     toolName: nil, isError: nil, details: nil, usage: nil, startedAt: nil,
                     completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil
@@ -504,10 +504,10 @@ struct ComposerDraftCoordinatorTests {
             try await valueOfOwnedTask(sending)
             let canonical = TranscriptItem.message(MessageTranscriptItem(
                 id: "canonical", parentId: nil, timestamp: "2025-01-01T00:00:00Z",
-                kind: .message, role: .user,
+                kind: .message, role: .user, presentationId: "canonical",
                 content: [
-                    ContentPart(id: "text", type: .text, text: "notes", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
-                    ContentPart(id: "name", type: .text, text: "notes.txt", attachment: .init(name: "notes.txt", mimeType: "text/plain", size: 5), redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "text", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "notes", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "name", ordinal: 1, thinkingRunOrdinal: nil, type: .text, text: "notes.txt", attachment: .init(name: "notes.txt", mimeType: "text/plain", size: 5), redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
                 ],
                 provider: nil, modelId: nil, stopReason: nil, errorMessage: nil, toolCallId: nil,
                 toolName: nil, isError: nil, details: nil, usage: nil, startedAt: nil,

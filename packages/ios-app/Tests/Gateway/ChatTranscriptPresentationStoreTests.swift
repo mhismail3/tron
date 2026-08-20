@@ -107,12 +107,16 @@ struct ChatTranscriptPresentationStoreTests {
 
             store.submit(snapshot: snapshot, tag: tag)
             let installed = try await store.waitForInstall(of: tag)
-            #expect(installed.preparedText != .empty)
+            let textRow = try #require(installed.timeline.items.first(where: {
+                if case .message = $0 { return true }
+                return false
+            }))
+            #expect(installed.preparedText(for: textRow) != .empty)
 
             store.handleMemoryPressure()
             #expect(store.installed?.tag == tag)
             #expect(store.installed?.timeline == installed.timeline)
-            #expect(store.installed?.preparedText == .empty)
+            #expect(store.installed?.preparedText(for: textRow) == .empty)
         }
     }
 
@@ -647,6 +651,64 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("live, settled-running, and idle installs retain one semantic row")
+    func streamingSettlementInstallIdentity() async throws {
+        try await withTestWatchdog { @MainActor in
+            var baseline = try SessionScenarioBuilder(seed: 1_240)
+                .openingTail(targetEncodedBytes: 8_000)
+            baseline.phase = .idle
+            baseline.streaming = nil
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: baseline, presentationGeneration: 40)
+            store.submit(snapshot: baseline, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            var live = baseline
+            live.phase = .running
+            live.eventSequence += 1
+            live.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+            {"id":"streaming","parentId":"parent","presentationId":"stream:install","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"stream:install:0","ordinal":0,"type":"text","text":"answer"}]}
+            """.utf8))
+            tag = ChatTranscriptProjectionTag(snapshot: live, presentationGeneration: 40)
+            store.submit(snapshot: live, tag: tag)
+            let liveInstall = try await store.waitForInstall(of: tag)
+            #expect(liveInstall.timeline.ids.last == "stream:install")
+            #expect(store.resolveEntrance(
+                id: "stream:install", installationTag: tag, isVisible: true
+            ))
+
+            var overlap = live
+            overlap.eventSequence += 1
+            overlap.transcript.append(try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
+            {"id":"canonical","parentId":"parent","presentationId":"stream:install","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"stream:install:0","ordinal":0,"type":"text","text":"answer"}]}
+            """.utf8)))
+            overlap.transcriptTotal = overlap.transcript.count
+            tag = ChatTranscriptProjectionTag(snapshot: overlap, presentationGeneration: 40)
+            store.submit(snapshot: overlap, tag: tag)
+            let overlapInstall = try await store.waitForInstall(of: tag)
+            #expect(overlapInstall.timeline.ids.filter { $0 == "stream:install" }.count == 1)
+            #expect(overlapInstall.hasUniqueDisplayedIDs)
+            #expect(store.entranceState(for: "stream:install") == .admitted)
+
+            var settled = overlap
+            settled.eventSequence += 1
+            settled.streaming = nil
+            tag = ChatTranscriptProjectionTag(snapshot: settled, presentationGeneration: 40)
+            store.submit(snapshot: settled, tag: tag)
+            let settledInstall = try await store.waitForInstall(of: tag)
+            #expect(settledInstall.timeline.ids.last == "stream:install")
+            #expect(store.entranceState(for: "stream:install") == .admitted)
+
+            settled.phase = .idle
+            settled.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: settled, presentationGeneration: 40)
+            store.submit(snapshot: settled, tag: tag)
+            let idleInstall = try await store.waitForInstall(of: tag)
+            #expect(idleInstall.timeline.ids.last == "stream:install")
+            #expect(store.entranceState(for: "stream:install") == .admitted)
+        }
+    }
+
     @Test("discrete entrances admit tail extension but never prepend or initial load")
     func entranceClassification() async throws {
         try await withTestWatchdog { @MainActor in
@@ -852,8 +914,10 @@ struct ChatTranscriptPresentationStoreTests {
                     .message(.init(
                         id: "\(prefix)-\(index)", parentId: nil,
                         timestamp: "2026-01-01T00:00:00Z", kind: .message, role: .user,
+                        presentationId: "\(prefix)-\(index)",
                         content: [.init(
-                            id: "\(prefix)-\(index)-text", type: .text, text: "row",
+                            id: "\(prefix)-\(index)-text", ordinal: 0, thinkingRunOrdinal: nil,
+                            type: .text, text: "row",
                             attachment: nil, redacted: nil, mimeType: nil, blobId: nil,
                             toolCallId: nil, name: nil, arguments: nil
                         )],
@@ -1027,7 +1091,7 @@ struct ChatTranscriptPresentationStoreTests {
         try await withTestWatchdog { @MainActor in
             var snapshot = try SessionScenarioBuilder(seed: 1_229)
                 .openingTail(targetEncodedBytes: 8_000)
-            snapshot.transcript = try JSONDecoder.gateway.decode(
+            snapshot.transcript = try decodeTranscriptFixture(
                 [TranscriptItem].self,
                 from: Data("""
                 [
@@ -1135,7 +1199,7 @@ struct ChatTranscriptPresentationStoreTests {
 }
 
 private func compactionItem(id: String) throws -> TranscriptItem {
-    try JSONDecoder.gateway.decode(
+    try decodeTranscriptFixture(
         TranscriptItem.self,
         from: Data("""
         {"id":"\(id)","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","summary":"Compacted summary","tokensBefore":1200}
@@ -1144,10 +1208,10 @@ private func compactionItem(id: String) throws -> TranscriptItem {
 }
 
 private func streamingMessage(update: Int) throws -> TranscriptItem {
-    try JSONDecoder.gateway.decode(
+    try decodeTranscriptFixture(
         TranscriptItem.self,
         from: Data("""
-        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"thinking","type":"thinking","text":"Working"},{"id":"answer","type":"text","text":"update-\(update)"}]}
+        {"id":"streaming","parentId":null,"presentationId":"stream:store","timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"thinking","ordinal":0,"thinkingRunOrdinal":0,"type":"thinking","text":"Working"},{"id":"answer","ordinal":1,"type":"text","text":"update-\(update)"}]}
         """.utf8)
     )
 }

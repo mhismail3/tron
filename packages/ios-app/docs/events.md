@@ -84,9 +84,12 @@ admits and reduces mounted-session topics:
   content-only output, then only a fallback distinct from Request. Exact current-runtime
   monotonic start-to-end durations are authoritative when available; older canonical history derives only
   an observed call-to-result interval because Pi JSONL does not persist tool execution timing;
-- transcript structure has one explicit animation boundary: newly admitted rows
-  reserve their measured layout and reveal once after geometry admission, while
-  installed-row updates, thinking-height measurement, and tool status changes
+- transcript structure has one explicit animation boundary: only rows with positive
+  semantic-novelty evidence reserve their measured layout and reveal once after
+  geometry admission. A page-bounded semantic ledger preserves displayed identities,
+  suppresses duplicate entrances, and cannot evict currently visible rows; a cancelled,
+  unanimated failsafe reveals any row whose geometry admission never arrives. Installed-row
+  updates, live-to-canonical settlement, thinking-height measurement, and tool status changes
   inherit no stack-wide animation. Tool status text updates inside its
   stable row without an implicit layout animation, and automatic tail-follow commands remain
   owned until fresh native geometry acknowledges them, so a second keyboard/composer/tool growth

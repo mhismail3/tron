@@ -27,6 +27,29 @@ struct ChatViewScrollHarnessTests {
         #expect(probe.observation.semanticFrameCallbackCount == 300)
     }
 
+    @Test("hosted probe counts semantic remounts across projection installs")
+    func hostedSemanticRemountCounter() {
+        let probe = ChatHostedProbe()
+        probe.recordProjectionInstall(
+            rowCount: 1,
+            sourceOrdinal: 1,
+            nextRenderedIDBySemanticID: ["stream:turn": "stream:turn"]
+        )
+        probe.recordProjectionInstall(
+            rowCount: 1,
+            sourceOrdinal: 2,
+            nextRenderedIDBySemanticID: ["stream:turn": "stream:turn"]
+        )
+        #expect(probe.observation.remountedWhileSemanticIDDisplayed == 0)
+
+        probe.recordProjectionInstall(
+            rowCount: 1,
+            sourceOrdinal: 3,
+            nextRenderedIDBySemanticID: ["stream:turn": "assistant-final"]
+        )
+        #expect(probe.observation.remountedWhileSemanticIDDisplayed == 1)
+    }
+
     @Test("harness renders the production scroll view and semantic row geometry")
     func harnessFidelity() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -683,7 +706,7 @@ private func harnessRuntimeTool(
 }
 
 private func harnessMessage(id: String) throws -> TranscriptItem {
-    try JSONDecoder.gateway.decode(
+    try decodeTranscriptFixture(
         TranscriptItem.self,
         from: Data("""
         {"id":"\(id)","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"\(id):text","type":"text","text":"A new response"}]}

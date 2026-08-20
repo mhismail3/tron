@@ -105,7 +105,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
     let timeline: ChatTranscriptTimeline
     let toolPayloads: ChatToolPayloadIndex
     let runtimeItems: [ChatTranscriptRenderItem]
-    let preparedText: ChatTextPreparationSnapshot
+    let preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
     let queuedMessages: [SessionSnapshot.QueuedMessage]
     let queueRevision: Int?
     let supportsQueueManagement: Bool
@@ -118,7 +118,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
         timeline: ChatTranscriptTimeline,
         toolPayloads: ChatToolPayloadIndex = .init(),
         runtimeItems: [ChatTranscriptRenderItem],
-        preparedText: ChatTextPreparationSnapshot = .empty,
+        preparedTextByRenderedID: [String: ChatTextPreparationSnapshot] = [:],
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
         queueRevision: Int? = nil,
         supportsQueueManagement: Bool = false,
@@ -128,7 +128,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
         self.timeline = timeline
         self.toolPayloads = toolPayloads
         self.runtimeItems = runtimeItems
-        self.preparedText = preparedText
+        self.preparedTextByRenderedID = preparedTextByRenderedID
         self.queuedMessages = queuedMessages
         self.queueRevision = queueRevision
         self.supportsQueueManagement = supportsQueueManagement
@@ -176,15 +176,25 @@ struct InstalledChatTranscript: Hashable, Sendable {
         return resolved
     }
 
-    func replacingPreparedText(
-        _ preparedText: ChatTextPreparationSnapshot
-    ) -> InstalledChatTranscript {
+    func preparedText(for item: ChatTranscriptRenderItem) -> ChatTextPreparationSnapshot {
+        switch item {
+        case .toolRun, .notification:
+            return .empty
+        case .transcript, .message:
+            precondition(timeline.containsID(item.id))
+            return preparedTextByRenderedID[item.id] ?? .empty
+        }
+    }
+
+    func removingPreparedText() -> InstalledChatTranscript {
         InstalledChatTranscript(
             tag: tag,
             timeline: timeline,
             toolPayloads: toolPayloads,
             runtimeItems: runtimeItems,
-            preparedText: preparedText,
+            preparedTextByRenderedID: Dictionary(
+                uniqueKeysWithValues: timeline.ids.map { ($0, ChatTextPreparationSnapshot.empty) }
+            ),
             queuedMessages: queuedMessages,
             queueRevision: queueRevision,
             supportsQueueManagement: supportsQueueManagement,
@@ -192,74 +202,25 @@ struct InstalledChatTranscript: Hashable, Sendable {
         )
     }
 
-    func replacingTimeline(_ timeline: ChatTranscriptTimeline) -> InstalledChatTranscript {
-        InstalledChatTranscript(
-            tag: tag,
-            timeline: timeline,
-            toolPayloads: toolPayloads,
-            runtimeItems: runtimeItems,
-            preparedText: preparedText,
-            queuedMessages: queuedMessages,
-            queueRevision: queueRevision,
-            supportsQueueManagement: supportsQueueManagement,
-            sourceWindow: sourceWindow
-        )
+    func semanticID(forDisplayedID id: String) -> String? {
+        if let semanticID = timeline.preferredSemanticIDByRenderedID[id] { return semanticID }
+        if runtimeIDSet.contains(id) { return id }
+        return nil
     }
+
+    #if HOSTED_TEST
+    var hostedRenderedIDBySemanticID: [String: String] {
+        var result = timeline.renderedIDBySemanticID.canonical
+        for (semanticID, renderedID) in timeline.renderedIDBySemanticID.live {
+            result[semanticID] = renderedID
+        }
+        for runtimeID in runtimeIDSet { result[runtimeID] = runtimeID }
+        return result
+    }
+    #endif
 }
 
 enum ChatTranscriptTransitionPolicy {
-    static func continuityAdjusted(
-        previous: InstalledChatTranscript?,
-        next: InstalledChatTranscript
-    ) -> InstalledChatTranscript {
-        guard let previous,
-              previous.tag.matchesIdentity(of: next.tag) else { return next }
-        let replacements = continuityReplacements(previous: previous.timeline, next: next.timeline)
-        guard !replacements.isEmpty else { return next }
-        return next.replacingTimeline(next.timeline.replacingRenderedIDs(replacements))
-    }
-
-    private static func continuityReplacements(
-        previous: ChatTranscriptTimeline,
-        next: ChatTranscriptTimeline
-    ) -> [String: String] {
-        let count = min(previous.items.count, next.items.count)
-        var replacements: [String: String] = [:]
-        for index in 0..<count {
-            guard case .message(let oldMessage) = previous.items[index],
-                  case .message(let newMessage) = next.items[index],
-                  oldMessage.streaming,
-                  !newMessage.streaming,
-                  oldMessage.item.role == .assistant,
-                  newMessage.item.role == .assistant,
-                  oldMessage.id != newMessage.id,
-                  messagesShareContinuity(oldMessage, newMessage) else { continue }
-            replacements[newMessage.id] = oldMessage.id
-        }
-
-        for index in 0..<count {
-            guard case .toolRun(let oldRun) = previous.items[index],
-                  case .toolRun(let newRun) = next.items[index],
-                  oldRun.id != newRun.id,
-                  !Set(oldRun.tools.map(\.id)).isDisjoint(with: newRun.tools.map(\.id)) else { continue }
-            replacements[newRun.id] = oldRun.id
-        }
-        return replacements
-    }
-
-    private static func messagesShareContinuity(
-        _ previous: ChatMessagePresentation,
-        _ next: ChatMessagePresentation
-    ) -> Bool {
-        let previousParts = Set(previous.parts.map(\.id))
-        let nextParts = Set(next.parts.map(\.id))
-        if !previousParts.isDisjoint(with: nextParts) { return true }
-        let previousText = previous.item.text
-        let nextText = next.item.text
-        guard !previousText.isEmpty, !nextText.isEmpty else { return false }
-        return previousText.hasPrefix(nextText) || nextText.hasPrefix(previousText)
-    }
-
     static func discreteInsertedIDs(
         previous: InstalledChatTranscript?,
         next: InstalledChatTranscript
@@ -359,7 +320,7 @@ typealias ChatTranscriptProjectionWorkGate = @Sendable (ChatTranscriptProjection
 private struct BuiltChatTranscript: Sendable {
     let timeline: ChatTranscriptTimeline
     let toolPayloads: ChatToolPayloadIndex
-    let preparedText: ChatTextPreparationSnapshot
+    let preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
     let isInternallyConsistent: Bool
 }
 
@@ -416,6 +377,7 @@ private actor ChatTranscriptProjectionWorker {
         let canonicalKey: CanonicalKey
         let candidate: ChatTranscriptProjectionCandidate
         let preparedText: ChatTextPreparationSnapshot
+        let preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
     }
 
     private let performanceSignposts: any PerformanceSignposting
@@ -475,7 +437,8 @@ private actor ChatTranscriptProjectionWorker {
                 projectionKey: basis.projectionKey,
                 canonicalKey: basis.canonicalKey,
                 candidate: basis.candidate,
-                preparedText: .empty
+                preparedText: .empty,
+                preparedTextByRenderedID: [:]
             )
         }
     }
@@ -505,7 +468,7 @@ private actor ChatTranscriptProjectionWorker {
             return BuiltChatTranscript(
                 timeline: basis.candidate.timeline,
                 toolPayloads: basis.candidate.toolPayloads,
-                preparedText: basis.preparedText,
+                preparedTextByRenderedID: basis.preparedTextByRenderedID,
                 isInternallyConsistent: basis.candidate.isValid
             )
         }
@@ -544,19 +507,27 @@ private actor ChatTranscriptProjectionWorker {
             preparedText = .empty
             await textPreparationCache.removeAll()
         }
+        // Preparation itself is bounded to the canonical render-critical tail.
+        // Slice only a matching bounded row tail as well; explicitly paged older
+        // rows use the exact cold parser instead of imposing O(history) work on
+        // every 150 ms live projection flush.
+        let slices = Dictionary(uniqueKeysWithValues: candidate.timeline.items
+            .suffix(ChatTranscriptPageRequest.maximumItemCount)
+            .map { item in (item.id, preparedText.slice(for: item)) })
         if cacheEpoch >= retiredBeforeEpoch, cacheEpoch == newestCacheEpoch {
             basis = Basis(
                 scope: scope,
                 projectionKey: projectionKey,
                 canonicalKey: canonicalKey,
                 candidate: candidate,
-                preparedText: preparedText
+                preparedText: preparedText,
+                preparedTextByRenderedID: slices
             )
         }
         return BuiltChatTranscript(
             timeline: candidate.timeline,
             toolPayloads: candidate.toolPayloads,
-            preparedText: preparedText,
+            preparedTextByRenderedID: slices,
             isInternallyConsistent: candidate.isValid
         )
     }
@@ -591,8 +562,11 @@ final class ChatTranscriptPresentationStore {
     private(set) var installed: InstalledChatTranscript?
     private(set) var pendingEntranceIDs: Set<String> = []
     private(set) var admittedEntranceIDs: Set<String> = []
+    private(set) var displayedSemanticIDCount: Int = 0
 
     @ObservationIgnored private var pendingEntranceOrder: [String] = []
+    @ObservationIgnored private var displayedSemanticIDs: Set<String> = []
+    @ObservationIgnored private var displayedSemanticOrder: [String] = []
     @ObservationIgnored private var admittedEntranceOrder: [String] = []
     @ObservationIgnored private let projectionWorker: ChatTranscriptProjectionWorker
     @ObservationIgnored private let installationFrameScheduler: DisplayFrameScheduler?
@@ -803,9 +777,9 @@ final class ChatTranscriptPresentationStore {
     }
 
     func handleMemoryPressure() {
-        if let installed { self.installed = installed.replacingPreparedText(.empty) }
+        if let installed { self.installed = installed.removingPreparedText() }
         if let readyToInstall {
-            self.readyToInstall = readyToInstall.replacingPreparedText(.empty)
+            self.readyToInstall = readyToInstall.removingPreparedText()
         }
         Task { await projectionWorker.removePreparedText() }
     }
@@ -855,7 +829,7 @@ final class ChatTranscriptPresentationStore {
                     timeline: built.timeline,
                     toolPayloads: built.toolPayloads,
                     runtimeItems: runtimeItems,
-                    preparedText: built.preparedText,
+                    preparedTextByRenderedID: built.preparedTextByRenderedID,
                     queuedMessages: next.snapshot.displayedQueuedMessages,
                     queueRevision: next.snapshot.queueRevision,
                     supportsQueueManagement: next.snapshot.queuedItems != nil,
@@ -922,26 +896,20 @@ final class ChatTranscriptPresentationStore {
     }
 
     private func install(_ output: InstalledChatTranscript) {
-        let adjustedOutput = ChatTranscriptTransitionPolicy.continuityAdjusted(
-            previous: installed,
-            next: output
-        )
-        let suppressEntrances = adjustedOutput.tag.entranceSuppressionGeneration.map { generation in
+        let suppressEntrances = output.tag.entranceSuppressionGeneration.map { generation in
             generation > (consumedEntranceSuppressionGeneration ?? -1)
         } ?? false
         let inserted = suppressEntrances
             ? []
-            : ChatTranscriptTransitionPolicy.discreteInsertedIDs(
-                previous: installed,
-                next: adjustedOutput
-            )
+            : ChatTranscriptTransitionPolicy.discreteInsertedIDs(previous: installed, next: output)
         if suppressEntrances {
-            consumedEntranceSuppressionGeneration = adjustedOutput.tag.entranceSuppressionGeneration
+            consumedEntranceSuppressionGeneration = output.tag.entranceSuppressionGeneration
             clearEntranceBookkeeping(keepingCapacity: true)
         }
-        synchronizeEntranceBookkeeping(with: adjustedOutput)
-        appendPendingEntrances(inserted)
-        installed = adjustedOutput
+        synchronizeEntranceBookkeeping(with: output)
+        appendPendingEntrances(inserted, output: output)
+        recordDisplayedSemanticIDs(from: output)
+        installed = output
     }
 
     private func synchronizeEntranceBookkeeping(with output: InstalledChatTranscript) {
@@ -955,13 +923,19 @@ final class ChatTranscriptPresentationStore {
         admittedEntranceIDs = Set(admittedEntranceOrder)
     }
 
-    private func appendPendingEntrances(_ candidates: [String]) {
+    private func appendPendingEntrances(_ candidates: [String], output: InstalledChatTranscript) {
         var novel: [String] = []
         var novelSet = Set<String>()
+        var novelSemanticIDs = Set<String>()
         for id in candidates
             where !admittedEntranceIDs.contains(id)
                 && !pendingEntranceIDs.contains(id)
                 && novelSet.insert(id).inserted {
+            guard let semanticID = output.semanticID(forDisplayedID: id) else {
+                preconditionFailure("Displayed entrance candidate lacks semantic identity")
+            }
+            guard !displayedSemanticIDs.contains(semanticID),
+                  novelSemanticIDs.insert(semanticID).inserted else { continue }
             novel.append(id)
         }
         let excess = max(
@@ -997,11 +971,43 @@ final class ChatTranscriptPresentationStore {
         order.removeFirst(count)
     }
 
+    private func recordDisplayedSemanticIDs(from output: InstalledChatTranscript) {
+        var currentlyDisplayed = Set<String>()
+        for item in output.displayedItems {
+            guard let semanticID = output.semanticID(forDisplayedID: item.id) else {
+                preconditionFailure("Displayed row lacks semantic identity")
+            }
+            currentlyDisplayed.insert(semanticID)
+            guard displayedSemanticIDs.insert(semanticID).inserted else { continue }
+            displayedSemanticOrder.append(semanticID)
+        }
+        var retirementNeeded = max(
+            0,
+            displayedSemanticOrder.count - ChatTranscriptPageRequest.maximumItemCount
+        )
+        if retirementNeeded > 0 {
+            displayedSemanticOrder.removeAll { semanticID in
+                guard retirementNeeded > 0,
+                      !currentlyDisplayed.contains(semanticID) else { return false }
+                displayedSemanticIDs.remove(semanticID)
+                retirementNeeded -= 1
+                return true
+            }
+        }
+        // Current rendered rows are never evicted from the resilience ledger,
+        // even if bounded runtime notifications temporarily lift the visible
+        // count above the canonical page size.
+        displayedSemanticIDCount = displayedSemanticIDs.count
+    }
+
     private func clearEntranceBookkeeping(keepingCapacity: Bool) {
         pendingEntranceIDs.removeAll(keepingCapacity: keepingCapacity)
         admittedEntranceIDs.removeAll(keepingCapacity: keepingCapacity)
         pendingEntranceOrder.removeAll(keepingCapacity: keepingCapacity)
         admittedEntranceOrder.removeAll(keepingCapacity: keepingCapacity)
+        displayedSemanticIDs.removeAll(keepingCapacity: keepingCapacity)
+        displayedSemanticOrder.removeAll(keepingCapacity: keepingCapacity)
+        displayedSemanticIDCount = 0
     }
 
     private func resumeWaiters(with output: InstalledChatTranscript) {

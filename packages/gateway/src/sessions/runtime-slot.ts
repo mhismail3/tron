@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { copyFile, mkdtemp, open, readdir, rm, stat } from "node:fs/promises";
@@ -89,6 +90,7 @@ const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
  * because each payload fully replaces the client's streaming bubble.
  */
 const STREAMING_PROGRESS_FLUSH_MS = 150;
+const MAX_PRESENTATION_IDENTITY_BINDINGS = 512;
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 
 function boundedSummaryText(value: string, maximumBytes = 1_024): string {
@@ -136,7 +138,18 @@ export class RuntimeSlot {
   private disposed = false;
   private snapshotTimer: NodeJS.Timeout | undefined;
   private progressFlushTimer: NodeJS.Timeout | undefined;
-  private pendingProgress: JsonValue | undefined;
+  /** The latest cumulative SDK message is projected only at the wire flush boundary. */
+  private pendingProgressMessage: AgentMessage | undefined;
+  /** Last cumulative assistant projection survives Pi's pre-persistence
+   * message_end hook window, when agent-core has already cleared its copy. */
+  private latestStreamingMessage: AgentMessage | undefined;
+  private streamIdentityMessage: AgentMessage | undefined;
+  private streamAnchorId: string | null | undefined;
+  private streamPresentationId: string | undefined;
+  private streamStartedAt: string | undefined;
+  /** Disposable runtime-only bridge from canonical entry IDs to mounted turn IDs. */
+  private readonly presentationIDs = new Map<string, string>();
+  private readonly presentationIDOrder: string[] = [];
   private activityHeartbeat: NodeJS.Timeout | undefined;
   private readonly toolProgressTimers = new Map<string, NodeJS.Timeout>();
   private readonly toolProgressPublishedAt = new Map<string, number>();
@@ -470,8 +483,8 @@ export class RuntimeSlot {
     });
   }
 
-  private emitProgress(data: JsonValue): void {
-    this.pendingProgress = data;
+  private emitProgress(message: AgentMessage): void {
+    this.pendingProgressMessage = message;
     if (this.progressFlushTimer !== undefined) return;
     this.progressFlushTimer = setTimeout(() => {
       this.progressFlushTimer = undefined;
@@ -482,10 +495,70 @@ export class RuntimeSlot {
   }
 
   private flushPendingProgress(): void {
-    if (this.pendingProgress === undefined) return;
-    const pending = this.pendingProgress;
-    this.pendingProgress = undefined;
-    this.emit("session.progress", pending);
+    const message = this.pendingProgressMessage;
+    this.pendingProgressMessage = undefined;
+    if (!message || message.role !== "assistant") return;
+    this.captureStreamIdentity(message);
+    if (!this.streamPresentationId || !this.streamStartedAt) return;
+    const projected = projectMessage(
+      "streaming",
+      this.streamAnchorId ?? null,
+      this.streamStartedAt,
+      message,
+      this.dependencies.blobs,
+      undefined,
+      this.streamPresentationId,
+    );
+    this.emit("session.progress", safeJson({
+      message: projected === undefined ? undefined : boundStreamingProgressItem(projected),
+    }));
+  }
+
+  private captureStreamIdentity(message: AgentMessage, startsMessage = false): void {
+    if (message.role !== "assistant") return;
+    this.latestStreamingMessage = message;
+    if (this.streamPresentationId !== undefined) {
+      // snapshot() can observe agent-core's streaming message while Pi is still
+      // awaiting an async message_start hook. The later Gateway message_start
+      // notification owns that same object and must not rotate its published ID.
+      if (!startsMessage || this.streamIdentityMessage === message) return;
+    }
+    this.streamIdentityMessage = message;
+    this.streamAnchorId = this.runtime.session.sessionManager.getLeafId() ?? null;
+    this.streamPresentationId = `stream:${randomUUID()}`;
+    this.streamStartedAt = new Date().toISOString();
+  }
+
+  private bindCanonicalPresentation(message: AgentMessage): void {
+    const presentationID = this.streamPresentationId;
+    if (!presentationID || message.role !== "assistant") return;
+    // Pi notifies listeners before synchronously appending the finalized
+    // message. The microtask runs after that append and before the next model
+    // continuation, so the exact new leaf owns this live-turn identity.
+    queueMicrotask(() => {
+      const canonicalID = this.runtime.session.sessionManager.getLeafId();
+      const candidate = canonicalID
+        ? this.runtime.session.sessionManager.getEntry(canonicalID)
+        : undefined;
+      if (candidate?.type !== "message"
+        || candidate.message.role !== "assistant"
+        || candidate.message !== message) return;
+      if (!this.presentationIDs.has(candidate.id)) this.presentationIDOrder.push(candidate.id);
+      this.presentationIDs.set(candidate.id, presentationID);
+      const excess = this.presentationIDOrder.length - MAX_PRESENTATION_IDENTITY_BINDINGS;
+      if (excess > 0) {
+        for (const id of this.presentationIDOrder.slice(0, excess)) this.presentationIDs.delete(id);
+        this.presentationIDOrder.splice(0, excess);
+      }
+      if (this.streamPresentationId === presentationID) {
+        this.latestStreamingMessage = undefined;
+        this.streamIdentityMessage = undefined;
+        this.streamAnchorId = undefined;
+        this.streamPresentationId = undefined;
+        this.streamStartedAt = undefined;
+      }
+      this.scheduleSnapshot();
+    });
   }
 
   private summary(): SessionSummaryUpdate {
@@ -566,6 +639,11 @@ export class RuntimeSlot {
           this.publishSnapshot();
           break;
         }
+        this.latestStreamingMessage = undefined;
+        this.streamIdentityMessage = undefined;
+        this.streamAnchorId = undefined;
+        this.streamPresentationId = undefined;
+        this.streamStartedAt = undefined;
         this.phase = "idle";
         const settledOperationId = this.activeOperationId;
         this.activeOperationId = undefined;
@@ -641,13 +719,18 @@ export class RuntimeSlot {
         this.retry = undefined;
         this.scheduleSnapshot();
         break;
+      case "message_start": {
+        if (event.message.role === "assistant") {
+          this.flushPendingProgress();
+          this.captureStreamIdentity(event.message, true);
+        }
+        break;
+      }
       case "message_update": {
         if (!this.hasActiveAgentRun) break;
         this.ensureAgentProjection();
-        const message = projectMessage("streaming", null, new Date().toISOString(), event.message, this.dependencies.blobs);
-        this.emitProgress(safeJson({
-          message: message === undefined ? undefined : boundStreamingProgressItem(message),
-        }));
+        this.captureStreamIdentity(event.message);
+        this.emitProgress(event.message);
         break;
       }
       case "tool_execution_start": {
@@ -801,6 +884,10 @@ export class RuntimeSlot {
         this.scheduleSnapshot();
         break;
       case "message_end":
+        if (event.message.role === "assistant") {
+          this.flushPendingProgress();
+          this.bindCanonicalPresentation(event.message);
+        }
         // Regular user messages are persisted by Pi at message_end; they do not
         // emit entry_appended. Retire the transient pending projection here so
         // it cannot survive the canonical prompt across reconnects.
@@ -1623,8 +1710,21 @@ export class RuntimeSlot {
     const contextUsage = session.getContextUsage();
     const stats = session.getSessionStats();
     const latestCacheHitRate = this.latestCacheHitRate();
-    const streaming = session.state.streamingMessage
-      ? projectMessage("streaming", null, new Date().toISOString(), session.state.streamingMessage, this.dependencies.blobs)
+    const streamingMessage = session.state.streamingMessage
+      ?? (this.streamPresentationId ? this.latestStreamingMessage : undefined);
+    const streaming = streamingMessage
+      ? (() => {
+        this.captureStreamIdentity(streamingMessage);
+        return projectMessage(
+          "streaming",
+          this.streamAnchorId ?? null,
+          this.streamStartedAt ?? new Date().toISOString(),
+          streamingMessage,
+          this.dependencies.blobs,
+          undefined,
+          this.streamPresentationId,
+        );
+      })()
       : undefined;
     const transcriptPage = this.transcriptPage();
     const queuedItems = this.projectedQueue();
@@ -1686,6 +1786,7 @@ export class RuntimeSlot {
         undefined,
         expectedNextEntryId,
         this.toolMetadata,
+        this.presentationIDs,
       );
     } catch (error) {
       if (error instanceof Error && error.message.includes("anchor changed")) {
@@ -2562,7 +2663,14 @@ export class RuntimeSlot {
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
     if (this.progressFlushTimer) clearTimeout(this.progressFlushTimer);
     this.progressFlushTimer = undefined;
-    this.pendingProgress = undefined;
+    this.pendingProgressMessage = undefined;
+    this.latestStreamingMessage = undefined;
+    this.streamIdentityMessage = undefined;
+    this.streamAnchorId = undefined;
+    this.streamPresentationId = undefined;
+    this.streamStartedAt = undefined;
+    this.presentationIDs.clear();
+    this.presentationIDOrder.splice(0);
     this.stopActivityHeartbeat();
     this.stopSubagentArtifactScan();
     this.clearToolProgressTimers();

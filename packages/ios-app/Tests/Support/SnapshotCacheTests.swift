@@ -118,7 +118,7 @@ struct SnapshotCacheTests {
         )
         defer { try? FileManager.default.removeItem(at: root) }
         let cache = SnapshotCache(root: root)
-        let item = try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data("""
+        let item = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
         {"id":"entry","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"x"}]}
         """.utf8))
         let snapshot = SessionSnapshot(

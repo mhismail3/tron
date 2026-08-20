@@ -68,17 +68,20 @@
       "timestamp": "2026-01-01T00:00:00Z",
       "kind": "message",
       "role": "user",
+      "presentationId": "user-entry",
       "content": [
         {
           "id": "user-entry:0",
           "type": "text",
-          "text": "hello"
+          "text": "hello",
+          "ordinal": 0
         },
         {
           "id": "user-entry:1",
           "type": "image",
           "mimeType": "image/png",
-          "blobId": "image-blob"
+          "blobId": "image-blob",
+          "ordinal": 1
         },
         {
           "id": "user-entry:2",
@@ -88,7 +91,8 @@
             "name": "fixture.pdf",
             "mimeType": "application/pdf",
             "size": 55972
-          }
+          },
+          "ordinal": 2
         }
       ]
     },
@@ -98,17 +102,21 @@
       "timestamp": "2026-01-01T00:00:01Z",
       "kind": "message",
       "role": "assistant",
+      "presentationId": "assistant-entry",
       "content": [
         {
           "id": "assistant-entry:0",
           "type": "thinking",
           "text": "reasoning",
-          "redacted": false
+          "redacted": false,
+          "ordinal": 0,
+          "thinkingRunOrdinal": 0
         },
         {
           "id": "assistant-entry:1",
           "type": "text",
-          "text": "answer"
+          "text": "answer",
+          "ordinal": 1
         },
         {
           "id": "assistant-entry:2",
@@ -117,7 +125,8 @@
           "name": "read",
           "arguments": {
             "path": "README.md"
-          }
+          },
+          "ordinal": 2
         }
       ],
       "provider": "fixture-provider",
@@ -134,11 +143,13 @@
       "timestamp": "2026-01-01T00:00:02Z",
       "kind": "message",
       "role": "toolResult",
+      "presentationId": "tool-entry",
       "content": [
         {
           "id": "tool-entry:0",
           "type": "text",
-          "text": "file contents"
+          "text": "file contents",
+          "ordinal": 0
         }
       ],
       "toolCallId": "tool-call",
@@ -176,7 +187,8 @@
         {
           "id": "custom-message:0",
           "type": "text",
-          "text": "extension message"
+          "text": "extension message",
+          "ordinal": 0
         }
       ],
       "details": {
@@ -250,11 +262,13 @@
     "timestamp": "2026-01-01T00:00:11Z",
     "kind": "message",
     "role": "assistant",
+    "presentationId": "streaming",
     "content": [
       {
         "id": "streaming:0",
         "type": "text",
-        "text": "partial"
+        "text": "partial",
+        "ordinal": 0
       }
     ],
     "provider": "fixture-provider",

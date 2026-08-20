@@ -62,7 +62,7 @@ struct PresentationStyleGuardTests {
         #expect(cache.contains("maximumConcurrentPreparations = 2"))
         #expect(cache.contains("maximumSourceBytes = 320_000"))
         #expect(cache.contains("snapshot.transcript.suffix(ChatTranscriptPageRequest.maximumItemCount)"))
-        #expect(store.contains("preparedText: built.preparedText"))
+        #expect(store.contains("preparedTextByRenderedID: built.preparedTextByRenderedID"))
         #expect(store.contains("handleMemoryPressure()"))
         #expect(transcript.contains("TronMarkdownView(document: document"))
         #expect(transcript.contains("preparedText.thinkingInline("))
@@ -1412,7 +1412,7 @@ struct PresentationStyleGuardTests {
         #expect(earlierMessagesChip.contains(".disabled(isLoadingEarlierMessages)"))
         #expect(chat.contains(".onChange(of: scrollCoordinator.layoutEpoch)"))
         #expect(chat.contains("outgoingSubmissionPresentation != nil"))
-        #expect(chat.contains("canonicalSubmissionHandoffIDs"))
+        #expect(chat.contains("canonicalSubmissionHandoffs"))
         #expect(chat.contains("submittedAttachments(for: target)"))
         #expect(chat.contains("canonicalSubmissionIDs("))
     }
@@ -1652,7 +1652,7 @@ struct PresentationStyleGuardTests {
         #expect(notification.contains("pill.frame(minWidth: 44, minHeight: 44)"))
         #expect(notification.contains(".frame(maxWidth: .infinity, minHeight: 44, alignment: .center)"))
         #expect(chat.contains("LazyVStack(alignment: .leading, spacing: 8)"))
-        #expect(chat.contains("canonicalSubmissionHandoffIDs.contains(item.id)"))
+        #expect(chat.contains("canonicalSubmissionHandoffs.contains(item.id)"))
         for label in [toolCardLabel, toolRunLabel] {
             #expect(label.contains("ChatCompactPillSurface"))
             #expect(!label.contains("minHeight"))

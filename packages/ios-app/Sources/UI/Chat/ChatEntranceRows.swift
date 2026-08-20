@@ -36,6 +36,7 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
     let state: ChatTranscriptEntranceState
     let kind: ChatContentEntranceKind
     let reduceMotion: Bool
+    let onFailsafeReveal: () -> Void
     @ViewBuilder let content: Content
     @State private var revealed: Bool
 
@@ -43,11 +44,13 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
         state: ChatTranscriptEntranceState,
         kind: ChatContentEntranceKind,
         reduceMotion: Bool,
+        onFailsafeReveal: @escaping () -> Void = {},
         @ViewBuilder content: () -> Content
     ) {
         self.state = state
         self.kind = kind
         self.reduceMotion = reduceMotion
+        self.onFailsafeReveal = onFailsafeReveal
         self.content = content()
         _revealed = State(initialValue: state != .pending)
     }
@@ -67,6 +70,17 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
                 x: revealed ? 0 : hidden.offsetX,
                 y: revealed ? 0 : hidden.offsetY
             )
+            .task(id: state) {
+                guard state == .pending else { return }
+                if !reduceMotion { try? await Task.sleep(for: .milliseconds(34)) }
+                guard !Task.isCancelled, !revealed else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    revealed = true
+                    onFailsafeReveal()
+                }
+            }
             .onChange(of: state, initial: true) { _, state in
                 switch state {
                 case .pending:
@@ -193,7 +207,7 @@ struct ChatTranscriptRenderRow: View, Equatable {
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.item == rhs.item,
-              lhs.preparedText == rhs.preparedText,
+              lhs.preparedText.revision == rhs.preparedText.revision,
               lhs.hiddenThinkingLabel == rhs.hiddenThinkingLabel else { return false }
         guard case .toolRun = lhs.item else { return true }
         return lhs.installationTag == rhs.installationTag

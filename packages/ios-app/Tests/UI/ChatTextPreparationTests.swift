@@ -113,6 +113,27 @@ struct ChatTextPreparationTests {
         #expect(metrics.markdownCount + metrics.thinkingCount == snapshot.markdown.count + snapshot.thinking.count)
     }
 
+    @Test("unrelated preparation does not revise an installed row slice")
+    func rowLocalRevision() async throws {
+        let cache = ChatTextPreparationCache()
+        let first = try message(id: "first", role: "assistant", parts: [
+            #"{"id":"first:0","type":"text","text":"one"}"#,
+        ])
+        let firstSnapshot = await cache.prepare([.init(
+            identity: .init(kind: .markdown, value: "first:content:0"),
+            source: "one"
+        )])
+        let firstSlice = firstSnapshot.slice(for: .transcript(first))
+
+        let secondSnapshot = await cache.prepare([.init(
+            identity: .init(kind: .markdown, value: "second:content:0"),
+            source: "two"
+        )])
+        let secondSlice = secondSnapshot.slice(for: .transcript(first))
+        #expect(firstSlice.revision == secondSlice.revision)
+        #expect(firstSlice == secondSlice)
+    }
+
     @Test("source extraction prepares assistant Markdown and normalized thinking only")
     func sourceExtraction() throws {
         var snapshot = try SessionScenarioBuilder(seed: 6_201)
@@ -148,8 +169,33 @@ struct ChatTextPreparationTests {
 
         let sources = ChatTextPreparationPolicy.sources(in: snapshot)
         #expect(sources.count == ChatTranscriptPageRequest.maximumItemCount)
-        #expect(sources.first?.identity.value == "part-88")
-        #expect(sources.last?.identity.value == "part-599")
+        #expect(sources.first?.identity.value == "assistant-88:content:0")
+        #expect(sources.last?.identity.value == "assistant-599:content:0")
+    }
+
+    @Test("row revision changes when lower-revision membership is evicted")
+    func rowRevisionTracksMembership() throws {
+        let row = try message(id: "row", role: "assistant", parts: [
+            #"{"id":"row:0","type":"text","text":"one"}"#,
+            #"{"id":"row:1","type":"text","text":"two"}"#,
+        ])
+        let complete = ChatTextPreparationSnapshot(
+            markdown: [
+                "row:content:0": .init(source: "one", document: .init(source: "one"), revision: 4),
+                "row:content:1": .init(source: "two", document: .init(source: "two"), revision: 9),
+            ],
+            thinking: [:]
+        ).slice(for: .transcript(row))
+        let evicted = ChatTextPreparationSnapshot(
+            markdown: [
+                "row:content:1": .init(source: "two", document: .init(source: "two"), revision: 9),
+            ],
+            thinking: [:]
+        ).slice(for: .transcript(row))
+
+        #expect(complete.revision == [4, 9])
+        #expect(evicted.revision == [9])
+        #expect(complete.revision != evicted.revision)
     }
 
     @Test("a row slice contains only that row's immutable prepared values")
@@ -159,22 +205,23 @@ struct ChatTextPreparationTests {
         ])
         let snapshot = ChatTextPreparationSnapshot(
             markdown: [
-                "first:0": .init(source: "one", document: .init(source: "one")),
-                "second:0": .init(source: "two", document: .init(source: "two")),
+                "first:content:0": .init(source: "one", document: .init(source: "one"), revision: 7),
+                "second:content:0": .init(source: "two", document: .init(source: "two"), revision: 8),
             ],
             thinking: [:]
         )
 
         let slice = snapshot.slice(for: .transcript(first))
-        #expect(Set(slice.markdown.keys) == ["first:0"])
-        #expect(slice.markdownDocument(identity: "first:0", source: "one") != nil)
-        #expect(slice.markdownDocument(identity: "second:0", source: "two") == nil)
+        #expect(Set(slice.markdown.keys) == ["first:content:0"])
+        #expect(slice.revision == [7])
+        #expect(slice.markdownDocument(identity: "first:content:0", source: "one") != nil)
+        #expect(slice.markdownDocument(identity: "second:content:0", source: "two") == nil)
     }
 
     private func message(id: String, role: String, parts: [String]) throws -> TranscriptItem {
         let data = Data("""
         {"id":"\(id)","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"\(role)","content":[\(parts.joined(separator: ","))]}
         """.utf8)
-        return try JSONDecoder.gateway.decode(TranscriptItem.self, from: data)
+        return try decodeTranscriptFixture(TranscriptItem.self, from: data)
     }
 }

@@ -21,7 +21,7 @@ struct ChatTranscriptProjectionKernelTests {
         """)
         snapshot.transcriptStart = 0
         snapshot.transcriptTotal = snapshot.transcript.count
-        snapshot.streaming = try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data("""
+        snapshot.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
         {"id":"streaming-source","parentId":"compact","timestamp":"2026-01-01T00:00:05Z","kind":"message","role":"assistant","content":[
           {"id":"stream-thinking","type":"thinking","text":"Finishing"},
           {"id":"stream-answer","type":"text","text":"Streaming"}
@@ -229,7 +229,7 @@ struct ChatTranscriptProjectionKernelTests {
     func streamingAndUnanchoredTools() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
-        snapshot.streaming = try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data("""
+        snapshot.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
         {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
           {"id":"thinking","type":"thinking","text":"Working"},
           {"id":"call-part","type":"toolCall","toolCallId":"anchored","name":"read","arguments":{}}
@@ -458,7 +458,7 @@ struct ChatTranscriptProjectionKernelTests {
         """)
         snapshot.transcriptTotal = 2
         let previous = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
-        snapshot.transcript[1] = try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data("""
+        snapshot.transcript[1] = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
         {"id":"result","parentId":"call-entry","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"result-text","type":"text","text":"new"}],"toolCallId":"call","toolName":"read","isError":false}
         """.utf8))
         let incremental = ChatTranscriptProjectionKernel.incremental(
@@ -475,6 +475,29 @@ struct ChatTranscriptProjectionKernelTests {
             return
         }
         #expect(run.tools.first.flatMap(incremental.toolPayloads.resolving)?.content == "new")
+    }
+
+    @Test("collision admission rebases later sparse tool patch sites")
+    func collisionAdmissionRebasesToolPatch() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"duplicate","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"bash","command":"one","output":"","cancelled":false,"truncated":false},
+          {"id":"duplicate","parentId":"duplicate","timestamp":"2026-01-01T00:00:01Z","kind":"bash","command":"two","output":"","cancelled":false,"truncated":false}
+        ]
+        """)
+        snapshot.phase = .running
+        snapshot.toolExecutions = [runtimeTool(id: "live", order: 0, output: "old")]
+        let previous = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(previous.timeline.ids == ["duplicate", "tool-run-live"])
+
+        snapshot.toolExecutions = [updatedTool(snapshot.toolExecutions[0], output: "new")]
+        let incremental = ChatTranscriptProjectionKernel.incremental(
+            snapshot: snapshot,
+            previous: previous,
+            canonicalSourceUnchanged: true
+        )
+        #expect(incremental.workReport.mode == .toolPayloadPatch)
+        #expect(incremental.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
     }
 
     @Test("one runtime tool payload update patches one flat row in ten thousand history entries")
@@ -795,7 +818,7 @@ struct ChatTranscriptProjectionKernelTests {
         let previous = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
         #expect(previous.timeline.ids == ["user", "tool-run-stream-call"])
 
-        snapshot.streaming = try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data("""
+        snapshot.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
         {"id":"stream-source","parentId":"result","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[
           {"id":"stream-text","type":"text","text":"before tool"},
           {"id":"stream-tool","type":"toolCall","toolCallId":"stream-call","name":"read","arguments":{"path":"README.md"}}
@@ -839,7 +862,7 @@ struct ChatTranscriptProjectionKernelTests {
         let previous = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
         #expect(previous.timeline.ids == ["user", "tool-run-extension-call"])
 
-        snapshot.streaming = try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data("""
+        snapshot.streaming = try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
         {"id":"stream-source","parentId":"result","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[
           {"id":"extension-reference","type":"text","text":"extension output follows","toolCallId":"extension-call"}
         ]}
@@ -980,13 +1003,13 @@ struct ChatTranscriptProjectionKernelTests {
         text: String,
         role: String = "user"
     ) throws -> TranscriptItem {
-        try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data("""
+        try decodeTranscriptFixture(TranscriptItem.self, from: Data("""
         {"id":"\(id)","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"\(role)","content":[{"id":"\(id)-text","type":"text","text":"\(text)"}]}
         """.utf8))
     }
 
     private func fixture(transcript: String) throws -> SessionSnapshot {
-        try JSONDecoder.gateway.decode(SessionSnapshot.self, from: Data("""
+        try decodeTranscriptFixture(SessionSnapshot.self, from: Data("""
         {
           "sessionId":"session","runtimeGeneration":"generation","revision":1,"eventSequence":1,"phase":"idle","cwd":"/workspace",
           "model":{"provider":"test","id":"model"},"thinkingLevel":"high","availableThinkingLevels":["off","high"],

@@ -79,6 +79,36 @@ describe("transcript projection", () => {
     expect(projected).toMatchObject({ extensionOrigin: { source: "public-source" } });
   });
 
+  it("keeps presentation and ordinal identity across live and canonical owners", () => {
+    const message: AgentMessage = {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "one" },
+        { type: "thinking", thinking: "two" },
+        { type: "text", text: "answer" },
+      ],
+      api: "openai-responses",
+      provider: "test",
+      model: "model",
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "stop",
+      timestamp: 2,
+    };
+    const blobs = new BlobStore();
+    const live = projectMessage("streaming", "user", "2026-01-01T00:00:00Z", message, blobs, undefined, "stream:turn");
+    const settled = projectMessage("canonical", "user", "2026-01-01T00:00:00Z", message, blobs, undefined, "stream:turn");
+    expect(live).toMatchObject({ id: "streaming", presentationId: "stream:turn" });
+    expect(settled).toMatchObject({ id: "canonical", presentationId: "stream:turn" });
+    if (live?.kind !== "message" || settled?.kind !== "message") throw new Error("expected messages");
+    expect(live.content.map(({ id, ordinal }) => ({ id, ordinal }))).toEqual(
+      settled.content.map(({ id, ordinal }) => ({ id, ordinal })),
+    );
+    expect(live.content.slice(0, 2)).toMatchObject([
+      { ordinal: 0, thinkingRunOrdinal: 0 },
+      { ordinal: 1, thinkingRunOrdinal: 0 },
+    ]);
+  });
+
   it("preserves Pi entry IDs and branch order", () => {
     const manager = SessionManager.inMemory("/tmp/project");
     const first = manager.appendMessage({ role: "user", content: "hello", timestamp: 1 });
@@ -521,14 +551,29 @@ describe("transcript projection", () => {
 });
 
 describe("streaming progress bounds", () => {
-  const streamingItem = (parts: Array<{ type: "text" | "thinking"; text: string }>): TranscriptItem => ({
-    id: "streaming",
-    parentId: null,
-    timestamp: "2026-01-01T00:00:00Z",
-    kind: "message",
-    role: "assistant",
-    content: parts.map((part, index) => ({ id: `streaming:${index}`, ...part })),
-  });
+  const streamingItem = (parts: Array<{ type: "text" | "thinking"; text: string }>): TranscriptItem => {
+    let activeThinkingRunOrdinal: number | undefined;
+    return {
+      id: "streaming",
+      parentId: null,
+      timestamp: "2026-01-01T00:00:00Z",
+      kind: "message",
+      role: "assistant",
+      presentationId: "stream:fixture",
+      content: parts.map((part, ordinal) => {
+        if (part.type === "thinking") {
+          activeThinkingRunOrdinal ??= ordinal;
+          return {
+            id: `streaming:${ordinal}`, ordinal,
+            thinkingRunOrdinal: activeThinkingRunOrdinal,
+            ...part,
+          };
+        }
+        activeThinkingRunOrdinal = undefined;
+        return { id: `streaming:${ordinal}`, ordinal, ...part };
+      }),
+    };
+  };
   const frameBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 
   it("returns an item inside the budget unchanged", () => {
@@ -547,7 +592,7 @@ describe("streaming progress bounds", () => {
     expect(frameBytes(bounded)).toBeLessThanOrEqual(STREAMING_PROGRESS_BYTES);
     expect(bounded).toMatchObject({ id: "streaming", kind: "message", role: "assistant" });
     if (bounded.kind !== "message") throw new Error("expected message");
-    expect(bounded.content.at(-1)).toMatchObject({ id: "streaming:2", type: "text", text: tail });
+    expect(bounded.content.at(-1)).toMatchObject({ id: "streaming:2", ordinal: 2, type: "text", text: tail });
     const trimmed = bounded.content[0]!;
     if (trimmed.type !== "text") throw new Error("expected trimmed text part");
     expect(trimmed.text.startsWith("…")).toBe(true);
@@ -568,6 +613,24 @@ describe("streaming progress bounds", () => {
     expect(body.endsWith(part.text.slice(1))).toBe(true);
   });
 
+  it("retains a thinking run identity when its leading part is trimmed", () => {
+    const item = streamingItem([
+      { type: "thinking", text: "a".repeat(STREAMING_PROGRESS_BYTES) },
+      { type: "thinking", text: "b".repeat(STREAMING_PROGRESS_BYTES) },
+      { type: "text", text: "answer" },
+    ]);
+    const bounded = boundStreamingProgressItem(item);
+    if (bounded.kind !== "message") throw new Error("expected message");
+    const thinking = bounded.content.find((part) => part.type === "thinking");
+    expect(thinking).toMatchObject({ thinkingRunOrdinal: 0 });
+  });
+
+  it("does not let JSON escaping bypass the exact frame bound", () => {
+    const item = streamingItem([{ type: "text", text: "\\\"\n".repeat(STREAMING_PROGRESS_BYTES) }]);
+    const bounded = boundStreamingProgressItem(item);
+    expect(frameBytes(bounded)).toBeLessThanOrEqual(STREAMING_PROGRESS_BYTES);
+  });
+
   it("never emits an empty live frame", () => {
     const item: TranscriptItem = {
       id: "streaming",
@@ -575,11 +638,24 @@ describe("streaming progress bounds", () => {
       timestamp: "2026-01-01T00:00:00Z",
       kind: "message",
       role: "assistant",
-      content: [{ id: "streaming:0", type: "toolCall", toolCallId: "call", name: "bash", arguments: { command: "x".repeat(STREAMING_PROGRESS_BYTES * 4) } }],
+      presentationId: "stream:fixture",
+      content: [{ id: "streaming:0", ordinal: 0, type: "toolCall", toolCallId: "call", name: "bash", arguments: { command: "x".repeat(STREAMING_PROGRESS_BYTES * 4) } }],
     };
     const bounded = boundStreamingProgressItem(item);
     if (bounded.kind !== "message") throw new Error("expected message");
     expect(bounded.content.length).toBeGreaterThan(0);
-    expect(frameBytes(bounded)).toBeLessThanOrEqual(Math.max(STREAMING_PROGRESS_BYTES, frameBytes(item)));
+    expect(frameBytes(bounded)).toBeLessThanOrEqual(STREAMING_PROGRESS_BYTES);
+  });
+
+  it("drops oversized optional envelope metadata to preserve the exact budget", () => {
+    const item = {
+      ...streamingItem([{ type: "text", text: "answer" }]),
+      errorMessage: "\\\"\n".repeat(STREAMING_PROGRESS_BYTES),
+    } as TranscriptItem;
+    const bounded = boundStreamingProgressItem(item);
+    expect(frameBytes(bounded)).toBeLessThanOrEqual(STREAMING_PROGRESS_BYTES);
+    expect(bounded).toMatchObject({ presentationId: "stream:fixture" });
+    if (bounded.kind !== "message") throw new Error("expected message");
+    expect(bounded.content).toHaveLength(1);
   });
 });

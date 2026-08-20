@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { copyFile, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -1405,10 +1406,20 @@ export default function (pi) {
 
     // The last live frame carries the complete cumulative message and the
     // settled canonical transcript keeps the full text.
-    const lastMessage = progress.at(-1)!.payload.data?.message;
-    const lastText = (lastMessage?.content ?? []).filter((part: any) => part.type === "text").map((part: any) => part.text).join("");
+    const progressMessages = progress.map((event) => event.payload.data?.message).filter(Boolean);
+    const lastMessage = progressMessages.at(-1)!;
+    const lastText = (lastMessage.content ?? []).filter((part: any) => part.type === "text").map((part: any) => part.text).join("");
     expect(lastText.trimEnd().endsWith("streaming chunk")).toBe(true);
-    const transcriptText = slot.snapshot().transcript
+    expect(new Set(progressMessages.map((message) => message.presentationId)).size).toBe(1);
+    expect(new Set(progressMessages.map((message) => message.parentId)).size).toBe(1);
+    expect(new Set(progressMessages.map((message) => message.timestamp)).size).toBe(1);
+    expect(lastMessage.content.map((part: any) => part.ordinal)).toEqual([0]);
+    const finalSnapshot = slot.snapshot();
+    const assistant = finalSnapshot.transcript.find(
+      (item) => item.kind === "message" && item.role === "assistant",
+    );
+    expect(assistant).toMatchObject({ presentationId: lastMessage.presentationId });
+    const transcriptText = finalSnapshot.transcript
       .filter((item) => item.kind === "message")
       .flatMap((item) => item.kind === "message" ? item.content : [])
       .filter((part) => part.type === "text")
@@ -1416,6 +1427,79 @@ export default function (pi) {
       .join("");
     expect(transcriptText).toContain(text.trimEnd());
   });
+
+  it.each(["message_start", "message_end"] as const)(
+    "keeps one presentation identity through an async %s extension hook",
+    async (hook) => {
+      const root = await mkdtemp(join(tmpdir(), `tron-streaming-${hook}-`));
+      const agentDir = join(root, "agent");
+      const cwd = join(root, "workspace");
+      const extensionDir = join(cwd, ".pi", "extensions");
+      const entered = join(root, "entered");
+      const release = join(root, "release");
+      await Promise.all([mkdir(agentDir), mkdir(extensionDir, { recursive: true })]);
+      process.env.PI_CODING_AGENT_DIR = agentDir;
+      await writeFile(join(extensionDir, "streaming-hook.ts"), `
+        import { existsSync, writeFileSync } from "node:fs";
+        export default function (pi) {
+          pi.on(${JSON.stringify(hook)}, async (event) => {
+            if (event.message?.role !== "assistant") return;
+            writeFileSync(${JSON.stringify(entered)}, "entered");
+            while (!existsSync(${JSON.stringify(release)})) {
+              await new Promise((resolve) => setTimeout(resolve, 5));
+            }
+          });
+        }
+      `);
+      const trust = new TrustService(agentDir);
+      await trust.set(cwd, true);
+      const faux = fauxProvider({ provider: `tron-streaming-${hook}`, tokensPerSecond: 20, tokenSize: { min: 1, max: 1 } });
+      const createModels = async () => {
+        const runtime = await ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+        runtime.registerNativeProvider(faux.provider);
+        return runtime;
+      };
+      faux.setResponses([fauxAssistantMessage("stable identity")]);
+      const registry = new RuntimeRegistry({
+        agentDir,
+        tronHome: join(root, "tron"),
+        idleRuntimeMs: 60_000,
+        modelRuntimeFactory: createModels,
+        trust,
+        broadcast: () => {},
+        sessionSummaryChanged: () => {},
+        sessionListChanged: () => {},
+      });
+      registries.push(registry);
+      await registry.initialize();
+      const slot = await registry.create(cwd);
+      const model = faux.getModel();
+      await slot.setModel(model.provider, model.id);
+
+      const prompt = slot.prompt("stream");
+      await waitUntil(() => existsSync(entered));
+      const during = slot.snapshot().streaming;
+      expect(during).toMatchObject({ role: "assistant" });
+      if (during?.kind !== "message") throw new Error("expected live assistant");
+      await writeFile(release, "release");
+      await prompt;
+      await waitUntil(() => !slot.isBusy);
+
+      const finalSnapshot = slot.snapshot();
+      const canonical = finalSnapshot.transcript.find(
+        (item) => item.kind === "message" && item.role === "assistant",
+      );
+      expect(canonical).toMatchObject({
+        id: expect.not.stringMatching(/^streaming$/),
+        presentationId: during.presentationId,
+      });
+      if (canonical?.kind !== "message") throw new Error("expected canonical assistant");
+      expect(canonical.content.slice(0, during.content.length).map(
+        (part) => ({ id: part.id, ordinal: part.ordinal }),
+      )).toEqual(during.content.map((part) => ({ id: part.id, ordinal: part.ordinal })));
+    },
+    15_000,
+  );
 
   it("keeps async input preflight alive and settles accepted handled input exactly once", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-input-handled-preflight-"));

@@ -14,6 +14,25 @@ private struct ChatScrollGeometryObservation: Equatable {
     let phase: ChatOpenPresentationPhase
 }
 
+struct BoundedChatIdentityLedger: Equatable {
+    private(set) var ids: Set<String> = []
+    private var order: [String] = []
+
+    mutating func formUnion(_ incoming: Set<String>) {
+        for id in incoming.sorted() where ids.insert(id).inserted { order.append(id) }
+        let excess = order.count - ChatTranscriptPageRequest.maximumItemCount
+        guard excess > 0 else { return }
+        for id in order.prefix(excess) { ids.remove(id) }
+        order.removeFirst(excess)
+    }
+
+    func contains(_ id: String) -> Bool { ids.contains(id) }
+    mutating func removeAll() {
+        ids.removeAll(keepingCapacity: false)
+        order.removeAll(keepingCapacity: false)
+    }
+}
+
 struct ChatView: View {
     let sessionID: String
     private let initialEditorText: String?
@@ -60,7 +79,7 @@ struct ChatView: View {
     // a UIViewRepresentable that has no `.focused` registration.
     @State private var composerFocused = false
     @State private var suppressedInteractionScope: ExtensionInteractionScope?
-    @State private var canonicalSubmissionHandoffIDs: Set<String> = []
+    @State private var canonicalSubmissionHandoffs = BoundedChatIdentityLedger()
 
     #if HOSTED_TEST
     init(
@@ -303,12 +322,10 @@ struct ChatView: View {
                   let snapshot = selectedAuthoritativeSnapshot,
                   snapshot.sessionId == currentSource.sessionID else { return }
             if let target = presentationTarget {
-                canonicalSubmissionHandoffIDs.formUnion(
-                    model.composerDrafts.canonicalSubmissionIDs(
-                        target: target,
-                        canonicalTranscript: snapshot.transcript
-                    )
-                )
+                rememberCanonicalSubmissionHandoffs(model.composerDrafts.canonicalSubmissionIDs(
+                    target: target,
+                    canonicalTranscript: snapshot.transcript
+                ))
             }
             // Prepend owns its exact page projection/layout-epoch transaction.
             guard !scrollCoordinator.isPrependingHistory else { return }
@@ -332,12 +349,10 @@ struct ChatView: View {
             let installed = transcriptPresentation.installed
             if let target = presentationTarget,
                let snapshot = selectedAuthoritativeSnapshot {
-                canonicalSubmissionHandoffIDs.formUnion(
-                    model.composerDrafts.canonicalSubmissionIDs(
-                        target: target,
-                        canonicalTranscript: snapshot.transcript
-                    )
-                )
+                rememberCanonicalSubmissionHandoffs(model.composerDrafts.canonicalSubmissionIDs(
+                    target: target,
+                    canonicalTranscript: snapshot.transcript
+                ))
                 model.composerDrafts.reconcileSubmission(
                     target: target,
                     canonicalTranscript: snapshot.transcript,
@@ -349,7 +364,8 @@ struct ChatView: View {
             if let installed {
                 hostedProbe?.recordProjectionInstall(
                     rowCount: installed.timeline.items.count,
-                    sourceOrdinal: installed.tag.timelineGeneration
+                    sourceOrdinal: installed.tag.timelineGeneration,
+                    nextRenderedIDBySemanticID: installed.hostedRenderedIDBySemanticID
                 )
             }
             #endif
@@ -365,7 +381,7 @@ struct ChatView: View {
             openingTask = nil
             scrollCoordinator.cancel()
             transcriptPresentation.reset()
-            canonicalSubmissionHandoffIDs.removeAll()
+            canonicalSubmissionHandoffs.removeAll()
             performanceTracker.cancelAll()
             cancelAttachmentPresentation(includingActive: true)
             photoImportTask?.cancel()
@@ -375,6 +391,10 @@ struct ChatView: View {
                 Task { await model.closeSessionPresentation(sessionID, generation: generation) }
             }
         }
+    }
+
+    private func rememberCanonicalSubmissionHandoffs(_ ids: Set<String>) {
+        canonicalSubmissionHandoffs.formUnion(ids)
     }
 
     private var topBlur: some View {
@@ -397,7 +417,7 @@ struct ChatView: View {
                     if let installed = transcriptPresentation.installed {
                         ForEach(installed.displayedItems) { item in
                             let entranceKind = ChatContentEntranceKind.classify(item)
-                            let entranceState = canonicalSubmissionHandoffIDs.contains(item.id)
+                            let entranceState = canonicalSubmissionHandoffs.contains(item.id)
                                 ? .none
                                 : transcriptPresentation.entranceState(for: item.id)
                             stableTranscriptRow(
@@ -409,11 +429,21 @@ struct ChatView: View {
                                 ChatTranscriptEntranceRow(
                                     state: entranceState,
                                     kind: entranceKind,
-                                    reduceMotion: reduceMotion
+                                    reduceMotion: reduceMotion,
+                                    onFailsafeReveal: {
+                                        _ = transcriptPresentation.resolveEntrance(
+                                            id: item.id,
+                                            installationTag: installed.tag,
+                                            isVisible: false
+                                        )
+                                        #if HOSTED_TEST
+                                        hostedProbe?.recordEntranceFailsafeReveal()
+                                        #endif
+                                    }
                                 ) {
                                     ChatTranscriptRenderRow(
                                         item: item,
-                                        preparedText: installed.preparedText.slice(for: item),
+                                        preparedText: installed.preparedText(for: item),
                                         hiddenThinkingLabel: snapshot.extensionPresentation.semanticState.hiddenThinkingLabel,
                                         installationTag: installed.tag,
                                         resolveToolDetails: { callIDs, tag in

@@ -39,10 +39,10 @@ export interface SessionSummaryUpdate {
 }
 
 export type ContentPart =
-  | { id: string; type: "text"; text: string; attachment?: { name: string; mimeType: string; size: number } }
-  | { id: string; type: "thinking"; text: string; redacted?: boolean }
-  | { id: string; type: "image"; mimeType: string; blobId: string }
-  | { id: string; type: "toolCall"; toolCallId: string; name: string; arguments: JsonValue };
+  | { id: string; ordinal: number; type: "text"; text: string; attachment?: { name: string; mimeType: string; size: number } }
+  | { id: string; ordinal: number; thinkingRunOrdinal: number; type: "thinking"; text: string; redacted?: boolean }
+  | { id: string; ordinal: number; type: "image"; mimeType: string; blobId: string }
+  | { id: string; ordinal: number; type: "toolCall"; toolCallId: string; name: string; arguments: JsonValue };
 
 interface TranscriptBase {
   id: string;
@@ -54,6 +54,8 @@ export type TranscriptItem =
   | TranscriptBase & {
       kind: "message";
       role: "user" | "assistant" | "toolResult";
+      /** Stable presentation identity for this runtime epoch. Canonical entry id remains authoritative. */
+      presentationId: string;
       content: ContentPart[];
       provider?: string;
       modelId?: string;

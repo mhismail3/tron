@@ -203,6 +203,8 @@ struct SessionScenarioBuilder: Sendable {
             encodedData: encodedData,
             content: ContentPart(
                 id: "generated-image-\(seed)-\(format.rawValue)",
+                ordinal: 0,
+                thinkingRunOrdinal: nil,
                 type: .image,
                 text: nil,
                 attachment: .init(
@@ -229,6 +231,8 @@ struct SessionScenarioBuilder: Sendable {
             encodedData: Data(repeating: UInt8(truncatingIfNeeded: seed), count: encodedBytes),
             content: ContentPart(
                 id: "attachment-\(seed)",
+                ordinal: 0,
+                thinkingRunOrdinal: nil,
                 type: .image,
                 text: nil,
                 attachment: .init(name: name, mimeType: "image/jpeg", size: encodedBytes),
@@ -349,8 +353,11 @@ struct SessionScenarioBuilder: Sendable {
             timestamp: timestamp,
             kind: .message,
             role: role,
+            presentationId: id(seed: seed, index: index),
             content: [ContentPart(
                 id: id(seed: seed, index: index, suffix: "text"),
+                ordinal: 0,
+                thinkingRunOrdinal: nil,
                 type: .text,
                 text: String(repeating: "x", count: textBytes),
                 attachment: nil,
@@ -385,8 +392,11 @@ struct SessionScenarioBuilder: Sendable {
             timestamp: timestamp,
             kind: .message,
             role: .toolResult,
+            presentationId: id(seed: seed, index: index),
             content: [ContentPart(
                 id: id(seed: seed, index: index, suffix: "result"),
+                ordinal: 0,
+                thinkingRunOrdinal: nil,
                 type: .text,
                 text: String(repeating: "r", count: textBytes),
                 attachment: nil,

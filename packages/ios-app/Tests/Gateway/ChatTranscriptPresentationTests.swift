@@ -1084,7 +1084,8 @@ struct ChatTranscriptPresentationTests {
         snapshot.transcriptTotal = 2
         let ids = ChatTranscriptPresentation.timeline(in: snapshot).items.map(\.id)
         #expect(ids == [
-            "notification-compaction-duplicate", "notification-compaction-duplicate",
+            "notification-compaction-duplicate",
+            "notification-compaction-duplicate#duplicate",
         ])
     }
 
@@ -1398,75 +1399,58 @@ struct ChatTranscriptPresentationTests {
         #expect(settled.ids == ["user", "assistant-tools", "tool-run-call-1", "assistant-final"])
     }
 
-    @Test("streaming assistant rows keep their visual identity when canonical text settles")
+    @Test("streaming and canonical assistant rows share projected identity")
     func streamingSettlementKeepsVisualIdentity() throws {
         var liveSnapshot = try fixture(transcript: "[]")
         liveSnapshot.phase = .running
         liveSnapshot.streaming = try message("""
-        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"answer","type":"text","text":"hello"}]}
+        {"id":"stream-live","parentId":"user","presentationId":"stream:turn","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"answer","ordinal":0,"type":"text","text":"hello"}]}
         """)
         var settledSnapshot = liveSnapshot
         settledSnapshot.phase = .idle
         settledSnapshot.revision += 1
         settledSnapshot.eventSequence += 1
         settledSnapshot.transcript = [try message("""
-        {"id":"assistant-final","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"answer","type":"text","text":"hello"}]}
+        {"id":"assistant-final","parentId":"user","presentationId":"stream:turn","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"answer","ordinal":0,"type":"text","text":"hello"}]}
         """)]
         settledSnapshot.streaming = nil
-        let liveTag = ChatTranscriptProjectionTag(snapshot: liveSnapshot, presentationGeneration: 3)
-        let settledTag = ChatTranscriptProjectionTag(snapshot: settledSnapshot, presentationGeneration: 3)
-        let live = InstalledChatTranscript(
-            tag: liveTag,
-            timeline: ChatTranscriptPresentation.timeline(in: liveSnapshot),
-            runtimeItems: [],
-            sourceWindow: .init(snapshot: liveSnapshot)
-        )
-        let settled = InstalledChatTranscript(
-            tag: settledTag,
-            timeline: ChatTranscriptPresentation.timeline(in: settledSnapshot),
-            runtimeItems: [],
-            sourceWindow: .init(snapshot: settledSnapshot)
-        )
-
-        let adjusted = ChatTranscriptTransitionPolicy.continuityAdjusted(previous: live, next: settled)
-        #expect(adjusted.timeline.ids == ["streaming"])
-        #expect(adjusted.timeline.renderedIDBySemanticID["assistant-final"] == "streaming")
+        let live = ChatTranscriptPresentation.timeline(in: liveSnapshot)
+        let settled = ChatTranscriptPresentation.timeline(in: settledSnapshot)
+        #expect(live.ids == ["stream:turn"])
+        #expect(settled.ids == ["stream:turn"])
     }
 
-    @Test("continuity fails safe when reconnect projects settled and live rows together")
-    func reconnectContinuityCollisionKeepsAuthoritativeIDs() throws {
+    @Test("thinking-only settlement preserves row and run identity after leading trimming")
+    func thinkingSettlementKeepsVisualIdentity() throws {
         var liveSnapshot = try fixture(transcript: "[]")
         liveSnapshot.phase = .running
         liveSnapshot.streaming = try message("""
-        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"answer","type":"text","text":"hello"}]}
+        {"id":"stream-live","parentId":"user","presentationId":"stream:thinking","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[
+          {"id":"stream:thinking:0","ordinal":0,"thinkingRunOrdinal":0,"type":"thinking","text":"first"},
+          {"id":"stream:thinking:1","ordinal":1,"thinkingRunOrdinal":0,"type":"thinking","text":"second"}
+        ]}
         """)
-        var reconnectSnapshot = liveSnapshot
-        reconnectSnapshot.revision += 1
-        reconnectSnapshot.eventSequence += 1
-        reconnectSnapshot.transcript = [try message("""
-        {"id":"assistant-final","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"answer","type":"text","text":"hello"}]}
+        var settledSnapshot = liveSnapshot
+        settledSnapshot.phase = .idle
+        settledSnapshot.transcript = [try message("""
+        {"id":"assistant-final","parentId":"user","presentationId":"stream:thinking","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[
+          {"id":"stream:thinking:1","ordinal":1,"thinkingRunOrdinal":0,"type":"thinking","text":"second"}
+        ]}
         """)]
-        let live = InstalledChatTranscript(
-            tag: ChatTranscriptProjectionTag(snapshot: liveSnapshot, presentationGeneration: 3),
-            timeline: ChatTranscriptPresentation.timeline(in: liveSnapshot),
-            runtimeItems: [],
-            sourceWindow: .init(snapshot: liveSnapshot)
-        )
-        let reconnect = InstalledChatTranscript(
-            tag: ChatTranscriptProjectionTag(snapshot: reconnectSnapshot, presentationGeneration: 3),
-            timeline: ChatTranscriptPresentation.timeline(in: reconnectSnapshot),
-            runtimeItems: [],
-            sourceWindow: .init(snapshot: reconnectSnapshot)
-        )
+        settledSnapshot.streaming = nil
 
-        #expect(reconnect.timeline.ids == ["assistant-final", "streaming"])
-        let adjusted = ChatTranscriptTransitionPolicy.continuityAdjusted(
-            previous: live,
-            next: reconnect
-        )
-        #expect(adjusted.timeline.ids == reconnect.timeline.ids)
-        #expect(adjusted.timeline.isInternallyConsistent)
-        #expect(adjusted.timeline.renderedIDBySemanticID["assistant-final"] == "assistant-final")
+        let live = ChatTranscriptPresentation.timeline(in: liveSnapshot)
+        let settled = ChatTranscriptPresentation.timeline(in: settledSnapshot)
+        #expect(live.ids == settled.ids)
+        guard case .message(let liveMessage) = live.items.first,
+              case .message(let settledMessage) = settled.items.first,
+              case .thinking(let liveRun) = liveMessage.parts.first,
+              case .thinking(let settledRun) = settledMessage.parts.first else {
+            Issue.record("Expected thinking presentations")
+            return
+        }
+        #expect(liveRun.id == "thinking-run-0")
+        #expect(settledRun.id == liveRun.id)
     }
 
     @Test("isolated text streaming tail is identical when no runtime tool is unanchored")
@@ -1679,6 +1663,16 @@ struct ChatTranscriptPresentationTests {
         #expect(run.tools.first?.subtitle == "Interrupted")
     }
 
+    @Test("canonical submission handoffs are page bounded")
+    func canonicalSubmissionHandoffBound() {
+        var ledger = BoundedChatIdentityLedger()
+        let capacity = ChatTranscriptPageRequest.maximumItemCount
+        ledger.formUnion(Set((0..<(capacity + 4)).map { "submission-\($0)" }))
+        #expect(ledger.ids.count == capacity)
+        #expect(!ledger.contains("submission-0"))
+        #expect(ledger.contains("submission-\(capacity + 3)"))
+    }
+
     @Test("entrance geometry follows exact displayed install across desired and identity replacements")
     func entranceGeometryAdmissionPolicy() throws {
         var displayed = try fixture(transcript: "[]")
@@ -1801,11 +1795,11 @@ struct ChatTranscriptPresentationTests {
     }
 
     private func message(_ value: String) throws -> TranscriptItem {
-        try JSONDecoder.gateway.decode(TranscriptItem.self, from: Data(value.utf8))
+        try decodeTranscriptFixture(TranscriptItem.self, from: Data(value.utf8))
     }
 
     private func transcript(_ value: String) throws -> [TranscriptItem] {
-        try JSONDecoder.gateway.decode([TranscriptItem].self, from: Data(value.utf8))
+        try decodeTranscriptFixture([TranscriptItem].self, from: Data(value.utf8))
     }
 
     private func tool(
@@ -1836,7 +1830,7 @@ struct ChatTranscriptPresentationTests {
     }
 
     private func fixture(transcript: String) throws -> SessionSnapshot {
-        try JSONDecoder.gateway.decode(SessionSnapshot.self, from: Data("""
+        try decodeTranscriptFixture(SessionSnapshot.self, from: Data("""
         {
           "sessionId":"session","runtimeGeneration":"generation","revision":1,"eventSequence":1,"phase":"idle","cwd":"/workspace",
           "model":{"provider":"openai-codex","id":"gpt-5.6-sol"},"thinkingLevel":"high","availableThinkingLevels":["off","high"],
