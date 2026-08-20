@@ -1433,6 +1433,42 @@ struct ChatTranscriptPresentationTests {
         #expect(adjusted.timeline.renderedIDBySemanticID["assistant-final"] == "streaming")
     }
 
+    @Test("continuity fails safe when reconnect projects settled and live rows together")
+    func reconnectContinuityCollisionKeepsAuthoritativeIDs() throws {
+        var liveSnapshot = try fixture(transcript: "[]")
+        liveSnapshot.phase = .running
+        liveSnapshot.streaming = try message("""
+        {"id":"streaming","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"answer","type":"text","text":"hello"}]}
+        """)
+        var reconnectSnapshot = liveSnapshot
+        reconnectSnapshot.revision += 1
+        reconnectSnapshot.eventSequence += 1
+        reconnectSnapshot.transcript = [try message("""
+        {"id":"assistant-final","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"answer","type":"text","text":"hello"}]}
+        """)]
+        let live = InstalledChatTranscript(
+            tag: ChatTranscriptProjectionTag(snapshot: liveSnapshot, presentationGeneration: 3),
+            timeline: ChatTranscriptPresentation.timeline(in: liveSnapshot),
+            runtimeItems: [],
+            sourceWindow: .init(snapshot: liveSnapshot)
+        )
+        let reconnect = InstalledChatTranscript(
+            tag: ChatTranscriptProjectionTag(snapshot: reconnectSnapshot, presentationGeneration: 3),
+            timeline: ChatTranscriptPresentation.timeline(in: reconnectSnapshot),
+            runtimeItems: [],
+            sourceWindow: .init(snapshot: reconnectSnapshot)
+        )
+
+        #expect(reconnect.timeline.ids == ["assistant-final", "streaming"])
+        let adjusted = ChatTranscriptTransitionPolicy.continuityAdjusted(
+            previous: live,
+            next: reconnect
+        )
+        #expect(adjusted.timeline.ids == reconnect.timeline.ids)
+        #expect(adjusted.timeline.isInternallyConsistent)
+        #expect(adjusted.timeline.renderedIDBySemanticID["assistant-final"] == "assistant-final")
+    }
+
     @Test("isolated text streaming tail is identical when no runtime tool is unanchored")
     func isolatedStreamingParity() throws {
         var snapshot = try fixture(transcript: """

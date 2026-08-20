@@ -1537,15 +1537,25 @@ struct ChatTranscriptTimeline: Hashable, Sendable {
         let live = items.live.map { item in
             Self.replacingRenderedID(item, replacements: replacements)
         }
-        let preferred = ChatSemanticIndex(
-            canonical: Self.replacingRenderedIDKeys(
+        let rewrittenIDs = canonical.map(\.id) + live.map(\.id)
+        guard Set(rewrittenIDs).count == rewrittenIDs.count,
+              let preferredCanonical = Self.replacingRenderedIDKeys(
                 preferredSemanticIDByRenderedID.canonical,
                 replacements: replacements
-            ),
-            live: Self.replacingRenderedIDKeys(
+              ),
+              let preferredLive = Self.replacingRenderedIDKeys(
                 preferredSemanticIDByRenderedID.live,
                 replacements: replacements
-            )
+              ) else {
+            // A reconnect snapshot can temporarily contain both the settled
+            // canonical row and the still-projected live row. Continuity is a
+            // visual optimization; if reusing the old ID would collide with an
+            // existing row, keep the authoritative next timeline unchanged.
+            return self
+        }
+        let preferred = ChatSemanticIndex(
+            canonical: preferredCanonical,
+            live: preferredLive
         )
         let reverse = ChatSemanticIndex(
             canonical: Self.replacingRenderedIDValues(
@@ -1583,10 +1593,16 @@ struct ChatTranscriptTimeline: Hashable, Sendable {
     private static func replacingRenderedIDKeys(
         _ values: [String: String],
         replacements: [String: String]
-    ) -> [String: String] {
-        Dictionary(uniqueKeysWithValues: values.map { key, value in
-            (replacements[key] ?? key, value)
-        })
+    ) -> [String: String]? {
+        var rewritten: [String: String] = [:]
+        rewritten.reserveCapacity(values.count)
+        for (key, value) in values {
+            let rewrittenKey = replacements[key] ?? key
+            guard rewritten.updateValue(value, forKey: rewrittenKey) == nil else {
+                return nil
+            }
+        }
+        return rewritten
     }
 
     private static func replacingRenderedIDValues(

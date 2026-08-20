@@ -901,8 +901,11 @@ queued intents rise from the trailing composer edge, tool activity enters from t
 system capsules settle from center, and assistant prose uses only a shallow vertical reveal. The
 exact installed-row geometry gate still owns admission, so projection preparation cannot animate a
 row that was never displayed, detached readers gain no follow authority, and continuity-adjusted same-turn
-assistant/tool rows preserve their mounted visual IDs instead of replaying an entrance. Submission handoffs also
-suppress the canonical replacement entrance because the outgoing row already owns that reveal. Reduce Motion retains
+assistant/tool rows preserve their mounted visual IDs instead of replaying an entrance. That identity rewrite is
+strictly an optional visual optimization: reconnect can temporarily project both a settled canonical row and its
+still-live predecessor, so the complete rewritten row/key set is checked for uniqueness before any semantic map is
+constructed. A collision retains the authoritative next timeline unchanged rather than trapping in dictionary
+construction. Submission handoffs also suppress the canonical replacement entrance because the outgoing row already owns that reveal. Reduce Motion retains
 only a brief opacity reveal. Canonical
 compaction/branch/configuration entries, embedded assistant failures, and exact admitted custom/retry
 working detail share one semantic notification projection and capsule primitive. Ordinary default running
