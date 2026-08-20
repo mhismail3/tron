@@ -343,6 +343,9 @@ struct GatewayHello: Decodable, Sendable {
     let machineGroupID: String?
     let machineName: String
     let capabilities: [String]
+    let sourceRevision: String?
+    let buildFingerprint: String?
+    let runtimeEpoch: String?
 
     var info: GatewayInfo {
         GatewayInfo(
@@ -353,7 +356,10 @@ struct GatewayHello: Decodable, Sendable {
             machineId: machineId,
             machineGroupID: machineGroupID,
             machineName: machineName,
-            capabilities: capabilities
+            capabilities: capabilities,
+            sourceRevision: sourceRevision,
+            buildFingerprint: buildFingerprint,
+            runtimeEpoch: runtimeEpoch
         )
     }
 }

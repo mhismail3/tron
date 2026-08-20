@@ -59,14 +59,30 @@ export function isTailscaleAddress(address: string): boolean {
   return octets.length === 4 && octets[0] === 100 && octets[1]! >= 64 && octets[1]! <= 127;
 }
 
-export function resolveBindHost(raw: string | undefined): string {
+export function resolveBindHost(raw: string | undefined, interfaces = networkInterfaces()): string {
   const requested = raw?.trim() || "127.0.0.1";
   if (requested !== "tailscale") return requested;
-  const candidates = Object.values(networkInterfaces())
-    .flatMap((addresses) => addresses ?? [])
-    .filter((candidate) => !candidate.internal && isTailscaleAddress(candidate.address));
-  const ipv4 = candidates.find((candidate) => candidate.family === "IPv4");
-  if (ipv4) return ipv4.address;
+  const candidates = Object.entries(interfaces).flatMap(([name, addresses]) => (addresses ?? [])
+    .filter((candidate) => !candidate.internal && isTailscaleAddress(candidate.address))
+    .map((candidate) => ({ ...candidate, name })));
+  candidates.sort((left, right) => {
+    const family = (value: string | number) => value === "IPv4" || value === 4 ? 0 : 1;
+    const compare = (a: string, b: string) => {
+      const leftOctets = a.split(".").map(Number);
+      const rightOctets = b.split(".").map(Number);
+      if (leftOctets.length === 4 && rightOctets.length === 4
+        && leftOctets.every(Number.isInteger) && rightOctets.every(Number.isInteger)) {
+        for (let index = 0; index < 4; index += 1) {
+          if (leftOctets[index] !== rightOctets[index]) return leftOctets[index]! - rightOctets[index]!;
+        }
+        return 0;
+      }
+      return a === b ? 0 : a < b ? -1 : 1;
+    };
+    return family(left.family) - family(right.family)
+      || compare(left.address, right.address)
+      || compare(left.name, right.name);
+  });
   if (candidates[0]) return candidates[0].address;
   throw new GatewayError("conflict", "Tailscale is not connected; Tron cannot expose the mobile gateway", true);
 }

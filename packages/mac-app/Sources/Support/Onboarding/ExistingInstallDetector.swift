@@ -161,8 +161,10 @@ enum ExistingInstallDetector {
 
         let nodePtyHelper = payloadRoot
             .appendingPathComponent("app/scripts/ensure-node-pty-helper.mjs", isDirectory: false)
-        guard usableFile(nodePtyHelper) else {
-            return "The bundled Gateway native helper is missing. Rebuild or reinstall Tron."
+        let updateHelper = payloadRoot
+            .appendingPathComponent("app/scripts/gateway-payload-deploy.mjs", isDirectory: false)
+        guard usableFile(nodePtyHelper), usableFile(updateHelper) else {
+            return "The bundled Gateway helper scripts are missing. Rebuild or reinstall Tron."
         }
 
         for architecture in ["arm64", "x64"] {

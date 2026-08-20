@@ -6,7 +6,9 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { homedir, networkInterfaces } from "node:os";
+import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -15,6 +17,7 @@ import {
   cp,
   lstat,
   mkdir,
+  mkdtemp,
   open,
   readFile,
   readdir,
@@ -24,7 +27,19 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import WebSocket from "../packages/gateway/node_modules/ws/index.js";
+
+// The helper is copied into app/scripts in the shipped payload. Resolve its
+// production dependencies from that adjacent app package first, then fall back
+// to the repository package when this source copy is run in-place.
+const scriptDirectory = dirname(fileURLToPath(import.meta.url));
+const adjacentPackage = join(scriptDirectory, "..", "package.json");
+const sourcePackage = join(scriptDirectory, "../packages/gateway/package.json");
+const dependencyPackage = (() => {
+  try { return existsSync(adjacentPackage) ? adjacentPackage : sourcePackage; } catch { return sourcePackage; }
+})();
+const requireForDependencies = createRequire(dependencyPackage);
+const WebSocket = requireForDependencies("ws");
+const lockfile = requireForDependencies("proper-lockfile");
 
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const SCHEMA = 1;
@@ -37,12 +52,11 @@ const REQUIREMENTS = [
   ["app/package.json", 1, false],
   ["app/package-lock.json", 1, false],
   ["app/scripts/ensure-node-pty-helper.mjs", 1, false],
+  ["app/scripts/gateway-payload-deploy.mjs", 1, false],
   ["app/node_modules", 0, true],
   ["runtime/node-arm64", 1_048_576, false],
   ["runtime/node-x64", 1_048_576, false],
 ];
-const requireForLock = createRequire(import.meta.url);
-const lockfile = requireForLock("../packages/gateway/node_modules/proper-lockfile");
 
 export function isTailscaleAddress(address) {
   if (address.toLowerCase().startsWith("fd7a:115c:a1e0:")) return true;
@@ -230,6 +244,8 @@ function store(home, channel) {
     current: join(channelRoot, "current.json"),
     previous: join(channelRoot, "previous.json"),
     state: join(channelRoot, "deployment-state.json"),
+    progress: join(channelRoot, "update-progress.json"),
+    config: join(home, "gateway", "update-config.json"),
     lock: join(channelRoot, ".update.lock"),
   };
 }
@@ -239,6 +255,47 @@ async function readOptional(path) {
     if (error?.code === "ENOENT") return undefined;
     throw error;
   }
+}
+
+const UPDATE_CONFIG_KIND = "tron-gateway-update-config";
+const MAX_UPDATE_CONFIG_PATH_BYTES = 4_096;
+
+export function validateUpdateConfigDocument(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).some((key) => !["schema", "kind", "sourceRoot", "artifactRoot", "updatedAt"].includes(key))
+    || value.schema !== SCHEMA || value.kind !== UPDATE_CONFIG_KIND
+    || typeof value.sourceRoot !== "string" || !isAbsolute(value.sourceRoot)
+    || Buffer.byteLength(value.sourceRoot) > MAX_UPDATE_CONFIG_PATH_BYTES || /[\u0000-\u001f\u007f]/u.test(value.sourceRoot)
+    || (value.artifactRoot !== undefined && (typeof value.artifactRoot !== "string"
+      || !isAbsolute(value.artifactRoot) || Buffer.byteLength(value.artifactRoot) > MAX_UPDATE_CONFIG_PATH_BYTES || /[\u0000-\u001f\u007f]/u.test(value.artifactRoot)))
+    || typeof value.updatedAt !== "string" || !gatewayTimestamp(value.updatedAt)) return false;
+  return true;
+}
+
+async function noSymlinkDirectory(path, markers = []) {
+  if (!isAbsolute(path) || Buffer.byteLength(path) > MAX_UPDATE_CONFIG_PATH_BYTES) throw new Error("trusted update path must be absolute and bounded");
+  const root = resolve(path).split("/")[0] === "" ? "/" : resolve(path).slice(0, resolve(path).indexOf("/") + 1);
+  let cursor = root;
+  for (const component of resolve(path).slice(root.length).split("/").filter(Boolean)) {
+    cursor = join(cursor, component);
+    const info = await lstat(cursor).catch(() => undefined);
+    if (!info || info.isSymbolicLink()) throw new Error("trusted update path is missing or contains a symlink");
+  }
+  const info = await lstat(path);
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("trusted update path is not a regular directory");
+  for (const marker of markers) {
+    const markerInfo = await lstat(join(path, marker)).catch(() => undefined);
+    if (!markerInfo?.isFile() || markerInfo.isSymbolicLink()) throw new Error("trusted source is not a Tron repository");
+  }
+  return resolve(path);
+}
+
+async function readUpdateConfig(paths) {
+  const value = await readOptional(paths.config);
+  if (value === undefined || !validateUpdateConfigDocument(value)) throw new Error("trusted Gateway update config is missing or malformed");
+  const sourceRoot = await noSymlinkDirectory(value.sourceRoot, ["packages/gateway/package.json", "packages/gateway/package-lock.json"]);
+  const artifactRoot = value.artifactRoot === undefined ? undefined : await noSymlinkDirectory(value.artifactRoot);
+  return { ...value, sourceRoot, ...(artifactRoot === undefined ? {} : { artifactRoot }) };
 }
 
 async function atomicBytes(path, data, mode = 0o600) {
@@ -379,6 +436,13 @@ async function writeState(paths, value) {
   await atomicJson(paths.state, { schema: SCHEMA, kind: "tron-gateway-deployment", ...value, updatedAt: new Date().toISOString() });
 }
 
+async function writeProgress(paths, state, commandId, error) {
+  await atomicJson(paths.progress, {
+    schema: SCHEMA, kind: "tron-gateway-update-progress", channel: paths.channel, state,
+    commandId, ...(error ? { error: String(error).slice(0, 2_048) } : {}), updatedAt: new Date().toISOString(),
+  });
+}
+
 function homeForChannel(channel, explicit) {
   if (explicit) return resolve(explicit);
   return join(homedir(), channel === "dev" ? ".tron-dev" : ".tron");
@@ -388,8 +452,44 @@ function validCommandId(value) {
   return typeof value === "string" && /^[A-Za-z0-9._:-]{8,160}$/u.test(value);
 }
 
+export function validateApplyRequest(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Gateway update apply request is malformed");
+  const keys = Object.keys(value);
+  if (keys.some((key) => !["channel", "mode", "candidateVersion", "commandId"].includes(key))) {
+    throw new Error("Gateway update apply request contains an unsupported field");
+  }
+  const channel = value.channel === undefined ? "stable" : value.channel;
+  const mode = value.mode === undefined ? "auto" : value.mode;
+  const candidateVersion = value.candidateVersion;
+  const commandId = value.commandId;
+  if (channel !== "stable" && channel !== "dev") throw new Error("invalid update channel");
+  if (mode !== "source" && mode !== "artifact" && mode !== "auto") throw new Error("invalid update mode");
+  if (candidateVersion !== undefined && !validComponent(candidateVersion, 128)) throw new Error("invalid candidate version");
+  if (!validCommandId(commandId)) throw new Error("invalid update command ID");
+  return { channel, mode, ...(candidateVersion === undefined ? {} : { candidateVersion }), commandId };
+}
+
 function suffixedCommandId(value, suffix) {
   return `${value.slice(0, 160 - suffix.length)}${suffix}`;
+}
+
+function applyArguments() {
+  const values = {};
+  const names = new Map([
+    ["--channel", "channel"], ["--mode", "mode"],
+    ["--candidate-version", "candidateVersion"], ["--command-id", "commandId"],
+  ]);
+  for (let index = 3; index < process.argv.length; index += 1) {
+    const raw = process.argv[index];
+    const equals = raw.indexOf("=");
+    const flag = equals >= 0 ? raw.slice(0, equals) : raw;
+    const name = names.get(flag);
+    if (!name) throw new Error("apply accepts only channel, mode, candidateVersion, and commandId");
+    const value = equals >= 0 ? raw.slice(equals + 1) : process.argv[++index];
+    if (value === undefined || value.startsWith("--")) throw new Error(`missing value for ${flag}`);
+    values[name] = value;
+  }
+  return validateApplyRequest({ channel: "stable", mode: "auto", ...values });
 }
 
 function argument(name) {
@@ -407,12 +507,61 @@ function args() {
   return { command, channel, home, paths: store(home, channel) };
 }
 
-async function gitRevision() {
+async function gitRevision(cwd) {
   try {
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
-    return (await promisify(execFile)("git", ["rev-parse", "HEAD"], { encoding: "utf8" })).stdout.trim() || "unknown";
+    return (await promisify(execFile)("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" })).stdout.trim() || "unknown";
   } catch { return "unknown"; }
+}
+
+export function sourceBuildCommands(sourceRoot, compilerOutput = "<private-output>") {
+  const gatewayRoot = join(sourceRoot, "packages", "gateway");
+  return [
+    {
+      tool: process.execPath,
+      args: [join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"), "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput],
+      cwd: gatewayRoot,
+    },
+    { tool: "npm", args: ["ci", "--omit=dev", "--ignore-scripts=false"], cwd: "<candidate>/app" },
+  ];
+}
+
+async function verifiedSourceCompilerOutput(root) {
+  const info = await lstat(root);
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("source compiler output is not a regular directory");
+  await regularFiles(root, "");
+  if (!(await regular(join(root, "index.js"), 1_024))) throw new Error("source compiler output is incomplete");
+  return root;
+}
+
+function runBounded(tool, args, options = {}) {
+  const timeoutMs = options.timeoutMs ?? 120_000;
+  const maxOutputBytes = options.maxOutputBytes ?? 128 * 1_024;
+  return new Promise((resolvePromise, rejectPromise) => {
+    let output = "";
+    let settled = false;
+    const child = spawn(tool, args, { cwd: options.cwd, shell: false, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) rejectPromise(error); else resolvePromise(result);
+    };
+    const collect = (chunk) => {
+      output += chunk.toString();
+      if (Buffer.byteLength(output) > maxOutputBytes) finish(new Error("Gateway source build output exceeded the limit"));
+    };
+    child.stdout.on("data", collect);
+    child.stderr.on("data", collect);
+    child.once("error", (error) => finish(error));
+    child.once("exit", (code, signal) => {
+      if (code === 0) finish(undefined, { code, signal, output });
+      else finish(new Error(`Gateway source build failed (${signal ?? `exit ${code}`}): ${output.slice(-2_048)}`));
+    });
+    const timer = setTimeout(() => { child.kill("SIGTERM"); finish(new Error("Gateway source build timed out")); }, timeoutMs);
+    timer.unref?.();
+  });
 }
 
 export async function stagePayload({ home, channel, source, version, sourceRevision }) {
@@ -424,10 +573,23 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
   const target = join(paths.versionsRoot, targetVersion);
   await mkdir(paths.versionsRoot, { recursive: true, mode: 0o700 });
   return withStoreLock(paths, async () => {
+    const markCandidate = async (result) => {
+      await writeState(paths, {
+        state: "prepared", channel, version: result.manifest.version,
+        payloadFingerprint: result.manifest.payloadFingerprint,
+        sourceRevision: result.manifest.sourceRevision, runtimeEpoch: result.manifest.runtimeEpoch,
+        candidateIdentity: {
+          version: result.manifest.version, gatewayVersion: result.manifest.gatewayVersion,
+          sourceRevision: result.manifest.sourceRevision, runtimeEpoch: result.manifest.runtimeEpoch,
+          payloadFingerprint: result.manifest.payloadFingerprint,
+        },
+      });
+      return result;
+    };
     try {
       await access(target);
       const existing = await validatePayload(target, { channel, version: targetVersion }, true);
-      if (existing.payloadFingerprint === sourceManifest.payloadFingerprint) return { root: target, manifest: existing, reused: true };
+      if (existing.payloadFingerprint === sourceManifest.payloadFingerprint) return markCandidate({ root: target, manifest: existing, reused: true });
       throw new Error(`version ${targetVersion} already exists with a different payload`);
     } catch (error) {
       if (error?.code !== "ENOENT") throw error;
@@ -454,7 +616,7 @@ export async function stagePayload({ home, channel, source, version, sourceRevis
       await rm(temporary, { recursive: true, force: true });
       throw error;
     }
-    return { root: target, manifest, reused: false };
+    return markCandidate({ root: target, manifest, reused: false });
   });
 }
 
@@ -539,6 +701,11 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
       channel, version, payloadFingerprint: manifest.payloadFingerprint, sourceRevision: manifest.sourceRevision,
       runtimeEpoch: manifest.runtimeEpoch, commandId: commandId ?? `gateway-payload-${randomUUID()}`,
       previousSelection: prior,
+      candidateIdentity: {
+        version: manifest.version, gatewayVersion: manifest.gatewayVersion,
+        sourceRevision: manifest.sourceRevision, runtimeEpoch: manifest.runtimeEpoch,
+        payloadFingerprint: manifest.payloadFingerprint,
+      },
     };
     await writeState(paths, { ...stateBase, state: "prepared" });
     const unchanged = prior?.version === version && prior.payloadFingerprint === manifest.payloadFingerprint;
@@ -591,6 +758,177 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
   });
 }
 
+async function stagedCandidate(paths, requestedVersion) {
+  let candidate = requestedVersion;
+  if (candidate === undefined) {
+    const stateValue = await readOptional(paths.state);
+    if (!stateValue || typeof stateValue !== "object" || Array.isArray(stateValue)) return undefined;
+    const raw = stateValue;
+    candidate = raw.candidateIdentity && typeof raw.candidateIdentity === "object"
+      ? raw.candidateIdentity.version : raw.candidateVersion;
+  }
+  if (!validComponent(candidate, 128)) return undefined;
+  try {
+    await validatePayload(join(paths.versionsRoot, candidate), { channel: paths.channel, version: candidate }, true);
+    return candidate;
+  } catch { return undefined; }
+}
+
+async function currentPayload(paths) {
+  try {
+    const selected = await currentSelection(paths);
+    if (selected) {
+      const root = join(paths.versionsRoot, selected.version);
+      const manifest = await validatePayload(root, {
+        channel: paths.channel, version: selected.version, payloadFingerprint: selected.payloadFingerprint,
+      }, true);
+      return { root, manifest };
+    }
+  } catch { /* fall through to the validated bundled payload */ }
+  const bundledCandidates = [
+    resolve(scriptDirectory, "..", ".."),
+    resolve(scriptDirectory, "../packages/mac-app/Sources/Resources/Gateway"),
+  ];
+  for (const bundledRoot of bundledCandidates) {
+    try {
+      const manifest = await validatePayload(bundledRoot, {}, true);
+      return { root: bundledRoot, manifest };
+    } catch { /* Try the next known bundled-payload location. */ }
+  }
+  throw new Error("source update requires an active or bundled validated Gateway payload");
+}
+
+async function stageConfiguredArtifact(paths, config, requestedVersion) {
+  if (!config.artifactRoot) return undefined;
+  const sourceManifest = await validatePayload(config.artifactRoot, {}, true);
+  const version = requestedVersion ?? sourceManifest.version;
+  const result = await stagePayload({
+    home: paths.home, channel: paths.channel, source: config.artifactRoot, version,
+    sourceRevision: sourceManifest.sourceRevision,
+  });
+  return result.manifest.version;
+}
+
+export async function buildSourcePayload({ paths, config, candidateVersion, timeoutMs = 120_000, runCommand = runBounded }) {
+  const active = await currentPayload(paths);
+  const gatewayRoot = join(config.sourceRoot, "packages", "gateway");
+  // Compile into a private temporary directory. In particular, never invoke
+  // the package build script here: its configured outDir is the trusted source
+  // tree's packages/gateway/dist, which must remain byte-for-byte unchanged.
+  const compilerOutput = await mkdtemp(join(tmpdir(), "tron-gateway-source-build-"));
+  try {
+    await runCommand(process.execPath, [
+      join(gatewayRoot, "node_modules", "typescript", "bin", "tsc"),
+      "-p", join(gatewayRoot, "tsconfig.json"), "--outDir", compilerOutput,
+    ], { cwd: gatewayRoot, timeoutMs });
+    const sourcePackage = JSON.parse(await readFile(join(gatewayRoot, "package.json"), "utf8"));
+    const version = candidateVersion ?? `${sourcePackage.version}-source-${Date.now()}`;
+    if (!validComponent(version, 128)) throw new Error("source build produced an invalid candidate version");
+    const target = join(paths.versionsRoot, version);
+    const temporary = join(paths.versionsRoot, `.source-staging-${version}-${process.pid}-${randomUUID()}`);
+    await rm(temporary, { recursive: true, force: true });
+    try {
+      await mkdir(paths.versionsRoot, { recursive: true, mode: 0o700 });
+      await cp(active.root, temporary, { recursive: true, errorOnExist: true, force: false });
+      await makeMutable(temporary);
+      await rm(join(temporary, "app", "dist"), { recursive: true, force: true });
+      await verifiedSourceCompilerOutput(compilerOutput);
+      await cp(compilerOutput, join(temporary, "app", "dist"), { recursive: true, errorOnExist: true, force: false });
+      await cp(join(gatewayRoot, "package.json"), join(temporary, "app", "package.json"));
+      await cp(join(gatewayRoot, "package-lock.json"), join(temporary, "app", "package-lock.json"));
+      await rm(join(temporary, "app", "node_modules"), { recursive: true, force: true });
+      await runCommand("npm", ["ci", "--omit=dev", "--ignore-scripts=false"], {
+        cwd: join(temporary, "app"), timeoutMs,
+      });
+      const fingerprint = await payloadFingerprint(temporary);
+      const manifest = {
+        ...active.manifest,
+        schema: SCHEMA, kind: KIND, channel: paths.channel, version,
+        gatewayVersion: sourcePackage.version, sourceRevision: await gitRevision(config.sourceRoot),
+        runtimeEpoch: randomUUID(), payloadFingerprint: fingerprint,
+      };
+      payloadManifest(manifest, { channel: paths.channel, version });
+      await atomicJson(join(temporary, "manifest.json"), manifest);
+      await validatePayload(temporary, { channel: paths.channel, version, payloadFingerprint: fingerprint }, true);
+      await makeImmutable(temporary);
+      try { await rename(temporary, target); } catch (error) {
+        if (error?.code === "EEXIST") throw new Error(`version ${version} already exists`);
+        throw error;
+      }
+      await writeState(paths, {
+        state: "prepared", channel: paths.channel, version, payloadFingerprint: fingerprint,
+        sourceRevision: manifest.sourceRevision, runtimeEpoch: manifest.runtimeEpoch,
+        candidateIdentity: {
+          version, gatewayVersion: manifest.gatewayVersion, sourceRevision: manifest.sourceRevision,
+          runtimeEpoch: manifest.runtimeEpoch, payloadFingerprint: fingerprint,
+        },
+      });
+      return { root: target, manifest };
+    } catch (error) {
+      await rm(temporary, { recursive: true, force: true });
+      throw error;
+    }
+  } finally {
+    await rm(compilerOutput, { recursive: true, force: true });
+  }
+}
+
+/**
+ * LaunchAgent-only update entrypoint. It deliberately has no source/path,
+ * executable, host, or port arguments. Source and artifact roots are read only
+ * from the validated home projection; request parameters select policy only.
+ */
+export async function applyPayload(request) {
+  const value = validateApplyRequest(request);
+  const home = homeForChannel(value.channel, process.env.TRON_DATA_DIR);
+  const paths = store(home, value.channel);
+  let version = value.mode === "source" ? undefined : await stagedCandidate(paths, value.candidateVersion);
+  let selectedMode = "artifact";
+  const config = version === undefined || value.mode === "source" ? await readUpdateConfig(paths) : undefined;
+  if (!version && value.mode !== "source") {
+    try {
+      version = await stageConfiguredArtifact(paths, config, value.candidateVersion);
+    } catch (error) {
+      if (value.mode !== "auto") throw error;
+    }
+  }
+  if (!version && value.mode !== "artifact") {
+    selectedMode = "source";
+    await writeProgress(paths, "building", value.commandId);
+    let built;
+    try {
+      built = await buildSourcePayload({ paths, config, candidateVersion: value.candidateVersion });
+    } catch (error) {
+      await writeProgress(paths, "failure", value.commandId, error?.message ?? error).catch(() => {});
+      throw error;
+    }
+    await writeProgress(paths, "staging", value.commandId);
+    version = built.manifest.version;
+    version = built.manifest.version;
+  }
+  if (!version) throw new Error("artifact update requires an available staged candidate version");
+  const requestedHost = process.env.TRON_GATEWAY_HEALTH_HOST ?? process.env.TRON_GATEWAY_HOST ?? "tailscale";
+  const host = resolveDeploymentHost(requestedHost);
+  const port = Number(process.env.TRON_GATEWAY_PORT ?? (value.channel === "dev" ? "9848" : "9847"));
+  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) throw new Error("invalid Gateway port");
+  const timeoutMs = Number(process.env.TRON_GATEWAY_UPDATE_TIMEOUT_MS ?? "60_000");
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 2_000 || timeoutMs > 300_000) throw new Error("invalid update timeout");
+  const token = await readLocalCredential(join(home, "gateway", "local-auth.json"));
+  await writeProgress(paths, "promoting", value.commandId);
+  let result;
+  try {
+    result = await promote({
+      paths, channel: value.channel, version, host, port, token, timeoutMs,
+      commandId: value.commandId,
+    });
+  } catch (error) {
+    await writeProgress(paths, "rollback", value.commandId, error?.message ?? error).catch(() => {});
+    throw error;
+  }
+  await writeProgress(paths, result.state, value.commandId);
+  return { accepted: true, channel: value.channel, mode: selectedMode === "source" ? "source" : value.mode, commandId: value.commandId, state: result.state, version };
+}
+
 export async function loadRollbackTarget(paths) {
   const priorState = await captureSelectionState(paths);
   if (priorState.previous === undefined) throw new Error("no previous Gateway selection is available for rollback");
@@ -633,6 +971,12 @@ async function rollback({ paths, host, port, token, timeoutMs, commandId }) {
 
 async function main() {
   const { command, channel, home, paths } = args();
+  if (command === "apply") {
+    const request = applyArguments();
+    const result = await applyPayload(request);
+    console.log(JSON.stringify({ command, channel: request.channel, home: homeForChannel(request.channel, process.env.TRON_DATA_DIR), ...result }));
+    return;
+  }
   if (command === "stage") {
     const source = argument("--source") ?? resolve(dirname(fileURLToPath(import.meta.url)), "../packages/mac-app/Sources/Resources/Gateway");
     const result = await stagePayload({ home, channel, source, version: argument("--version"), sourceRevision: argument("--source-revision") });

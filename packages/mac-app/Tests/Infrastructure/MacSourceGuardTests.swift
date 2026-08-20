@@ -135,6 +135,7 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("npm ci --omit=dev"))
         #expect(bundleScript.contains("tron-gateway-launcher.c"))
         #expect(bundleScript.contains("hash-gateway-payload.sh"))
+        #expect(bundleScript.contains("gateway-payload-deploy.mjs"))
         #expect(bundleScript.contains("dependencyTreeCoverage"))
         #expect(bundleScript.contains("runtimeEpoch"))
         #expect(bundleScript.contains("-arch arm64 -arch x86_64"))
@@ -145,7 +146,7 @@ struct MacSourceGuardTests {
         #expect(hashScript.contains("shasum -a 256"))
 
         let launcher = try Self.read(macRoot, "scripts/tron-gateway-launcher.c")
-        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "immutable_tree", "S_IWUSR"] {
+        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "immutable_tree", "S_IWUSR"] {
             #expect(launcher.contains(required), "launcher missing external payload safety marker: \(required)")
         }
 

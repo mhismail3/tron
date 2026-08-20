@@ -50,6 +50,10 @@ struct GatewayProfile: Codable, Hashable, Identifiable, Sendable {
         return components.url
     }
 
+    /// The managed isolated LaunchAgent uses port 9848 for the dev channel.
+    /// Profiles otherwise retain the stable channel default for older Gateways.
+    var gatewayChannel: String { port == 9848 ? "dev" : "stable" }
+
     var socketURL: URL? {
         var components = URLComponents()
         components.scheme = "ws"

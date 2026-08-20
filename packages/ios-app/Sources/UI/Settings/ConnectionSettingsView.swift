@@ -319,9 +319,13 @@ struct GatewayConnectionDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let profile: GatewayProfile
     @State private var info: GatewayInfo?
+    @State private var updateStatus: GatewayUpdateStatus?
+    @State private var updateConfig: GatewayUpdateConfig?
     @State private var loadingInfo = false
     @State private var infoLoadGeneration = 0
     @State private var confirmingRestart = false
+    @State private var confirmingUpdate = false
+    @State private var configuringSourceRepository = false
     @State private var confirmingForget = false
 
     private var currentProfile: GatewayProfile {
@@ -384,6 +388,14 @@ struct GatewayConnectionDetailView: View {
                                 "Restart supervision",
                                 info.capabilities.contains("restart-supervised.v1") ? "Managed LaunchAgent" : "Unavailable"
                             )
+                            if let sourceRevision = info.sourceRevision {
+                                TronSettingsDivider(accent: .tronCyan)
+                                infoRow("number", "Source revision", sourceRevision)
+                            }
+                            if let runtimeEpoch = info.runtimeEpoch {
+                                TronSettingsDivider(accent: .tronCyan)
+                                infoRow("clock", "Runtime epoch", runtimeEpoch)
+                            }
                         } else {
                             TronValueRow(
                                 icon: loadingInfo ? "arrow.clockwise" : "questionmark.circle",
@@ -395,6 +407,14 @@ struct GatewayConnectionDetailView: View {
                             }
                         }
                     }
+                }
+
+                if let updateStatus, let updateConfig {
+                    gatewayUpdateGroup(status: updateStatus, config: updateConfig)
+                } else if let updateStatus {
+                    gatewayUpdateGroup(status: updateStatus, config: nil)
+                } else if let updateConfig {
+                    gatewayUpdateGroup(status: nil, config: updateConfig)
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
@@ -446,6 +466,37 @@ struct GatewayConnectionDetailView: View {
         } message: {
             Text("The pairing token will be removed from this iPhone. You must pair again to reconnect.")
         }
+        .sheet(isPresented: $configuringSourceRepository) {
+            GatewayUpdateConfigSheet(initialSourceRoot: updateConfig?.sourceRoot ?? "") { sourceRoot in
+                guard let saved = await model.configureGatewayUpdate(
+                    for: currentProfile,
+                    sourceRoot: sourceRoot,
+                    artifactRoot: updateConfig?.artifactRoot
+                ) else { return false }
+                updateConfig = saved
+                await loadInfo()
+                return true
+            }
+        }
+        .sheet(isPresented: $confirmingUpdate) {
+            TronConfirmationSheet(
+                title: updateStatus?.candidateAvailable ? "Update Tron Gateway?" : "Build and update Tron Gateway?",
+                message: updateStatus?.candidateAvailable
+                    == true
+                    ? "The verified candidate will be promoted after accepted runs finish. Tron reconnects automatically."
+                    : "The configured Mac repository will be built, verified, and promoted after accepted runs finish. Tron reconnects automatically.",
+                confirmTitle: updateStatus?.candidateAvailable == true ? "Update and restart" : "Build and update",
+                destructive: false,
+                icon: "arrow.down.circle",
+                onConfirm: {
+                    Task {
+                        await model.requestGatewayUpdate(for: currentProfile)
+                        updateConfig = await model.loadGatewayUpdateConfig(for: currentProfile)
+                        updateStatus = await model.loadGatewayUpdateStatus(for: currentProfile)
+                    }
+                }
+            )
+        }
         .sheet(isPresented: $confirmingRestart) {
             TronConfirmationSheet(
                 title: "Restart Tron Gateway?",
@@ -456,6 +507,81 @@ struct GatewayConnectionDetailView: View {
                 onConfirm: { Task { await model.requestGatewayRestart(for: currentProfile) } }
             )
         }
+    }
+
+    @ViewBuilder
+    private func gatewayUpdateGroup(status: GatewayUpdateStatus?, config: GatewayUpdateConfig?) -> some View {
+        TronSettingsGroup("Gateway Update", accent: .tronEmerald) {
+            VStack(spacing: 0) {
+                if let status {
+                    TronValueRow(
+                        icon: "arrow.down.circle",
+                        title: status.presentationTitle,
+                        detail: status.currentIdentity?.version.map { "Current \($0) · \(status.channel)" } ?? "Channel \(status.channel)",
+                        accent: .tronEmerald
+                    )
+                    if status.currentIdentity?.payloadFingerprint != nil {
+                        TronSettingsDivider(accent: .tronEmerald)
+                        infoRow("number", "Payload identity", status.currentIdentity?.payloadFingerprint.map { String($0.prefix(12)) } ?? "", numeric: true)
+                    }
+                }
+                if let config {
+                    if status != nil { TronSettingsDivider(accent: .tronEmerald) }
+                    TronValueRow(
+                        icon: "folder",
+                        title: "Source repository",
+                        detail: Self.redactedMacPath(config.sourceRoot),
+                        accent: .tronEmerald
+                    )
+                    if let artifactRoot = config.artifactRoot {
+                        TronSettingsDivider(accent: .tronEmerald)
+                        TronValueRow(
+                            icon: "shippingbox",
+                            title: "Artifact root",
+                            detail: Self.redactedMacPath(artifactRoot),
+                            accent: .tronEmerald
+                        )
+                    }
+                }
+                if config == nil {
+                    if status != nil { TronSettingsDivider(accent: .tronEmerald) }
+                    TronValueRow(
+                        icon: "folder.badge.gearshape",
+                        title: "Source repository not configured",
+                        detail: "Choose a path on the Mac, not the iPhone",
+                        accent: .tronEmerald
+                    )
+                }
+                TronSettingsDivider(accent: .tronEmerald)
+                Button {
+                    configuringSourceRepository = true
+                } label: {
+                    TronValueRow(
+                        icon: "folder.badge.gearshape",
+                        title: "Configure Source Repository",
+                        detail: "Mac path · not an iPhone path",
+                        accent: .tronEmerald
+                    )
+                }
+                .buttonStyle(.plain)
+                if let status, Self.canShowGatewayUpdate(info: info, status: status, config: config) {
+                    TronSettingsDivider(accent: .tronEmerald)
+                    gatewayActionButton(
+                        status.candidateAvailable ? "Update and restart Gateway" : "Build and update Gateway",
+                        accent: .tronEmerald
+                    ) {
+                        confirmingUpdate = true
+                    }
+                }
+            }
+            .padding(12)
+        }
+    }
+
+    private static func redactedMacPath(_ path: String) -> String {
+        let components = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard components.count > 3 else { return path }
+        return "…/" + components.suffix(3).joined(separator: "/")
     }
 
     private func gatewayActionButton(
@@ -482,6 +608,16 @@ struct GatewayConnectionDetailView: View {
         return AppModel.supportsSafeGatewayRestart(capabilities: info.capabilities)
     }
 
+    private static func canShowGatewayUpdate(
+        info: GatewayInfo?,
+        status: GatewayUpdateStatus,
+        config: GatewayUpdateConfig?
+    ) -> Bool {
+        guard let info else { return false }
+        return AppModel.supportsGatewayUpdate(capabilities: info.capabilities)
+            && (status.candidateAvailable && status.candidateIdentity != nil || config != nil)
+    }
+
     private func loadInfo() async {
         infoLoadGeneration &+= 1
         let generation = infoLoadGeneration
@@ -492,6 +628,8 @@ struct GatewayConnectionDetailView: View {
         let loaded = await model.gatewayInfo(for: currentProfile.id)
         guard generation == infoLoadGeneration else { return }
         info = loaded
+        updateConfig = await model.loadGatewayUpdateConfig(for: currentProfile)
+        updateStatus = await model.loadGatewayUpdateStatus(for: currentProfile)
     }
 
     private func infoRow(_ icon: String, _ title: String, _ value: String, numeric: Bool = false) -> some View {
@@ -500,6 +638,66 @@ struct GatewayConnectionDetailView: View {
                 .font(numeric ? TronTypography.numericValue : TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                 .foregroundStyle(Color.tronTextPrimary)
                 .multilineTextAlignment(.trailing)
+        }
+    }
+}
+
+private struct GatewayUpdateConfigSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onSave: (String) async -> Bool
+    @State private var sourceRoot: String
+    @State private var saving = false
+
+    init(initialSourceRoot: String, onSave: @escaping (String) async -> Bool) {
+        self.onSave = onSave
+        _sourceRoot = State(initialValue: initialSourceRoot)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("This path is on the Mac running the Gateway, not on the iPhone. It must be a trusted Tron source repository.")
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextSecondary)
+                    TextField("/Users/name/Workspace/tron", text: $sourceRoot)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .tronField(monospaced: true)
+                        .disabled(saving)
+                    Text("The Gateway validates the repository before saving. Updates continue to use the configured channel and verified candidate.")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                }
+                .padding(20)
+            }
+            .tronScrollEdgeChrome()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    TronSheetTitle(title: "Source Repository", accent: .tronEmerald)
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(saving)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let path = sourceRoot.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !path.isEmpty else { return }
+                        saving = true
+                        Task {
+                            if await onSave(path) { dismiss() }
+                            saving = false
+                        }
+                    }
+                    .disabled(saving || sourceRoot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .overlay {
+                if saving { ProgressView().tint(Color.tronEmerald) }
+            }
         }
     }
 }

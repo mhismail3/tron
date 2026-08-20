@@ -13,10 +13,16 @@ describe("gateway configuration", () => {
     expect(isTailscaleAddress("fd7a:115c:a1e0::1")).toBe(true);
   });
 
-  it("keeps explicit loopback binding and validates Tron home overrides", () => {
-    expect(resolveBindHost("127.0.0.1")).toBe("127.0.0.1");
+  it("resolves tailscale deterministically and keeps explicit loopback binding", () => {
+    const interfaces = {
+      en0: [{ address: "100.90.0.2", netmask: "", family: "IPv4" as const, mac: "", internal: false, cidr: "" }],
+      utun9: [{ address: "100.80.0.3", netmask: "", family: "IPv4" as const, mac: "", internal: false, cidr: "" }],
+    };
+    expect(resolveBindHost("tailscale", interfaces)).toBe("100.80.0.3");
+    expect(resolveBindHost("127.0.0.1", interfaces)).toBe("127.0.0.1");
     expect(resolveTronHome({ TRON_DATA_DIR: "/tmp/tron-home" })).toBe("/tmp/tron-home");
     expect(() => resolveTronHome({ TRON_DATA_DIR: "relative" })).toThrow(/absolute/);
+    expect(() => resolveBindHost("tailscale", {})).toThrow(/Tailscale is not connected/);
   });
 
   it("shares an injected machine group while retaining per-home machine identity", async () => {

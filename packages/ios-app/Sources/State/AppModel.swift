@@ -1046,6 +1046,148 @@ final class AppModel {
         return await dashboardConnections.info(for: profileID)
     }
 
+    nonisolated static func supportsGatewayUpdate(capabilities: [String]) -> Bool {
+        capabilities.contains("gateway-update.v1")
+    }
+
+    func loadGatewayUpdateConfig(for profile: GatewayProfile) async -> GatewayUpdateConfig? {
+        if profiles.selected?.id != profile.id { await switchGateway(profile) }
+        guard profiles.selected?.id == profile.id,
+              let admission = lifecycle.generationAdmission else { return nil }
+        do {
+            try requireLifecycle(admission)
+            let config: GatewayUpdateConfig? = try await client.request(
+                "gateway.update.config.status",
+                EmptyParams(),
+                as: GatewayUpdateConfig?.self,
+                timeout: .seconds(10)
+            )
+            try requireLifecycle(admission)
+            return config
+        } catch let failure as GatewayFailure where failure.code == "not_found" || failure.code == "unsupported" {
+            return nil
+        } catch {
+            guard admitsLifecycle(admission) else { return nil }
+            surface(error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func configureGatewayUpdate(
+        for profile: GatewayProfile,
+        sourceRoot: String,
+        artifactRoot: String? = nil
+    ) async -> GatewayUpdateConfig? {
+        if profiles.selected?.id != profile.id { await switchGateway(profile) }
+        guard profiles.selected?.id == profile.id,
+              let admission = lifecycle.generationAdmission else { return nil }
+        do {
+            try requireLifecycle(admission)
+            let admittedSourceRoot = try GatewayUpdateConfigPolicy.admitPath(sourceRoot, name: "source repository")
+            let admittedArtifactRoot = try artifactRoot.map {
+                try GatewayUpdateConfigPolicy.admitPath($0, name: "artifact root")
+            }
+            struct Params: Encodable {
+                let commandId: String
+                let sourceRoot: String
+                let artifactRoot: String?
+
+                private enum CodingKeys: String, CodingKey { case commandId, sourceRoot, artifactRoot }
+
+                func encode(to encoder: Encoder) throws {
+                    var values = encoder.container(keyedBy: CodingKeys.self)
+                    try values.encode(commandId, forKey: .commandId)
+                    try values.encode(sourceRoot, forKey: .sourceRoot)
+                    if let artifactRoot { try values.encode(artifactRoot, forKey: .artifactRoot) }
+                }
+            }
+            let commandID = uuidSource.next().uuidString
+            let config: GatewayUpdateConfig = try await mutationExecutor.perform(method: "gateway.update.config", commandID: commandID) {
+                try await self.client.request(
+                    "gateway.update.config",
+                    Params(commandId: commandID, sourceRoot: admittedSourceRoot, artifactRoot: admittedArtifactRoot),
+                    as: GatewayUpdateConfig.self,
+                    timeout: .seconds(30)
+                )
+            }
+            try requireLifecycle(admission)
+            return config
+        } catch {
+            guard admitsLifecycle(admission) else { return nil }
+            surface(error)
+            return nil
+        }
+    }
+
+    func loadGatewayUpdateStatus(for profile: GatewayProfile) async -> GatewayUpdateStatus? {
+        if profiles.selected?.id != profile.id { await switchGateway(profile) }
+        guard profiles.selected?.id == profile.id,
+              let admission = lifecycle.generationAdmission else { return nil }
+        do {
+            try requireLifecycle(admission)
+            struct Params: Codable { let channel: String }
+            let status: GatewayUpdateStatus = try await client.request(
+                "gateway.update.status",
+                Params(channel: profile.gatewayChannel),
+                as: GatewayUpdateStatus.self,
+                timeout: .seconds(10)
+            )
+            try requireLifecycle(admission)
+            return status
+        } catch let failure as GatewayFailure where failure.code == "not_found" || failure.code == "unsupported" {
+            return nil
+        } catch {
+            guard admitsLifecycle(admission) else { return nil }
+            surface(error)
+            return nil
+        }
+    }
+
+    func requestGatewayUpdate(
+        for profile: GatewayProfile,
+        mode: String = "auto",
+        candidateVersion: String? = nil
+    ) async {
+        if profiles.selected?.id != profile.id { await switchGateway(profile) }
+        guard profiles.selected?.id == profile.id,
+              let admission = lifecycle.generationAdmission else { return }
+        do {
+            try requireLifecycle(admission)
+            guard Self.supportsGatewayUpdate(capabilities: gatewayInfo?.capabilities ?? []) else {
+                throw GatewayFailure(
+                    code: "unsupported",
+                    message: "This Gateway is not managed by a LaunchAgent-owned update helper.",
+                    retryable: false,
+                    details: nil
+                )
+            }
+            guard ["source", "artifact", "auto"].contains(mode) else {
+                throw GatewayFailure(code: "invalid_request", message: "The Gateway update mode is invalid.", retryable: false, details: nil)
+            }
+            struct Params: Codable {
+                let commandId: String
+                let channel: String
+                let mode: String
+                let candidateVersion: String?
+            }
+            let commandID = uuidSource.next().uuidString
+            _ = try await mutationExecutor.performValue(method: "gateway.update", commandID: commandID) {
+                try await self.client.requestValue(
+                    "gateway.update",
+                    Params(commandId: commandID, channel: profile.gatewayChannel, mode: mode, candidateVersion: candidateVersion),
+                    timeout: .seconds(30)
+                )
+            }
+            try requireLifecycle(admission)
+            lifecycle.beginRestarting()
+            postNotice("Gateway update accepted. Tron will reconnect automatically.", replacing: .gatewayRestart)
+        } catch {
+            guard admitsLifecycle(admission) else { return }
+            surface(error)
+        }
+    }
+
     func gatewayLogs(for profileID: String, limit: Int = 1_000) async throws -> [GatewayLogRecord] {
         guard limit >= 0 else { throw GatewayFailure(code: "invalid_request", message: "Log limit is invalid.", retryable: false, details: nil) }
         if profiles.selected?.id == profileID {

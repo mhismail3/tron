@@ -96,8 +96,14 @@ scripts/gateway-payload-deploy.mjs rollback --channel stable
 Promotion is serialized per channel, verifies the complete payload fingerprint,
 uses authenticated drain-aware `gateway.restart`, and proves the new health
 identity before success. On timeout or identity mismatch it atomically restores
-`previous.json` and requests/awaits rollback restart. The Mac menu Restart
-seam uses the same authenticated drain command rather than `launchctl kickstart`.
+`previous.json` and requests/awaits rollback restart. The iOS update button invokes
+only the LaunchAgent-owned helper; verified artifact promotion is wired, and source
+builds read only the validated `gateway/update-config.json` projection. Source mode uses
+the repository's local TypeScript compiler with a private temporary output directory,
+never `packages/gateway/dist`, and stages only verified output. A helper launch
+acknowledgement does not claim eventual build or promotion success; failures are exposed
+through bounded update progress. The Mac menu Restart seam uses the same authenticated drain command rather than
+`launchctl kickstart`.
 
 ## Reinstall a local Release build
 

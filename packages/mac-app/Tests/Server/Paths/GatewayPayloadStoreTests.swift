@@ -74,6 +74,7 @@ struct GatewayPayloadStoreTests {
             "app/package.json": Data("{}".utf8),
             "app/package-lock.json": Data("{}".utf8),
             "app/scripts/ensure-node-pty-helper.mjs": Data("// helper".utf8),
+            "app/scripts/gateway-payload-deploy.mjs": Data("// update helper".utf8),
         ]
         for (relative, data) in files {
             let url = root.appendingPathComponent(relative)

@@ -204,6 +204,7 @@ enum GatewayPayloadValidator {
             ("app/package.json", 1),
             ("app/package-lock.json", 1),
             ("app/scripts/ensure-node-pty-helper.mjs", 1),
+            ("app/scripts/gateway-payload-deploy.mjs", 1),
         ]
         for (relativePath, minimumBytes) in requiredFiles {
             guard let url = containedURL(relativePath, under: root),

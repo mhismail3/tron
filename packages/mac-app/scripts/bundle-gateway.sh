@@ -53,6 +53,7 @@ fi
 required=(
     "$GATEWAY_DIR/package.json"
     "$GATEWAY_DIR/package-lock.json"
+    "$REPO_ROOT/scripts/gateway-payload-deploy.mjs"
     "$SCRIPT_DIR/tron-gateway-launcher.c"
     "$HELPER_DIR/Info.plist"
     "$DEV_HELPER_DIR/Info.plist"
@@ -101,6 +102,7 @@ rm -rf "$APP_DIR/dist" "$APP_DIR/node_modules"
 cp -R "$GATEWAY_DIR/dist" "$APP_DIR/dist"
 cp "$GATEWAY_DIR/package.json" "$GATEWAY_DIR/package-lock.json" "$APP_DIR/"
 cp "$GATEWAY_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/"
+cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
 # npm prune in the source tree would damage developer dependencies. Install an
 # independent production tree directly into the generated app payload.
 (cd "$APP_DIR" && npm ci --omit=dev --ignore-scripts=false)
@@ -115,6 +117,13 @@ for destination in "${launchers[@]}"; do
     install -m 0755 "$launcher_temp" "$destination"
 done
 rm -rf "$(dirname "$launcher_temp")"
+
+for required_payload in \
+    "$APP_DIR/dist/index.js" "$APP_DIR/package.json" "$APP_DIR/package-lock.json" \
+    "$APP_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/gateway-payload-deploy.mjs" \
+    "$APP_DIR/node_modules" "$RUNTIME_DIR/node-arm64" "$RUNTIME_DIR/node-x64"; do
+    [[ -e "$required_payload" ]] || { echo "missing required staged payload: $required_payload" >&2; exit 3; }
+done
 
 cp "$RESOURCES_DIR/AppIcon.icns" "$HELPER_DIR/Resources/AppIcon.icns"
 cp "$RESOURCES_DIR/AppIcon.icns" "$DEV_HELPER_DIR/Resources/AppIcon.icns"

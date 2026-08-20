@@ -175,7 +175,8 @@ static int read_payload_manifest(const char *root, PayloadIdentity *identity) {
 }
 
 static int validate_payload(const char *payload, const char *expectedChannel, const char *expectedVersion,
-                            const char *expectedFingerprint, char *node, char *entrypoint, PayloadIdentity *selectedIdentity) {
+                            const char *expectedFingerprint, char *node, char *entrypoint, char *helper,
+                            PayloadIdentity *selectedIdentity) {
     char root[PATH_MAX];
     PayloadIdentity identity;
     if (realpath(payload, root) == NULL || immutable_tree(root) != 0 || read_payload_manifest(root, &identity) != 0) return -1;
@@ -186,6 +187,7 @@ static int validate_payload(const char *payload, const char *expectedChannel, co
         required_path(root, "app/package.json", node, PATH_MAX, 0, 1, 0) != 0 ||
         required_path(root, "app/package-lock.json", node, PATH_MAX, 0, 1, 0) != 0 ||
         required_path(root, "app/scripts/ensure-node-pty-helper.mjs", node, PATH_MAX, 0, 1, 0) != 0 ||
+        required_path(root, "app/scripts/gateway-payload-deploy.mjs", helper, PATH_MAX, 0, 1, 0) != 0 ||
         required_path(root, "app/node_modules", node, PATH_MAX, 0, 0, 1) != 0) return -1;
 #if defined(__arm64__)
     const char *runtimeName = "node-arm64";
@@ -224,7 +226,7 @@ static int selected_home(char *home, size_t capacity) {
     return snprintf(home, capacity, "%s/%s", homeDirectory, name) >= (int)capacity ? -1 : 0;
 }
 
-static int external_payload(const char *home, const char *channel, char *node, char *entrypoint, PayloadIdentity *selectedIdentity) {
+static int external_payload(const char *home, const char *channel, char *node, char *entrypoint, char *helper, PayloadIdentity *selectedIdentity) {
     char payloadsPath[PATH_MAX], payloadsRoot[PATH_MAX], channelRootPath[PATH_MAX], channelRoot[PATH_MAX];
     char versionsPath[PATH_MAX], versionsRoot[PATH_MAX], currentPath[PATH_MAX];
     char selection[MAX_MANIFEST_BYTES + 1], version[128], fingerprint[65], selectedChannel[64];
@@ -247,7 +249,7 @@ static int external_payload(const char *home, const char *channel, char *node, c
     if (snprintf(payload, sizeof(payload), "%s/%s", versionsRoot, version) >= (int)sizeof(payload)) return -1;
     char payloadRoot[PATH_MAX];
     if (realpath(payload, payloadRoot) == NULL || !path_is_under(versionsRoot, payloadRoot)) return -1;
-    return validate_payload(payloadRoot, channel, version, fingerprint, node, entrypoint, selectedIdentity);
+    return validate_payload(payloadRoot, channel, version, fingerprint, node, entrypoint, helper, selectedIdentity);
 }
 
 int main(int argc, char **argv) {
@@ -268,18 +270,19 @@ int main(int argc, char **argv) {
         return 78;
     }
 
-    char node[PATH_MAX], entrypoint[PATH_MAX], home[PATH_MAX];
+    char node[PATH_MAX], entrypoint[PATH_MAX], helper[PATH_MAX], home[PATH_MAX];
     PayloadIdentity selectedIdentity;
     const char *channel = getenv("TRON_GATEWAY_CHANNEL");
     if (channel == NULL || channel[0] == '\0') channel = "stable";
-    int external = selected_home(home, sizeof(home)) == 0 && external_payload(home, channel, node, entrypoint, &selectedIdentity) == 0;
-    if (!external && validate_payload(bundledRoot, NULL, NULL, NULL, node, entrypoint, &selectedIdentity) != 0) {
+    int external = selected_home(home, sizeof(home)) == 0 && external_payload(home, channel, node, entrypoint, helper, &selectedIdentity) == 0;
+    if (!external && validate_payload(bundledRoot, NULL, NULL, NULL, node, entrypoint, helper, &selectedIdentity) != 0) {
         fprintf(stderr, "Tron Gateway payload is incomplete or invalid at %s. Reinstall Tron.\n", bundledRoot);
         return 78;
     }
     if (setenv("TRON_GATEWAY_SOURCE_REVISION", selectedIdentity.sourceRevision, 1) != 0 ||
         setenv("TRON_GATEWAY_BUILD_FINGERPRINT", selectedIdentity.fingerprint, 1) != 0 ||
-        setenv("TRON_GATEWAY_RUNTIME_EPOCH", selectedIdentity.runtimeEpoch, 1) != 0) {
+        setenv("TRON_GATEWAY_RUNTIME_EPOCH", selectedIdentity.runtimeEpoch, 1) != 0 ||
+        setenv("TRON_GATEWAY_UPDATE_HELPER", helper, 1) != 0) {
         fputs("Tron could not export Gateway payload identity.\n", stderr);
         return 70;
     }

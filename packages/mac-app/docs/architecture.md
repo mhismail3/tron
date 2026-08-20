@@ -124,8 +124,14 @@ bounds manifest reads, rejects symlinks and writable payload entries, resolves
 every executable/resource path with `realpath`, and exports provenance before
 `exec`. Invalid or absent external
 selection falls back to the bundled payload only after validating its
-authoritative manifest. No payload selection code writes canonical sessions or
-credentials.
+authoritative manifest. The LaunchAgent exports the selected payload's validated
+`app/scripts/gateway-payload-deploy.mjs` as the only update helper; verified
+artifact promotion is wired, and source builds read only the validated
+`gateway/update-config.json` projection. Source mode compiles with the repository's
+local TypeScript compiler into a private temporary output directory, never the trusted
+repository's `packages/gateway/dist`, and copies only verified output into the candidate.
+No payload selection code writes
+canonical sessions or credentials.
 
 The Mac menu Restart action authenticates to the Gateway WebSocket, validates
 protocol identity, and calls `gateway.restart` with a bounded command ID. The

@@ -18,6 +18,7 @@ import type { ModelConfigService } from "../admin/model-config-service.js";
 import type { PackageService } from "../admin/package-service.js";
 import type { AuthBroker } from "../admin/auth-broker.js";
 import type { LegacyImportService } from "../admin/legacy-import-service.js";
+import { GatewayUpdateService, validateGatewayUpdateRequest } from "../admin/gateway-update-service.js";
 import type { GatewayLogger } from "./logger.js";
 import type { CommandReceiptStore } from "./command-receipts.js";
 import { fitSessionSnapshot, safeJson } from "../sessions/projection.js";
@@ -55,7 +56,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "command.status", "gateway.restart",
+  "system.info", "system.logs", "command.status", "gateway.update.config.status", "gateway.update.config", "gateway.update.status", "gateway.update", "gateway.restart",
   "session.list", "session.open", "session.sync", "session.close", "session.transcript",
   "session.abort", "session.clearQueue", "session.queue.replace", "extension.respond", "extension.editor.update", "extension.toolsExpanded",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
@@ -89,6 +90,8 @@ export interface GatewayServiceDependencies {
   packages: PackageService;
   auth: AuthBroker;
   legacyImport: LegacyImportService;
+  /** Configured only by the LaunchAgent-owned update helper; never from RPC params. */
+  updateService?: GatewayUpdateService;
   logger: GatewayLogger;
   receipts: CommandReceiptStore;
   requestRestart: () => void;
@@ -102,8 +105,13 @@ export class GatewayService {
   private readonly gitWorktrees: GitWorktreeService;
   private readonly sessionListPages = new SessionListPaginationStore();
   private readonly modelCatalogPages = new ModelCatalogPager();
+  private readonly updateService: GatewayUpdateService;
 
   constructor(private readonly dependencies: GatewayServiceDependencies) {
+    this.updateService = dependencies.updateService ?? new GatewayUpdateService({
+      tronHome: dependencies.config?.tronHome ?? process.cwd(),
+      runtimeIdentity: runtimeIdentity(),
+    });
     this.gitWorktrees = dependencies.gitWorktrees ?? new GitWorktreeService(
       dependencies.config?.tronHome ?? process.env.TRON_HOME ?? process.cwd(),
     );
@@ -153,6 +161,7 @@ export class GatewayService {
         "extension-presentation.v1",
         "queue-management.v1",
         "restart-drain.v1",
+        ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
       ],
     };
   }
@@ -173,6 +182,34 @@ export class GatewayService {
           string(params.method, "method", { max: 160 }),
           string(params.commandId, "commandId", { min: 8, max: 160 }),
         ));
+      case "gateway.update.config.status": {
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Gateway update config status accepts no parameters");
+        return safeJson(await this.updateService.configStatus());
+      }
+      case "gateway.update.config":
+        return this.mutation(client, method, params, async () => {
+          const keys = Object.keys(params);
+          if (keys.some((key) => !["commandId", "sourceRoot", "artifactRoot"].includes(key))) {
+            throw new GatewayError("invalid_request", "Gateway update config accepts only sourceRoot and artifactRoot");
+          }
+          const sourceRoot = string(params.sourceRoot, "sourceRoot", { max: 4_096 });
+          const artifactRoot = params.artifactRoot === undefined || params.artifactRoot === null
+            ? params.artifactRoot : string(params.artifactRoot, "artifactRoot", { max: 4_096 });
+          return safeJson(await this.updateService.configure({ sourceRoot, artifactRoot }));
+        });
+      case "gateway.update.status": {
+        if (Object.keys(params).some((key) => key !== "channel")) throw new GatewayError("invalid_request", "Gateway update status accepts only channel");
+        const channel = params.channel === undefined ? "stable" : oneOf(params.channel, "channel", ["stable", "dev"] as const);
+        return safeJson(await this.updateService.status(channel));
+      }
+      case "gateway.update":
+        return this.mutation(client, method, params, async () => {
+          const commandId = string(params.commandId, "commandId", { min: 8, max: 160 });
+          return safeJson(await this.updateService.update({
+            ...validateGatewayUpdateRequest(params),
+            commandId,
+          }));
+        });
       case "device.list":
         return safeJson({ devices: await this.dependencies.devices.listDevices() });
       case "device.revoke":

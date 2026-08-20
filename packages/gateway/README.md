@@ -104,6 +104,24 @@ text, while later requests can retry after expiry. Blob storage rejects control-
 full-body responses without Range support.
 The retired `/engine` protocol is not exposed.
 
+Gateway updates are an explicit, bounded control-plane contract. `gateway.update.status`
+projects only the selected channel's `deployment-state.json`, `current.json`,
+`previous.json`, and version manifests (each document is capped at 64 KiB); malformed
+or oversized state fails closed. `gateway.update` accepts only `channel` (`stable` or `dev`), `mode` (`source`,
+`artifact`, or `auto`), and an optional candidate version, and requires a command ID.
+`gateway.update.config` separately accepts only a trusted repository `sourceRoot` and
+optional `artifactRoot`; both are checked as absolute, non-symlinked directories before
+being stored in `gateway/update-config.json`. It invokes no client-supplied command or
+path. The LaunchAgent-owned helper reads that projection only: source mode invokes the
+repository's local TypeScript compiler with its checked-in config and a private temporary
+`outDir` (it never writes the trusted repository's `packages/gateway/dist`), then stages
+only verified output; artifact mode only promotes a verified candidate, and auto prefers
+staged artifacts before source. A successful RPC acknowledges helper launch, not eventual
+build or promotion success; asynchronous helper failures are reported in update progress. `gateway.update.config.status` and
+`gateway.update.status` are bounded projections; the latter includes build/staging/
+promotion/rollback/failure progress. The mutation is usable only when the helper is
+configured, in which case `gateway-update.v1` appears in capabilities.
+
 Every WebSocket starts with:
 
 ```json
