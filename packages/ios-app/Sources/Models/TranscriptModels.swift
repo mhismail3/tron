@@ -20,12 +20,49 @@ struct ContentPart: Codable, Hashable, Sendable, Identifiable {
     let toolCallId: String?
     let name: String?
     let arguments: JSONValue?
+    let groupId: String?
+    let groupIndex: Int?
+    let groupCount: Int?
+    let groupFinalized: Bool?
 }
 
 extension ContentPart {
+    init(
+        id: String,
+        ordinal: Int,
+        thinkingRunOrdinal: Int?,
+        type: Kind,
+        text: String?,
+        attachment: Attachment?,
+        redacted: Bool?,
+        mimeType: String?,
+        blobId: String?,
+        toolCallId: String?,
+        name: String?,
+        arguments: JSONValue?
+    ) {
+        self.id = id
+        self.ordinal = ordinal
+        self.thinkingRunOrdinal = thinkingRunOrdinal
+        self.type = type
+        self.text = text
+        self.attachment = attachment
+        self.redacted = redacted
+        self.mimeType = mimeType
+        self.blobId = blobId
+        self.toolCallId = toolCallId
+        self.name = name
+        self.arguments = arguments
+        groupId = nil
+        groupIndex = nil
+        groupCount = nil
+        groupFinalized = nil
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id, ordinal, thinkingRunOrdinal, type, text, attachment, redacted,
-             mimeType, blobId, toolCallId, name, arguments
+             mimeType, blobId, toolCallId, name, arguments,
+             groupId, groupIndex, groupCount, groupFinalized
     }
 
     init(from decoder: Decoder) throws {
@@ -51,6 +88,31 @@ extension ContentPart {
         toolCallId = try values.decodeIfPresent(String.self, forKey: .toolCallId)
         name = try values.decodeIfPresent(String.self, forKey: .name)
         arguments = try values.decodeIfPresent(JSONValue.self, forKey: .arguments)
+        groupId = try values.decodeIfPresent(String.self, forKey: .groupId)
+        groupIndex = try values.decodeIfPresent(Int.self, forKey: .groupIndex)
+        groupCount = try values.decodeIfPresent(Int.self, forKey: .groupCount)
+        groupFinalized = try values.decodeIfPresent(Bool.self, forKey: .groupFinalized)
+        let identityFieldsPresent = [groupId != nil, groupIndex != nil, groupCount != nil]
+        if identityFieldsPresent.contains(true) || groupFinalized == true {
+            guard type == .toolCall,
+                  identityFieldsPresent.allSatisfy({ $0 }),
+                  let groupId, !groupId.isEmpty,
+                  let groupIndex, groupIndex >= 0,
+                  let groupCount, groupCount > 0, groupIndex < groupCount,
+                  groupFinalized == true else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .groupId,
+                    in: values,
+                    debugDescription: "Tool invocation group metadata must be complete, finalized, and in bounds"
+                )
+            }
+        } else if groupFinalized == false, type != .toolCall {
+            throw DecodingError.dataCorruptedError(
+                forKey: .groupFinalized,
+                in: values,
+                debugDescription: "Only provisional tool calls may carry groupFinalized=false"
+            )
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -67,6 +129,10 @@ extension ContentPart {
         try values.encodeIfPresent(toolCallId, forKey: .toolCallId)
         try values.encodeIfPresent(name, forKey: .name)
         try values.encodeIfPresent(arguments, forKey: .arguments)
+        try values.encodeIfPresent(groupId, forKey: .groupId)
+        try values.encodeIfPresent(groupIndex, forKey: .groupIndex)
+        try values.encodeIfPresent(groupCount, forKey: .groupCount)
+        try values.encodeIfPresent(groupFinalized, forKey: .groupFinalized)
     }
 }
 
@@ -77,7 +143,30 @@ private protocol TranscriptPayload: Codable, Hashable, Sendable {
 }
 
 struct ExtensionToolOrigin: Codable, Hashable, Sendable {
+    /// Legacy public source fallback. It is never a filesystem path or grouping
+    /// key when more than one admitted owner claims it.
     let source: String
+    /// Exact opaque owner identity, when supplied by the Gateway.
+    let owner: ExtensionOwner?
+
+    init(source: String, owner: ExtensionOwner? = nil) {
+        self.source = source
+        self.owner = owner
+    }
+
+    private enum CodingKeys: String, CodingKey { case source, owner }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        source = try values.decode(String.self, forKey: .source)
+        owner = try values.decodeIfPresent(ExtensionOwner.self, forKey: .owner)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(source, forKey: .source)
+        try values.encodeIfPresent(owner, forKey: .owner)
+    }
 }
 
 struct MessageTranscriptItem: TranscriptPayload {
@@ -233,13 +322,31 @@ enum TranscriptItem: Codable, Hashable, Identifiable, Sendable {
     ) throws {
         let ordinals = content.map(\.ordinal)
         guard ordinals.allSatisfy({ $0 >= 0 }), Set(ordinals).count == ordinals.count,
-              content.allSatisfy({ ($0.thinkingRunOrdinal ?? 0) >= 0 }) else {
+              content.allSatisfy({ ($0.thinkingRunOrdinal ?? 0) >= 0 }),
+              validToolGroups(in: content) else {
             throw DecodingError.dataCorruptedError(
                 forKey: .kind,
                 in: container,
-                debugDescription: "Projected content ordinals must be unique and nonnegative"
+                debugDescription: "Projected content ordinals and finalized tool groups must be unique and valid"
             )
         }
+    }
+
+    private static func validToolGroups(in content: [ContentPart]) -> Bool {
+        let grouped = Dictionary(grouping: content.compactMap { part in
+            part.groupId == nil ? nil : part
+        }, by: { $0.groupId! })
+        for parts in grouped.values {
+            guard let expectedCount = parts.first?.groupCount,
+                  parts.count == expectedCount,
+                  Set(parts.compactMap(\.groupIndex)) == Set(0..<expectedCount) else { return false }
+            let positions = parts.compactMap { part in
+                content.firstIndex(where: { $0.id == part.id })
+            }
+            guard let first = positions.min(), positions.count == expectedCount,
+                  positions.sorted() == Array(first..<(first + expectedCount)) else { return false }
+        }
+        return true
     }
 
     func encode(to encoder: Encoder) throws {

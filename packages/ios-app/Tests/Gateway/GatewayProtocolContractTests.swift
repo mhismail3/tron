@@ -115,6 +115,44 @@ struct GatewayProtocolContractTests {
         #expect(throws: DecodingError.self) { try decode(missingThinkingRun) }
     }
 
+    @Test("finalized tool invocation groups are complete and contiguous")
+    func finalizedToolGroupsValidate() throws {
+        let valid: [String: Any] = [
+            "id": "assistant", "parentId": NSNull(),
+            "timestamp": "2026-01-01T00:00:00Z", "kind": "message", "role": "assistant",
+            "presentationId": "stream:turn",
+            "content": [
+                ["id": "stream:turn:0", "ordinal": 0, "type": "toolCall", "toolCallId": "a", "name": "read", "arguments": [:], "groupId": "stream:turn:tool-group:0", "groupIndex": 0, "groupCount": 2, "groupFinalized": true],
+                ["id": "stream:turn:1", "ordinal": 1, "type": "toolCall", "toolCallId": "b", "name": "bash", "arguments": [:], "groupId": "stream:turn:tool-group:0", "groupIndex": 1, "groupCount": 2, "groupFinalized": true],
+            ],
+        ]
+        func decode(_ object: [String: Any]) throws {
+            _ = try JSONDecoder.gateway.decode(
+                TranscriptItem.self,
+                from: JSONSerialization.data(withJSONObject: object)
+            )
+        }
+        try decode(valid)
+
+        var incomplete = valid
+        var incompleteContent = try #require(incomplete["content"] as? [[String: Any]])
+        incompleteContent[0].removeValue(forKey: "groupCount")
+        incomplete["content"] = incompleteContent
+        #expect(throws: DecodingError.self) { try decode(incomplete) }
+
+        var duplicateIndex = valid
+        var duplicateContent = try #require(duplicateIndex["content"] as? [[String: Any]])
+        duplicateContent[1]["groupIndex"] = 0
+        duplicateIndex["content"] = duplicateContent
+        #expect(throws: DecodingError.self) { try decode(duplicateIndex) }
+
+        var conflictingCount = valid
+        var conflictingContent = try #require(conflictingCount["content"] as? [[String: Any]])
+        conflictingContent[1]["groupCount"] = 3
+        conflictingCount["content"] = conflictingContent
+        #expect(throws: DecodingError.self) { try decode(conflictingCount) }
+    }
+
     @Test("dashboard summary update carries a monotonic revision")
     func summaryUpdateDecodes() throws {
         let data = Data(#"{"sessionId":"session-1","summaryRevision":7,"phase":"running","updatedAt":"2026-01-01T00:00:01Z","messageCount":2,"firstMessage":"hello"}"#.utf8)

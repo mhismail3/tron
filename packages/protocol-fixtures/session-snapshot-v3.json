@@ -126,6 +126,10 @@
           "arguments": {
             "path": "README.md"
           },
+          "groupId": "tool-group:[\"assistant-entry\",2]",
+          "groupIndex": 0,
+          "groupCount": 1,
+          "groupFinalized": true,
           "ordinal": 2
         }
       ],
@@ -311,7 +315,11 @@
       "startedAt": "2026-01-01T00:00:10Z",
       "updatedAt": "2026-01-01T00:00:11Z",
       "lastProgressAt": "2026-01-01T00:00:11Z",
-      "progressSequence": 2
+      "progressSequence": 2,
+      "groupId": "tool-group:[\"assistant-entry\",2]",
+      "groupIndex": 0,
+      "groupCount": 1,
+      "groupFinalized": true
     }
   ],
   "extensionPresentation": {

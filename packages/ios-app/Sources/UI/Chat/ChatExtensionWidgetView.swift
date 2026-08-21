@@ -2,31 +2,152 @@ import SwiftUI
 
 struct ExtensionActivityRoute: Identifiable, Hashable {
     let id: String
+    let mountedActivity: ExtensionRunActivity?
+
+    init(id: String, mountedActivity: ExtensionRunActivity? = nil) {
+        self.id = id
+        self.mountedActivity = mountedActivity
+    }
 }
 
 /// One compact, composer-adjacent affordance per opaque widget group. Groups
 /// are intentionally not inferred from package names or display text.
+enum ExtensionActivityHubSection: CaseIterable, Sendable {
+    case overview, currentWork, recentlyFinished, extensionUpdates, serviceActivity, viewAllActivity
+
+    var title: String {
+        switch self {
+        case .overview: "Overview"
+        case .currentWork: "Current Work"
+        case .recentlyFinished: "Recently Finished"
+        case .extensionUpdates: "Extension Updates"
+        case .serviceActivity: "Service Activity"
+        case .viewAllActivity: "View All Activity"
+        }
+    }
+}
+
+struct ExtensionActivityPillTransitionState: Equatable, Sendable {
+    private(set) var token = 0
+    private(set) var target: ExtensionActivityPillVisualState?
+
+    mutating func retarget(_ value: ExtensionActivityPillVisualState) -> Int {
+        token &+= 1
+        target = value
+        return token
+    }
+
+    func admits(_ candidate: Int) -> Bool { candidate == token }
+}
+
 struct ExtensionActivityPill: View {
     let group: ExtensionWidgetGroup
     let onTap: () -> Void
+    var onVisualState: ((ExtensionActivityPillVisualState, Int) -> Void)? = nil
+    var onExpiry: ((String, ExtensionActivityVisibility, Int?) -> Void)? = nil
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var displayedState: ExtensionActivityPillVisualState?
+    @State private var transitionState = ExtensionActivityPillTransitionState()
+    @State private var transitionTask: Task<Void, Never>?
+    @State private var expiryTask: Task<Void, Never>?
+    @State private var visualDeadline: ExtensionActivityVisualDeadline?
+    @State private var visualDeadlineExpired = false
+
+    private var targetState: ExtensionActivityPillVisualState {
+        ExtensionActivityPillPolicy.state(for: group)
+    }
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                Image(systemName: group.liveActivityCount > 0 ? "circle.dotted" : (group.isWidgetGroup ? "rectangle.3.group" : "sparkles"))
-                Text(group.label).lineLimit(1).truncationMode(.tail)
-                let count = max(group.liveActivityCount, group.items.count)
-                if count > 1 { Text("\(count)").font(TronTypography.caption) }
+        let visual = displayedState ?? targetState
+        Group {
+            if !visualDeadlineExpired {
+                Button(action: onTap) {
+                    ChatCompactPillSurface(
+                        tone: visual.tone,
+                        material: .glass,
+                        interactive: true
+                    ) {
+                        ChatCompactPillLabel(
+                            icon: visual.symbol,
+                            title: visual.title,
+                            detail: visual.detail,
+                            tone: visual.tone,
+                            showsProgress: visual.showsProgress,
+                            iconSize: ChatCompactPillLayoutPolicy.standardIconSize
+                        ) {
+                            if visual.count > 1 {
+                                Text("\(visual.count)")
+                                    .font(TronTypography.code(size: TronTypography.sizeCaption, weight: .bold))
+                                    .foregroundStyle(visual.tone.secondaryColor)
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                        .contentTransition(reduceMotion ? .opacity : .interpolate)
+                    }
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .accessibilityLabel(visual.accessibilityLabel)
+                .accessibilityHint("Opens extension activity")
+                .accessibilityIdentifier("extension-pill-\(visual.ownerID)")
             }
-            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-            .foregroundStyle(Color.tronEmerald)
-            .padding(.horizontal, 11).padding(.vertical, 7)
         }
-        .buttonStyle(.plain)
-        .tronGlassSurface(accent: .tronEmerald, cornerRadius: 14, tintOpacity: 0.13, interactive: true)
-        .accessibilityLabel("Extension: \(group.label)")
-        .accessibilityHint("Opens live extension details")
-        .accessibilityIdentifier("extension-pill-\(group.id)")
+        .onAppear {
+            let token = transitionState.retarget(targetState)
+            displayedState = targetState
+            onVisualState?(targetState, token)
+            refreshExpiry()
+        }
+        .onChange(of: targetState) { _, target in
+            retarget(target)
+            refreshExpiry()
+        }
+        .onChange(of: group) { _, _ in refreshExpiry() }
+        .onDisappear {
+            transitionTask?.cancel()
+            expiryTask?.cancel()
+            transitionTask = nil
+            expiryTask = nil
+        }
+    }
+
+    private func retarget(_ target: ExtensionActivityPillVisualState) {
+        transitionTask?.cancel()
+        let token = transitionState.retarget(target)
+        // One task per owner is coalesced to the next display frame. This is
+        // intentionally the same shallow transition contract as tool chips.
+        transitionTask = Task { @MainActor in
+            do { try await Task.sleep(for: .milliseconds(16)) } catch { return }
+            guard !Task.isCancelled, transitionState.admits(token) else { return }
+            var transaction = Transaction(animation: reduceMotion ? .linear(duration: 0.10) : .smooth(duration: 0.20))
+            transaction.admitsChatToolChipAnimation = true
+            withTransaction(transaction) { displayedState = target }
+            onVisualState?(target, token)
+        }
+    }
+
+    private func refreshExpiry() {
+        expiryTask?.cancel()
+        visualDeadlineExpired = false
+        guard let activity = group.activities.first,
+              let lifecycle = activity.lifecycle,
+              let bucket = lifecycle.visibility else {
+            visualDeadline = nil
+            return
+        }
+        let deadline = ExtensionActivityVisualDeadline(bucket: bucket, remainingMs: lifecycle.remainingMs)
+        visualDeadline = deadline
+        onExpiry?(group.id, bucket, lifecycle.remainingMs)
+        guard bucket == .recent, let remainingMs = lifecycle.remainingMs, remainingMs > 0 else { return }
+        // This is a rendering failsafe only. The Gateway bucket remains the
+        // authority; a stale recent frame may not keep a pill mounted forever.
+        expiryTask = Task { @MainActor in
+            do { try await Task.sleep(for: .milliseconds(remainingMs)) } catch { return }
+            guard !Task.isCancelled, visualDeadline?.expired(at: .now) == true else { return }
+            visualDeadlineExpired = true
+            onExpiry?(group.id, bucket, 0)
+        }
     }
 }
 
@@ -35,9 +156,6 @@ struct ExtensionDetailsSheet: View {
     let groupID: String?
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedActivityRoute: ExtensionActivityRoute?
-    @State private var directActivityIDState: String?
-
     init(sessionID: String, groupID: String? = nil) { self.sessionID = sessionID; self.groupID = groupID }
 
     private var snapshot: SessionSnapshot? { model.authoritativeSnapshot(for: sessionID) }
@@ -55,37 +173,18 @@ struct ExtensionDetailsSheet: View {
         return groups.first(where: { $0.id == groupID })
     }
     private var isExpanded: Bool { presentation?.semanticState.toolsExpanded ?? false }
-    private var directActivityID: String? {
-        guard let group = selectedGroup, group.activities.count == 1 else { return nil }
-        return group.activities[0].id
-    }
+    var body: some View { activityHub }
 
-    var body: some View {
-        Group {
-            if let activityID = directActivityIDState ?? directActivityID {
-                ExtensionRunDetailsSheet(sessionID: sessionID, activityID: activityID)
-            } else {
-                detailsList
-            }
-        }
-        .onAppear {
-            if directActivityIDState == nil { directActivityIDState = directActivityID }
-        }
-    }
-
-    private var detailsList: some View {
+    private var activityHub: some View {
         NavigationStack {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(alignment: .leading, spacing: TronSpacing.lg) {
-                    if let group = selectedGroup {
-                        groupSection(group)
-                    } else if groups.isEmpty {
-                        settledState
-                    } else {
-                        ForEach(groups) { group in
-                            groupSection(group)
-                        }
-                    }
+                    hubOverview
+                    hubCurrentWork
+                    hubRecentlyFinished
+                    hubExtensionUpdates
+                    hubServiceActivity
+                    hubHistoryLink
                 }
                 .padding(.horizontal, TronSpacing.section)
                 .padding(.top, TronSpacing.md).padding(.bottom, TronSpacing.xl)
@@ -99,30 +198,216 @@ struct ExtensionDetailsSheet: View {
                 }
             }
         }
+        .navigationDestination(for: ExtensionActivityRoute.self) { route in
+            ExtensionRunDetailsSheet(
+                sessionID: sessionID,
+                activityID: route.id,
+                activityOverride: route.mountedActivity
+            )
+        }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .accessibilityIdentifier("extension-details-sheet")
-        .sheet(item: $selectedActivityRoute) { route in
-            ExtensionRunDetailsSheet(sessionID: sessionID, activityID: route.id)
+    }
+
+    private var hubGroups: [ExtensionWidgetGroup] {
+        if let selectedGroup { return [selectedGroup] }
+        return groups
+    }
+
+    private var hubActivities: [ExtensionRunActivity] {
+        ChatExtensionWidgetPolicy.orderedActivities(hubGroups.flatMap(\.activities))
+    }
+
+    private var currentActivities: [ExtensionRunActivity] {
+        hubActivities.filter { $0.lifecycle?.state.isCurrent == true || ($0.lifecycle == nil && $0.status == .running) }
+    }
+
+    private var recentActivities: [ExtensionRunActivity] {
+        hubActivities.filter { activity in
+            guard activity.lifecycle?.isTerminal == true || activity.status != .running else { return false }
+            return activity.lifecycle?.visibility == .recent || activity.lifecycle == nil || activity.lifecycle?.visibility == .unknown
         }
     }
 
-    @ViewBuilder private func groupSection(_ group: ExtensionWidgetGroup) -> some View {
-        if !group.activities.isEmpty {
-            activitySection(group.activities)
-        } else {
-            if !group.statuses.isEmpty { statusSection(group.statuses) }
-            if !group.services.isEmpty { serviceSection(group.services) }
-            if !group.items.isEmpty {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(group.items) { item in
-                        switch item.content {
-                        case .semantic(let widget):
-                            ExtensionWidgetView(widget: widget, isExpanded: isExpanded) { toggleExpanded() }
-                        case .surface(let surface):
-                            ExtensionSurfaceWidgetView(surface: surface, isExpanded: isExpanded) { toggleExpanded() }
+    private var hubServices: [ExtensionActivityServiceItem] {
+        var seen = Set<String>()
+        return hubGroups.flatMap(\.services).filter { seen.insert($0.id).inserted }
+    }
+
+    @ViewBuilder private var hubOverview: some View {
+        hubSection("Overview", detail: "A bounded view of extension work, updates, and services.", accent: .tronEmerald) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(hubActivities.isEmpty && hubGroups.flatMap(\.items).isEmpty ? "No active extension work" : "Extension activity is grouped by its exact owner.")
+                    .font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 10)], spacing: 10) {
+                    overviewMetric("Current", currentActivities.count)
+                    overviewMetric("Finished", recentActivities.count)
+                    overviewMetric("Updates", hubGroups.reduce(0) { $0 + $1.items.count + $1.statuses.count })
+                    overviewMetric("Services", hubServices.count)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var hubCurrentWork: some View {
+        hubSection("Current Work", detail: "Live runs and their latest bounded progress.", accent: .tronTeal) {
+            if currentActivities.isEmpty { emptyHubRow("No current extension work", systemImage: "circle") }
+            else { ForEach(currentActivities) { activityRow($0, accent: .tronTeal, fetchDetail: false) } }
+        }
+    }
+
+    @ViewBuilder private var hubRecentlyFinished: some View {
+        hubSection("Recently Finished", detail: "Terminal work retained in the mounted projection.", accent: .tronAmber) {
+            if recentActivities.isEmpty { emptyHubRow("Nothing recently finished", systemImage: "checkmark.circle") }
+            else { ForEach(recentActivities) { activityRow($0, accent: .tronAmber, fetchDetail: false) } }
+        }
+    }
+
+    @ViewBuilder private var hubExtensionUpdates: some View {
+        hubSection("Extension Updates", detail: "Statuses and widgets published by each owner.", accent: .tronCyan) {
+            let updateGroups = hubGroups.filter { !$0.statuses.isEmpty || !$0.items.isEmpty }
+            if updateGroups.isEmpty { emptyHubRow("No extension updates", systemImage: "rectangle.dashed") }
+            else {
+                ForEach(updateGroups) { group in
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(group.label).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
+                        if !group.statuses.isEmpty { statusRows(group.statuses) }
+                        ForEach(group.items) { item in
+                            switch item.content {
+                            case .semantic(let widget): ExtensionWidgetView(widget: widget, isExpanded: isExpanded) { toggleExpanded() }
+                            case .surface(let surface): ExtensionSurfaceWidgetView(surface: surface, isExpanded: isExpanded) { toggleExpanded() }
+                            }
                         }
+                    }
+                    .padding(12).tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var hubServiceActivity: some View {
+        hubSection("Service Activity", detail: "Extension tools remain outside the conversation transcript.", accent: .tronTeal) {
+            if hubServices.isEmpty { emptyHubRow("No service activity", systemImage: "wrench.and.screwdriver") }
+            else { serviceRows(hubServices) }
+        }
+    }
+
+    @ViewBuilder private var hubHistoryLink: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("View All Activity")
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                .foregroundStyle(Color.tronTextPrimary)
+            Text("Open canonical history, grouped separately from mounted current work.")
+                .font(TronTypography.caption).foregroundStyle(Color.tronTextMuted)
+            NavigationLink {
+                ExtensionActivityHistorySheet(sessionID: sessionID)
+            } label: {
+                Label("View All Activity", systemImage: "clock.arrow.circlepath")
+                    .font(TronTypography.bodySM).frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12).tronGlassSurface(accent: .tronCyan, tintOpacity: 0.12, interactive: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("extension-view-all-activity")
+        }
+        .accessibilityIdentifier("extension-activity-section-view-all")
+    }
+
+    private func hubSection<Content: View>(_ title: String, detail: String, accent: Color, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold)).foregroundStyle(Color.tronTextPrimary)
+            Text(detail).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted).fixedSize(horizontal: false, vertical: true)
+            content()
+        }
+        .padding(14)
+        .tronGlassSurface(accent: accent, tintOpacity: 0.08)
+        .accessibilityIdentifier("extension-activity-section-\(title.lowercased().replacingOccurrences(of: " ", with: "-"))")
+    }
+
+    private func overviewMetric(_ title: String, _ value: Int) -> some View {
+        VStack(spacing: 3) {
+            Text("\(value)").font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold)).foregroundStyle(Color.tronTextPrimary)
+            Text(title).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), \(value)")
+    }
+
+    private func emptyHubRow(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
+    }
+
+    private func statusRows(_ statuses: [ExtensionActivityStatus]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(statuses) { status in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(status.displayKey).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted)
+                    Text(status.value).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine).accessibilityLabel("\(status.key): \(status.value)")
+            }
+        }
+    }
+
+    private func serviceRows(_ services: [ExtensionActivityServiceItem]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(services) { service in
+                HStack(spacing: 10) {
+                    Image(systemName: service.error ? "exclamationmark.triangle.fill" : (service.status == "Running" ? "circle.dotted" : "checkmark.circle"))
+                        .foregroundStyle(service.error ? Color.tronError : Color.tronTeal)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(service.title).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).lineLimit(1)
+                        Text("\(service.status) · \(service.source)").font(TronTypography.caption).foregroundStyle(Color.tronTextMuted).fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .accessibilityElement(children: .combine).accessibilityLabel("\(service.title), \(service.status)")
+            }
+        }
+    }
+
+    private func activityRow(_ activity: ExtensionRunActivity, accent: Color, fetchDetail: Bool) -> some View {
+        NavigationLink(value: ExtensionActivityRoute(
+            id: activity.stableID,
+            mountedActivity: fetchDetail ? nil : activity
+        )) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: activity.lifecycle?.isTerminal == true ? "checkmark.circle" : "circle.dotted")
+                    .foregroundStyle(activity.status == .failed ? Color.tronError : accent)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(activity.title).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary).lineLimit(1)
+                    Text(activitySummary(activity)).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted).lineLimit(2)
+                    if let currentTool = activity.currentTool {
+                        Label(currentTool, systemImage: "wrench.and.screwdriver").font(TronTypography.caption).foregroundStyle(accent).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(TronTypography.caption).foregroundStyle(Color.tronTextMuted)
+            }
+            .padding(11).tronGlassSurface(accent: accent, tintOpacity: 0.08, interactive: true)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(activity.title), \(activitySummary(activity))")
+    }
+
+    @ViewBuilder private func groupSection(_ group: ExtensionWidgetGroup) -> some View {
+        // Structured lifecycle rows never suppress semantic status, service,
+        // or widget content; the hub is one composable native surface.
+        if !group.statuses.isEmpty { statusSection(group.statuses) }
+        if !group.activities.isEmpty { activitySection(group.activities) }
+        if !group.services.isEmpty { serviceSection(group.services) }
+        if !group.items.isEmpty {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(group.items) { item in
+                    switch item.content {
+                    case .semantic(let widget):
+                        ExtensionWidgetView(widget: widget, isExpanded: isExpanded) { toggleExpanded() }
+                    case .surface(let surface):
+                        ExtensionSurfaceWidgetView(surface: surface, isExpanded: isExpanded) { toggleExpanded() }
                     }
                 }
             }
@@ -141,7 +426,10 @@ struct ExtensionDetailsSheet: View {
                 .font(TronTypography.caption)
                 .foregroundStyle(Color.tronTextMuted)
             ForEach(ChatExtensionWidgetPolicy.orderedActivities(activities)) { activity in
-                Button { selectedActivityRoute = ExtensionActivityRoute(id: activity.id) } label: {
+                NavigationLink(value: ExtensionActivityRoute(
+                    id: activity.stableID,
+                    mountedActivity: activity
+                )) {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
                             Image(systemName: activity.isLive ? "circle.dotted" : (activity.status == .failed ? "exclamationmark.triangle.fill" : "checkmark.circle"))
@@ -151,9 +439,9 @@ struct ExtensionDetailsSheet: View {
                                 .foregroundStyle(Color.tronTextPrimary)
                                 .lineLimit(1)
                             Spacer(minLength: 0)
-                            Text(activity.status == .running ? "Live" : activity.status == .failed ? "Failed" : "Completed")
+                            Text(activity.displayStateName)
                                 .font(TronTypography.caption)
-                                .foregroundStyle(activity.status == .failed ? Color.tronError : Color.tronTextMuted)
+                                .foregroundStyle(activity.lifecycle?.state == .failed || activity.status == .failed ? Color.tronError : Color.tronTextMuted)
                         }
                         Text(activitySummary(activity))
                             .font(TronTypography.caption)
@@ -200,11 +488,7 @@ struct ExtensionDetailsSheet: View {
     }
 
     private func activitySummary(_ activity: ExtensionRunActivity) -> String {
-        let state = switch activity.status {
-        case .running: "Running"
-        case .completed: "Completed"
-        case .failed: "Failed"
-        }
+        let state = activity.displayStateName
         let metrics = [
             activity.currentTool.map { "\($0)" },
             activity.toolCount.map { "\($0) tools" },
@@ -280,8 +564,16 @@ struct ExtensionDetailsSheet: View {
 struct ExtensionRunDetailsSheet: View {
     let sessionID: String
     let activityID: String
+    let activityOverride: ExtensionRunActivity?
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @State private var durationAnchors: [String: ExtensionActivityDurationAnchor] = [:]
+
+    init(sessionID: String, activityID: String, activityOverride: ExtensionRunActivity? = nil) {
+        self.sessionID = sessionID
+        self.activityID = activityID
+        self.activityOverride = activityOverride
+    }
 
     static func resolveActivity(
         activityID: String,
@@ -291,7 +583,7 @@ struct ExtensionRunDetailsSheet: View {
         let allActivities = extensionActivities + toolExecutions.compactMap(\.extensionActivity)
         // Routes are created with activity.id. Canonical identity always wins,
         // even when an older projection also exposes a matching alias.
-        if let canonical = allActivities.first(where: { $0.id == activityID }) { return canonical }
+        if let canonical = allActivities.first(where: { $0.stableID == activityID || $0.id == activityID }) { return canonical }
 
         let legacySyntheticID = activityID.hasPrefix("subagent:") ? activityID : nil
         let aliases = allActivities.filter { activity in
@@ -310,6 +602,18 @@ struct ExtensionRunDetailsSheet: View {
 
     private var activity: ExtensionRunActivity? {
         guard let snapshot = model.authoritativeSnapshot(for: sessionID) else { return nil }
+        // A mounted override is only a fast first frame. Revalidate its exact
+        // identity against the authoritative owner so a lost mounted owner
+        // cannot leave a stale detail route alive.
+        if let activityOverride {
+            // Mounted routes are owned by the mounted activity projection, not
+            // by a parallel tool-execution alias. Once that owner disappears,
+            // invalidate the route instead of showing a stale live card.
+            guard let authoritative = (snapshot.extensionActivities ?? []).first(where: {
+                $0.stableID == activityID && $0.stableID == activityOverride.stableID
+            }) else { return nil }
+            return authoritative
+        }
         return Self.resolveActivity(
             activityID: activityID,
             extensionActivities: snapshot.extensionActivities ?? [],
@@ -318,12 +622,11 @@ struct ExtensionRunDetailsSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ScrollView(.vertical, showsIndicators: true) {
+        ScrollView(.vertical, showsIndicators: true) {
                 if let activity {
                     LazyVStack(alignment: .leading, spacing: TronSpacing.lg) {
-                        TimelineView(.periodic(from: .now, by: 1)) { context in
-                            summaryCard(activity: activity, now: context.date)
+                        TimelineView(.periodic(from: .now, by: 1)) { _ in
+                            summaryCard(activity: activity)
                         }
                         if !activity.children.isEmpty { childSection(activity) }
                         if activity.children.isEmpty && activity.output == nil && activity.currentTool == nil {
@@ -343,6 +646,22 @@ struct ExtensionRunDetailsSheet: View {
                     }
                     .padding(.horizontal, TronSpacing.section)
                     .padding(.top, TronSpacing.md).padding(.bottom, TronSpacing.xl)
+                    .task(id: "\(activity.stableID)|\(activity.startedAt)") {
+                        if durationAnchors[activity.stableID] == nil {
+                            durationAnchors[activity.stableID] = ExtensionActivityDurationAnchor(
+                                startedAt: activity.startedAt,
+                                observedDurationMs: activity.durationMs ?? 0
+                            )
+                        }
+                    }
+                    .onChange(of: activity.durationMs) { _, authoritativeDuration in
+                        guard let authoritativeDuration else { return }
+                        let current = durationAnchors[activity.stableID]
+                        durationAnchors[activity.stableID] = ExtensionActivityDurationAnchor(
+                            startedAt: activity.startedAt,
+                            observedDurationMs: max(authoritativeDuration, current?.observedDurationMs ?? 0)
+                        )
+                    }
                 } else {
                     ContentUnavailableView(
                         "Activity No Longer Available",
@@ -355,11 +674,10 @@ struct ExtensionRunDetailsSheet: View {
             }
             .tronScrollEdgeChrome()
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) { TronSheetTitle(title: activity?.title ?? "Extension run", accent: .tronEmerald) }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }.foregroundStyle(Color.tronEmerald)
-                }
+        .toolbar {
+            ToolbarItem(placement: .principal) { TronSheetTitle(title: activity?.title ?? "Extension run", accent: .tronEmerald) }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }.foregroundStyle(Color.tronEmerald)
             }
         }
         .tronTopBlur(.sheet)
@@ -368,23 +686,19 @@ struct ExtensionRunDetailsSheet: View {
         .accessibilityIdentifier("extension-run-details-sheet")
     }
 
-    private func summaryCard(activity: ExtensionRunActivity, now: Date) -> some View {
-        let state = switch activity.status {
-        case .running: "Running"
-        case .completed: "Completed"
-        case .failed: "Failed"
-        }
+    private func summaryCard(activity: ExtensionRunActivity) -> some View {
+        let state = activity.displayStateName
         let metrics = [
             (state, "Status"),
             (activity.toolCount.map(String.init) ?? "—", "Tools"),
             (activity.turnCount.map(String.init) ?? "—", "Turns"),
-            (durationLabel(activeDurationMs(activity, now: now)), "Active time"),
+            (durationLabel(activeDurationMs(activity)), "Active time"),
         ]
         return VStack(alignment: .leading, spacing: 12) {
             Text(activity.mode?.capitalized ?? "Extension run")
                 .font(TronTypography.caption)
                 .foregroundStyle(Color.tronTextMuted)
-            HStack(spacing: 0) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: 12)], spacing: 12) {
                 ForEach(Array(metrics.enumerated()), id: \.offset) { _, metric in
                     VStack(spacing: 3) {
                         Text(metric.0)
@@ -395,9 +709,16 @@ struct ExtensionRunDetailsSheet: View {
                         Text(metric.1)
                             .font(TronTypography.caption)
                             .foregroundStyle(Color.tronTextMuted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity)
                 }
+            }
+            if activity.lifecycle?.attention == .needsAttention {
+                Label("Needs attention", systemImage: "exclamationmark.triangle.fill")
+                    .font(TronTypography.bodySM)
+                    .foregroundStyle(Color.tronError)
+                    .accessibilityLabel("Needs attention")
             }
             if let currentTool = activity.currentTool {
                 Label(currentTool, systemImage: "wrench.and.screwdriver")
@@ -409,17 +730,19 @@ struct ExtensionRunDetailsSheet: View {
         .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.14)
     }
 
-    private func activeDurationMs(_ activity: ExtensionRunActivity, now: Date) -> Int {
-        guard activity.isLive, let started = ISO8601DateFormatter().date(from: activity.startedAt) else {
-            return activity.durationMs ?? 0
-        }
-        return max(activity.durationMs ?? 0, Int(max(0, now.timeIntervalSince(started) * 1_000).rounded()))
+    private func activeDurationMs(_ activity: ExtensionRunActivity) -> Int {
+        guard activity.isLive else { return activity.durationMs ?? 0 }
+        let anchor = durationAnchors[activity.stableID] ?? ExtensionActivityDurationAnchor(
+            startedAt: activity.startedAt,
+            observedDurationMs: activity.durationMs ?? 0
+        )
+        return anchor.durationMs()
     }
 
     private func noStructuredProgressState(_ activity: ExtensionRunActivity) -> some View {
         TronSettingsGroup("Run details", detail: "The run is tracked, but its producer has not published structured progress.", accent: .tronTeal) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Status: \(activity.status == .running ? "Running" : activity.status == .failed ? "Failed" : "Completed")")
+                Text("Status: \(activity.displayStateName)")
                     .font(TronTypography.bodySM)
                     .foregroundStyle(Color.tronTextPrimary)
                 if let runID = activity.runId {
@@ -439,28 +762,20 @@ struct ExtensionRunDetailsSheet: View {
         TronSettingsGroup("Subagents", detail: "Each child keeps its own stable progress identity.", accent: .tronTeal) {
             VStack(spacing: 0) {
                 ForEach(activity.children) { child in
-                    HStack(spacing: 10) {
-                        Image(systemName: child.status == .running ? "circle.dotted" : (child.status == .failed ? "xmark.circle" : "checkmark.circle"))
-                            .foregroundStyle(child.status == .failed ? Color.tronError : Color.tronTeal)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(child.label).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
-                            Text(childSummary(child)).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted).lineLimit(2)
-                            if let task = child.task, !task.isEmpty {
-                                Text(task)
-                                    .font(TronTypography.caption)
-                                    .foregroundStyle(Color.tronTextSecondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            if let output = child.output, !output.isEmpty {
-                                Text(output)
-                                    .font(TronTypography.codeContent)
-                                    .foregroundStyle(Color.tronTextPrimary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
+                    NavigationLink {
+                        SubagentSessionChatView(child: child)
+                    } label: {
+                        HStack(spacing: 8) {
+                            ExtensionChildDisclosureView(child: child, depth: 0)
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(TronTypography.caption)
+                                .foregroundStyle(Color.tronTextMuted)
                         }
-                        Spacer(minLength: 0)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.vertical, 9)
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens the live subagent session view")
                     if child.id != activity.children.last?.id { TronSettingsDivider(accent: .tronTeal) }
                 }
             }
@@ -468,11 +783,7 @@ struct ExtensionRunDetailsSheet: View {
     }
 
     private func childSummary(_ child: ExtensionRunChild) -> String {
-        let status = switch child.status {
-        case .running: "Running"
-        case .completed: "Completed"
-        case .failed: "Failed"
-        }
+        let status = child.displayStateName
         let detail = [
             child.currentTool,
             child.toolCount.map { "\($0) tools" },
@@ -486,6 +797,179 @@ struct ExtensionRunDetailsSheet: View {
         let seconds = max(0, milliseconds) / 1_000
         if seconds < 60 { return "\(seconds)s" }
         return "\(seconds / 60)m \(seconds % 60)s"
+    }
+}
+
+private struct SubagentSessionChatView: View {
+    let child: ExtensionRunChild
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
+                statusHeader
+                if let task = child.task, !task.isEmpty {
+                    chatBubble(role: "Task", text: task, accent: .tronEmerald, trailing: true)
+                }
+                if let currentTool = child.currentTool, !currentTool.isEmpty {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Label(child.lifecycle?.isTerminal == true ? "Last tool" : "Working", systemImage: "wrench.and.screwdriver")
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextMuted)
+                        Text(currentTool)
+                            .font(TronTypography.codeContent)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .textSelection(.enabled)
+                    }
+                    .padding(12)
+                    .tronGlassSurface(accent: .tronTeal, tintOpacity: 0.12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if let output = child.output, !output.isEmpty {
+                    chatBubble(role: "Subagent", text: output, accent: .tronCyan, trailing: false)
+                } else if child.lifecycle?.isTerminal != true {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small).tint(Color.tronEmerald)
+                        Text("Waiting for live subagent output…")
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextMuted)
+                    }
+                    .padding(12)
+                    .tronGlassSurface(accent: .tronTeal, tintOpacity: 0.10)
+                } else {
+                    ContentUnavailableView(
+                        "No Output Published",
+                        systemImage: "text.bubble",
+                        description: Text("The completed subagent did not publish readable output.")
+                    )
+                }
+                if let children = child.children, !children.isEmpty {
+                    ForEach(children) { nested in
+                        NavigationLink {
+                            SubagentSessionChatView(child: nested)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(nested.label).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
+                                    Text(nested.displayStateName).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").foregroundStyle(Color.tronTextMuted)
+                            }
+                            .padding(12)
+                            .tronGlassSurface(accent: .tronTeal, tintOpacity: 0.10)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.horizontal, TronSpacing.section)
+            .padding(.vertical, TronSpacing.md)
+        }
+        .tronScrollEdgeChrome()
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .principal) { TronSheetTitle(title: child.label, accent: .tronEmerald) } }
+        .accessibilityIdentifier("subagent-session-chat-view")
+    }
+
+    private var statusHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: child.lifecycle?.isTerminal == true ? "checkmark.circle.fill" : "circle.dotted")
+                .foregroundStyle(child.lifecycle == .failed || child.status == .failed ? Color.tronError : Color.tronEmerald)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(child.displayStateName).font(TronTypography.bodySM).foregroundStyle(Color.tronTextPrimary)
+                let metrics = [child.toolCount.map { "\($0) tools" }, child.turnCount.map { "\($0) turns" }].compactMap { $0 }
+                if !metrics.isEmpty {
+                    Text(metrics.joined(separator: " · ")).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.12)
+    }
+
+    private func chatBubble(role: String, text: String, accent: Color, trailing: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(role).font(TronTypography.caption).foregroundStyle(Color.tronTextMuted)
+            Text(text)
+                .font(TronTypography.body)
+                .foregroundStyle(Color.tronTextPrimary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .tronGlassSurface(accent: accent, tintOpacity: 0.12)
+        .padding(trailing ? .leading : .trailing, 28)
+    }
+}
+
+private struct ExtensionChildDisclosureView: View {
+    let child: ExtensionRunChild
+    let depth: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: symbol)
+                    .foregroundStyle(tone)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(child.label)
+                        .font(TronTypography.bodySM)
+                        .foregroundStyle(Color.tronTextPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(summary)
+                        .font(TronTypography.caption)
+                        .foregroundStyle(Color.tronTextMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let task = child.task, !task.isEmpty {
+                        Text(task)
+                            .font(TronTypography.caption)
+                            .foregroundStyle(Color.tronTextSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let output = child.output, !output.isEmpty {
+                        Text(output)
+                            .font(TronTypography.codeContent)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, CGFloat(depth) * 16)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(child.label), \(summary)")
+
+            if depth < ExtensionActivityAdmissionPolicy.maximumDepth,
+               let children = child.children {
+                ForEach(children) { nested in
+                    ExtensionChildDisclosureView(child: nested, depth: depth + 1)
+                }
+            }
+        }
+    }
+
+    private var symbol: String {
+        if child.attention == .needsAttention || child.lifecycle == .failed || child.status == .failed { return "exclamationmark.triangle.fill" }
+        if child.lifecycle == .paused { return "pause.circle" }
+        return child.lifecycle?.isTerminal == true ? "checkmark.circle" : "circle.dotted"
+    }
+
+    private var tone: Color {
+        if child.attention == .needsAttention || child.lifecycle == .failed || child.status == .failed { return .tronError }
+        return child.lifecycle == .paused ? .tronAmber : .tronTeal
+    }
+
+    private var summary: String {
+        let state = child.attention == .needsAttention ? "Needs attention" : child.displayStateName
+        let metrics = [child.currentTool, child.toolCount.map { "\($0) tools" }, child.turnCount.map { "\($0) turns" }, child.durationMs.map(durationLabel)].compactMap { $0 }
+        return ([state] + metrics).joined(separator: " · ")
+    }
+
+    private func durationLabel(_ milliseconds: Int) -> String {
+        let seconds = max(0, milliseconds) / 1_000
+        return seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
     }
 }
 

@@ -104,7 +104,7 @@ enum ChatCompactPillDetailStyle {
 
 /// A shallow animation key: transitions never compare raw request/result JSON,
 /// output bodies, or summary payloads on the render path.
-struct ChatCompactPillVisualState: Hashable {
+struct ChatCompactPillVisualState: Hashable, Sendable {
     let id: String
     let title: String
     let detail: String?
@@ -113,7 +113,6 @@ struct ChatCompactPillVisualState: Hashable {
     let material: ChatNotificationMaterial
     let showsProgress: Bool
     let count: Int
-    let durationMilliseconds: Int?
 
     init(
         id: String,
@@ -123,8 +122,7 @@ struct ChatCompactPillVisualState: Hashable {
         tone: ChatNotificationTone,
         material: ChatNotificationMaterial,
         showsProgress: Bool,
-        count: Int = 1,
-        durationMilliseconds: Int? = nil
+        count: Int = 1
     ) {
         self.id = id
         self.title = title
@@ -134,8 +132,39 @@ struct ChatCompactPillVisualState: Hashable {
         self.material = material
         self.showsProgress = showsProgress
         self.count = count
-        self.durationMilliseconds = durationMilliseconds
     }
+
+    static func toolRun(_ run: ChatToolRunPresentation) -> Self {
+        let tone: ChatNotificationTone = run.failureCount > 0
+            ? .error : run.isRunning ? .warning : .accent
+        let single = run.displayCount == 1 ? run.tools.first : nil
+        return Self(
+            id: run.id,
+            title: run.title,
+            detail: single?.subtitle.lowercased() ?? run.status,
+            icon: run.failureCount > 0
+                ? "exclamationmark.triangle.fill"
+                : single.map { ToolDetailPresentation.icon(for: $0.title) }
+                    ?? "square.stack.3d.up",
+            tone: tone,
+            material: .glass,
+            showsProgress: run.isRunning,
+            count: run.displayCount
+        )
+    }
+}
+
+struct ChatToolChipTransitionState: Equatable, Sendable {
+    private(set) var token = 0
+    private(set) var target: ChatCompactPillVisualState?
+
+    mutating func retarget(_ value: ChatCompactPillVisualState) -> Int {
+        token &+= 1
+        target = value
+        return token
+    }
+
+    func admits(_ candidate: Int) -> Bool { candidate == token }
 }
 
 struct ChatCompactPillLabel<Trailing: View>: View {

@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import TronMobile
 
@@ -65,6 +66,63 @@ struct GatewayDiagnosticsServiceTests {
 
         #expect(first.id != second.id)
         #expect(first.record == second.record)
+    }
+
+    @Test("iOS response diagnostics are bounded, profile-qualified, and noncanonical")
+    func iosClientDiagnostics() {
+        var buffer = IOSClientDiagnosticBuffer()
+        let invalid = GatewayFailure(
+            code: "invalid_response",
+            message: "The Gateway response for session.open is missing required data at session.stats.tokens.",
+            retryable: false,
+            details: nil
+        )
+        buffer.record(
+            GatewayFailure(code: "offline", message: "offline", retryable: true, details: nil),
+            profileID: "stable",
+            profileLabel: "Stable",
+            timestamp: "2026-08-16T00:00:00Z"
+        )
+        #expect(buffer.records.isEmpty)
+
+        for index in 0..<(IOSClientDiagnosticBuffer.maximumRecords + 5) {
+            buffer.record(
+                invalid,
+                profileID: "stable",
+                profileLabel: "Stable",
+                timestamp: String(format: "2026-08-16T00:00:%02dZ", index)
+            )
+        }
+        #expect(buffer.records.count == IOSClientDiagnosticBuffer.maximumRecords)
+        #expect(buffer.records.first?.profileID == "stable:ios-client")
+        #expect(buffer.records.first?.profileLabel == "Stable · iOS client")
+        #expect(buffer.records.first?.record.event == "gateway.response.invalid")
+        #expect(buffer.records.first?.record.source == "ios-client")
+        #expect(buffer.records.last?.record.timestamp != "2026-08-16T00:00:00Z")
+
+        buffer.record(
+            GatewayFailure(
+                code: "invalid_response",
+                message: String(repeating: "🛠️", count: 1_000),
+                retryable: false,
+                details: nil
+            ),
+            profileID: nil,
+            profileLabel: nil,
+            timestamp: "2026-08-16T01:00:00Z"
+        )
+        #expect((buffer.records.first?.record.message.utf8.count ?? 0) <= 2_000)
+        #expect(buffer.records.first?.record.message.hasSuffix("…") == true)
+
+        buffer.record(
+            invalid,
+            profileID: String(repeating: "profile", count: 100),
+            profileLabel: String(repeating: "Gateway", count: 200),
+            timestamp: String(repeating: "timestamp", count: 100)
+        )
+        #expect((buffer.records.first?.profileID.utf8.count ?? 0) <= 267)
+        #expect((buffer.records.first?.profileLabel.utf8.count ?? 0) <= 512)
+        #expect((buffer.records.first?.record.timestamp.utf8.count ?? 0) <= 128)
     }
 
     @Test("non-repository and absent records retain empty presentation semantics")

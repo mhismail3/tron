@@ -1,7 +1,11 @@
+import { createHash } from "node:crypto";
 import type {
   ExtensionRunActivity,
   ExtensionRunChild,
   ExtensionRunStatus,
+  ExtensionRunAttention,
+  ExtensionRunLifecycle,
+  ExtensionRunLifecycleState,
   ExtensionToolOrigin,
   JsonValue,
 } from "../protocol/types.js";
@@ -10,6 +14,52 @@ const MAX_CHILDREN = 32;
 const MAX_CHILDREN_TOTAL = 64;
 const MAX_DEPTH = 3;
 const MAX_TEXT_BYTES = 2_048;
+export const MAX_EXTENSION_ACTIVITY_COUNT = 32;
+export const MAX_EXTENSION_ACTIVITY_BYTES = 256 * 1_024;
+
+/** Stable native identity. It is intentionally independent of run/artifact
+ * correlation so replacing a producer artifact cannot re-key a native row. */
+export function extensionActivityId(sessionId: string, toolCallId: string): string {
+  return `extension-activity:${createHash("sha256").update(`${sessionId}\0${toolCallId}`).digest("hex").slice(0, 32)}`;
+}
+
+export function boundExtensionActivities(activities: readonly ExtensionRunActivity[]): {
+  activities: ExtensionRunActivity[];
+  omittedCount: number;
+  omittedBytes: number;
+  hitCount: boolean;
+  hitBytes: boolean;
+} {
+  const retained: ExtensionRunActivity[] = [];
+  const ordered = [...activities].sort((left, right) => {
+    const active = (activity: ExtensionRunActivity) => activity.lifecycle?.state === "queued"
+      || activity.lifecycle?.state === "running" || activity.lifecycle?.state === "paused" ? 0 : 1;
+    return active(left) - active(right) || right.updatedAt.localeCompare(left.updatedAt);
+  });
+  let bytes = 2;
+  let omittedBytes = 0;
+  let hitCount = false;
+  let hitBytes = false;
+  const seenIDs = new Set<string>();
+  for (const activity of ordered) {
+    const activityID = activity.activityId ?? activity.id;
+    if (seenIDs.has(activityID)) {
+      omittedBytes += Buffer.byteLength(JSON.stringify(activity)) + 1;
+      continue;
+    }
+    seenIDs.add(activityID);
+    const size = Buffer.byteLength(JSON.stringify(activity)) + 1;
+    if (retained.length >= MAX_EXTENSION_ACTIVITY_COUNT || bytes + size > MAX_EXTENSION_ACTIVITY_BYTES) {
+      if (retained.length >= MAX_EXTENSION_ACTIVITY_COUNT) hitCount = true;
+      if (bytes + size > MAX_EXTENSION_ACTIVITY_BYTES) hitBytes = true;
+      omittedBytes += size;
+      continue;
+    }
+    retained.push(activity);
+    bytes += size;
+  }
+  return { activities: retained, omittedCount: ordered.length - retained.length, omittedBytes, hitCount, hitBytes };
+}
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -38,9 +88,94 @@ function isoTime(value: unknown): string | undefined {
 
 function status(value: unknown, fallback: ExtensionRunStatus): ExtensionRunStatus {
   if (value === "failed") return "failed";
-  if (value === "completed" || value === "complete" || value === "stopped") return "completed";
-  if (value === "running" || value === "pending" || value === "detached" || value === "paused") return "running";
+  if (value === "completed" || value === "complete" || value === "stopped" || value === "rejected") return "completed";
+  if (value === "running" || value === "pending" || value === "detached" || value === "paused" || value === "queued") return "running";
   return fallback;
+}
+
+const lifecycleStates = new Set<ExtensionRunLifecycleState>([
+  "queued", "running", "paused", "completed", "failed", "stopped", "rejected", "unknown",
+]);
+export const terminalLifecycleStates = new Set<ExtensionRunLifecycleState>(["completed", "failed", "stopped", "rejected"]);
+export const EXTENSION_LIFECYCLE_ARTIFACT_VERSION = 3;
+
+/** Admit the current versioned status artifact contract. Historical artifacts
+ * are accepted only for final correlation by an exact tool-owned asyncDir; the
+ * discovery scan itself never grants session ownership. */
+export function admitExtensionLifecycleArtifact(
+  value: unknown,
+  options: { exactOwnedLegacy?: boolean } = {},
+): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const artifact = value as Record<string, unknown>;
+  const historicalVersion = artifact.lifecycleArtifactVersion;
+  const versionAccepted = historicalVersion === EXTENSION_LIFECYCLE_ARTIFACT_VERSION
+    || (options.exactOwnedLegacy === true && (
+      historicalVersion === undefined
+      || (Number.isSafeInteger(historicalVersion)
+        && (historicalVersion as number) >= 1
+        && (historicalVersion as number) < EXTENSION_LIFECYCLE_ARTIFACT_VERSION)
+    ));
+  if (!versionAccepted
+    || typeof artifact.runId !== "string" || artifact.runId.trim().length === 0
+    || extensionLifecycleState(artifact.state ?? artifact.status) === "unknown") return undefined;
+  for (const key of ["startedAt", "lastUpdate"] as const) {
+    if (!Number.isSafeInteger(artifact[key]) || (artifact[key] as number) < 0) return undefined;
+  }
+  if (artifact.endedAt !== undefined && (!Number.isSafeInteger(artifact.endedAt) || (artifact.endedAt as number) < 0)) return undefined;
+  return artifact;
+}
+
+/** Gateway sequence admission used by every producer projection. Producer
+ * timestamps are intentionally absent from this decision. */
+export function admitExtensionRunActivity(previous: ExtensionRunActivity | undefined, candidate: ExtensionRunActivity): ExtensionRunActivity {
+  if (!previous) return candidate;
+  const previousTerminal = previous.lifecycle && terminalLifecycleStates.has(previous.lifecycle.state);
+  const candidateTerminal = candidate.lifecycle && terminalLifecycleStates.has(candidate.lifecycle.state);
+  if (previousTerminal) {
+    if (!candidateTerminal || candidate.lifecycle?.state !== previous.lifecycle?.state) return previous;
+  }
+  if (previous.lifecycle?.sequence !== undefined && candidate.lifecycle?.sequence !== undefined
+    && candidate.lifecycle.sequence <= previous.lifecycle.sequence) return previous;
+  return candidate;
+}
+
+/** Strictly admits the additive producer lifecycle vocabulary. Unsupported
+ * values are unknown rather than silently becoming running. */
+export function extensionLifecycleState(value: unknown, fallback: ExtensionRunLifecycleState = "unknown"): ExtensionRunLifecycleState {
+  if (typeof value === "string" && lifecycleStates.has(value as ExtensionRunLifecycleState)) return value as ExtensionRunLifecycleState;
+  if (value === "complete") return "completed";
+  if (value === "pending" || value === "detached") return "running";
+  return fallback;
+}
+
+function attention(value: unknown): ExtensionRunAttention {
+  if (value === "activeLongRunning" || value === "needsAttention") return value;
+  return "none";
+}
+
+function lifecycleFrom(
+  details: Record<string, unknown> | undefined,
+  base: { status: ExtensionRunStatus; updatedAt: string; completedAt?: string; previous?: ExtensionRunActivity; sequence?: number; observedAt?: string; terminalAt?: string; recentUntil?: string },
+): ExtensionRunLifecycle {
+  const explicit = details?.state ?? details?.status;
+  const fallback = base.status === "failed" ? "failed" : base.status === "completed" ? "completed" : "running";
+  const candidateState = explicit === undefined ? fallback : extensionLifecycleState(explicit);
+  const prior = base.previous?.lifecycle;
+  const priorTerminal = prior !== undefined && terminalLifecycleStates.has(prior.state);
+  const state = priorTerminal && !terminalLifecycleStates.has(candidateState) ? prior.state : candidateState;
+  const terminal = terminalLifecycleStates.has(state);
+  const terminalAt = terminal ? base.terminalAt ?? prior?.terminalAt ?? base.completedAt : undefined;
+  return {
+    version: 1,
+    state,
+    attention: priorTerminal ? (prior?.attention ?? "none") : attention(details?.attention ?? details?.attentionState),
+    sequence: Math.max(0, Number.isSafeInteger(base.sequence) ? base.sequence! : (prior?.sequence ?? 0)),
+    observedAt: base.observedAt ?? prior?.observedAt ?? base.updatedAt,
+    ...(details?.updatedAt !== undefined && typeof details.updatedAt === "string" ? { producerUpdatedAt: details.updatedAt } : {}),
+    ...(terminalAt ? { terminalAt } : {}),
+    ...(terminalAt ? { recentUntil: base.recentUntil ?? prior?.recentUntil ?? new Date(Date.parse(terminalAt) + 900_000).toISOString() } : {}),
+  };
 }
 
 function output(value: unknown): string | undefined {
@@ -83,6 +218,9 @@ function child(
     .slice(0, MAX_CHILDREN)
     .map((item, nestedIndex) => child(item, nestedIndex, fallbackStatus, depth + 1, budget))
     .filter((item): item is ExtensionRunChild => Boolean(item));
+  const childLifecycle = extensionLifecycleState(progress?.state ?? progress?.status ?? source.state ?? source.status,
+    fallbackStatus === "failed" ? "failed" : fallbackStatus === "completed" ? "completed" : "running");
+  const childAttention = attention(progress?.attention ?? progress?.attentionState ?? source.attention ?? source.attentionState);
   const task = text(progress?.task ?? source.task ?? source.description ?? source.summary, 2_048);
   const lastActivityAt = isoTime(progress?.lastActivityAt ?? source.lastActivityAt ?? source.updatedAt);
   const currentTool = text(progress?.currentTool ?? source.currentTool, 256);
@@ -101,6 +239,8 @@ function child(
     id: text(source.runId ?? source.id ?? source.asyncId, 256) ?? `${label}:${index}`,
     label,
     status: status(progress?.status ?? source.status, fallbackStatus),
+    lifecycle: childLifecycle,
+    attention: childAttention,
     ...(task ? { task } : {}),
     ...(lastActivityAt ? { lastActivityAt } : {}),
     ...(currentTool ? { currentTool } : {}),
@@ -117,6 +257,46 @@ function child(
 function detailsFrom(value: unknown): Record<string, unknown> | undefined {
   const root = record(value);
   return record(root?.details) ?? root;
+}
+
+/** Generic extension tools remain ordinary service/tool activity. Only an
+ * explicit delegated-run convention may create the ambient lifecycle hub. */
+export function hasStructuredExtensionRunActivity(value: unknown): boolean {
+  const details = detailsFrom(value);
+  if (!details) return false;
+  if (typeof details.runId === "string"
+    || typeof details.asyncId === "string"
+    || Number.isSafeInteger(details.lifecycleArtifactVersion)) return true;
+  const nested = [details.results, details.progress, details.steps, details.children]
+    .filter(Array.isArray)
+    .flat() as unknown[];
+  return nested.some((value) => {
+    const item = record(value);
+    if (!item) return false;
+    const progress = record(item.progress);
+    return typeof item.runId === "string"
+      || typeof item.asyncId === "string"
+      || typeof progress?.runId === "string"
+      || typeof progress?.asyncId === "string";
+  });
+}
+
+export function extensionActivityStatusFromTool(
+  value: unknown,
+  fallback: "running" | "completed" | "failed",
+): { status: "running" | "completed" | "failed"; terminal: boolean; reportedTerminal: boolean } {
+  const details = detailsFrom(value);
+  const reported = extensionLifecycleState(details?.state ?? details?.status);
+  const reportedTerminal = ["completed", "failed", "stopped", "rejected"].includes(reported);
+  const reportedCurrent = ["queued", "running", "paused"].includes(reported);
+  // asyncDir is an explicit detached-run receipt. The outer extension tool has
+  // returned, but the delegated workflow has not reached a terminal state.
+  const detachedCurrent = extensionRunAsyncDir(value) !== undefined && !reportedTerminal;
+  const terminal = reportedTerminal || (!reportedCurrent && !detachedCurrent && fallback !== "running");
+  const status = reportedCurrent || detachedCurrent
+    ? "running"
+    : reported === "failed" || fallback === "failed" ? "failed" : terminal ? "completed" : "running";
+  return { status, terminal, reportedTerminal };
 }
 
 /**
@@ -140,6 +320,12 @@ export function projectExtensionRunActivity(
     completedAt?: string;
     durationMs?: number;
     previous?: ExtensionRunActivity;
+    /** Gateway facts are optional for old callers and make the projector deterministic in tests. */
+    activityId?: string;
+    sequence?: number;
+    observedAt?: string;
+    terminalAt?: string;
+    recentUntil?: string;
   },
 ): ExtensionRunActivity {
   const details = detailsFrom(value);
@@ -156,9 +342,10 @@ export function projectExtensionRunActivity(
         ? stepValues
         : childValues;
   const explicitStatus = details?.state ?? details?.status;
-  const terminalStatus = explicitStatus === "failed"
+  const explicitLifecycleState = extensionLifecycleState(explicitStatus);
+  const terminalStatus = explicitLifecycleState === "failed"
     ? "failed"
-    : (explicitStatus === "completed" || explicitStatus === "complete" || explicitStatus === "stopped")
+    : (explicitLifecycleState === "completed" || explicitLifecycleState === "stopped" || explicitLifecycleState === "rejected")
       ? "completed"
       : undefined;
   const priorTerminal = previous?.status === "completed" || previous?.status === "failed";
@@ -180,21 +367,26 @@ export function projectExtensionRunActivity(
     .map((item, index) => child(item, index, activityStatus, 0, { remaining: MAX_CHILDREN_TOTAL }))
     .filter((item): item is ExtensionRunChild => Boolean(item));
   const firstProgress = candidates.length > 0 ? progressRecord(candidates[0]) : undefined;
+  // Aggregate fields belong to the lifecycle root. A first child must never
+  // win merely because it happens to be present in the payload.
+  const aggregateProgress = progressRecord(details?.aggregate ?? details?.progressState);
   const runId = text(details?.runId ?? details?.asyncId, 256) ?? previous?.runId;
-  const lastActivityAt = isoTime(firstProgress?.lastActivityAt ?? details?.lastActivityAt ?? details?.updatedAt) ?? previous?.lastActivityAt;
-  const currentTool = text(firstProgress?.currentTool ?? details?.currentTool, 256) ?? previous?.currentTool;
-  const currentToolStartedAt = isoTime(firstProgress?.currentToolStartedAt ?? details?.currentToolStartedAt) ?? previous?.currentToolStartedAt;
-  const currentPath = displayPath(firstProgress?.currentPath ?? details?.currentPath) ?? previous?.currentPath;
-  const toolCount = number(firstProgress?.toolCount ?? details?.toolCount) ?? previous?.toolCount;
-  const turnCount = number(firstProgress?.turnCount ?? details?.turnCount) ?? previous?.turnCount;
+  const lastActivityAt = isoTime(details?.lastActivityAt ?? aggregateProgress?.lastActivityAt ?? firstProgress?.lastActivityAt ?? details?.updatedAt) ?? previous?.lastActivityAt;
+  const currentTool = text(details?.currentTool ?? aggregateProgress?.currentTool ?? firstProgress?.currentTool, 256) ?? previous?.currentTool;
+  const currentToolStartedAt = isoTime(details?.currentToolStartedAt ?? aggregateProgress?.currentToolStartedAt ?? firstProgress?.currentToolStartedAt) ?? previous?.currentToolStartedAt;
+  const currentPath = displayPath(details?.currentPath ?? aggregateProgress?.currentPath ?? firstProgress?.currentPath) ?? previous?.currentPath;
+  const toolCount = number(details?.toolCount ?? aggregateProgress?.toolCount ?? firstProgress?.toolCount) ?? previous?.toolCount;
+  const turnCount = number(details?.turnCount ?? aggregateProgress?.turnCount ?? firstProgress?.turnCount) ?? previous?.turnCount;
   const durationMs = activityStatus === "running"
-    ? number(firstProgress?.durationMs ?? details?.durationMs) ?? base.durationMs ?? previous?.durationMs
-    : base.durationMs ?? number(firstProgress?.durationMs ?? details?.durationMs) ?? previous?.durationMs;
+    ? number(details?.durationMs ?? aggregateProgress?.durationMs ?? firstProgress?.durationMs) ?? base.durationMs ?? previous?.durationMs
+    : base.durationMs ?? number(details?.durationMs ?? aggregateProgress?.durationMs ?? firstProgress?.durationMs) ?? previous?.durationMs;
   const recentOutput = output(
-    firstProgress?.recentOutput
-      ?? firstProgress?.output
-      ?? details?.recentOutput
+    details?.recentOutput
       ?? details?.output
+      ?? aggregateProgress?.recentOutput
+      ?? aggregateProgress?.output
+      ?? firstProgress?.recentOutput
+      ?? firstProgress?.output
       ?? details?.summary
       ?? details?.error
   ) ?? previous?.output;
@@ -202,6 +394,7 @@ export function projectExtensionRunActivity(
 
   return {
     id: base.id,
+    ...(base.activityId ? { activityId: base.activityId } : previous?.activityId ? { activityId: previous.activityId } : {}),
     ...(runId ? { runId } : {}),
     toolCallId: base.toolCallId,
     source: base.source,
@@ -220,6 +413,16 @@ export function projectExtensionRunActivity(
     ...(durationMs === undefined ? {} : { durationMs: Math.max(0, Math.round(durationMs)) }),
     ...(recentOutput ? { output: recentOutput } : {}),
     children: children.length > 0 ? children : previous?.children ?? [],
+    lifecycle: lifecycleFrom(details, {
+      status: activityStatus,
+      updatedAt: base.updatedAt,
+      ...(completedAt ? { completedAt } : {}),
+      ...(previous ? { previous } : {}),
+      ...(base.sequence === undefined ? {} : { sequence: base.sequence }),
+      ...(base.observedAt ? { observedAt: base.observedAt } : {}),
+      ...(base.terminalAt ? { terminalAt: base.terminalAt } : {}),
+      ...(base.recentUntil ? { recentUntil: base.recentUntil } : {}),
+    }),
   } satisfies ExtensionRunActivity;
 }
 

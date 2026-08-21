@@ -1010,6 +1010,19 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.command == current)
     }
 
+    @Test("same-session presentation handoff retains viewport without reset-to-bottom")
+    func retainedPresentationHandoffDoesNotResetViewport() {
+        let coordinator = detachedCoordinator(at: away, withUnread: true)
+        #expect(coordinator.userScrolledAway)
+        #expect(!coordinator.isAtBottom)
+
+        coordinator.resetForPresentation(2, retainingVisibleViewport: true)
+
+        #expect(coordinator.userScrolledAway)
+        #expect(!coordinator.isAtBottom)
+        #expect(coordinator.command == nil)
+    }
+
     @Test("opening timeout reveals after one exact-ID attempt when geometry disappears")
     func openingTailTimeoutFallsBackToExactBinding() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1490,6 +1503,52 @@ struct ChatScrollCoordinatorTests {
             #expect(release.destination == .releaseBinding)
             #expect(release.animation == .disabled)
             coordinator.commandApplied(release)
+        }
+    }
+
+    @Test("prepend deadline revokes a pending correction command")
+    func prependDeadlineRevokesPendingCorrection() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let coordinator = ChatScrollCoordinator(clock: clock.clock)
+            coordinator.geometryChanged(previous: away, current: away)
+            coordinator.semanticFrameChanged(
+                renderedID: "old-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 20, width: 100, height: 40)
+            )
+            let anchor = ChatSemanticAnchor(
+                semanticID: "semantic",
+                renderedID: "old-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                viewportOffsetY: 20
+            )
+            let results = ScrollResultRecorder()
+            let began = coordinator.beginPrepend(anchor: anchor, load: {
+                ChatPrependPage(
+                    renderedAnchorID: "new-row",
+                    installedLayout: coordinator.beginInstalledLayoutEpoch()
+                )
+            }, completion: { results.record($0) })
+            #expect(began)
+
+            try await clock.waitUntilSleeping(count: 1)
+            try await coordinator.hostedWaitForPrependSemanticSample()
+            coordinator.semanticFrameChanged(
+                renderedID: "new-row",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 220, width: 100, height: 40)
+            )
+            coordinator.geometryChanged(previous: away, current: away)
+            let correction = try await coordinator.hostedNextCommand()
+            #expect(correction.origin == .prepend)
+            #expect(coordinator.command == correction)
+
+            clock.advance(by: .seconds(8))
+            try await results.waitForValue()
+            #expect(results.values == [.failure])
+            #expect(!coordinator.isPrependingHistory)
+            #expect(coordinator.command == nil)
         }
     }
 

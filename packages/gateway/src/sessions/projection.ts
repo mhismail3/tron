@@ -4,6 +4,7 @@ import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import type { BlobStore } from "./blob-store.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
 import type { CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
 
 const MAX_TEXT = 64_000;
@@ -15,6 +16,7 @@ const COMPACT_LIVE_TOOL_JSON_BYTES = 12_000;
 const MAX_LIVE_TOOL_OUTPUT_BYTES = 48_000;
 export const TRANSCRIPT_PAGE_BYTES = 600_000;
 export const TRANSCRIPT_PAGE_ITEMS = 512;
+export const MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES = 24;
 /** Leaves headroom for the response/event envelope under the 1 MiB socket cap. */
 export const SESSION_SNAPSHOT_BYTES = 800_000;
 /**
@@ -110,6 +112,33 @@ export function projectToolOutput(value: unknown, maximumBytes = MAX_LIVE_TOOL_O
   };
 }
 
+/** Progress payloads are current display frames, not an append-only log.
+ * Install the latest nonempty frame in place; an empty advisory frame preserves
+ * the last readable frame so an open detail sheet never flashes blank. */
+export function mergeLiveToolOutput(
+  previous: { output?: string; outputTruncated?: boolean } | undefined,
+  incoming: { output?: string; outputTruncated?: true },
+  maximumBytes = MAX_LIVE_TOOL_OUTPUT_BYTES,
+): { output?: string; outputTruncated?: true } {
+  if (incoming.output) {
+    if (Buffer.byteLength(incoming.output) > maximumBytes) {
+      const marker = "… earlier live output truncated by gateway …\n";
+      return {
+        output: marker + utf8Suffix(incoming.output, Math.max(0, maximumBytes - Buffer.byteLength(marker))),
+        outputTruncated: true,
+      };
+    }
+    return {
+      output: incoming.output,
+      ...(incoming.outputTruncated ? { outputTruncated: true } : {}),
+    };
+  }
+  return previous?.output === undefined ? {} : {
+    output: previous.output,
+    ...(previous.outputTruncated ? { outputTruncated: true } : {}),
+  };
+}
+
 /** The JSON frame stays bounded independently from the readable live-output
  * channel. If Pi streams a huge text result, retain only a recent tail here too
  * rather than serializing the whole value before projectJson can compact it. */
@@ -189,6 +218,25 @@ export function boundStreamingProgressItem(
     }
     break;
   }
+  // A bounded live frame may omit a leading portion of a finalized group.
+  // Never publish a partial declaration with a complete group count: either
+  // the whole group survives or the subsequent group-aware tool progress owns
+  // its aggregate placeholder until canonical projection arrives.
+  const retainedCounts = new Map<string, number>();
+  for (const part of kept) {
+    if (part.type === "toolCall" && part.groupFinalized && part.groupId) {
+      retainedCounts.set(part.groupId, (retainedCounts.get(part.groupId) ?? 0) + 1);
+    }
+  }
+  const completeGroupIDs = new Set([...retainedCounts].flatMap(([groupId, count]) => {
+    const member = kept.find((part) => part.type === "toolCall" && part.groupId === groupId);
+    return member?.type === "toolCall" && member.groupCount === count ? [groupId] : [];
+  }));
+  for (let index = kept.length - 1; index >= 0; index -= 1) {
+    const part = kept[index]!;
+    if (part.type === "toolCall" && part.groupId && !completeGroupIDs.has(part.groupId)) kept.splice(index, 1);
+  }
+
   const fallbackOrdinal = item.content.reduce(
     (maximum, part) => Math.max(maximum, part.ordinal), -1,
   ) + 1;
@@ -220,6 +268,11 @@ export function boundStreamingProgressItem(
 
 function frameBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value));
+}
+
+function transcriptContinuityMessages(items: TranscriptItem[]): number {
+  return items.reduce((count, item) =>
+    count + (item.kind === "message" && item.role === "toolResult" ? 0 : 1), 0);
 }
 
 function definitelyFitsStreamingFrame(item: TranscriptItem, maximumBytes: number): boolean {
@@ -254,10 +307,9 @@ function definitelyFitsStreamingFrame(item: TranscriptItem, maximumBytes: number
 /**
  * Fits every live session snapshot to a strict wire budget without touching Pi's
  * canonical state. Large tool payloads become readable previews first. While an
- * operation is active, transcript rows inside the fixed item cap are not removed:
- * doing so would make a subscribed chat replace already-visible history with a
- * shorter tail. Status, operation, ordering, and canonical transcript cursors
- * always survive.
+ * operation is active, the newest transcript continuity floor survives pressure;
+ * iOS retains any larger compatible prefix already on screen. Status, operation,
+ * ordering, and canonical transcript cursors always survive.
  */
 export function fitSessionSnapshot(
   snapshot: SessionSnapshot,
@@ -292,34 +344,47 @@ export function fitSessionSnapshot(
   };
   if (frameBytes(projected) <= maximumBytes) return projected;
 
-  // Completed output is canonical in the transcript. Do not duplicate partial
-  // output in the live overlay when the frame is under pressure.
+  // Completed output is canonical in the transcript. Do not duplicate terminal
+  // payloads in the live overlay when the frame is under pressure. Running
+  // output remains available for the exact current call.
   projected = {
     ...projected,
     toolExecutions: projected.toolExecutions.map((tool) => {
       if (tool.status === "running") return tool;
-      const { partialResult: _partialResult, ...withoutPartialResult } = tool;
-      return withoutPartialResult;
+      const {
+        partialResult: _partialResult,
+        result: _result,
+        output: _output,
+        outputTruncated: _outputTruncated,
+        ...metadata
+      } = tool;
+      return metadata;
     }),
   };
+  if (frameBytes(projected) <= maximumBytes) return projected;
 
-  // A resumed idle session may use a smaller fitted tail. An active session must
-  // keep its baseline page stable for the lifetime of the open subscription;
-  // mobile merges later snapshots with any history it has explicitly prepended.
-  if (projected.phase === "idle" || projected.phase === "interrupted") {
-    let removed = 0;
-    const transcript = [...projected.transcript];
-    while (transcript.length > 0 && frameBytes({ ...projected, transcript }) > maximumBytes) {
-      transcript.shift();
-      removed += 1;
+  // Retain a stable recent continuity floor even under active snapshot pressure.
+  // iOS may keep a larger exact loaded prefix, but it must never receive a new
+  // authoritative tail containing only the Load earlier control and one row.
+  let removed = 0;
+  const fittedTranscript = [...projected.transcript];
+  let fittedContinuityMessages = transcriptContinuityMessages(fittedTranscript);
+  while (
+    fittedContinuityMessages > MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES
+      && frameBytes({ ...projected, transcript: fittedTranscript }) > maximumBytes
+  ) {
+    const shifted = fittedTranscript.shift();
+    if (shifted && !(shifted.kind === "message" && shifted.role === "toolResult")) {
+      fittedContinuityMessages -= 1;
     }
-    projected = {
-      ...projected,
-      transcript,
-      transcriptStart: projected.transcriptStart + removed,
-    };
-    if (frameBytes(projected) <= maximumBytes) return projected;
+    removed += 1;
   }
+  projected = {
+    ...projected,
+    transcript: fittedTranscript,
+    transcriptStart: projected.transcriptStart + removed,
+  };
+  if (frameBytes(projected) <= maximumBytes) return projected;
 
   // Retain actionable frames first. Omitted identities/revisions remain a
   // bounded delta baseline, so an exact-next full-frame upsert can converge.
@@ -387,27 +452,80 @@ export function fitSessionSnapshot(
 
   const tools = projected.toolExecutions.slice(-256).map((tool) => {
     const { partialResult: _partialResult, result: _result, ...metadata } = tool;
-    return { ...metadata, arguments: { truncated: true } };
+    const liveOutput = tool.output === undefined
+      ? {}
+      : {
+          output: utf8Suffix(tool.output, 8 * 1_024),
+          ...(Buffer.byteLength(tool.output) > 8 * 1_024 || tool.outputTruncated ? { outputTruncated: true } : {}),
+        };
+    return { ...metadata, ...liveOutput, arguments: { truncated: true } };
   });
   projected = {
     ...projected,
-    ...(projected.phase === "idle" || projected.phase === "interrupted"
-      ? { transcript: [], transcriptStart: projected.transcriptTotal }
-      : {}),
     toolExecutions: tools,
     diagnostics: [{ type: "projection", message: "Large live detail is available from canonical paged history after the run settles." }],
   };
   if (frameBytes(projected) <= maximumBytes) return projected;
 
-  if (projected.phase !== "idle" && projected.phase !== "interrupted") {
-    // Preserve the active canonical baseline before sacrificing live detail.
-    // Tool identities/order remain in the streaming/canonical call projection
-    // and return through events or the next fitted snapshot.
-    projected = { ...projected, toolExecutions: [] };
-    if (frameBytes(projected) <= maximumBytes) return projected;
-  }
+  // Output tails are the last disposable component. Preserve every bounded call
+  // identity and the transcript continuity floor before dropping live text.
+  projected = {
+    ...projected,
+    toolExecutions: tools.map((tool) => {
+      const { output: _output, outputTruncated: _outputTruncated, ...metadata } = tool;
+      return metadata;
+    }),
+  };
+  if (frameBytes(projected) <= maximumBytes) return projected;
 
-  return projected;
+  // All high-cardinality fields above are bounded. Reaching this point means a
+  // legal transcript item itself exhausted the remaining envelope. Shrink only
+  // rows above the continuity floor; projectTranscriptPage already compacts an
+  // individually oversized item before it can enter this frame.
+  const strictTranscript = [...projected.transcript];
+  let strictContinuityMessages = transcriptContinuityMessages(strictTranscript);
+  let strictRemoved = 0;
+  while (strictContinuityMessages > MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES
+    && frameBytes({ ...projected, transcript: strictTranscript }) > maximumBytes) {
+    const shifted = strictTranscript.shift();
+    if (shifted && !(shifted.kind === "message" && shifted.role === "toolResult")) {
+      strictContinuityMessages -= 1;
+    }
+    strictRemoved += 1;
+  }
+  projected = {
+    ...projected,
+    transcript: strictTranscript,
+    transcriptStart: projected.transcriptStart + strictRemoved,
+  };
+  if (frameBytes(projected) <= maximumBytes) return projected;
+
+  const envelopeBytes = frameBytes({ ...projected, transcript: [] });
+  const perItemBudget = Math.max(
+    256,
+    Math.floor(Math.max(0, maximumBytes - envelopeBytes - 2) / Math.max(1, projected.transcript.length)) - 1,
+  );
+  projected = {
+    ...projected,
+    transcript: projected.transcript.map((item) => compactTranscriptPageItem(item, perItemBudget)),
+  };
+  if (frameBytes(projected) <= maximumBytes) return projected;
+
+  // The caller may provide a test-only envelope smaller than the legal metadata
+  // floor. Preserve strict transport safety and the newest canonical rows when
+  // even compacted continuity cannot fit.
+  const unavoidableTrim = [...projected.transcript];
+  let unavoidableRemoved = 0;
+  while (unavoidableTrim.length > 0
+    && frameBytes({ ...projected, transcript: unavoidableTrim }) > maximumBytes) {
+    unavoidableTrim.shift();
+    unavoidableRemoved += 1;
+  }
+  return {
+    ...projected,
+    transcript: unavoidableTrim,
+    transcriptStart: projected.transcriptStart + unavoidableRemoved,
+  };
 }
 
 type ProjectableContent = string | Array<
@@ -486,7 +604,36 @@ function projectUserText(text: string, ownerId: string, nextIndex: () => number)
   return projected;
 }
 
-function projectContent(content: ProjectableContent, blobs: BlobStore, ownerId: string, extractAttachments = false): ContentPart[] {
+export function toolGroupId(presentationId: string, firstOrdinal: number): string {
+  return `tool-group:${JSON.stringify([presentationId, firstOrdinal])}`;
+}
+
+function decorateToolGroups(parts: ContentPart[], presentationId: string, finalized: boolean): ContentPart[] {
+  if (!finalized) {
+    return parts.map((part) => part.type === "toolCall"
+      ? { ...part, groupFinalized: false }
+      : part);
+  }
+  let index = 0;
+  while (index < parts.length) {
+    if (parts[index]?.type !== "toolCall") { index += 1; continue; }
+    const start = index;
+    while (index < parts.length && parts[index]?.type === "toolCall") index += 1;
+    const count = index - start;
+    const first = parts[start]!;
+    if (first.type !== "toolCall") continue;
+    const groupId = toolGroupId(presentationId, first.ordinal);
+    for (let offset = 0; offset < count; offset += 1) {
+      const part = parts[start + offset]!;
+      if (part.type === "toolCall") {
+        parts[start + offset] = { ...part, groupId, groupIndex: offset, groupCount: count, groupFinalized: true };
+      }
+    }
+  }
+  return parts;
+}
+
+function projectContent(content: ProjectableContent, blobs: BlobStore, ownerId: string, extractAttachments = false, finalizedToolGroups = false): ContentPart[] {
   const source = typeof content === "string" ? [{ type: "text" as const, text: content }] : content;
   const projected: ContentPart[] = [];
   let bytes = 2;
@@ -539,22 +686,26 @@ function projectContent(content: ProjectableContent, blobs: BlobStore, ownerId: 
       if (projected.length >= MAX_CONTENT_PARTS - 1) {
         const ordinal = nextIndex();
         projected.push({ id: `${ownerId}:truncated:${ordinal}`, ordinal, type: "text", text: "… additional content omitted from this mobile projection" });
-        return projected;
+        return decorateToolGroups(projected, ownerId, finalizedToolGroups);
       }
       const candidateBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
       if (bytes + candidateBytes > MAX_CONTENT_BYTES) {
         const ordinal = nextIndex();
         projected.push({ id: `${ownerId}:truncated:${ordinal}`, ordinal, type: "text", text: "… additional content omitted from this mobile projection" });
-        return projected;
+        return decorateToolGroups(projected, ownerId, finalizedToolGroups);
       }
       projected.push(candidate);
       bytes += candidateBytes;
     }
   }
-  return projected;
+  return decorateToolGroups(projected, ownerId, finalizedToolGroups);
 }
 
 export interface ToolProjectionMetadata {
+  groupId?: string;
+  groupIndex?: number;
+  groupCount?: number;
+  groupFinalized?: boolean;
   startedAt: string;
   completedAt?: string;
   durationMs?: number;
@@ -571,6 +722,7 @@ export function projectMessage(
   blobs: BlobStore,
   toolMetadata?: ToolProjectionMetadata,
   presentationId = id,
+  finalizedToolGroups = true,
 ): TranscriptItem | undefined {
   switch (message.role) {
     case "user":
@@ -586,7 +738,7 @@ export function projectMessage(
         kind: "message",
         role: "assistant",
         presentationId,
-        content: projectContent(message.content, blobs, presentationId),
+        content: projectContent(message.content, blobs, presentationId, false, finalizedToolGroups),
         provider: message.provider,
         modelId: message.model,
         stopReason: message.stopReason,
@@ -614,6 +766,10 @@ export function projectMessage(
           lastProgressAt: toolMetadata.lastProgressAt,
           progressSequence: toolMetadata.progressSequence,
           ...(toolMetadata.extensionOrigin ? { extensionOrigin: toolMetadata.extensionOrigin } : {}),
+          ...(toolMetadata.groupId ? { groupId: toolMetadata.groupId } : {}),
+          ...(toolMetadata.groupIndex === undefined ? {} : { groupIndex: toolMetadata.groupIndex }),
+          ...(toolMetadata.groupCount === undefined ? {} : { groupCount: toolMetadata.groupCount }),
+          ...(toolMetadata.groupFinalized === undefined ? {} : { groupFinalized: toolMetadata.groupFinalized }),
         } : {
           // Pi JSONL does not currently persist tool execution start/end metadata.
           // The result timestamp is an observed completion anchor; clients pair it
@@ -678,6 +834,7 @@ export function projectEntry(
         blobs,
         entry.message.role === "toolResult" ? toolMetadata?.get(entry.message.toolCallId) : undefined,
         entry.message.role === "assistant" ? (presentationIDs?.get(entry.id) ?? entry.id) : entry.id,
+        entry.message.role === "assistant",
       );
     case "custom_message":
       if (!entry.display) return undefined;
@@ -691,6 +848,9 @@ export function projectEntry(
         ...(entry.details === undefined ? {} : { details: projectJson(entry.details) }),
       };
     case "custom":
+      // Canonical lifecycle receipts are session audit facts, not transcript,
+      // tree, or model-visible conversation entries.
+      if (entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE) return undefined;
       return {
         id: entry.id,
         parentId: entry.parentId,
@@ -843,6 +1003,13 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
   }
   while (work.length > 0) {
     const { source, depth } = work.pop()!;
+    if (source.entry.type === "custom" && source.entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE) {
+      // Preserve descendants while omitting the reserved audit node itself.
+      for (let index = source.children.length - 1; index >= 0; index -= 1) {
+        work.push({ source: source.children[index]!, depth });
+      }
+      continue;
+    }
     if (byId.has(source.entry.id)) {
       throw new GatewayError("conflict", "Session tree contains a duplicate canonical entry ID");
     }
@@ -880,6 +1047,7 @@ export function projectTree(manager: SessionManager, blobs: BlobStore): SessionT
 function projectableTranscriptEntries(manager: SessionManager): SessionEntry[] {
   return manager.getBranch().filter((entry) =>
     entry.type !== "session_info"
+      && !(entry.type === "custom" && entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE)
       && !(entry.type === "custom_message" && !entry.display)
       && !(entry.type === "message" && entry.message.role === "custom" && !entry.message.display));
 }
@@ -901,6 +1069,11 @@ export interface TranscriptPage {
   start: number;
   end: number;
   total: number;
+  /** Exact next projected entry at `end`, echoed so clients can validate the
+   * page boundary without treating raw parent links as display adjacency. */
+  nextEntryId?: string;
+  runtimeGeneration?: string;
+  leafEntryId?: string;
 }
 
 export function projectTranscriptPage(
@@ -938,7 +1111,13 @@ export function projectTranscriptPage(
     bytes += itemBytes;
     start -= 1;
   }
-  return { items: selected, start, end, total: entries.length };
+  return {
+    items: selected,
+    start,
+    end,
+    total: entries.length,
+    ...(entries[end]?.id ? { nextEntryId: entries[end].id } : {}),
+  };
 }
 
 function compactTranscriptPageItem(item: TranscriptItem, byteBudget: number): TranscriptItem {

@@ -372,15 +372,13 @@ struct ChatViewScrollHarnessTests {
                         && $0.observation.lastAnimatedEntranceSourceOrdinal == runningOrdinal
                 }
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
-                let followed = try await harness.recorder.waitUntil {
-                    $0.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1
-                }
-                #expect(followed.observation.rowFrames["tool-run-active-race"] != nil)
+                #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
+                #expect(settled.observation.rowFrames["tool-run-active-race"] != nil)
             }
         }
     }
 
-    @Test("real tool group topology follows new chips with one smooth viewport motion")
+    @Test("real tool group topology updates one chip without smooth viewport motion")
     func toolGroupTopologySettlement() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_194) { harness in
@@ -394,7 +392,7 @@ struct ChatViewScrollHarnessTests {
                 var first = harness.snapshot
                 first.phase = .running
                 first.toolExecutions = [
-                    harnessRuntimeTool(id: "group-one", order: 0, status: .running),
+                    harnessRuntimeTool(id: "group-one", order: 0, status: .running, groupId: "group-one", groupIndex: 0, groupCount: 2),
                 ]
                 first.eventSequence += 1
                 harness.replaceAuthoritativeSnapshot(first)
@@ -405,8 +403,8 @@ struct ChatViewScrollHarnessTests {
 
                 var grouped = first
                 grouped.toolExecutions = [
-                    harnessRuntimeTool(id: "group-one", order: 0, status: .completed),
-                    harnessRuntimeTool(id: "group-two", order: 1, status: .completed),
+                    harnessRuntimeTool(id: "group-one", order: 0, status: .completed, groupId: "group-one", groupIndex: 0, groupCount: 2),
+                    harnessRuntimeTool(id: "group-two", order: 1, status: .completed, groupId: "group-one", groupIndex: 1, groupCount: 2),
                 ]
                 grouped.eventSequence += 1
                 harness.replaceAuthoritativeSnapshot(grouped)
@@ -416,9 +414,14 @@ struct ChatViewScrollHarnessTests {
                 }
 
                 #expect(settled.observation.rowFrames["tool-run-group-two"] == nil)
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1
+                #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
+                let visuallySettled = try await harness.recorder.waitUntil {
+                    $0.observation.toolChipSamples.last(where: { $0.runID == "tool-run-group-one" })?.title == "Used 2 tools"
                 }
+                let samples = visuallySettled.observation.toolChipSamples.filter { $0.runID == "tool-run-group-one" }
+                #expect(samples.first?.title == "Using 2 tools")
+                #expect(samples.last?.title == "Used 2 tools")
+                #expect(samples.allSatisfy { $0.count == 2 && !$0.title.contains("Extension activity") })
             }
         }
     }
@@ -685,7 +688,10 @@ struct ChatViewScrollHarnessTests {
 private func harnessRuntimeTool(
     id: String = "active-race",
     order: Int = 0,
-    status: ToolExecutionState.Status
+    status: ToolExecutionState.Status,
+    groupId: String? = nil,
+    groupIndex: Int = 0,
+    groupCount: Int = 1
 ) -> ToolExecutionState {
     ToolExecutionState(
         toolCallId: id,
@@ -701,7 +707,11 @@ private func harnessRuntimeTool(
         updatedAt: status == .completed ? "2026-01-01T00:00:01Z" : "2026-01-01T00:00:00Z",
         completedAt: status == .completed ? "2026-01-01T00:00:01Z" : nil,
         durationMs: status == .completed ? 1_000 : nil,
-        progressSequence: status == .completed ? 2 : 1
+        progressSequence: status == .completed ? 2 : 1,
+        groupId: groupId ?? id,
+        groupIndex: groupIndex,
+        groupCount: groupCount,
+        groupFinalized: true
     )
 }
 

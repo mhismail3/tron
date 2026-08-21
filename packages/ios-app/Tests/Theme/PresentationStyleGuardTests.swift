@@ -332,8 +332,9 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
         #expect(chat.components(separatedBy: ".animation(transcriptRevealAnimation, value: isTranscriptReady)").count == 1)
-        #expect(chat.contains("followAnimation: entranceKind == .leadingActivity"))
-        #expect(toolRuns.contains(".contentTransition(.interpolate)"))
+        #expect(chat.contains("scrollCoordinator.discreteContentInserted(renderedID: id)"))
+        #expect(!chat.contains("followAnimation: entranceKind == .leadingActivity"))
+        #expect(toolRuns.contains(".contentTransition(reduceMotion ? .opacity : .interpolate)"))
         #expect(reveal.contains("initialViewportHeight"))
     }
 
@@ -660,6 +661,8 @@ struct PresentationStyleGuardTests {
         #expect(resources.contains("pathEditor(value)"))
         #expect(resources.contains(".multilineTextAlignment(.leading)"))
         #expect(resources.contains("minHeight: value.acceptsMultipleLines ? 120 : 52"))
+        #expect(resources.contains("HStack(alignment: .center, spacing: TronSpacing.xl)"))
+        #expect(resources.contains(".frame(width: 22, height: 22, alignment: .center)"))
         #expect(resources.contains("drafts.install(draft, for: target)"))
         #expect(!resources.contains("Save Changes"))
         #expect(customModels.contains("TronSaveToolbarButton"))
@@ -676,6 +679,17 @@ struct PresentationStyleGuardTests {
         #expect(saveToolbarButton.contains(".tint(actionColor)"))
         #expect(!saveToolbarButton.contains(".buttonStyle(.glass)"))
         #expect(!saveToolbarButton.contains(".buttonBorderShape(.capsule)"))
+        let settingsRow = (presentation.components(separatedBy: "struct TronSettingsRow<Trailing: View>: View").dropFirst().first ?? "")
+            .components(separatedBy: "extension TronSettingsRow where Trailing == EmptyView").first ?? ""
+        let infoCard = (presentation.components(separatedBy: "struct TronInfoCard: View").dropFirst().first ?? "")
+            .components(separatedBy: "struct TronSettingsDivider").first ?? ""
+        let gatewayUpdateGroup = (connections.components(separatedBy: "private func gatewayUpdateGroup").dropFirst().first ?? "")
+            .components(separatedBy: "private func gatewayActionButton").first ?? ""
+        for alignedSurface in [settingsRow, infoCard] {
+            #expect(alignedSurface.contains(".frame(width: 22, height: 22, alignment: .center)"))
+            #expect(alignedSurface.contains(".padding(.horizontal, 14)"))
+        }
+        #expect(!gatewayUpdateGroup.contains(".padding(12)"))
         #expect(presentation.contains("static var numericValue"))
         #expect(presentation.contains("static var codeJSON"))
         #expect(structuredJSON.contains("TronTypography.codeJSON"))
@@ -1258,26 +1272,26 @@ struct PresentationStyleGuardTests {
         #expect(transcript.contains(".presentationDetents([.medium, .large], selection: $detent)"))
         let runOwner = try #require(
             transcript.components(separatedBy: "struct ToolRunView: View {").dropFirst().first?
-                .components(separatedBy: "private struct ToolRunChip: View {").first
+                .components(separatedBy: "private struct ToolActivityChip: View {").first
         )
-        #expect(runOwner.contains("@State private var detailRoute: ToolDetailRoute?"))
-        #expect(runOwner.contains("@State private var resolvedDetail: ChatToolPresentation?"))
-        #expect(runOwner.contains("@State private var resolvedGroup: [ChatToolPresentation]?"))
+        #expect(runOwner.contains("@State private var resolvedState: ToolRunResolvedState?"))
+        #expect(!runOwner.contains("resolvedDetail"))
+        #expect(!runOwner.contains("resolvedGroup"))
         #expect(runOwner.contains("@State private var detailDetent: PresentationDetent = .medium"))
-        #expect(runOwner.contains("if let tool = run.tools.first, run.tools.count == 1"))
-        #expect(runOwner.contains("resolveDetails([toolID], installationTag)"))
+        #expect(runOwner.contains("ToolActivityChip("))
+        #expect(runOwner.contains("if resolvedState.run.displayCount == 1"))
         #expect(runOwner.contains("resolveDetails(detailToolIDs, installationTag)"))
-        #expect(runOwner.contains("tool: resolvedDetail"))
-        let statePosition = try #require(runOwner.firstRange(of: "@State private var detailRoute")?.lowerBound)
-        let branchPosition = try #require(runOwner.firstRange(of: "if let tool = run.tools.first")?.lowerBound)
-        let hostPosition = try #require(runOwner.firstRange(of: ".toolDetailSheet(")?.lowerBound)
-        #expect(statePosition < branchPosition)
-        #expect(branchPosition < hostPosition)
+        #expect(runOwner.contains("resolvedState = ToolRunResolvedState(installationTag: tag, run: run, tools: details)"))
+        let statePosition = try #require(runOwner.firstRange(of: "@State private var resolvedState")?.lowerBound)
+        let chipPosition = try #require(runOwner.firstRange(of: "ToolActivityChip(")?.lowerBound)
+        let sheetPosition = try #require(runOwner.firstRange(of: ".sheet(isPresented:")?.lowerBound)
+        #expect(statePosition < chipPosition)
+        #expect(chipPosition < sheetPosition)
         #expect(sheet.contains(".defaultScrollAnchor(.top, for: .initialOffset)"))
         #expect(sheet.contains(".defaultScrollAnchor(.top, for: .alignment)"))
         #expect(navigationChrome.contains("navigationTitle(\"\")"))
         #expect(navigationChrome.contains(".navigationBarTitleDisplayMode(.inline)"))
-        #expect(transcript.matches(#"\.tronToolDetailNavigationChrome\(\)"#) == 2)
+        #expect(transcript.matches(#"\.tronToolDetailNavigationChrome\(\)"#) == 3)
         #expect(detailSheets.matches(#"\.tronToolDetailNavigationChrome\(\)"#) == 3)
         #expect(sheet.contains("title: \"Technical details\""))
         #expect(sheet.contains("ToolTechnicalDetailsSheet"))
@@ -1705,8 +1719,8 @@ struct PresentationStyleGuardTests {
             .components(separatedBy: "struct ToolRunView").first ?? ""
         let toolCardLabel = (toolCard.components(separatedBy: "var body: some View").dropFirst().first ?? "")
             .components(separatedBy: ".buttonStyle(.plain)").first ?? ""
-        let toolRunChip = (toolRuns.components(separatedBy: "private struct ToolRunChip").dropFirst().first ?? "")
-            .components(separatedBy: "private struct ToolElapsedText").first ?? ""
+        let toolRunChip = (toolRuns.components(separatedBy: "private struct ToolActivityChip").dropFirst().first ?? "")
+            .components(separatedBy: "private struct ToolRunDetailSheet").first ?? ""
         let toolRunLabel = (toolRunChip.components(separatedBy: "var body: some View").dropFirst().first ?? "")
             .components(separatedBy: ".buttonStyle(.plain)").first ?? ""
         let toolElapsed = (toolRuns.components(separatedBy: "private struct ToolElapsedText").dropFirst().first ?? "")
@@ -1716,7 +1730,8 @@ struct PresentationStyleGuardTests {
         #expect(transcriptEvents.contains("struct TranscriptNotice: View"))
         #expect(transcriptEvents.contains("struct ChatNotificationView: View"))
         #expect(toolRuns.contains("struct ToolRunView: View"))
-        #expect((transcriptEvents + toolRuns).components(separatedBy: "ChatCompactPillSurface(tone: tone, material: .glass").count - 1 >= 2)
+        #expect(toolCardLabel.contains("ChatCompactPillSurface(tone: tone, material: .glass"))
+        #expect(toolRunLabel.contains("ChatCompactPillSurface(tone: visual.tone, material: visual.material"))
         #expect(notification.contains("pill.frame(minWidth: 44, minHeight: 44)"))
         #expect(notification.contains(".frame(maxWidth: .infinity, minHeight: 44, alignment: .center)"))
         #expect(chat.contains("LazyVStack(alignment: .leading, spacing: 8)"))
@@ -1729,7 +1744,7 @@ struct PresentationStyleGuardTests {
         }
         #expect(!(transcriptEvents + toolRuns).contains("value: visualState"))
         #expect(!notification.contains(".contentTransition(.opacity)"))
-        #expect(!toolRuns.contains(".contentTransition(.opacity)"))
+        #expect(toolRuns.contains(".contentTransition(reduceMotion ? .opacity : .interpolate)"))
         #expect(chat.contains(".chatStableTranscriptUpdates()"))
         #expect(!toolRuns.contains("value: detailTool"))
         #expect(!toolRuns.contains("value: presentation)"))
@@ -1750,7 +1765,9 @@ struct PresentationStyleGuardTests {
         #expect(transcript.contains(".font(TronFont.body(12))"))
         #expect(transcript.contains(".foregroundStyle(Color.tronTextSecondary)"))
         #expect(transcript.contains(".italic()"))
-        #expect(toolRuns.contains("run.reverseChronologicalTools.map(\\.id)"))
+        #expect(toolRuns.contains("run.tools.reversed().map(\\.id)"))
+        #expect(toolRuns.contains("ChatToolChipTransitionState"))
+        #expect(toolRuns.contains("Task.sleep(for: .milliseconds(16))"))
         #expect(toolElapsed.contains("TimelineView(.periodic(from: .now, by: 0.1)"))
         #expect(toolRunElapsed.contains("TimelineView(.periodic(from: .now, by: 0.1)"))
         #expect(toolRuns.contains("private struct ToolElapsedClock"))

@@ -645,10 +645,9 @@ final class ChatTranscriptPresentationStore {
             return false
         }
 
-        if let installed, !installed.tag.matchesIdentity(of: tag) {
-            self.installed = nil
-            clearEntranceBookkeeping(keepingCapacity: true)
-        }
+        // Keep the last complete commit visible while this source is prepared.
+        // The replacement is admitted as one frame-gated install below; clearing
+        // here would expose a blank interval and let controls race ahead of rows.
         desiredTag = tag
         pending = PendingProjection(snapshot: snapshot, tag: tag, generation: generation)
         failWaiters(except: tag, error: .superseded)

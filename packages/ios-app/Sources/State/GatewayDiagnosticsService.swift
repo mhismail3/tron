@@ -32,6 +32,49 @@ struct GatewayProfileLogRecord: Hashable, Identifiable, Sendable {
     var id: String { "\(profileID):\(record.id)" }
 }
 
+struct IOSClientDiagnosticBuffer: Sendable {
+    static let maximumRecords = 200
+    private(set) var records: [GatewayProfileLogRecord] = []
+
+    mutating func record(
+        _ failure: GatewayFailure,
+        profileID: String?,
+        profileLabel: String?,
+        timestamp: String = Date.now.formatted(.iso8601)
+    ) {
+        guard failure.code == "invalid_response" else { return }
+        let ownerID = Self.boundedUTF8(profileID ?? "ios-client", maximumBytes: 256)
+        let ownerLabel = Self.boundedUTF8(
+            profileLabel.map { "\($0) · iOS client" } ?? "iOS client",
+            maximumBytes: 512
+        )
+        records.insert(GatewayProfileLogRecord(
+            profileID: "\(ownerID):ios-client",
+            profileLabel: ownerLabel,
+            record: GatewayLogRecord(
+                timestamp: Self.boundedUTF8(timestamp, maximumBytes: 128),
+                level: "error",
+                message: Self.boundedUTF8(failure.message, maximumBytes: 2_000),
+                event: "gateway.response.invalid",
+                source: "ios-client"
+            )
+        ), at: 0)
+        if records.count > Self.maximumRecords {
+            records.removeLast(records.count - Self.maximumRecords)
+        }
+    }
+
+    private static func boundedUTF8(_ value: String, maximumBytes: Int) -> String {
+        let bytes = Array(value.utf8)
+        guard bytes.count > maximumBytes else { return value }
+        let ellipsis = Array("…".utf8)
+        var end = max(0, maximumBytes - ellipsis.count)
+        while end > 0, String(bytes: bytes[..<end], encoding: .utf8) == nil { end -= 1 }
+        let prefix = String(bytes: bytes[..<end], encoding: .utf8) ?? ""
+        return prefix + "…"
+    }
+}
+
 typealias GatewayDiagnosticsRequest = @Sendable (String, JSONValue) async throws -> JSONValue
 
 struct GatewayDiagnosticsService: Sendable {

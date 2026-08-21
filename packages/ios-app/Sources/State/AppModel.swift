@@ -136,6 +136,8 @@ final class AppModel {
     private let customModelConfiguration: CustomModelConfigurationCoordinator
     let composerDrafts: ComposerDraftCoordinator
     let gatewayDiagnostics: GatewayDiagnosticsService
+    private var iosClientDiagnostics = IOSClientDiagnosticBuffer()
+    private var lastErrorDiagnosticMessage: String?
     let chatMedia: ChatMediaLoader
     private let chatMediaMemoryPressureObserver: ChatMediaMemoryPressureObserver
 
@@ -177,10 +179,14 @@ final class AppModel {
     private var sessionCatchUpNoticeTask: Task<Void, Never>?
     var latestNotice: String? { noticeStore.latest }
     var lastError: String?
+    var lastErrorHasLocalDiagnostic: Bool {
+        lastError != nil && lastError == lastErrorDiagnosticMessage
+    }
     var onboardingError: String?
     var context: JSONValue? { sessionPresentation.context }
     var sessionTree: [SessionTreeNode] { sessionPresentation.sessionTree }
     var loadingEarlierTranscript: Bool { sessionPresentation.loadingEarlierTranscript }
+    var transcriptLoadState: SessionTranscriptLoadState { sessionPresentation.transcriptLoadState }
     /// Foreground reconciliation is an aggregate install, not a live insertion
     /// stream; mounted chats use this fact to suppress entrance replay. The
     /// generation remains stable until its first aggregate projection installs,
@@ -1275,7 +1281,7 @@ final class AppModel {
 
     func loadGatewayLogs(limit: Int = 1_000) async -> [GatewayProfileLogRecord] {
         let profileSnapshot = profiles.profiles
-        var loaded: [GatewayProfileLogRecord] = []
+        var loaded = Array(iosClientDiagnostics.records.prefix(limit))
         for profile in profileSnapshot {
             do {
                 let records = try await gatewayLogs(for: profile.id, limit: limit)
@@ -1283,12 +1289,12 @@ final class AppModel {
                     GatewayProfileLogRecord(profileID: profile.id, profileLabel: profile.label, record: $0)
                 })
             } catch is CancellationError {
-                return loaded
+                return Array(loaded.sorted { $0.record.timestamp > $1.record.timestamp }.prefix(limit))
             } catch {
                 continue
             }
         }
-        return loaded.sorted { $0.record.timestamp > $1.record.timestamp }
+        return Array(loaded.sorted { $0.record.timestamp > $1.record.timestamp }.prefix(limit))
     }
 
     func loadAuthorizedDevices() async -> [GatewayAuthorizedDevice] {
@@ -1501,18 +1507,8 @@ final class AppModel {
         await sessionPresentation.close(target)
     }
 
-    func loadEarlierTranscript(sessionID: String, presentationGeneration: Int) async {
+    func loadEarlierTranscript(sessionID: String, presentationGeneration: Int) async -> SessionTranscriptLoadResult {
         await sessionPresentation.loadEarlier(
-            sessionID: sessionID,
-            presentationGeneration: presentationGeneration
-        )
-    }
-
-    func discardLoadedTranscriptHistory(
-        sessionID: String,
-        presentationGeneration: Int
-    ) {
-        sessionPresentation.discardLoadedTranscriptHistory(
             sessionID: sessionID,
             presentationGeneration: presentationGeneration
         )
@@ -1579,7 +1575,7 @@ final class AppModel {
         target: SessionPresentationTarget
     ) async throws {
         guard ownsPresentation(target) else { throw CancellationError() }
-        try await sessionMutations.prompt(
+        _ = try await sessionMutations.prompt(
             text,
             sessionID: target.sessionID,
             uploadIDs: [],
@@ -1626,9 +1622,9 @@ final class AppModel {
     }
 
     func clearQueue(sessionID: String) async throws -> SessionSnapshot.QueuedMessages {
-        let cleared = try await sessionMutations.clearQueue(sessionID: sessionID)
-        sessionPresentation.clearConfirmedQueue(sessionID: sessionID)
-        return cleared
+        // The confirmed response proves command completion, not the sequenced
+        // queue projection. Gateway snapshot/event authority clears the rows.
+        try await sessionMutations.clearQueue(sessionID: sessionID)
     }
 
     func replaceQueue(
@@ -2458,6 +2454,16 @@ final class AppModel {
 
     private func surface(_ error: Error) {
         guard Self.shouldSurface(error) else { return }
+        if let failure = error as? GatewayFailure, failure.code == "invalid_response" {
+            iosClientDiagnostics.record(
+                failure,
+                profileID: profiles.selected?.id,
+                profileLabel: profiles.selected?.label
+            )
+            lastErrorDiagnosticMessage = failure.localizedDescription
+        } else {
+            lastErrorDiagnosticMessage = nil
+        }
         lastError = error.localizedDescription
     }
 
@@ -2581,6 +2587,18 @@ extension AppModel: SessionPresentationStoreDelegate {
             async let commandRefresh: Void = self.loadCommands(sessionID: target.sessionID)
             _ = await (providerRefresh, commandRefresh)
         }
+    }
+
+    func sessionPresentationStoreDidPublishSnapshot(
+        _ snapshot: SessionSnapshot,
+        target: SessionPresentationTarget
+    ) {
+        guard snapshot.sessionId == target.sessionID else { return }
+        composerDrafts.reconcileSubmission(
+            target: target,
+            canonicalTranscript: snapshot.transcript,
+            queuedMessages: snapshot.displayedQueuedMessages
+        )
     }
 
     func sessionPresentationStorePostNotice(_ message: String, replacing key: GlobalNoticeKey?) {

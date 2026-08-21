@@ -77,7 +77,20 @@ struct GatewayUpdateControlPlaneTests {
             candidateIdentity: GatewayUpdateIdentity(version: "2026.01", gatewayVersion: nil, sourceRevision: nil, runtimeEpoch: nil, payloadFingerprint: nil),
             candidateAvailable: true, error: nil, updatedAt: "2026-01-01T00:00:00Z"
         )
-        #expect(available.presentationTitle == "Ready")
+        #expect(available.presentationTitle == "Update available")
+        let installed = GatewayUpdateStatus(
+            state: "ready", channel: "stable", currentIdentity: available.candidateIdentity,
+            candidateIdentity: nil, candidateAvailable: false, error: nil, updatedAt: "2026-01-01T00:00:01Z"
+        )
+        #expect(installed.presentationTitle == "Installed and running")
+        #expect(installed.isActive == false)
+        let draining = GatewayUpdateStatus(
+            state: "draining", channel: "stable", currentIdentity: installed.currentIdentity,
+            candidateIdentity: available.candidateIdentity, candidateAvailable: true,
+            error: nil, updatedAt: "2026-01-01T00:00:02Z", commandId: "command-draining"
+        )
+        #expect(draining.isActive)
+        #expect(draining.presentationTitle == "Draining")
         let failed = GatewayUpdateStatus(
             state: "failed", channel: "stable", currentIdentity: nil, candidateIdentity: available.candidateIdentity,
             candidateAvailable: true, error: "health check failed", updatedAt: nil,
@@ -130,6 +143,7 @@ struct GatewayUpdateControlPlaneTests {
         #expect(GatewayUpdateIntent.admitted(info: capableInfo, status: debug, config: config) == .debug(provenDebug))
         #expect(GatewayUpdateIntent.admitted(info: capableInfo, status: available, config: nil) == nil)
         #expect(GatewayUpdateIntent.admitted(info: capableInfo, status: available, config: config) == .source)
+        #expect(GatewayUpdateIntent.source.actionTitle == "Rebuild Gateway from Source")
         let unprovenDebug = GatewayUpdateStatus(
             state: "prepared", channel: "stable", currentIdentity: nil,
             candidateIdentity: available.candidateIdentity, candidateAvailable: true,

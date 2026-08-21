@@ -253,7 +253,7 @@ enum GatewayUpdateIntent: Identifiable, Equatable {
     var actionTitle: String {
         switch self {
         case .debug: return "Promote Debug Gateway to Stable"
-        case .source: return "Build and update Gateway from source"
+        case .source: return "Rebuild Gateway from Source"
         }
     }
 
@@ -546,13 +546,18 @@ struct GatewayConnectionDetailView: View {
     }
 
     private func gatewayUpdateStatusRow(_ updateStatus: GatewayUpdateStatus) -> some View {
-        let active = ["starting", "building", "staging", "draining", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].contains(updateStatus.state)
+        let active = updateStatus.isActive
+        let installed = updateStatus.state == "ready"
+            && !updateStatus.candidateAvailable
+            && updateStatus.error == nil
         let accent: Color = updateStatus.error == nil
             ? (active ? .tronAmber : .tronEmerald)
             : .tronError
         return TronValueRow(
-            icon: updateStatus.state == "rolled-back" ? "arrow.uturn.backward.circle" : "arrow.down.circle",
-            title: "Gateway Update · \(updateStatus.channel.capitalized)",
+            icon: installed
+                ? "checkmark.seal.fill"
+                : (updateStatus.state == "rolled-back" ? "arrow.uturn.backward.circle" : "arrow.down.circle"),
+            title: "Gateway Deployment · \(updateStatus.channel.capitalized)",
             value: acceptedOperationLabel ?? updateStatus.presentationTitle,
             accent: accent
         ) {
@@ -563,7 +568,7 @@ struct GatewayConnectionDetailView: View {
     }
 
     private func gatewayUpdateGroup(config: GatewayUpdateConfig?) -> some View {
-        TronSettingsGroup("Gateway Update", accent: .tronEmerald) {
+        TronSettingsGroup("Gateway Maintenance", accent: .tronEmerald) {
             TronValueRow(
                 icon: "folder",
                 title: "Source repository",
@@ -582,7 +587,6 @@ struct GatewayConnectionDetailView: View {
                     )
                     .disabled(updateIsActive)
             }
-            .padding(12)
         }
     }
 
@@ -610,14 +614,14 @@ struct GatewayConnectionDetailView: View {
         case .debug(let candidate):
             return (
                 "Promote Debug Gateway to Stable?",
-                "Promote exact version \(candidate.version) (fingerprint \(candidate.payloadFingerprint.prefix(12))) after accepted runs finish. Tron reconnects automatically.",
+                "Select exact version \(candidate.version) (fingerprint \(candidate.payloadFingerprint.prefix(12))). It activates when accepted runs finish and Tron restarts automatically.",
                 "Promote and restart"
             )
         case .source:
             return (
-                "Build and update Tron Gateway from source?",
-                "The configured Mac repository will be built into a new verified candidate and promoted after accepted runs finish. Tron reconnects automatically.",
-                "Build and update from source"
+                "Rebuild Tron Gateway from source?",
+                "This is an on-demand maintenance rebuild, not a pending-update warning. Tron builds and selects a verified candidate, then activates it when accepted runs finish and the Gateway restarts automatically.",
+                "Rebuild from source"
             )
         }
     }
@@ -634,7 +638,7 @@ struct GatewayConnectionDetailView: View {
     }
 
     private var updateIsActive: Bool {
-        activeUpdateCommandID != nil || ["starting", "building", "staging", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].contains(updateStatus?.state)
+        activeUpdateCommandID != nil || updateStatus?.isActive == true
     }
 
     private var detailLoadIdentity: String {
@@ -663,7 +667,16 @@ struct GatewayConnectionDetailView: View {
             return
         }
         updateConfig = await model.loadGatewayUpdateConfig(for: currentProfile)
-        updateStatus = await model.loadGatewayUpdateStatus(for: currentProfile)
+        let loadedStatus = await model.loadGatewayUpdateStatus(for: currentProfile)
+        updateStatus = loadedStatus
+        if activeUpdateCommandID == nil,
+           loadedStatus?.isActive == true,
+           let commandID = loadedStatus?.commandId {
+            // A sheet reopened during an accepted update adopts its bounded
+            // command identity and resumes polling replacement truth.
+            activeUpdateCommandID = commandID
+            acceptedOperationLabel = nil
+        }
     }
 
     private func pollGatewayUpdate() async {

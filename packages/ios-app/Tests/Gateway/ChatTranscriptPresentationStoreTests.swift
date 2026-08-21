@@ -328,6 +328,45 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("previous installed projection remains visible until replacement installs")
+    func retainsPreviousInstalledProjectionDuringReplacement() async throws {
+        try await withTestWatchdog { @MainActor in
+            let first = try SessionScenarioBuilder(seed: 1_225)
+                .openingTail(targetEncodedBytes: 8_000)
+            var replacement = first
+            replacement.runtimeGeneration = "runtime-replacement"
+            replacement.revision &+= 1
+            replacement.eventSequence &+= 1
+            let firstTag = ChatTranscriptProjectionTag(
+                snapshot: first,
+                presentationGeneration: 24
+            )
+            let replacementTag = ChatTranscriptProjectionTag(
+                snapshot: replacement,
+                presentationGeneration: 25
+            )
+            let frames = ManualProjectionFrameScheduler()
+            let store = ChatTranscriptPresentationStore(
+                installationFrameScheduler: frames.scheduler
+            )
+
+            store.submit(snapshot: first, tag: firstTag)
+            try await store.hostedWaitForCompletedProjection(of: firstTag)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            _ = try await store.waitForInstall(of: firstTag)
+
+            store.submit(snapshot: replacement, tag: replacementTag)
+            try await store.hostedWaitForCompletedProjection(of: replacementTag)
+            await frames.waitForRequest(count: 2)
+            #expect(store.installed?.tag == firstTag)
+
+            frames.releaseNext()
+            _ = try await store.waitForInstall(of: replacementTag)
+            #expect(store.installed?.tag == replacementTag)
+        }
+    }
+
     @Test("two completed projections before one frame publish only the newest")
     func newestCompletedProjectionWinsFrameRace() async throws {
         try await withTestWatchdog { @MainActor in
@@ -554,8 +593,8 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(store.entranceState(for: rowID) == .admitted)
 
             let completedInstall = try await store.waitForInstall(of: completedTag)
-            #expect(completedInstall.containsDisplayedID(rowID))
-            #expect(store.entranceState(for: rowID) == .admitted)
+            #expect(!completedInstall.containsDisplayedID(rowID))
+            #expect(store.entranceState(for: rowID) == .none)
         }
     }
 
@@ -611,12 +650,12 @@ struct ChatTranscriptPresentationStoreTests {
                 installationTag: runningTag,
                 isVisible: true
             ))
-            #expect(store.resolveEntrance(
+            #expect(!store.resolveEntrance(
                 id: rowID,
                 installationTag: completedTag,
                 isVisible: true
             ))
-            #expect(store.entranceState(for: rowID) == .admitted)
+            #expect(store.entranceState(for: rowID) == .none)
         }
     }
 

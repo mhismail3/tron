@@ -98,8 +98,46 @@ struct ChatTranscriptPresentationTests {
             extensionOrigin: ExtensionToolOrigin(source: "public-source")
         ))
         let run = ChatToolRunPresentation(tools: [descriptor])
-        #expect(run.isExtensionActivity)
-        #expect(run.title == "Extension activity")
+        #expect(run.title == "subtask")
+        #expect(!run.title.contains("Extension activity"))
+    }
+
+    @Test("finalized invocation groups keep complete membership and stable identity")
+    func finalizedInvocationGroupIdentity() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant-tools","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","presentationId":"stream:turn","content":[
+            {"id":"stream:turn:0","ordinal":0,"type":"toolCall","toolCallId":"a","name":"read","arguments":{},"groupId":"stream:turn:tool-group:0","groupIndex":0,"groupCount":3,"groupFinalized":true},
+            {"id":"stream:turn:1","ordinal":1,"type":"toolCall","toolCallId":"b","name":"bash","arguments":{},"groupId":"stream:turn:tool-group:0","groupIndex":1,"groupCount":3,"groupFinalized":true},
+            {"id":"stream:turn:2","ordinal":2,"type":"toolCall","toolCallId":"c","name":"edit","arguments":{},"groupId":"stream:turn:tool-group:0","groupIndex":2,"groupCount":3,"groupFinalized":true}
+          ]}
+        ]
+        """)
+        snapshot.phase = .running
+        snapshot.toolExecutions = [
+            tool("a", "read", startedAt: "2026-01-01T00:00:01Z", order: 0, groupId: "stream:turn:tool-group:0", groupIndex: 0, groupCount: 3),
+            tool("b", "bash", startedAt: "2026-01-01T00:00:01Z", order: 1, groupId: "stream:turn:tool-group:0", groupIndex: 1, groupCount: 3),
+            tool("c", "edit", startedAt: "2026-01-01T00:00:01Z", order: 2, groupId: "stream:turn:tool-group:0", groupIndex: 2, groupCount: 3),
+        ]
+
+        guard case .toolRun(let running) = ChatTranscriptPresentation.timeline(in: snapshot).items.first else {
+            Issue.record("Expected finalized tool group")
+            return
+        }
+        #expect(running.id == "tool-run-stream:turn:tool-group:0")
+        #expect(running.tools.map(\.id) == ["a", "b", "c"])
+        #expect(running.title == "Using 3 tools")
+
+        snapshot.toolExecutions = snapshot.toolExecutions.map {
+            tool($0.toolCallId, $0.toolName, status: .completed, startedAt: $0.startedAt,
+                 order: $0.order, groupId: $0.groupId, groupIndex: $0.groupIndex, groupCount: $0.groupCount)
+        }
+        guard case .toolRun(let completed) = ChatTranscriptPresentation.timeline(in: snapshot).items.first else {
+            Issue.record("Expected completed tool group")
+            return
+        }
+        #expect(completed.id == running.id)
+        #expect(completed.title == "Used 3 tools")
     }
 
     @Test("composer pills keep only live extension work while Manage Session retains history")
@@ -797,6 +835,11 @@ struct ChatTranscriptPresentationTests {
             runtimeGeneration: "runtime-a", transcriptStart: 40,
             transcriptTotal: 48, firstTranscriptID: "entry-40"
         ))
+        #expect(request.canInstall(
+            sessionID: "session-a", presentationGeneration: 7,
+            runtimeGeneration: "runtime-a", transcriptStart: 40,
+            transcriptTotal: nil, firstTranscriptID: "entry-40"
+        ))
         #expect(!request.canInstall(
             sessionID: "session-a", presentationGeneration: 8,
             runtimeGeneration: "runtime-a", transcriptStart: 40,
@@ -1270,6 +1313,64 @@ struct ChatTranscriptPresentationTests {
         #expect(timeline.renderedIDBySemanticID["call-2"] == run.id)
     }
 
+    @Test("finalized tool-only groups coalesce across canonical results")
+    func finalizedToolOnlyGroupsCoalesce() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"a","ordinal":0,"type":"toolCall","toolCallId":"a","name":"read","arguments":{},"groupId":"group-1","groupIndex":0,"groupCount":2,"groupFinalized":true},
+            {"id":"b","ordinal":1,"type":"toolCall","toolCallId":"b","name":"bash","arguments":{},"groupId":"group-1","groupIndex":1,"groupCount":2,"groupFinalized":true}
+          ]},
+          {"id":"result-a","parentId":"assistant-1","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"ra","ordinal":0,"type":"text","text":"a"}],"toolCallId":"a","toolName":"read","isError":false},
+          {"id":"result-b","parentId":"result-a","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"rb","ordinal":0,"type":"text","text":"b"}],"toolCallId":"b","toolName":"bash","isError":false},
+          {"id":"assistant-2","parentId":"result-b","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[
+            {"id":"c","ordinal":0,"type":"toolCall","toolCallId":"c","name":"edit","arguments":{},"groupId":"group-2","groupIndex":0,"groupCount":1,"groupFinalized":true}
+          ]},
+          {"id":"result-c","parentId":"assistant-2","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"toolResult","content":[{"id":"rc","ordinal":0,"type":"text","text":"c"}],"toolCallId":"c","toolName":"edit","isError":false}
+        ]
+        """)
+
+        let runs = ChatTranscriptPresentation.timeline(in: snapshot).items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }
+        #expect(runs.count == 1)
+        #expect(runs.first?.tools.map(\.id) == ["a", "b", "c"])
+        #expect(runs.first?.anchorID == "group-1")
+        #expect(runs.first?.title == "Used 3 tools")
+    }
+
+    @Test("visible thinking is a hard barrier between finalized tool groups")
+    func thinkingSeparatesFinalizedToolGroups() throws {
+        let snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant-1","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"a","ordinal":0,"type":"toolCall","toolCallId":"a","name":"read","arguments":{},"groupId":"group-1","groupIndex":0,"groupCount":1,"groupFinalized":true}
+          ]},
+          {"id":"result-a","parentId":"assistant-1","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"ra","ordinal":0,"type":"text","text":"a"}],"toolCallId":"a","toolName":"read","isError":false},
+          {"id":"assistant-2","parentId":"result-a","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[
+            {"id":"thinking","ordinal":0,"thinkingRunOrdinal":0,"type":"thinking","text":"Planning the edit"},
+            {"id":"b","ordinal":1,"type":"toolCall","toolCallId":"b","name":"edit","arguments":{},"groupId":"group-2","groupIndex":0,"groupCount":1,"groupFinalized":true}
+          ]},
+          {"id":"result-b","parentId":"assistant-2","timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"toolResult","content":[{"id":"rb","ordinal":0,"type":"text","text":"b"}],"toolCallId":"b","toolName":"edit","isError":false}
+        ]
+        """)
+
+        let timeline = ChatTranscriptPresentation.timeline(in: snapshot)
+        let runs = timeline.items.compactMap { item -> ChatToolRunPresentation? in
+            guard case .toolRun(let run) = item else { return nil }
+            return run
+        }
+        #expect(runs.map { $0.tools.map(\.id) } == [["a"], ["b"]])
+        #expect(timeline.items.contains { item in
+            guard case .message(let message) = item else { return false }
+            return message.parts.contains { part in
+                guard case .thinking = part else { return false }
+                return true
+            }
+        })
+    }
+
     @Test("semantic tool anchor survives page-boundary regrouping when the outer row changes")
     func semanticAnchorSurvivesPageBoundaryRegrouping() throws {
         let current = try fixture(transcript: """
@@ -1481,7 +1582,13 @@ struct ChatTranscriptPresentationTests {
 
     @Test("explicit empty tool output never falls back to duplicated request content")
     func explicitEmptyToolOutputPreservesDetailParity() throws {
-        var snapshot = try fixture(transcript: "[]")
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"call","ordinal":0,"type":"toolCall","toolCallId":"empty-output","name":"read","arguments":{}}
+          ]}
+        ]
+        """)
         snapshot.phase = .running
         snapshot.toolExecutions = [
             tool(
@@ -1658,7 +1765,7 @@ struct ChatTranscriptPresentationTests {
             Issue.record("Expected retained tool run")
             return
         }
-        #expect(run.title == "Used 1 tool")
+        #expect(run.title == "Subagent Wait")
         #expect(!run.isRunning)
         #expect(run.tools.first?.subtitle == "Interrupted")
     }
@@ -1808,7 +1915,10 @@ struct ChatTranscriptPresentationTests {
         status: ToolExecutionState.Status = .running,
         startedAt: String,
         order: Int? = nil,
-        output: String? = nil
+        output: String? = nil,
+        groupId: String? = nil,
+        groupIndex: Int? = nil,
+        groupCount: Int? = nil
     ) -> ToolExecutionState {
         ToolExecutionState(
             toolCallId: id,
@@ -1825,7 +1935,11 @@ struct ChatTranscriptPresentationTests {
             lastProgressAt: startedAt,
             completedAt: status == .running ? nil : startedAt,
             durationMs: status == .running ? nil : 0,
-            progressSequence: 1
+            progressSequence: 1,
+            groupId: groupId,
+            groupIndex: groupIndex,
+            groupCount: groupCount,
+            groupFinalized: groupId == nil ? nil : true
         )
     }
 

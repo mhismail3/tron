@@ -119,6 +119,73 @@ struct ExtensionWidgetGroup: Identifiable, Hashable, Sendable {
     var hasLiveContent: Bool { !items.isEmpty || !statuses.isEmpty || liveActivityCount > 0 }
 }
 
+/// The compact composer affordance is deliberately a typed projection. It
+/// never exposes opaque widget payloads to the animation/render path.
+struct ExtensionActivityPillVisualState: Hashable, Sendable {
+    let ownerID: String
+    let title: String
+    let detail: String
+    let symbol: String
+    let tone: ChatNotificationTone
+    let count: Int
+    let showsProgress: Bool
+    let accessibilityLabel: String
+}
+
+enum ExtensionActivityPillPolicy {
+    static func state(for group: ExtensionWidgetGroup) -> ExtensionActivityPillVisualState {
+        let activities = group.activities
+        let attention = activities.contains { $0.lifecycle?.attention == .needsAttention }
+        let failed = activities.contains { $0.lifecycle?.state == .failed || ($0.lifecycle == nil && $0.status == .failed) }
+        let rejected = activities.contains { $0.lifecycle?.state == .rejected }
+        let paused = activities.contains { $0.lifecycle?.state == .paused }
+        let queued = activities.contains { $0.lifecycle?.state == .queued }
+        let running = activities.filter {
+            $0.lifecycle?.state == .running || ($0.lifecycle == nil && $0.status == .running)
+        }.count + group.services.filter { $0.status == "Running" }.count
+        let stopped = activities.contains { $0.lifecycle?.state == .stopped }
+        let state: String
+        let symbol: String
+        let tone: ChatNotificationTone
+        if attention {
+            state = "Needs attention"; symbol = "exclamationmark.triangle.fill"; tone = .warning
+        } else if failed {
+            state = "Failed"; symbol = "xmark.circle.fill"; tone = .error
+        } else if rejected {
+            state = "Rejected"; symbol = "nosign"; tone = .error
+        } else if paused {
+            state = "Paused"; symbol = "pause.circle.fill"; tone = .warning
+        } else if running > 0 {
+            state = "\(running) running"; symbol = "circle.dotted"; tone = .warning
+        } else if queued {
+            state = "Queued"; symbol = "clock"; tone = .warning
+        } else if stopped {
+            state = "Stopped"; symbol = "stop.circle.fill"; tone = .warning
+        } else {
+            state = "Recently completed"; symbol = "checkmark.circle.fill"; tone = .accent
+        }
+        let count = max(1, activities.count + group.services.count + group.items.count + group.statuses.count)
+        let accessible = "Extension \(group.label), \(state), \(count) \(count == 1 ? "item" : "items")"
+        return ExtensionActivityPillVisualState(
+            ownerID: group.id,
+            title: group.label,
+            detail: state,
+            symbol: symbol,
+            tone: tone,
+            count: count,
+            showsProgress: running > 0,
+            accessibilityLabel: accessible
+        )
+    }
+
+    /// Composer chrome is owner-only. Unknown or source-fallback groups remain
+    /// available in the hub but can never produce a second ambiguous pill.
+    static func composerGroups(_ groups: [ExtensionWidgetGroup]) -> [ExtensionWidgetGroup] {
+        var seen = Set<String>()
+        return groups.filter { $0.id.hasPrefix("owner:") && seen.insert($0.id).inserted }
+    }
+}
+
 enum ChatExtensionWidgetPolicy {
     static let maximumStackHeight: CGFloat = 220
     static let maximumStatuses = 16
@@ -260,7 +327,9 @@ enum ChatExtensionWidgetPolicy {
         }
 
         for activity in admittedActivities {
-            let owner = ownerBySource[activity.source.source]
+            // Exact opaque owner identity always wins; source is only the
+            // compatibility fallback when the owner inventory is unique.
+            let owner = activity.source.owner ?? ownerBySource[activity.source.source]
             let groupID = owner.map(ownerID) ?? "source:\(activity.source.source)"
             let isLocalSubagent = activity.source.source == "local"
             let fallbackLabel = isLocalSubagent ? "Pi Subagents" : humanizedSource(activity.source.source)
@@ -309,20 +378,21 @@ enum ChatExtensionWidgetPolicy {
         executions: [ToolExecutionState] = [],
         activities: [ExtensionRunActivity] = []
     ) -> [ExtensionWidgetGroup] {
-        groups(presentation, executions: executions, activities: activities).compactMap { group in
-            let liveActivities = group.activities.filter(\.isLive)
+        let inventory = presentation.semanticState.widgets.compactMap(\.owner)
+            + Array(presentation.semanticState.statusOwners.values)
+        return groups(presentation, executions: executions, activities: activities).compactMap { group in
+            // Ambient admission is lifecycle-only. Statuses, widgets, and
+            // service tools enrich a qualifying run but never create a pill.
+            let admittedActivities = group.activities.filter { activity in
+                ExtensionActivityAdmissionPolicy.admits(activity)
+                    && ExtensionActivityVisibilityPolicy.ambient(activity)
+                    && ExtensionActivityGroupProjection.owner(for: activity, inventory: inventory) != nil
+            }
+            guard !admittedActivities.isEmpty else { return nil }
             let liveServices = group.services.filter { $0.status == "Running" }
-            // A structured activity owns the live presentation for its exact
-            // provenance group. Do not let the retained opaque widget surface
-            // reappear when the activity settles; that was the source of the
-            // raw `async subagent … background` fallback returning after the
-            // native sheet disappeared. Manage Session still receives the
-            // complete group, including finished activities and any surface.
-            let liveItems = group.activities.isEmpty ? group.items : []
-            guard !liveItems.isEmpty || !group.statuses.isEmpty || !liveActivities.isEmpty || !liveServices.isEmpty else { return nil }
             return ExtensionWidgetGroup(
-                id: group.id, label: group.label, items: liveItems, statuses: group.statuses,
-                services: liveServices, activities: liveActivities
+                id: group.id, label: group.label, items: group.items, statuses: group.statuses,
+                services: liveServices, activities: admittedActivities
             )
         }
     }
@@ -672,7 +742,7 @@ struct ChatTranscriptPageRequest: Equatable {
             && self.presentationGeneration == presentationGeneration
             && self.runtimeGeneration == runtimeGeneration
             && transcriptStart == before
-            && transcriptTotal == expectedTotal
+            && (transcriptTotal == nil || transcriptTotal == expectedTotal)
             && firstTranscriptID == expectedNextEntryID
     }
 
@@ -748,6 +818,10 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
     let progressSequence: Int?
     let outputTruncated: Bool
     let extensionOrigin: ExtensionToolOrigin?
+    let groupId: String?
+    let groupIndex: Int?
+    let groupCount: Int?
+    let groupFinalized: Bool?
 
     init(_ tool: ChatToolPresentation) {
         id = tool.id
@@ -761,6 +835,10 @@ struct ChatToolDescriptor: Hashable, Identifiable, Sendable {
         progressSequence = tool.progressSequence
         outputTruncated = tool.outputTruncated
         extensionOrigin = tool.extensionOrigin
+        groupId = tool.groupId
+        groupIndex = tool.groupIndex
+        groupCount = tool.groupCount
+        groupFinalized = tool.groupFinalized
     }
 
     var isRunning: Bool { subtitle == "Running" || subtitle == "Invocation" }
@@ -823,6 +901,10 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
     let progressSequence: Int?
     let outputTruncated: Bool
     let extensionOrigin: ExtensionToolOrigin?
+    let groupId: String?
+    let groupIndex: Int?
+    let groupCount: Int?
+    let groupFinalized: Bool?
 
     init(
         id: String,
@@ -839,7 +921,11 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         lastProgressAt: String?,
         progressSequence: Int?,
         outputTruncated: Bool = false,
-        extensionOrigin: ExtensionToolOrigin? = nil
+        extensionOrigin: ExtensionToolOrigin? = nil,
+        groupId: String? = nil,
+        groupIndex: Int? = nil,
+        groupCount: Int? = nil,
+        groupFinalized: Bool? = nil
     ) {
         self.id = id
         self.title = title
@@ -856,6 +942,10 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         self.progressSequence = progressSequence
         self.outputTruncated = outputTruncated || response?.hasToolOutputTruncationMetadata == true
         self.extensionOrigin = extensionOrigin
+        self.groupId = groupId
+        self.groupIndex = groupIndex
+        self.groupCount = groupCount
+        self.groupFinalized = groupFinalized
     }
 
     init(descriptor: ChatToolDescriptor, payload: ChatToolPayload) {
@@ -874,6 +964,10 @@ struct ChatToolPresentation: Hashable, Identifiable, Sendable {
         progressSequence = descriptor.progressSequence
         outputTruncated = descriptor.outputTruncated
         extensionOrigin = descriptor.extensionOrigin
+        groupId = descriptor.groupId
+        groupIndex = descriptor.groupIndex
+        groupCount = descriptor.groupCount
+        groupFinalized = descriptor.groupFinalized
     }
 
     var descriptor: ChatToolDescriptor { ChatToolDescriptor(self) }
@@ -1163,9 +1257,11 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
 
     init(tools: [ChatToolDescriptor], anchorID: String? = nil) {
         self.tools = tools
-        // Callers provide canonical content order or the runtime's monotonic
-        // ordinal order. Opaque call IDs are not sortable order keys.
-        self.anchorID = anchorID ?? tools.first?.id ?? "empty"
+        // Finalized Gateway group identity is stable before execution starts
+        // and survives live-to-canonical settlement. Legacy rows retain their
+        // first call only when no finalized group metadata exists.
+        self.anchorID = anchorID ?? tools.first(where: { $0.groupFinalized == true })?.groupId
+            ?? tools.first?.id ?? "empty"
     }
 
     init(tools: [ChatToolPresentation], anchorID: String? = nil) {
@@ -1177,12 +1273,29 @@ struct ChatToolRunPresentation: Hashable, Identifiable, Sendable {
     var reverseChronologicalTools: [ChatToolDescriptor] {
         ChatToolInvocationOrdering.reverseChronological(tools)
     }
-    var isExtensionActivity: Bool { !tools.isEmpty && tools.allSatisfy { $0.extensionOrigin != nil } }
-    var isRunning: Bool { tools.contains(where: \.isRunning) }
+    var groupIDs: [String] {
+        var seen = Set<String>()
+        return tools.compactMap(\.groupId).filter { seen.insert($0).inserted }
+    }
+    var displayCount: Int {
+        var countByGroup: [String: Int] = [:]
+        var ungrouped = 0
+        for tool in tools {
+            if let groupId = tool.groupId, tool.groupFinalized == true {
+                countByGroup[groupId] = max(countByGroup[groupId] ?? 0, tool.groupCount ?? 0)
+            } else {
+                ungrouped += 1
+            }
+        }
+        return max(tools.count, ungrouped + countByGroup.values.reduce(0, +))
+    }
+    var isRunning: Bool { displayCount > tools.count || tools.contains(where: \.isRunning) }
     var failureCount: Int { tools.filter(\.error).count }
     var title: String {
-        if isExtensionActivity { return isRunning ? "Extension activity" : "Extension activity complete" }
-        return "\(isRunning ? "Using" : "Used") \(tools.count) \(tools.count == 1 ? "tool" : "tools")"
+        if displayCount == 1, let tool = tools.first {
+            return ToolDetailPresentation.displayTitle(for: tool.title)
+        }
+        return "\(isRunning ? "Using" : "Used") \(displayCount) tools"
     }
     var status: String? {
         if failureCount > 0 { return "\(failureCount) failed" }

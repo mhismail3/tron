@@ -124,10 +124,23 @@ extension ChatContentEntranceTransform.Anchor {
 /// replay an opacity or layout animation over content that is already visible.
 /// Insertions still animate through `ChatTranscriptEntranceRow`; this modifier
 /// only makes updates to an installed row transaction-stable.
+private enum ChatToolChipAnimationTransactionKey: TransactionKey {
+    static let defaultValue = false
+}
+
+extension Transaction {
+    var admitsChatToolChipAnimation: Bool {
+        get { self[ChatToolChipAnimationTransactionKey.self] }
+        set { self[ChatToolChipAnimationTransactionKey.self] = newValue }
+    }
+}
+
 private struct ChatStableTranscriptUpdateModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.transaction { transaction in
-            transaction.animation = nil
+            if !transaction.admitsChatToolChipAnimation {
+                transaction.animation = nil
+            }
         }
     }
 }

@@ -25,6 +25,20 @@ struct SessionSnapshotEventAdmissionTests {
         #expect(admission(current: current, incoming: gap) == .resynchronize(current.sessionId))
     }
 
+    @Test("older live activity revisions cannot resurrect a delayed projection")
+    func staleLiveActivityProjection() throws {
+        let current = try SessionScenarioBuilder(seed: 53).openingTail(targetEncodedBytes: 8_192)
+        var installed = current
+        installed.eventSequence += 1
+        installed.liveActivityRevision = 4
+        installed.extensionActivityAsOf = "2026-01-01T00:00:04Z"
+        var stale = installed
+        stale.eventSequence += 1
+        stale.liveActivityRevision = 3
+        stale.extensionActivityAsOf = "2026-01-01T00:00:03Z"
+        #expect(admission(current: installed, incoming: stale) == .ignore)
+    }
+
     @Test("missing baselines, runtime replacement, and route-payload mismatch require authority")
     func authorityBoundaries() throws {
         let current = try SessionScenarioBuilder(seed: 52).openingTail(targetEncodedBytes: 8_192)

@@ -161,6 +161,70 @@ struct GatewayClientTransportTests {
         }
     }
 
+    @Test("typed response decoding reports the RPC method and sanitized missing-key path")
+    func typedResponseDecodeDiagnostics() async throws {
+        struct Response: Decodable {
+            struct Session: Decodable {
+                struct Stats: Decodable { let tokens: Int }
+                let stats: Stats
+            }
+            let session: Session
+        }
+
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+        await socket.enqueue(helloFrame())
+        _ = try await client.connect(profile: profile, token: "token")
+
+        let request = Task {
+            try await client.request("session.open", EmptyParams(), as: Response.self)
+        }
+        defer { request.cancel() }
+        try await socket.waitUntilSent(count: 2)
+        let sent = try await decodedValue(in: socket, index: 1)
+        let requestID = try #require(sent.objectValue?["id"]?.stringValue)
+        await socket.enqueue(responseFrame(
+            id: requestID,
+            result: .object(["session": .object(["stats": .object([:])])])
+        ))
+
+        do {
+            _ = try await valueOfOwnedTask(request)
+            Issue.record("malformed typed response unexpectedly decoded")
+        } catch let failure as GatewayFailure {
+            #expect(failure.code == "invalid_response")
+            #expect(failure.retryable == false)
+            #expect(failure.message.contains("session.open"))
+            #expect(failure.message.contains("session.stats.tokens"))
+            #expect(failure.message.contains("View Logs"))
+            #expect(failure.details?.objectValue?["category"] == .string("missing_required_data"))
+            #expect(failure.details?.objectValue?["codingPath"] == .string("session.stats.tokens"))
+        }
+        await client.close()
+    }
+
+    @Test("typed response diagnostics redact response-owned dictionary keys")
+    func typedResponseDecodeDiagnosticsRedactDynamicKeys() throws {
+        struct Response: Decodable {
+            struct Session: Decodable { let required: Int }
+            let sessions: [String: Session]
+        }
+        let sensitiveKey = "01a0228a-secret-provider-value"
+        let value = JSONValue.object([
+            "sessions": .object([sensitiveKey: .object([:])]),
+        ])
+
+        do {
+            _ = try GatewayResponseDecoding.decode(value, as: Response.self, method: "session.open")
+            Issue.record("malformed dictionary response unexpectedly decoded")
+        } catch let failure as GatewayFailure {
+            let path = try #require(failure.details?.objectValue?["codingPath"]?.stringValue)
+            #expect(path == "sessions.<redacted>.required")
+            #expect(!failure.message.contains(sensitiveKey))
+            #expect(!path.contains(sensitiveKey))
+        }
+    }
+
     @Test("canonical file preview identities route only valid upload UUIDs")
     func canonicalFilePreviewRoutes() {
         #expect(GatewayClient.mediaPath(id: "blob-value") == "/v1/blobs/blob-value")

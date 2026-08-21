@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectExtensionRunActivity } from "./extension-run-projection.js";
+import { boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasStructuredExtensionRunActivity, projectExtensionRunActivity } from "./extension-run-projection.js";
 
 const base = {
   id: "tool-call",
@@ -12,6 +12,63 @@ const base = {
 };
 
 describe("projectExtensionRunActivity", () => {
+  it("admits only explicit delegated-run conventions for ambient activity", () => {
+    expect(hasStructuredExtensionRunActivity(undefined)).toBe(false);
+    expect(hasStructuredExtensionRunActivity({ content: [{ type: "text", text: "ordinary tool output" }] })).toBe(false);
+    expect(hasStructuredExtensionRunActivity({ details: { mode: "management", results: [] } })).toBe(false);
+    expect(hasStructuredExtensionRunActivity({ details: { results: [{ status: "completed", output: "ordinary result" }] } })).toBe(false);
+    expect(hasStructuredExtensionRunActivity({ details: { asyncId: "run-1", results: [] } })).toBe(true);
+    expect(hasStructuredExtensionRunActivity({ details: { results: [{ runId: "run-1", status: "running" }] } })).toBe(true);
+    expect(hasStructuredExtensionRunActivity({ lifecycleArtifactVersion: 3, runId: "run-2" })).toBe(true);
+  });
+
+  it("keeps detached async launch receipts current until lifecycle termination", () => {
+    const receipt = { details: { runId: "run-1", asyncId: "run-1", asyncDir: "/tmp/run-1", results: [] } };
+    expect(extensionActivityStatusFromTool(receipt, "completed")).toEqual({
+      status: "running",
+      terminal: false,
+      reportedTerminal: false,
+    });
+    expect(extensionActivityStatusFromTool({ details: { ...receipt.details, state: "completed" } }, "completed")).toEqual({
+      status: "completed",
+      terminal: true,
+      reportedTerminal: true,
+    });
+    expect(extensionActivityStatusFromTool({ details: { state: "running" } }, "completed")).toEqual({
+      status: "running",
+      terminal: false,
+      reportedTerminal: false,
+    });
+  });
+
+  it("admits rich lifecycle states without collapsing rejection or pause", () => {
+    expect(extensionLifecycleState("paused")).toBe("paused");
+    expect(extensionLifecycleState("rejected")).toBe("rejected");
+    expect(extensionLifecycleState("future-state")).toBe("unknown");
+    const activity = projectExtensionRunActivity({ details: { state: "rejected", attention: "needsAttention" } }, {
+      ...base, status: "completed", completedAt: "2026-01-01T00:00:03.000Z", sequence: 4, observedAt: "2026-01-01T00:00:03.000Z", terminalAt: "2026-01-01T00:00:03.000Z",
+    });
+    expect(activity.lifecycle).toMatchObject({ state: "rejected", attention: "needsAttention", sequence: 4 });
+  });
+
+  it("uses aggregate progress before the first child", () => {
+    const activity = projectExtensionRunActivity({ details: { toolCount: 9, results: [{ progress: { toolCount: 1 } }] } }, base);
+    expect(activity.toolCount).toBe(9);
+  });
+
+  it("applies an explicit count and encoded-byte bound", () => {
+    const activities = Array.from({ length: 40 }, (_, index) => ({ ...projectExtensionRunActivity(undefined, { ...base, id: `tool-${index}`, toolCallId: `tool-${index}` }), output: "x".repeat(1_000) }));
+    const bounded = boundExtensionActivities(activities);
+    expect(bounded.activities.length).toBeLessThanOrEqual(32);
+    expect(bounded.omittedCount).toBeGreaterThan(0);
+  });
+
+  it("protects queued/running/paused activities ahead of recent terminals", () => {
+    const recent = projectExtensionRunActivity({ state: "completed" }, { ...base, id: "recent", toolCallId: "recent", status: "completed" });
+    const active = projectExtensionRunActivity({ state: "running" }, { ...base, id: "active", toolCallId: "active" });
+    const bounded = boundExtensionActivities([recent, active]);
+    expect(bounded.activities.map((item) => item.toolCallId)).toEqual(["active", "recent"]);
+  });
   it("projects structured child progress without exposing runner paths", () => {
     const activity = projectExtensionRunActivity({
       details: {

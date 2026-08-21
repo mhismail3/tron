@@ -220,6 +220,49 @@ struct ChatCompactPillTests {
         #expect(ChatCompactPillLayoutPolicy.toolIconSize == 11)
     }
 
+    @Test("tool chip visual state excludes timing and provenance payload churn")
+    func toolChipStructuralState() {
+        func run(duration: Int, origin: ExtensionToolOrigin?) -> ChatToolRunPresentation {
+            ChatToolRunPresentation(tools: [ChatToolPresentation(
+                id: "call", title: "subagent", subtitle: "Running",
+                request: nil, response: nil, content: "", fallbackContent: nil,
+                error: false, startedAt: "2026-01-01T00:00:00Z", completedAt: nil,
+                durationMs: duration, lastProgressAt: nil, progressSequence: duration,
+                extensionOrigin: origin,
+                groupId: "stream:turn:tool-group:0", groupIndex: 0,
+                groupCount: 1, groupFinalized: true
+            )])
+        }
+        let first = ChatCompactPillVisualState.toolRun(run(duration: 10, origin: nil))
+        let updated = ChatCompactPillVisualState.toolRun(run(
+            duration: 900,
+            origin: ExtensionToolOrigin(source: "extension-source")
+        ))
+        #expect(first == updated)
+        #expect(first.title == "subagent")
+        #expect(!first.title.contains("Extension activity"))
+    }
+
+    @Test("tool chip transitions admit only the latest target token")
+    func toolChipLatestTarget() {
+        var transition = ChatToolChipTransitionState()
+        let first = ChatCompactPillVisualState(
+            id: "run", title: "Using 2 tools", detail: "in progress",
+            icon: "square.stack.3d.up", tone: .warning, material: .glass,
+            showsProgress: true, count: 2
+        )
+        let final = ChatCompactPillVisualState(
+            id: "run", title: "Used 2 tools", detail: nil,
+            icon: "square.stack.3d.up", tone: .accent, material: .glass,
+            showsProgress: false, count: 2
+        )
+        let staleToken = transition.retarget(first)
+        let finalToken = transition.retarget(final)
+        #expect(!transition.admits(staleToken))
+        #expect(transition.admits(finalToken))
+        #expect(transition.target == final)
+    }
+
     @Test("small warning and neutral text keeps accessible contrast")
     @MainActor func compactToneContrast() {
         let lightTraits = UITraitCollection(userInterfaceStyle: .light)

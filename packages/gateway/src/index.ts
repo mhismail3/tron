@@ -128,7 +128,21 @@ function requestRestart(): void {
   if (requestedRestart) return;
   logger.log("info", "Gateway restart scheduled after accepted agent runs settle", { event: "gateway.restart-drain", source: "lifecycle" });
   requestedRestart = (async () => {
-    await sessions.waitUntilIdle();
+    const waitingLog = setInterval(() => {
+      const remaining = sessions.drainBusySessionCount();
+      logger.log(
+        "info",
+        `Gateway restart is waiting for ${remaining} admitted session operation${remaining === 1 ? "" : "s"} to settle`,
+        { event: "gateway.restart-drain.waiting", source: "lifecycle" },
+      );
+    }, 15_000);
+    waitingLog.unref();
+    try {
+      await sessions.waitUntilIdle();
+    } finally {
+      clearInterval(waitingLog);
+    }
+    logger.log("info", "Gateway restart drain completed", { event: "gateway.restart-drain.completed", source: "lifecycle" });
     await shutdown("requested restart", 75);
   })().catch((error) => {
     logger.log("error", error instanceof Error ? error.message : String(error), { event: "gateway.restart-drain-failed", source: "lifecycle" });

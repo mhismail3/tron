@@ -8,6 +8,7 @@ enum QueuedMessageManagementAvailability: Equatable, Sendable {
     case available
     case requiresGatewayUpdate
     case invalidProjection
+    case updatingProjection
 
     var isManageable: Bool { self == .available }
 }
@@ -20,8 +21,8 @@ enum QueuedMessageManagementPolicy {
         queueRevision: Int?,
         hasAuthoritativeItems: Bool
     ) -> QueuedMessageManagementAvailability {
-        if queueRevision != nil, hasAuthoritativeItems { return .available }
-        return capabilities.contains(capability) ? .invalidProjection : .requiresGatewayUpdate
+        guard capabilities.contains(capability) else { return .requiresGatewayUpdate }
+        return queueRevision != nil && hasAuthoritativeItems ? .available : .invalidProjection
     }
 }
 
@@ -256,6 +257,8 @@ struct QueuedMessageRow: View {
             "Update Tron on Mac to edit or remove queued messages"
         case .invalidProjection:
             "Reconnect to Tron on Mac to restore queue editing"
+        case .updatingProjection:
+            "Updating the conversation; queue editing is temporarily unavailable"
         }
     }
 }

@@ -20,7 +20,7 @@ function humanizedDisplayName(extension: Extension): string {
   return words.length === 0 ? "Extension" : words.map((word) => word[0]!.toUpperCase() + word.slice(1)).join(" ");
 }
 
-function ownerFor(extension: Extension): ExtensionOwner {
+export function extensionOwnerFor(extension: Extension): ExtensionOwner {
   const source = extension.sourceInfo.source;
   const identity = `${source}\0${extension.resolvedPath}`;
   const id = `extension:${createHash("sha256").update(identity).digest("base64url")}`;
@@ -36,7 +36,7 @@ function owned<T extends (...args: any[]) => any>(fn: T, owner: ExtensionOwner):
  * and all maps/functions are retained as public Pi objects. */
 export function attributeExtensions(base: LoadExtensionsResult): LoadExtensionsResult {
   for (const extension of base.extensions) {
-    const owner = ownerFor(extension);
+    const owner = extensionOwnerFor(extension);
     for (const [event, handlers] of extension.handlers) {
       extension.handlers.set(event, handlers.map((handler) => owned(handler, owner)));
     }

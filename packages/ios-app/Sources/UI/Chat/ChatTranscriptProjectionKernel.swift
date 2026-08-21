@@ -599,10 +599,21 @@ enum ChatTranscriptProjectionKernel {
         for callID in oldStates.keys {
             guard let old = oldStates[callID], let new = newStates[callID],
                   old.order == new.order,
-                  old.startedAt == new.startedAt else { return nil }
+                  old.startedAt == new.startedAt,
+                  old.groupId == new.groupId,
+                  old.groupIndex == new.groupIndex,
+                  old.groupCount == new.groupCount,
+                  old.groupFinalized == new.groupFinalized else { return nil }
         }
         for callID in changed {
             guard previous.patchMetadata.sitesByCallID[callID]?.count == 1 else { return nil }
+            if previous.patchMetadata.sitesByCallID[callID]![0].classification == .unanchoredRuntime,
+               newStates[callID]?.status != .running {
+                // Terminal runtime-only rows leave the overlay entirely; they
+                // cannot be patched in place because the next assembly removes
+                // the duplicate tail row instead of retaining its old position.
+                return nil
+            }
         }
         return measured(performanceSignposts: performanceSignposts, workRecorder: workRecorder) {
             var runsByIndex: [Int: ChatToolRunPresentation] = [:]
@@ -907,7 +918,7 @@ enum ChatTranscriptProjectionKernel {
 
         let streamingTools = streamingFragment.map { fragment in
             toolPresentations(in: fragment.source, results: results)
-                .filter { !anchoredCallIDs.contains($0.id) }
+                .filter { $0.groupFinalized != false && !anchoredCallIDs.contains($0.id) }
                 .map { canonical in
                     PreparedTool(
                         presentation: resolved(canonical, live: liveByID[canonical.id]),
@@ -918,8 +929,19 @@ enum ChatTranscriptProjectionKernel {
         } ?? []
         toolsInspected += streamingTools.count
         let streamingCallIDs = Set(streamingTools.map { $0.presentation.id })
+        // The runtime-only tail is an admission surface for current work, not a
+        // second history surface. Terminal calls without a canonical/streaming
+        // declaration are stale overlay evidence: once they settle, their
+        // authoritative position is the transcript (or they are intentionally
+        // omitted by the bounded window). Keeping them here duplicates the same
+        // calls at the bottom before a later snapshot relocates them.
         let unanchoredLive = liveByID.values
-            .filter { !anchoredCallIDs.contains($0.toolCallId) && !streamingCallIDs.contains($0.toolCallId) }
+            .filter {
+                $0.status == .running
+                    && ($0.groupFinalized == true || $0.groupId == nil)
+                    && !anchoredCallIDs.contains($0.toolCallId)
+                    && !streamingCallIDs.contains($0.toolCallId)
+            }
             .sorted(by: ToolExecutionStatePolicy.orderedBefore)
             .map { state in
                 PreparedTool(
@@ -1009,7 +1031,7 @@ enum ChatTranscriptProjectionKernel {
                 preferredSemanticIDByRenderedID[item.id] = message.semanticID
                 renderedIDBySemanticID[message.semanticID] = item.id
             case .toolRun(let run):
-                let semanticID = run.tools.first?.id ?? item.id
+                let semanticID = run.groupIDs.isEmpty ? (run.tools.first?.id ?? run.id) : run.id
                 preferredSemanticIDByRenderedID[item.id] = semanticID
                 renderedIDBySemanticID[semanticID] = item.id
                 for tool in run.tools { renderedIDBySemanticID[tool.id] = item.id }
@@ -1045,7 +1067,12 @@ enum ChatTranscriptProjectionKernel {
             lastProgressAt: live.lastProgressAt ?? live.updatedAt,
             progressSequence: live.progressSequence,
             outputTruncated: live.outputTruncated == true || canonical.outputTruncated,
-            extensionOrigin: live.extensionOrigin ?? canonical.extensionOrigin
+            extensionOrigin: live.extensionOrigin ?? canonical.extensionOrigin,
+            groupId: canonical.groupId ?? live.groupId,
+            groupIndex: canonical.groupIndex ?? live.groupIndex,
+            groupCount: canonical.groupCount ?? live.groupCount,
+            groupFinalized: (canonical.groupFinalized == true || live.groupFinalized == true)
+                ? true : (canonical.groupFinalized ?? live.groupFinalized)
         )
     }
 
@@ -1058,7 +1085,9 @@ enum ChatTranscriptProjectionKernel {
             error: tool.isError, startedAt: tool.startedAt, completedAt: tool.completedAt,
             durationMs: tool.durationMs, lastProgressAt: tool.lastProgressAt ?? tool.updatedAt,
             progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated == true,
-            extensionOrigin: tool.extensionOrigin
+            extensionOrigin: tool.extensionOrigin,
+            groupId: tool.groupId, groupIndex: tool.groupIndex,
+            groupCount: tool.groupCount, groupFinalized: tool.groupFinalized
         )
     }
 
@@ -1079,7 +1108,9 @@ enum ChatTranscriptProjectionKernel {
             error: true, startedAt: tool.startedAt, completedAt: tool.completedAt,
             durationMs: tool.durationMs, lastProgressAt: tool.lastProgressAt,
             progressSequence: tool.progressSequence, outputTruncated: tool.outputTruncated,
-            extensionOrigin: tool.extensionOrigin
+            extensionOrigin: tool.extensionOrigin,
+            groupId: tool.groupId, groupIndex: tool.groupIndex,
+            groupCount: tool.groupCount, groupFinalized: tool.groupFinalized
         )
     }
 
@@ -1119,14 +1150,18 @@ enum ChatTranscriptProjectionKernel {
                         completedAt: result.completedAt ?? result.timestamp,
                         durationMs: ToolTiming.observedDuration(callTimestamp: item.timestamp, result: result),
                         lastProgressAt: result.lastProgressAt, progressSequence: result.progressSequence,
-                        extensionOrigin: result.extensionOrigin
+                        extensionOrigin: result.extensionOrigin,
+                        groupId: part.groupId, groupIndex: part.groupIndex,
+                        groupCount: part.groupCount, groupFinalized: part.groupFinalized
                     )
                 }
                 return ChatToolPresentation(
                     id: part.toolCallId ?? part.id, title: part.name ?? "Tool", subtitle: "Invocation",
                     request: part.arguments, response: nil, content: "", fallbackContent: part.arguments,
                     error: false, startedAt: item.timestamp, completedAt: nil, durationMs: nil,
-                    lastProgressAt: item.timestamp, progressSequence: nil, extensionOrigin: nil
+                    lastProgressAt: item.timestamp, progressSequence: nil, extensionOrigin: nil,
+                    groupId: part.groupId, groupIndex: part.groupIndex,
+                    groupCount: part.groupCount, groupFinalized: part.groupFinalized
                 )
             }
         case .compaction, .branchSummary, .modelChange, .thinkingChange, .label:

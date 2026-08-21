@@ -8,6 +8,7 @@ import {
   deploymentTimeoutMs,
   publishSelection,
   rollbackSelection,
+  rollbackSelectionAndClearAttempt,
   resolveDeploymentHost,
   protocolHandshakeCompatible,
   validateLocalCredentialDocument,
@@ -26,6 +27,7 @@ import {
   waitForDrainCompletion,
   confirmAndClearPendingAttempt,
   verifyIdempotentPromotion,
+  restoreSelectionStateAndClearAttempt,
   stagePayload,
   stagedCandidate,
   runBounded,
@@ -55,6 +57,73 @@ async function paths(root) {
     lock: join(channelRoot, ".update.lock"),
   };
 }
+
+test("restored selection clears a mismatched candidate attempt marker", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-payload-restore-attempt-"));
+  try {
+    const store = await paths(root);
+    await mkdir(store.channelRoot, { recursive: true });
+    const current = selection("current", "a".repeat(64));
+    const previous = selection("previous", "b".repeat(64));
+    const candidate = selection("candidate", "c".repeat(64));
+    await writeFile(store.current, `${JSON.stringify(candidate)}\n`);
+    await writeFile(store.previous, `${JSON.stringify(current)}\n`);
+    await writeFile(store.pending, `${JSON.stringify({
+      schema: 1, kind: "tron-gateway-pending-attempt", channel: "stable", attempt: "pending",
+      version: candidate.version, payloadFingerprint: candidate.payloadFingerprint,
+      previousVersion: current.version, previousFingerprint: current.payloadFingerprint,
+    })}\n`);
+
+    const lock = `${store.pending}.lock`;
+    await mkdir(lock);
+    let restored = false;
+    const restoring = restoreSelectionStateAndClearAttempt(store, {
+      current: Buffer.from(`${JSON.stringify(current)}\n`),
+      previous: Buffer.from(`${JSON.stringify(previous)}\n`),
+    }).then(() => { restored = true; });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(restored, false);
+    assert.deepEqual(JSON.parse(await readFile(store.current, "utf8")), candidate);
+    await rm(lock, { recursive: true });
+    await restoring;
+
+    assert.deepEqual(JSON.parse(await readFile(store.current, "utf8")), current);
+    assert.deepEqual(JSON.parse(await readFile(store.previous, "utf8")), previous);
+    await assert.rejects(readFile(store.pending), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("automatic rollback switches selection and clears its attempt under the shared lock", async () => {
+  const root = await mkdtemp(join(tmpdir(), "tron-payload-rollback-attempt-"));
+  try {
+    const store = await paths(root);
+    await mkdir(store.channelRoot, { recursive: true });
+    const prior = selection("prior", "a".repeat(64));
+    const candidate = selection("candidate", "b".repeat(64));
+    await writeFile(store.current, `${JSON.stringify(candidate)}\n`);
+    await writeFile(store.previous, `${JSON.stringify(prior)}\n`);
+    await writeFile(store.pending, `${JSON.stringify({
+      schema: 1, kind: "tron-gateway-pending-attempt", channel: "stable", attempt: "launched",
+      version: candidate.version, payloadFingerprint: candidate.payloadFingerprint,
+      previousVersion: prior.version, previousFingerprint: prior.payloadFingerprint,
+    })}\n`);
+    const lock = `${store.pending}.lock`;
+    await mkdir(lock);
+    let rolledBack = false;
+    const rollingBack = rollbackSelectionAndClearAttempt(store).then(() => { rolledBack = true; });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(rolledBack, false);
+    await rm(lock, { recursive: true });
+    await rollingBack;
+    assert.deepEqual(JSON.parse(await readFile(store.current, "utf8")), prior);
+    assert.deepEqual(JSON.parse(await readFile(store.previous, "utf8")), candidate);
+    await assert.rejects(readFile(store.pending), { code: "ENOENT" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("selection publication is atomic in order and rollback preserves the prior pointer", async () => {
   const root = await mkdtemp(join(tmpdir(), "tron-payload-selection-"));

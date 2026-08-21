@@ -73,7 +73,7 @@ final class SessionMutationService {
         sessionID: String,
         uploadIDs: [String],
         behavior: String?
-    ) async throws {
+    ) async throws -> String {
         struct Params: Codable {
             let sessionId: String
             let text: String
@@ -90,9 +90,10 @@ final class SessionMutationService {
             behavior: behavior,
             commandId: commandID
         )
-        let _: Response = try await executor.perform(method: "session.prompt", commandID: commandID) {
+        let response: Response = try await executor.perform(method: "session.prompt", commandID: commandID) {
             try await client.request("session.prompt", params, as: Response.self, timeout: .seconds(15))
         }
+        return response.operationId
     }
 
     func abort(sessionID: String, kind: String) async throws {

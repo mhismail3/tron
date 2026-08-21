@@ -140,112 +140,198 @@ struct ToolCard: View {
         return isRunning ? .warning : .accent
     }
     private var displayTitle: String {
-        if timing?.extensionOrigin != nil { return "Extension activity" }
-        return ToolDetailPresentation.displayTitle(for: title)
+        ToolDetailPresentation.displayTitle(for: title)
     }
     private var icon: String {
         error ? "exclamationmark.triangle.fill" : ToolDetailPresentation.icon(for: title)
     }
 }
 
+struct ToolChipInstrumentationSample: Equatable, Sendable {
+    let runID: String
+    let callIDs: [String]
+    let groupIDs: [String]
+    let title: String
+    let count: Int
+    let isRunning: Bool
+    let failureCount: Int
+    let installationGeneration: Int
+    let transitionToken: Int
+}
+
+private struct ToolRunResolvedState: Equatable {
+    let installationTag: ChatTranscriptProjectionTag
+    let run: ChatToolRunPresentation
+    let tools: [ChatToolPresentation]
+}
+
 struct ToolRunView: View {
     let run: ChatToolRunPresentation
     let installationTag: ChatTranscriptProjectionTag
     let resolveDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
-    @State private var detailRoute: ToolDetailRoute?
-    @State private var resolvedDetail: ChatToolPresentation?
-    @State private var resolvedGroup: [ChatToolPresentation]?
+    let recordChip: (ToolChipInstrumentationSample) -> Void
+    @State private var resolvedState: ToolRunResolvedState?
     @State private var detailDetent: PresentationDetent = .medium
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            if let tool = run.tools.first, run.tools.count == 1 {
-                ToolCard(data: tool) { toolID in
-                    guard let detail = resolveDetails([toolID], installationTag)?.first else { return }
-                    detailDetent = .medium
-                    resolvedDetail = detail
-                    detailRoute = ToolDetailRoute(toolID: toolID)
-                }
-            } else {
-                ToolRunChip(run: run) {
-                    guard let details = resolveDetails(detailToolIDs, installationTag) else { return }
-                    resolvedGroup = details
-                }
-            }
-        }
-        .toolDetailSheet(
-            route: $detailRoute,
-            detent: $detailDetent,
-            tool: resolvedDetail
+        ToolActivityChip(
+            run: run,
+            installationTag: installationTag,
+            recordChip: recordChip,
+            action: openDetails
         )
-        .sheet(isPresented: Binding(
-            get: { resolvedGroup != nil },
-            set: { if !$0 { resolvedGroup = nil } }
-        )) {
-            if let resolvedGroup {
-                ToolRunDetailSheet(run: run, tools: resolvedGroup)
+            .sheet(isPresented: Binding(
+                get: { resolvedState != nil },
+                set: { if !$0 { resolvedState = nil } }
+            )) {
+                if let resolvedState {
+                    if resolvedState.run.displayCount == 1, let tool = resolvedState.tools.first {
+                        let accent: Color = tool.error ? .tronError : .tronEmerald
+                        NavigationStack {
+                            ToolDetailSheet(
+                                tool: tool,
+                                density: detailDetent == .large ? .expanded : .glance
+                            )
+                            .tronToolDetailNavigationChrome()
+                            .toolbar {
+                                ToolbarItem(placement: .principal) {
+                                    TronSheetTitle(
+                                        title: ToolDetailPresentation.displayTitle(for: tool.title),
+                                        accent: accent
+                                    )
+                                }
+                                ToolbarItem(placement: .confirmationAction) {
+                                    Button { self.resolvedState = nil } label: {
+                                        Image(systemName: "checkmark")
+                                            .font(TronTypography.buttonSM)
+                                            .foregroundStyle(Color.tronEmerald)
+                                    }
+                                    .accessibilityLabel("Done")
+                                }
+                            }
+                        }
+                        .tronTopBlur(.sheet)
+                        .presentationDetents([.medium, .large], selection: $detailDetent)
+                        .presentationDragIndicator(.hidden)
+                        .tronPresentation()
+                    } else {
+                        ToolRunDetailSheet(run: resolvedState.run, tools: resolvedState.tools)
+                    }
+                }
             }
-        }
-        .onChange(of: installationTag) { _, currentTag in
-            refreshResolvedDetails(for: currentTag)
-        }
-        .contentTransition(.interpolate)
+            .onChange(of: installationTag) { _, currentTag in
+                refreshResolvedDetails(for: currentTag)
+            }
     }
 
     private var detailToolIDs: [String] {
-        run.reverseChronologicalTools.map(\.id)
+        run.tools.reversed().map(\.id)
+    }
+
+    private func openDetails() {
+        guard let details = resolveDetails(detailToolIDs, installationTag), !details.isEmpty else { return }
+        detailDetent = .medium
+        resolvedState = ToolRunResolvedState(
+            installationTag: installationTag,
+            run: run,
+            tools: details
+        )
     }
 
     private func refreshResolvedDetails(for tag: ChatTranscriptProjectionTag) {
-        if let detailRoute {
-            guard let detail = resolveDetails([detailRoute.toolID], tag)?.first else {
-                self.detailRoute = nil
-                resolvedDetail = nil
-                resolvedGroup = nil
-                return
-            }
-            resolvedDetail = detail
+        guard resolvedState != nil,
+              let details = resolveDetails(detailToolIDs, tag), !details.isEmpty else {
+            resolvedState = nil
+            return
         }
-        if resolvedGroup != nil {
-            resolvedGroup = resolveDetails(detailToolIDs, tag)
-        }
+        resolvedState = ToolRunResolvedState(installationTag: tag, run: run, tools: details)
     }
 }
 
-private struct ToolRunChip: View {
+private struct ToolActivityChip: View {
     let run: ChatToolRunPresentation
-    let onOpenDetails: () -> Void
+    let installationTag: ChatTranscriptProjectionTag
+    let recordChip: (ToolChipInstrumentationSample) -> Void
+    let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var displayedState: ChatCompactPillVisualState?
+    @State private var transitionState = ChatToolChipTransitionState()
+    @State private var transitionTask: Task<Void, Never>?
 
-    private var tone: ChatNotificationTone {
-        if run.failureCount > 0 { return .error }
-        return run.isRunning ? .warning : .accent
+    private var targetState: ChatCompactPillVisualState {
+        .toolRun(run)
     }
+
     var body: some View {
-        Button(action: onOpenDetails) {
-            ChatCompactPillSurface(tone: tone, material: .glass, interactive: true) {
+        let visual = displayedState ?? targetState
+        Button(action: action) {
+            ChatCompactPillSurface(tone: visual.tone, material: visual.material, interactive: true) {
                 ChatCompactPillLabel(
-                    icon: run.failureCount > 0
-                        ? "exclamationmark.triangle.fill" : "square.stack.3d.up",
-                    title: run.title,
-                    detail: run.status,
-                    tone: tone,
-                    showsProgress: run.isRunning,
+                    icon: visual.icon,
+                    title: visual.title,
+                    detail: visual.detail,
+                    tone: visual.tone,
+                    showsProgress: visual.showsProgress,
                     iconSize: ChatCompactPillLayoutPolicy.toolIconSize
                 ) {
-                    ToolRunElapsedText(run: run, color: tone.secondaryColor)
+                    ToolRunElapsedText(run: run, color: visual.tone.secondaryColor)
                 }
+                .contentTransition(reduceMotion ? .opacity : .interpolate)
             }
         }
         .buttonStyle(.plain)
         .contentShape(Rectangle())
-        .accessibilityLabel(runAccessibilityLabel)
+        .accessibilityLabel(accessibilityLabel(visual))
+        .accessibilityValue(visual.title)
+        .onAppear {
+            let token = transitionState.retarget(targetState)
+            displayedState = targetState
+            recordSample(targetState, token: token)
+        }
+        .onChange(of: targetState) { _, target in
+            retarget(target)
+        }
+        .onDisappear {
+            transitionTask?.cancel()
+            transitionTask = nil
+        }
     }
 
-    private var runAccessibilityLabel: String {
+    private func retarget(_ target: ChatCompactPillVisualState) {
+        transitionTask?.cancel()
+        let token = transitionState.retarget(target)
+        transitionTask = Task { @MainActor in
+            do { try await Task.sleep(for: .milliseconds(16)) }
+            catch { return }
+            guard !Task.isCancelled, transitionState.admits(token) else { return }
+            let animation: Animation = reduceMotion
+                ? .linear(duration: 0.10)
+                : .smooth(duration: 0.20)
+            var transaction = Transaction(animation: animation)
+            transaction.admitsChatToolChipAnimation = true
+            withTransaction(transaction) { displayedState = target }
+            recordSample(target, token: token)
+        }
+    }
+
+    private func recordSample(_ visual: ChatCompactPillVisualState, token: Int) {
+        recordChip(ToolChipInstrumentationSample(
+            runID: run.id,
+            callIDs: run.tools.map(\.id),
+            groupIDs: run.groupIDs,
+            title: visual.title,
+            count: visual.count,
+            isRunning: visual.showsProgress,
+            failureCount: run.failureCount,
+            installationGeneration: installationTag.timelineGeneration,
+            transitionToken: token
+        ))
+    }
+
+    private func accessibilityLabel(_ visual: ChatCompactPillVisualState) -> String {
         let duration = run.elapsedMilliseconds().map(ToolTiming.format(milliseconds:))
-        return [run.title, run.status, duration].compactMap { $0 }.joined(separator: ", ")
+        return [visual.title, visual.detail, duration].compactMap { $0 }.joined(separator: ", ")
     }
-
 }
 
 private struct ToolRunDetailSheet: View {
@@ -259,7 +345,8 @@ private struct ToolRunDetailSheet: View {
     }
 
     private var orderedTools: [ChatToolPresentation] {
-        ChatToolInvocationOrdering.reverseChronological(tools)
+        let byID = Dictionary(uniqueKeysWithValues: tools.map { ($0.id, $0) })
+        return run.tools.reversed().compactMap { byID[$0.id] }
     }
 
     var body: some View {

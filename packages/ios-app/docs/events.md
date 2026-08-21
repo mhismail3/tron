@@ -42,8 +42,9 @@ admits and reduces mounted-session topics:
   queued-message cards atomically rather than applying per-row mobile deltas. A Gateway advertising
   `queue-management.v1` must supply both rich fields; iOS admits Edit/Remove only for that
   authoritative pair. Legacy string-only projections remain visibly locked and direct the user to
-  update Tron on Mac. Confirmed clear may remove both rich and legacy projections immediately,
-  while edit/reorder/remove waits for the authoritative revisioned snapshot;
+  update Tron on Mac. A mutation response never rewrites queue projection locally: clear,
+  edit, reorder, and remove keep controls inert until a strictly newer sequenced queue revision
+  installs from the Gateway;
 - `compactionQueued` is an optional rolling snapshot field owned by the Gateway's
   single pending maintenance slot. iOS renders it as explicit runtime feedback and never
   inserts a transcript entry or retries the mutation. The row is replaced by existing
@@ -53,31 +54,54 @@ admits and reduces mounted-session topics:
   during prompt preflight. iOS renders that exact prompt after runtime feedback and
   reconstructs it from every authoritative snapshot until the canonical user entry
   arrives; a mounted submission keeps one visual handoff through pending and canonical
-  installation, and it never replays the prompt. `automaticCompactionEnabled` likewise reports
+  installation, and it never replays the prompt. Optimistic composer settlement consumes every
+  authoritative session-reducer publication directly rather than waiting for delayed transcript
+  formatting. For queued steering/follow-up, the returned prompt operation ID is also the Gateway's
+  stable queue-item ID, so a concurrent same-text item cannot settle the wrong optimistic admission;
+  attachment-only canonical settlement uses an exact attachment metadata multiset even when Pi
+  persists synthesized envelope text. `automaticCompactionEnabled` likewise reports
   runtime truth rather than a mobile inference; older snapshots may omit these fields;
 - provider, package, settings, trust, and custom-model mutation invalidations
   advance owner revisions across connected clients; each visible surface reloads
   its explicit global or project scope instead of sharing a wrong-scope payload;
 - authentication prompts drive the generic secure prompt sheet;
-- the single `session.extensionPresentation` stream drives semantic updates, select/confirm/input/editor sheets, the bounded `semantic.questionnaire.v1` projection for the installed `@pi9/ask` adapter, and the compact composer activity pills and dynamic native detail sheet for admitted read-only widgets and live service activity. Structured extension-owned runs arrive additively on tool progress and the bounded recent-runtime `extensionActivities` snapshot projection; composer pills admit only live groups, one per attributed extension; a single live run opens directly into its updating detail view, while completed/history groups are presented from Manage Session History. The complete canonical audit remains the session JSONL/export. questionnaire descriptors carry rich options, previews, single/multi selection, comments, and optional freeform answers while old clients ignore the additive field and continue the primitive RPC fallback. Admission enforces the shared conditional option bound (single-select allows 64 options without freeform or 63 with the legacy Type-a-response choice; multi-select/input allows 64), 2 KiB label/description, 32 KiB preview/context, and 192 KiB aggregate bounds; native editor echoes are coalesced per mounted target and empty text is valid; tool provenance is optional disposable metadata from public Pi source information, and unknown/ambiguous ownership remains an ordinary tool row. Native run details use Gateway-projected timestamps/counts/output and never open a child canonical JSONL session concurrently; run choosers order live activities before settled activities with deterministic recent-activity/id tie-breaks, and stable activity/tool/run identifiers keep a tapped route resolvable while artifact enrichment arrives;
+- the single `session.extensionPresentation` stream drives semantic updates, select/confirm/input/editor sheets, the bounded `semantic.questionnaire.v1` projection for the installed `@pi9/ask` adapter, and the compact composer activity pills and integrated extension hub for admitted read-only widgets, statuses, services, and structured runs. Structured extension-owned runs use the compact `session.extensionActivity` lifecycle channel plus the bounded current/recent `extensionActivities` snapshot baseline. Each delta carries one exact activity and the Gateway live-activity revision; iOS upserts it without rebuilding transcript projection or moving transcript scroll state. Gateway artifact heartbeats never publish full transcript snapshots. Tool progress remains a rolling-compatibility path, terminal state is latched, and an older full-frame live revision cannot erase a newer mounted delta. Ambient pills admit lifecycle-qualified activities only, group by exact opaque owner (unique source fallback, ambiguous fail-closed), and always route to the hub rather than bypassing it for one run. Canonical history is capability-gated and loaded by the cancellation-owned `SessionExtensionActivityStore`; pages/details are installed only for the exact session/presentation/history generation. The complete canonical audit remains the session JSONL/export. questionnaire descriptors carry rich options, previews, single/multi selection, comments, and optional freeform answers while old clients ignore the additive field and continue the primitive RPC fallback. Admission enforces the shared conditional option bound (single-select allows 64 options without freeform or 63 with the legacy Type-a-response choice; multi-select/input allows 64), 2 KiB label/description, 32 KiB preview/context, and 192 KiB aggregate bounds; native editor echoes are coalesced per mounted target and empty text is valid; tool provenance is optional disposable metadata from public Pi source information, and unknown/ambiguous ownership remains an ordinary tool row. Native run details use Gateway-projected timestamps/counts/output and never open a child canonical JSONL session concurrently; run choosers order live activities before settled activities with deterministic recent-activity/id tie-breaks, and stable activity/tool/run identifiers keep a tapped route resolvable while artifact enrichment arrives;
 - chat rendering joins canonical calls, live progress, and canonical results by
-  `toolCallId` into one ordered timeline. Parallel calls carry a Gateway-issued
-  monotonic ordinal, and each call carries a monotonic progress sequence so equal
-  wall-clock timestamps cannot regress output. A run keeps the first call's row
-  identity from invocation through completion so final assistant text cannot jump
-  ahead of or reinsert it. Only consecutive tool calls consolidate; thinking or
-  other canonical content flushes the group and remains in exact transcript order.
+  `toolCallId` into one ordered timeline. At finalized assistant `message_end`, the
+  Gateway publishes complete contiguous declaration groups before their tool starts.
+  Runtime-only `groupId`, `groupIndex`, `groupCount`, and `groupFinalized` facts derive
+  from the stable assistant presentation identity and first projected content ordinal;
+  they describe declaration membership, never inferred parallel execution, and are not
+  persisted to Pi JSONL. Provisional streaming calls remain hidden until that boundary.
+  Each call still carries a Gateway-issued monotonic execution ordinal and progress
+  sequence so equal wall-clock timestamps cannot regress output. A display run keeps
+  its first finalized group identity from invocation through completion, reconnect,
+  and canonical settlement so final assistant text cannot jump ahead of or reinsert it.
+  Only consecutive tool calls consolidate; thinking or other canonical content flushes
+  the group and remains in exact transcript order.
   The Gateway supplies monotonic duration samples while a call is running and the
   authoritative final call-to-return duration when it completes; chips display those
-  samples without deriving normal timing from the device wall clock. Older Gateways
+  samples without deriving normal timing from the device wall clock. The runtime-only
+  tail overlay admits current running executions only. Terminal unanchored executions
+  are not synthesized into a duplicate bottom aggregate; they appear only through their
+  canonical or streaming transcript position, while anchored terminal calls remain visible.
+  Older Gateways
   without live duration samples use a bounded local monotonic fallback. The open detail
-  sheet continues to consume the newest immutable call presentation, showing status, the bounded readable
-  live-output tail, explicit output-truncation state only when the runtime flag or
+  sheet continues to consume the newest immutable call presentation, showing status and all bounded readable
+  latest bounded live-output frame. Each newer nonempty frame replaces the displayed frame in place rather than
+  accumulating repeated status snapshots; an empty advisory frame preserves the last readable output so an open
+  sheet never flashes blank. The terminal nonempty result remains authoritative. Gateway and iOS apply the same
+  replacement rule so reconnect or projection replacement cannot resurrect discarded frames or erase readable output. Explicit output-truncation state appears only when the runtime flag or
   structured truncation contract says `truncated: true`, and the age of the most recent
-  runtime update without automatic scrolling. Multi-tool run chips show accumulated time as
-  the sum of their invocation durations. The detail rows are always reverse chronological by
-  invocation timestamp, with canonical tool order as the
-  single deterministic fallback when timestamp metadata is incomplete. Known built-ins
+  runtime update without automatic scrolling. One mounted tool chip hierarchy presents the
+  actual tool name for a single invocation and **Using/Used N tools** for an aggregate;
+  extension provenance never substitutes **Extension activity**. Structural chip targets
+  exclude duration and payload churn, coalesce for one display frame, and use a monotonic
+  latest-target token for local interruptible animation while transcript and scroll
+  transactions remain stable. Multi-tool run chips show accumulated time as the sum of their
+  invocation durations. Detail summary and rows install atomically for one projection tag,
+  and rows remain in reverse canonical invocation order rather than switching when optional
+  timing metadata arrives. Known built-ins
   derive only a semantic primary summary from exact request/result keys; compact protocol
   identifiers, timing, and progress remain first in Technical details, followed directly by
   complete Request JSON and Result JSON in that order. Result JSON prefers the response, then
@@ -90,8 +114,9 @@ admits and reduces mounted-session topics:
   suppresses duplicate entrances, and cannot evict currently visible rows; a cancelled,
   unanimated failsafe reveals any row whose geometry admission never arrives. Installed-row
   updates, live-to-canonical settlement, thinking-height measurement, and tool status changes
-  inherit no stack-wide animation. Tool status text updates inside its
-  stable row without an implicit layout animation, and automatic tail-follow commands remain
+  inherit no stack-wide animation. The stable transcript transaction admits only the explicit
+  chip-local animation marker; Reduce Motion uses an opacity-only transition. Tool status text
+  updates inside its stable row, and automatic tail-follow commands remain
   owned until fresh native geometry acknowledges them, so a second keyboard/composer/tool growth
   sample cannot replace a pending scroll write;
 - structure/context/resource invalidations reload an already-presented History,
@@ -145,13 +170,18 @@ and advances all three public reload revisions before publishing the replacement
 and failures both require the exact captured subscription token and latest request generation, so a retired
 runtime cannot repopulate data or surface a stale error. A reconnect while that same chat remains mounted instead receives
 complete current runtime state and preserves compatible explicitly paged history
-and the reader's follow/detached mode. If a pathological live
-tool run exceeds the ordinary projection budget, duplicate tool detail is
-compacted while an active snapshot retains its canonical baseline rows. iOS also
-merges an overlapping authoritative tail with any earlier pages already loaded in
-that open chat, so a tool burst or resync cannot reveal a new history boundary or
-hide visible rows. A later navigation presentation always begins again from the
-bounded latest page; this cold-presentation rule is distinct from in-place reconnect.
+and the reader's follow/detached mode. If a pathological live tool run exceeds the
+ordinary projection budget, duplicate terminal detail is removed and running detail
+is compacted before canonical transcript continuity. Gateway snapshots and iOS tail
+settlement retain at least 24 recent display-bearing canonical entries whenever their
+exact ordinal/parent/leaf/ID suffix remains compatible. iOS also merges an overlapping authoritative
+tail with any earlier pages already loaded in that open chat, so a tool burst, keyboard
+transition, or resync cannot collapse the mounted chat to an empty Load earlier view. A later navigation presentation always begins again from the
+bounded latest page; this cold-presentation rule is distinct from in-place reconnect. History paging is owned by the session presentation reducer,
+not scroll geometry: an empty display tail with a positive canonical cursor is backfilled once under the provisional subscription before publication,
+and a mounted Load earlier request starts without requiring a semantic anchor. Page admission validates the projected cursor, echoed next projected
+entry, runtime, branch leaf, range, total, and IDs; it never mistakes raw parent links through filtered canonical entries for visible-row adjacency.
+Tail/keyboard settlement never discards loaded transcript coverage.
 Phase, operation, tool ordering, and canonical paging cursors remain authoritative. A rolling-upgrade
 client also normalizes the impossible legacy combination of an idle phase and retained running-tool
 overlay to an interrupted chip; it does not expose a fake Stop action for extension-owned detached

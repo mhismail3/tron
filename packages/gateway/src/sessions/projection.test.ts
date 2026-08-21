@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { BlobStore } from "./blob-store.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js";
 import type { SessionSnapshot, TranscriptItem } from "../protocol/types.js";
 import {
   admitCommandCatalog,
@@ -13,6 +14,8 @@ import {
   STREAMING_PROGRESS_BYTES,
   projectJson,
   projectMessage,
+  mergeLiveToolOutput,
+  MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES,
   projectToolOutput,
   projectTranscript,
   projectTranscriptPage,
@@ -77,6 +80,45 @@ describe("transcript projection", () => {
       },
     );
     expect(projected).toMatchObject({ extensionOrigin: { source: "public-source" } });
+  });
+
+  it("projects contiguous finalized groups with stable declaration metadata", () => {
+    const message: AgentMessage = {
+      role: "assistant",
+      content: [
+        { type: "text", text: "before" },
+        { type: "toolCall", id: "call-a", name: "read", arguments: { path: "a" } },
+        { type: "toolCall", id: "call-b", name: "write", arguments: { path: "b" } },
+        { type: "text", text: "between" },
+        { type: "toolCall", id: "call-c", name: "bash", arguments: { command: "true" } },
+      ],
+      api: "openai-responses", provider: "test", model: "model",
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: "toolUse", timestamp: 2,
+    };
+    const live = projectMessage("streaming", null, "2026-01-01T00:00:00Z", message, new BlobStore(), undefined, "stream:turn", false);
+    const settled = projectMessage("canonical", null, "2026-01-01T00:00:00Z", message, new BlobStore(), undefined, "stream:turn");
+    if (live?.kind !== "message" || settled?.kind !== "message") throw new Error("expected messages");
+    expect(live.content.filter((part) => part.type === "toolCall").every((part) => !part.groupFinalized)).toBe(true);
+    const calls = settled.content.filter((part) => part.type === "toolCall");
+    expect(calls).toMatchObject([
+      { toolCallId: "call-a", groupIndex: 0, groupCount: 2, groupFinalized: true },
+      { toolCallId: "call-b", groupIndex: 1, groupCount: 2, groupFinalized: true },
+      { toolCallId: "call-c", groupIndex: 0, groupCount: 1, groupFinalized: true },
+    ]);
+    expect(calls[0]?.type === "toolCall" && calls[1]?.type === "toolCall" ? calls[0].groupId : undefined)
+      .toBe(calls[1]?.type === "toolCall" ? calls[1].groupId : undefined);
+    expect(calls[0]?.type === "toolCall" && calls[2]?.type === "toolCall" ? calls[0].groupId : undefined)
+      .not.toBe(calls[2]?.type === "toolCall" ? calls[2].groupId : undefined);
+
+    const bounded = boundStreamingProgressItem(settled, 900);
+    if (bounded.kind !== "message") throw new Error("expected bounded message");
+    const retained = bounded.content.filter((part) => part.type === "toolCall");
+    for (const groupId of new Set(retained.map((part) => part.type === "toolCall" ? part.groupId : undefined))) {
+      if (!groupId) continue;
+      const members = retained.filter((part) => part.type === "toolCall" && part.groupId === groupId);
+      expect(members).toHaveLength(members[0]?.type === "toolCall" ? members[0].groupCount : 0);
+    }
   });
 
   it("keeps presentation and ordinal identity across live and canonical owners", () => {
@@ -323,6 +365,19 @@ describe("transcript projection", () => {
     expect(Buffer.byteLength(bounded.output!)).toBeLessThanOrEqual(1_024);
   });
 
+  it("replaces live output frames in place while empty updates preserve readable output", () => {
+    const first = mergeLiveToolOutput(undefined, { output: "waiting\nworker: thinking", outputTruncated: true });
+    expect(mergeLiveToolOutput(first, {})).toEqual(first);
+    expect(mergeLiveToolOutput(first, { output: "waiting" })).toEqual({ output: "waiting" });
+    const latest = mergeLiveToolOutput(first, { output: "worker: read complete" });
+    expect(latest).toEqual({ output: "worker: read complete" });
+    expect(latest.output).not.toContain("worker: thinking");
+    const bounded = mergeLiveToolOutput({ output: "old" }, { output: "x".repeat(2_000) }, 256);
+    expect(bounded.outputTruncated).toBe(true);
+    expect(bounded.output).not.toContain("old");
+    expect(Buffer.byteLength(bounded.output!)).toBeLessThanOrEqual(256);
+  });
+
   it("fits pathological live snapshots while preserving run and tool identity", () => {
     const snapshot: SessionSnapshot = {
       sessionId: "session",
@@ -376,8 +431,59 @@ describe("transcript projection", () => {
     expect(fitted.toolExecutions.map(({ toolCallId, order }) => ({ toolCallId, order }))).toEqual(
       Array.from({ length: 6 }, (_, index) => ({ toolCallId: `tool-${index}`, order: index })),
     );
-    expect(fitted.transcriptStart).toBe(snapshot.transcriptStart);
-    expect(fitted.transcript.map((item) => item.id)).toEqual(snapshot.transcript.map((item) => item.id));
+    const removedTranscriptRows = fitted.transcriptStart - snapshot.transcriptStart;
+    expect(removedTranscriptRows).toBeGreaterThanOrEqual(0);
+    expect(fitted.transcript.map((item) => item.id)).toEqual(
+      snapshot.transcript.slice(removedTranscriptRows).map((item) => item.id),
+    );
+
+    const maximumToolSnapshot: SessionSnapshot = {
+      ...snapshot,
+      transcript: Array.from({ length: 20 }, (_, index) => ({
+        id: `continuity-${index}`, parentId: index ? `continuity-${index - 1}` : null,
+        timestamp: new Date(index).toISOString(), kind: "message" as const, role: "assistant" as const,
+        content: [{ id: `continuity-${index}:0`, type: "text" as const, text: `message-${index}` }],
+      })),
+      transcriptStart: 0,
+      transcriptTotal: 20,
+      toolExecutions: Array.from({ length: 256 }, (_, index) => ({
+        toolCallId: `maximum-tool-${index}`, toolName: "bash", order: index,
+        status: "running" as const, arguments: { command: "x".repeat(150_000) },
+        partialResult: { output: "y".repeat(150_000) }, output: "z".repeat(96 * 1_024),
+        isError: false, startedAt: new Date(index).toISOString(), updatedAt: new Date(index).toISOString(),
+        lastProgressAt: new Date(index).toISOString(), progressSequence: index + 1,
+      })),
+    };
+    const maximumToolFitted = fitSessionSnapshot(maximumToolSnapshot);
+    expect(Buffer.byteLength(JSON.stringify(maximumToolFitted))).toBeLessThanOrEqual(SESSION_SNAPSHOT_BYTES);
+    expect(maximumToolFitted.toolExecutions.map((tool) => tool.toolCallId)).toEqual(
+      maximumToolSnapshot.toolExecutions.map((tool) => tool.toolCallId),
+    );
+    expect(maximumToolFitted.transcript.filter(
+      (item) => !(item.kind === "message" && item.role === "toolResult"),
+    )).toHaveLength(20);
+
+    const resultDominated: SessionSnapshot = {
+      ...snapshot,
+      transcript: Array.from({ length: 60 }, (_, index) => index % 2 === 0 ? ({
+        id: `visible-${index}`, parentId: index ? `result-dominated-${index - 1}` : null,
+        timestamp: new Date(index).toISOString(), kind: "message" as const, role: "assistant" as const,
+        content: [{ id: `visible-${index}:0`, type: "text" as const, text: "v".repeat(2_000) }],
+      }) : ({
+        id: `result-dominated-${index}`, parentId: `visible-${index - 1}`,
+        timestamp: new Date(index).toISOString(), kind: "message" as const, role: "toolResult" as const,
+        content: [{ id: `result-${index}:0`, type: "text" as const, text: "r".repeat(2_000) }],
+        toolCallId: `call-${index}`, toolName: "read", isError: false,
+      })),
+      transcriptStart: 0,
+      transcriptTotal: 60,
+      toolExecutions: [],
+    };
+    const resultDominatedFitted = fitSessionSnapshot(resultDominated, 70_000);
+    expect(Buffer.byteLength(JSON.stringify(resultDominatedFitted))).toBeLessThanOrEqual(70_000);
+    expect(resultDominatedFitted.transcript.filter(
+      (item) => !(item.kind === "message" && item.role === "toolResult"),
+    ).length).toBeGreaterThanOrEqual(MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES);
 
     const tinySnapshot: SessionSnapshot = {
       ...snapshot,
@@ -397,7 +503,7 @@ describe("transcript projection", () => {
     expect(safeJson(fittedTiny)).toEqual(fittedTiny);
   });
 
-  it("allows only resumed idle snapshots to trim canonical rows under pressure", () => {
+  it("compacts the recent idle continuity floor before trimming canonical rows", () => {
     const snapshot: SessionSnapshot = {
       sessionId: "idle-session", runtimeGeneration: "generation", revision: 1, eventSequence: 1,
       phase: "idle", cwd: "/tmp/project", thinkingLevel: "high", availableThinkingLevels: ["high"],
@@ -417,8 +523,10 @@ describe("transcript projection", () => {
     };
 
     const fitted = fitSessionSnapshot(snapshot, 180_000);
-    expect(fitted.transcriptStart).toBeGreaterThan(0);
+    expect(fitted.transcript).toHaveLength(10);
+    expect(fitted.transcriptStart).toBe(0);
     expect(fitted.transcriptStart + fitted.transcript.length).toBe(snapshot.transcriptTotal);
+    expect(Buffer.byteLength(JSON.stringify(fitted))).toBeLessThanOrEqual(180_000);
   });
 
   it("preserves actionable interaction identity before decorative surfaces under snapshot pressure", () => {
@@ -509,9 +617,29 @@ describe("transcript projection", () => {
     const earlier = projectTranscriptPage(manager, blobs, tail.start, TRANSCRIPT_PAGE_BYTES, tail.items[0]?.id);
     expect(earlier.start).toBeLessThan(tail.start);
     expect(earlier.end).toBe(tail.start);
+    expect(earlier.nextEntryId).toBe(tail.items[0]?.id);
     expect(earlier.items.at(-1)?.id).not.toBe(tail.items[0]?.id);
     expect(() => projectTranscriptPage(manager, blobs, tail.start, TRANSCRIPT_PAGE_BYTES, "stale-anchor")).toThrow("anchor changed");
     expect(Buffer.byteLength(JSON.stringify(earlier.items))).toBeLessThanOrEqual(TRANSCRIPT_PAGE_BYTES);
+  });
+
+  it("pages across filtered canonical entries without treating raw parents as projected adjacency", () => {
+    const manager = SessionManager.inMemory("/tmp/filtered-page-adjacency");
+    const first = manager.appendMessage({ role: "user", content: "first", timestamp: 1 });
+    manager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, {
+      version: 1,
+      activity: { id: "filtered-receipt" },
+    });
+    const second = manager.appendMessage({ role: "assistant", content: "second", timestamp: 3 });
+    const next = manager.appendMessage({ role: "user", content: "next", timestamp: 4 });
+
+    const page = projectTranscriptPage(manager, new BlobStore(), 2, TRANSCRIPT_PAGE_BYTES, next);
+    expect(page.items.map((item) => item.id)).toEqual([first, second]);
+    expect(page.items[1]?.parentId).not.toBe(first);
+    expect(page.nextEntryId).toBe(next);
+    expect(page.start).toBe(0);
+    expect(page.end).toBe(2);
+    expect(page.total).toBe(3);
   });
 
   it("caps nested content before generic JSON projection can truncate it", () => {

@@ -8,6 +8,24 @@ enum ChatComposerLayoutSignalPolicy {
     }
 }
 
+struct ExtensionActivityPillComposerGeometry: Equatable, Sendable {
+    let ownerIDs: [String]
+    let height: CGFloat
+}
+
+enum ExtensionActivityPillComposerGeometryPolicy {
+    enum Disposition: Equatable { case noScrollWrites, noSmoothFollow }
+
+    static func disposition(isDetached: Bool) -> Disposition {
+        isDetached ? .noScrollWrites : .noSmoothFollow
+    }
+
+    static func changed(previous: ExtensionActivityPillComposerGeometry?, current: ExtensionActivityPillComposerGeometry) -> Bool {
+        guard let previous else { return false }
+        return previous.ownerIDs != current.ownerIDs || abs(previous.height - current.height) > 0.5
+    }
+}
+
 private struct ChatScrollGeometryObservation: Equatable {
     let geometry: ChatTranscriptGeometry
     let presentationEpoch: Int
@@ -57,16 +75,17 @@ struct ChatView: View {
     @State private var showContext = false
     @State private var showExtensionDetails = false
     @State private var extensionDetailsGroupID: String?
-    @State private var extensionActivityRoute: ExtensionActivityRoute?
     @State private var initialModelSettled = true
     @State private var showSettings = false
     @State private var queuedMessageEditor: QueuedMessageEditorRoute?
     @State private var mutatingQueuedMessageIDs: Set<String> = []
+    @State private var pendingQueueMutationRevision: Int?
     @State private var openPresentation: ChatOpenPresentationState
     @State private var openingTask: Task<Void, Never>?
     @State private var modelPresentationGeneration: Int?
     @State private var composerTextHeight: CGFloat = 20
     @State private var composerLayoutHeight: CGFloat = 0
+    @State private var extensionPillGeometry: ExtensionActivityPillComposerGeometry?
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
     @State private var scrollCoordinator: ChatScrollCoordinator
     @State private var transcriptPresentation: ChatTranscriptPresentationStore
@@ -201,11 +220,8 @@ struct ChatView: View {
             maxSelectionCount: ChatAttachmentImportPolicy.maximumPhotoSelection,
             matching: .images
         )
-        .sheet(isPresented: $showExtensionDetails) {
+        .sheet(isPresented: extensionHubPresentationBinding) {
             ExtensionDetailsSheet(sessionID: sessionID, groupID: extensionDetailsGroupID)
-        }
-        .sheet(item: $extensionActivityRoute) { route in
-            ExtensionRunDetailsSheet(sessionID: sessionID, activityID: route.id)
         }
         .sheet(item: interactionBinding) { interaction in
             if interaction.questionnaire != nil {
@@ -327,8 +343,10 @@ struct ChatView: View {
                     canonicalTranscript: snapshot.transcript
                 ))
             }
-            // Prepend owns its exact page projection/layout-epoch transaction.
-            guard !scrollCoordinator.isPrependingHistory else { return }
+            // Projection intake remains live during prepend. The scroll owner
+            // preserves the exact anchor, while this store coalesces to the
+            // newest complete desired commit; dropping intake here could leave
+            // streaming/canonical rows stale indefinitely.
             let installedBeforeSubmission = transcriptPresentation.installed
             let startedWork = transcriptPresentation.submit(snapshot: snapshot, tag: currentSource)
             if startedWork {
@@ -338,27 +356,17 @@ struct ChatView: View {
             hostedProbe?.recordProjectionSubmit(startedWork: startedWork)
             #endif
         }
-        .onChange(of: scrollCoordinator.tailSettlementGeneration) { _, _ in
-            guard let generation = modelPresentationGeneration else { return }
-            model.discardLoadedTranscriptHistory(
-                sessionID: sessionID,
-                presentationGeneration: generation
-            )
-        }
         .onChange(of: transcriptPresentation.installed?.tag) { _, _ in
             let installed = transcriptPresentation.installed
-            if let target = presentationTarget,
-               let snapshot = selectedAuthoritativeSnapshot {
-                rememberCanonicalSubmissionHandoffs(model.composerDrafts.canonicalSubmissionIDs(
-                    target: target,
-                    canonicalTranscript: snapshot.transcript
-                ))
-                model.composerDrafts.reconcileSubmission(
-                    target: target,
-                    canonicalTranscript: snapshot.transcript,
-                    queuedMessages: installed?.queuedMessages ?? snapshot.displayedQueuedMessages
-                )
+            if let pendingQueueMutationRevision,
+               let installedRevision = installed?.queueRevision,
+               installedRevision > pendingQueueMutationRevision {
+                self.pendingQueueMutationRevision = nil
+                mutatingQueuedMessageIDs.removeAll()
             }
+            // Optimistic submission settlement is owned by authoritative
+            // SessionPresentationStore publication, never by this delayed
+            // formatting/install callback.
             scrollCoordinator.installedTranscriptChanged(installed)
             #if HOSTED_TEST
             if let installed {
@@ -404,18 +412,17 @@ struct ChatView: View {
     private var transcript: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
-                if let snapshot = selectedAuthoritativeSnapshot {
-                    if (snapshot.transcriptStart ?? 0) > 0 {
+                if let installed = transcriptPresentation.installed {
+                    if (installed.sourceWindow.originalStart ?? 0) > 0 {
                         stableTranscriptRow(
                             id: "earlier-messages",
-                            installedTag: nil,
+                            installedTag: installed.tag,
                             entranceState: .none
                         ) {
-                            earlierMessagesChip(snapshot: snapshot)
+                            earlierMessagesChip(installed: installed)
                         }
                     }
-                    if let installed = transcriptPresentation.installed {
-                        ForEach(installed.displayedItems) { item in
+                    ForEach(installed.displayedItems) { item in
                             let entranceKind = ChatContentEntranceKind.classify(item)
                             let entranceState = canonicalSubmissionHandoffs.contains(item.id)
                                 ? .none
@@ -428,6 +435,7 @@ struct ChatView: View {
                             ) {
                                 ChatTranscriptEntranceRow(
                                     state: entranceState,
+                                    admissionTag: installed.tag,
                                     kind: entranceKind,
                                     reduceMotion: reduceMotion,
                                     onFailsafeReveal: {
@@ -444,13 +452,18 @@ struct ChatView: View {
                                     ChatTranscriptRenderRow(
                                         item: item,
                                         preparedText: installed.preparedText(for: item),
-                                        hiddenThinkingLabel: snapshot.extensionPresentation.semanticState.hiddenThinkingLabel,
+                                        hiddenThinkingLabel: selectedAuthoritativeSnapshot?.extensionPresentation.semanticState.hiddenThinkingLabel,
                                         installationTag: installed.tag,
                                         resolveToolDetails: { callIDs, tag in
                                             transcriptPresentation.resolveToolDetails(
                                                 callIDs: callIDs,
                                                 installationTag: tag
                                             )
+                                        },
+                                        recordToolChip: { sample in
+                                            #if HOSTED_TEST
+                                            hostedProbe?.recordToolChip(sample)
+                                            #endif
                                         }
                                     )
                                     .equatable()
@@ -496,8 +509,7 @@ struct ChatView: View {
                                 }
                             }
                         }
-                        queuedMessageRows(installed)
-                    }
+                    queuedMessageRows(installed)
                 }
                 transcriptTailMarker
             }
@@ -596,11 +608,13 @@ struct ChatView: View {
     @ViewBuilder
     private func queuedMessageRows(_ installed: InstalledChatTranscript) -> some View {
         let messages = installed.queuedMessages
-        let managementAvailability = QueuedMessageManagementPolicy.availability(
-            capabilities: model.gatewayInfo?.capabilities ?? [],
-            queueRevision: installed.queueRevision,
-            hasAuthoritativeItems: installed.supportsQueueManagement
-        )
+        let managementAvailability = isTranscriptProjectionUpdating
+            ? QueuedMessageManagementAvailability.updatingProjection
+            : QueuedMessageManagementPolicy.availability(
+                capabilities: model.gatewayInfo?.capabilities ?? [],
+                queueRevision: installed.queueRevision,
+                hasAuthoritativeItems: installed.supportsQueueManagement
+            )
         ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
             stableTranscriptRow(
                 id: "queued-message-\(message.id)",
@@ -847,6 +861,18 @@ struct ChatView: View {
         )
     }
 
+    /// The ChatView owns one extension hub intent. Interaction and editor routes
+    /// have foreground priority; retaining this intent lets the hub resume
+    /// after either route settles without competing sheets.
+    private var extensionHubPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { showExtensionDetails && extensionForegroundPresentation == .none },
+            set: { presented in
+                if !presented { showExtensionDetails = false }
+            }
+        )
+    }
+
     private var pendingPresentedInteraction: ExtensionInteraction? {
         extensionForegroundPresentation == .interaction ? candidatePresentedInteraction : nil
     }
@@ -914,6 +940,13 @@ struct ChatView: View {
     }
 
     private var isTranscriptReady: Bool { openPresentation.phase == .ready }
+
+    private var isTranscriptProjectionUpdating: Bool {
+        guard let desired = transcriptProjectionSource else {
+            return transcriptPresentation.installed != nil
+        }
+        return transcriptPresentation.installed?.tag != desired
+    }
 
     private var isLoadingEarlierMessages: Bool {
         model.loadingEarlierTranscript || scrollCoordinator.isPrependingHistory
@@ -994,7 +1027,10 @@ struct ChatView: View {
             transcriptPresentation.reset()
         }
         let epoch = openPresentation.begin(retainingVisiblePresentation: retainsVisiblePresentation)
-        scrollCoordinator.resetForPresentation(epoch)
+        scrollCoordinator.resetForPresentation(
+            epoch,
+            retainingVisibleViewport: retainsVisiblePresentation
+        )
         let task = Task { @MainActor in
             let interval = performanceSignposts.begin(.firstReadyFrame)
             var openedGeneration: Int?
@@ -1118,8 +1154,14 @@ struct ChatView: View {
     @MainActor
     private func beginHostedPresentation(probe: ChatHostedProbe) async {
         performanceTracker.discardScroll()
-        transcriptPresentation.reset()
-        let epoch = openPresentation.begin()
+        let retainsVisiblePresentation = modelPresentationGeneration != nil
+            && selectedAuthoritativeSnapshot?.sessionId == sessionID
+        if !retainsVisiblePresentation {
+            transcriptPresentation.reset()
+        }
+        let epoch = openPresentation.begin(
+            retainingVisiblePresentation: retainsVisiblePresentation
+        )
         let interval = performanceSignposts.begin(.firstReadyFrame)
         guard selectedAuthoritativeSnapshot != nil,
               let presentationGeneration = model.presentationGeneration(for: sessionID) else {
@@ -1132,7 +1174,10 @@ struct ChatView: View {
             return
         }
         modelPresentationGeneration = presentationGeneration
-        scrollCoordinator.resetForPresentation(presentationGeneration)
+        scrollCoordinator.resetForPresentation(
+            presentationGeneration,
+            retainingVisibleViewport: retainsVisiblePresentation
+        )
         let installed: InstalledChatTranscript
         do {
             installed = try await installCurrentTranscriptProjection(
@@ -1185,16 +1230,30 @@ struct ChatView: View {
                 )
             },
             prepend: {
-                guard let installed = transcriptPresentation.installed,
-                      installed.tag == transcriptProjectionSource else { return false }
-                let anchor = scrollCoordinator.semanticAnchor(in: installed.timeline)
-                return scrollCoordinator.beginPrepend(
+                guard let generation = modelPresentationGeneration else { return false }
+                let anchor = transcriptPresentation.installed
+                    .flatMap { installed in
+                        installed.tag == transcriptProjectionSource
+                            ? scrollCoordinator.semanticAnchor(in: installed.timeline)
+                            : nil
+                    }
+                let began = scrollCoordinator.beginPrepend(
                     anchor: anchor,
                     load: {
                         do { try await probe.waitForPrependPageRelease() }
                         catch { return nil }
-                        guard let anchor,
-                              let generation = modelPresentationGeneration else { return nil }
+                        let result = await model.loadEarlierTranscript(
+                            sessionID: sessionID,
+                            presentationGeneration: generation
+                        )
+                        guard result == .installed,
+                              modelPresentationGeneration == generation else { return nil }
+                        guard let anchor else {
+                            _ = try? await installCurrentTranscriptProjection(
+                                presentationGeneration: generation
+                            )
+                            return nil
+                        }
                         guard let current = try? await installCurrentTranscriptProjection(
                             presentationGeneration: generation
                         ),
@@ -1209,6 +1268,18 @@ struct ChatView: View {
                     },
                     completion: { probe.recordPrependCompletion($0) }
                 )
+                guard !began else { return true }
+                // The native coordinator may reject anchoring because its
+                // command/semantic sample is stale. Canonical history still
+                // starts, and its projection is installed explicitly.
+                Task { @MainActor in
+                    do { try await probe.waitForPrependPageRelease() } catch { return }
+                    await loadEarlierTranscriptUnanchored(
+                        sessionID: sessionID,
+                        presentationGeneration: generation
+                    )
+                }
+                return true
             },
             invalidatePresentation: {
                 scrollCoordinator.resetForPresentation()
@@ -1353,35 +1424,56 @@ struct ChatView: View {
         scrollCoordinator.requestCatchUp(reduceMotion: reduceMotion)
     }
 
-    private func earlierMessagesChip(snapshot: SessionSnapshot) -> some View {
+    @MainActor
+    private func loadEarlierTranscriptUnanchored(
+        sessionID: String,
+        presentationGeneration: Int
+    ) async {
+        let result = await model.loadEarlierTranscript(
+            sessionID: sessionID,
+            presentationGeneration: presentationGeneration
+        )
+        guard result == .installed, modelPresentationGeneration == presentationGeneration else { return }
+        // A rejected prepend admission (no semantic anchor, stale geometry, or
+        // an outstanding automatic command) must still install canonical data.
+        // Do not rely on the source-change callback here: it is intentionally
+        // suppressed while another layout transaction is settling.
+        _ = try? await installCurrentTranscriptProjection(
+            presentationGeneration: presentationGeneration
+        )
+    }
+
+    private func earlierMessagesChip(installed: InstalledChatTranscript) -> some View {
         Button {
-            guard !isLoadingEarlierMessages else { return }
-            let sessionID = snapshot.sessionId
-            let runtimeGeneration = snapshot.runtimeGeneration
-            let previousStart = snapshot.transcriptStart ?? 0
-            guard let installed = transcriptPresentation.installed,
-                  installed.tag == transcriptProjectionSource else { return }
-            let anchor = scrollCoordinator.semanticAnchor(in: installed.timeline)
-            guard let presentationGeneration = modelPresentationGeneration else { return }
-            let performanceGeneration = performanceTracker.beginPrepend()
+            guard !isLoadingEarlierMessages,
+                  !isTranscriptProjectionUpdating,
+                  let presentationGeneration = modelPresentationGeneration else { return }
+            let sessionID = installed.tag.sessionID
+            let capturedAnchor = transcriptPresentation.installed.map {
+                scrollCoordinator.semanticAnchor(in: $0.timeline)
+            } ?? nil
             let began = scrollCoordinator.beginPrepend(
-                anchor: anchor,
-                load: {
-                    await model.loadEarlierTranscript(
+                anchor: capturedAnchor,
+                load: { @MainActor in
+                    let result = await model.loadEarlierTranscript(
                         sessionID: sessionID,
                         presentationGeneration: presentationGeneration
                     )
-                    guard !Task.isCancelled,
-                          modelPresentationGeneration == presentationGeneration,
-                          let current = model.authoritativeSnapshot(for: sessionID),
-                          current.sessionId == sessionID,
-                          current.runtimeGeneration == runtimeGeneration,
-                          (current.transcriptStart ?? previousStart) < previousStart else { return nil }
-                    guard let anchor else { return nil }
+                    guard result == .installed,
+                          modelPresentationGeneration == presentationGeneration else { return nil }
+                    guard let anchor = capturedAnchor else {
+                        // The canonical page is already installed. Materialize
+                        // its projection even though there is no old row whose
+                        // viewport position can be preserved.
+                        _ = try? await installCurrentTranscriptProjection(
+                            presentationGeneration: presentationGeneration
+                        )
+                        return nil
+                    }
                     guard let installed = try? await installCurrentTranscriptProjection(
                         presentationGeneration: presentationGeneration
                     ),
-                          let renderedID = installed.timeline.renderedIDBySemanticID[anchor.semanticID] else {
+                    let renderedID = installed.timeline.renderedIDBySemanticID[anchor.semanticID] else {
                         return nil
                     }
                     let installedLayout = scrollCoordinator.beginInstalledLayoutEpoch()
@@ -1390,12 +1482,17 @@ struct ChatView: View {
                         installedLayout: installedLayout
                     )
                 },
-                completion: { result in
-                    performanceTracker.endPrepend(generation: performanceGeneration, result: result)
-                }
+                completion: { _ in }
             )
-            if !began {
-                performanceTracker.endPrepend(generation: performanceGeneration, result: .discarded)
+            guard !began else { return }
+            // beginPrepend is deliberately strict for viewport preservation;
+            // its rejection is not permission to turn a canonical request into
+            // a silent no-op.
+            Task { @MainActor in
+                await loadEarlierTranscriptUnanchored(
+                    sessionID: sessionID,
+                    presentationGeneration: presentationGeneration
+                )
             }
         } label: {
             HStack(spacing: 7) {
@@ -1406,43 +1503,100 @@ struct ChatView: View {
                 } else {
                     Image(systemName: "arrow.up")
                 }
-                Text(isLoadingEarlierMessages ? "Loading earlier…" : "Load earlier messages")
+                Text(
+                    isLoadingEarlierMessages
+                        ? "Loading earlier…"
+                        : isTranscriptProjectionUpdating
+                            ? "Updating transcript…"
+                            : "Load earlier messages"
+                )
             }
             .chatTranscriptPill()
         }
         .buttonStyle(.plain)
-        .disabled(isLoadingEarlierMessages)
+        .disabled(isLoadingEarlierMessages || isTranscriptProjectionUpdating)
         .frame(maxWidth: .infinity, minHeight: 44)
-        .accessibilityLabel(isLoadingEarlierMessages ? "Loading earlier messages" : "Load earlier messages")
+        .accessibilityLabel(
+            isLoadingEarlierMessages
+                ? "Loading earlier messages"
+                : isTranscriptProjectionUpdating
+                    ? "Updating transcript"
+                    : "Load earlier messages"
+        )
+        .overlay(alignment: .bottom) {
+            if case let .failed(message) = model.transcriptLoadState {
+                Text(message)
+                    .font(TronTypography.caption)
+                    .foregroundStyle(Color.tronTextSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 42)
+            }
+        }
     }
 
     private var composer: some View {
         VStack(spacing: 10) {
             if let snapshot = selectedAuthoritativeSnapshot {
-                let groups = ChatExtensionWidgetPolicy.liveGroups(
-                    snapshot.extensionPresentation,
-                    executions: snapshot.toolExecutions,
-                    activities: snapshot.extensionActivities ?? []
+                let groups = ExtensionActivityPillPolicy.composerGroups(
+                    ChatExtensionWidgetPolicy.liveGroups(
+                        snapshot.extensionPresentation,
+                        executions: snapshot.toolExecutions,
+                        activities: snapshot.extensionActivities ?? []
+                    )
                 )
                 if !groups.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(groups) { group in
-                                ExtensionActivityPill(group: group) {
-                                    let liveActivities = group.activities.filter(\.isLive)
-                                    if liveActivities.count == 1, let activity = liveActivities.first {
-                                        extensionActivityRoute = ExtensionActivityRoute(id: activity.id)
-                                    } else {
+                                ExtensionActivityPill(
+                                    group: group,
+                                    onTap: {
+                                        // Every pill enters the integrated hub. Run
+                                        // details are a value-based destination
+                                        // owned by that hub, never a bypass route.
                                         extensionDetailsGroupID = group.id
                                         showExtensionDetails = true
+                                        #if HOSTED_TEST
+                                        hostedProbe?.recordExtensionRoute(group.id)
+                                        #endif
+                                    },
+                                    onVisualState: { state, token in
+                                        #if HOSTED_TEST
+                                        hostedProbe?.recordExtensionPillState(state, transitionToken: token)
+                                        #endif
+                                    },
+                                    onExpiry: { ownerID, bucket, remainingMs in
+                                        #if HOSTED_TEST
+                                        hostedProbe?.recordExtensionPillExpiry(ownerID: ownerID, bucket: bucket, remainingMs: remainingMs)
+                                        #endif
                                     }
-                                }
+                                )
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .trailing)
                         .padding(.horizontal, 16)
                     }
                     .scrollClipDisabled()
+                    .onGeometryChange(for: CGFloat.self) { geometry in geometry.size.height } action: { height in
+                        let current = ExtensionActivityPillComposerGeometry(
+                            ownerIDs: groups.map(\.id), height: height
+                        )
+                        guard ExtensionActivityPillComposerGeometryPolicy.changed(
+                            previous: extensionPillGeometry, current: current
+                        ) else { return }
+                        extensionPillGeometry = current
+                        switch ExtensionActivityPillComposerGeometryPolicy.disposition(
+                            isDetached: scrollCoordinator.userScrolledAway
+                        ) {
+                        case .noScrollWrites:
+                            break
+                        case .noSmoothFollow:
+                            // The shared coordinator emits a disabled,
+                            // frame-admitted follow; the pill reason never
+                            // issues a smooth scroll or direct offset write.
+                            scrollCoordinator.composerViewportTransitionBegan()
+                        }
+                    }
                     .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                     .accessibilityElement(children: .contain)
                 }
@@ -1849,14 +2003,18 @@ struct ChatView: View {
         do { try mutation(&items) }
         catch { return }
         mutatingQueuedMessageIDs.insert(affectedID)
-        defer { mutatingQueuedMessageIDs.remove(affectedID) }
+        pendingQueueMutationRevision = expectedRevision
         do {
             try await model.replaceQueue(
                 sessionID: sessionID,
                 expectedRevision: expectedRevision,
                 items: items
             )
+            // Keep controls inert until the exact newer sequenced queue frame
+            // installs. A command response alone is not projection authority.
         } catch {
+            pendingQueueMutationRevision = nil
+            mutatingQueuedMessageIDs.remove(affectedID)
             model.presentComposerActionError(error, target: target)
         }
     }

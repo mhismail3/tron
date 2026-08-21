@@ -160,7 +160,7 @@ typealias ComposerSendOperation = @MainActor @Sendable (
     _ sessionID: String,
     _ uploadIDs: [String],
     _ behavior: String?
-) async throws -> Void
+) async throws -> String
 
 enum ComposerDraftTextPolicy {
     static func restoredDraft(outgoing: String, currentDraft: String) -> String {
@@ -215,6 +215,8 @@ final class ComposerDraftCoordinator {
         let baselineTranscriptIDs: Set<String>
         let lifecycleGeneration: Int
         var transportState: SubmissionTransportState
+        var operationID: String?
+        var observedQueuedCandidateIDs: Set<String>
         var canonicalObserved: Bool
     }
 
@@ -424,15 +426,22 @@ final class ComposerDraftCoordinator {
                 baselineTranscriptIDs: admission.baselineTranscriptIDs
             )
         })
-        let queuedObserved = admission.snapshot.behavior.map { behavior in
-            queuedMessages.contains {
-                !admission.snapshot.baselineQueuedMessageIDs.contains($0.id)
-                    && $0.behavior.rawValue == behavior
-                    && $0.text == admission.snapshot.outgoingText
-                    && $0.attachmentCount == admission.submittedAttachments.count
+        let queuedCandidates = admission.snapshot.behavior.map { behavior in
+            queuedMessages.filter { message in
+                !admission.snapshot.baselineQueuedMessageIDs.contains(message.id)
+                    && message.behavior.rawValue == behavior
+                    && message.text == admission.snapshot.outgoingText
+                    && message.attachmentCount == admission.submittedAttachments.count
             }
+        } ?? []
+        admission.observedQueuedCandidateIDs.formUnion(queuedCandidates.map(\.id))
+        let queuedObserved = admission.operationID.map {
+            admission.observedQueuedCandidateIDs.contains($0)
         } ?? false
-        guard transcriptObserved || queuedObserved else { return }
+        guard transcriptObserved || queuedObserved else {
+            submissionByTarget[target] = admission
+            return
+        }
         admission.canonicalObserved = true
         if admission.transportState == .accepted {
             finishSubmission(admission)
@@ -632,8 +641,9 @@ final class ComposerDraftCoordinator {
               admission.snapshot == submission else {
             throw CancellationError()
         }
+        let operationID: String
         do {
-            try await sendOperation(
+            operationID = try await sendOperation(
                 admission.snapshot.outgoingText,
                 submission.target.sessionID,
                 admission.snapshot.attachmentIDs,
@@ -649,6 +659,7 @@ final class ComposerDraftCoordinator {
             throw error
         }
         try require(admission)
+        markOperationAccepted(operationID, admission: admission)
         markTransportAccepted(admission)
     }
 
@@ -777,6 +788,8 @@ final class ComposerDraftCoordinator {
             baselineTranscriptIDs: Set(canonicalTranscript.map(\.id)),
             lifecycleGeneration: lease.lifecycleGeneration,
             transportState: .sending,
+            operationID: nil,
+            observedQueuedCandidateIDs: [],
             canonicalObserved: false
         )
         submissionByTarget[target] = admission
@@ -816,6 +829,16 @@ final class ComposerDraftCoordinator {
             .filter { !submittedIDs.contains($0.id) }
         attachmentsByTarget[currentAdmission.snapshot.target] = currentAdmission.submittedAttachments + newerAttachments
         submissionByTarget[currentAdmission.snapshot.target] = nil
+    }
+
+    private func markOperationAccepted(_ operationID: String, admission: SubmissionAdmission) {
+        guard var current = submissionByTarget[admission.snapshot.target],
+              current.id == admission.id else { return }
+        current.operationID = operationID
+        if current.observedQueuedCandidateIDs.contains(operationID) {
+            current.canonicalObserved = true
+        }
+        submissionByTarget[admission.snapshot.target] = current
     }
 
     private func markTransportAccepted(_ admission: SubmissionAdmission) {
@@ -862,33 +885,45 @@ final class ComposerDraftCoordinator {
             guard part.type == .text, part.attachment == nil else { return nil }
             return part.text
         }.joined()
-        guard text == snapshot.outgoingText else { return false }
+        let isAttachmentOnlySubmission = snapshot.outgoingText.isEmpty && !submittedAttachments.isEmpty
+        // Pi may persist bounded attachment-envelope context as canonical text
+        // even though the user-facing steering/follow-up text was empty. Exact
+        // attachment evidence below owns this fallback; text-only submissions
+        // still require exact display-text equality.
+        guard isAttachmentOnlySubmission || text == snapshot.outgoingText else { return false }
         guard !submittedAttachments.isEmpty else { return true }
 
         let contents = item.content ?? []
         let imageAttachments = submittedAttachments.filter { $0.mimeType.hasPrefix("image/") }
         let canonicalImages = contents.filter { $0.type == .image }
+        var unmatchedImages = canonicalImages
         let imageMetadataMatches = imageAttachments.count == canonicalImages.count
-            && zip(imageAttachments, canonicalImages).allSatisfy { attachment, part in
-                guard attachment.mimeType == part.mimeType else { return false }
-                if let metadata = part.attachment {
-                    return metadata.name == attachment.name && metadata.mimeType == attachment.mimeType && metadata.size == attachment.size
-                }
-                // Canonical image projection uses a content-hash blob ID rather
-                // than the client's upload ID. Count and MIME correspondence is
-                // the truthful bounded identity when the projection omits names.
+            && imageAttachments.allSatisfy { attachment in
+                guard let index = unmatchedImages.firstIndex(where: { part in
+                    guard attachment.mimeType == part.mimeType else { return false }
+                    if let metadata = part.attachment {
+                        return metadata.name == attachment.name
+                            && metadata.mimeType == attachment.mimeType
+                            && metadata.size == attachment.size
+                    }
+                    // Canonical image projection uses a content-hash blob ID rather
+                    // than the client's upload ID. MIME multiplicity is the truthful
+                    // bounded identity when the projection omits names.
+                    return true
+                }) else { return false }
+                unmatchedImages.remove(at: index)
                 return true
             }
         let nonImageAttachments = submittedAttachments.filter { !$0.mimeType.hasPrefix("image/") }
-        let nonImageMatches = nonImageAttachments.allSatisfy { attachment in
-            contents.contains(where: {
-                guard let metadata = $0.attachment else { return false }
-                return metadata.name == attachment.name
-                    && metadata.mimeType == attachment.mimeType
-                    && metadata.size == attachment.size
-            })
-        }
-        return imageMetadataMatches && nonImageMatches
+        let submittedNonImageKeys = nonImageAttachments.map {
+            "\($0.name)\u{1F}\($0.mimeType)\u{1F}\($0.size)"
+        }.sorted()
+        let canonicalNonImageKeys = contents.compactMap { part -> String? in
+            guard let metadata = part.attachment,
+                  !metadata.mimeType.hasPrefix("image/") else { return nil }
+            return "\(metadata.name)\u{1F}\(metadata.mimeType)\u{1F}\(metadata.size)"
+        }.sorted()
+        return imageMetadataMatches && submittedNonImageKeys == canonicalNonImageKeys
     }
 
     private func apply(_ request: ComposerEditorRequest, to scope: ComposerDraftScope) {

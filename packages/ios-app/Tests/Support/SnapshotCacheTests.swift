@@ -108,6 +108,13 @@ struct SnapshotCacheTests {
             return
         }
         #expect(loadMetrics == saveMetrics)
+
+        snapshot.transcriptStart = nil
+        snapshot.transcriptTotal = nil
+        await cache.save(profileID: "profile", sessions: [summary], snapshots: [snapshot])
+        let absentBounds = await cache.load(profileID: "profile").snapshots.first
+        #expect(absentBounds?.transcriptStart == nil)
+        #expect(absentBounds?.transcriptTotal == nil)
     }
 
     @Test("malformed maximum source bounds trim without overflow")

@@ -987,7 +987,7 @@ struct TronSettingsRow<Trailing: View>: View {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(accent)
-                .frame(width: 20, height: 20, alignment: .center)
+                .frame(width: 22, height: 22, alignment: .center)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -1006,7 +1006,7 @@ struct TronSettingsRow<Trailing: View>: View {
             Spacer(minLength: TronSpacing.md)
             trailing
         }
-        .padding(.horizontal, TronSpacing.xl)
+        .padding(.horizontal, 14)
         .padding(.vertical, TronSpacing.xl)
         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         .contentShape(Rectangle())
@@ -1048,7 +1048,7 @@ struct TronInfoCard: View {
             Image(systemName: icon)
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(accent)
-                .frame(width: 20, height: 20, alignment: .center)
+                .frame(width: 22, height: 22, alignment: .center)
                 .accessibilityHidden(true)
             Text(text)
                 .font(TronTypography.bodySM)
@@ -1057,7 +1057,7 @@ struct TronInfoCard: View {
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, TronSpacing.xl)
+        .padding(.horizontal, 14)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .tronGlassSurface(accent: accent, tintOpacity: 0.09)

@@ -8,6 +8,7 @@ import { PI_VERSION, GATEWAY_VERSION, MIN_PROTOCOL_VERSION, PROTOCOL_VERSION } f
 import { arrayOfStrings, boolean, integer, object, oneOf, optionalString, string, text } from "../util/validation.js";
 import type { DeviceStore } from "../security/device-store.js";
 import type { RuntimeRegistry } from "../sessions/runtime-registry.js";
+import { EXTENSION_ACTIVITY_HISTORY_CAPABILITY } from "../sessions/extension-activity-history.js";
 import type { FilesystemService } from "../machine/filesystem-service.js";
 import { GitWorktreeService, type SessionSourceControlRequest } from "../machine/git-worktree-service.js";
 import type { UploadStore } from "../machine/upload-store.js";
@@ -58,7 +59,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 const restartDrainMethods = new Set([
   "system.info", "system.logs", "command.status", "gateway.update.config.status", "gateway.update.config", "gateway.update.status", "gateway.update", "gateway.rollback", "gateway.restart",
   "session.list", "session.open", "session.sync", "session.close", "session.transcript",
-  "session.abort", "session.clearQueue", "session.queue.replace", "extension.respond", "extension.editor.update", "extension.toolsExpanded",
+  "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "extension.respond", "extension.editor.update", "extension.toolsExpanded",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
 ]);
 
@@ -160,6 +161,7 @@ export class GatewayService {
         "uploads.v1",
         "terminal.v1",
         "extension-presentation.v1",
+        EXTENSION_ACTIVITY_HISTORY_CAPABILITY,
         "queue-management.v1",
         "restart-drain.v1",
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
@@ -344,10 +346,43 @@ export class GatewayService {
           ? undefined
           : integer(params.before, "before", 0, Number.MAX_SAFE_INTEGER);
         const expectedNextEntryId = optionalString(params.expectedNextEntryId, "expectedNextEntryId", 200);
+        const expectedRuntimeGeneration = optionalString(params.expectedRuntimeGeneration, "expectedRuntimeGeneration", 200);
+        const expectedLeafEntryId = optionalString(params.expectedLeafEntryId, "expectedLeafEntryId", 200);
         const slot = await this.openedSlot(client, params);
         // Paging is a bounded read for an already-open presentation. It must
         // never create or revive event-subscription ownership after a close.
-        return safeJson(slot.transcriptPage(before, expectedNextEntryId));
+        return safeJson(slot.transcriptPage(
+          before,
+          expectedNextEntryId,
+          expectedRuntimeGeneration,
+          expectedLeafEntryId,
+        ));
+      }
+      case "session.extensionActivity.list": {
+        const slot = await this.openedSlot(client, params);
+        const cursor = optionalString(params.cursor, "cursor", 200);
+        const limit = params.limit === undefined ? 25 : integer(params.limit, "limit", 1, 50);
+        const ownerId = optionalString(params.ownerId, "ownerId", 256);
+        const runId = optionalString(params.runId, "runId", 256);
+        const state = params.state === undefined ? undefined : oneOf(params.state, "state", ["completed", "failed", "stopped", "rejected"] as const);
+        try {
+          return safeJson(slot.extensionActivityHistory(cursor, limit, {
+            ...(ownerId ? { ownerId } : {}), ...(runId ? { runId } : {}), ...(state ? { state } : {}),
+          }));
+        } catch (error) {
+          if (error instanceof Error && /cursor conflict/u.test(error.message)) {
+            throw new GatewayError("conflict", "Extension activity history changed; restart paging", true);
+          }
+          throw new GatewayError("invalid_request", error instanceof Error ? error.message : "Invalid extension activity history request");
+        }
+      }
+      case "session.extensionActivity.get": {
+        const slot = await this.openedSlot(client, params);
+        const activityId = string(params.activityId, "activityId", { max: 256 });
+        const generation = optionalString(params.historyRevision, "historyRevision", 64);
+        const activity = slot.extensionActivityDetail(activityId, generation);
+        if (!activity) throw new GatewayError("not_found", "Extension activity is not available");
+        return safeJson({ activity });
       }
       case "session.close": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });

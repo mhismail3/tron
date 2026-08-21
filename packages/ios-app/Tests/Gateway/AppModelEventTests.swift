@@ -37,6 +37,73 @@ struct AppModelEventTests {
         ))
     }
 
+    @Test("compact extension activity deltas update the hub without rebuilding chat")
+    func compactExtensionActivityDelta() async throws {
+        let snapshot = try loadSnapshot()
+        let model = AppModel()
+        model.installHostedSubscribedSnapshot(snapshot)
+        let initialProjection = try #require(model.chatProjectionGenerations(
+            for: snapshot.sessionId,
+            presentationGeneration: 1
+        ))
+        let activity: JSONValue = .object([
+            "id": .string("tool:subagent"),
+            "activityId": .string("extension-activity:test"),
+            "runId": .string("run-test"),
+            "toolCallId": .string("tool:subagent"),
+            "source": .object([
+                "source": .string("npm:pi-subagents@test"),
+                "owner": .object([
+                    "id": .string("extension:test"),
+                    "title": .string("Pi Subagents"),
+                    "source": .string("npm:pi-subagents@test"),
+                ]),
+            ]),
+            "title": .string("subagent"),
+            "mode": .string("workflow"),
+            "status": .string("running"),
+            "startedAt": .string("2026-01-01T00:00:00.000Z"),
+            "updatedAt": .string("2026-01-01T00:00:01.000Z"),
+            "currentTool": .string("bash"),
+            "children": .array([]),
+            "lifecycle": .object([
+                "version": .number(1),
+                "state": .string("running"),
+                "attention": .string("none"),
+                "sequence": .number(1),
+                "observedAt": .string("2026-01-01T00:00:01.000Z"),
+                "visibility": .string("current"),
+            ]),
+        ])
+        await model.handle(event(
+            topic: "session.extensionActivity",
+            snapshot: snapshot,
+            sequence: snapshot.eventSequence + 1,
+            data: .object([
+                "activity": activity,
+                "liveActivityRevision": .number(1),
+                "extensionActivityAsOf": .string("2026-01-01T00:00:01.000Z"),
+            ])
+        ))
+        #expect(model.selectedSnapshot?.extensionActivities?.first?.stableID == "extension-activity:test")
+        #expect(model.selectedSnapshot?.extensionActivities?.first?.currentTool == "bash")
+        let afterDelta = try #require(model.chatProjectionGenerations(
+            for: snapshot.sessionId,
+            presentationGeneration: 1
+        ))
+        #expect(afterDelta == initialProjection)
+
+        var staleFullFrame = snapshot
+        staleFullFrame.eventSequence = snapshot.eventSequence + 2
+        staleFullFrame.revision = snapshot.revision + 2
+        staleFullFrame.liveActivityRevision = 0
+        staleFullFrame.extensionActivityAsOf = "2026-01-01T00:00:00.000Z"
+        staleFullFrame.extensionActivities = nil
+        await model.handle(snapshotEvent(staleFullFrame, sessionID: snapshot.sessionId))
+        #expect(model.selectedSnapshot?.extensionActivities?.first?.stableID == "extension-activity:test")
+        #expect(model.selectedSnapshot?.liveActivityRevision == 1)
+    }
+
     @Test("portable tool and extension events update native session state in sequence")
     func portableSessionEvents() async throws {
         let snapshot = try loadSnapshot()

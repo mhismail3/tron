@@ -9,6 +9,19 @@ struct SessionPresentationIdentity: Hashable, Sendable {
 enum SessionSnapshotInstallationMode { case freshPresentation, reconnect }
 enum SessionEditorAction: String, Hashable, Sendable { case set, paste, native }
 
+enum SessionTranscriptLoadState: Equatable, Sendable {
+    case idle
+    case loading
+    case failed(String)
+}
+
+enum SessionTranscriptLoadResult: Equatable, Sendable {
+    case installed
+    case unavailable
+    case stale
+    case failed
+}
+
 struct GatewaySessionOpenResponse: Decodable {
     let session: SessionSnapshot
     let syncToken: String
@@ -19,7 +32,8 @@ struct GatewaySessionOpenResponse: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         session = try container.decode(SessionSnapshot.self, forKey: .session)
-        guard ExtensionPresentationPolicy.admit(session.extensionPresentation) else {
+        guard ExtensionPresentationPolicy.admit(session.extensionPresentation),
+              ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(session) else {
             throw DecodingError.dataCorruptedError(forKey: .session, in: container, debugDescription: "Invalid extension presentation snapshot")
         }
         syncToken = try container.decode(String.self, forKey: .syncToken)
@@ -39,6 +53,10 @@ protocol SessionPresentationStoreDelegate: AnyObject {
         operationID: String?
     )
     func sessionPresentationStoreDidOpen(_ target: SessionPresentationIdentity)
+    func sessionPresentationStoreDidPublishSnapshot(
+        _ snapshot: SessionSnapshot,
+        target: SessionPresentationIdentity
+    )
     func sessionPresentationStorePostNotice(_ message: String, replacing key: GlobalNoticeKey?)
     func sessionPresentationStoreRemoveNotice(_ key: GlobalNoticeKey)
     func sessionPresentationStoreSurface(_ error: Error)
@@ -60,8 +78,9 @@ final class SessionPresentationStore {
     private(set) var isAuthoritative = false
     @ObservationIgnored private var authoritativeTailSnapshot: SessionSnapshot?
     @ObservationIgnored private var hasLoadedTranscriptHistory = false
-    @ObservationIgnored private var discardLoadedHistoryAfterCurrentLoad = false
     private(set) var loadingEarlierTranscript = false
+    private(set) var transcriptLoadState: SessionTranscriptLoadState = .idle
+    @ObservationIgnored private var transcriptLoadTarget: SessionPresentationIdentity?
     private var revokedTargets = Set<SessionPresentationIdentity>()
     private var nextPresentationGeneration = 0
     // Every Gateway connection owns a distinct token namespace. Responses and
@@ -74,6 +93,7 @@ final class SessionPresentationStore {
     private var pendingRebaselines: [String: PreparedSessionRebaseline] = [:]
     private let synchronization = SessionSynchronizationCoordinator()
     private var deferredEffectsByTarget: [SessionPresentationIdentity: [ReducerEffect]] = [:]
+    private var terminalSynchronizationFailures: [SessionPresentationIdentity: GatewayFailure] = [:]
 
     private(set) var context: JSONValue?
     private(set) var sessionTree: [SessionTreeNode] = []
@@ -178,6 +198,10 @@ final class SessionPresentationStore {
             generation: nextPresentationGeneration
         )
         pendingTarget = requested
+        terminalSynchronizationFailures[requested] = nil
+        transcriptLoadTarget = nil
+        loadingEarlierTranscript = false
+        transcriptLoadState = .idle
         // A same-session mounted snapshot remains truthful while a replacement
         // owner reconnects. New sessions have no retained chat to preserve.
         let retainsMountedChat = isAuthoritative
@@ -207,6 +231,10 @@ final class SessionPresentationStore {
             replacingVisibleTranscript: true,
             presentationGeneration: requested.generation
         )
+        if !synchronized,
+           let failure = terminalSynchronizationFailures.removeValue(forKey: requested) {
+            throw failure
+        }
         guard pendingTarget == requested,
               synchronized,
               subscribedSessionID == sessionID,
@@ -231,6 +259,7 @@ final class SessionPresentationStore {
         // Composer presentation authority must mount before deferred editor
         // effects publish for this exact fresh presentation.
         delegate?.sessionPresentationStoreDidOpen(requested)
+        if let snapshot { delegate?.sessionPresentationStoreDidPublishSnapshot(snapshot, target: requested) }
         publish(deferredEffectsByTarget.removeValue(forKey: requested) ?? [], target: requested)
         didOpen = true
         result = .success
@@ -249,6 +278,9 @@ final class SessionPresentationStore {
         target = nil
         if pendingTarget == requested { pendingTarget = nil }
         isAuthoritative = false
+        transcriptLoadTarget = nil
+        loadingEarlierTranscript = false
+        transcriptLoadState = .idle
         snapshot = nil
         authoritativeTailSnapshot = nil
         hasLoadedTranscriptHistory = false
@@ -257,113 +289,214 @@ final class SessionPresentationStore {
         await closeSubscription(requested.sessionID, expectedTarget: requested)
     }
 
-    func loadEarlier(sessionID: String, presentationGeneration: Int) async {
-        guard !loadingEarlierTranscript,
-              let target,
-              target.sessionID == sessionID,
-              target.generation == presentationGeneration,
-              owns(target),
-              isAuthoritative,
-              let subscriptionToken = installedSubscriptionToken(for: sessionID),
-              let current = snapshot,
-              let before = current.transcriptStart,
-              before > 0 else { return }
-        let expectedTotal: Int
-        if let transcriptTotal = current.transcriptTotal {
-            expectedTotal = transcriptTotal
-        } else {
-            let (derivedTotal, overflow) = before.addingReportingOverflow(current.transcript.count)
-            guard !overflow else { return }
-            expectedTotal = derivedTotal
+    func loadEarlier(sessionID: String, presentationGeneration: Int) async -> SessionTranscriptLoadResult {
+        guard !loadingEarlierTranscript else { return .unavailable }
+        guard let loadTarget = mountedTarget,
+              loadTarget.sessionID == sessionID,
+              loadTarget.generation == presentationGeneration,
+              owns(loadTarget),
+              isAuthoritative else {
+            transcriptLoadState = .failed("Earlier messages are not available on this presentation.")
+            return .unavailable
         }
-        let request = ChatTranscriptPageRequest(
-            sessionID: sessionID,
-            presentationGeneration: presentationGeneration,
-            runtimeGeneration: current.runtimeGeneration,
-            before: before,
-            expectedTotal: expectedTotal,
-            expectedNextEntryID: current.transcript.first?.id
-        )
-        struct Params: Codable { let sessionId: String; let before: Int; let expectedNextEntryId: String? }
+        transcriptLoadTarget = loadTarget
+        loadingEarlierTranscript = true
+        transcriptLoadState = .loading
+        defer {
+            if transcriptLoadTarget == loadTarget {
+                transcriptLoadTarget = nil
+                loadingEarlierTranscript = false
+            }
+        }
+
+        struct Params: Codable {
+            let sessionId: String
+            let before: Int
+            let expectedNextEntryId: String?
+            let expectedRuntimeGeneration: String
+            let expectedLeafEntryId: String?
+        }
         struct Response: Decodable {
             let items: [TranscriptItem]
             let start: Int
             let end: Int?
             let total: Int
+            let nextEntryId: String?
+            let runtimeGeneration: String?
+            let leafEntryId: String?
         }
-        loadingEarlierTranscript = true
-        discardLoadedHistoryAfterCurrentLoad = false
-        defer {
-            loadingEarlierTranscript = false
-            discardLoadedHistoryAfterCurrentLoad = false
-        }
-        do {
-            let response: Response = try await client.request(
-                "session.transcript",
-                Params(sessionId: sessionID, before: before, expectedNextEntryId: current.transcript.first?.id),
-                timeout: .seconds(60)
+        // A cursor can become stale while the Gateway request is suspended.
+        // Retry a bounded number of times; never recurse through an unbounded
+        // stream of moving cursors or leave the loading state wedged.
+        for attempt in 0...2 {
+            guard let target,
+                  target == loadTarget,
+                  owns(target),
+                  isAuthoritative,
+                  let subscriptionToken = installedSubscriptionToken(for: sessionID),
+                  let current = snapshot,
+                  let before = current.transcriptStart,
+                  before > 0 else {
+                updateTranscriptLoadState(
+                    .failed("Earlier messages are not available on this presentation."),
+                    for: loadTarget
+                )
+                return .unavailable
+            }
+            let expectedTotal: Int
+            if let transcriptTotal = current.transcriptTotal {
+                expectedTotal = transcriptTotal
+            } else {
+                let (derivedTotal, overflow) = before.addingReportingOverflow(current.transcript.count)
+                guard !overflow else {
+                    updateTranscriptLoadState(.failed("History bounds are invalid."), for: loadTarget)
+                    return .failed
+                }
+                expectedTotal = derivedTotal
+            }
+            let request = ChatTranscriptPageRequest(
+                sessionID: sessionID,
+                presentationGeneration: presentationGeneration,
+                runtimeGeneration: current.runtimeGeneration,
+                before: before,
+                expectedTotal: expectedTotal,
+                expectedNextEntryID: current.transcript.first?.id
             )
-            guard !Task.isCancelled,
-                  let currentTarget = self.mountedTarget,
-                  currentTarget == target,
-                  self.isAuthoritative,
-                  self.installedSubscriptionToken(for: sessionID) == subscriptionToken,
-                  var snapshot = self.snapshot,
-                  request.canInstall(
+            do {
+                let response: Response = try await client.request(
+                    "session.transcript",
+                    Params(
+                        sessionId: sessionID,
+                        before: before,
+                        expectedNextEntryId: current.transcript.first?.id,
+                        expectedRuntimeGeneration: current.runtimeGeneration,
+                        expectedLeafEntryId: current.leafEntryId
+                    ),
+                    timeout: .seconds(15)
+                )
+                guard !Task.isCancelled,
+                      let currentTarget = self.mountedTarget,
+                      currentTarget == target,
+                      self.isAuthoritative,
+                      self.installedSubscriptionToken(for: sessionID) == subscriptionToken,
+                      var installed = self.snapshot else {
+                    updateTranscriptLoadState(.idle, for: loadTarget)
+                    return .unavailable
+                }
+                guard request.canInstall(
                     sessionID: currentTarget.sessionID,
                     presentationGeneration: currentTarget.generation,
-                    runtimeGeneration: snapshot.runtimeGeneration,
-                    transcriptStart: snapshot.transcriptStart,
-                    transcriptTotal: snapshot.transcriptTotal,
-                    firstTranscriptID: snapshot.transcript.first?.id
-                  ),
-                  request.canInstallPage(
+                    runtimeGeneration: installed.runtimeGeneration,
+                    transcriptStart: installed.transcriptStart,
+                    transcriptTotal: installed.transcriptTotal,
+                    firstTranscriptID: installed.transcript.first?.id
+                ) else {
+                    if attempt < 2 { continue }
+                    updateTranscriptLoadState(
+                        .failed("History changed while loading. Tap to retry."),
+                        for: loadTarget
+                    )
+                    return .stale
+                }
+                guard (response.runtimeGeneration == nil || response.runtimeGeneration == installed.runtimeGeneration),
+                      (response.leafEntryId == nil || installed.leafEntryId == nil || response.leafEntryId == installed.leafEntryId),
+                      Self.admitsTranscriptPageAnchor(
+                        expectedNextEntryID: request.expectedNextEntryID,
+                        echoedNextEntryID: response.nextEntryId
+                      ),
+                      request.canInstallPage(
                     start: response.start,
                     end: response.end ?? before,
                     total: response.total,
                     itemCount: response.items.count,
-                    visibleItemCount: snapshot.transcript.count
-                  ),
-                  !discardLoadedHistoryAfterCurrentLoad else { return }
-            let existingIDs = Set(snapshot.transcript.map(\.id))
-            let pageIDs = Set(response.items.map(\.id))
-            guard pageIDs.count == response.items.count,
-                  response.items.allSatisfy({ !existingIDs.contains($0.id) }) else { return }
-            snapshot.transcript = response.items + snapshot.transcript
-            snapshot.transcriptStart = response.start
-            snapshot.transcriptTotal = response.total
-            self.snapshot = snapshot
-            hasLoadedTranscriptHistory = true
-            advanceChatProjection(canonical: true)
-            delegate?.sessionPresentationStoreCheckpointCache()
-        } catch is CancellationError {
-            return
-        } catch {
-            delegate?.sessionPresentationStoreSurface(error)
+                    visibleItemCount: installed.transcript.count
+                ), Self.admitsTranscriptPage(response.items) else {
+                    // Repeating the same malformed/stale page cannot converge.
+                    // Retry only when the mounted canonical cursor itself moved.
+                    updateTranscriptLoadState(
+                        .failed("The history page did not match this conversation. Tap to retry."),
+                        for: loadTarget
+                    )
+                    return .stale
+                }
+                let existingIDs = Set(installed.transcript.map(\.id))
+                let pageIDs = Set(response.items.map(\.id))
+                guard pageIDs.count == response.items.count,
+                      response.items.allSatisfy({ !existingIDs.contains($0.id) }) else {
+                    updateTranscriptLoadState(
+                        .failed("The history branch changed. Tap to retry."),
+                        for: loadTarget
+                    )
+                    return .stale
+                }
+                installed.transcript = response.items + installed.transcript
+                installed.transcriptStart = response.start
+                installed.transcriptTotal = response.total
+                self.snapshot = installed
+                if let authoritativeTailSnapshot {
+                    self.authoritativeTailSnapshot = Self.retainingRecentTranscriptContinuity(
+                        visible: installed,
+                        authoritative: authoritativeTailSnapshot
+                    )
+                }
+                hasLoadedTranscriptHistory = true
+                advanceChatProjection(canonical: true)
+                updateTranscriptLoadState(.idle, for: loadTarget)
+                delegate?.sessionPresentationStoreCheckpointCache()
+                return .installed
+            } catch is CancellationError {
+                updateTranscriptLoadState(.idle, for: loadTarget)
+                return .unavailable
+            } catch let error as GatewayFailure where error.code == "conflict" && attempt < 2 {
+                continue
+            } catch {
+                updateTranscriptLoadState(.failed(error.localizedDescription), for: loadTarget)
+                delegate?.sessionPresentationStoreSurface(error)
+                return .failed
+            }
         }
+        updateTranscriptLoadState(
+            .failed("History changed while loading. Tap to retry."),
+            for: loadTarget
+        )
+        return .stale
     }
 
-    func discardLoadedTranscriptHistory(
-        sessionID: String,
-        presentationGeneration: Int
+    private func updateTranscriptLoadState(
+        _ state: SessionTranscriptLoadState,
+        for target: SessionPresentationIdentity
     ) {
-        guard mountedTarget == SessionPresentationIdentity(
-            sessionID: sessionID,
-            generation: presentationGeneration
-        ) else { return }
-        if loadingEarlierTranscript { discardLoadedHistoryAfterCurrentLoad = true }
-        guard hasLoadedTranscriptHistory,
-              let tail = authoritativeTailSnapshot,
-              tail.sessionId == sessionID,
-              tail.runtimeGeneration == snapshot?.runtimeGeneration else { return }
-        snapshot = tail
-        hasLoadedTranscriptHistory = false
-        advanceChatProjection(canonical: true)
-        delegate?.sessionPresentationStoreCheckpointCache()
+        guard transcriptLoadTarget == target else { return }
+        transcriptLoadState = state
+    }
+
+    static func admitsTranscriptPageAnchor(
+        expectedNextEntryID: String?,
+        echoedNextEntryID: String?
+    ) -> Bool {
+        // A positive cursor can accompany an empty fitted tail, so that legacy
+        // request has no anchor to compare even though a new Gateway can echo
+        // the exact projected neighbor. When an anchor was requested, a new
+        // mismatch is invalid while an omitted legacy echo remains compatible.
+        guard let expectedNextEntryID else { return true }
+        return echoedNextEntryID == nil || echoedNextEntryID == expectedNextEntryID
+    }
+
+    private static func admitsTranscriptPage(_ items: [TranscriptItem]) -> Bool {
+        // Page order and adjacency belong to the Gateway's filtered projected
+        // branch. Raw canonical parent links can legitimately point through
+        // omitted session-info, hidden custom, or extension receipt entries,
+        // so they are not evidence that two displayed rows are noncontiguous.
+        // The request/response cursor, runtime, leaf, range, total, echoed next
+        // projected entry, and unique/non-overlapping IDs provide admission.
+        items.count <= ChatTranscriptPageRequest.maximumItemCount
     }
 
     func retireConnection() {
         connectionGeneration &+= 1
+        transcriptLoadTarget = nil
+        loadingEarlierTranscript = false
+        transcriptLoadState = .idle
         deferredEffectsByTarget.removeAll()
         pendingRebaselines.removeAll()
         pendingSubscriptionTokens.removeAll()
@@ -412,14 +545,6 @@ final class SessionPresentationStore {
         deferredEffectsByTarget = deferredEffectsByTarget.filter { $0.key.sessionID != sessionID }
         retireConnection()
         clearSecondaryProjection()
-    }
-
-    func clearConfirmedQueue(sessionID: String) {
-        guard ownsSession(sessionID), var snapshot else { return }
-        snapshot.queued = .init(steering: [], followUp: [])
-        snapshot.queuedItems = []
-        self.snapshot = snapshot
-        advanceChatProjection(canonical: false)
     }
 
     func admit(_ event: GatewayEvent) async {
@@ -765,14 +890,19 @@ final class SessionPresentationStore {
     ) async -> Bool {
         var nextOperation = operation
         let synchronizationConnectionGeneration = connectionGeneration
-        for _ in 0..<3 {
+        for attempt in 0..<3 {
             guard !Task.isCancelled,
                   synchronization.owns(lease),
                   ownsSynchronizationIntent(lease.intent, sessionID: sessionID) else {
                 synchronization.complete(lease, outcome: false)
                 return false
             }
-            switch await performSynchronizationAttempt(sessionID: sessionID, lease: lease, operation: nextOperation) {
+            switch await performSynchronizationAttempt(
+                sessionID: sessionID,
+                lease: lease,
+                operation: nextOperation,
+                retriesInvalidResponse: attempt < 2
+            ) {
             case .success:
                 synchronization.complete(lease, outcome: true)
                 delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
@@ -839,10 +969,96 @@ final class SessionPresentationStore {
         return false
     }
 
+    // Canonical opening and later paging share the same bounded, display-bearing
+    // continuity policy. Keep this in one place so opening cannot silently use a
+    // smaller (or unbounded) history window than live continuity.
+    static let minimumRecentTranscriptContinuityMessages = 24
+
+    private static func displayBearingTranscriptCount(_ snapshot: SessionSnapshot) -> Int {
+        snapshot.transcript.reduce(into: 0) { count, item in
+            if !(item.kind == .message && item.role == .toolResult) { count += 1 }
+        }
+    }
+
+    private func backfillOpeningTailIfNeeded(
+        _ baseline: SessionSnapshot,
+        sessionID: String,
+        subscriptionToken: String,
+        connectionGeneration: Int
+    ) async throws -> SessionSnapshot {
+        guard let before = baseline.transcriptStart,
+              before > 0,
+              baseline.transcript.isEmpty
+                || Self.displayBearingTranscriptCount(baseline) < Self.minimumRecentTranscriptContinuityMessages else {
+            return baseline
+        }
+        struct Params: Codable {
+            let sessionId: String
+            let before: Int
+            let expectedNextEntryId: String?
+            let expectedRuntimeGeneration: String
+            let expectedLeafEntryId: String?
+        }
+        struct Response: Decodable {
+            let items: [TranscriptItem]
+            let start: Int
+            let end: Int?
+            let total: Int
+            let nextEntryId: String?
+            let runtimeGeneration: String?
+            let leafEntryId: String?
+        }
+        let response: Response = try await client.request(
+            "session.transcript",
+            Params(
+                sessionId: sessionID,
+                before: before,
+                expectedNextEntryId: baseline.transcript.first?.id,
+                expectedRuntimeGeneration: baseline.runtimeGeneration,
+                expectedLeafEntryId: baseline.leafEntryId
+            ),
+            timeout: .seconds(15)
+        )
+        let expectedTotal = baseline.transcriptTotal ?? before + baseline.transcript.count
+        guard connectionGeneration == self.connectionGeneration,
+              pendingSubscriptionTokens[sessionID] == subscriptionToken,
+              response.total == expectedTotal,
+              (response.runtimeGeneration == nil || response.runtimeGeneration == baseline.runtimeGeneration),
+              (response.leafEntryId == nil || baseline.leafEntryId == nil || response.leafEntryId == baseline.leafEntryId),
+              Self.admitsTranscriptPageAnchor(
+                expectedNextEntryID: baseline.transcript.first?.id,
+                echoedNextEntryID: response.nextEntryId
+              ),
+              (response.end ?? before) == before,
+              response.start >= 0,
+              response.start <= before,
+              response.items.count == before - response.start,
+              response.items.count <= ChatTranscriptPageRequest.maximumItemCount,
+              Self.admitsTranscriptPage(response.items) else {
+            throw GatewayFailure(code: "history_changed", message: "The session history changed while opening.", retryable: true, details: nil)
+        }
+        let existingIDs = Set(baseline.transcript.map(\.id))
+        guard Set(response.items.map(\.id)).count == response.items.count,
+              response.items.allSatisfy({ !existingIDs.contains($0.id) }) else {
+            throw GatewayFailure(code: "history_changed", message: "The session branch changed while opening.", retryable: true, details: nil)
+        }
+        var result = baseline
+        result.transcript = response.items + baseline.transcript
+        result.transcriptStart = response.start
+        result.transcriptTotal = response.total
+        if result.transcript.count > ChatTranscriptPageRequest.maximumItemCount {
+            let omitted = result.transcript.count - ChatTranscriptPageRequest.maximumItemCount
+            result.transcript = Array(result.transcript.suffix(ChatTranscriptPageRequest.maximumItemCount))
+            result.transcriptStart = response.start + omitted
+        }
+        return result
+    }
+
     private func performSynchronizationAttempt(
         sessionID: String,
         lease: SessionSynchronizationCoordinator.Lease,
-        operation: PerformanceOperation
+        operation: PerformanceOperation,
+        retriesInvalidResponse: Bool
     ) async -> AttemptOutcome {
         let interval = performanceSignposts.begin(operation)
         var result = PerformanceResult.failure
@@ -853,11 +1069,32 @@ final class SessionPresentationStore {
         do {
             try Task.checkCancellation()
             struct Params: Codable { let sessionId: String }
-            let response: GatewaySessionOpenResponse = try await client.request(
+            let responseValue = try await client.requestValue(
                 "session.open",
                 Params(sessionId: sessionID),
                 timeout: .seconds(60)
             )
+            // session.open creates synchronization ownership before iOS decodes
+            // the snapshot. Preserve the independently bounded close token so
+            // a malformed snapshot can release that ownership before retrying.
+            if let token = responseValue.objectValue?["subscriptionToken"]?.stringValue,
+               !token.isEmpty, token.utf8.count <= 200 {
+                provisionalToken = token
+                pendingSubscriptionTokens[sessionID] = token
+            }
+            let response = try GatewayResponseDecoding.decode(
+                responseValue,
+                as: GatewaySessionOpenResponse.self,
+                method: "session.open"
+            )
+            guard response.session.sessionId == sessionID else {
+                throw GatewayFailure(
+                    code: "invalid_response",
+                    message: "The Gateway returned a different session while opening this conversation.",
+                    retryable: false,
+                    details: nil
+                )
+            }
             provisionalToken = response.subscriptionToken
             pendingSubscriptionTokens[sessionID] = response.subscriptionToken
             guard ownsSynchronizationAttempt(
@@ -891,13 +1128,19 @@ final class SessionPresentationStore {
             }
 
             let pendingRebaseline = pendingRebaselines.removeValue(forKey: sessionID)
-            let authoritativeResponse: SessionSnapshot
+            var authoritativeResponse: SessionSnapshot
             if let pendingRebaseline,
                isNewer(pendingRebaseline.snapshot, than: response.session) {
                 authoritativeResponse = pendingRebaseline.snapshot
             } else {
                 authoritativeResponse = response.session
             }
+            authoritativeResponse = try await backfillOpeningTailIfNeeded(
+                authoritativeResponse,
+                sessionID: sessionID,
+                subscriptionToken: response.subscriptionToken,
+                connectionGeneration: attemptConnectionGeneration
+            )
             let mode: SessionSnapshotInstallationMode
             switch lease.intent {
             case .presentation:
@@ -906,7 +1149,7 @@ final class SessionPresentationStore {
                 mode = synchronization.consumeFreshInstallRequirement(sessionID: sessionID)
                     ? .freshPresentation : .reconnect
             }
-            let visibleCurrent = hasLoadedTranscriptHistory ? snapshot : nil
+            let visibleCurrent = snapshot
             var installed = Self.installingSnapshot(
                 current: visibleCurrent,
                 authoritative: authoritativeResponse,
@@ -975,6 +1218,16 @@ final class SessionPresentationStore {
                 result = .discarded
                 return .retry
             }
+            if synchronization.consumeRetryRequirement(for: lease) {
+                if case .freshPresentation = mode { synchronization.requireFreshInstall(sessionID: sessionID) }
+                await closeProvisionalSubscription(
+                    sessionID,
+                    token: response.subscriptionToken,
+                    expectedConnectionGeneration: attemptConnectionGeneration
+                )
+                result = .discarded
+                return .retry
+            }
             guard let installedTarget = synchronizationTarget(
                 for: lease.intent,
                 sessionID: sessionID
@@ -992,6 +1245,12 @@ final class SessionPresentationStore {
                 return .failed(showCatchUpNotice: false)
             }
             let replacedRuntime = prepareSecondaryProjectionForRuntimeInstallation(installed)
+            let continuityTail = Self.retainingRecentTranscriptContinuity(
+                visible: installed,
+                authoritative: installedTail
+            )
+            if !hasLoadedTranscriptHistory { installed = continuityTail }
+            installedTail = continuityTail
             subscribedSessionID = sessionID
             subscriptionToken = response.subscriptionToken
             pendingSubscriptionTokens[sessionID] = nil
@@ -1010,11 +1269,6 @@ final class SessionPresentationStore {
                 publish(replayEffects, target: installedTarget)
             }
             provisionalToken = nil
-
-            if synchronization.consumeRetryRequirement(for: lease) {
-                result = .discarded
-                return .retry
-            }
             result = .success
             metrics = PerformanceMetrics(itemCount: replay.count)
             return .success
@@ -1031,8 +1285,30 @@ final class SessionPresentationStore {
                 lease,
                 sessionID: sessionID,
                 connectionGeneration: attemptConnectionGeneration
-            ), synchronizationTarget(for: lease.intent, sessionID: sessionID) != nil else {
+            ), let failureTarget = synchronizationTarget(
+                for: lease.intent,
+                sessionID: sessionID
+            ) else {
                 return .failed(showCatchUpNotice: false)
+            }
+            if let failure = error as? GatewayFailure,
+               failure.code == "history_changed",
+               retriesInvalidResponse {
+                return .retry
+            }
+            if let failure = error as? GatewayFailure,
+               failure.code == "invalid_response",
+               retriesInvalidResponse {
+                // A runtime snapshot can change while bounded extension
+                // activity settles. Retry a malformed projection twice from a
+                // fresh session.open; the final failure remains actionable and
+                // enters the iOS Logs ring.
+                return .retry
+            }
+            if let failure = error as? GatewayFailure,
+               failure.code == "invalid_response",
+               case .presentation = lease.intent {
+                terminalSynchronizationFailures[failureTarget] = failure
             }
             let showCatchUpNotice: Bool
             if let failure = error as? GatewayFailure,
@@ -1093,6 +1369,84 @@ final class SessionPresentationStore {
         guard response.synchronized else {
             throw GatewayFailure(code: "sync_failed", message: "Tron did not confirm session synchronization.", retryable: true, details: nil)
         }
+    }
+
+    private static func installingExtensionActivities(
+        _ snapshot: SessionSnapshot,
+        preserving previous: [ExtensionRunActivity],
+        previousLiveRevision: Int?,
+        previousActivityAsOf: String?
+    ) -> SessionSnapshot {
+        var result = snapshot
+        var admitted = ExtensionActivityAdmissionPolicy.admitted(snapshot.extensionActivities ?? [])
+        let staleLiveProjection = previousLiveRevision.map { previous in
+            snapshot.liveActivityRevision.map { $0 < previous } ?? true
+        } ?? false
+        // Preserve all rows across a stale full frame. This closes the compact
+        // delta/full-snapshot race without letting an equal/newer authoritative
+        // frame retain expired membership. Terminal truth remains latched even
+        // when the full frame itself is current.
+        for prior in previous {
+            guard let index = admitted.firstIndex(where: { $0.stableID == prior.stableID }) else {
+                if staleLiveProjection { admitted.append(prior) }
+                continue
+            }
+            let candidate = admitted[index]
+            let priorSequence = prior.lifecycle?.sequence
+            let candidateSequence = candidate.lifecycle?.sequence
+            if staleLiveProjection && (candidateSequence ?? -1) < (priorSequence ?? -1) {
+                admitted[index] = prior
+                continue
+            }
+            guard let lifecycle = prior.lifecycle, lifecycle.isTerminal else { continue }
+            if candidate.lifecycle?.isTerminal != true || candidate.lifecycle?.state != lifecycle.state {
+                admitted[index] = prior
+            } else if let sequence = candidate.lifecycle?.sequence, sequence < lifecycle.sequence {
+                admitted[index] = prior
+            }
+        }
+        admitted = ExtensionActivityAdmissionPolicy.admitted(
+            admitted,
+            preserving: Set(admitted.filter(\.isLive).map(\.stableID))
+        )
+        if staleLiveProjection {
+            result.liveActivityRevision = previousLiveRevision
+            result.extensionActivityAsOf = previousActivityAsOf
+        }
+        result.extensionActivities = snapshot.extensionActivities == nil && admitted.isEmpty
+            ? nil : admitted
+        return result
+    }
+
+    private static func upsertingExtensionActivity(
+        _ activity: ExtensionRunActivity,
+        into activities: [ExtensionRunActivity]
+    ) -> ([ExtensionRunActivity], Bool) {
+        let key = activity.stableID
+        var result = activities
+        guard let index = result.firstIndex(where: { $0.stableID == key }) else {
+            result.append(activity)
+            let prioritized = [activity] + result.filter { $0.stableID != key }
+            return (ExtensionActivityAdmissionPolicy.admitted(
+                prioritized,
+                preserving: Set(prioritized.filter { $0.isLive || $0.stableID == key }.map(\.stableID))
+            ), true)
+        }
+        let previous = result[index]
+        let previousLifecycle = previous.lifecycle
+        let nextLifecycle = activity.lifecycle
+        if let previousLifecycle, previousLifecycle.isTerminal {
+            // Terminal truth is latched. Equal/older advisory updates and any
+            // attempt to return to a current state are ignored.
+            if nextLifecycle?.isTerminal != true || nextLifecycle?.state != previousLifecycle.state { return (activities, false) }
+        }
+        if let old = previousLifecycle?.sequence, let next = nextLifecycle?.sequence, next <= old { return (activities, false) }
+        result[index] = activity
+        let prioritized = [activity] + result.filter { $0.stableID != key }
+        return (ExtensionActivityAdmissionPolicy.admitted(
+            prioritized,
+            preserving: Set(prioritized.filter { $0.isLive || $0.stableID == key }.map(\.stableID))
+        ), true)
     }
 
     private func reduce(_ event: GatewayEvent) -> String? {
@@ -1253,9 +1607,15 @@ final class SessionPresentationStore {
                 incoming: incoming
             ) {
             case .install:
+                let admitted = Self.installingExtensionActivities(
+                    incoming,
+                    preserving: snapshot.extensionActivities ?? [],
+                    previousLiveRevision: snapshot.liveActivityRevision,
+                    previousActivityAsOf: snapshot.extensionActivityAsOf
+                )
                 snapshot = mergesVisibleTranscript
-                    ? Self.mergingVisibleTranscript(current: snapshot, authoritative: incoming)
-                    : incoming
+                    ? Self.mergingVisibleTranscript(current: snapshot, authoritative: admitted)
+                    : admitted
             case .ignore:
                 break
             case .resynchronize(let sessionID):
@@ -1272,16 +1632,57 @@ final class SessionPresentationStore {
         case "session.toolProgress":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
                   case .toolProgress(let tool)? = event.preparedSessionEvent?.data else { return resyncIfNeeded(event, snapshot: snapshot) }
+            if let incomingRevision = tool.liveActivityRevision {
+                if let currentRevision = snapshot.liveActivityRevision,
+                   incomingRevision < currentRevision {
+                    advance(&snapshot, envelope)
+                    return nil
+                }
+                if snapshot.liveActivityRevision == nil || incomingRevision > snapshot.liveActivityRevision! {
+                    snapshot.liveActivityRevision = incomingRevision
+                    snapshot.extensionActivityAsOf = tool.extensionActivityAsOf
+                }
+            }
+            var installedTool = tool
             if let index = snapshot.toolExecutions.firstIndex(where: { $0.toolCallId == tool.toolCallId }) {
-                if ToolExecutionStatePolicy.shouldReplace(snapshot.toolExecutions[index], with: tool) {
-                    snapshot.toolExecutions[index] = tool
+                let currentTool = snapshot.toolExecutions[index]
+                if ToolExecutionStatePolicy.shouldReplace(currentTool, with: tool) {
+                    installedTool = ToolExecutionStatePolicy.mergingLiveEvidence(from: currentTool, into: tool)
+                    snapshot.toolExecutions[index] = installedTool
                     chatTimelineChanged = true
+                } else {
+                    installedTool = currentTool
                 }
             } else {
                 snapshot.toolExecutions.append(tool)
                 chatTimelineChanged = true
             }
+            if let activity = installedTool.extensionActivity,
+               ExtensionActivityAdmissionPolicy.admits(activity) {
+                let (next, changed) = Self.upsertingExtensionActivity(activity, into: snapshot.extensionActivities ?? [])
+                if changed { snapshot.extensionActivities = next; chatTimelineChanged = true }
+            }
             if chatTimelineChanged { snapshot.toolExecutions.sort(by: ToolExecutionStatePolicy.orderedBefore) }
+            advance(&snapshot, envelope)
+        case "session.extensionActivity":
+            guard let envelope = admitEnvelope(event, snapshot: snapshot),
+                  case .extensionActivity(let delta)? = event.preparedSessionEvent?.data else {
+                return resyncIfNeeded(event, snapshot: snapshot)
+            }
+            if let currentRevision = snapshot.liveActivityRevision,
+               delta.liveActivityRevision < currentRevision {
+                advance(&snapshot, envelope)
+                return nil
+            }
+            snapshot.liveActivityRevision = delta.liveActivityRevision
+            snapshot.extensionActivityAsOf = delta.extensionActivityAsOf
+            let (next, changed) = Self.upsertingExtensionActivity(
+                delta.activity,
+                into: snapshot.extensionActivities ?? []
+            )
+            if changed { snapshot.extensionActivities = next }
+            // This delta changes only the mounted extension hub. Deliberately
+            // do not advance transcript projection or scrolling.
             advance(&snapshot, envelope)
         case "session.extensionPresentation":
             guard let envelope = admitEnvelope(event, snapshot: snapshot),
@@ -1380,15 +1781,24 @@ final class SessionPresentationStore {
             incoming: incoming
         ) {
         case .install:
-            let installed = hasLoadedTranscriptHistory
-                ? snapshot.map { Self.mergingVisibleTranscript(current: $0, authoritative: incoming) } ?? incoming
-                : incoming
+            let admitted = Self.installingExtensionActivities(
+                incoming,
+                preserving: snapshot?.extensionActivities ?? [],
+                previousLiveRevision: snapshot?.liveActivityRevision,
+                previousActivityAsOf: snapshot?.extensionActivityAsOf
+            )
+            let merged = snapshot.map {
+                Self.mergingVisibleTranscript(current: $0, authoritative: admitted)
+            } ?? admitted
+            let continuityTail = Self.retainingRecentTranscriptContinuity(
+                visible: merged,
+                authoritative: admitted
+            )
+            let installed = hasLoadedTranscriptHistory ? merged : continuityTail
             snapshot = installed
-            authoritativeTailSnapshot = incoming
-            if installed.transcriptStart == incoming.transcriptStart,
-               installed.transcript.map(\.id) == incoming.transcript.map(\.id) {
-                hasLoadedTranscriptHistory = false
-            }
+            authoritativeTailSnapshot = continuityTail
+            hasLoadedTranscriptHistory = (installed.transcriptStart ?? 0)
+                < (continuityTail.transcriptStart ?? 0)
             advanceChatProjection(canonical: true)
             if installed.transcriptStart == incoming.transcriptStart,
                installed.transcript.count == incoming.transcript.count {
@@ -1447,6 +1857,12 @@ final class SessionPresentationStore {
     private func advanceChatProjection(canonical: Bool) {
         if canonical { chatCanonicalGeneration &+= 1 }
         chatTimelineGeneration &+= 1
+        if pendingTarget == nil,
+           isAuthoritative,
+           let target,
+           let snapshot {
+            delegate?.sessionPresentationStoreDidPublishSnapshot(snapshot, target: target)
+        }
     }
 
     static func installingSnapshot(
@@ -1480,10 +1896,84 @@ final class SessionPresentationStore {
         return current
     }
 
-    static func mergingVisibleTranscript(
-        current: SessionSnapshot,
+    static func retainingRecentTranscriptContinuity(
+        visible: SessionSnapshot,
         authoritative: SessionSnapshot
     ) -> SessionSnapshot {
+        guard visible.sessionId == authoritative.sessionId,
+              visible.runtimeGeneration == authoritative.runtimeGeneration,
+              let visibleStart = visible.transcriptStart,
+              let authoritativeStart = authoritative.transcriptStart,
+              visibleStart >= 0,
+              authoritativeStart >= visibleStart,
+              visible.transcript.count >= authoritative.transcript.count else {
+            return authoritative
+        }
+        if visible.transcriptTotal == authoritative.transcriptTotal,
+           let visibleLeaf = visible.leafEntryId,
+           let authoritativeLeaf = authoritative.leafEntryId,
+           visibleLeaf != authoritativeLeaf {
+            return authoritative
+        }
+        let prefixCount = visible.transcript.count - authoritative.transcript.count
+        let (expectedAuthoritativeStart, startOverflow) = visibleStart.addingReportingOverflow(prefixCount)
+        let suffix = visible.transcript.suffix(authoritative.transcript.count)
+        guard !startOverflow,
+              authoritativeStart == expectedAuthoritativeStart,
+              suffix.map(\.id) == authoritative.transcript.map(\.id) else { return authoritative }
+        if prefixCount > 0,
+           let firstAuthoritative = authoritative.transcript.first,
+           firstAuthoritative.parentId != visible.transcript[prefixCount - 1].id {
+            return authoritative
+        }
+
+        func contributesVisibleMessage(_ item: TranscriptItem) -> Bool {
+            !(item.kind == .message && item.role == .toolResult)
+        }
+
+        var retainedStartIndex = prefixCount
+        var visibleMessages = authoritative.transcript.reduce(into: 0) { count, item in
+            if contributesVisibleMessage(item) { count += 1 }
+        }
+        while retainedStartIndex > 0,
+              visibleMessages < minimumRecentTranscriptContinuityMessages,
+              visible.transcript.count - retainedStartIndex < ChatTranscriptPageRequest.maximumItemCount {
+            retainedStartIndex -= 1
+            if contributesVisibleMessage(visible.transcript[retainedStartIndex]) {
+                visibleMessages += 1
+            }
+        }
+        guard retainedStartIndex < prefixCount else { return authoritative }
+
+        var retained = authoritative
+        retained.transcript = Array(visible.transcript[retainedStartIndex..<prefixCount])
+            + authoritative.transcript
+        retained.transcriptStart = visibleStart + retainedStartIndex
+        let (retainedEnd, overflow) = retained.transcriptStart!.addingReportingOverflow(
+            retained.transcript.count
+        )
+        retained.transcriptTotal = max(
+            max(
+                authoritative.transcriptTotal ?? authoritative.transcript.count,
+                visible.transcriptTotal ?? 0
+            ),
+            overflow ? 0 : retainedEnd
+        )
+        return retained
+    }
+
+    static func mergingVisibleTranscript(
+        current: SessionSnapshot,
+        authoritative incoming: SessionSnapshot
+    ) -> SessionSnapshot {
+        var authoritative = incoming
+        if current.sessionId == authoritative.sessionId,
+           current.runtimeGeneration == authoritative.runtimeGeneration {
+            authoritative.toolExecutions = authoritative.toolExecutions.map { candidate in
+                guard let previous = current.toolExecutions.first(where: { $0.toolCallId == candidate.toolCallId }) else { return candidate }
+                return ToolExecutionStatePolicy.newest(previous, candidate)
+            }
+        }
         guard current.sessionId == authoritative.sessionId,
               current.runtimeGeneration == authoritative.runtimeGeneration,
               !current.transcript.isEmpty,
@@ -1609,7 +2099,10 @@ final class SessionPresentationStore {
         guard target?.sessionID == visible.sessionId,
               visible.sessionId == authoritativeTail.sessionId else { return }
         snapshot = visible
-        authoritativeTailSnapshot = authoritativeTail
+        authoritativeTailSnapshot = Self.retainingRecentTranscriptContinuity(
+            visible: visible,
+            authoritative: authoritativeTail
+        )
         hasLoadedTranscriptHistory = true
         advanceChatProjection(canonical: true)
     }
@@ -1649,6 +2142,9 @@ final class SessionPresentationStore {
         let target = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: nextPresentationGeneration)
         self.target = target
         pendingTarget = nil
+        transcriptLoadTarget = nil
+        loadingEarlierTranscript = false
+        transcriptLoadState = .idle
         self.snapshot = snapshot
         authoritativeTailSnapshot = snapshot
         hasLoadedTranscriptHistory = false

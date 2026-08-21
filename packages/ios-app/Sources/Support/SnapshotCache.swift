@@ -288,8 +288,13 @@ actor SnapshotCache {
     ) -> SessionSnapshot {
         let transcript = Array(snapshot.transcript.suffix(maximumTranscriptEntries))
         let omitted = snapshot.transcript.count - transcript.count
-        let sourceStart = max(0, snapshot.transcriptStart ?? 0)
-        let (trimmedStart, overflow) = sourceStart.addingReportingOverflow(omitted)
+        let trimmedStart: Int?
+        if let sourceStart = snapshot.transcriptStart {
+            let (candidate, overflow) = max(0, sourceStart).addingReportingOverflow(omitted)
+            trimmedStart = overflow ? nil : candidate
+        } else {
+            trimmedStart = nil
+        }
         return SessionSnapshot(
             sessionId: snapshot.sessionId,
             runtimeGeneration: snapshot.runtimeGeneration,
@@ -306,8 +311,8 @@ actor SnapshotCache {
             stats: snapshot.stats,
             queued: snapshot.queued,
             transcript: transcript,
-            transcriptStart: overflow ? nil : trimmedStart,
-            transcriptTotal: snapshot.transcriptTotal ?? snapshot.transcript.count,
+            transcriptStart: trimmedStart,
+            transcriptTotal: snapshot.transcriptTotal,
             streaming: nil,
             leafEntryId: snapshot.leafEntryId,
             operation: nil,

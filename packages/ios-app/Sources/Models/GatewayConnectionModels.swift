@@ -233,12 +233,16 @@ struct GatewayUpdateStatus: Codable, Hashable, Sendable {
         return GatewayDebugPromotionCandidate(identity: candidateIdentity, provenance: candidateProvenance)
     }
 
+    var isActive: Bool {
+        ["starting", "building", "staging", "draining", "promoting", "restart", "rollback", "rollback-requested", "restart-requested"].contains(state)
+    }
+
     var presentationTitle: String {
         switch state {
         case "failed", "failure": return "Update failed"
         case "rolled-back": return "Rolled back"
-        case "ready": return "Ready"
-        case "starting", "building", "staging", "promoting", "restart", "rollback", "rollback-requested":
+        case "ready": return candidateAvailable ? "Update available" : "Installed and running"
+        case "starting", "building", "staging", "draining", "promoting", "restart", "rollback", "rollback-requested", "restart-requested":
             return state.replacingOccurrences(of: "-", with: " ").capitalized
         case "unknown": return "Unavailable"
         default: return candidateAvailable ? "Update available" : state.replacingOccurrences(of: "-", with: " ").capitalized

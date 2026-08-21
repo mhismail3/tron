@@ -19,6 +19,14 @@ enum SessionSnapshotEventAdmission: Equatable, Sendable {
             return .resynchronize(eventSessionID)
         }
         if incoming.eventSequence <= current.eventSequence { return .ignore }
+        // Activity recency is a separate Gateway-owned projection. A delayed
+        // snapshot must not resurrect an older current/recent frame even when
+        // its session event sequence is otherwise admissible.
+        if let currentLiveRevision = current.liveActivityRevision,
+           let incomingLiveRevision = incoming.liveActivityRevision,
+           incomingLiveRevision < currentLiveRevision {
+            return .ignore
+        }
         if incoming.eventSequence != current.eventSequence + 1 {
             return .resynchronize(eventSessionID)
         }

@@ -32,8 +32,14 @@ enum ChatEntranceGeometryAdmissionPolicy {
     }
 }
 
+private struct ChatEntranceFailsafeID: Hashable {
+    let state: ChatTranscriptEntranceState
+    let admissionTag: ChatTranscriptProjectionTag?
+}
+
 struct ChatTranscriptEntranceRow<Content: View>: View {
     let state: ChatTranscriptEntranceState
+    let admissionTag: ChatTranscriptProjectionTag?
     let kind: ChatContentEntranceKind
     let reduceMotion: Bool
     let onFailsafeReveal: () -> Void
@@ -42,12 +48,14 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
 
     init(
         state: ChatTranscriptEntranceState,
+        admissionTag: ChatTranscriptProjectionTag? = nil,
         kind: ChatContentEntranceKind,
         reduceMotion: Bool,
         onFailsafeReveal: @escaping () -> Void = {},
         @ViewBuilder content: () -> Content
     ) {
         self.state = state
+        self.admissionTag = admissionTag
         self.kind = kind
         self.reduceMotion = reduceMotion
         self.onFailsafeReveal = onFailsafeReveal
@@ -70,7 +78,7 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
                 x: revealed ? 0 : hidden.offsetX,
                 y: revealed ? 0 : hidden.offsetY
             )
-            .task(id: state) {
+            .task(id: ChatEntranceFailsafeID(state: state, admissionTag: admissionTag)) {
                 guard state == .pending else { return }
                 if !reduceMotion { try? await Task.sleep(for: .milliseconds(34)) }
                 guard !Task.isCancelled, !revealed else { return }
@@ -204,6 +212,7 @@ struct ChatTranscriptRenderRow: View, Equatable {
     let hiddenThinkingLabel: String?
     let installationTag: ChatTranscriptProjectionTag
     let resolveToolDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
+    let recordToolChip: (ToolChipInstrumentationSample) -> Void
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.item == rhs.item,
@@ -236,7 +245,8 @@ struct ChatTranscriptRenderRow: View, Equatable {
             ToolRunView(
                 run: run,
                 installationTag: installationTag,
-                resolveDetails: resolveToolDetails
+                resolveDetails: resolveToolDetails,
+                recordChip: recordToolChip
             )
             .frame(maxWidth: .infinity, alignment: .leading)
         case .notification(let notification):

@@ -647,25 +647,24 @@ struct ChatTranscriptProjectionKernelTests {
             output: "running"
         )]
         let completedIDs = completed.timeline.ids
-        #expect(completedIDs == ["user", "streaming", "tool-run-one"])
+        #expect(completedIDs == ["user", "stream"])
         let flipped = ChatTranscriptProjectionKernel.incremental(
             snapshot: placement,
             previous: completed,
             canonicalSourceUnchanged: true
         )
-        #expect(flipped.workReport.mode == .toolPayloadPatch)
-        #expect(flipped.timeline.ids == completedIDs)
+        #expect(flipped.workReport.mode != .toolPayloadPatch)
+        #expect(flipped.timeline.ids == ["user", "stream", "tool-run-one"])
         #expect(flipped.timeline == ChatTranscriptProjectionKernel.cold(snapshot: placement).timeline)
     }
 
-    @Test("unanchored tools stay after streaming through status and group transitions")
+    @Test("unanchored tools stay visible only while they are running")
     func stableUnanchoredStreamingPlacement() throws {
         var snapshot = try fixture(transcript: "[]")
         snapshot.phase = .running
-        snapshot.streaming = try transcriptItem(id: "stream", text: "answer", role: "assistant")
         snapshot.toolExecutions = [runtimeTool(id: "one", order: 0)]
         let running = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
-        #expect(running.timeline.ids == ["streaming", "tool-run-one"])
+        #expect(running.timeline.ids == ["tool-run-one"])
 
         snapshot.toolExecutions.append(runtimeTool(id: "two", order: 1))
         let grouped = ChatTranscriptProjectionKernel.incremental(
@@ -673,7 +672,7 @@ struct ChatTranscriptProjectionKernelTests {
             previous: running,
             canonicalSourceUnchanged: true
         )
-        #expect(grouped.timeline.ids == ["streaming", "tool-run-one"])
+        #expect(grouped.timeline.ids == ["tool-run-one"])
         guard case .toolRun(let groupedRun) = grouped.timeline.items.last else {
             Issue.record("Expected grouped unanchored tools after streaming")
             return
@@ -688,28 +687,86 @@ struct ChatTranscriptProjectionKernelTests {
             previous: grouped,
             canonicalSourceUnchanged: true
         )
-        #expect(completed.workReport.mode == .toolPayloadPatch)
-        #expect(completed.timeline.ids == grouped.timeline.ids)
+        #expect(completed.workReport.mode != .toolPayloadPatch)
+        #expect(completed.timeline.items.isEmpty)
         #expect(completed.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
+    }
 
-        snapshot.streaming = try transcriptItem(id: "stream", text: "answer updated", role: "assistant")
-        let streamingUpdate = ChatTranscriptProjectionKernel.incremental(
-            snapshot: snapshot,
-            previous: completed,
-            canonicalSourceUnchanged: true
-        )
-        #expect(streamingUpdate.workReport.mode != .isolatedStreamingSuffix)
-        #expect(streamingUpdate.timeline.ids == ["streaming", "tool-run-one"])
-        #expect(streamingUpdate.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
+    @Test("running unanchored tools remain visible at the current-work tail")
+    func runningUnanchoredToolRemainsVisible() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.toolExecutions = [runtimeTool(id: "running", order: 0)]
 
-        snapshot.toolExecutions.removeFirst()
-        let regrouped = ChatTranscriptProjectionKernel.incremental(
-            snapshot: snapshot,
-            previous: streamingUpdate,
-            canonicalSourceUnchanged: true
-        )
-        #expect(regrouped.timeline.ids == ["streaming", "tool-run-two"])
-        #expect(regrouped.timeline == ChatTranscriptProjectionKernel.cold(snapshot: snapshot).timeline)
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.timeline.ids == ["tool-run-running"])
+        guard case .toolRun(let run) = candidate.timeline.items.first else {
+            Issue.record("Expected current running tool overlay")
+            return
+        }
+        #expect(run.tools.map(\.id) == ["running"])
+        #expect(run.isRunning)
+    }
+
+    @Test("terminal unanchored tools do not synthesize a bottom aggregate")
+    func terminalUnanchoredToolsDoNotRenderTailAggregate() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        let completed = updatedTool(runtimeTool(id: "completed", order: 0), status: .completed, output: "done")
+        let failed = updatedTool(runtimeTool(id: "failed", order: 1), status: .failed, output: "error")
+        snapshot.toolExecutions = [completed, failed]
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.timeline.items.isEmpty)
+        #expect(candidate.timeline.renderedIDBySemanticID["completed"] == nil)
+        #expect(candidate.timeline.renderedIDBySemanticID["failed"] == nil)
+    }
+
+    @Test("canonical positioned terminal tools preserve thinking and tool order")
+    func canonicalPositionedTerminalToolsRemainInTranscriptOrder() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[
+            {"id":"thinking-before","type":"thinking","text":"Planning"},
+            {"id":"call","type":"toolCall","toolCallId":"call","name":"read","arguments":{}},
+            {"id":"thinking-after","type":"thinking","text":"Editing"}
+          ]},
+          {"id":"result","parentId":"assistant","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"result-text","type":"text","text":"done"}],"toolCallId":"call","toolName":"read","isError":false}
+        ]
+        """)
+        snapshot.phase = .running
+        snapshot.toolExecutions = [updatedTool(runtimeTool(id: "call", order: 0), status: .completed, output: "done")]
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.timeline.items.count == 3)
+        guard case .message = candidate.timeline.items[0],
+              case .toolRun(let run) = candidate.timeline.items[1],
+              case .message = candidate.timeline.items[2] else {
+            Issue.record("Expected canonical tool position")
+            return
+        }
+        #expect(run.tools.map(\.id) == ["call"])
+        #expect(run.title == "Read file")
+        #expect(!run.isRunning)
+    }
+
+    @Test("mixed stale terminal and running unanchored tools show only current work")
+    func mixedTerminalAndRunningUnanchoredTools() throws {
+        var snapshot = try fixture(transcript: "[]")
+        snapshot.phase = .running
+        snapshot.toolExecutions = [
+            updatedTool(runtimeTool(id: "stale", order: 0), status: .completed, output: "done"),
+            runtimeTool(id: "current", order: 1),
+        ]
+
+        let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+        #expect(candidate.timeline.ids == ["tool-run-current"])
+        guard case .toolRun(let run) = candidate.timeline.items.first else {
+            Issue.record("Expected only the current running overlay")
+            return
+        }
+        #expect(run.tools.map(\.id) == ["current"])
+        #expect(run.isRunning)
     }
 
     @Test("repeated tool patches keep a bounded flat overlay and isolated suffixes preserve parity")

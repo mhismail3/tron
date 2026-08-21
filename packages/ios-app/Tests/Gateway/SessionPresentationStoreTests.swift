@@ -219,7 +219,7 @@ struct SessionPresentationStoreTests {
         }
     }
 
-    @Test("confirmed queue clear removes both rich and legacy projections")
+    @Test("queue projection changes only through sequenced Gateway authority")
     func confirmedQueueClear() throws {
         var snapshot = try SessionScenarioBuilder(seed: 84).openingTail(targetEncodedBytes: 4_096)
         snapshot.queued = .init(steering: ["duplicate", "duplicate"], followUp: ["later"])
@@ -236,13 +236,12 @@ struct SessionPresentationStoreTests {
         store.installHostedAuthoritativeSnapshot(snapshot)
         let generation = store.chatTimelineGeneration
 
-        store.clearConfirmedQueue(sessionID: snapshot.sessionId)
-
-        #expect(store.chatTimelineGeneration == generation + 1)
-        #expect(store.snapshot?.queued.steering == [])
-        #expect(store.snapshot?.queued.followUp == [])
-        #expect(store.snapshot?.queuedItems == [])
-        #expect(store.snapshot?.displayedQueuedMessages == [])
+        // A command response is not a queue commit. Until the sequenced
+        // Gateway snapshot/event arrives, every projection remains unchanged.
+        #expect(store.chatTimelineGeneration == generation)
+        #expect(store.snapshot?.queued == snapshot.queued)
+        #expect(store.snapshot?.queuedItems == snapshot.queuedItems)
+        #expect(store.snapshot?.displayedQueuedMessages == snapshot.displayedQueuedMessages)
     }
 
     @Test("revocation rejects every sequenced event before cursor reduction")
@@ -559,12 +558,72 @@ struct SessionPresentationStoreTests {
         store.installHostedSubscription(snapshot: retained, token: "token")
         let target = try #require(store.mountedTarget)
         store.installHostedLoadedHistory(visible: visible, authoritativeTail: installedTail)
-        store.discardLoadedTranscriptHistory(
-            sessionID: retained.sessionId,
-            presentationGeneration: target.generation
-        )
-        #expect(store.snapshot == retained)
+        #expect(store.snapshot == visible)
         #expect(store.disposableCacheSnapshot == retained)
+    }
+
+    @Test("tail settlement never discards mounted transcript history")
+    func tailSettlementRetainsContinuityFloor() throws {
+        var visible = try SessionScenarioBuilder(seed: 8_505).openingTail(targetEncodedBytes: 4_096)
+        visible.transcript = SessionScenarioBuilder(seed: 8_506).historyPage(count: 40, longRowBytes: 24)
+        visible.transcriptStart = 0
+        visible.transcriptTotal = visible.transcript.count
+
+        var pressureFittedTail = visible
+        pressureFittedTail.transcript = Array(visible.transcript.suffix(2))
+        pressureFittedTail.transcriptStart = visible.transcript.count - 2
+        pressureFittedTail.eventSequence += 1
+        pressureFittedTail.revision += 1
+
+        let retained = SessionPresentationStore.retainingRecentTranscriptContinuity(
+            visible: visible,
+            authoritative: pressureFittedTail
+        )
+        let retainedVisibleMessages = retained.transcript.filter {
+            !($0.kind == .message && $0.role == .toolResult)
+        }
+        #expect(retainedVisibleMessages.count >= SessionPresentationStore.minimumRecentTranscriptContinuityMessages)
+        #expect(retained.transcript.suffix(2).map(\.id) == pressureFittedTail.transcript.map(\.id))
+        #expect((retained.transcriptStart ?? 0) > 0)
+
+        let store = SessionPresentationStore(
+            client: GatewayClient(),
+            performanceSignposts: SystemPerformanceSignposts.shared
+        )
+        store.installHostedSubscription(snapshot: pressureFittedTail, token: "token")
+        let target = try #require(store.mountedTarget)
+        store.installHostedLoadedHistory(visible: visible, authoritativeTail: pressureFittedTail)
+        #expect(store.snapshot?.transcript == visible.transcript)
+        #expect(store.snapshot?.transcriptStart == visible.transcriptStart)
+    }
+
+    @Test("continuity retention fails closed across a changed canonical spine")
+    func continuityRetentionRejectsChangedSpine() throws {
+        var visible = try SessionScenarioBuilder(seed: 8_507).openingTail(targetEncodedBytes: 4_096)
+        visible.transcript = SessionScenarioBuilder(seed: 8_508).historyPage(count: 20, longRowBytes: 24)
+        visible.transcriptStart = 0
+        visible.transcriptTotal = visible.transcript.count
+        var changed = visible
+        changed.transcript = Array(visible.transcript.suffix(2))
+        changed.transcript[0] = try #require(
+            SessionScenarioBuilder(seed: 8_509).historyPage(count: 1, longRowBytes: 24).first
+        )
+        changed.transcriptStart = visible.transcript.count - 2
+
+        #expect(SessionPresentationStore.retainingRecentTranscriptContinuity(
+            visible: visible,
+            authoritative: changed
+        ) == changed)
+
+        var changedLeaf = visible
+        changedLeaf.transcript = Array(visible.transcript.suffix(2))
+        changedLeaf.transcriptStart = visible.transcript.count - 2
+        visible.leafEntryId = "leaf-a"
+        changedLeaf.leafEntryId = "leaf-b"
+        #expect(SessionPresentationStore.retainingRecentTranscriptContinuity(
+            visible: visible,
+            authoritative: changedLeaf
+        ) == changedLeaf)
     }
 
     @Test("runtime replacement clears secondary projections and advances their reload owners")
@@ -856,7 +915,86 @@ struct SessionPresentationStoreTests {
         }
     }
 
-    @Test("synchronization replay keeps the cache tail bounded to the incoming snapshot")
+    @Test("active fresh open backfills an empty positive-start recent tail before publication")
+    func freshOpenBackfillsEmptyActiveTail() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory
+            )
+            let profile = GatewayProfile(
+                id: "gateway",
+                label: "Mac",
+                host: "gateway.test",
+                port: 9_847,
+                machineId: "machine",
+                deviceId: "device"
+            )
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            var baseline = try SessionScenarioBuilder(seed: 8_905).openingTail(targetEncodedBytes: 4_096)
+            baseline.phase = .compacting
+            baseline.transcript = []
+            baseline.transcriptStart = 10
+            baseline.transcriptTotal = 10
+            let recent = SessionScenarioBuilder(seed: 8_906).historyPage(count: 10, longRowBytes: 16)
+            let store = SessionPresentationStore(
+                client: client,
+                performanceSignposts: SystemPerformanceSignposts.shared
+            )
+            let opening = Task { try await store.open(baseline.sessionId) }
+
+            try await socket.waitUntilSent(count: 2)
+            var frame = await socket.sentFrames()[1]
+            var request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+            var requestID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
+                "result": .object([
+                    "session": try JSONValue.encode(baseline),
+                    "syncToken": .string("sync"),
+                    "subscriptionToken": .string("subscription"),
+                ]),
+            ])))
+
+            try await socket.waitUntilSent(count: 3)
+            frame = await socket.sentFrames()[2]
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+            requestID = try #require(request.objectValue?["id"]?.stringValue)
+            #expect(request.objectValue?["method"]?.stringValue == "session.sync")
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
+                "result": .object(["synchronized": .bool(true)]),
+            ])))
+
+            try await socket.waitUntilSent(count: 4)
+            frame = await socket.sentFrames()[3]
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+            requestID = try #require(request.objectValue?["id"]?.stringValue)
+            #expect(request.objectValue?["method"]?.stringValue == "session.transcript")
+            #expect(request.objectValue?["params"]?.objectValue?["before"]?.intValue == 10)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
+                "result": .object([
+                    "items": try JSONValue.encode(recent),
+                    "start": .number(0),
+                    "end": .number(10),
+                    "total": .number(10),
+                ]),
+            ])))
+
+            _ = try await opening.value
+            #expect(store.snapshot?.phase == .compacting)
+            #expect(store.snapshot?.transcriptStart == 0)
+            #expect(store.snapshot?.transcript.map(\.id) == recent.map(\.id))
+            await client.close()
+        }
+    }
+
+    @Test("synchronization replay retains compatible recent continuity in the cache tail")
     func synchronizationReplayKeepsBoundedTail() async throws {
         try await withTestWatchdog { @MainActor in
             let socket = ScriptedGatewaySocket()
@@ -878,6 +1016,10 @@ struct SessionPresentationStoreTests {
 
             var baseline = try SessionScenarioBuilder(seed: 8_901)
                 .openingTail(targetEncodedBytes: 8_000)
+            // Five-item fixtures contain one hidden tool-result row, so 30
+            // canonical entries provide exactly 24 display-bearing rows and
+            // do not exercise opening backfill in this replay-specific test.
+            baseline.transcript = SessionScenarioBuilder(seed: 8_902).historyPage(count: 30, longRowBytes: 16)
             baseline.transcriptStart = 10
             baseline.transcriptTotal = baseline.transcript.count + 10
             var shifted = baseline
@@ -925,7 +1067,161 @@ struct SessionPresentationStoreTests {
 
             _ = try await opening.value
             #expect(store.snapshot?.transcript.map(\.id) == baseline.transcript.map(\.id))
-            #expect(store.disposableCacheSnapshot == shifted)
+            #expect(store.disposableCacheSnapshot?.transcript.map(\.id) == baseline.transcript.map(\.id))
+            #expect(store.disposableCacheSnapshot?.transcriptStart == baseline.transcriptStart)
+            await client.close()
+        }
+    }
+
+    @Test("transient malformed session-open response retries before surfacing failure")
+    func transientMalformedOpenRetries() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let profile = GatewayProfile(
+                id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            var baseline = try SessionScenarioBuilder(seed: 8_907).openingTail(targetEncodedBytes: 4_096)
+            baseline.extensionPresentation.hostEpoch = "retry-host"
+            baseline.extensionPresentation.revision = 0
+            let store = SessionPresentationStore(client: client, performanceSignposts: SystemPerformanceSignposts.shared)
+            let opening = Task { try await store.open(baseline.sessionId) }
+
+            try await socket.waitUntilSent(count: 2)
+            var frames = await socket.sentFrames()
+            var request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[1])
+            let malformedID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(malformedID), "ok": .bool(true),
+                "result": .object(["syncToken": .string("missing-session"), "subscriptionToken": .string("unused")]),
+            ])))
+
+            try await socket.waitUntilSent(count: 3)
+            frames = await socket.sentFrames()
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[2])
+            #expect(request.objectValue?["method"]?.stringValue == "session.close")
+            #expect(request.objectValue?["params"]?.objectValue?["subscriptionToken"] == .string("unused"))
+            let firstCloseID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(firstCloseID), "ok": .bool(true),
+                "result": .object(["closed": .bool(true)]),
+            ])))
+
+            try await socket.waitUntilSent(count: 4)
+            frames = await socket.sentFrames()
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[3])
+            #expect(request.objectValue?["method"]?.stringValue == "session.open")
+            let secondMalformedID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(secondMalformedID), "ok": .bool(true),
+                "result": .object(["syncToken": .string("still-missing-session"), "subscriptionToken": .string("unused-again")]),
+            ])))
+
+            try await socket.waitUntilSent(count: 5)
+            frames = await socket.sentFrames()
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[4])
+            #expect(request.objectValue?["method"]?.stringValue == "session.close")
+            #expect(request.objectValue?["params"]?.objectValue?["subscriptionToken"] == .string("unused-again"))
+            let secondCloseID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(secondCloseID), "ok": .bool(true),
+                "result": .object(["closed": .bool(true)]),
+            ])))
+
+            try await socket.waitUntilSent(count: 6)
+            frames = await socket.sentFrames()
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[5])
+            #expect(request.objectValue?["method"]?.stringValue == "session.open")
+            let retryID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(retryID), "ok": .bool(true),
+                "result": .object([
+                    "session": try JSONValue.encode(baseline),
+                    "syncToken": .string("retry-sync"),
+                    "subscriptionToken": .string("retry-subscription"),
+                ]),
+            ])))
+
+            try await socket.waitUntilSent(count: 7)
+            frames = await socket.sentFrames()
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[6])
+            #expect(request.objectValue?["method"]?.stringValue == "session.sync")
+            let syncID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(syncID), "ok": .bool(true),
+                "result": .object(["synchronized": .bool(true)]),
+            ])))
+
+            _ = try await opening.value
+            #expect(store.snapshot?.sessionId == baseline.sessionId)
+            await client.close()
+        }
+    }
+
+    @Test("terminal malformed session-open response propagates actionable failure after two retries")
+    func terminalMalformedOpenPropagates() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let model = AppModel(
+                client: client,
+                cache: SnapshotCache(root: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
+            )
+            let profile = GatewayProfile(
+                id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            let connecting = Task { try await model.connectHostedGateway(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            let opening = Task { try await model.openSessionPresentation("terminal-malformed") }
+            for attempt in 0..<3 {
+                let openFrameCount = 2 + attempt * 2
+                try await socket.waitUntilSent(count: openFrameCount)
+                var frames = await socket.sentFrames()
+                var request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[openFrameCount - 1])
+                #expect(request.objectValue?["method"]?.stringValue == "session.open")
+                let openID = try #require(request.objectValue?["id"]?.stringValue)
+                let token = "malformed-token-\(attempt)"
+                await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"), "id": .string(openID), "ok": .bool(true),
+                    "result": .object([
+                        "syncToken": .string("malformed-sync-\(attempt)"),
+                        "subscriptionToken": .string(token),
+                    ]),
+                ])))
+
+                try await socket.waitUntilSent(count: openFrameCount + 1)
+                frames = await socket.sentFrames()
+                request = try JSONDecoder.gateway.decode(JSONValue.self, from: frames[openFrameCount])
+                #expect(request.objectValue?["method"]?.stringValue == "session.close")
+                #expect(request.objectValue?["params"]?.objectValue?["subscriptionToken"] == .string(token))
+                let closeID = try #require(request.objectValue?["id"]?.stringValue)
+                await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"), "id": .string(closeID), "ok": .bool(true),
+                    "result": .object(["closed": .bool(true)]),
+                ])))
+            }
+
+            do {
+                _ = try await opening.value
+                Issue.record("terminal malformed open unexpectedly succeeded")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "invalid_response")
+                #expect(failure.message.contains("session.open"))
+                #expect(failure.message.contains("session"))
+            }
+            #expect((await socket.sentFrames()).count == 7)
+            #expect(model.lastError?.contains("session.open") == true)
+            #expect(model.lastErrorHasLocalDiagnostic)
             await client.close()
         }
     }
@@ -1163,6 +1459,7 @@ struct SessionPresentationStoreTests {
             _ = try await connecting.value
 
             var snapshot = try SessionScenarioBuilder(seed: 86).openingTail(targetEncodedBytes: 4_096)
+            snapshot.transcript = []
             snapshot.transcriptStart = 10
             snapshot.transcriptTotal = snapshot.transcript.count + 10
             let store = SessionPresentationStore(
@@ -1209,12 +1506,8 @@ struct SessionPresentationStoreTests {
             await loaded.value
             #expect(store.snapshot?.transcriptStart == 9)
             #expect(store.snapshot?.transcript.first?.id == earlierItem.id)
-            store.discardLoadedTranscriptHistory(
-                sessionID: snapshot.sessionId,
-                presentationGeneration: target.generation
-            )
-            #expect(store.snapshot?.transcriptStart == 10)
-            #expect(store.snapshot?.transcript.map(\.id) == snapshot.transcript.map(\.id))
+            #expect(store.snapshot?.transcriptStart == 9)
+            #expect(store.snapshot?.transcript.map(\.id) == [earlierItem.id] + snapshot.transcript.map(\.id))
 
             let returningWhileLoading = Task {
                 await store.loadEarlier(
@@ -1223,14 +1516,10 @@ struct SessionPresentationStoreTests {
                 )
             }
             try await socket.waitUntilSent(count: 3)
-            store.discardLoadedTranscriptHistory(
-                sessionID: snapshot.sessionId,
-                presentationGeneration: target.generation
-            )
             try await respond(index: 2, items: [earlierItem], start: 9, end: 10)
             await returningWhileLoading.value
-            #expect(store.snapshot?.transcriptStart == 10)
-            #expect(store.snapshot?.transcript.map(\.id) == snapshot.transcript.map(\.id))
+            #expect(store.snapshot?.transcriptStart == 9)
+            #expect(store.snapshot?.transcript.map(\.id) == [earlierItem.id] + snapshot.transcript.map(\.id))
 
             store.installHostedSubscription(snapshot: snapshot, token: "revoked")
             target = try #require(store.mountedTarget)
@@ -1268,6 +1557,83 @@ struct SessionPresentationStoreTests {
         }
     }
 
+    @Test("paging admits projected neighbors separated by filtered canonical entries")
+    func pagingAcrossFilteredCanonicalEntries() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory
+            )
+            let profile = GatewayProfile(
+                id: "gateway",
+                label: "Mac",
+                host: "gateway.test",
+                port: 9_847,
+                machineId: "machine",
+                deviceId: "device"
+            )
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            var snapshot = try SessionScenarioBuilder(seed: 8_602).openingTail(targetEncodedBytes: 4_096)
+            snapshot.transcript = Array(snapshot.transcript.suffix(1))
+            snapshot.transcriptStart = 10
+            snapshot.transcriptTotal = 11
+            let nextID = try #require(snapshot.transcript.first?.id)
+
+            var page = try SessionScenarioBuilder(seed: 8_603).historyPage(count: 2, longRowBytes: 16)
+            let encodedSecond = try JSONValue.encode(page[1])
+            var secondObject = try #require(encodedSecond.objectValue)
+            secondObject["parentId"] = .string("filtered-canonical-entry")
+            page[1] = try JSONDecoder.gateway.decode(
+                TranscriptItem.self,
+                from: JSONEncoder.gateway.encode(JSONValue.object(secondObject))
+            )
+            #expect(page[1].parentId != page[0].id)
+            #expect(snapshot.transcript.first?.parentId != page[1].id)
+
+            let store = SessionPresentationStore(
+                client: client,
+                performanceSignposts: SystemPerformanceSignposts.shared
+            )
+            store.installHostedSubscription(snapshot: snapshot, token: "current")
+            let target = try #require(store.mountedTarget)
+            let loading = Task {
+                await store.loadEarlier(
+                    sessionID: snapshot.sessionId,
+                    presentationGeneration: target.generation
+                )
+            }
+            try await socket.waitUntilSent(count: 2)
+            let request = try JSONDecoder.gateway.decode(
+                JSONValue.self,
+                from: await socket.sentFrames()[1]
+            )
+            let requestID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"),
+                "id": .string(requestID),
+                "ok": .bool(true),
+                "result": .object([
+                    "items": try JSONValue.encode(page),
+                    "start": .number(8),
+                    "end": .number(10),
+                    "total": .number(11),
+                    "nextEntryId": .string(nextID),
+                    "runtimeGeneration": .string(snapshot.runtimeGeneration),
+                    "leafEntryId": snapshot.leafEntryId.map(JSONValue.string) ?? .null,
+                ]),
+            ])))
+
+            #expect(await loading.value == .installed)
+            #expect(store.snapshot?.transcriptStart == 8)
+            #expect(store.snapshot?.transcript.map(\.id) == page.map(\.id) + snapshot.transcript.map(\.id))
+            await client.close()
+        }
+    }
+
     @Test("subscription and paging admissions require every captured identity")
     func exactAdmissionMatrices() throws {
         let snapshot = try SessionScenarioBuilder(seed: 89).openingTail(targetEncodedBytes: 4_096)
@@ -1297,6 +1663,23 @@ struct SessionPresentationStoreTests {
             subscribedSessionID: "session",
             installedToken: "new",
             requestedToken: "stale"
+        ))
+
+        #expect(SessionPresentationStore.admitsTranscriptPageAnchor(
+            expectedNextEntryID: "first",
+            echoedNextEntryID: "first"
+        ))
+        #expect(!SessionPresentationStore.admitsTranscriptPageAnchor(
+            expectedNextEntryID: "first",
+            echoedNextEntryID: "wrong"
+        ))
+        #expect(SessionPresentationStore.admitsTranscriptPageAnchor(
+            expectedNextEntryID: "first",
+            echoedNextEntryID: nil
+        ))
+        #expect(SessionPresentationStore.admitsTranscriptPageAnchor(
+            expectedNextEntryID: nil,
+            echoedNextEntryID: "gateway-projected-neighbor"
         ))
 
         let request = ChatTranscriptPageRequest(
@@ -1401,6 +1784,10 @@ private final class SecondaryErrorProbe: SessionPresentationStoreDelegate {
         operationID: String?
     ) {}
     func sessionPresentationStoreDidOpen(_ target: SessionPresentationIdentity) {}
+    func sessionPresentationStoreDidPublishSnapshot(
+        _ snapshot: SessionSnapshot,
+        target: SessionPresentationIdentity
+    ) {}
     func sessionPresentationStorePostNotice(_ message: String, replacing key: GlobalNoticeKey?) {}
     func sessionPresentationStoreRemoveNotice(_ key: GlobalNoticeKey) {}
     func sessionPresentationStoreSurface(_ error: Error) { errors.append(error.localizedDescription) }

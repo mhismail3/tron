@@ -27,6 +27,58 @@ struct ToolExecutionStatePolicyTests {
         #expect(ToolExecutionStatePolicy.newest(completed, tieCandidate) == tieCandidate)
     }
 
+    @Test("live output replaces in place while empty progress preserves the last readable frame")
+    func replacingLiveOutput() {
+        let first = tool(
+            id: "call", updatedAt: "1", sequence: 1,
+            output: "Waiting\nworker: thinking", outputTruncated: true
+        )
+        let empty = ToolExecutionStatePolicy.newest(first, tool(id: "call", updatedAt: "2", sequence: 2))
+        #expect(empty.output == first.output)
+        #expect(empty.outputTruncated == true)
+        let shorter = ToolExecutionStatePolicy.newest(
+            empty,
+            tool(id: "call", updatedAt: "3", sequence: 3, output: "Waiting")
+        )
+        #expect(shorter.output == "Waiting")
+        #expect(shorter.outputTruncated == nil)
+        let latest = ToolExecutionStatePolicy.newest(
+            shorter,
+            tool(id: "call", updatedAt: "4", sequence: 4, output: "worker: read complete")
+        )
+        #expect(latest.output == "worker: read complete")
+        let terminal = ToolExecutionStatePolicy.newest(
+            latest,
+            tool(id: "call", status: .completed, updatedAt: "5", sequence: 5, output: "final result")
+        )
+        #expect(terminal.output == "final result")
+    }
+
+    @Test("terminal result wins while the selected latest frame stays bounded")
+    func terminalResultAndBoundedOutput() {
+        let latest = String(repeating: "b", count: 100 * 1_024)
+        let merged = ToolExecutionStatePolicy.newest(
+            tool(id: "call", updatedAt: "1", sequence: 1, output: "discarded old frame"),
+            tool(id: "call", updatedAt: "2", sequence: 2, output: latest)
+        )
+        #expect(merged.output?.utf8.count ?? 0 <= 96 * 1_024)
+        #expect(merged.output?.contains("discarded old frame") == false)
+        #expect(merged.outputTruncated == true)
+
+        let terminal = ToolExecutionStatePolicy.newest(
+            merged,
+            ToolExecutionState(
+                toolCallId: "call", toolName: "tool", status: .completed,
+                arguments: .object([:]), partialResult: nil,
+                result: .string("final result"), output: nil,
+                isError: false, startedAt: "2026-01-01T00:00:00Z",
+                updatedAt: "3", progressSequence: 3
+            )
+        )
+        #expect(terminal.result == .string("final result"))
+        #expect(terminal.output == merged.output)
+    }
+
     @Test("explicit order, missing order, start time, and call ID preserve established sorting")
     func ordering() {
         let explicitFirst = tool(id: "z", order: 1, startedAt: "later")
@@ -50,7 +102,9 @@ struct ToolExecutionStatePolicyTests {
         status: ToolExecutionState.Status = .running,
         startedAt: String = "2026-01-01T00:00:00Z",
         updatedAt: String = "2026-01-01T00:00:00Z",
-        sequence: Int? = nil
+        sequence: Int? = nil,
+        output: String? = nil,
+        outputTruncated: Bool? = nil
     ) -> ToolExecutionState {
         ToolExecutionState(
             toolCallId: id,
@@ -60,6 +114,8 @@ struct ToolExecutionStatePolicyTests {
             arguments: .object([:]),
             partialResult: nil,
             result: nil,
+            output: output,
+            outputTruncated: outputTruncated,
             isError: status == .failed,
             startedAt: startedAt,
             updatedAt: updatedAt,

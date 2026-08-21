@@ -229,12 +229,20 @@ struct ResourceSettingsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Label(value.explanation, systemImage: "info.circle")
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
+                    HStack(alignment: .center, spacing: TronSpacing.xl) {
+                        Image(systemName: "info.circle")
+                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
+                            .foregroundStyle(Color.tronCyan)
+                            .frame(width: 22, height: 22, alignment: .center)
+                            .accessibilityHidden(true)
+                        Text(value.explanation)
+                            .font(TronTypography.bodySM)
+                            .foregroundStyle(Color.tronTextPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .tronGlassSurface(accent: .tronCyan, tintOpacity: 0.08)
                     pathEditor(value)
                     if value.acceptsMultipleLines {
                         TronCaption("Enter one file, directory, glob, or exclusion per line.")

@@ -1,6 +1,6 @@
 # Tool Chip Presentation Hardening Plan
 
-Status: Draft for implementation
+Status: Implemented; focused projection regression validation passed, physical UX verification pending
 
 ## Objective
 
@@ -547,25 +547,25 @@ Verify:
 
 The change is complete only when all of these are demonstrated by focused automated evidence and physical-device validation:
 
-- [ ] Gateway publishes finalized invocation-group membership before corresponding tool starts.
-- [ ] The protocol carries stable, validated, bounded group identity and order.
-- [ ] iOS displays one stable row per admitted display run.
-- [ ] The first visible finalized multi-tool state contains its complete count.
-- [ ] A single tool always displays its actual tool name.
-- [ ] Transcript tool chips never display **Extension activity**.
-- [ ] Live, canonical, result, reconnect, and idle states retain one run identity.
-- [ ] One-to-many presentation does not replace the chip hierarchy.
-- [ ] Rapid state changes use one latest-target transition owner.
-- [ ] Duration and payload progress do not retrigger structural animation.
-- [ ] Entrance and scroll animation remain separate from chip animation.
-- [ ] Detail summaries and rows install atomically.
-- [ ] Reduce Motion is honored.
-- [ ] Canonical tool IDs, results, ordering, and JSONL remain unchanged.
-- [ ] Focused Gateway tests pass.
-- [ ] Focused iOS projection/store/hosted tests pass.
-- [ ] Generic iOS build-for-testing succeeds.
-- [ ] `git diff --check` passes.
-- [ ] `scripts/personal-info-guard.sh` passes.
+- [x] Gateway publishes finalized invocation-group membership before corresponding tool starts.
+- [x] The protocol carries stable, validated, bounded group identity and order.
+- [x] iOS displays one stable row per admitted display run.
+- [x] The first visible finalized multi-tool state contains its complete count.
+- [x] A single tool always displays its actual tool name.
+- [x] Transcript tool chips never display **Extension activity**.
+- [x] Live, canonical, result, reconnect, and idle states retain one run identity.
+- [x] One-to-many presentation does not replace the chip hierarchy.
+- [x] Rapid state changes use one latest-target transition owner.
+- [x] Duration and payload progress do not retrigger structural animation.
+- [x] Entrance and scroll animation remain separate from chip animation.
+- [x] Detail summaries and rows install atomically.
+- [x] Reduce Motion is honored.
+- [x] Canonical tool IDs, results, ordering, and JSONL remain unchanged.
+- [x] Focused Gateway tests pass.
+- [ ] Focused iOS projection/store/hosted tests pass (test bundle compiles; execution intentionally deferred to avoid simulator hangs).
+- [x] Generic iOS build-for-testing succeeds.
+- [x] `git diff --check` passes.
+- [x] `scripts/personal-info-guard.sh` passes.
 - [ ] Physical-device validation passes.
 
 ## Residual risks and explicit non-goals

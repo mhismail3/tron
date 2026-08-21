@@ -42,7 +42,19 @@ export type ContentPart =
   | { id: string; ordinal: number; type: "text"; text: string; attachment?: { name: string; mimeType: string; size: number } }
   | { id: string; ordinal: number; thinkingRunOrdinal: number; type: "thinking"; text: string; redacted?: boolean }
   | { id: string; ordinal: number; type: "image"; mimeType: string; blobId: string }
-  | { id: string; ordinal: number; type: "toolCall"; toolCallId: string; name: string; arguments: JsonValue };
+  | {
+      id: string;
+      ordinal: number;
+      type: "toolCall";
+      toolCallId: string;
+      name: string;
+      arguments: JsonValue;
+      /** Disposable declaration metadata; never persisted to Pi JSONL. */
+      groupId?: string;
+      groupIndex?: number;
+      groupCount?: number;
+      groupFinalized?: boolean;
+    };
 
 interface TranscriptBase {
   id: string;
@@ -75,6 +87,10 @@ export type TranscriptItem =
       progressSequence?: number;
       /** Disposable provenance derived from public Pi sourceInfo; absent means unknown/ambiguous. */
       extensionOrigin?: ExtensionToolOrigin | undefined;
+      groupId?: string;
+      groupIndex?: number;
+      groupCount?: number;
+      groupFinalized?: boolean;
     }
   | TranscriptBase & {
       kind: "bash";
@@ -120,11 +136,33 @@ export type TranscriptItem =
     };
 
 export interface ExtensionToolOrigin {
-  /** Public Pi source identity; package and extension names are intentionally not interpreted by Tron. */
-  source: string;
+  /** Exact opaque owner attribution captured at the extension boundary. */
+  owner?: ExtensionOwner;
+  /** Bounded legacy fallback only; never treated as a filesystem path or identity. */
+  source?: string;
 }
 
 export type ExtensionRunStatus = "running" | "completed" | "failed";
+
+/** Rich lifecycle state. `status` remains the coarse compatibility field above. */
+export type ExtensionRunLifecycleState =
+  | "queued" | "running" | "paused" | "completed" | "failed" | "stopped" | "rejected" | "unknown";
+export type ExtensionRunAttention = "none" | "activeLongRunning" | "needsAttention";
+export type ExtensionRunVisibility = "current" | "recent" | "historical" | "unknown";
+
+export interface ExtensionRunLifecycle {
+  version: 1;
+  state: ExtensionRunLifecycleState;
+  attention: ExtensionRunAttention;
+  /** Monotonic Gateway projection sequence, not producer wall time. */
+  sequence: number;
+  observedAt: string;
+  producerUpdatedAt?: string;
+  terminalAt?: string;
+  recentUntil?: string;
+  visibility?: ExtensionRunVisibility;
+  remainingMs?: number;
+}
 
 /** Structured, bounded progress emitted by an extension-owned delegated run.
  * This is intentionally presentation-neutral: native clients may render it
@@ -132,7 +170,11 @@ export type ExtensionRunStatus = "running" | "completed" | "failed";
 export interface ExtensionRunChild {
   id: string;
   label: string;
+  /** Coarse compatibility status retained for older native clients. */
   status: ExtensionRunStatus;
+  /** Rich delegated-run state, independent of the parent tool status. */
+  lifecycle?: ExtensionRunLifecycleState;
+  attention?: ExtensionRunAttention;
   task?: string;
   lastActivityAt?: string;
   currentTool?: string;
@@ -146,7 +188,10 @@ export interface ExtensionRunChild {
 }
 
 export interface ExtensionRunActivity {
+  /** Compatibility row identity. New clients use activityId when present. */
   id: string;
+  /** Deterministic identity derived from canonical session + real tool call. */
+  activityId?: string;
   runId?: string;
   toolCallId: string;
   source: ExtensionToolOrigin;
@@ -165,6 +210,14 @@ export interface ExtensionRunActivity {
   durationMs?: number;
   output?: string;
   children: ExtensionRunChild[];
+  /** Additive rich lifecycle projection; absent on old Gateway snapshots. */
+  lifecycle?: ExtensionRunLifecycle;
+}
+
+export interface ExtensionActivityDelta {
+  activity: ExtensionRunActivity;
+  liveActivityRevision: number;
+  extensionActivityAsOf: string;
 }
 
 export interface ToolExecutionState {
@@ -189,8 +242,16 @@ export interface ToolExecutionState {
   progressSequence: number;
   /** Disposable provenance derived from public Pi sourceInfo; absent means unknown/ambiguous. */
   extensionOrigin?: ExtensionToolOrigin | undefined;
+  /** Finalized declaration metadata, bounded to the active Gateway runtime. */
+  groupId?: string;
+  groupIndex?: number;
+  groupCount?: number;
+  groupFinalized?: boolean;
   /** Optional structured extension-owned run projection for native clients. */
   extensionActivity?: ExtensionRunActivity;
+  /** Activity projection facts carried with live frames for stale-frame admission. */
+  liveActivityRevision?: number;
+  extensionActivityAsOf?: string;
 }
 
 export interface RetryState {
@@ -451,6 +512,11 @@ export interface SessionSnapshot {
   /** Bounded recent extension-owned run history. Live entries are also carried
    * on their owning toolExecution so progress can update without a snapshot. */
   extensionActivities?: ExtensionRunActivity[];
+  extensionActivityOmissions?: { count: number; bytes: number; reason: "count" | "bytes" | "countAndBytes" };
+  /** Monotonic Gateway revision for disposable current/recent activity. */
+  liveActivityRevision: number;
+  /** Wall-clock observation time for the activity projection, including expiry. */
+  extensionActivityAsOf: string;
   extensionPresentation: ExtensionPresentationState;
   diagnostics: Array<{ type: string; message: string }>;
 }

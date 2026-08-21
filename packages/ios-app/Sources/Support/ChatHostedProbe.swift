@@ -7,8 +7,24 @@ struct ChatHostedScrollState: Sendable {
     let isWaitingForPrependSemanticFrame: Bool
 }
 
+struct ExtensionActivityPillHostedSample: Sendable, Equatable {
+    let ownerID: String
+    let detail: String
+    let count: Int
+    let transitionToken: Int
+}
+
+struct ExtensionActivityPillExpirySample: Sendable, Equatable {
+    let ownerID: String
+    let bucket: ExtensionActivityVisibility
+    let remainingMs: Int?
+}
+
 struct ChatHostedObservation: Sendable {
     let revision: Int
+    let extensionPillStates: [ExtensionActivityPillHostedSample]
+    let extensionRoutes: [String]
+    let extensionPillExpiries: [ExtensionActivityPillExpirySample]
     let geometry: ChatTranscriptGeometry
     let visibleRowIDs: [String]
     let rowFrames: [String: CGRect]
@@ -26,6 +42,7 @@ struct ChatHostedObservation: Sendable {
     let projectionWorkAdmissionCount: Int
     let projectionInstallCount: Int
     let remountedWhileSemanticIDDisplayed: Int
+    let toolChipSamples: [ToolChipInstrumentationSample]
     let installedProjectionRowCount: Int
     let installedProjectionSourceOrdinal: Int?
     let maximumSemanticExcursion: CGFloat
@@ -42,6 +59,9 @@ struct ChatHostedObservation: Sendable {
 @MainActor
 final class ChatHostedProbe {
     private var geometry = ChatTranscriptGeometry.zero
+    private var extensionPillStates: [String: ExtensionActivityPillHostedSample] = [:]
+    private var extensionRoutes: [String] = []
+    private var extensionPillExpiries: [String: ExtensionActivityPillExpirySample] = [:]
     private var rowFrames: [String: CGRect] = [:]
     private var rowFrameOrder: [String] = []
     private var scrollSettledDistance: CGFloat?
@@ -58,6 +78,7 @@ final class ChatHostedProbe {
     private var projectionWorkAdmissionCount = 0
     private var projectionInstallCount = 0
     private var remountedWhileSemanticIDDisplayed = 0
+    private var toolChipSamples: [ToolChipInstrumentationSample] = []
     private var renderedIDBySemanticID: [String: String] = [:]
     private var installedProjectionRowCount = 0
     private var installedProjectionSourceOrdinal: Int?
@@ -96,6 +117,9 @@ final class ChatHostedProbe {
             .map(\.key)
         return ChatHostedObservation(
             revision: revision,
+            extensionPillStates: extensionPillStates.values.sorted { $0.ownerID < $1.ownerID },
+            extensionRoutes: extensionRoutes,
+            extensionPillExpiries: extensionPillExpiries.values.sorted { $0.ownerID < $1.ownerID },
             geometry: geometry,
             visibleRowIDs: visibleRowIDs,
             rowFrames: rowFrames,
@@ -113,6 +137,7 @@ final class ChatHostedProbe {
             projectionWorkAdmissionCount: projectionWorkAdmissionCount,
             projectionInstallCount: projectionInstallCount,
             remountedWhileSemanticIDDisplayed: remountedWhileSemanticIDDisplayed,
+            toolChipSamples: toolChipSamples,
             installedProjectionRowCount: installedProjectionRowCount,
             installedProjectionSourceOrdinal: installedProjectionSourceOrdinal,
             maximumSemanticExcursion: maximumSemanticExcursion,
@@ -125,6 +150,28 @@ final class ChatHostedProbe {
             readyFrameCompletionCount: readyFrameCompletionCount,
             isReady: isReady
         )
+    }
+
+    func recordExtensionPillState(_ state: ExtensionActivityPillVisualState, transitionToken: Int) {
+        extensionPillStates[state.ownerID] = ExtensionActivityPillHostedSample(
+            ownerID: state.ownerID,
+            detail: state.detail,
+            count: state.count,
+            transitionToken: transitionToken
+        )
+        revision &+= 1
+    }
+
+    func recordExtensionRoute(_ routeID: String) {
+        guard !routeID.isEmpty else { return }
+        extensionRoutes.append(routeID)
+        if extensionRoutes.count > 32 { extensionRoutes.removeFirst(extensionRoutes.count - 32) }
+        revision &+= 1
+    }
+
+    func recordExtensionPillExpiry(ownerID: String, bucket: ExtensionActivityVisibility, remainingMs: Int?) {
+        extensionPillExpiries[ownerID] = ExtensionActivityPillExpirySample(ownerID: ownerID, bucket: bucket, remainingMs: remainingMs)
+        revision &+= 1
     }
 
     func updateGeometry(_ value: ChatTranscriptGeometry) {
@@ -181,6 +228,14 @@ final class ChatHostedProbe {
     func recordProjectionSubmit(startedWork: Bool) {
         projectionSubmitCount &+= 1
         if startedWork { projectionWorkAdmissionCount &+= 1 }
+        revision &+= 1
+    }
+
+    func recordToolChip(_ sample: ToolChipInstrumentationSample) {
+        toolChipSamples.append(sample)
+        if toolChipSamples.count > 128 {
+            toolChipSamples.removeFirst(toolChipSamples.count - 128)
+        }
         revision &+= 1
     }
 

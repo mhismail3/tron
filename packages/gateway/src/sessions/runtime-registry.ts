@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { open, opendir, realpath, rm, stat } from "node:fs/promises";
+import { open, opendir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
 import { ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
@@ -10,6 +11,15 @@ import type { TrustService } from "../admin/trust-service.js";
 import { BlobStore } from "./blob-store.js";
 import { RunMarkerStore } from "./run-markers.js";
 import { RuntimeSlot, type SessionBroadcast } from "./runtime-slot.js";
+import { ExtensionActivityRecency } from "./extension-activity-recency.js";
+import { admitExtensionLifecycleArtifact } from "./extension-run-projection.js";
+
+const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
+// MaximumLiveRuntimes is 16 and each slot retains at most 64 owned activity
+// bindings, so this covers every exact drain owner before ambient work.
+const MAX_EXTENSION_DISCOVERY_WORK = 1_024;
+const MAX_EXTENSION_DISCOVERY_ROOTS = 64;
+const MAX_EXTENSION_TEMP_ENTRIES = 1_024;
 
 const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
   maximumDirectories: 25_001,
@@ -71,6 +81,7 @@ export class RuntimeRegistry {
   private readonly catalogAcquisitionMutex = new AsyncMutex();
   private readonly blobs: BlobStore;
   private readonly markers: RunMarkerStore;
+  private readonly extensionActivityRecency = new ExtensionActivityRecency();
   private readonly configuredSessionDir: string | undefined;
   private interrupted = new Set<string>();
   private readonly subscribers = new Map<string, Set<string>>();
@@ -87,6 +98,10 @@ export class RuntimeRegistry {
   private catalogAcquisitionInvalidationGeneration = 0;
   private catalogAcquisitionAdmission: CatalogAcquisitionAdmission | undefined;
   private evictionTimer?: NodeJS.Timeout;
+  private artifactDiscoveryTimer?: NodeJS.Timeout;
+  private artifactDiscoveryInFlight = false;
+  private slotAdmissionsInFlight = 0;
+  private administrativeDrainStarted = false;
   private shutdownState: "active" | "shuttingDown" | "disposed" = "active";
   private disposalPromise: Promise<void> | undefined;
 
@@ -126,6 +141,9 @@ export class RuntimeRegistry {
     this.interrupted = await this.markers.interruptedSessionIds();
     this.evictionTimer = setInterval(() => void this.evictIdle(), 60_000);
     this.evictionTimer.unref();
+    this.artifactDiscoveryTimer = setInterval(() => void this.discoverExtensionArtifacts(), 750);
+    this.artifactDiscoveryTimer.unref();
+    void this.discoverExtensionArtifacts();
   }
 
   initializeBlobStorage(): Promise<void> {
@@ -207,6 +225,7 @@ export class RuntimeRegistry {
       trust: this.options.trust,
       blobs: this.blobs,
       markers: this.markers,
+      extensionActivityRecency: this.extensionActivityRecency,
     };
   }
 
@@ -803,23 +822,27 @@ export class RuntimeRegistry {
   }
 
   async create(cwdInput: string): Promise<RuntimeSlot> {
-    this.assertSlotAdmissionOpen();
-    const trust = await this.options.trust.requireResolved(cwdInput);
-    return this.mutex.run(async () => {
-      this.assertSlotAdmissionOpen();
-      if (this.trustReloadProjects.has(trust.cwd)) {
-        throw new GatewayError("busy", "Project trust is being reconfigured", true);
-      }
-      this.requireLiveSlotCapacity();
-      const manager = SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd));
-      const id = manager.getSessionId();
-      const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false);
-      this.slots.set(id, slot);
-      this.invalidateCatalogAcquisition();
-      this.revision += 1;
-      this.options.sessionListChanged();
-      return slot;
-    });
+    const finishAdmission = this.beginSlotAdmission();
+    try {
+      const trust = await this.options.trust.requireResolved(cwdInput);
+      return await this.mutex.run(async () => {
+        this.assertSlotAdmissionOpen();
+        if (this.trustReloadProjects.has(trust.cwd)) {
+          throw new GatewayError("busy", "Project trust is being reconfigured", true);
+        }
+        this.requireLiveSlotCapacity();
+        const manager = SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd));
+        const id = manager.getSessionId();
+        const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false);
+        this.slots.set(id, slot);
+        this.invalidateCatalogAcquisition();
+        this.revision += 1;
+        this.options.sessionListChanged();
+        return slot;
+      });
+    } finally {
+      finishAdmission();
+    }
   }
 
   async acquire(sessionId: string): Promise<RuntimeSlot> {
@@ -835,6 +858,16 @@ export class RuntimeRegistry {
       existing.touch();
       return existing;
     }
+    const finishAdmission = this.beginSlotAdmission();
+    try {
+      return await this.acquireMissing(sessionId);
+    } finally {
+      finishAdmission();
+    }
+  }
+
+  private async acquireMissing(sessionId: string): Promise<RuntimeSlot> {
+    const existing = this.slots.get(sessionId);
     const acquisition = await this.catalogAcquisition();
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     const entry = acquisition.entriesByID.get(sessionId);
@@ -923,30 +956,34 @@ export class RuntimeRegistry {
   }
 
   async importFromJsonl(path: string, cwdInput: string): Promise<RuntimeSlot> {
-    this.assertSlotAdmissionOpen();
-    const trust = await this.options.trust.requireResolved(cwdInput);
-    return this.mutex.run(async () => {
-      this.assertSlotAdmissionOpen();
-      if (this.trustReloadProjects.has(trust.cwd)) {
-        throw new GatewayError("busy", "Project trust is being reconfigured", true);
-      }
-      this.requireLiveSlotCapacity();
-      const manager = SessionManager.inMemory(trust.cwd);
-      const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false);
-      this.slots.set(slot.id, slot);
-      try {
-        await slot.importFromJsonl(path, trust.cwd);
+    const finishAdmission = this.beginSlotAdmission();
+    try {
+      const trust = await this.options.trust.requireResolved(cwdInput);
+      return await this.mutex.run(async () => {
+        this.assertSlotAdmissionOpen();
+        if (this.trustReloadProjects.has(trust.cwd)) {
+          throw new GatewayError("busy", "Project trust is being reconfigured", true);
+        }
+        this.requireLiveSlotCapacity();
+        const manager = SessionManager.inMemory(trust.cwd);
+        const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false);
         this.slots.set(slot.id, slot);
-        this.invalidateCatalogAcquisition();
-        this.revision += 1;
-        this.options.sessionListChanged();
-        return slot;
-      } catch (error) {
-        this.slots.delete(slot.id);
-        await slot.dispose().catch(() => {});
-        throw error;
-      }
-    });
+        try {
+          await slot.importFromJsonl(path, trust.cwd);
+          this.slots.set(slot.id, slot);
+          this.invalidateCatalogAcquisition();
+          this.revision += 1;
+          this.options.sessionListChanged();
+          return slot;
+        } catch (error) {
+          this.slots.delete(slot.id);
+          await slot.dispose().catch(() => {});
+          throw error;
+        }
+      });
+    } finally {
+      finishAdmission();
+    }
   }
 
   async reloadProject(cwdInput: string, projectTrusted?: boolean, publish = true): Promise<void> {
@@ -1094,6 +1131,103 @@ export class RuntimeRegistry {
       && (this.subscribers.get(sessionId)?.size ?? 0) === 0;
   }
 
+  /** One bounded Gateway owner discovers shared extension artifacts. Exact
+   * live bindings are refreshed first; ambient enumeration and routed reads
+   * share one hard work budget and cannot starve a known drain owner. */
+  private async discoverExtensionArtifacts(): Promise<void> {
+    if (this.artifactDiscoveryInFlight || this.shutdownState !== "active") return;
+    this.artifactDiscoveryInFlight = true;
+    try {
+      let work = 0;
+      const slots = [...this.slots.values()];
+      const exact = new Set<string>();
+      for (const slot of slots) {
+        for (const asyncDir of slot.ownedExtensionArtifactDirectories()) {
+          const key = `${slot.id}\0${asyncDir}`;
+          if (!exact.add(key)) continue;
+          if (work >= MAX_EXTENSION_DISCOVERY_WORK) return;
+          work += 1;
+          await slot.discoverExtensionArtifact(asyncDir);
+        }
+      }
+
+      const roots = new Set<string>();
+      for (const slot of slots) {
+        if (roots.size >= MAX_EXTENSION_DISCOVERY_ROOTS) break;
+        const root = join(resolve(slot.cwd), ".pi", "subagents", "async-subagent-runs");
+        try { if ((await stat(root)).isDirectory()) roots.add(root); } catch { /* no project artifacts */ }
+      }
+      try {
+        let examined = 0;
+        const entries = await opendir(tmpdir());
+        for await (const entry of entries) {
+          examined += 1;
+          if (examined > MAX_EXTENSION_TEMP_ENTRIES || roots.size >= MAX_EXTENSION_DISCOVERY_ROOTS) break;
+          if (!entry.isDirectory() || !entry.name.startsWith("pi-subagents-")) continue;
+          const root = join(tmpdir(), entry.name, "async-subagent-runs");
+          try { if ((await stat(root)).isDirectory()) roots.add(root); } catch { /* disappearing runtime root */ }
+        }
+      } catch { /* an unavailable temp directory leaves exact bindings authoritative */ }
+
+      const rootList = [...roots];
+      for (let rootIndex = 0; rootIndex < rootList.length && work < MAX_EXTENSION_DISCOVERY_WORK; rootIndex += 1) {
+        const root = rootList[rootIndex]!;
+        const rootsRemaining = rootList.length - rootIndex;
+        const routedSlots = Math.max(1, slots.length);
+        const rootBudget = Math.max(1, Math.floor(
+          (MAX_EXTENSION_DISCOVERY_WORK - work) / (rootsRemaining * routedSlots),
+        ));
+        const candidates: Array<{ asyncDir: string; active: boolean; timestamp: number }> = [];
+        try {
+          let examined = 0;
+          const entries = await opendir(root);
+          for await (const entry of entries) {
+            examined += 1;
+            if (examined > rootBudget) break;
+            if (!entry.isDirectory()) continue;
+            const asyncDir = join(root, entry.name);
+            try {
+              const statusPath = join(asyncDir, "status.json");
+              const handle = await open(statusPath, "r");
+              let parsed: unknown;
+              try {
+                const metadata = await handle.stat();
+                if (!metadata.isFile() || metadata.size > MAX_EXTENSION_ARTIFACT_BYTES) continue;
+                const buffer = Buffer.alloc(MAX_EXTENSION_ARTIFACT_BYTES + 1);
+                const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+                if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) continue;
+                parsed = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+              } finally {
+                await handle.close();
+              }
+              const value = admitExtensionLifecycleArtifact(parsed, { exactOwnedLegacy: true });
+              if (!value) continue;
+              const state = value.state ?? value.status;
+              const active = state === "queued" || state === "running" || state === "pending"
+                || state === "detached" || state === "paused";
+              const timestamps = [value.lastUpdate, value.startedAt, value.endedAt]
+                .filter((item): item is number => typeof item === "number" && Number.isSafeInteger(item) && item >= 0);
+              candidates.push({ asyncDir, active, timestamp: Math.max(0, ...timestamps) });
+            } catch { /* replacement or malformed artifact */ }
+          }
+        } catch { continue; }
+        // Terminal evidence releases accepted work; live exact bindings were
+        // already refreshed above and do not outrank it in ambient discovery.
+        candidates.sort((left, right) => Number(left.active) - Number(right.active)
+          || right.timestamp - left.timestamp || left.asyncDir.localeCompare(right.asyncDir));
+        for (const candidate of candidates) {
+          for (const slot of slots) {
+            if (work >= MAX_EXTENSION_DISCOVERY_WORK) return;
+            work += 1;
+            await slot.discoverExtensionArtifact(candidate.asyncDir);
+          }
+        }
+      }
+    } finally {
+      this.artifactDiscoveryInFlight = false;
+    }
+  }
+
   private async evictIdle(): Promise<void> {
     const cutoff = Date.now() - this.options.idleRuntimeMs;
     for (const [id, slot] of this.slots) {
@@ -1129,20 +1263,28 @@ export class RuntimeRegistry {
     return [...this.slots.values()].filter((slot) => slot.isBusy).map((slot) => slot.id);
   }
 
-  async waitUntilIdle(timeoutMs = 60_000): Promise<void> {
-    const slots = [...this.slots.values()];
+  drainBusySessionCount(): number {
+    return this.slotAdmissionsInFlight
+      + [...this.slots.values()].filter((slot) => slot.isDrainBusy).length;
+  }
+
+  async waitUntilIdle(): Promise<void> {
+    // Freeze slot-creating admissions synchronously, then wait for every
+    // create/acquire/import that entered before the freeze—including trust and
+    // catalog awaits outside the mutex—to publish or fail before snapshotting.
+    this.administrativeDrainStarted = true;
+    while (this.slotAdmissionsInFlight > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const slots = await this.mutex.run(() => [...this.slots.values()]);
     let preparationSettled = false;
     let preparationError: unknown;
     void Promise.all(slots.map((slot) => slot.prepareForAdministrativeDrain())).then(
       () => { preparationSettled = true; },
       (error) => { preparationError = error; preparationSettled = true; },
     );
-    const deadline = Date.now() + timeoutMs;
     while (!preparationSettled || slots.some((slot) => slot.isDrainBusy)) {
-      if (Date.now() >= deadline) {
-        throw new GatewayError("busy", "Gateway restart drain timed out; remaining extension work will be interrupted", true);
-      }
-      await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(1, deadline - Date.now()))));
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (preparationError !== undefined) throw preparationError;
   }
@@ -1156,6 +1298,7 @@ export class RuntimeRegistry {
     // already begun and excludes every later create/acquire/import attempt.
     this.shutdownState = "shuttingDown";
     if (this.evictionTimer) clearInterval(this.evictionTimer);
+    if (this.artifactDiscoveryTimer) clearInterval(this.artifactDiscoveryTimer);
     const operation = this.performDispose();
     this.disposalPromise = operation;
     return operation;
@@ -1179,6 +1322,20 @@ export class RuntimeRegistry {
     }
     await this.blobs.dispose();
     this.shutdownState = "disposed";
+  }
+
+  private beginSlotAdmission(): () => void {
+    this.assertSlotAdmissionOpen();
+    if (this.administrativeDrainStarted) {
+      throw new GatewayError("busy", "Gateway restart is draining admitted session work", true);
+    }
+    this.slotAdmissionsInFlight += 1;
+    let finished = false;
+    return () => {
+      if (finished) return;
+      finished = true;
+      this.slotAdmissionsInFlight -= 1;
+    };
   }
 
   private assertSlotAdmissionOpen(): void {

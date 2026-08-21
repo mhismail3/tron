@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { copyFile, mkdtemp, open, readdir, rm, stat } from "node:fs/promises";
+import { copyFile, mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import type { ImageContent, Model } from "@earendil-works/pi-ai";
@@ -46,6 +46,7 @@ import {
   fitSessionSnapshot,
   projectJson,
   projectMessage,
+  mergeLiveToolOutput,
   projectToolOutput,
   projectToolResult,
   projectTranscriptPage,
@@ -55,8 +56,11 @@ import {
   type TranscriptPage,
 } from "./projection.js";
 import type { RunMarkerStore } from "./run-markers.js";
-import { attributeExtensions } from "../extensions/owner-attribution.js";
-import { extensionRunAsyncDir, projectExtensionRunActivity } from "./extension-run-projection.js";
+import { attributeExtensions, extensionOwnerFor } from "../extensions/owner-attribution.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionLifecycleArtifact, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasStructuredExtensionRunActivity, projectExtensionRunActivity } from "./extension-run-projection.js";
+import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
+import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
+import type { ExtensionActivityHistoryPage } from "./extension-activity-history.js";
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
@@ -116,6 +120,7 @@ export interface RuntimeSlotDependencies {
   trust: TrustService;
   blobs: BlobStore;
   markers: RunMarkerStore;
+  extensionActivityRecency: ExtensionActivityRecency;
 }
 
 /**
@@ -147,6 +152,7 @@ export class RuntimeSlot {
   private streamAnchorId: string | null | undefined;
   private streamPresentationId: string | undefined;
   private streamStartedAt: string | undefined;
+  private finalizedStreamPresentationId: string | undefined;
   /** Disposable runtime-only bridge from canonical entry IDs to mounted turn IDs. */
   private readonly presentationIDs = new Map<string, string>();
   private readonly presentationIDOrder: string[] = [];
@@ -164,9 +170,18 @@ export class RuntimeSlot {
   private projectTrustReloadOverride: boolean | undefined;
   private trustReloadPending = false;
   private readonly toolExecutions = new Map<string, ToolExecutionState>();
+  /** Latched declaration facts keyed by exact Pi tool call ID. Runtime-only;
+   * never persisted to canonical Pi JSONL. */
+  private readonly toolInvocationGroups = new Map<string, Pick<ToolProjectionMetadata, "groupId" | "groupIndex" | "groupCount" | "groupFinalized">>();
   /** Bounded, disposable extension-owned run projections retain completed work
    * for Manage Session while the owning tool carries the live copy. */
   private readonly extensionActivities = new Map<string, ExtensionRunActivity>();
+  /** Monotonic lifecycle projection ordering and terminal latches are runtime
+   * facts; producer timestamps are display evidence only. */
+  private readonly extensionActivitySequences = new Map<string, number>();
+  private readonly extensionActivityTerminals = new Set<string>();
+  private liveActivityRevision = 0;
+  private extensionActivityAsOf = new Date().toISOString();
   /** Gateway-owned correlation keeps one activity identity across Pi lifecycle
    * payloads and independently-written async artifacts. */
   private readonly extensionRunOwnership = new Map<string, {
@@ -176,8 +191,10 @@ export class RuntimeSlot {
   }>();
   private readonly extensionActivityWatchers = new Map<string, { watcher: FSWatcher; timer: NodeJS.Timeout | undefined; asyncDir: string }>();
   private readonly extensionActivityReadGenerations = new Map<string, number>();
-  private subagentArtifactScanTimer: NodeJS.Timeout | undefined;
-  private subagentArtifactScanInFlight = false;
+  /** Receipt persistence is runtime work: eviction and restart drain wait for
+   * this bounded barrier rather than disposing the Pi manager underneath it. */
+  private readonly pendingReceiptWrites = new Set<Promise<void>>();
+  private readonly unregisterExtensionExpiry: () => void;
   /** Bounded runtime timing enriches the mobile projection without changing Pi
    * JSONL. Historical entries without retained metadata use timestamp fallback. */
   private readonly toolMetadata = new Map<string, ToolProjectionMetadata>();
@@ -213,6 +230,7 @@ export class RuntimeSlot {
     this.ui = this.createSemanticBroker();
     this.extensionHost = new RemotePiExtensionHost(this.ui, { enableBlockingCustom: false });
     this.lifecycle = new ExtensionLifecycleCoordinator(this.ui.presentation, () => this.hasRuntimeWork());
+    this.unregisterExtensionExpiry = dependencies.extensionActivityRecency.registerExpiryCallback((frame) => this.onExtensionActivityExpiry(frame));
   }
 
   private createSemanticBroker(): SemanticUIBroker {
@@ -262,7 +280,7 @@ export class RuntimeSlot {
   get isBusy(): boolean { return this.lifecycle.preventsOperationalQuiescence; }
   /** Retained presentation protects only automatic idle eviction. */
   get isEvictionProtected(): boolean { return this.lifecycle.preventsEviction; }
-  get isDrainBusy(): boolean { return this.lifecycle.preventsAdministrativeDrain; }
+  get isDrainBusy(): boolean { return this.lifecycle.preventsAdministrativeDrain || this.pendingReceiptWrites.size > 0; }
 
   async prepareForAdministrativeDrain(): Promise<void> {
     this.lifecycle.beginDrain();
@@ -284,7 +302,13 @@ export class RuntimeSlot {
       || this.effectivePhase === "running"
       || this.effectivePhase === "compacting"
       || this.effectivePhase === "retrying"
-      || this.runtime?.session.isBashRunning === true;
+      || this.runtime?.session.isBashRunning === true
+      || this.pendingReceiptWrites.size > 0
+      // Detached nonterminal extension work owns this session lane until a
+      // terminal receipt or explicit resolution is observed.
+      || [...this.extensionActivities.values()].some((activity) => activity.lifecycle?.state === "queued"
+        || activity.lifecycle?.state === "running"
+        || activity.lifecycle?.state === "paused" || activity.lifecycle?.attention === "needsAttention");
   }
 
   /** AgentSession can start an extension-triggered continuation while an older
@@ -433,16 +457,84 @@ export class RuntimeSlot {
       onError: (error) => this.emit("session.extensionError", safeJson(error)),
     });
     this.unsubscribe = session.subscribe((event) => this.onEvent(event));
+    this.hydrateCanonicalExtensionActivities();
     const nextId = session.sessionId;
     if (previousId !== nextId) {
       this.clearExtensionActivityWatchers();
       this.extensionActivities.clear();
+      this.extensionActivitySequences.clear();
+      this.extensionActivityTerminals.clear();
+
       this.extensionRunOwnership.clear();
       this.hooks.rekey(previousId, nextId, this);
     }
     this.revision += 1;
     this.publishSnapshot();
-    this.startSubagentArtifactScan();
+  }
+
+  /** Rebuild terminal extension cards from canonical receipts before backfilling
+   * tool results. This preserves the canonical terminalAt across a restart;
+   * receipts are authoritative when the disposable result projection is rebuilt. */
+  private hydrateCanonicalExtensionActivities(): void {
+    for (const { receipt } of extensionActivityReceipts(this.sessionManager.getEntries(), this.id)) {
+      const activity = extensionReceiptActivity(receipt);
+      this.upsertExtensionActivity(activity);
+      // Retain even an already-expired terminal latch in the disposable map so
+      // tool-result backfill cannot manufacture a new terminalAt on restart;
+      // snapshot visibility still omits historical rows.
+      this.extensionActivities.set(activity.toolCallId, activity);
+    }
+    for (const entry of this.sessionManager.getEntries()) {
+      if (entry.type !== "message" || entry.message.role !== "toolResult") continue;
+      const toolName = entry.message.toolName;
+      const origin = this.extensionToolOrigin(toolName);
+      if (!origin) continue;
+      const details = entry.message.details;
+      if (!details || typeof details !== "object" || Array.isArray(details)) continue;
+      const state = extensionLifecycleState((details as Record<string, unknown>).state ?? (details as Record<string, unknown>).status);
+      if (!["completed", "failed", "stopped", "rejected"].includes(state)) continue;
+      this.updateExtensionActivity(
+        entry.message.toolCallId,
+        toolName,
+        origin,
+        state === "failed" ? "failed" : "completed",
+        new Date(entry.message.timestamp).toISOString(),
+        new Date(entry.message.timestamp).toISOString(),
+        details,
+        new Date(entry.message.timestamp).toISOString(),
+      );
+    }
+  }
+
+  private upsertExtensionActivity(activity: ExtensionRunActivity): ActivityVisibility {
+    const visibility = this.dependencies.extensionActivityRecency.upsert(activity);
+    if (visibility.accepted) {
+      this.liveActivityRevision += 1;
+      this.extensionActivityAsOf = new Date().toISOString();
+    }
+    return visibility;
+  }
+
+  /** Evict disposable rows by bucket, never allowing a recent terminal row to
+   * displace queued/running/paused work from the 64-entry runtime map. */
+  private trimExtensionActivities(): void {
+    while (this.extensionActivities.size > 64) {
+      const candidates = [...this.extensionActivities.entries()];
+      const ranked = candidates.sort((left, right) => {
+        const bucket = (activity: ExtensionRunActivity): number => {
+          const visibility = this.extensionActivityVisibility(activity);
+          return visibility === "recent" || visibility === "historical" ? 0 : 1;
+        };
+        return bucket(left[1]) - bucket(right[1]) || left[1].updatedAt.localeCompare(right[1].updatedAt);
+      });
+      const oldest = ranked[0]?.[0];
+      if (!oldest) break;
+      this.stopExtensionActivityWatcher(oldest);
+      this.extensionActivities.delete(oldest);
+      for (const [runId, binding] of this.extensionRunOwnership) {
+        if (binding.toolCallId === oldest) this.extensionRunOwnership.delete(runId);
+      }
+    }
   }
 
   private requestExtensionShutdown(): void {
@@ -508,10 +600,50 @@ export class RuntimeSlot {
       this.dependencies.blobs,
       undefined,
       this.streamPresentationId,
+      false,
     );
     this.emit("session.progress", safeJson({
       message: projected === undefined ? undefined : boundStreamingProgressItem(projected),
     }));
+  }
+
+  /** Publish the assistant declaration at message_end before any subsequent
+   * tool lifecycle event can be observed, and latch its exact call membership. */
+  private finalizeToolInvocationGroups(message: AgentMessage): void {
+    if (message.role !== "assistant") return;
+    this.captureStreamIdentity(message);
+    if (!this.streamPresentationId || !this.streamStartedAt) return;
+    if (this.progressFlushTimer !== undefined) clearTimeout(this.progressFlushTimer);
+    this.progressFlushTimer = undefined;
+    this.pendingProgressMessage = undefined;
+    const projected = projectMessage(
+      "streaming",
+      this.streamAnchorId ?? null,
+      this.streamStartedAt,
+      message,
+      this.dependencies.blobs,
+      undefined,
+      this.streamPresentationId,
+      true,
+    );
+    if (!projected || projected.kind !== "message") return;
+    this.finalizedStreamPresentationId = this.streamPresentationId;
+    for (const part of projected.content) {
+      if (part.type !== "toolCall" || !part.groupFinalized || !part.groupId
+        || part.groupIndex === undefined || part.groupCount === undefined) continue;
+      this.toolInvocationGroups.set(part.toolCallId, {
+        groupId: part.groupId,
+        groupIndex: part.groupIndex,
+        groupCount: part.groupCount,
+        groupFinalized: true,
+      });
+    }
+    while (this.toolInvocationGroups.size > 2_048) {
+      const oldest = this.toolInvocationGroups.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.toolInvocationGroups.delete(oldest);
+    }
+    this.emit("session.progress", safeJson({ message: boundStreamingProgressItem(projected) }));
   }
 
   private captureStreamIdentity(message: AgentMessage, startsMessage = false): void {
@@ -527,6 +659,7 @@ export class RuntimeSlot {
     this.streamAnchorId = this.runtime.session.sessionManager.getLeafId() ?? null;
     this.streamPresentationId = `stream:${randomUUID()}`;
     this.streamStartedAt = new Date().toISOString();
+    this.finalizedStreamPresentationId = undefined;
   }
 
   private bindCanonicalPresentation(message: AgentMessage): void {
@@ -556,6 +689,7 @@ export class RuntimeSlot {
         this.streamAnchorId = undefined;
         this.streamPresentationId = undefined;
         this.streamStartedAt = undefined;
+        this.finalizedStreamPresentationId = undefined;
       }
       this.scheduleSnapshot();
     });
@@ -615,6 +749,7 @@ export class RuntimeSlot {
         }
         this.phase = "running";
         this.toolExecutions.clear();
+        this.toolInvocationGroups.clear();
         this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
         this.activeOperationId ??= randomUUID();
@@ -644,12 +779,14 @@ export class RuntimeSlot {
         this.streamAnchorId = undefined;
         this.streamPresentationId = undefined;
         this.streamStartedAt = undefined;
+        this.finalizedStreamPresentationId = undefined;
         this.phase = "idle";
         const settledOperationId = this.activeOperationId;
         this.activeOperationId = undefined;
         this.operation = undefined;
         this.retry = undefined;
         this.toolExecutions.clear();
+        this.toolInvocationGroups.clear();
         this.toolStartedAtMonotonicMs.clear();
         this.nextToolOrder = 0;
         this.stopActivityHeartbeat();
@@ -765,6 +902,7 @@ export class RuntimeSlot {
           lastProgressAt: now,
           durationMs,
           progressSequence,
+          ...(this.toolInvocationGroups.get(event.toolCallId) ?? {}),
           ...(extensionOrigin ? { extensionOrigin } : {}),
           ...(extensionActivity ? { extensionActivity } : {}),
         };
@@ -779,7 +917,7 @@ export class RuntimeSlot {
         this.ensureAgentProjection();
         const now = new Date().toISOString();
         const existing = this.toolExecutions.get(event.toolCallId);
-        const output = projectToolOutput(event.partialResult);
+        const output = mergeLiveToolOutput(existing, projectToolOutput(event.partialResult));
         const startedAt = existing?.startedAt ?? now;
         const durationMs = this.measureToolDuration(
           event.toolCallId,
@@ -810,6 +948,7 @@ export class RuntimeSlot {
           lastProgressAt: now,
           durationMs,
           progressSequence: (existing?.progressSequence ?? 0) + 1,
+          ...(this.toolInvocationGroups.get(event.toolCallId) ?? {}),
           ...(extensionOrigin ? { extensionOrigin } : {}),
           ...(extensionActivity ? { extensionActivity } : {}),
         };
@@ -856,6 +995,7 @@ export class RuntimeSlot {
           completedAt: now,
           durationMs,
           progressSequence: (existing?.progressSequence ?? 0) + 1,
+          ...(this.toolInvocationGroups.get(event.toolCallId) ?? {}),
           ...(extensionOrigin ? { extensionOrigin } : {}),
           ...(extensionActivity ? { extensionActivity } : {}),
         };
@@ -885,7 +1025,7 @@ export class RuntimeSlot {
         break;
       case "message_end":
         if (event.message.role === "assistant") {
-          this.flushPendingProgress();
+          this.finalizeToolInvocationGroups(event.message);
           this.bindCanonicalPresentation(event.message);
         }
         // Regular user messages are persisted by Pi at message_end; they do not
@@ -958,84 +1098,6 @@ export class RuntimeSlot {
     }
   }
 
-  private startSubagentArtifactScan(): void {
-    if (this.disposed) return;
-    if (this.subagentArtifactScanTimer) {
-      void this.scanSubagentArtifacts();
-      return;
-    }
-    this.subagentArtifactScanTimer = setInterval(() => {
-      void this.scanSubagentArtifacts();
-    }, 750);
-    this.subagentArtifactScanTimer.unref();
-    void this.scanSubagentArtifacts();
-  }
-
-  private stopSubagentArtifactScan(): void {
-    if (this.subagentArtifactScanTimer) clearInterval(this.subagentArtifactScanTimer);
-    this.subagentArtifactScanTimer = undefined;
-  }
-
-  private async scanSubagentArtifacts(): Promise<void> {
-    if (this.subagentArtifactScanInFlight || this.disposed) return;
-    this.subagentArtifactScanInFlight = true;
-    try {
-      const entries = await readdir(tmpdir(), { withFileTypes: true });
-      const roots: string[] = [];
-      for (const entry of entries) {
-        if (!entry.isDirectory() || !entry.name.startsWith("pi-subagents-")) continue;
-        const root = join(tmpdir(), entry.name, "async-subagent-runs");
-        try {
-          if ((await stat(root)).isDirectory()) roots.push(root);
-        } catch {
-          // The per-user runtime directory may disappear during cleanup.
-        }
-      }
-      // Project-local artifacts are an equally canonical producer surface. Keep
-      // the same status-file/path validation used for temporary runtime roots.
-      const projectRoot = resolve(this.cwd, ".pi", "subagents", "async-subagent-runs");
-      try {
-        if ((await stat(projectRoot)).isDirectory()) roots.push(projectRoot);
-      } catch {
-        // A project without local subagent artifacts is normal.
-      }
-      const uniqueRoots = [...new Set(roots.map((root) => resolve(root)))];
-      for (const root of uniqueRoots) {
-        let runs: import("node:fs").Dirent[];
-        try {
-          runs = await readdir(root, { withFileTypes: true });
-        } catch {
-          continue;
-        }
-        const candidates: Array<{ asyncDir: string; state: number; timestamp: number }> = [];
-        for (const run of runs.filter((entry) => entry.isDirectory())) {
-          const asyncDir = join(root, run.name);
-          try {
-            const raw = await this.readExtensionStatusArtifact(asyncDir);
-            if (!raw || typeof raw.runId !== "string") continue;
-            const status = raw.state === "running" || raw.status === "running" ? 1 : 0;
-            const statusTimestamp = [raw.lastUpdate, raw.startedAt, raw.endedAt]
-              .filter((value): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
-              .reduce((latest, value) => Math.max(latest, value), 0);
-            const metadata = await stat(join(asyncDir, "status.json"));
-            candidates.push({ asyncDir, state: status, timestamp: Math.max(statusTimestamp, metadata.mtimeMs) });
-          } catch {
-            // The runner may be replacing or removing status.json.
-          }
-        }
-        // Directory names are UUIDs and have no activity ordering. Validate all
-        // status files first, then retain the newest lifecycle timestamps so a
-        // recent active run cannot be omitted by lexical slicing.
-        candidates.sort((left, right) => right.state - left.state || right.timestamp - left.timestamp);
-        for (const candidate of candidates.slice(0, 64)) {
-          await this.refreshSubagentActivityFromArtifact(candidate.asyncDir);
-        }
-      }
-    } finally {
-      this.subagentArtifactScanInFlight = false;
-    }
-  }
-
   private subagentExtensionOrigin(): ExtensionToolOrigin {
     const extensions = this.runtime?.session.resourceLoader.getExtensions().extensions ?? [];
     const extension = extensions.find((candidate) => {
@@ -1043,8 +1105,8 @@ export class RuntimeSlot {
         .filter((value): value is string => typeof value === "string");
       return paths.some((value) => /(?:^|[\\/])pi-subagents(?:[\\/]|$)/u.test(value));
     });
-    const source = extension?.sourceInfo.source?.trim();
-    return { source: source || "pi-subagents" };
+    if (extension) return { owner: extensionOwnerFor(extension) };
+    return { source: "pi-subagents" };
   }
 
   private async readExtensionStatusArtifact(asyncDir: string): Promise<Record<string, unknown> | undefined> {
@@ -1057,21 +1119,46 @@ export class RuntimeSlot {
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
       if (bytesRead > MAX_EXTENSION_ARTIFACT_BYTES) return undefined;
       const parsed: unknown = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
-      return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : undefined;
+      return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
     } finally {
       await handle.close();
     }
+  }
+
+  /** Exact directories already bound by a live tool result outrank ambient
+   * discovery, especially while administrative drain needs terminal evidence. */
+  ownedExtensionArtifactDirectories(): string[] {
+    const terminalStates = new Set(["completed", "failed", "stopped", "rejected"]);
+    const candidates: Array<{ directory: string; updatedAt: string }> = [];
+    for (const binding of this.extensionRunOwnership.values()) {
+      if (binding.terminal || !binding.asyncDir) continue;
+      const activity = this.extensionActivities.get(binding.toolCallId);
+      if (activity?.lifecycle && terminalStates.has(activity.lifecycle.state)) continue;
+      const directory = this.canonicalExtensionArtifactDirectory(binding.asyncDir);
+      if (directory) candidates.push({ directory, updatedAt: activity?.updatedAt ?? "" });
+    }
+    candidates.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt)
+      || left.directory.localeCompare(right.directory));
+    return [...new Set(candidates.map((candidate) => candidate.directory))].slice(0, 64);
+  }
+
+  /** Called only by the Gateway-scoped bounded artifact discovery owner or by
+   * a watcher attached after this slot proved canonical ownership. */
+  discoverExtensionArtifact(asyncDir: string): Promise<void> {
+    return this.refreshSubagentActivityFromArtifact(asyncDir);
   }
 
   private async refreshSubagentActivityFromArtifact(asyncDir: string): Promise<void> {
     try {
       const realAsyncDir = this.canonicalExtensionArtifactDirectory(asyncDir);
       if (!realAsyncDir) return;
-      const raw = await this.readExtensionStatusArtifact(realAsyncDir);
+      const rawValue = await this.readExtensionStatusArtifact(realAsyncDir);
+      // Registry discovery is bounded but grants no ownership. Historical
+      // artifacts become admissible only here, where the canonical tool result
+      // or an exact live asyncDir binding proves the owning session/tool call.
+      const raw = admitExtensionLifecycleArtifact(rawValue, { exactOwnedLegacy: true });
       if (!raw) return;
-      const runId = typeof raw.runId === "string" ? raw.runId : undefined;
+      const runId = raw.runId as string;
       if (!runId) return;
       // The file's declared directory is advisory. If present, it must agree
       // with the directory that was actually discovered/read.
@@ -1081,6 +1168,8 @@ export class RuntimeSlot {
       }
       const ownership = this.extensionRunOwnership.get(runId);
       const canonical = this.canonicalExtensionRunFacts().get(runId);
+      const historicalArtifact = raw.lifecycleArtifactVersion !== EXTENSION_LIFECYCLE_ARTIFACT_VERSION;
+      if (historicalArtifact && !ownership?.asyncDir && !canonical?.asyncDir) return;
       // A duplicated runId in canonical JSONL has no safe artifact owner.
       if (canonical?.ambiguous) return;
       if (ownership?.asyncDir) {
@@ -1113,28 +1202,19 @@ export class RuntimeSlot {
       // A tool result is the ownership proof for an activity. Once that proof
       // exists, the artifact may enrich it. Unmatched artifacts still require
       // the exact cwd/session guard.
-      const ownsUnmatchedArtifact = typeof raw.cwd === "string"
-        && typeof raw.sessionId === "string"
-        && raw.cwd === this.cwd
-        && raw.sessionId === this.sessionFile;
-      if (!ownsUnmatchedArtifact && !existingEntry?.[1] && !canonical) return;
-      if (!existingEntry?.[1]) {
-        // After disposal/reacquisition, cwd and sessionId alone are not proof
-        // of ownership: a completed run can leave its status file behind.
-        if (canonical?.terminal) return;
-        if (!canonical) {
-          const runningExtensionTools = [...this.toolExecutions.values()]
-            .filter((tool) => tool.status === "running" && tool.extensionOrigin)
-            .map((tool) => tool.toolCallId);
-          if (runningExtensionTools.length !== 1) return;
-          existingEntry = [runningExtensionTools[0]!, this.extensionActivities.get(runningExtensionTools[0]!)];
-        } else if (canonical.toolCallId) {
-          existingEntry = [canonical.toolCallId, this.extensionActivities.get(canonical.toolCallId)];
-        }
+      // Artifact files are enrichment only. A current tool execution or a
+      // canonical terminal tool result must establish ownership first; cwd,
+      // sessionId, and a lone running tool are not attribution evidence.
+      if (!existingEntry?.[1] && !canonical?.toolCallId) return;
+      if (!existingEntry?.[1] && canonical?.toolCallId) {
+        existingEntry = [canonical.toolCallId, this.extensionActivities.get(canonical.toolCallId)];
       }
-      const toolCallId = existingEntry?.[0] ?? `subagent:${runId}`;
+      const toolCallId = existingEntry?.[0];
+      if (!toolCallId) return;
       const previous = existingEntry?.[1];
-      const state = raw.state === "failed" ? "failed" : raw.state === "complete" || raw.state === "completed" || raw.state === "stopped" ? "completed" : "running";
+      const lifecycleState = extensionLifecycleState(raw.state ?? raw.status);
+      if (lifecycleState === "unknown") return;
+      const state = lifecycleState === "failed" ? "failed" : lifecycleState === "running" || lifecycleState === "queued" || lifecycleState === "paused" ? "running" : "completed";
       // A terminal lifecycle event is authoritative; a late running artifact
       // enriches neither status nor ownership and must not resurrect the pill.
       if (ownership?.terminal && state === "running") return;
@@ -1145,44 +1225,54 @@ export class RuntimeSlot {
       const artifactValue = ownership?.terminal
         ? { ...raw, state: previous?.status === "failed" ? "failed" : "completed" }
         : raw;
+      const activityKey = previous?.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
+      const sequence = (this.extensionActivitySequences.get(activityKey) ?? previous?.lifecycle?.sequence ?? 0) + 1;
+      this.extensionActivitySequences.set(activityKey, sequence);
+      const observedAt = new Date().toISOString();
+      const terminalAt = state === "running"
+        ? previous?.lifecycle?.terminalAt
+        : previous?.lifecycle?.terminalAt ?? completedAt ?? observedAt;
+      const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
       const activity = projectExtensionRunActivity(artifactValue, {
         id: previous?.id ?? toolCallId,
+        activityId: activityKey,
         toolCallId,
         source: previous?.source ?? this.subagentExtensionOrigin(),
         title: previous?.title ?? "Pi Subagents",
         status: state,
+        authoritativeStatus: state !== "running" || previous?.lifecycle?.state === "completed" || previous?.lifecycle?.state === "failed" || previous?.lifecycle?.state === "stopped" || previous?.lifecycle?.state === "rejected",
         startedAt,
         updatedAt,
         ...(completedAt ? { completedAt } : {}),
         ...(durationMs === undefined ? {} : { durationMs }),
         ...(previous ? { previous } : {}),
+        sequence,
+        observedAt,
+        ...(terminalAt ? { terminalAt } : {}),
+        ...(recentUntil ? { recentUntil } : {}),
       });
-      if (previous?.updatedAt && previous.updatedAt > activity.updatedAt) return;
-      if (existingEntry) this.extensionActivities.delete(existingEntry[0]);
-      const syntheticToolCallId = matchingEntries.find(([id]) => id.startsWith("subagent:") && id !== toolCallId)?.[0];
-      if (syntheticToolCallId) this.extensionActivities.delete(syntheticToolCallId);
-      this.extensionActivities.delete(toolCallId);
-      this.extensionActivities.set(toolCallId, activity);
       const ownershipAccepted = this.bindExtensionRunOwnership(runId, {
         toolCallId,
         asyncDir: realAsyncDir,
         terminal: activity.status !== "running" || Boolean(ownership?.terminal),
       });
+      if (!ownershipAccepted) return;
+      if (existingEntry) this.extensionActivities.delete(existingEntry[0]);
+      const syntheticToolCallId = matchingEntries.find(([id]) => id.startsWith("subagent:") && id !== toolCallId)?.[0];
+      if (syntheticToolCallId) this.extensionActivities.delete(syntheticToolCallId);
+      this.extensionActivities.delete(toolCallId);
+      this.extensionActivities.set(toolCallId, activity);
+      this.upsertExtensionActivity(activity);
       if (activity.status === "running" && ownershipAccepted) {
         this.startExtensionActivityWatcher(toolCallId, realAsyncDir);
       } else {
+        if (activity.status !== "running") {
+          void this.appendExtensionActivityReceipt(activity).catch((error) => this.emit("session.extensionError", safeJson(error)));
+        }
         this.stopExtensionActivityWatcher(toolCallId);
       }
-      while (this.extensionActivities.size > 64) {
-        const oldest = this.extensionActivities.keys().next().value as string | undefined;
-        if (!oldest) break;
-        this.stopExtensionActivityWatcher(oldest);
-        this.extensionActivities.delete(oldest);
-        for (const [runId, binding] of this.extensionRunOwnership) {
-          if (binding.toolCallId === oldest) this.extensionRunOwnership.delete(runId);
-        }
-      }
-      this.scheduleSnapshot();
+      this.trimExtensionActivities();
+      this.publishExtensionActivity(activity);
     } catch {
       // The artifact may be mid-replacement or may have been removed after the scan.
     }
@@ -1307,10 +1397,11 @@ export class RuntimeSlot {
     const generation = (this.extensionActivityReadGenerations.get(toolCallId) ?? 0) + 1;
     this.extensionActivityReadGenerations.set(toolCallId, generation);
     try {
-      const raw = await this.readExtensionStatusArtifact(realAsyncDir);
+      const rawValue = await this.readExtensionStatusArtifact(realAsyncDir);
+      const raw = admitExtensionLifecycleArtifact(rawValue, { exactOwnedLegacy: true });
       if (!raw) return;
       if (this.disposed || this.extensionActivityReadGenerations.get(toolCallId) !== generation) return;
-      const runId = typeof raw.runId === "string" ? raw.runId : undefined;
+      const runId = raw.runId as string;
       if (!runId || runId !== previous.runId) return;
       if (typeof raw.asyncDir === "string") {
         const declaredAsyncDir = this.canonicalExtensionArtifactDirectory(raw.asyncDir);
@@ -1331,8 +1422,15 @@ export class RuntimeSlot {
         if (!canonicalAsyncDir || canonicalAsyncDir !== realAsyncDir) return;
       }
       const updatedAt = this.artifactTime(raw.lastUpdate) ?? new Date().toISOString();
-      const artifactState = raw.state === "failed" ? "failed" : raw.state === "complete" || raw.state === "completed" || raw.state === "stopped" ? "completed" : "running";
+      const artifactLifecycleState = extensionLifecycleState(raw.state ?? raw.status);
+      if (artifactLifecycleState === "unknown") return;
+      const artifactState = artifactLifecycleState === "failed" ? "failed" : artifactLifecycleState === "running" || artifactLifecycleState === "queued" || artifactLifecycleState === "paused" ? "running" : "completed";
+      const terminalStates = ["completed", "failed", "stopped", "rejected"];
       if (ownership.terminal && artifactState === "running") return;
+      if (terminalStates.includes(previous.lifecycle?.state ?? "") && artifactState !== "running") {
+        const requestedTerminal = artifactState === "failed" ? "failed" : "completed";
+        if (requestedTerminal !== previous.lifecycle?.state) return;
+      }
       const completedAt = artifactState === "running" ? undefined : this.artifactTime(raw.endedAt) ?? updatedAt;
       const durationMs = typeof raw.durationMs === "number" && Number.isSafeInteger(raw.durationMs) && raw.durationMs >= 0
         ? raw.durationMs
@@ -1340,8 +1438,17 @@ export class RuntimeSlot {
       const artifactValue = ownership.terminal
         ? { ...raw, state: previous.status === "failed" ? "failed" : "completed" }
         : raw;
+      const activityKey = previous.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
+      const sequence = (this.extensionActivitySequences.get(activityKey) ?? previous.lifecycle?.sequence ?? 0) + 1;
+      this.extensionActivitySequences.set(activityKey, sequence);
+      const observedAt = new Date().toISOString();
+      const terminalAt = artifactState === "running"
+        ? previous.lifecycle?.terminalAt
+        : previous.lifecycle?.terminalAt ?? completedAt ?? observedAt;
+      const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
       const activity = projectExtensionRunActivity(artifactValue, {
         id: previous.id,
+        activityId: activityKey,
         toolCallId,
         source: previous.source,
         title: previous.title,
@@ -1351,24 +1458,31 @@ export class RuntimeSlot {
         ...(completedAt ? { completedAt } : {}),
         ...(durationMs === undefined ? {} : { durationMs }),
         previous,
+        sequence,
+        observedAt,
+        ...(terminalAt ? { terminalAt } : {}),
+        ...(recentUntil ? { recentUntil } : {}),
       });
       const current = this.extensionActivities.get(toolCallId);
-      if (!current || current.updatedAt > activity.updatedAt) return;
+      if (!current) return;
+      if (admitExtensionRunActivity(current, activity) === current) return;
+      if (current.lifecycle?.sequence !== undefined && activity.lifecycle?.sequence !== undefined
+        && activity.lifecycle.sequence <= current.lifecycle.sequence) return;
       this.extensionActivities.delete(toolCallId);
       this.extensionActivities.set(toolCallId, activity);
+      this.upsertExtensionActivity(activity);
       const tool = this.toolExecutions.get(toolCallId);
-      if (tool) {
-        const nextTool = { ...tool, extensionActivity: activity };
-        this.toolExecutions.set(toolCallId, nextTool);
-        this.publishToolProgress(nextTool, true);
-      }
+      if (tool) this.toolExecutions.set(toolCallId, { ...tool, extensionActivity: activity });
+      this.publishExtensionActivity(activity);
       this.bindExtensionRunOwnership(runId, {
         toolCallId,
         asyncDir: realAsyncDir,
         terminal: activity.status !== "running" || Boolean(ownership.terminal),
       });
-      if (activity.status !== "running") this.stopExtensionActivityWatcher(toolCallId);
-      this.scheduleSnapshot();
+      if (activity.status !== "running") {
+        this.stopExtensionActivityWatcher(toolCallId);
+        void this.appendExtensionActivityReceipt(activity).catch((error) => this.emit("session.extensionError", safeJson(error)));
+      }
     } catch {
       // The runner may be atomically replacing status.json. The next filesystem
       // event or the normal runtime snapshot will retry without surfacing noise.
@@ -1410,6 +1524,41 @@ export class RuntimeSlot {
     }
   }
 
+  private appendExtensionActivityReceipt(activity: ExtensionRunActivity): Promise<void> {
+    if (!activity.lifecycle || !["completed", "failed", "stopped", "rejected"].includes(activity.lifecycle.state)) return Promise.resolve();
+    const receipt = makeExtensionActivityReceipt(activity, this.id);
+    if (!receipt) return Promise.resolve();
+    const write = (async () => {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          await this.lane.run(async () => {
+            const existing = extensionActivityReceipts(this.runtime.session.sessionManager.getEntries(), this.id)
+              .some((entry) => entry.receipt.activityId === receipt.activityId);
+            if (existing) return;
+            this.runtime.session.sessionManager.appendCustomEntry(EXTENSION_ACTIVITY_RECEIPT_TYPE, receipt);
+            this.revision += 1;
+            this.scheduleSnapshot();
+          });
+          return;
+        } catch (error) {
+          lastError = error;
+          await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+        }
+      }
+      // Keep the failure observable to the owning barrier. The caller observes
+      // the rejection; disposal/drain still awaits this tracked operation before
+      // it can tear down the canonical session manager.
+      if (lastError) throw lastError;
+    })();
+    this.pendingReceiptWrites.add(write);
+    void write.then(
+      () => this.pendingReceiptWrites.delete(write),
+      () => this.pendingReceiptWrites.delete(write),
+    );
+    return write;
+  }
+
   private updateExtensionActivity(
     toolCallId: string,
     toolName: string,
@@ -1423,18 +1572,54 @@ export class RuntimeSlot {
   ): ExtensionRunActivity | undefined {
     if (!extensionOrigin) return undefined;
     const current = this.extensionActivities.get(toolCallId);
+    if (!current && !hasStructuredExtensionRunActivity(value)) return undefined;
+    const activityKey = current?.activityId ?? extensionActivityId(this.runtime.session.sessionManager.getSessionId(), toolCallId);
+    const terminalStates = ["completed", "failed", "stopped", "rejected"];
+    if (current?.lifecycle && terminalStates.includes(current.lifecycle.state)) {
+      // Terminal admission is a Gateway fact: neither wall-clock order nor a
+      // producer's later contradictory terminal may replace it.
+      if (status === "running") return current;
+      const requestedTerminal = status === "failed" ? "failed" : "completed";
+      if (requestedTerminal !== current.lifecycle.state) return current;
+    }
+    const sequence = (this.extensionActivitySequences.get(activityKey) ?? current?.lifecycle?.sequence ?? 0) + 1;
+    this.extensionActivitySequences.set(activityKey, sequence);
+    // Returning an async launch receipt completes only the outer tool call. The
+    // delegated run remains current until its lifecycle artifact reaches a
+    // terminal state; treating this acknowledgement as terminal made pills
+    // flash directly into Recently Finished with a near-zero duration.
+    const requestedAsyncDir = extensionRunAsyncDir(value);
+    const derivedStatus = extensionActivityStatusFromTool(value, status);
+    const { terminal, reportedTerminal } = derivedStatus;
+    const effectiveStatus = derivedStatus.status;
+    const terminalAt = terminal ? current?.lifecycle?.terminalAt ?? new Date().toISOString() : current?.lifecycle?.terminalAt;
+    const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
     const activity = projectExtensionRunActivity(value, {
       id: toolCallId,
+      activityId: activityKey,
       toolCallId,
       source: extensionOrigin,
       title: toolName,
-      status,
+      status: current?.lifecycle && terminalStates.includes(current.lifecycle.state) ? current.status : effectiveStatus,
+      authoritativeStatus: reportedTerminal || Boolean(current?.lifecycle && terminalStates.includes(current.lifecycle.state)),
       startedAt,
       updatedAt,
-      ...(completedAt ? { completedAt } : {}),
-      ...(durationMs === undefined ? {} : { durationMs }),
+      ...(terminal && completedAt ? { completedAt } : {}),
+      ...(!terminal || durationMs === undefined ? {} : { durationMs }),
       ...(current ? { previous: current } : {}),
+      sequence,
+      observedAt: new Date().toISOString(),
+      ...(terminalAt ? { terminalAt } : {}),
+      ...(recentUntil ? { recentUntil } : {}),
     });
+    if (admitExtensionRunActivity(current, activity) === current) return current;
+    const asyncDir = requestedAsyncDir ? this.canonicalExtensionArtifactDirectory(requestedAsyncDir) : undefined;
+    if (activity.runId && !this.bindExtensionRunOwnership(activity.runId, {
+      toolCallId,
+      ...(asyncDir === undefined ? {} : { asyncDir }),
+      terminal: activity.status !== "running",
+    })) return current;
+    if (terminal) this.extensionActivityTerminals.add(activityKey);
     // A synchronous result can be the first lifecycle payload carrying runId.
     // Re-key any artifact-created synthetic row to the real Pi tool call.
     const ownership = activity.runId ? this.extensionRunOwnership.get(activity.runId) : undefined;
@@ -1449,6 +1634,7 @@ export class RuntimeSlot {
       this.extensionActivities.delete(syntheticToolCallId!);
       const merged = projectExtensionRunActivity(value, {
         id: toolCallId,
+        activityId: activityKey,
         toolCallId,
         source: extensionOrigin,
         title: toolName,
@@ -1457,6 +1643,10 @@ export class RuntimeSlot {
         updatedAt,
         ...(completedAt ? { completedAt } : {}),
         ...(durationMs === undefined ? {} : { durationMs }),
+        sequence,
+        observedAt: new Date().toISOString(),
+        ...(terminalAt ? { terminalAt } : {}),
+        ...(recentUntil ? { recentUntil } : {}),
         previous: current
           ? {
               ...synthetic,
@@ -1467,32 +1657,19 @@ export class RuntimeSlot {
       });
       this.extensionActivities.delete(toolCallId);
       this.extensionActivities.set(toolCallId, merged);
+      this.upsertExtensionActivity(merged);
     } else {
       this.extensionActivities.delete(toolCallId);
       this.extensionActivities.set(toolCallId, activity);
+      this.upsertExtensionActivity(activity);
     }
     const retainedActivity = this.extensionActivities.get(toolCallId)!;
-    const requestedAsyncDir = extensionRunAsyncDir(value);
-    const asyncDir = requestedAsyncDir ? this.canonicalExtensionArtifactDirectory(requestedAsyncDir) : undefined;
-    let ownershipAccepted = true;
-    if (retainedActivity.runId) {
-      ownershipAccepted = this.bindExtensionRunOwnership(retainedActivity.runId, {
-        toolCallId,
-        ...(asyncDir === undefined ? {} : { asyncDir }),
-        terminal: retainedActivity.status !== "running",
-      });
+    this.trimExtensionActivities();
+    if (asyncDir && retainedActivity.status === "running") this.startExtensionActivityWatcher(toolCallId, asyncDir);
+    if (retainedActivity.status !== "running") {
+      this.stopExtensionActivityWatcher(toolCallId);
+      void this.appendExtensionActivityReceipt(retainedActivity).catch((error) => this.emit("session.extensionError", safeJson(error)));
     }
-    while (this.extensionActivities.size > 64) {
-      const oldest = this.extensionActivities.keys().next().value as string | undefined;
-      if (!oldest) break;
-      this.stopExtensionActivityWatcher(oldest);
-      this.extensionActivities.delete(oldest);
-      for (const [runId, binding] of this.extensionRunOwnership) {
-        if (binding.toolCallId === oldest) this.extensionRunOwnership.delete(runId);
-      }
-    }
-    if (asyncDir && retainedActivity.status === "running" && ownershipAccepted) this.startExtensionActivityWatcher(toolCallId, asyncDir);
-    if (retainedActivity.status !== "running") this.stopExtensionActivityWatcher(toolCallId);
     return retainedActivity;
   }
 
@@ -1522,7 +1699,7 @@ export class RuntimeSlot {
       if (pending) clearTimeout(pending);
       this.toolProgressTimers.delete(state.toolCallId);
       this.toolProgressPublishedAt.set(state.toolCallId, now);
-      this.emit("session.toolProgress", safeJson(state));
+      this.emit("session.toolProgress", safeJson(this.toolProgressWire(state)));
       return;
     }
     if (pending) return;
@@ -1531,10 +1708,27 @@ export class RuntimeSlot {
       const current = this.toolExecutions.get(state.toolCallId);
       if (!current) return;
       this.toolProgressPublishedAt.set(state.toolCallId, Date.now());
-      this.emit("session.toolProgress", safeJson(current));
+      this.emit("session.toolProgress", safeJson(this.toolProgressWire(current)));
     }, minimumIntervalMs - (now - last));
     timer.unref();
     this.toolProgressTimers.set(state.toolCallId, timer);
+  }
+
+  private toolProgressWire(state: ToolExecutionState): ToolExecutionState {
+    return state.extensionActivity
+      ? { ...state, liveActivityRevision: this.liveActivityRevision, extensionActivityAsOf: this.extensionActivityAsOf }
+      : state;
+  }
+
+  /** Lifecycle updates are compact presentation deltas, not transcript
+   * changes. Avoid rebuilding and sending the canonical transcript for every
+   * status artifact heartbeat. */
+  private publishExtensionActivity(activity: ExtensionRunActivity): void {
+    this.emit("session.extensionActivity", safeJson({
+      activity: this.extensionActivityWire(activity),
+      liveActivityRevision: this.liveActivityRevision,
+      extensionActivityAsOf: this.extensionActivityAsOf,
+    }));
   }
 
   private clearToolProgressTimers(): void {
@@ -1573,8 +1767,9 @@ export class RuntimeSlot {
     if (extensions.length !== 1) return undefined;
     const extension = extensions[0]!;
     if (tool.sourceInfo.path !== extension.path && tool.sourceInfo.path !== extension.resolvedPath) return undefined;
-    const source = tool.sourceInfo.source.trim();
-    return source ? { source } : undefined;
+    const extensionOwner = extensionOwnerFor(extension);
+    const source = extensionOwner.source.trim().slice(0, 256);
+    return source ? { owner: extensionOwner, source } : { owner: extensionOwner };
   }
 
   private rememberToolMetadata(toolCallId: string, state: ToolExecutionState): void {
@@ -1585,6 +1780,10 @@ export class RuntimeSlot {
       ...(state.durationMs === undefined ? {} : { durationMs: state.durationMs }),
       lastProgressAt: state.lastProgressAt,
       progressSequence: state.progressSequence,
+      ...(state.groupId ? { groupId: state.groupId } : {}),
+      ...(state.groupIndex === undefined ? {} : { groupIndex: state.groupIndex }),
+      ...(state.groupCount === undefined ? {} : { groupCount: state.groupCount }),
+      ...(state.groupFinalized ? { groupFinalized: true } : {}),
       ...(state.extensionOrigin ? { extensionOrigin: state.extensionOrigin } : {}),
     });
     while (this.toolMetadata.size > 2_048) {
@@ -1592,6 +1791,35 @@ export class RuntimeSlot {
       if (!oldest) break;
       this.toolMetadata.delete(oldest);
     }
+  }
+
+  private extensionActivityWire(activity: ExtensionRunActivity): ExtensionRunActivity {
+    if (!activity.lifecycle) return activity;
+    const recency = this.dependencies.extensionActivityRecency.visibility(activity);
+    return { ...activity, lifecycle: { ...activity.lifecycle, visibility: recency.visibility, remainingMs: recency.remainingMs } };
+  }
+
+  private extensionActivityVisibility(activity: ExtensionRunActivity): "current" | "recent" | "historical" | "unknown" {
+    return this.dependencies.extensionActivityRecency.visibility(activity).visibility;
+  }
+
+  /** Recency is the sole expiry owner. At the wall-clock boundary remove the
+   * disposable ambient rows, advance this slot's revision, and publish one
+   * authoritative snapshot rather than waiting for a client request. */
+  private onExtensionActivityExpiry(frame: ActivityExpiryFrame): void {
+    if (this.disposed) return;
+    let removed = false;
+    for (const [toolCallId, activity] of this.extensionActivities) {
+      const key = activity.activityId ?? activity.id;
+      if (!frame.expiredActivityIds.includes(key)) continue;
+      this.extensionActivities.delete(toolCallId);
+      removed = true;
+    }
+    if (!removed) return;
+    this.liveActivityRevision += 1;
+    this.extensionActivityAsOf = frame.asOf;
+    this.revision += 1;
+    this.publishSnapshot();
   }
 
   private scheduleSnapshot(): void {
@@ -1723,6 +1951,7 @@ export class RuntimeSlot {
           this.dependencies.blobs,
           undefined,
           this.streamPresentationId,
+          this.finalizedStreamPresentationId === this.streamPresentationId,
         );
       })()
       : undefined;
@@ -1768,32 +1997,98 @@ export class RuntimeSlot {
       toolExecutions: [...this.toolExecutions.values()]
         .filter((tool) => this.effectivePhase === "running" || tool.status !== "running")
         .sort((left, right) => left.order - right.order),
-      ...(this.extensionActivities.size > 0
-        ? { extensionActivities: [...this.extensionActivities.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)) }
-        : {}),
+      ...(() => {
+        const visible = [...this.extensionActivities.values()]
+          .map((activity) => ({ activity, visibility: this.extensionActivityVisibility(activity) }))
+          .filter(({ visibility }) => visibility === "current" || visibility === "recent")
+          // Current work is always retained ahead of recent terminal rows when
+          // count or byte bounds force omission.
+          .sort((left, right) => {
+            const bucket = (visibility: string) => visibility === "current" ? 0 : 1;
+            return bucket(left.visibility) - bucket(right.visibility)
+              || right.activity.updatedAt.localeCompare(left.activity.updatedAt);
+          })
+          .map(({ activity }) => this.extensionActivityWire(activity));
+        const bounded = boundExtensionActivities(visible);
+        return bounded.activities.length > 0 || bounded.omittedCount > 0
+          ? {
+              ...(bounded.activities.length > 0 ? { extensionActivities: bounded.activities } : {}),
+              ...(bounded.omittedCount > 0 ? { extensionActivityOmissions: {
+                count: bounded.omittedCount,
+                bytes: bounded.omittedBytes,
+                reason: bounded.hitCount && bounded.hitBytes ? "countAndBytes" : bounded.hitCount ? "count" : "bytes",
+              } } : {}),
+            }
+          : {};
+      })(),
+      liveActivityRevision: this.liveActivityRevision,
+      extensionActivityAsOf: this.extensionActivityAsOf,
       extensionPresentation: this.ui.state(),
       diagnostics: this.runtime.diagnostics.map((diagnostic) => ({ type: diagnostic.type, message: diagnostic.message })),
     });
   }
 
-  transcriptPage(before?: number, expectedNextEntryId?: string): TranscriptPage {
+  transcriptPage(
+    before?: number,
+    expectedNextEntryId?: string,
+    expectedRuntimeGeneration?: string,
+    expectedLeafEntryId?: string,
+  ): TranscriptPage {
     this.assertNoTrustReload();
+    if (expectedRuntimeGeneration !== undefined && expectedRuntimeGeneration !== this.runtimeGeneration) {
+      throw new GatewayError("conflict", "The session runtime changed while loading history. Refresh the session and try again.", true);
+    }
+    const leafEntryId = this.runtime.session.sessionManager.getLeafId();
+    if (expectedLeafEntryId !== undefined && expectedLeafEntryId !== leafEntryId) {
+      throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
+    }
     try {
-      return projectTranscriptPage(
-        this.runtime.session.sessionManager,
-        this.dependencies.blobs,
-        before,
-        undefined,
-        expectedNextEntryId,
-        this.toolMetadata,
-        this.presentationIDs,
-      );
+      return {
+        ...projectTranscriptPage(
+          this.runtime.session.sessionManager,
+          this.dependencies.blobs,
+          before,
+          undefined,
+          expectedNextEntryId,
+          this.toolMetadata,
+          this.presentationIDs,
+        ),
+        runtimeGeneration: this.runtimeGeneration,
+        ...(leafEntryId ? { leafEntryId } : {}),
+      };
     } catch (error) {
       if (error instanceof Error && error.message.includes("anchor changed")) {
         throw new GatewayError("conflict", "The session branch changed while loading history. Refresh the session and try again.", true);
       }
       throw error;
     }
+  }
+
+  /** Canonical reserved receipts are read independently of transcript/tree
+   * projection. The page revision includes entry/parent identity so branch
+   * changes invalidate cursors without creating a second history store. */
+  extensionActivityHistory(cursor?: string, limit = 25, filter?: { ownerId?: string; runId?: string; state?: "completed" | "failed" | "stopped" | "rejected" }): ExtensionActivityHistoryPage {
+    this.assertNoTrustReload();
+    return listExtensionActivityHistory(
+      this.runtime.session.sessionManager.getEntries(),
+      this.id,
+      cursor,
+      limit,
+      this.runtime.session.sessionManager.getLeafId() ?? "root",
+      filter,
+    );
+  }
+
+  extensionActivityDetail(activityId: string, expectedHistoryRevision?: string): ExtensionRunActivity | undefined {
+    this.assertNoTrustReload();
+    if (expectedHistoryRevision !== undefined) {
+      const actual = extensionActivityHistoryRevision(this.runtime.session.sessionManager.getEntries(), this.id, this.runtime.session.sessionManager.getLeafId() ?? "root");
+      if (actual !== expectedHistoryRevision) throw new GatewayError("conflict", "Extension activity generation changed; refresh history", true);
+    }
+    const receipts = extensionActivityReceipts(this.runtime.session.sessionManager.getEntries(), this.id);
+    const receipt = receipts.find((entry) => entry.receipt.activityId === activityId)?.receipt;
+    if (receipt) return extensionReceiptActivity(receipt);
+    return [...this.extensionActivities.values()].find((activity) => (activity.activityId ?? activity.id) === activityId);
   }
 
   publishSnapshot(): void {
@@ -1836,6 +2131,7 @@ export class RuntimeSlot {
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
       const queuesIntoActiveRun = session.isStreaming && behavior !== undefined && !isExactExtensionCommand;
+      const operationId = randomUUID();
       if (session.isStreaming && !behavior && !isExactExtensionCommand) throw new GatewayError("busy", "Session is running; choose steer or follow-up");
       if (queuesIntoActiveRun) {
         this.reconcileQueuedMessages();
@@ -1848,7 +2144,9 @@ export class RuntimeSlot {
         };
         RuntimeSlot.validateQueue([...this.queuedMessages, { text: display.text, attachmentCount: display.attachmentCount }]);
         this.pendingQueueAdmission = {
-          id: randomUUID(), behavior: behavior!, text: display.text,
+          // The returned operation identity is also the stable projected queue
+          // identity, giving clients an exact settlement receipt.
+          id: operationId, behavior: behavior!, text: display.text,
           attachmentCount: display.attachmentCount,
           ...(display.photoCount === undefined ? {} : { photoCount: display.photoCount }),
           ...(display.fileAttachmentCount === undefined
@@ -1858,7 +2156,6 @@ export class RuntimeSlot {
         };
       }
 
-      const operationId = randomUUID();
       if (isExactExtensionCommand) {
         this.pendingExtensionCommand = { id: operationId, kind: "command", startedAt: new Date().toISOString() };
         // Exact commands run before Pi's preflight callback and can wait on UI
@@ -2578,9 +2875,16 @@ export class RuntimeSlot {
     }
   }
 
+  private async waitForReceiptWrites(): Promise<void> {
+    while (this.pendingReceiptWrites.size > 0) {
+      await Promise.allSettled([...this.pendingReceiptWrites]);
+    }
+  }
+
   async dispose(): Promise<void> {
     if (this.disposed) return;
-    if (this.isBusy || this.trustReloadPending) throw new GatewayError("busy", "Cannot dispose a busy session runtime");
+    if ((this.isBusy && this.pendingReceiptWrites.size === 0) || this.trustReloadPending) throw new GatewayError("busy", "Cannot dispose a busy session runtime");
+    await this.waitForReceiptWrites();
     await this.disposeIf(() => true);
   }
 
@@ -2591,6 +2895,7 @@ export class RuntimeSlot {
    */
   async disposeIf(shouldDispose: () => boolean): Promise<boolean> {
     if (this.disposed) return false;
+    await this.waitForReceiptWrites();
     return this.lane.run(async () => {
       if (this.disposed || !shouldDispose()) return false;
       if (this.isBusy || this.trustReloadPending) {
@@ -2636,6 +2941,7 @@ export class RuntimeSlot {
     this.runtime.session.abortBranchSummary();
     this.runtime.session.abortBash();
     await this.runtime.session.abort();
+    await this.waitForReceiptWrites();
     // A command may hold the mutation lane while awaiting native UI. Cancel the
     // epoch's imperative interactions before joining that lane so shutdown cannot
     // deadlock behind a response that no client can deliver.
@@ -2660,6 +2966,10 @@ export class RuntimeSlot {
   }
 
   private async disposeRuntime(): Promise<void> {
+    this.unregisterExtensionExpiry();
+    for (const activity of this.extensionActivities.values()) {
+      this.dependencies.extensionActivityRecency.remove(activity.activityId ?? activity.id);
+    }
     if (this.snapshotTimer) clearTimeout(this.snapshotTimer);
     if (this.progressFlushTimer) clearTimeout(this.progressFlushTimer);
     this.progressFlushTimer = undefined;
@@ -2669,10 +2979,10 @@ export class RuntimeSlot {
     this.streamAnchorId = undefined;
     this.streamPresentationId = undefined;
     this.streamStartedAt = undefined;
+    this.finalizedStreamPresentationId = undefined;
     this.presentationIDs.clear();
     this.presentationIDOrder.splice(0);
     this.stopActivityHeartbeat();
-    this.stopSubagentArtifactScan();
     this.clearToolProgressTimers();
     this.clearExtensionActivityWatchers();
     this.extensionRunOwnership.clear();

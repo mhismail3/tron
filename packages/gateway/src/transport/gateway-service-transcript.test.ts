@@ -31,6 +31,8 @@ describe("session transcript paging", () => {
       sessionId: "session",
       before: 1,
       expectedNextEntryId: "next",
+      expectedRuntimeGeneration: "runtime",
+      expectedLeafEntryId: "leaf",
     })).resolves.toEqual({
       items: [{ id: "entry", type: "message", role: "user", text: "earlier" }],
       start: 0,
@@ -38,7 +40,7 @@ describe("session transcript paging", () => {
       total: 1,
     });
     expect(acquire).toHaveBeenCalledWith("session");
-    expect(transcriptPage).toHaveBeenCalledWith(1, "next");
+    expect(transcriptPage).toHaveBeenCalledWith(1, "next", "runtime", "leaf");
 
     const closedService = new GatewayService({
       sessions: { isSubscribed: () => false, acquire },

@@ -993,6 +993,113 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     );
   });
 
+  it("includes runtime creation admitted before administrative drain", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-restart-create-drain-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+
+    const trust = new TrustService(agentDir);
+    const resolveTrust = trust.requireResolved.bind(trust);
+    let markTrustEntered!: () => void;
+    const trustEntered = new Promise<void>((resolve) => { markTrustEntered = resolve; });
+    let releaseTrust!: () => void;
+    const trustBarrier = new Promise<void>((resolve) => { releaseTrust = resolve; });
+    vi.spyOn(trust, "requireResolved").mockImplementation(async (input) => {
+      markTrustEntered();
+      await trustBarrier;
+      return resolveTrust(input);
+    });
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust,
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+
+    const creating = registry.create(cwd);
+    await trustEntered;
+    expect(registry.drainBusySessionCount()).toBe(1);
+    let drainSettled = false;
+    const drain = registry.waitUntilIdle().then(() => { drainSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(drainSettled).toBe(false);
+    expect(registry.drainBusySessionCount()).toBe(1);
+    await expect(registry.create(cwd)).rejects.toMatchObject({ code: "busy", retryable: true });
+
+    releaseTrust();
+    const slot = await creating;
+    await drain;
+    expect(drainSettled).toBe(true);
+    expect(slot.isDrainBusy).toBe(false);
+  });
+
+  it("reconciles an exact-owned historical terminal artifact during administrative drain", async () => {
+    const fixture = await coldFixture("historical-terminal-drain");
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const runId = "historical-terminal-run";
+    const toolCallId = "historical-terminal-tool";
+    const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
+    await mkdir(asyncDir, { recursive: true });
+    const startedAt = new Date(Date.now() - 5_000).toISOString();
+    const internal = slot as unknown as {
+      extensionActivities: Map<string, ExtensionRunActivity>;
+      extensionRunOwnership: Map<string, { toolCallId: string; asyncDir?: string; terminal: boolean }>;
+    };
+    internal.extensionActivities.set(toolCallId, {
+      id: toolCallId,
+      activityId: "historical-terminal-activity",
+      runId,
+      toolCallId,
+      source: { source: "pi-subagents" },
+      title: "Pi Subagents",
+      status: "running",
+      startedAt,
+      updatedAt: startedAt,
+      children: [],
+      lifecycle: {
+        version: 1,
+        state: "running",
+        attention: "none",
+        sequence: 1,
+        observedAt: startedAt,
+      },
+    });
+    internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      // Deployed sessions may outlive the producer version that launched them.
+      // Exact runtime ownership must still reconcile their terminal evidence.
+      runId,
+      state: "complete",
+      startedAt: Date.parse(startedAt),
+      lastUpdate: Date.now(),
+      endedAt: Date.now(),
+    }));
+
+    expect(slot.isDrainBusy).toBe(true);
+    let drainSettled = false;
+    const drain = fixture.registry.waitUntilIdle().then(() => { drainSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(drainSettled).toBe(false);
+
+    await (fixture.registry as unknown as { discoverExtensionArtifacts: () => Promise<void> })
+      .discoverExtensionArtifacts();
+    await drain;
+    expect(drainSettled).toBe(true);
+    expect(slot.isDrainBusy).toBe(false);
+    expect(slot.snapshot().extensionActivities).toMatchObject([{
+      toolCallId,
+      status: "completed",
+      lifecycle: { state: "completed" },
+    }]);
+  });
+
   it("fails closed on a stale running artifact after canonical completion", async () => {
     const fixture = await coldFixture("stale-subagent-artifact");
     fixture.manager.appendMessage({
@@ -1004,10 +1111,20 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       isError: false,
       timestamp: Date.now(),
     });
+    fixture.manager.appendMessage({
+      role: "toolResult",
+      toolCallId: "unbound-historical-tool-call",
+      toolName: "subagent",
+      content: [{ type: "text", text: "launched" }],
+      details: { runId: "unbound-historical-run", state: "running" },
+      isError: false,
+      timestamp: Date.now(),
+    });
     const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "stale-run");
     await mkdir(asyncDir, { recursive: true });
     await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3,
       runId: "stale-run",
       cwd: fixture.cwd,
       sessionId: slot.id,
@@ -1020,6 +1137,18 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(slot.snapshot().extensionActivities ?? []).toEqual([]);
 
     const projectRoot = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs");
+    const unboundHistoricalDir = join(projectRoot, "unbound-historical-run");
+    await mkdir(unboundHistoricalDir, { recursive: true });
+    await writeFile(join(unboundHistoricalDir, "status.json"), JSON.stringify({
+      runId: "unbound-historical-run",
+      state: "complete",
+      startedAt: Date.now() - 1_000,
+      lastUpdate: Date.now(),
+      endedAt: Date.now(),
+    }));
+    await internal.refreshSubagentActivityFromArtifact(unboundHistoricalDir);
+    expect(slot.snapshot().extensionActivities ?? []).toEqual([]);
+
     const pathPolicy = slot as unknown as { extensionArtifactPathAllowed: (path: string) => boolean };
     expect(pathPolicy.extensionArtifactPathAllowed(projectRoot)).toBe(false);
     expect(pathPolicy.extensionArtifactPathAllowed(`${projectRoot}/.`)).toBe(false);
@@ -1039,6 +1168,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const ordinaryDir = join(projectRoot, "ordinary-run");
     await mkdir(ordinaryDir, { recursive: true });
     await writeFile(join(ordinaryDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3,
       runId: "ordinary-run",
       cwd: fixture.cwd,
       sessionId: slot.id,
@@ -1068,6 +1198,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     const toolCallId = "real-tool-call";
     const asyncDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", runId);
     await mkdir(asyncDir, { recursive: true });
+    const activityStartedAt = new Date(Date.now() - 5_000).toISOString();
+    const artifactCompletedAt = new Date(Date.now() - 1_000).toISOString();
     const activity: ExtensionRunActivity = {
       id: toolCallId,
       runId,
@@ -1075,8 +1207,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       source: { source: "pi-subagents" },
       title: "Pi Subagents",
       status: "running",
-      startedAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:01.000Z",
+      startedAt: activityStartedAt,
+      updatedAt: activityStartedAt,
       children: [],
     };
     const internal = slot as unknown as {
@@ -1090,23 +1222,27 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     internal.extensionActivities.set(toolCallId, activity);
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
     await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3,
       runId,
       state: "completed",
       startedAt: Date.parse(activity.startedAt),
-      lastUpdate: Date.parse("2026-01-01T00:00:04.000Z"),
+      lastUpdate: Date.parse(artifactCompletedAt),
     }));
     await internal.refreshSubagentActivityFromArtifact(asyncDir);
     expect(slot.snapshot().extensionActivities).toMatchObject([{
       toolCallId,
       status: "completed",
-      completedAt: "2026-01-01T00:00:04.000Z",
+      completedAt: artifactCompletedAt,
+      lifecycle: { terminalAt: artifactCompletedAt },
     }]);
 
     const foreignDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "foreign-run");
     await mkdir(foreignDir, { recursive: true });
     await writeFile(join(foreignDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3,
       runId,
       state: "running",
+      startedAt: Date.parse(activity.startedAt),
       lastUpdate: Date.parse("2026-01-01T00:00:05.000Z"),
     }));
     await internal.refreshSubagentActivityFromArtifact(foreignDir);
@@ -1114,7 +1250,8 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(slot.snapshot().extensionActivities).toMatchObject([{
       toolCallId,
       status: "completed",
-      completedAt: "2026-01-01T00:00:04.000Z",
+      completedAt: artifactCompletedAt,
+      lifecycle: { terminalAt: artifactCompletedAt },
     }]);
 
     expect(internal.bindExtensionRunOwnership(runId, {
@@ -1570,7 +1707,7 @@ export default function (pi) {
     await slot.setModel(model.provider, model.id);
     await slot.prompt("start");
     await waitUntil(() => slot.catalogPhase === "running");
-    await registry.waitUntilIdle(5_000);
+    await registry.waitUntilIdle();
     expect(slot.isDrainBusy).toBe(false);
     expect(failures).not.toEqual([]);
   });
@@ -2403,7 +2540,21 @@ export default function (pi) {
         progressSequence: number;
         durationMs?: number;
         completedAt?: string;
+        groupId?: string;
+        groupIndex?: number;
+        groupCount?: number;
+        groupFinalized?: boolean;
       });
+    const finalizedProgressIndex = events.findIndex((event) => {
+      if (event.topic !== "session.progress") return false;
+      const message = event.payload.data?.message;
+      const calls = message?.content?.filter((part: any) => part.type === "toolCall") ?? [];
+      return calls.length === 2 && calls.every((part: any) => part.groupFinalized === true);
+    });
+    const firstToolProgressIndex = events.findIndex((event) => event.topic === "session.toolProgress");
+    expect(finalizedProgressIndex).toBeGreaterThanOrEqual(0);
+    expect(firstToolProgressIndex).toBeGreaterThan(finalizedProgressIndex);
+
     const firstRunning = new Map<string, number>();
     for (const event of progress) {
       if (event.status === "running" && !firstRunning.has(event.toolCallId)) firstRunning.set(event.toolCallId, event.order);
@@ -2411,6 +2562,12 @@ export default function (pi) {
     expect(firstRunning).toEqual(new Map([["call-read", 0], ["call-bash", 1]]));
     const finalOrder = new Map(progress.map((event) => [event.toolCallId, event.order]));
     expect(finalOrder).toEqual(new Map([["call-read", 0], ["call-bash", 1]]));
+    const grouped = progress.filter((event) => event.groupFinalized === true);
+    expect(grouped.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(grouped.map((event) => event.groupId)).size).toBe(1);
+    expect(new Set(grouped.map((event) => event.groupCount))).toEqual(new Set([2]));
+    expect(new Map(grouped.map((event) => [event.toolCallId, event.groupIndex])))
+      .toEqual(new Map([["call-read", 0], ["call-bash", 1]]));
     const bashProgress = progress.filter((event) => event.toolCallId === "call-bash");
     expect(bashProgress.some((event) => event.status === "running" && event.output?.includes("start"))).toBe(true);
     const runningDurations = bashProgress
@@ -2425,6 +2582,13 @@ export default function (pi) {
     expect(bashProgress.at(-1)!.completedAt).toBeTypeOf("string");
     const settled = slot.snapshot();
     expect(settled.toolExecutions).toEqual([]);
+    const canonicalAssistant = settled.transcript.find((item) => item.kind === "message" && item.role === "assistant");
+    const canonicalCalls = canonicalAssistant?.kind === "message"
+      ? canonicalAssistant.content.filter((part) => part.type === "toolCall")
+      : [];
+    expect(canonicalCalls).toHaveLength(2);
+    expect(canonicalCalls.every((part) => part.type === "toolCall" && part.groupFinalized === true)).toBe(true);
+    expect(new Set(canonicalCalls.flatMap((part) => part.type === "toolCall" ? [part.groupId] : [])).size).toBe(1);
     expect(settled.transcript.find((item) => item.kind === "message" && item.role === "toolResult" && item.toolCallId === "call-bash"))
       .toMatchObject({ durationMs: expect.any(Number), startedAt: expect.any(String), completedAt: expect.any(String) });
     expect(slot.sessionFile?.startsWith(sessionDir)).toBe(true);
@@ -2472,13 +2636,18 @@ export default function (pi) {
     expect(during.extensionCommand?.kind).toBe("command");
     const marker = JSON.parse(await readFile(join(root, "tron", "gateway", "runtime-markers", `${slot.id}.json`), "utf8")) as { operationId: string };
     expect(marker.operationId).toBe(during.extensionCommand?.id);
-    await expect(registry.waitUntilIdle(25)).rejects.toMatchObject({ code: "busy", retryable: true });
+    let drainSettled = false;
+    const drain = registry.waitUntilIdle().then(() => { drainSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(drainSettled).toBe(false);
     slot.respondToInteraction(pending.id, pending.hostEpoch, pending.presentationRevision, true, false);
     await expect(command).resolves.toEqual({ operationId: expect.any(String) });
     await waitUntil(() => slot.snapshot().extensionCommand === undefined);
     expect(slot.snapshot().extensionPresentation.semanticState.statuses["stream-command"]).toBe("accepted");
     await slot.abort();
     await waitUntil(() => slot.catalogPhase === "idle");
+    await drain;
+    expect(drainSettled).toBe(true);
   });
 
   it("scopes extension shutdown to the owning runtime slot", async () => {

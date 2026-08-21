@@ -137,6 +137,7 @@ final class ChatScrollCoordinator {
     @ObservationIgnored private var followFrameTask: Task<Void, Never>?
     @ObservationIgnored private var catchUpTask: Task<Void, Never>?
     @ObservationIgnored private var prependTask: Task<Void, Never>?
+    @ObservationIgnored private var prependTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private var openingTailFrameTask: Task<Void, Never>?
     @ObservationIgnored private var openingTailTimeoutTask: Task<Void, Never>?
 
@@ -217,9 +218,21 @@ final class ChatScrollCoordinator {
             && !isPrependingHistory && catchUpPhase == .none
     }
 
-    func resetForPresentation(_ presentation: Int? = nil) {
+    func resetForPresentation(
+        _ presentation: Int? = nil,
+        retainingVisibleViewport: Bool = false
+    ) {
         cancelAllOwnedWork(result: .discarded)
         self.presentation = presentation ?? (self.presentation &+ 1)
+        if retainingVisibleViewport {
+            // A same-session generation handoff keeps the physical viewport
+            // owner intact while the retained installed commit remains visible.
+            // Preserve measured semantic frames until the replacement commit
+            // emits its explicit installed-layout epoch. Clearing them here
+            // would erase the detached reader's only viewport anchor.
+            clearCommand()
+            return
+        }
         isAtBottom = true
         userScrolledAway = false
         hasUnreadContent = false
@@ -801,6 +814,16 @@ final class ChatScrollCoordinator {
         maximumPrependSemanticExcursion = 0
         pendingGrowthFollow = false
         cancelAutomaticTasks()
+        prependTimeoutTask?.cancel()
+        prependTimeoutTask = Task { [weak self, clock] in
+            do { try await clock.sleep(.seconds(8)) }
+            catch { return }
+            guard let self,
+                  self.prependToken == token,
+                  self.presentation == admittedPresentation else { return }
+            self.prependTask?.cancel()
+            self.finishPrepend(token: token, result: .failure)
+        }
 
         prependTask = Task { [weak self] in
             let page = await load()
@@ -1228,6 +1251,8 @@ final class ChatScrollCoordinator {
         cancelCatchUp(restoringDetached: false)
         prependTask?.cancel()
         prependTask = nil
+        prependTimeoutTask?.cancel()
+        prependTimeoutTask = nil
         if isPrependingHistory { prependCompletion?(result) }
         prependCompletion = nil
         prependToken = nil
@@ -1257,6 +1282,12 @@ final class ChatScrollCoordinator {
             && !prependInterrupted && !isUserInteracting
             && !pendingNativeUserGeometry && !isUserDrivenSettling
         prependTask = nil
+        prependTimeoutTask?.cancel()
+        prependTimeoutTask = nil
+        if let correctionToken = prependCorrectionCommandToken,
+           command?.token == correctionToken {
+            clearCommand()
+        }
         prependToken = nil
         prependAnchor = nil
         prependRenderedAnchorID = nil

@@ -1,7 +1,7 @@
 import SwiftUI
 
 private enum ManageSessionDestination: String, Identifiable {
-    case agentContext, projectResources, history, terminal
+    case agentContext, projectResources, history, extensionActivity, terminal
     var id: String { rawValue }
 }
 
@@ -193,9 +193,6 @@ struct SessionContextSheet: View {
     @State private var exportTask: Task<Void, Never>?
     @State private var gitPresentation: SessionGitPresentation = .loading
     @State private var gitLoadGeneration = 0
-    @State private var extensionActivityGroupID: String?
-    @State private var extensionActivityRoute: ExtensionActivityRoute?
-    @State private var showExtensionActivity = false
 
     var body: some View {
         NavigationStack {
@@ -243,12 +240,6 @@ struct SessionContextSheet: View {
                     generation: generation
                 )
             }
-            .sheet(isPresented: $showExtensionActivity) {
-                ExtensionDetailsSheet(sessionID: sessionID, groupID: extensionActivityGroupID)
-            }
-            .sheet(item: $extensionActivityRoute) { route in
-                ExtensionRunDetailsSheet(sessionID: sessionID, activityID: route.id)
-            }
             .sheet(item: $destination) { route in
                 switch route {
                 case .agentContext:
@@ -261,6 +252,8 @@ struct SessionContextSheet: View {
                         onForkCreated: handleForkCreated,
                         onNavigated: handleNavigation
                     )
+                case .extensionActivity:
+                    ExtensionActivityHistorySheet(sessionID: sessionID)
                 case .terminal:
                     TerminalSheet(sessionID: sessionID)
                 }
@@ -471,53 +464,18 @@ struct SessionContextSheet: View {
 
     @ViewBuilder
     private func extensionActivitySection(_ snapshot: SessionSnapshot) -> some View {
-        let groups = ChatExtensionWidgetPolicy.groups(
-            snapshot.extensionPresentation,
-            executions: snapshot.toolExecutions,
-            activities: snapshot.extensionActivities ?? []
-        ).compactMap { group -> ExtensionWidgetGroup? in
-            let activities = group.activities.filter { !$0.isLive }
-            let services = group.services.filter { $0.status != "Running" }
-            guard !activities.isEmpty || !services.isEmpty else { return nil }
-            return ExtensionWidgetGroup(
-                id: group.id,
-                label: group.label,
-                items: [],
-                statuses: [],
-                services: services,
-                activities: activities
-            )
-        }
-        if !groups.isEmpty {
-            TronSettingsGroup("Extension History", detail: "Completed extension work retained for this runtime.", accent: .tronEmerald) {
-                VStack(spacing: 0) {
-                    ForEach(groups) { group in
-                        Button {
-                            if group.activities.count == 1, let activity = group.activities.first {
-                                extensionActivityRoute = ExtensionActivityRoute(id: activity.id)
-                            } else {
-                                extensionActivityGroupID = group.id
-                                showExtensionActivity = true
-                            }
-                        } label: {
-                            TronSettingsRow(
-                                icon: group.hasLiveContent ? "circle.dotted" : "clock.arrow.circlepath",
-                                title: group.label,
-                                subtitle: extensionActivitySubtitle(group),
-                                subtitleRole: .dynamicValue,
-                                accent: .tronEmerald
-                            ) {
-                                Image(systemName: "chevron.right")
-                                    .font(TronTypography.caption)
-                                    .foregroundStyle(Color.tronTextMuted)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Extension activity: \(group.label)")
-                        if group.id != groups.last?.id { TronSettingsDivider(accent: .tronEmerald) }
-                    }
-                }
-            }
+        let current = (snapshot.extensionActivities ?? []).filter(ExtensionActivityVisibilityPolicy.ambient).count
+        let durable = model.gatewayInfo?.capabilities.contains(ExtensionActivityAdmissionPolicy.capability) == true
+        let subtitle = durable
+            ? (current > 0 ? "Mounted activity · Canonical history" : "Canonical history available")
+            : "History unavailable on this Gateway"
+        TronSettingsGroup("Extension Activity", detail: "Lifecycle, status, widget, and service activity.", accent: .tronEmerald) {
+            manageRow(
+                icon: "clock.arrow.circlepath",
+                title: "Extension Activity",
+                subtitle: subtitle,
+                accent: .tronEmerald
+            ) { destination = .extensionActivity }
         }
     }
 

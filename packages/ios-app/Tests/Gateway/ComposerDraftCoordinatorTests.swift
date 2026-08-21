@@ -180,7 +180,7 @@ struct ComposerDraftCoordinatorTests {
                     return "document-id"
                 },
                 attachmentFileAccess: access.seam,
-                send: { _, _, _, _ in },
+                send: { _, _, _, _ in "unused-operation" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let target = SessionPresentationIdentity(sessionID: "session", generation: 9)
@@ -216,7 +216,7 @@ struct ComposerDraftCoordinatorTests {
                 upload: { _, _, _ in Issue.record("unexpected data upload"); return "unused" },
                 fileUpload: { _, _, _, _ in "image-id" },
                 attachmentFileAccess: access.seam,
-                send: { _, _, _, _ in },
+                send: { _, _, _, _ in "unused-operation" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let target = SessionPresentationIdentity(sessionID: "session", generation: 10)
@@ -243,7 +243,7 @@ struct ComposerDraftCoordinatorTests {
                 upload: { _, _, _ in Issue.record("unexpected data upload"); return "unused" },
                 fileUpload: { name, _, file, _ in try await gate.upload(name: name, file: file) },
                 attachmentFileAccess: access.seam,
-                send: { _, _, _, _ in },
+                send: { _, _, _, _ in "unused-operation" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let target = SessionPresentationIdentity(sessionID: "session", generation: 11)
@@ -385,8 +385,9 @@ struct ComposerDraftCoordinatorTests {
                 kind: .message, role: .user, presentationId: "canonical-user",
                 content: [
                     ContentPart(id: "text", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "outgoing", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
-                    ContentPart(id: "image-one", ordinal: 1, thinkingRunOrdinal: nil, type: .image, text: nil, attachment: .init(name: "a", mimeType: "image/jpeg", size: 1), redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob-a", toolCallId: nil, name: nil, arguments: nil),
-                    ContentPart(id: "image-two", ordinal: 2, thinkingRunOrdinal: nil, type: .image, text: nil, attachment: .init(name: "b", mimeType: "image/jpeg", size: 1), redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob-b", toolCallId: nil, name: nil, arguments: nil),
+                    // Canonical attachment order is not a client-upload identity.
+                    ContentPart(id: "image-two", ordinal: 1, thinkingRunOrdinal: nil, type: .image, text: nil, attachment: .init(name: "b", mimeType: "image/jpeg", size: 1), redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob-b", toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "image-one", ordinal: 2, thinkingRunOrdinal: nil, type: .image, text: nil, attachment: .init(name: "a", mimeType: "image/jpeg", size: 1), redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob-a", toolCallId: nil, name: nil, arguments: nil),
                 ],
                 provider: nil, modelId: nil, stopReason: nil, errorMessage: nil, toolCallId: nil,
                 toolName: nil, isError: nil, details: nil, usage: nil, startedAt: nil,
@@ -470,8 +471,8 @@ struct ComposerDraftCoordinatorTests {
             )
             #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
 
-            let admitted = SessionSnapshot.QueuedMessage(
-                id: "new",
+            let unrelated = SessionSnapshot.QueuedMessage(
+                id: "other-operation",
                 behavior: .steer,
                 text: "same",
                 attachmentCount: 0
@@ -479,7 +480,20 @@ struct ComposerDraftCoordinatorTests {
             harness.coordinator.reconcileSubmission(
                 target: target,
                 canonicalTranscript: [],
-                queuedMessages: [existing, admitted]
+                queuedMessages: [existing, unrelated]
+            )
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+
+            let admitted = SessionSnapshot.QueuedMessage(
+                id: "operation-0",
+                behavior: .steer,
+                text: "same",
+                attachmentCount: 0
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                queuedMessages: [existing, unrelated, admitted]
             )
             #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
         }
@@ -515,6 +529,48 @@ struct ComposerDraftCoordinatorTests {
             ))
             harness.coordinator.reconcileSubmission(target: target, canonicalTranscript: [canonical])
             #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+        }
+    }
+
+    @Test("attachment-only steering settles from canonical attachment evidence and admits the next send")
+    func attachmentOnlySteeringSettlement() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 44)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: ""
+            )
+            harness.coordinator.installHostedAttachment(
+                .init(id: "photo", name: "photo.jpg", mimeType: "image/jpeg", size: 7, previewData: nil),
+                target: target
+            )
+            let first = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(first)
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+
+            let canonical = TranscriptItem.message(MessageTranscriptItem(
+                id: "canonical-photo", parentId: nil, timestamp: "2025-01-01T00:00:00Z",
+                kind: .message, role: .user, presentationId: "canonical-photo",
+                content: [
+                    ContentPart(id: "envelope", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "[Attached image context]", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "image", ordinal: 1, thinkingRunOrdinal: nil, type: .image, text: nil, attachment: .init(name: "photo.jpg", mimeType: "image/jpeg", size: 7), redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob", toolCallId: nil, name: nil, arguments: nil),
+                ],
+                provider: nil, modelId: nil, stopReason: nil, errorMessage: nil, toolCallId: nil,
+                toolName: nil, isError: nil, details: nil, usage: nil, startedAt: nil,
+                completedAt: nil, durationMs: nil, lastProgressAt: nil, progressSequence: nil
+            ))
+            harness.coordinator.reconcileSubmission(target: target, canonicalTranscript: [canonical])
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+
+            harness.coordinator.setText("next", for: scope)
+            let second = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
+            try await harness.waitForSends(2)
+            harness.completeSend(index: 1, result: .success(()))
+            try await valueOfOwnedTask(second)
+            #expect(harness.sendCalls.last?.text == "next")
         }
     }
 
@@ -816,6 +872,7 @@ private final class ComposerHarness {
         },
         send: { [weak self] text, sessionID, uploadIDs, behavior in
             guard let self else { throw CancellationError() }
+            let index = self.sendCalls.count
             self.sendCalls.append(.init(
                 text: text, sessionID: sessionID, uploadIDs: uploadIDs, behavior: behavior
             ))
@@ -823,6 +880,7 @@ private final class ComposerHarness {
             try await withCheckedThrowingContinuation { continuation in
                 self.sendContinuations.append(continuation)
             }
+            return "operation-\(index)"
         },
         admitsLifecycleGeneration: { [weak admission] generation in
             admission?.generation == generation

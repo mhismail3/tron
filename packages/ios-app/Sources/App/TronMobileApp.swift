@@ -56,6 +56,7 @@ private struct RootView: View {
     @Environment(AppModel.self) private var model
     @State private var onboardingDetent: PresentationDetent = .medium
     @State private var showOnboarding = false
+    @State private var showLogs = false
 
     var body: some View {
         SessionShellView()
@@ -76,9 +77,25 @@ private struct RootView: View {
             get: { !showOnboarding && model.lastError != nil },
             set: { if !$0 { model.lastError = nil } }
         )) {
+            if model.lastErrorHasLocalDiagnostic {
+                Button("View Logs") {
+                    model.lastError = nil
+                    showLogs = true
+                }
+            }
             Button("OK") { model.lastError = nil }
         } message: {
             Text(model.lastError ?? "")
+        }
+        .sheet(isPresented: $showLogs) {
+            NavigationStack {
+                GatewayLogsSettingsView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showLogs = false }
+                        }
+                    }
+            }
         }
     }
 

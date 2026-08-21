@@ -56,6 +56,7 @@ never persisted by Gateway.
 - Current invitation: `gateway/enrollment.json` (`0600`, ten minutes, one use)
 - Run markers and command receipts: gateway-owned bounded operational state
 - Uploads: transient and bounded; unclaimed staging expires, while prompt attachments remain session-owned until canonical deletion
+- Tool invocation groups: at finalized assistant `message_end`, Gateway publishes the complete contiguous declaration group before any corresponding tool start, with runtime-only `groupId`, `groupIndex`, `groupCount`, and `groupFinalized` metadata. Group IDs derive from the stable assistant presentation ID plus first projected content ordinal, survive live/canonical/result reconciliation, remain bounded until agent settlement, and are never written to Pi JSONL or interpreted as proof of parallel execution.
 
 Legacy `~/.tron/auth.json` is not gateway auth and is never overwritten. It is
 read only by the explicit legacy importer. That importer rejects duplicate or
@@ -136,7 +137,10 @@ for already-accepted runs; only after the exact captured old PID/start identity 
 changes does the bounded candidate health deadline begin. Listener or health loss alone is not
 transition evidence. Candidate startup uses an atomic attempt/commit marker shared
 with the launcher: an uncommitted relaunch crash-rolls back, while a committed exact selection
-and authenticated identity cannot be raced into rollback. Debug handoff is exposed as Debug
+and authenticated identity cannot be raced into rollback. If bounded recovery health fails after
+selection restoration, the helper removes the now-mismatched attempt marker under the launcher's
+shared attempt lock so the launcher can start the restored payload instead of failing closed forever.
+Debug handoff is exposed as Debug
 origin only when its bounded provenance (candidate version/fingerprint, tested Debug fingerprint,
 source revision, tested runtime epoch, and candidate runtime epoch) matches the verified Stable
 candidate manifest. Generic automatic/source updates never infer a Debug-origin candidate from
@@ -287,7 +291,7 @@ UI, native custom/overlay rendering, footer/header/editor/autocomplete, theme UI
 renderer hosting, package-specific integration, and truthful TUI activation remain
 deferred.
 
-Live tool projections may carry an optional extension provenance record derived from the public Pi tool `sourceInfo` and the loaded extension inventory. The Gateway emits that record only when exactly one extension owns the tool and the source path agrees; unknown or ambiguous ownership omits provenance and fails open to the ordinary tool projection. This metadata is disposable presentation state and never modifies Pi JSONL. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Temporary runtime roots and the project-local `.pi/subagents/async-subagent-runs` layout are scanned. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run. Watchers stop on terminal state, disposal, and retention eviction.
+Live tool projections may carry an optional extension provenance record derived from the public Pi tool `sourceInfo` and the loaded extension inventory. The Gateway emits that record only when exactly one extension owns the tool and the source path agrees; unknown or ambiguous ownership omits provenance and fails open to the ordinary tool projection. This metadata is disposable presentation state and never modifies Pi JSONL. When an extension-owned tool returns the public structured delegated-run convention (`details.runId`/`asyncId` plus bounded `results[].progress`), the Gateway additionally projects `ExtensionRunActivity` with stable child identities, active time, tool/turn counts, current tool/path, and a bounded output tail. It is carried on the live tool projection and retained as a bounded recent `extensionActivities` snapshot; native clients must not infer it from rendered widget text or open a child JSONL concurrently. The runtime also admits the explicit `pi-subagents` lifecycle-artifact contract: allowlisted `status.json` files are matched to the canonical session file, read with a hard byte bound, and projected as one workflow activity with bounded child progress so detached async runs remain visible after the launching tool returns. Temporary runtime roots and the project-local `.pi/subagents/async-subagent-runs` layout are scanned under one hard work budget; exact live `asyncDir` bindings refresh before bounded ambient enumeration, and terminal ambient evidence outranks decorative live enrichment. A bounded Gateway-owned `runId` binding maps lifecycle events and artifacts to one real tool-call identity; a synthetic `subagent:<runId>` identity is used only for an initially unmatched, session-owned artifact and is re-keyed when the real tool call arrives. Terminal lifecycle status is authoritative, while later artifacts only enrich retained details and cannot resurrect a completed run; terminal recency uses the producer's completion time rather than the later discovery time. Current artifacts are admitted by their exact schema version; historical versioned or unversioned artifacts can supply terminal evidence only after an exact canonical tool-call/`asyncDir` binding proves ownership, so a Gateway reload cannot strand already-finished delegated work in restart drain. Watchers stop on terminal state, disposal, and retention eviction.
 
 Remote restart is advertised only when `TRON_GATEWAY_SUPERVISED=1` is present from a managed LaunchAgent or repository background supervisor; direct foreground processes fail closed for remote restart. The Gateway exits with code 75 only after the registry drain completes, leaving process replacement to the owning supervisor.
 
@@ -298,11 +302,16 @@ a monotonic progress sequence, bounded display-safe live-output tail, runtime st
 last-progress/completion timestamps, and a duration measured from the tool callback
 with a monotonic clock. Running progress carries the latest monotonic duration sample;
 the completion carries the final call-to-return duration. The Gateway coalesces high-rate
-updates without losing the newest state. Clients join calls, progress, and results
-by canonical call ID rather than arrival order.
+updates without losing the newest state. Running readable output is a bounded current-frame
+channel: each newer nonempty frame replaces the previous display in place, while an empty advisory
+frame preserves the last readable output so detail views never flash blank. A nonempty terminal result
+is authoritative. Clients join
+calls, progress, and results by canonical call ID rather than arrival order.
 
 Active message queues are projected with stable per-entry IDs, delivery behavior,
 display text, total attachment count, optional photo/file counts, and a monotonic queue revision.
+For newly admitted steering/follow-up work, the returned prompt operation ID is the queue entry ID;
+clients can therefore settle one optimistic submission without content-based queue guessing.
 A Gateway advertising
 `queue-management.v1` includes both `queueRevision` and `queuedItems` in every authoritative
 session snapshot. The legacy steering and follow-up string arrays remain a compatibility
@@ -433,20 +442,24 @@ rather than creating transcript rows. Exact timing is retained for the current
 owning runtime using a monotonic start-to-end measurement and projected onto settled
 results; older Pi JSONL entries, which do not persist execution timing, use the
 canonical call-to-result interval as an observed fallback. Completed results leave the live overlay as soon as their
-canonical transcript entry exists. A final snapshot fitter compacts duplicate live
-detail before canonical rows. Active snapshots preserve their baseline page so a
-tool burst cannot reveal a new pagination boundary in an already-open chat; resumed
-idle sessions may begin from a smaller bounded tail. iOS retains explicitly loaded
-earlier pages while installing an overlapping authoritative tail. Phase, operation,
+canonical transcript entry exists. A final snapshot fitter removes duplicate terminal
+detail and compacts running payloads before canonical rows. Every legal fitted snapshot
+retains at least the newest 24 display-bearing canonical transcript entries when that continuity floor can
+fit; an individually oversized item is compacted before rows are removed. iOS preserves a
+compatible recent continuity suffix—and any explicitly loaded earlier pages—while installing
+an overlapping authoritative tail. Phase, operation,
 tool identity/order, and canonical paging cursors remain authoritative. Arbitrarily
 large active runs therefore remain openable; no canonical Pi content is modified or
 discarded. Canonical non-image upload
 envelopes retain their runtime-owned readable paths, but the mobile transcript
 projection replaces those tags with bounded name/type/size metadata on an
 ordinary text part and never sends the Mac path to clients. Active protocol-v3 clients therefore receive the safe filename instead of the
-Mac path for a new content discriminant. A page carries the next
-visible entry as its branch anchor and fails retryably if tree navigation changed
-that boundary while the request was in flight. Oversized responses return
+Mac path for a new content discriminant. A page carries and echoes the next projected entry as its branch anchor plus the current runtime
+generation and leaf identity. Raw canonical parent links may pass through filtered session-info,
+hidden custom, or extension-receipt entries and therefore never define projected-row adjacency.
+Requests may supply all three expected identities; the
+Gateway fails retryably if runtime replacement or tree navigation changed any boundary
+while the request was in flight. Oversized responses return
 a correlated protocol error instead of disconnecting the device. `session.context`
 and `session.resources` return runtime-native resource projections. The resource
 projection includes display-safe extension, prompt, skill, context-file, and tool
@@ -471,9 +484,13 @@ Read projections redact secret-looking strings; matching redaction placeholders 
 from canonical state during update so mobile editing cannot erase credentials it was never
 allowed to read.
 
-Administrative restart is a drain, not an abort: the Gateway freezes new mutations,
-allows every admitted agent run to settle canonically, then exits with the supervised
-restart code. Live PTYs block restart because process replacement cannot preserve them.
+Administrative restart is a deadline-free drain, not an abort: the Gateway freezes new
+mutations, allows every admitted agent run to settle canonically, then exits with the
+supervised restart code. While waiting it emits bounded, count-only
+`gateway.restart-drain.waiting` diagnostics every 15 seconds with the combined count of
+in-flight slot admissions and drain-busy sessions, plus an explicit completion record,
+so the Logs sheet distinguishes a healthy drain from a stuck or failed restart.
+Live PTYs block restart because process replacement cannot preserve them.
 The installed Release wrapper supervises Stable only. `scripts/tron dev` owns the
 separate Debug lifecycle on 9848 through the same immutable payload store and launcher.
 Its loopback-by-default handoff copies only an authenticated, selected Debug
@@ -587,3 +604,36 @@ session runtimes, detached completion, and fork rekeying without network
 credentials. Additional deterministic tests exercise interactive API-key and
 OAuth brokering, project trust, native local-package persistence, legacy import,
 and credential separation.
+
+## Extension activity lifecycle and history
+
+Structured extension runs retain the legacy coarse `status` alongside the additive
+versioned lifecycle record (`queued`, `running`, `paused`, `completed`, `failed`,
+`stopped`, `rejected`, or `unknown`). Gateway projection sequence and terminal
+latches own ordering; producer timestamps are display evidence only. Terminal
+activities receive Gateway-owned `terminalAt`/`recentUntil` facts and are current
+or recent for exactly 15 minutes. A single coalesced expiry deadline republishes
+visibility; history is not deleted at expiry. Live artifact heartbeats publish one
+`session.extensionActivity` delta with the exact activity and live revision; they do
+not rebuild or broadcast the full transcript snapshot. Reconnect/open snapshots remain
+authoritative baselines, and terminal/expiry transitions converge through the same
+revisioned activity facts.
+
+The `extension-activity-history.v1` capability exposes
+`session.extensionActivity.list` and `.get`. Terminal facts are written as
+reserved `tron.extension-activity.v1` Pi custom entries through the session
+mutation lane. Receipts are bounded, exactly-once by activity identity, and retain
+only child identity, label, lifecycle/attention, and aggregate tool/turn counts;
+child task, output, path, current-tool, and timing fields never persist. They
+remain in raw JSONL/export but are excluded from transcript, tree, and model projection. History cursors
+carry an immutable receipt/branch revision and reject generation mixing.
+
+Artifact discovery is bounded, validates the supported versioned lifecycle
+artifact shape, and prioritizes queued/running/paused then newest observations
+before routing them. One Gateway registry owns discovery and the watcher
+lifecycle; RuntimeSlot remains the authority for exact session/tool ownership.
+Per-slot watchers are therefore permitted only after that exact ownership has
+already been proven, and never perform global scans. Shared recency scheduling
+removes only the disposable ambient projection at its wall-clock deadline,
+while canonical history remains available. Detached nonterminal work protects
+its session lane from idle eviction and administrative drain.

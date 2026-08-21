@@ -43,6 +43,7 @@ struct GatewayFailure: Codable, Error, Hashable, Sendable, LocalizedError {
 enum PreparedSessionEventData: Sendable, Equatable {
     case progress(TranscriptItem)
     case toolProgress(ToolExecutionState)
+    case extensionActivity(ExtensionActivityDelta)
     case extensionPresentation(ExtensionPresentationMutation)
     case raw
     case invalid
@@ -175,13 +176,15 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             return (try? SessionSummaryUpdate(from: decoder)).map(GatewayEventPreparation.sessionSummary) ?? .none
         case "session.snapshot":
             guard let snapshot = try? SessionSnapshot(from: decoder),
-                  ExtensionPresentationPolicy.admit(snapshot.extensionPresentation) else { return .none }
+                  ExtensionPresentationPolicy.admit(snapshot.extensionPresentation),
+                  ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(snapshot) else { return .none }
             return .sessionSnapshot(snapshot)
         case "session.rebaseline":
             struct Payload: Decodable { let snapshot: SessionSnapshot; let subscriptionToken: String }
             guard let payload = try? Payload(from: decoder),
                   !payload.subscriptionToken.isEmpty,
-                  ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation) else { return .none }
+                  ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation),
+                  ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(payload.snapshot) else { return .none }
             return .sessionRebaseline(PreparedSessionRebaseline(
                 snapshot: payload.snapshot,
                 subscriptionToken: payload.subscriptionToken
@@ -214,8 +217,19 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
                     preparedData = .invalid
                 }
             case "session.toolProgress":
-                preparedData = (try? container.decode(ToolExecutionState.self, forKey: .data))
-                    .map(PreparedSessionEventData.toolProgress) ?? .invalid
+                if let tool = try? container.decode(ToolExecutionState.self, forKey: .data),
+                   ExtensionActivityAdmissionPolicy.admitsToolFacts(tool) {
+                    preparedData = .toolProgress(tool)
+                } else {
+                    preparedData = .invalid
+                }
+            case "session.extensionActivity":
+                if let delta = try? container.decode(ExtensionActivityDelta.self, forKey: .data),
+                   ExtensionActivityAdmissionPolicy.admitsDelta(delta) {
+                    preparedData = .extensionActivity(delta)
+                } else {
+                    preparedData = .invalid
+                }
             case "session.extensionPresentation":
                 if let mutation = try? container.decode(ExtensionPresentationMutation.self, forKey: .data),
                    ExtensionPresentationPolicy.admit(mutation) {
@@ -240,13 +254,15 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
                 .map(GatewayEventPreparation.sessionSummary) ?? .none
         case "session.snapshot":
             guard let snapshot = try? payload.decode(SessionSnapshot.self),
-                  ExtensionPresentationPolicy.admit(snapshot.extensionPresentation) else { return .none }
+                  ExtensionPresentationPolicy.admit(snapshot.extensionPresentation),
+                  ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(snapshot) else { return .none }
             return .sessionSnapshot(snapshot)
         case "session.rebaseline":
             struct Payload: Decodable { let snapshot: SessionSnapshot; let subscriptionToken: String }
             guard let payload = try? payload.decode(Payload.self),
                   !payload.subscriptionToken.isEmpty,
-                  ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation) else { return .none }
+                  ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation),
+                  ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(payload.snapshot) else { return .none }
             return .sessionRebaseline(PreparedSessionRebaseline(
                 snapshot: payload.snapshot,
                 subscriptionToken: payload.subscriptionToken
@@ -269,8 +285,19 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
                     preparedData = .invalid
                 }
             case "session.toolProgress":
-                preparedData = (try? envelope.data.decode(ToolExecutionState.self))
-                    .map(PreparedSessionEventData.toolProgress) ?? .invalid
+                if let tool = try? envelope.data.decode(ToolExecutionState.self),
+                   ExtensionActivityAdmissionPolicy.admitsToolFacts(tool) {
+                    preparedData = .toolProgress(tool)
+                } else {
+                    preparedData = .invalid
+                }
+            case "session.extensionActivity":
+                if let delta = try? envelope.data.decode(ExtensionActivityDelta.self),
+                   ExtensionActivityAdmissionPolicy.admitsDelta(delta) {
+                    preparedData = .extensionActivity(delta)
+                } else {
+                    preparedData = .invalid
+                }
             case "session.extensionPresentation":
                 if let mutation = try? envelope.data.decode(ExtensionPresentationMutation.self),
                    ExtensionPresentationPolicy.admit(mutation) {

@@ -489,6 +489,17 @@ async function restoreSelectionState(paths, state) {
   else await atomicBytes(paths.previous, state.previous);
 }
 
+export async function restoreSelectionStateAndClearAttempt(paths, state) {
+  return withPendingAttemptLock(paths, async () => {
+    await restoreSelectionState(paths, state);
+    // Once current/previous are restored, a candidate attempt marker no longer
+    // matches current.json. Leaving it behind makes the launcher fail closed on
+    // every retry instead of starting the restored payload. The launcher's
+    // shared lock prevents it from recreating a launched marker after removal.
+    await rm(paths.pending ?? join(paths.channelRoot, "pending-attempt.json"), { force: true });
+  });
+}
+
 async function makeMutable(root) {
   const visit = async (path) => {
     const info = await lstat(path);
@@ -623,6 +634,14 @@ export async function rollbackSelection(paths) {
     throw error;
   }
   return { previous: current, current: prior };
+}
+
+export async function rollbackSelectionAndClearAttempt(paths) {
+  return withPendingAttemptLock(paths, async () => {
+    const result = await rollbackSelection(paths);
+    await rm(paths.pending ?? join(paths.channelRoot, "pending-attempt.json"), { force: true });
+    return result;
+  });
 }
 
 export function deploymentTransition(state, event) {
@@ -1240,8 +1259,8 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
     } catch (error) {
       if (published) {
         try {
-          if (unchanged) await rollbackSelection(paths);
-          else await restoreSelectionState(paths, priorState);
+          if (unchanged) await rollbackSelectionAndClearAttempt(paths);
+          else await restoreSelectionStateAndClearAttempt(paths, priorState);
           await writeState(paths, { ...stateBase, state: deploymentTransition("published", "failed"), error: String(error?.message ?? error) });
           const recoveryBoundary = await captureAuthenticatedRestartBoundary({ host, port, token, timeoutMs, channel });
           const recoveryBefore = recoveryBoundary.info;
@@ -1257,10 +1276,13 @@ async function promote({ paths, channel, version, expectedFingerprint, host, por
           await writeState(paths, { ...stateBase, state: deploymentTransition("rollback-requested", "rolledBack") });
           // Preserve terminal automatic rollback through the outer apply
           // boundary; callers still receive the original bounded failure.
-          await rm(paths.pending ?? join(paths.channelRoot, "pending-attempt.json"), { force: true });
           if (error && typeof error === "object") error.automaticRollbackCompleted = true;
         } catch (recoveryError) {
-          try { await restoreSelectionState(paths, priorState); } catch { /* best effort, keep original error */ }
+          try {
+            await restoreSelectionStateAndClearAttempt(paths, priorState);
+          } catch (restoreError) {
+            recoveryError.message += `; selection restore failed: ${restoreError.message}`;
+          }
           error.message += `; deployment recovery failed: ${recoveryError.message}`;
         }
       } else {
