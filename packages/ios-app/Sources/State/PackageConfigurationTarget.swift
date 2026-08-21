@@ -20,5 +20,7 @@ enum PackageConfigurationTarget: Hashable, Sendable {
 
 struct PackageLoadID: Hashable {
     let target: PackageConfigurationTarget
+    let profileRevision: Int
     let invalidationGeneration: Int
+    let refreshGeneration: Int
 }

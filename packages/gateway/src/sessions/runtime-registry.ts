@@ -20,6 +20,9 @@ const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 const MAX_EXTENSION_DISCOVERY_WORK = 1_024;
 const MAX_EXTENSION_DISCOVERY_ROOTS = 64;
 const MAX_EXTENSION_TEMP_ENTRIES = 1_024;
+// Root enumeration is structurally bounded independently of the smaller
+// selected routing budget, so directory order cannot hide a newer candidate.
+const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
 
 const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
   maximumDirectories: 25_001,
@@ -1183,7 +1186,7 @@ export class RuntimeRegistry {
           const entries = await opendir(root);
           for await (const entry of entries) {
             examined += 1;
-            if (examined > rootBudget) break;
+            if (examined > MAX_EXTENSION_ROOT_ENTRIES) break;
             if (!entry.isDirectory()) continue;
             const asyncDir = join(root, entry.name);
             try {
@@ -1213,9 +1216,11 @@ export class RuntimeRegistry {
         } catch { continue; }
         // Terminal evidence releases accepted work; live exact bindings were
         // already refreshed above and do not outrank it in ambient discovery.
-        candidates.sort((left, right) => Number(left.active) - Number(right.active)
+        candidates.sort((left, right) => Number(right.active) - Number(left.active)
           || right.timestamp - left.timestamp || left.asyncDir.localeCompare(right.asyncDir));
-        for (const candidate of candidates) {
+        // Validate the bounded structural scan before selecting only the amount
+        // this pass can safely route to live slots.
+        for (const candidate of candidates.slice(0, rootBudget)) {
           for (const slot of slots) {
             if (work >= MAX_EXTENSION_DISCOVERY_WORK) return;
             work += 1;

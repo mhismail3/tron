@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { chmod, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer } from "ws";
@@ -149,6 +149,29 @@ describe("LegacyImportService", () => {
 
     await expect(service.import(port)).rejects.toThrow("session history exceeds its total message limit");
     expect(historyPage).toBe(21);
+  });
+
+  it("fails closed for missing, malformed, permissive, and symlinked legacy auth", async () => {
+    const { service, tronHome } = await fixture();
+    const authPath = join(tronHome, "auth.json");
+    await rm(authPath);
+    await expect(service.inspect()).resolves.toMatchObject({ available: false });
+
+    await writeFile(authPath, "{not-json", { mode: 0o600 });
+    await expect(service.inspect()).resolves.toMatchObject({ available: false });
+
+    await chmod(authPath, 0o640);
+    await expect(service.inspect()).resolves.toMatchObject({ available: false });
+
+    await rm(authPath);
+    const external = join(tronHome, "external-auth.json");
+    await writeFile(external, JSON.stringify({ bearerToken: "valid-legacy-token-that-is-long-enough" }), { mode: 0o600 });
+    await symlink(external, authPath);
+    await expect(service.inspect()).resolves.toMatchObject({ available: false });
+
+    await rm(authPath);
+    await writeFile(authPath, JSON.stringify({ bearerToken: "valid-legacy-token-that-is-long-enough" }), { mode: 0o600 });
+    await expect(service.inspect()).resolves.toMatchObject({ available: true });
   });
 
   it("rejects oversized index and auth JSON before decoding and bounds bearer tokens", async () => {

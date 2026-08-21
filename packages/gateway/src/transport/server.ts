@@ -40,13 +40,11 @@ type SynchronizationOwner = SynchronizationCompletion;
 export function existingSessionOpenOwner(
   pendingSessionOpens: ReadonlyMap<string, string>,
   synchronizations: ReadonlyMap<string, ActiveSessionSynchronization>,
-  subscriptionTokens: ReadonlyMap<string, string>,
   sessionId: string,
 ): string | undefined {
   // Only genuinely in-flight opens are rejected. An installed subscription is
   // not an open owner: beginSynchronization replaces it deterministically so
   // reconnecting clients always converge instead of deadlocking on conflict.
-  void subscriptionTokens;
   return pendingSessionOpens.get(sessionId)
     ?? synchronizations.get(sessionId)?.requestId;
 }
@@ -74,11 +72,11 @@ export function releaseSessionTerminals(
 }
 
 export function canAttachTerminal(
-  subscriptions: ReadonlySet<string>,
+  subscriptionTokens: ReadonlyMap<string, string>,
   terminalId: string,
   belongsToSession: (terminalId: string, sessionId: string) => boolean,
 ): boolean {
-  return [...subscriptions].some((sessionId) => belongsToSession(terminalId, sessionId));
+  return [...subscriptionTokens.keys()].some((sessionId) => belongsToSession(terminalId, sessionId));
 }
 
 export function clearRequestSynchronizations(
@@ -229,7 +227,6 @@ interface Connection {
   alive: boolean;
   ready: boolean;
   presentationOnly: boolean;
-  subscriptions: Set<string>;
   terminals: Set<string>;
   inFlight: Set<string>;
   synchronizations: Map<string, ActiveSessionSynchronization>;
@@ -393,8 +390,8 @@ export class GatewayServer {
     for (const connection of this.clients.values()) {
       const sourceSynchronization = connection.synchronizations.get(previousSessionId);
       const sourceToken = connection.subscriptionTokens.get(previousSessionId);
-      const sourceSubscribed = connection.subscriptions.has(previousSessionId);
-      if (!sourceSynchronization && sourceToken === undefined && !sourceSubscribed) continue;
+      const pendingOwner = connection.pendingSessionOpens.get(previousSessionId);
+      if (!sourceSynchronization && sourceToken === undefined && pendingOwner === undefined) continue;
 
       // A destination owner can only be stale here: RuntimeRegistry prevents
       // two live slots from owning the replacement ID. Retire it locally
@@ -412,7 +409,6 @@ export class GatewayServer {
         (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
       );
 
-      connection.subscriptions.delete(previousSessionId);
       connection.subscriptionTokens.delete(previousSessionId);
       connection.synchronizations.delete(previousSessionId);
       releaseSessionTerminals(
@@ -420,8 +416,12 @@ export class GatewayServer {
         previousSessionId,
         (terminalId, ownerSessionId) => this.options.service.terminalBelongsToSession(terminalId, ownerSessionId),
       );
-      connection.subscriptions.add(nextSessionId);
       if (sourceToken !== undefined) connection.subscriptionTokens.set(nextSessionId, sourceToken);
+      // session.open reserves its requested ID before the asynchronous acquire.
+      // A fork can rekey that slot before beginSynchronization runs; retain the
+      // old alias for duplicate-open rejection while moving the canonical owner
+      // to the replacement ID used by synchronization admission and cleanup.
+      if (pendingOwner !== undefined) connection.pendingSessionOpens.set(nextSessionId, pendingOwner);
       if (sourceSynchronization) {
         sourceSynchronization.sessionId = nextSessionId;
         connection.synchronizations.set(nextSessionId, sourceSynchronization);
@@ -441,7 +441,7 @@ export class GatewayServer {
   broadcastSession(sessionId: string, topic: string, payload: JsonValue): void {
     const event: BufferedSessionEvent = { type: "event", topic, sessionId, payload };
     for (const client of this.clients.values()) {
-      if (!client.ready || !client.subscriptions.has(sessionId)) continue;
+      if (!client.ready || !client.subscriptionTokens.has(sessionId)) continue;
       // While a synchronization quarantine owns this session's catch-up, its
       // barrier is the only delivery path: the event is flushed exactly once
       // after the acknowledgement. Sending it here as well would deliver every
@@ -617,7 +617,7 @@ export class GatewayServer {
         socket.destroy();
         return;
       }
-      const identity = authenticated.kind === "local" ? "local-wrapper" : authenticated.device.id;
+      const identity = authenticated.kind === "local" ? "local-wrapper" : authenticated.deviceId;
       const maximumConnections = this.options.maximumConnections ?? 32;
       const maximumPerIdentity = this.options.maximumConnectionsPerIdentity ?? 4;
       const identityConnections = [...this.clients.values()].filter((client) => client.identity === identity).length;
@@ -670,7 +670,6 @@ export class GatewayServer {
       alive: true,
       ready: false,
       presentationOnly: false,
-      subscriptions: new Set(),
       terminals: new Set(),
       inFlight: new Set(),
       synchronizations: new Map(),
@@ -743,7 +742,6 @@ export class GatewayServer {
       const owner = existingSessionOpenOwner(
         connection.pendingSessionOpens,
         connection.synchronizations,
-        connection.subscriptionTokens,
         sessionOpenID,
       );
       if (owner !== undefined) {
@@ -779,15 +777,19 @@ export class GatewayServer {
         if (former === sessionId || current === sessionId) connection.rekeyedSessionIds.delete(former);
       }
     };
-    const revokeSynchronization = (sessionId: string, synchronization: ActiveSessionSynchronization): boolean => {
+    const revokeInstalledSubscription = (sessionId: string, token: string): boolean => {
       sessionId = resolveSessionId(sessionId);
-      // A later session.open may have replaced this request's owner. In that
-      // case, only the current token may revoke the runtime subscription.
-      if (connection.synchronizations.get(sessionId) !== synchronization
-          || connection.subscriptionTokens.get(sessionId) !== synchronization.subscriptionToken) return false;
-      synchronization.barrier.abort(synchronization.requestId);
+      // The installed token is the ownership proof. The synchronization map is
+      // only a pending barrier and may already have been removed after a
+      // compact resync fallback was enqueued.
+      if (connection.subscriptionTokens.get(sessionId) !== token) return false;
+      const synchronization = connection.synchronizations.get(sessionId);
+      if (synchronization) {
+        clearTimeout(synchronization.timeout);
+        synchronization.barrier.abort(synchronization.requestId);
+        connection.synchronizations.delete(sessionId);
+      }
       connection.subscriptionTokens.delete(sessionId);
-      connection.subscriptions.delete(sessionId);
       clearRekeyedSessionIds(sessionId);
       releaseSessionTerminals(
         connection.terminals,
@@ -796,6 +798,14 @@ export class GatewayServer {
       );
       this.options.sessions.unsubscribe(connection.id, sessionId);
       return true;
+    };
+    const revokeSynchronization = (sessionId: string, synchronization: ActiveSessionSynchronization): boolean => {
+      sessionId = resolveSessionId(sessionId);
+      // A later session.open may have replaced this request's owner. In that
+      // case, only the current token may revoke the runtime subscription.
+      if (connection.synchronizations.get(sessionId) !== synchronization
+          || connection.subscriptionTokens.get(sessionId) !== synchronization.subscriptionToken) return false;
+      return revokeInstalledSubscription(sessionId, synchronization.subscriptionToken);
     };
     const revokeSubscription = (sessionId: string, token: string): boolean => {
       sessionId = resolveSessionId(sessionId);
@@ -808,7 +818,6 @@ export class GatewayServer {
       }
       if (connection.subscriptionTokens.get(sessionId) !== token) return false;
       connection.subscriptionTokens.delete(sessionId);
-      connection.subscriptions.delete(sessionId);
       clearRekeyedSessionIds(sessionId);
       releaseSessionTerminals(
         connection.terminals,
@@ -839,6 +848,10 @@ export class GatewayServer {
         identity: connection.identity,
         isLocal: connection.isLocal,
         beginSynchronization: (sessionId) => {
+          // Runtime acquire may yield to a fork before this call. Resolve the
+          // request's ID before installing the subscription and barrier so
+          // ownership is attached to the canonical slot.
+          sessionId = resolveSessionId(sessionId);
           if (connection.presentationOnly
               && connection.pendingSessionOpens.get(sessionId) !== requestId) {
             throw new GatewayError("conflict", "This mobile presentation open was retired", true);
@@ -863,7 +876,6 @@ export class GatewayServer {
             // stale close for the revoked token is ignored harmlessly.
             revokeSubscription(sessionId, installedToken);
           }
-          connection.subscriptions.add(sessionId);
           this.options.sessions.subscribe(connection.id, sessionId);
           const syncToken = randomUUID();
           connection.subscriptionTokens.set(sessionId, syncToken);
@@ -940,13 +952,12 @@ export class GatewayServer {
           }
           const token = connection.subscriptionTokens.get(sessionId);
           if (token !== undefined) return revokeSubscription(sessionId, token);
-          connection.subscriptions.delete(sessionId);
           this.options.sessions.unsubscribe(connection.id, sessionId);
           return true;
         },
         attachTerminal: (terminalId) => {
           if (!canAttachTerminal(
-            connection.subscriptions,
+            connection.subscriptionTokens,
             terminalId,
             (id, sessionId) => this.options.service.terminalBelongsToSession(id, sessionId),
           )) {
@@ -1018,6 +1029,14 @@ export class GatewayServer {
             && connection.subscriptionTokens.get(completion.sessionId) === completion.subscriptionToken;
           if (!stillOwned) continue;
 
+          const revokeBeforeResync = (): void => {
+            // resyncRequired is a terminal barrier: revoke every local and
+            // runtime ownership before publishing it, otherwise a later event
+            // can bypass the absent barrier while the client still believes it
+            // has a subscription. The token check remains valid even after the
+            // pending barrier was removed for a compact fallback.
+            revokeInstalledSubscription(completion.sessionId, completion.subscriptionToken);
+          };
           const sendResyncRequired = () => this.send(connection, {
             type: "event",
             topic: "transport.resyncRequired",
@@ -1025,9 +1044,7 @@ export class GatewayServer {
             payload: { reason: "subscription catch-up overflow" },
           });
           if (recovery === undefined) {
-            active.barrier.abort(completion.syncToken);
-            clearTimeout(active.timeout);
-            connection.synchronizations.delete(completion.sessionId);
+            revokeBeforeResync();
             sendResyncRequired();
             continue;
           }
@@ -1035,13 +1052,15 @@ export class GatewayServer {
           active.barrier.establish(recovery);
           const recovered = active.barrier.commit(completion.syncToken);
           clearTimeout(active.timeout);
-          connection.synchronizations.delete(completion.sessionId);
           if (recovered.overflowed) {
             // The recovery quarantine overflowed too; no snapshot or suffix is
-            // trustworthy enough to publish.
+            // trustworthy enough to publish. Revoke the installed token and
+            // terminal attachments before the resync notice can be observed.
+            revokeBeforeResync();
             sendResyncRequired();
             continue;
           }
+          connection.synchronizations.delete(completion.sessionId);
 
           // `fallback` means encodeOutboundFrame already emitted the compact
           // resync replacement. Do not emit a duplicate or flush a suffix that
@@ -1058,8 +1077,12 @@ export class GatewayServer {
           });
           if (recoveryOutcome === "sent") {
             for (const event of recovered.events) this.send(connection, event);
-          } else if (recoveryOutcome === "failed") {
-            sendResyncRequired();
+          } else {
+            // Both an encoded fallback and a failed write are resync paths.
+            // The fallback already carries the notice; a failed write gets a
+            // best-effort direct notice after ownership is revoked.
+            revokeBeforeResync();
+            if (recoveryOutcome === "failed") sendResyncRequired();
           }
         } else {
           const completed = active.barrier.commit(completion.syncToken);
@@ -1084,8 +1107,17 @@ export class GatewayServer {
         this.send(connection, { type: "response", id: frame.id, ok: false, error: publicError(error) });
       }
     } finally {
-      if (sessionOpenID !== undefined && connection.pendingSessionOpens.get(sessionOpenID) === frame.id) {
-        connection.pendingSessionOpens.delete(sessionOpenID);
+      if (sessionOpenID !== undefined) {
+        const resolvedOpenID = resolveSessionId(sessionOpenID);
+        // Rekey retains an old duplicate-open alias but the canonical
+        // reservation is the one that must be released after begin/response.
+        if (connection.pendingSessionOpens.get(resolvedOpenID) === frame.id) {
+          connection.pendingSessionOpens.delete(resolvedOpenID);
+        }
+        if (resolvedOpenID !== sessionOpenID
+            && connection.pendingSessionOpens.get(sessionOpenID) === frame.id) {
+          connection.pendingSessionOpens.delete(sessionOpenID);
+        }
       }
       connection.inFlight.delete(frame.id);
     }
@@ -1133,6 +1165,7 @@ export class GatewayServer {
       synchronization.barrier.abort(synchronization.requestId);
     }
     connection.synchronizations.clear();
+    connection.subscriptionTokens.clear();
     this.options.sessions.unsubscribeClient(connection.id);
     this.options.service.releaseClient(connection.id);
     this.options.auth.cancelClient(connection.id);

@@ -157,7 +157,9 @@ The settings shell and its appearance, connection/import, provider, agent-defaul
 package, trust, and custom-model destinations live in separate source owners while retaining the same progressive sheet links and shared draft/state coordinators. The main settings sheet is a single eager list of separated Liquid Glass row containers without category headers; each row carries a concise secondary summary, and project scope inserts Project Trust while dashboard scope inserts Import. Connections owns the server-management surface: paired-server rows open per-server detail sheets and authorized devices remain below the server list. Logs are a separate final top-level Settings destination, so Connections and its detail sheets never fetch or render Gateway log history. The Logs destination performs one bounded on-demand Gateway read when opened, merges the app's bounded in-memory iOS response-diagnostic ring, renders through a lazy compact list, filters locally, and refreshes only when explicitly requested. An actionable invalid-response alert can open Logs directly. Gateway Update status/config decoding is bounded and capability-aware. The live update state sits directly below connection state, opaque runtime/deployment identities live in a Technical Details sub-sheet, and source configuration is one row whose Configure action reuses the Gateway-backed workspace browser before submitting the selected Mac path through lifecycle admission and command receipts. Update and rollback confirmations remain separate full-width actions outside the configuration container. Stable on 9847 and local Debug on 9848 remain separately paired profiles with their own persisted credentials. Pairing, initial hello, reconnect hello, and authenticated `system.info` require an asserted `stable`/`dev` channel matching that profile; missing, malformed, or endpoint-mismatched identities fail closed. A planned Debug `system.stopping` event uses the existing immediate reconnect path with the same profile endpoint and token, then installs the replacement runtime epoch and authoritative projections without replaying an accepted prompt. A Debug-origin candidate exposes the confirmed **Promote Debug Gateway to Stable** action only when its focused Stable-channel status carries an available exact version, lowercase SHA-256 fingerprint, source revision, tested Debug runtime epoch, and candidate runtime epoch whose provenance matches the verified candidate identity; the confirmation pins the immutable version and fingerprint. The separate **Rebuild Gateway from Source** maintenance action requires a valid configured source root and sends source mode only; its copy does not imply a pending update, and generic or unpinned artifact candidates are never promoted automatically. The dashboard server filter keeps multi-selection separate from ordering: the default groups by project/server, while Recent Activity renders one reverse-chronological session list with project/server context beneath each row. Its selection guidance belongs in a compact header block directly below the Servers section label, with stronger separation above that block, and uses the shared 11-point secondary-description scale matching the other adjusted sheet descriptions. The selected ordering is stored as a bounded local UI preference and restored when the app launches. Project headers show the project folder in bold monospace with the server name as a right-aligned secondary monospace label. The dashboard settings overview uses an eager stack so the Gateway Import destination is materialized with the initial sheet; project-scoped settings intentionally omit that dashboard-only action.
 Resolved package JSON is constructed only inside its progressive detail destination; the overview retains a
 constant-depth top-level count instead of recursively rendering a potentially large resource tree. Package reload
-refreshes the inventory and update projection together, while installation controls live in a medium/large
+refreshes the inventory and update projection together: SwiftUI’s structured `.task(id:)` owns and awaits automatic
+refresh, target/invalidation changes reject stale completions, and confirmed mutation reloads have priority over
+ordinary refresh. Installation controls live in a medium/large
 progressive sheet. Custom provider editors keep their three dense text fields together before the API-format row
 and use the standard settings-group header treatment. Provider and model catalogs use the shared
 `ModelDisplayFormatting` projections everywhere they are shown; canonical IDs remain unchanged for
@@ -232,8 +234,8 @@ Camera boundary tests inject authorization and capture-session providers into
 session provider. They never invoke camera hardware or replace AVFoundation in production.
 Keep provider callbacks MainActor-bound and keep the two unchecked Sendable AVFoundation
 envelopes limited to the photo provider's serial queue boundary. The QR permission task
-must recheck cancellation before configuration. Phase 7 owns the remaining generation-scoped
-camera setup/capture lifecycle changes.
+must recheck cancellation before configuration. Camera setup, capture, torch, and
+permission callbacks carry lifecycle/configuration identity so dismissal cannot publish late state.
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \
@@ -438,11 +440,18 @@ identity transform required by Reduce Motion. Hosted scroll tests remain the aut
 visual transforms do not grant detached readers automatic writes or replay same-ID entrances.
 `GatewayProtocolContractTests`, `SharedProtocolFixtureTests`, and
 `SessionMutationServiceTests` cover revisioned queue projection and replacement commands.
-`QueuedMessagePresentationTests` own capability/field admission for editing; presentation guards
+`QueuedMessagePresentationTests` own capability/field admission for editing, prove that advancing
+transcript projection tags do not revoke an installed queue card's authority, and cover exact-token
+settlement/stale-completion immunity plus the loading evidence policy. Queue controls remain
+owned by the installed commit's queue revision/items plus its exact Gateway capability fact, never generic transcript
+build lag. The earlier pill remains loading from explicit admission through paging, projection installation,
+and anchored (or unanchored) settlement; presentation retirement cancels its local owner. Presentation guards
 retain intrinsic cards capped at the user-prompt bound, full-shape whole-card interactive Liquid Glass,
 leading-toolbar removal, an explicit legacy lock, and Tron surfaces instead of stock forms.
-Native bottom evidence comes from `ScrollGeometry.visibleRect.maxY`
-plus the bottom inset; the harness no longer substitutes a hard-coded settled distance.
+Native bottom evidence compares `ScrollGeometry.visibleRect.maxY` with the physical
+content edge (`contentSize.height + contentInsets.bottom`); the harness no longer substitutes
+a hard-coded settled distance. A released pinned offset beyond a structurally shortened edge
+receives one frame-gated tail clamp, while ordinary shrink and detached readers remain inert.
 The obsolete visibility modifier is removed; the native SwiftUI geometry modifier still
 reports a multiple-update-per-frame diagnostic in hosted runs and remains a physical checkpoint.
 
@@ -571,8 +580,10 @@ streaming. The sheet uses the shared Tron title/top-blur/toolbar
 chrome with no drag handle. The same rendered tool/group row stays after non-tool streaming
 across running-to-completed updates, retains at most one installed-identity-owned tail settlement while
 pinned, uses one coordinated smooth viewport follow for a newly admitted tool chip,
-preserves a surviving semantic anchor while detached, and emits no unowned automatic write when content
-shrinks. Verify a tool entrance has one correlated chip reveal and viewport command rather than competing writes.
+preserves a surviving semantic anchor while detached, and emits no unowned automatic write for ordinary
+shrink. If settlement shortens content beneath a released pinned offset, verify exactly one physical-tail
+clamp; a detached or directly owned reader receives none. Verify a tool entrance has one correlated chip
+reveal and viewport command rather than competing writes.
 Tool-detail checkpoints open read, edit, bash, and one unknown/extension call at the medium detent: verify the compact status/metadata chips,
 secondary-plus-accent path, faithful single-change diff glance, word-preserving wrapped bash commands in
 the smaller code size, high-signal generic summary, and larger live result are visible before

@@ -79,7 +79,8 @@ enum ExtensionActivityAdmissionPolicy {
               activity.currentPath.map({ bounded($0, maximumStringBytes) }) ?? true,
               activity.output.map({ bounded($0, 32 * 1_024, newlines: true) }) ?? true,
               nonnegative(activity.toolCount), nonnegative(activity.turnCount),
-              nonnegative(activity.durationMs), activity.children.count <= maximumChildren else { return false }
+              nonnegative(activity.durationMs), activity.children.count <= maximumChildren,
+              validReceiptTimeline(activity) else { return false }
         for child in activity.children {
             guard admits(child, depth: 0, budget: &descendantBudget) else { return false }
         }
@@ -227,6 +228,17 @@ enum ExtensionActivityAdmissionPolicy {
 
     private static func validTimestamp(_ value: String) -> Bool {
         bounded(value, 128) && GatewayTimestamp.parse(value) != nil
+    }
+
+    /// Terminal receipt facts must never describe a lifecycle that runs
+    /// backwards. This covers both versioned Gateway rows and legacy rows
+    /// without a lifecycle wrapper.
+    private static func validReceiptTimeline(_ activity: ExtensionRunActivity) -> Bool {
+        guard let terminalAt = activity.lifecycle?.terminalAt ?? activity.completedAt else { return true }
+        guard let started = GatewayTimestamp.parse(activity.startedAt),
+              let terminal = GatewayTimestamp.parse(terminalAt),
+              let observed = GatewayTimestamp.parse(activity.lifecycle?.observedAt ?? activity.updatedAt) else { return false }
+        return started <= terminal && terminal <= observed
     }
 
     private static func validSource(_ source: ExtensionToolOrigin) -> Bool {

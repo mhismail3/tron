@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -312,6 +313,38 @@ describe("transcript projection", () => {
     expect(tree.at(-1)).toMatchObject({ depth: 4_999, isCurrentPath: true });
     expect(Buffer.byteLength(JSON.stringify(tree))).toBeLessThanOrEqual(TREE_PROJECTION_BYTES);
     expect(JSON.stringify(tree)).not.toContain('"children"');
+  });
+
+  it("projects tree images lazily so omitted candidates do not consume blobs", () => {
+    const manager = SessionManager.inMemory("/tmp/lazy-tree-images");
+    for (let index = 0; index < 1_001; index += 1) {
+      manager.appendMessage({
+        role: "user",
+        content: [{ type: "image", data: Buffer.from(`image-${index}`).toString("base64"), mimeType: "image/png" }],
+        timestamp: index + 1,
+      });
+    }
+    const blobs = new BlobStore({ maximumItemBytes: 64, maximumItems: 1, maximumTotalBytes: 64 });
+    const tree = projectTree(manager, blobs);
+    expect(tree).toHaveLength(1_000);
+    const imageNodes = tree.filter((node) => node.kind === "message");
+    expect(imageNodes).toHaveLength(1_000);
+    // The newest admitted candidate registers; the structurally omitted oldest
+    // candidate never reaches BlobStore registration.
+    const blobID = (index: number) => createHash("sha256").update("image/png").update("\0").update(`image-${index}`).digest("base64url");
+    expect(blobs.get(blobID(1_000)).data.toString()).toBe("image-1000");
+    expect(() => blobs.get(blobID(0))).toThrow();
+    expect(tree.at(-1)?.id).toBe(manager.getEntries().at(-1)?.id);
+  });
+
+  it("validates malformed canonical payloads even when the oldest node is omitted", () => {
+    const manager = SessionManager.inMemory("/tmp/malformed-oldest-tree");
+    for (let index = 0; index < 1_001; index += 1) {
+      manager.appendMessage({ role: "user", content: `message ${index}`, timestamp: index });
+    }
+    const oldest = manager.getEntries()[0]! as { message: unknown };
+    oldest.message = { role: "user" };
+    expect(() => projectTree(manager, new BlobStore())).toThrow(/invalid canonical entry payload/);
   });
 
   it("rejects duplicate canonical tree IDs and oversized retained strings", () => {

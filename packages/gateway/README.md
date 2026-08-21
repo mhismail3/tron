@@ -16,14 +16,19 @@ Gateway owns only mobile infrastructure:
 - authoritative transcript snapshots projected from canonical JSONL;
 - filesystem/Git browsing, bounded uploads, and bounded PTY replay;
 - settings, credentials, packages, trust, custom-model administration, and
-  generic extension UI forwarding.
+  generic extension UI forwarding. Extension activity history revisions are
+  derived from the globally sorted canonical receipt sequence; filters and
+  duplicate-content collapse select page content but never change cursor
+  identity. Component placement metadata is committed only with registry
+  admission, so bounded capacity failures cannot orphan surfaces.
 
 The embedded runtime remains canonical for sessions, provider/model semantics,
 credentials, settings, packages, resources, compaction, and retries. Gateway
 does not maintain a session database or event journal. A process lock is held per
 agent directory and any configured external session directory because the session
 format has no cross-process lock; another Gateway must use separate canonical
-storage, not the same JSONL tree. Runtime `sessionDir` changes are rejected until
+storage, not the same JSONL tree. The aggregate runtime-lock release is shared and
+idempotent across concurrent shutdown callers. Runtime `sessionDir` changes are rejected until
 the Gateway is stopped and restarted; the runtime also snapshots the admitted
 session directory at startup so an out-of-band settings edit cannot redirect
 new work around the ownership lock.
@@ -51,10 +56,15 @@ never persisted by Gateway.
   `~/.tron-machine-group-id`, shared by separate Tron homes only for connection
   grouping; it is not a session, credential, or runtime-data store
 - Gateway state: `<TRON_DATA_DIR|~/$TRON_HOME_NAME|~/.tron>/gateway/`; `gateway.json` is an exact-shape, 16 KiB maximum document with a 256-byte machine ID, 1 KiB machine name, and optional 8 KiB default workspace; malformed/oversized existing files fail startup without rekeying
-- Local wrapper credential: `gateway/local-auth.json` (`0600`)
-- Hashed mobile devices: `gateway/devices.json`
-- Current invitation: `gateway/enrollment.json` (`0600`, ten minutes, one use)
-- Run markers and command receipts: gateway-owned bounded operational state
+- Local wrapper credential: `gateway/local-auth.json` (`0600`, owner-UID-only regular non-symlink file;
+  an existing malformed, wrong-version, or wrong-purpose credential fails closed)
+- Hashed mobile devices: `gateway/devices.json` (bounded owner-UID-only regular non-symlink file;
+  legacy `lastSeenAt` is read for migration but removed on the next owned write; auth contexts expose
+  only `kind` and `deviceId`)
+- Current invitation: `gateway/enrollment.json` (`0600`, owner-UID-only regular non-symlink file;
+  ten minutes, one use; pairing consumes it before device persistence and regenerates it if persistence fails)
+- Run markers and command receipts: gateway-owned bounded operational state; per-session
+  marker mutex lanes are retained only while queued or executing callers use them
 - Uploads: transient and bounded; unclaimed staging expires, while prompt attachments remain session-owned until canonical deletion
 - Tool invocation groups: at finalized assistant `message_end`, Gateway publishes the complete contiguous declaration group before any corresponding tool start, with runtime-only `groupId`, `groupIndex`, `groupCount`, and `groupFinalized` metadata. Group IDs derive from the stable assistant presentation ID plus first projected content ordinal, survive live/canonical/result reconciliation, remain bounded until agent settlement, and are never written to Pi JSONL or interpreted as proof of parallel execution.
 
@@ -74,7 +84,7 @@ before the index rename remains outside that cleanup.
 - `POST /v1/uploads` — authenticated bounded upload
 - `GET /v1/uploads/:id` — authenticated stream for a prompt-owned canonical attachment
 - `GET /v1/blobs/:id` — authenticated transient projected blob
-- `GET /v1/socket` — authenticated protocol version 2 WebSocket
+- `GET /v1/socket` — authenticated protocol version 3 WebSocket
 
 The pairing limiter keeps the exact rolling per-address window while retaining at most 4,096
 least-recently-used address keys and periodically deleting expired windows; address churn cannot
@@ -82,7 +92,10 @@ create append-only process state. Paired-device storage admits at most 256 uniqu
 token hashes with bounded names/timestamps; capacity rejection leaves the one-time invitation valid
 so an old device can be revoked before retrying. Device metadata is capped at 1 MiB, the local wrapper
 credential at 4 KiB, and the one-time invitation at 16 KiB before JSON decode. Local credentials and
-invitations also require exact versions, purposes, bounded identities/codes, and canonical timestamps. Uploads retain the 25 MiB per-request limit and additionally
+invitations also require owner-only regular-file boundaries (symlinks are rejected), exact versions,
+purposes, bounded identities/codes, and canonical timestamps. A pairing invitation is consumed before
+its device record is written; a failed device write explicitly issues a fresh invitation while the
+pairing mutex remains held. Uploads retain the 25 MiB per-request limit and additionally
 serialize reservation and commit against a 1,024-entry and eight-times-per-upload (200 MiB by default) aggregate ceiling. The aggregate byte bound remains the primary storage limit so many small photos do not exhaust capacity prematurely.
 A separate admission permits at most half that ratio concurrently (four default 25 MiB bodies). Authenticated request
 chunks stream directly into protected store-owned files; exact declared and observed sizes are checked before atomic
@@ -258,7 +271,10 @@ The revisioned editor text and revision are retained as one inseparable baseline
 pressure may omit decorative statuses/widgets but never fabricate an empty editor at
 a nonzero revision.
 Pending interactions remain live across ordinary client disconnect and all imperative
-presentation is excluded from offline mobile cache. Native editor updates admit an
+presentation is excluded from offline mobile cache. Wire interactions retain one flat JSON
+shape but are method-discriminated by Gateway and native admission: select requires options;
+confirm forbids select/input fields; input permits text defaults and questionnaires; editor
+permits text defaults without select options or questionnaires. Native editor updates admit an
 empty or whitespace-only text payload without trimming; per-session clients coalesce
 possibly-sent updates and treat revision conflicts as ordinary convergence rather than
 user-visible failures. Exact extension commands persist a provisional run marker
@@ -349,20 +365,25 @@ Session structure/context/resource invalidations refresh
 already-presented secondary surfaces. Provider, settings, trust, package, and
 custom-model mutations publish bounded global invalidations so another connected
 client refreshes its explicitly scoped canonical projection. `session.create` accepts an
-optional source-control strategy. `existingCheckout` passes the selected directory through
-unchanged; `newBranchWorktree` creates a managed Git worktree on a new branch from `HEAD` or
+optional source-control strategy. The Gateway admits only exact mode-specific objects and
+rejects unknown or cross-mode fields before constructing the internal request. `existingCheckout`
+passes the selected directory through unchanged; `newBranchWorktree` creates a managed Git worktree on a new branch from `HEAD` or
 a validated committed base ref; and `existingBranchWorktree` creates a managed worktree from
 an existing local branch. Git arguments are passed without a shell, branch/ref inputs are
 validated, implicit-`HEAD` creation refuses dirty checkouts, and a worktree is removed again
-if session creation fails. Pi itself receives only the resulting canonical `cwd`; its SDK has
-no Git/worktree creation option. Persisted worktrees remain available for later sessions and
-are never silently deleted with a session.
+if session creation fails. Managed worktree roots and repository directories are created and
+checked with non-following directory metadata, then realpath containment is proven before Git
+runs, so pre-existing symlinks cannot redirect a target. Pi itself receives only the resulting
+canonical `cwd`; its SDK has no Git/worktree creation option. Persisted worktrees remain available
+for later sessions and are never silently deleted with a session.
 Settings projections include
 scope-owned documents and effective values, but write-only proxy credentials are removed
 from both; clients receive only `httpProxyConfigured` and can set or explicitly clear the
 canonical value. Persisted settings documents and their responses fail closed before generic JSON
 projection if their depth, members, nodes, strings, or encoded size would be truncated or exceed
-the mobile frame; rejected updates leave the prior document intact. Trust changes reload
+the mobile frame; rejected updates leave the prior document intact. Tree projection validates every
+canonical entry discriminant and required payload before selecting its bounded newest candidates;
+content and blob registration are performed only for admitted candidates. Trust changes reload
 idle live runtimes before acknowledgement; project resources therefore cannot stay
 loaded from an obsolete decision. PTY output has an independent monotonic
 sequence and wire-safe attach replay for gap/reconnect convergence. The global
@@ -375,7 +396,8 @@ replay uses encoded JSON byte accounting below the 1 MiB frame ceiling. Context,
 resources, commands, exports, transcript paging, terminal inventory, and all live-runtime mutations
 require an established open subscription for that exact session. Dashboard rename and delete remain
 explicit catalog-scoped exceptions. Terminal creation and attachment require the terminal's current
-session subscription; input, resize, and termination additionally require attachment ownership on the
+session subscription; each connection's installed subscription-token map is the sole local
+subscription index for routing, admission, rekey, and revocation. Input, resize, and termination additionally require attachment ownership on the
 requesting connection. Closing a session immediately revokes attachment admission. These checks
 prevent stale client selection or reconnect races from reading or mutating a different runtime,
 controlling another connection's PTY, or leaving an orphan terminal process.
@@ -467,8 +489,11 @@ metadata while canonical resource files and runtime loaders remain authoritative
 `session.tree` returns the existing newest-first-selected, chronologically restored
 flat outline of at most 1,000 nodes and 700 KiB with depth, child-count, role, and
 current-path metadata; it never recursively serializes an unbounded canonical tree.
-The projection rejects duplicate canonical entry IDs and oversized retained strings;
-omitted older parents are valid because the bounded outline is not a canonical mirror.
+Every source node, parent link, timestamp, label, child list, and canonical entry ID is
+validated before selection. Content and image blobs are projected only for admitted newest
+candidates, so omitted images do not consume BlobStore capacity. The projection rejects
+duplicate or malformed canonical entries and oversized retained strings; omitted older parents
+are valid because the bounded outline is not a canonical mirror.
 `session.commands` preserves runtime sort order and rejects catalogs above 1,000 rows
 or 700 KiB, duplicate full `source:name` identities, empty names, or command metadata
 strings above 8 KiB before generic JSON projection can truncate the response.
@@ -519,7 +544,9 @@ and is never automatically replayed.
 3. Prompt admission returns an operation ID; client disconnect does not abort it.
 4. Subscribe/open establishes a two-phase baseline barrier: the connection subscribes
    and captures a snapshot cursor, returns that snapshot plus an ephemeral `syncToken` and
-   explicit `subscriptionToken` ownership credential. The client acknowledges the exact
+   explicit `subscriptionToken` ownership credential. The connection-local token map is the
+   sole installed-subscription representation; replacing a session atomically replaces its slot.
+   The client acknowledges the exact
    baseline with `session.sync`, after which only later sequenced events are released.
    While the barrier owns a session's catch-up it is the only delivery path, so every
    in-window event reaches the client exactly once and in sequence. A bounded barrier
@@ -539,7 +566,7 @@ and is never automatically replayed.
 7. A foreground snapshot cannot be idle while the embedded runtime is streaming,
    and an idle snapshot cannot retain a running foreground-tool overlay. Detached
    extension work is represented separately by extension UI state.
-8. Fork/session replacement rekeys the same owning slot and subscriptions.
+8. Fork/session replacement rekeys the same owning slot and subscription-token map entry.
 9. Idle runtimes may be evicted only while not busy and unsubscribed.
 10. Administrative restart waits for admitted agent runs to settle and requires an
     external supervisor; it never claims that in-process runtime memory survives replacement.
@@ -633,7 +660,9 @@ artifact shape, and prioritizes queued/running/paused then newest observations
 before routing them. One Gateway registry owns discovery and the watcher
 lifecycle; RuntimeSlot remains the authority for exact session/tool ownership.
 Per-slot watchers are therefore permitted only after that exact ownership has
-already been proven, and never perform global scans. Shared recency scheduling
+already been proven, and never perform global scans. Pure artifact state and timestamp
+normalization is shared by discovery and watcher refresh, while their admission,
+ownership, receipt, and fail-closed policies remain slot-owned. Shared recency scheduling
 removes only the disposable ambient projection at its wall-clock deadline,
 while canonical history remains available. Detached nonterminal work protects
 its session lane from idle eviction and administrative drain.

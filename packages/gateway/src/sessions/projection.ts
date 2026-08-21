@@ -958,6 +958,100 @@ export const MAX_TREE_NODES = 1_000;
 export const TREE_PROJECTION_BYTES = 700_000;
 export const TREE_PROJECTION_STRING_BYTES = 8_192;
 
+function validTreeString(value: unknown, optional = false): boolean {
+  return optional && value === undefined
+    || typeof value === "string" && value.length > 0 && Buffer.byteLength(value) <= TREE_PROJECTION_STRING_BYTES;
+}
+
+function validContentPart(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const part = value as Record<string, unknown>;
+  switch (part.type) {
+    case "text": return typeof part.text === "string";
+    case "thinking": return typeof part.thinking === "string";
+    case "image": return typeof part.mimeType === "string" && typeof part.data === "string";
+    case "toolCall": return typeof part.id === "string" && typeof part.name === "string"
+      && Object.prototype.hasOwnProperty.call(part, "arguments");
+    default: return false;
+  }
+}
+
+function validMessage(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const message = value as Record<string, unknown>;
+  if (typeof message.role !== "string" || !Number.isFinite(message.timestamp as number)) return false;
+  switch (message.role) {
+    case "user":
+      return (typeof message.content === "string"
+        || Array.isArray(message.content) && message.content.every(validContentPart));
+    case "assistant":
+      return Array.isArray(message.content) && message.content.every(validContentPart)
+        && typeof message.api === "string" && typeof message.provider === "string"
+        && typeof message.model === "string" && !!message.usage && typeof message.usage === "object"
+        && typeof message.stopReason === "string";
+    case "toolResult":
+      return Array.isArray(message.content) && message.content.every(validContentPart)
+        && typeof message.toolCallId === "string" && typeof message.toolName === "string"
+        && typeof message.isError === "boolean";
+    case "bashExecution":
+      return typeof message.command === "string" && typeof message.output === "string"
+        && (message.exitCode === undefined || Number.isSafeInteger(message.exitCode))
+        && typeof message.cancelled === "boolean" && typeof message.truncated === "boolean";
+    case "custom":
+      return typeof message.customType === "string"
+        && (typeof message.content === "string"
+          || Array.isArray(message.content) && message.content.every(validContentPart))
+        && typeof message.display === "boolean";
+    case "branchSummary":
+      return typeof message.fromId === "string" && typeof message.summary === "string";
+    case "compactionSummary":
+      return typeof message.summary === "string" && Number.isSafeInteger(message.tokensBefore);
+    default:
+      return false;
+  }
+}
+
+/** Validate canonical shape without calling projectEntry/projectContent. This
+ * keeps omitted history fail-closed while reserving blob registration for an
+ * already admitted tree candidate. */
+function validateCanonicalEntry(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new GatewayError("conflict", "Session tree contains a malformed canonical entry");
+  }
+  const entry = value as Record<string, unknown>;
+  if (!validTreeString(entry.id) || (entry.parentId !== null && !validTreeString(entry.parentId))
+    || typeof entry.type !== "string") {
+    throw new GatewayError("conflict", "Session tree contains an invalid canonical entry");
+  }
+  if (typeof entry.timestamp !== "string" || !isGatewayTimestamp(entry.timestamp)) {
+    throw new GatewayError("conflict", "Session tree contains an invalid or oversized string");
+  }
+  let valid = false;
+  if (typeof entry.customType === "string" && Buffer.byteLength(entry.customType) > TREE_PROJECTION_STRING_BYTES) {
+    throw new GatewayError("conflict", "Session tree contains an invalid or oversized string");
+  }
+  switch (entry.type) {
+    case "message": valid = validMessage(entry.message); break;
+    case "thinking_level_change": valid = validTreeString(entry.thinkingLevel); break;
+    case "model_change": valid = validTreeString(entry.provider) && validTreeString(entry.modelId); break;
+    case "compaction":
+      valid = validTreeString(entry.summary) && validTreeString(entry.firstKeptEntryId)
+        && Number.isSafeInteger(entry.tokensBefore); break;
+    case "branch_summary":
+      valid = validTreeString(entry.fromId) && validTreeString(entry.summary); break;
+    case "custom": valid = validTreeString(entry.customType); break;
+    case "custom_message":
+      valid = validTreeString(entry.customType)
+        && (typeof entry.content === "string"
+          || Array.isArray(entry.content) && entry.content.every(validContentPart))
+        && typeof entry.display === "boolean"; break;
+    case "label": valid = validTreeString(entry.targetId) && (entry.label === undefined || validTreeString(entry.label)); break;
+    case "session_info": valid = entry.name === undefined || validTreeString(entry.name); break;
+    default: valid = false;
+  }
+  if (!valid) throw new GatewayError("conflict", "Session tree contains an invalid canonical entry payload");
+}
+
 function validateProjectedTreeNode(node: SessionTreeNode): void {
   const required = [node.id, node.kind];
   const optionalNonempty = [node.parentId ?? undefined, node.label, node.role];
@@ -993,53 +1087,82 @@ function projectedTreeNode(
   };
 }
 
+interface TreeProjectionRef {
+  source: PiSessionTreeNode;
+  depth: number;
+}
+
+// A dry projector preserves the exact projected shape without registering image
+// bytes. Real BlobStore registration occurs only after a candidate is admitted.
+const treeProjectionProbe = { register: () => "x".repeat(43) } as unknown as BlobStore;
+
+function validateSourceTreeNode(source: PiSessionTreeNode, expectedParentId: string | null, depth: number): void {
+  if (!source || typeof source !== "object") throw new GatewayError("conflict", "Session tree contains a malformed node");
+  const raw = source as unknown as Record<string, unknown>;
+  const entry = raw.entry as Record<string, unknown> | undefined;
+  const children = raw.children;
+  if (!entry || typeof entry !== "object" || !Array.isArray(children)
+    || entry.parentId !== expectedParentId
+    || children.length > MAX_TREE_NODES * 2 || depth > MAX_TREE_NODES * 32) {
+    throw new GatewayError("conflict", "Session tree contains a malformed node");
+  }
+  validateCanonicalEntry(entry);
+  if (raw.label !== undefined && !validTreeString(raw.label)) {
+    throw new GatewayError("conflict", "Session tree contains an invalid or oversized string");
+  }
+}
+
 export function projectTree(manager: SessionManager, blobs: BlobStore): SessionTreeNode[] {
   const canonicalRoots = manager.getTree();
   const currentPath = new Set(manager.getBranch().map((entry) => entry.id));
-  const byId = new Map<string, SessionTreeNode>();
-  const work: Array<{ source: PiSessionTreeNode; depth: number }> = [];
+  const byId = new Map<string, TreeProjectionRef>();
+  const seenSourceIDs = new Set<string>();
+  const work: Array<{ source: PiSessionTreeNode; depth: number; parentId: string | null }> = [];
   for (let index = canonicalRoots.length - 1; index >= 0; index -= 1) {
-    work.push({ source: canonicalRoots[index]!, depth: 0 });
+    work.push({ source: canonicalRoots[index]!, depth: 0, parentId: null });
   }
   while (work.length > 0) {
-    const { source, depth } = work.pop()!;
-    if (source.entry.type === "custom" && source.entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE) {
-      // Preserve descendants while omitting the reserved audit node itself.
-      for (let index = source.children.length - 1; index >= 0; index -= 1) {
-        work.push({ source: source.children[index]!, depth });
-      }
-      continue;
-    }
-    if (byId.has(source.entry.id)) {
-      throw new GatewayError("conflict", "Session tree contains a duplicate canonical entry ID");
-    }
-    byId.set(source.entry.id, projectedTreeNode(source, blobs, depth, currentPath));
+    const { source, depth, parentId } = work.pop()!;
+    validateSourceTreeNode(source, parentId, depth);
+    const id = source.entry.id;
+    if (seenSourceIDs.has(id)) throw new GatewayError("conflict", "Session tree contains a duplicate canonical entry ID");
+    seenSourceIDs.add(id);
+    const isReceipt = source.entry.type === "custom" && source.entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE;
+    if (!isReceipt) byId.set(id, { source, depth });
+    // Preserve descendants while omitting reserved audit nodes themselves.
     for (let index = source.children.length - 1; index >= 0; index -= 1) {
-      work.push({ source: source.children[index]!, depth: depth + 1 });
+      work.push({ source: source.children[index]!, depth: isReceipt ? depth : depth + 1, parentId: id });
+    }
+  }
+
+  const entries = manager.getEntries();
+  const canonicalEntryIDs = new Set<string>();
+  for (const entry of entries) {
+    validateCanonicalEntry(entry);
+    if (canonicalEntryIDs.has(entry.id)) throw new GatewayError("conflict", "Session tree contains a duplicate canonical entry ID");
+    canonicalEntryIDs.add(entry.id);
+    const omittedReceipt = entry.type === "custom" && entry.customType === EXTENSION_ACTIVITY_RECEIPT_TYPE;
+    if (!omittedReceipt && !byId.has(entry.id)) {
+      throw new GatewayError("conflict", "Session tree omits a canonical entry");
     }
   }
 
   // Admit the newest canonical entries first, then restore chronological order.
-  // This keeps the current fork/navigation points useful when a large session
-  // exceeds the bounded mobile projection.
+  // Dry projection is intentionally side-effect free so omitted images never
+  // consume BlobStore capacity.
   const selected: SessionTreeNode[] = [];
   let bytes = 2;
-  const entries = manager.getEntries();
-  const canonicalEntryIDs = new Set<string>();
-  for (const entry of entries) {
-    if (canonicalEntryIDs.has(entry.id)) {
-      throw new GatewayError("conflict", "Session tree contains a duplicate canonical entry ID");
-    }
-    canonicalEntryIDs.add(entry.id);
-  }
   for (let index = entries.length - 1; index >= 0 && selected.length < MAX_TREE_NODES; index -= 1) {
-    const node = byId.get(entries[index]!.id);
-    if (!node) continue;
-    validateProjectedTreeNode(node);
-    const nodeBytes = Buffer.byteLength(JSON.stringify(node)) + 1;
+    const ref = byId.get(entries[index]!.id);
+    if (!ref) continue;
+    const candidate = projectedTreeNode(ref.source, treeProjectionProbe, ref.depth, currentPath);
+    validateProjectedTreeNode(candidate);
+    const nodeBytes = Buffer.byteLength(JSON.stringify(candidate)) + 1;
     if (bytes + nodeBytes > TREE_PROJECTION_BYTES) break;
-    bytes += nodeBytes;
-    selected.push(node);
+    const admitted = projectedTreeNode(ref.source, blobs, ref.depth, currentPath);
+    validateProjectedTreeNode(admitted);
+    bytes += Buffer.byteLength(JSON.stringify(admitted)) + 1;
+    selected.push(admitted);
   }
   return selected.reverse();
 }

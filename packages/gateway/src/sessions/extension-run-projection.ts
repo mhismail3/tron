@@ -119,10 +119,24 @@ export function admitExtensionLifecycleArtifact(
   if (!versionAccepted
     || typeof artifact.runId !== "string" || artifact.runId.trim().length === 0
     || extensionLifecycleState(artifact.state ?? artifact.status) === "unknown") return undefined;
-  for (const key of ["startedAt", "lastUpdate"] as const) {
-    if (!Number.isSafeInteger(artifact[key]) || (artifact[key] as number) < 0) return undefined;
+  const state = extensionLifecycleState(artifact.state ?? artifact.status);
+  const startedAt = artifact.startedAt;
+  const lastUpdate = artifact.lastUpdate;
+  // completedAt is the supported older spelling of endedAt. If both are
+  // present, an invalid primary value must not be hidden by the alias.
+  const terminalAt = artifact.endedAt !== undefined ? artifact.endedAt : artifact.completedAt;
+  for (const value of [startedAt, lastUpdate]) {
+    if (!Number.isSafeInteger(value) || (value as number) < 0) return undefined;
   }
   if (artifact.endedAt !== undefined && (!Number.isSafeInteger(artifact.endedAt) || (artifact.endedAt as number) < 0)) return undefined;
+  if (artifact.completedAt !== undefined && (!Number.isSafeInteger(artifact.completedAt) || (artifact.completedAt as number) < 0)) return undefined;
+  const startedMilliseconds = startedAt as number;
+  const updatedMilliseconds = lastUpdate as number;
+  if (updatedMilliseconds < startedMilliseconds) return undefined;
+  if (terminalAt !== undefined) {
+    if ((terminalAt as number) < startedMilliseconds || (terminalAt as number) < updatedMilliseconds) return undefined;
+  }
+  if (terminalLifecycleStates.has(state) && terminalAt === undefined) return undefined;
   return artifact;
 }
 
@@ -147,6 +161,59 @@ export function extensionLifecycleState(value: unknown, fallback: ExtensionRunLi
   if (value === "complete") return "completed";
   if (value === "pending" || value === "detached") return "running";
   return fallback;
+}
+
+export interface NormalizedExtensionArtifact {
+  lifecycleState: ExtensionRunLifecycleState;
+  status: "running" | "completed" | "failed";
+  terminal: boolean;
+  startedAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  durationMs?: number;
+}
+
+/** Purely normalize producer artifact state and timestamps. Filesystem
+ * admission, ownership, receipts, and watcher policy remain RuntimeSlot work. */
+export function normalizeExtensionArtifact(
+  value: Record<string, unknown>,
+  options: { now: string; fallbackStartedAt?: string; fallbackUpdatedAt?: string; useArtifactStartedAt?: boolean },
+): NormalizedExtensionArtifact | undefined {
+  const lifecycleState = extensionLifecycleState(value.state ?? value.status);
+  if (lifecycleState === "unknown") return undefined;
+  const terminal = terminalLifecycleStates.has(lifecycleState);
+  const status = lifecycleState === "failed" ? "failed" : terminal ? "completed" : "running";
+  const artifactStartedAt = value.startedAt === undefined ? undefined : isoTime(value.startedAt);
+  const artifactUpdatedAt = value.lastUpdate === undefined ? undefined : isoTime(value.lastUpdate);
+  const artifactEndedAt = value.endedAt !== undefined ? isoTime(value.endedAt)
+    : value.completedAt !== undefined ? isoTime(value.completedAt) : undefined;
+  if ((value.startedAt !== undefined && !artifactStartedAt)
+      || (value.lastUpdate !== undefined && !artifactUpdatedAt)
+      || (value.endedAt !== undefined && !artifactEndedAt)
+      || (value.completedAt !== undefined && !isoTime(value.completedAt))) return undefined;
+  const startedAt = (options.useArtifactStartedAt !== false ? artifactStartedAt : undefined) ?? options.fallbackStartedAt;
+  const updatedAt = artifactUpdatedAt ?? options.fallbackUpdatedAt ?? startedAt ?? options.now;
+  const completedAt = terminal ? artifactEndedAt : undefined;
+  if (terminal && !completedAt) return undefined;
+  const startedMilliseconds = Date.parse(startedAt ?? options.now);
+  const updatedMilliseconds = Date.parse(updatedAt);
+  const endedMilliseconds = artifactEndedAt === undefined ? undefined : Date.parse(artifactEndedAt);
+  if (!Number.isFinite(startedMilliseconds) || !Number.isFinite(updatedMilliseconds)
+      || updatedMilliseconds < startedMilliseconds
+      || (endedMilliseconds !== undefined
+        && (!Number.isFinite(endedMilliseconds)
+          || endedMilliseconds < startedMilliseconds
+          || endedMilliseconds < updatedMilliseconds))) return undefined;
+  const durationMs = number(value.durationMs);
+  return {
+    lifecycleState,
+    status,
+    terminal,
+    startedAt: startedAt ?? options.now,
+    updatedAt,
+    ...(completedAt ? { completedAt } : {}),
+    ...(durationMs === undefined || durationMs < 0 ? {} : { durationMs }),
+  };
 }
 
 function attention(value: unknown): ExtensionRunAttention {

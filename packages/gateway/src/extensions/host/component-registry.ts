@@ -34,11 +34,14 @@ export class ComponentRegistry {
   get mountedRecords(): readonly ComponentRecord[] { return [...this.records.values()].filter((record) => record.state === "mounted"); }
 
   set(key: string, factory: RemoteComponentFactory): boolean {
+    // Reject before touching the current generation. In particular, a retired
+    // registry must not remove an existing record while rejecting a late
+    // replacement.
+    if (this.retired) return false;
     const maximumRecords = this.options.maxRecords ?? 24;
     if (this.pendingFactories >= maximumRecords) return false;
     if (!this.records.has(key) && this.records.size >= maximumRecords) return false;
     this.remove(key);
-    if (this.retired) return false;
     const generation = (this.generations.get(key) ?? 0) + 1;
     this.generations.set(key, generation);
     const record = { key, hostEpoch: this.options.hostEpoch, generation, recording: undefined as unknown as RecordingComponent, state: "pending" as ComponentRecordState, factoryPending: true };

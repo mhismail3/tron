@@ -80,6 +80,7 @@ struct ChatView: View {
     @State private var queuedMessageEditor: QueuedMessageEditorRoute?
     @State private var mutatingQueuedMessageIDs: Set<String> = []
     @State private var pendingQueueMutationRevision: Int?
+    @State private var earlierMessagesOperation = ChatEarlierMessagesOperationOwner()
     @State private var openPresentation: ChatOpenPresentationState
     @State private var openingTask: Task<Void, Never>?
     @State private var modelPresentationGeneration: Int?
@@ -190,9 +191,9 @@ struct ChatView: View {
             .presentationDragIndicator(.hidden)
         }
         .sheet(item: $queuedMessageEditor) { route in
-            if let message = selectedAuthoritativeSnapshot?.displayedQueuedMessages.first(
-                where: { $0.id == route.id }
-            ) {
+            if let commit = QueuedMessageManagementPolicy.installedCommit(
+                for: transcriptPresentation.installed
+            ), let message = commit.items.first(where: { $0.id == route.id }) {
                 QueuedMessageEditorSheet(
                     message: message,
                     isSaving: mutatingQueuedMessageIDs.contains(message.id),
@@ -205,11 +206,19 @@ struct ChatView: View {
                 )
             } else {
                 ContentUnavailableView(
-                    "Message No Longer Queued",
-                    systemImage: "text.badge.xmark",
-                    description: Text("It was delivered or removed before the editor opened.")
+                    "Queue Editing Unavailable",
+                    systemImage: "exclamationmark.triangle",
+                    description: Text("Queue management is no longer available for this Gateway commit.")
                 )
             }
+        }
+        .onChange(of: transcriptPresentation.installed) { _, installed in
+            // Revoke an editor at the same installed commit boundary as its
+            // controls. mutateQueue also fails closed for an action already
+            // queued by SwiftUI before this dismissal is rendered.
+            guard queuedMessageEditor != nil,
+                  QueuedMessageManagementPolicy.installedCommit(for: installed) == nil else { return }
+            queuedMessageEditor = nil
         }
         .sheet(isPresented: attachmentPresentationBinding(for: .camera)) {
             CameraCaptureSheet { image in Task { await importCameraImage(image) } }
@@ -389,6 +398,7 @@ struct ChatView: View {
             openingTask = nil
             scrollCoordinator.cancel()
             transcriptPresentation.reset()
+            earlierMessagesOperation.cancel()
             canonicalSubmissionHandoffs.removeAll()
             performanceTracker.cancelAll()
             cancelAttachmentPresentation(includingActive: true)
@@ -608,13 +618,11 @@ struct ChatView: View {
     @ViewBuilder
     private func queuedMessageRows(_ installed: InstalledChatTranscript) -> some View {
         let messages = installed.queuedMessages
-        let managementAvailability = isTranscriptProjectionUpdating
-            ? QueuedMessageManagementAvailability.updatingProjection
-            : QueuedMessageManagementPolicy.availability(
-                capabilities: model.gatewayInfo?.capabilities ?? [],
-                queueRevision: installed.queueRevision,
-                hasAuthoritativeItems: installed.supportsQueueManagement
-            )
+        let managementAvailability = QueuedMessageManagementPolicy.availability(
+            queueManagementCapability: installed.tag.queueManagementCapability,
+            queueRevision: installed.queueRevision,
+            hasAuthoritativeItems: installed.supportsQueueManagement
+        )
         ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
             stableTranscriptRow(
                 id: "queued-message-\(message.id)",
@@ -756,6 +764,16 @@ struct ChatView: View {
         }
     }
 
+    /// A disconnected Gateway must not revoke the installed commit. Once a
+    /// Gateway reports a capability again, its exact fact becomes part of the
+    /// next desired commit and is published atomically with that transcript.
+    private var queueManagementCapabilityForProjection: Bool {
+        guard let gatewayInfo = model.gatewayInfo else {
+            return transcriptPresentation.installed?.tag.queueManagementCapability ?? false
+        }
+        return gatewayInfo.capabilities.contains(QueuedMessageManagementPolicy.capability)
+    }
+
     private var transcriptProjectionSource: ChatTranscriptProjectionTag? {
         guard let snapshot = selectedAuthoritativeSnapshot,
               let generation = modelPresentationGeneration,
@@ -771,7 +789,8 @@ struct ChatView: View {
             timelineGeneration: projection.timeline,
             entranceSuppressionGeneration: model.foregroundReconciliationGeneration == 0
                 ? nil
-                : model.foregroundReconciliationGeneration
+                : model.foregroundReconciliationGeneration,
+            queueManagementCapability: queueManagementCapabilityForProjection
         )
     }
 
@@ -795,7 +814,8 @@ struct ChatView: View {
                 timelineGeneration: projection.timeline,
                 entranceSuppressionGeneration: model.foregroundReconciliationGeneration == 0
                     ? nil
-                    : model.foregroundReconciliationGeneration
+                    : model.foregroundReconciliationGeneration,
+                queueManagementCapability: queueManagementCapabilityForProjection
             )
             transcriptPresentation.submit(snapshot: snapshot, tag: tag)
             do {
@@ -941,15 +961,12 @@ struct ChatView: View {
 
     private var isTranscriptReady: Bool { openPresentation.phase == .ready }
 
-    private var isTranscriptProjectionUpdating: Bool {
-        guard let desired = transcriptProjectionSource else {
-            return transcriptPresentation.installed != nil
-        }
-        return transcriptPresentation.installed?.tag != desired
-    }
-
     private var isLoadingEarlierMessages: Bool {
-        model.loadingEarlierTranscript || scrollCoordinator.isPrependingHistory
+        ChatEarlierMessagesOperationPolicy.isLoading(
+            owner: earlierMessagesOperation,
+            modelLoading: model.loadingEarlierTranscript,
+            scrollLoading: scrollCoordinator.isPrependingHistory
+        )
     }
 
     private var transcriptRevealAnimation: Animation {
@@ -1005,6 +1022,9 @@ struct ChatView: View {
 
     @MainActor
     private func beginOpeningPresentation() async {
+        // Retiring/restarting presentation authority cancels any local page
+        // admission; late model/scroll completions are token-gated.
+        earlierMessagesOperation.cancel()
         if composerScope == nil, let profileID = model.profiles.selected?.id {
             composerScope = model.composerDrafts.prepareDraft(
                 profileID: profileID,
@@ -1230,7 +1250,10 @@ struct ChatView: View {
                 )
             },
             prepend: {
-                guard let generation = modelPresentationGeneration else { return false }
+                guard !isLoadingEarlierMessages,
+                      let generation = modelPresentationGeneration,
+                      let operationToken = earlierMessagesOperation.begin() else { return false }
+                let admission = ChatEarlierMessagesOperationAdmission()
                 let anchor = transcriptPresentation.installed
                     .flatMap { installed in
                         installed.tag == transcriptProjectionSource
@@ -1266,17 +1289,26 @@ struct ChatView: View {
                             installedLayout: installedLayout
                         )
                     },
-                    completion: { probe.recordPrependCompletion($0) }
+                    completion: { [admission] result in
+                        probe.recordPrependCompletion(result)
+                        guard admission.coordinatorAdmitted else { return }
+                        self.settleEarlierMessagesOperation(operationToken)
+                    }
                 )
-                guard !began else { return true }
+                if began {
+                    admission.coordinatorAdmitted = true
+                    return true
+                }
                 // The native coordinator may reject anchoring because its
                 // command/semantic sample is stale. Canonical history still
                 // starts, and its projection is installed explicitly.
                 Task { @MainActor in
+                    defer { self.settleEarlierMessagesOperation(operationToken) }
                     do { try await probe.waitForPrependPageRelease() } catch { return }
                     await loadEarlierTranscriptUnanchored(
                         sessionID: sessionID,
-                        presentationGeneration: generation
+                        presentationGeneration: generation,
+                        operationToken: operationToken
                     )
                 }
                 return true
@@ -1425,10 +1457,17 @@ struct ChatView: View {
     }
 
     @MainActor
+    private func settleEarlierMessagesOperation(_ token: ChatEarlierMessagesOperationOwner.Token) {
+        earlierMessagesOperation.settle(token)
+    }
+
+    @MainActor
     private func loadEarlierTranscriptUnanchored(
         sessionID: String,
-        presentationGeneration: Int
+        presentationGeneration: Int,
+        operationToken: ChatEarlierMessagesOperationOwner.Token
     ) async {
+        defer { settleEarlierMessagesOperation(operationToken) }
         let result = await model.loadEarlierTranscript(
             sessionID: sessionID,
             presentationGeneration: presentationGeneration
@@ -1446,12 +1485,13 @@ struct ChatView: View {
     private func earlierMessagesChip(installed: InstalledChatTranscript) -> some View {
         Button {
             guard !isLoadingEarlierMessages,
-                  !isTranscriptProjectionUpdating,
-                  let presentationGeneration = modelPresentationGeneration else { return }
+                  let presentationGeneration = modelPresentationGeneration,
+                  let operationToken = earlierMessagesOperation.begin() else { return }
             let sessionID = installed.tag.sessionID
             let capturedAnchor = transcriptPresentation.installed.map {
                 scrollCoordinator.semanticAnchor(in: $0.timeline)
             } ?? nil
+            let admission = ChatEarlierMessagesOperationAdmission()
             let began = scrollCoordinator.beginPrepend(
                 anchor: capturedAnchor,
                 load: { @MainActor in
@@ -1482,16 +1522,23 @@ struct ChatView: View {
                         installedLayout: installedLayout
                     )
                 },
-                completion: { _ in }
+                completion: { [admission] _ in
+                    guard admission.coordinatorAdmitted else { return }
+                    self.settleEarlierMessagesOperation(operationToken)
+                }
             )
-            guard !began else { return }
+            if began {
+                admission.coordinatorAdmitted = true
+                return
+            }
             // beginPrepend is deliberately strict for viewport preservation;
             // its rejection is not permission to turn a canonical request into
             // a silent no-op.
             Task { @MainActor in
                 await loadEarlierTranscriptUnanchored(
                     sessionID: sessionID,
-                    presentationGeneration: presentationGeneration
+                    presentationGeneration: presentationGeneration,
+                    operationToken: operationToken
                 )
             }
         } label: {
@@ -1506,22 +1553,18 @@ struct ChatView: View {
                 Text(
                     isLoadingEarlierMessages
                         ? "Loading earlier…"
-                        : isTranscriptProjectionUpdating
-                            ? "Updating transcript…"
-                            : "Load earlier messages"
+                        : "Load earlier messages"
                 )
             }
             .chatTranscriptPill()
         }
         .buttonStyle(.plain)
-        .disabled(isLoadingEarlierMessages || isTranscriptProjectionUpdating)
+        .disabled(isLoadingEarlierMessages)
         .frame(maxWidth: .infinity, minHeight: 44)
         .accessibilityLabel(
             isLoadingEarlierMessages
                 ? "Loading earlier messages"
-                : isTranscriptProjectionUpdating
-                    ? "Updating transcript"
-                    : "Load earlier messages"
+                : "Load earlier messages"
         )
         .overlay(alignment: .bottom) {
             if case let .failed(message) = model.transcriptLoadState {
@@ -1996,19 +2039,24 @@ struct ChatView: View {
         mutation: (inout [SessionSnapshot.QueuedMessage]) throws -> Void
     ) async {
         guard mutatingQueuedMessageIDs.isEmpty,
-              let target = presentationTarget,
-              let snapshot = selectedAuthoritativeSnapshot,
-              let expectedRevision = snapshot.queueRevision,
-              var items = snapshot.queuedItems else { return }
-        do { try mutation(&items) }
-        catch { return }
+              let target = presentationTarget else { return }
+        let commit: QueuedMessageManagementCommit
+        do {
+            guard let prepared = try QueuedMessageManagementPolicy.mutationCommit(
+                for: transcriptPresentation.installed,
+                mutation: mutation
+            ) else { return }
+            commit = prepared
+        } catch {
+            return
+        }
         mutatingQueuedMessageIDs.insert(affectedID)
-        pendingQueueMutationRevision = expectedRevision
+        pendingQueueMutationRevision = commit.expectedRevision
         do {
             try await model.replaceQueue(
                 sessionID: sessionID,
-                expectedRevision: expectedRevision,
-                items: items
+                expectedRevision: commit.expectedRevision,
+                items: commit.items
             )
             // Keep controls inert until the exact newer sequenced queue frame
             // installs. A command response alone is not projection authority.

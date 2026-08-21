@@ -55,40 +55,52 @@ export class GatewayProtocolClient {
     this.closeError = undefined;
     return new Promise<JsonValue>((resolve, reject) => {
       const timer = setTimeout(() => {
-        socket.terminate();
-        reject(new GatewayClientError("timeout", "Gateway handshake timed out", true));
+        fail(new GatewayClientError("timeout", "Gateway handshake timed out", true));
+        if (this.isCurrent(socket)) socket.terminate();
       }, timeoutMs);
       timer.unref();
+      let settled = false;
       const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
         reject(error);
       };
       socket.once("error", fail);
       socket.once("open", () => {
+        if (!this.isCurrent(socket)) return;
         socket.send(JSON.stringify({ type: "hello", protocolVersion: PROTOCOL_VERSION, clientId: randomUUID() }));
       });
       socket.on("message", (raw) => {
+        if (!this.isCurrent(socket)) return;
         try {
           const frame = JSON.parse(raw.toString()) as Record<string, unknown>;
           if (frame.type === "hello") {
             if (frame.protocolVersion !== PROTOCOL_VERSION || frame.minProtocolVersion !== PROTOCOL_VERSION) {
-              clearTimeout(timer);
+              fail(new GatewayClientError("protocol_mismatch", "Gateway protocol is not compatible", false));
               socket.terminate();
-              reject(new GatewayClientError("protocol_mismatch", "Gateway protocol is not compatible", false));
               return;
             }
+            settled = true;
             clearTimeout(timer);
             socket.off("error", fail);
             resolve(frame as JsonValue);
             return;
           }
-          this.handleFrame(frame);
+          this.handleFrame(socket, frame);
         } catch (error) {
-          this.close(error instanceof Error ? error : new Error(String(error)));
+          if (this.isCurrent(socket)) this.close(error instanceof Error ? error : new Error(String(error)));
         }
       });
-      socket.on("error", (error) => { this.closeError = new GatewayClientError("disconnected", error.message, true); });
+      socket.on("error", (error) => {
+        if (this.isCurrent(socket)) this.closeError = new GatewayClientError("disconnected", error.message, true);
+      });
       socket.on("close", (_code, reason) => {
+        if (!this.isCurrent(socket)) {
+          if (!settled) fail(new GatewayClientError("disconnected", reason.toString() || "Gateway disconnected", true));
+          return;
+        }
+        if (!settled) fail(this.closeError ?? new GatewayClientError("disconnected", reason.toString() || "Gateway disconnected", true));
         const error = this.closeError ?? new GatewayClientError("disconnected", reason.toString() || "Gateway disconnected", true);
         this.failPending(error);
         this.socket = undefined;
@@ -140,7 +152,10 @@ export class GatewayProtocolClient {
     this.failPending(error);
   }
 
-  private handleFrame(frame: Record<string, unknown>): void {
+  private isCurrent(socket: WebSocket): boolean { return this.socket === socket; }
+
+  private handleFrame(socket: WebSocket, frame: Record<string, unknown>): void {
+    if (!this.isCurrent(socket)) return;
     if (frame.type === "response" && typeof frame.id === "string") {
       const pending = this.pending.get(frame.id);
       if (!pending) return;

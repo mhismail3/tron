@@ -50,6 +50,19 @@ struct ExtensionQuestionnaireTests {
         )))
     }
 
+    @Test func crossMethodFieldsAreRejectedBeforePresentation() {
+        let base = { (value: ExtensionInteraction) in
+            ExtensionPresentationState(
+                version: 2, hostEpoch: "epoch", revision: 1, capabilities: [], diagnostics: [],
+                semanticState: .init(statuses: [:], statusOwners: [:], working: .init(visible: true, indicator: .init(kind: .default, frames: [])), widgets: [], toolsExpanded: false, editorRevision: 0, editorText: ""),
+                surfaces: [], pendingInteractions: [value]
+            )
+        }
+        #expect(!ExtensionPresentationPolicy.admit(base(ExtensionInteraction(id: "confirm", hostEpoch: "epoch", presentationRevision: 1, method: .confirm, title: "Confirm", options: ["bad"]))))
+        #expect(!ExtensionPresentationPolicy.admit(base(ExtensionInteraction(id: "input", hostEpoch: "epoch", presentationRevision: 1, method: .input, title: "Input", options: ["bad"]))))
+        #expect(!ExtensionPresentationPolicy.admit(base(ExtensionInteraction(id: "editor", hostEpoch: "epoch", presentationRevision: 1, method: .editor, title: "Editor", questionnaire: ExtensionQuestionnaireDescriptor(version: 1, question: "q", context: nil, options: [ExtensionQuestionnaireOption(label: "one", description: nil, preview: nil)], allowMultiple: false, allowFreeform: false)))))
+    }
+
     @Test func nestedOptionDecodingIsBoundedAndUnknownFieldsRemainCompatible() throws {
         let options = String(repeating: "{\"label\":\"x\"},", count: 65).dropLast()
         let json = "{\"version\":1,\"question\":\"Pick\",\"options\":[\(options)],\"allowMultiple\":false,\"allowFreeform\":false,\"future\":true}"

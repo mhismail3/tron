@@ -57,7 +57,7 @@ import {
 } from "./projection.js";
 import type { RunMarkerStore } from "./run-markers.js";
 import { attributeExtensions, extensionOwnerFor } from "../extensions/owner-attribution.js";
-import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionLifecycleArtifact, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasStructuredExtensionRunActivity, projectExtensionRunActivity } from "./extension-run-projection.js";
+import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionLifecycleArtifact, admitExtensionRunActivity, boundExtensionActivities, extensionActivityId, extensionActivityStatusFromTool, extensionLifecycleState, extensionRunAsyncDir, hasStructuredExtensionRunActivity, normalizeExtensionArtifact, projectExtensionRunActivity } from "./extension-run-projection.js";
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import type { ExtensionActivityHistoryPage } from "./extension-activity-history.js";
@@ -179,7 +179,6 @@ export class RuntimeSlot {
   /** Monotonic lifecycle projection ordering and terminal latches are runtime
    * facts; producer timestamps are display evidence only. */
   private readonly extensionActivitySequences = new Map<string, number>();
-  private readonly extensionActivityTerminals = new Set<string>();
   private liveActivityRevision = 0;
   private extensionActivityAsOf = new Date().toISOString();
   /** Gateway-owned correlation keeps one activity identity across Pi lifecycle
@@ -463,8 +462,6 @@ export class RuntimeSlot {
       this.clearExtensionActivityWatchers();
       this.extensionActivities.clear();
       this.extensionActivitySequences.clear();
-      this.extensionActivityTerminals.clear();
-
       this.extensionRunOwnership.clear();
       this.hooks.rekey(previousId, nextId, this);
     }
@@ -1105,7 +1102,10 @@ export class RuntimeSlot {
         .filter((value): value is string => typeof value === "string");
       return paths.some((value) => /(?:^|[\\/])pi-subagents(?:[\\/]|$)/u.test(value));
     });
-    if (extension) return { owner: extensionOwnerFor(extension) };
+    if (extension) {
+      const owner = extensionOwnerFor(extension);
+      return { source: owner.source, owner };
+    }
     return { source: "pi-subagents" };
   }
 
@@ -1212,16 +1212,17 @@ export class RuntimeSlot {
       const toolCallId = existingEntry?.[0];
       if (!toolCallId) return;
       const previous = existingEntry?.[1];
-      const lifecycleState = extensionLifecycleState(raw.state ?? raw.status);
-      if (lifecycleState === "unknown") return;
-      const state = lifecycleState === "failed" ? "failed" : lifecycleState === "running" || lifecycleState === "queued" || lifecycleState === "paused" ? "running" : "completed";
+      const normalized = normalizeExtensionArtifact(raw, {
+        now: new Date().toISOString(),
+        ...(previous?.startedAt ? { fallbackStartedAt: previous.startedAt } : {}),
+        ...(previous?.updatedAt ? { fallbackUpdatedAt: previous.updatedAt } : {}),
+        useArtifactStartedAt: false,
+      });
+      if (!normalized) return;
+      const { status: state, startedAt, updatedAt, completedAt, durationMs } = normalized;
       // A terminal lifecycle event is authoritative; a late running artifact
       // enriches neither status nor ownership and must not resurrect the pill.
       if (ownership?.terminal && state === "running") return;
-      const startedAt = this.artifactTime(raw.startedAt) ?? previous?.startedAt ?? new Date().toISOString();
-      const updatedAt = this.artifactTime(raw.lastUpdate) ?? previous?.updatedAt ?? startedAt;
-      const completedAt = state === "running" ? undefined : this.artifactTime(raw.endedAt) ?? updatedAt;
-      const durationMs = typeof raw.durationMs === "number" && Number.isSafeInteger(raw.durationMs) && raw.durationMs >= 0 ? raw.durationMs : undefined;
       const artifactValue = ownership?.terminal
         ? { ...raw, state: previous?.status === "failed" ? "failed" : "completed" }
         : raw;
@@ -1231,7 +1232,7 @@ export class RuntimeSlot {
       const observedAt = new Date().toISOString();
       const terminalAt = state === "running"
         ? previous?.lifecycle?.terminalAt
-        : previous?.lifecycle?.terminalAt ?? completedAt ?? observedAt;
+        : previous?.lifecycle?.terminalAt ?? observedAt;
       const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
       const activity = projectExtensionRunActivity(artifactValue, {
         id: previous?.id ?? toolCallId,
@@ -1251,6 +1252,10 @@ export class RuntimeSlot {
         ...(terminalAt ? { terminalAt } : {}),
         ...(recentUntil ? { recentUntil } : {}),
       });
+      // Ambient discovery is another producer of lifecycle candidates. Apply
+      // the same Gateway terminal latch and sequence admission as live tool
+      // events before replacing an existing row.
+      if (admitExtensionRunActivity(previous, activity) === previous) return;
       const ownershipAccepted = this.bindExtensionRunOwnership(runId, {
         toolCallId,
         asyncDir: realAsyncDir,
@@ -1293,11 +1298,6 @@ export class RuntimeSlot {
   private clearExtensionActivityWatchers(): void {
     for (const toolCallId of this.extensionActivityWatchers.keys()) this.stopExtensionActivityWatcher(toolCallId);
     this.extensionActivityReadGenerations.clear();
-  }
-
-  private artifactTime(value: unknown): string | undefined {
-    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > 8.64e15) return undefined;
-    return new Date(value).toISOString();
   }
 
   private canonicalExtensionArtifactDirectory(asyncDir: string): string | undefined {
@@ -1421,20 +1421,19 @@ export class RuntimeSlot {
         const canonicalAsyncDir = this.canonicalExtensionArtifactDirectory(canonical.asyncDir);
         if (!canonicalAsyncDir || canonicalAsyncDir !== realAsyncDir) return;
       }
-      const updatedAt = this.artifactTime(raw.lastUpdate) ?? new Date().toISOString();
-      const artifactLifecycleState = extensionLifecycleState(raw.state ?? raw.status);
-      if (artifactLifecycleState === "unknown") return;
-      const artifactState = artifactLifecycleState === "failed" ? "failed" : artifactLifecycleState === "running" || artifactLifecycleState === "queued" || artifactLifecycleState === "paused" ? "running" : "completed";
+      const normalized = normalizeExtensionArtifact(raw, {
+        now: new Date().toISOString(),
+        fallbackStartedAt: previous.startedAt,
+        useArtifactStartedAt: false,
+      });
+      if (!normalized) return;
+      const { status: artifactState, updatedAt, completedAt, durationMs } = normalized;
       const terminalStates = ["completed", "failed", "stopped", "rejected"];
       if (ownership.terminal && artifactState === "running") return;
       if (terminalStates.includes(previous.lifecycle?.state ?? "") && artifactState !== "running") {
         const requestedTerminal = artifactState === "failed" ? "failed" : "completed";
         if (requestedTerminal !== previous.lifecycle?.state) return;
       }
-      const completedAt = artifactState === "running" ? undefined : this.artifactTime(raw.endedAt) ?? updatedAt;
-      const durationMs = typeof raw.durationMs === "number" && Number.isSafeInteger(raw.durationMs) && raw.durationMs >= 0
-        ? raw.durationMs
-        : undefined;
       const artifactValue = ownership.terminal
         ? { ...raw, state: previous.status === "failed" ? "failed" : "completed" }
         : raw;
@@ -1444,7 +1443,7 @@ export class RuntimeSlot {
       const observedAt = new Date().toISOString();
       const terminalAt = artifactState === "running"
         ? previous.lifecycle?.terminalAt
-        : previous.lifecycle?.terminalAt ?? completedAt ?? observedAt;
+        : previous.lifecycle?.terminalAt ?? observedAt;
       const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
       const activity = projectExtensionRunActivity(artifactValue, {
         id: previous.id,
@@ -1592,7 +1591,8 @@ export class RuntimeSlot {
     const derivedStatus = extensionActivityStatusFromTool(value, status);
     const { terminal, reportedTerminal } = derivedStatus;
     const effectiveStatus = derivedStatus.status;
-    const terminalAt = terminal ? current?.lifecycle?.terminalAt ?? new Date().toISOString() : current?.lifecycle?.terminalAt;
+    const observedAt = new Date().toISOString();
+    const terminalAt = terminal ? current?.lifecycle?.terminalAt ?? observedAt : current?.lifecycle?.terminalAt;
     const recentUntil = terminalAt ? new Date(Date.parse(terminalAt) + 900_000).toISOString() : undefined;
     const activity = projectExtensionRunActivity(value, {
       id: toolCallId,
@@ -1608,7 +1608,7 @@ export class RuntimeSlot {
       ...(!terminal || durationMs === undefined ? {} : { durationMs }),
       ...(current ? { previous: current } : {}),
       sequence,
-      observedAt: new Date().toISOString(),
+      observedAt,
       ...(terminalAt ? { terminalAt } : {}),
       ...(recentUntil ? { recentUntil } : {}),
     });
@@ -1619,7 +1619,6 @@ export class RuntimeSlot {
       ...(asyncDir === undefined ? {} : { asyncDir }),
       terminal: activity.status !== "running",
     })) return current;
-    if (terminal) this.extensionActivityTerminals.add(activityKey);
     // A synchronous result can be the first lifecycle payload carrying runId.
     // Re-key any artifact-created synthetic row to the real Pi tool call.
     const ownership = activity.runId ? this.extensionRunOwnership.get(activity.runId) : undefined;
@@ -1644,7 +1643,7 @@ export class RuntimeSlot {
         ...(completedAt ? { completedAt } : {}),
         ...(durationMs === undefined ? {} : { durationMs }),
         sequence,
-        observedAt: new Date().toISOString(),
+        observedAt,
         ...(terminalAt ? { terminalAt } : {}),
         ...(recentUntil ? { recentUntil } : {}),
         previous: current
@@ -1769,7 +1768,7 @@ export class RuntimeSlot {
     if (tool.sourceInfo.path !== extension.path && tool.sourceInfo.path !== extension.resolvedPath) return undefined;
     const extensionOwner = extensionOwnerFor(extension);
     const source = extensionOwner.source.trim().slice(0, 256);
-    return source ? { owner: extensionOwner, source } : { owner: extensionOwner };
+    return source ? { source, owner: extensionOwner } : undefined;
   }
 
   private rememberToolMetadata(toolCallId: string, state: ToolExecutionState): void {

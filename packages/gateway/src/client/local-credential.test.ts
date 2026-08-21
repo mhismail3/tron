@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -25,7 +25,7 @@ describe("bounded local wrapper credential", () => {
     const { root, path } = await credentialPath();
     const compact = JSON.stringify(document());
     const exact = `${compact}${" ".repeat(64 * 1_024 - Buffer.byteLength(compact))}`;
-    await writeFile(path, exact);
+    await writeFile(path, exact, { mode: 0o600 });
 
     await expect(readLocalCredential(root)).resolves.toBe("t".repeat(32));
   });
@@ -37,9 +37,24 @@ describe("bounded local wrapper credential", () => {
     ["wrong purpose", JSON.stringify({ ...document(), purpose: "device" })],
     ["unknown field", JSON.stringify({ ...document(), extra: true })],
     ["short token", JSON.stringify(document("short"))],
+    ["empty", ""],
   ])("rejects %s credentials consistently", async (_label, content) => {
     const { root, path } = await credentialPath();
-    if (content !== undefined) await writeFile(path, content);
+    if (content !== undefined) await writeFile(path, content, { mode: 0o600 });
+
+    await expect(readLocalCredential(root)).rejects.toThrow(/missing or invalid/);
+  });
+
+  it.each(["permissive mode", "symlink"])("rejects %s credentials", async (boundary) => {
+    const { root, path } = await credentialPath();
+    if (boundary === "permissive mode") {
+      await writeFile(path, JSON.stringify(document()), { mode: 0o640 });
+      await chmod(path, 0o640);
+    } else {
+      const external = join(root, "external-auth.json");
+      await writeFile(external, JSON.stringify(document()), { mode: 0o600 });
+      await symlink(external, path);
+    }
 
     await expect(readLocalCredential(root)).rejects.toThrow(/missing or invalid/);
   });

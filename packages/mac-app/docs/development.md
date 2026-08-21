@@ -71,6 +71,9 @@ packages/mac-app/scripts/bundle-gateway.sh --clean
 
 # Pure helper check against a staged payload (does not build or install)
 packages/mac-app/scripts/hash-gateway-payload.sh Sources/Resources/Gateway
+
+# Launcher boundary fixture (also covers channel path-component rejection)
+packages/mac-app/scripts/test-tron-gateway-launcher.sh
 ```
 
 ## Generate and build

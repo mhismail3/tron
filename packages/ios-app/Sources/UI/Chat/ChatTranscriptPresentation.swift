@@ -1,6 +1,67 @@
 import Foundation
 import SwiftUI
 
+/// Owns the one locally admitted earlier-page transaction. Model and scroll
+/// reducers may corroborate loading, but neither can retire this token.
+struct ChatEarlierMessagesOperationOwner: Equatable, Sendable {
+    typealias Token = UInt64
+
+    private(set) var activeToken: Token?
+    private var nextToken: Token = 0
+
+    var isActive: Bool { activeToken != nil }
+
+    mutating func begin() -> Token? {
+        guard activeToken == nil else { return nil }
+        nextToken &+= 1
+        if nextToken == 0 { nextToken = 1 }
+        activeToken = nextToken
+        return nextToken
+    }
+
+    /// Only the currently admitted request may settle the operation. A late
+    /// completion from an older request cannot clear a newer page load.
+    mutating func settle(_ token: Token) {
+        guard activeToken == token else { return }
+        activeToken = nil
+    }
+
+    mutating func cancel() {
+        activeToken = nil
+    }
+}
+
+enum ChatEarlierMessagesOperationPhase: Equatable, Sendable {
+    case available
+    case loading
+}
+
+enum ChatEarlierMessagesOperationPolicy {
+    static func phase(
+        owner: ChatEarlierMessagesOperationOwner,
+        modelLoading: Bool,
+        scrollLoading: Bool
+    ) -> ChatEarlierMessagesOperationPhase {
+        owner.isActive || modelLoading || scrollLoading ? .loading : .available
+    }
+
+    static func isLoading(
+        owner: ChatEarlierMessagesOperationOwner,
+        modelLoading: Bool,
+        scrollLoading: Bool
+    ) -> Bool {
+        phase(owner: owner, modelLoading: modelLoading, scrollLoading: scrollLoading) == .loading
+    }
+}
+
+/// `beginPrepend` invokes completion synchronously when strict anchor
+/// admission rejects a request. This box distinguishes that rejection from a
+/// later coordinator settlement without creating a second local operation.
+@MainActor
+final class ChatEarlierMessagesOperationAdmission {
+    var coordinatorAdmitted = false
+}
+
 enum ChatExtensionChromePolicy {
     // Canonical extension state continues to flow. These presentation gates stay
     // explicit so native widgets/statuses can be restored only after their layout
@@ -641,13 +702,31 @@ struct ChatTranscriptGeometry: Equatable {
         return max(0, rawDistance)
     }
     static let catchUpDistance: CGFloat = 16
-    var isAtBottom: Bool { isValid && distanceFromBottom <= 80 }
-    var isAtExactBottom: Bool { isValid && distanceFromBottom <= 2 }
+    /// A structural shrink can leave SwiftUI's visible rect beyond the new
+    /// content edge while `distanceFromBottom` clamps the negative distance to
+    /// zero. That is not settled bottom geometry and requires one tail clamp.
+    var isPastBottomEdge: Bool {
+        guard isValid else { return false }
+        let contentBottom = contentHeight + bottomInset
+        guard contentBottom.isFinite, offsetY.isFinite else { return false }
+        if contentBottom <= containerHeight + 2 {
+            if let visibleTopY { return visibleTopY.isFinite && visibleTopY > 2 }
+            return offsetY > 2
+        }
+        if let visibleBottomY {
+            return visibleBottomY.isFinite && visibleBottomY > contentBottom + 2
+        }
+        return offsetY > contentBottom - containerHeight + 2
+    }
+    var isAtBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 80 }
+    var isAtExactBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 2 }
     /// Physical scroll settling commonly stops a few points above the computed
     /// edge because content insets and pixel rounding update in separate frames.
     /// This tighter-than-"near bottom" boundary is user-equivalent to reaching
     /// the tail and is used to dismiss catch-up without requiring a tap.
-    var isAtCatchUpBoundary: Bool { isValid && distanceFromBottom <= Self.catchUpDistance }
+    var isAtCatchUpBoundary: Bool {
+        isValid && !isPastBottomEdge && distanceFromBottom <= Self.catchUpDistance
+    }
 
     /// Opening placement must reject a transient native offset beyond an
     /// overflowing content edge. `distanceFromBottom` intentionally clamps

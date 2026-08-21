@@ -12,6 +12,26 @@ enum PackageResourceSummaryPolicy {
     }
 }
 
+enum PackageInstallDraftPolicy {
+    static func afterSuccess(current: String, captured: String) -> String {
+        current == captured ? "" : current
+    }
+}
+
+enum PackageMutationOperation: Hashable {
+    case install(String)
+    case update(String)
+    case remove(String)
+
+    var identity: String {
+        switch self {
+        case .install(let source): return "install:\(source)"
+        case .update(let source): return "update:\(source)"
+        case .remove(let source): return "remove:\(source)"
+        }
+    }
+}
+
 struct PackagesSettingsView: View {
     @Environment(AppModel.self) private var model
     let projectCWD: String?
@@ -24,9 +44,20 @@ struct PackagesSettingsView: View {
     @State private var local = false
     @State private var packageToRemove: PackageSummary?
     @State private var showingInstall = false
-    @State private var workingSources: Set<String> = []
     @State private var reloading = false
-    @State private var packageError: String?
+    @State private var refreshError: String?
+    @State private var mutationErrors: [PackageMutationOperation: String] = [:]
+    @State private var refreshGeneration = 0
+    @State private var mutationToken = 0
+    private struct OwnedMutation {
+        let token: Int
+        let task: Task<Void, Never>
+    }
+    @State private var activeMutations: [PackageMutationOperation: OwnedMutation] = [:]
+
+    private var packageError: String? {
+        mutationErrors.values.first ?? refreshError
+    }
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -112,8 +143,36 @@ struct PackagesSettingsView: View {
                 TronReloadToolbarButton(isReloading: reloading, action: reload)
             }
         }
-        .task(id: PackageLoadID(target: target, invalidationGeneration: model.packageInvalidationGeneration)) {
-            await refreshPackages()
+        .task(id: PackageLoadID(
+            target: target,
+            profileRevision: model.profileRevision,
+            invalidationGeneration: model.packageInvalidationGeneration,
+            refreshGeneration: refreshGeneration
+        )) {
+            let requestedTarget = target
+            let profileRevision = model.profileRevision
+            let generation = refreshGeneration
+            let invalidationGeneration = model.packageInvalidationGeneration
+            await refreshPackages(
+                target: requestedTarget,
+                profileRevision: profileRevision,
+                generation: generation,
+                invalidationGeneration: invalidationGeneration
+            )
+        }
+        .onChange(of: target) { _, _ in
+            revokeMutationTasks()
+            refreshError = nil
+        }
+        .onChange(of: model.profileRevision) { _, _ in
+            revokeMutationTasks()
+            refreshError = nil
+        }
+        .onChange(of: model.packageInvalidationGeneration) { _, _ in
+            revokeMutationTasks()
+        }
+        .onDisappear {
+            revokeMutationTasks()
         }
         .sheet(isPresented: $showingInstall) {
             NavigationStack {
@@ -137,26 +196,128 @@ struct PackagesSettingsView: View {
     }
 
     private func reload() {
-        guard !reloading else { return }
+        refreshGeneration &+= 1
+    }
+
+    private func refreshPackages(
+        target requestedTarget: PackageConfigurationTarget,
+        profileRevision: Int,
+        generation: Int,
+        invalidationGeneration: Int
+    ) async {
+        guard refreshIsCurrent(
+            target: requestedTarget,
+            profileRevision: profileRevision,
+            generation: generation,
+            invalidationGeneration: invalidationGeneration
+        ) else { return }
         reloading = true
-        Task {
-            defer { reloading = false }
-            await refreshPackages()
+        refreshError = nil
+        defer {
+            if refreshIsCurrent(
+                target: requestedTarget,
+                profileRevision: profileRevision,
+                generation: generation,
+                invalidationGeneration: invalidationGeneration
+            ) {
+                reloading = false
+            }
+        }
+        let loaded = await model.loadPackages(target: requestedTarget, surfaceError: false)
+        guard refreshIsCurrent(
+            target: requestedTarget,
+            profileRevision: profileRevision,
+            generation: generation,
+            invalidationGeneration: invalidationGeneration
+        ) else { return }
+        guard loaded else {
+            // A false result without coordinator error means this request was
+            // superseded or coalesced; it is not a user-visible failure.
+            guard let error = model.packageError(for: requestedTarget) else { return }
+            refreshError = error
+            return
+        }
+        let updatesLoaded = await model.checkPackageUpdates(target: requestedTarget, surfaceError: false)
+        guard refreshIsCurrent(
+            target: requestedTarget,
+            profileRevision: profileRevision,
+            generation: generation,
+            invalidationGeneration: invalidationGeneration
+        ) else { return }
+        if updatesLoaded {
+            refreshError = nil
+        } else if let error = model.packageError(for: requestedTarget) {
+            refreshError = error
         }
     }
 
-    private func refreshPackages() async {
-        let loaded = await model.loadPackages(target: target, surfaceError: false)
-        guard loaded else {
-            packageError = model.packageError(for: target) ?? "The package catalog is unavailable. Try again."
-            return
-        }
-        let updatesLoaded = await model.checkPackageUpdates(target: target, surfaceError: false)
-        if updatesLoaded {
-            packageError = nil
-        } else {
-            packageError = model.packageError(for: target) ?? "Package updates are unavailable. Try again."
-        }
+    private func refreshIsCurrent(
+        target requestedTarget: PackageConfigurationTarget,
+        profileRevision: Int,
+        generation: Int,
+        invalidationGeneration: Int
+    ) -> Bool {
+        !Task.isCancelled
+            && requestedTarget == target
+            && profileRevision == model.profileRevision
+            && generation == refreshGeneration
+            && invalidationGeneration == model.packageInvalidationGeneration
+    }
+
+    private func beginMutation(_ operation: PackageMutationOperation) -> Int {
+        activeMutations[operation]?.task.cancel()
+        mutationToken &+= 1
+        return mutationToken
+    }
+
+    private func mutationIsCurrent(
+        target requestedTarget: PackageConfigurationTarget,
+        operation: PackageMutationOperation,
+        token: Int,
+        profileRevision: Int,
+        invalidationGeneration: Int
+    ) -> Bool {
+        !Task.isCancelled
+            && requestedTarget == target
+            && model.profileRevision == profileRevision
+            && activeMutations[operation]?.token == token
+            && model.packageInvalidationGeneration == invalidationGeneration
+    }
+
+    private func finishMutation(
+        _ operation: PackageMutationOperation,
+        target requestedTarget: PackageConfigurationTarget,
+        token: Int,
+        profileRevision: Int,
+        invalidationGeneration: Int
+    ) {
+        guard mutationIsCurrent(
+            target: requestedTarget,
+            operation: operation,
+            token: token,
+            profileRevision: profileRevision,
+            invalidationGeneration: invalidationGeneration
+        ) else { return }
+        activeMutations[operation] = nil
+    }
+
+    private func revokeMutationTasks() {
+        for owned in activeMutations.values { owned.task.cancel() }
+        activeMutations.removeAll()
+        mutationErrors.removeAll()
+    }
+
+    private func isMutating(_ package: PackageSummary) -> Bool {
+        activeMutations[.update(package.id)] != nil
+            || activeMutations[.remove(package.id)] != nil
+    }
+
+    private func recordMutationSuccess(_ operation: PackageMutationOperation) {
+        mutationErrors[operation] = nil
+    }
+
+    private func recordMutationFailure(_ operation: PackageMutationOperation, error: Error) {
+        mutationErrors[operation] = error.localizedDescription
     }
 
     private var packageInstallSheet: some View {
@@ -172,7 +333,7 @@ struct PackagesSettingsView: View {
                             .disabled(projectCWD == nil)
                         Button("Install Package") { install() }
                             .buttonStyle(TronActionButtonStyle(role: .primary))
-                            .disabled(source.isEmpty || workingSources.contains("install:\(source)"))
+                            .disabled(source.isEmpty || activeMutations[.install(source)] != nil)
                     }
                     .padding(10)
                 }
@@ -200,7 +361,7 @@ struct PackagesSettingsView: View {
             value: [package.scope == .project ? "Project" : "Global", package.filtered ? "Filtered" : nil, updates.contains { $0.id == package.id } ? "Update available" : nil]
                 .compactMap { $0 }.joined(separator: " · ")
         ) {
-            if workingSources.contains(package.id) {
+            if isMutating(package) {
                 ProgressView().controlSize(.small)
             } else {
                 Menu {
@@ -217,57 +378,158 @@ struct PackagesSettingsView: View {
 
     private func install() {
         let value = source
-        let identity = "install:\(value)"
-        workingSources.insert(identity)
-        Task {
-            defer { workingSources.remove(identity) }
-            do {
-                try await model.mutatePackage(
-                    action: .install,
-                    source: value,
-                    local: local,
-                    target: target,
-                    surfaceError: false
-                )
-                source = ""
-                packageError = nil
-            } catch { packageError = error.localizedDescription }
+        let operation = PackageMutationOperation.install(value)
+        let requestedTarget = target
+        let profileRevision = model.profileRevision
+        let invalidationGeneration = model.packageInvalidationGeneration
+        let token = beginMutation(operation)
+        let authoritative = Task { @MainActor in
+            try await model.mutatePackage(
+                action: .install,
+                source: value,
+                local: local,
+                target: requestedTarget,
+                surfaceError: false
+            )
         }
+        let task = Task { @MainActor in
+            defer {
+                finishMutation(
+                    operation,
+                    target: requestedTarget,
+                    token: token,
+                    profileRevision: profileRevision,
+                    invalidationGeneration: invalidationGeneration
+                )
+            }
+            do {
+                try await authoritative.value
+                guard mutationIsCurrent(
+                    target: requestedTarget,
+                    operation: operation,
+                    token: token,
+                    profileRevision: profileRevision,
+                    invalidationGeneration: invalidationGeneration
+                ) else { return }
+                source = PackageInstallDraftPolicy.afterSuccess(current: source, captured: value)
+                recordMutationSuccess(operation)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard mutationIsCurrent(
+                    target: requestedTarget,
+                    operation: operation,
+                    token: token,
+                    profileRevision: profileRevision,
+                    invalidationGeneration: invalidationGeneration
+                ) else { return }
+                recordMutationFailure(operation, error: error)
+            }
+        }
+        activeMutations[operation] = OwnedMutation(token: token, task: task)
     }
 
     private func update(_ package: PackageSummary) {
-        workingSources.insert(package.id)
-        Task {
-            defer { workingSources.remove(package.id) }
-            do {
-                try await model.mutatePackage(
-                    action: .update,
-                    source: package.source,
-                    local: package.scope == .project,
-                    target: target,
-                    surfaceError: false
-                )
-                packageError = nil
-            } catch { packageError = error.localizedDescription }
+        let operation = PackageMutationOperation.update(package.id)
+        let requestedTarget = target
+        let profileRevision = model.profileRevision
+        let invalidationGeneration = model.packageInvalidationGeneration
+        let token = beginMutation(operation)
+        let authoritative = Task { @MainActor in
+            try await model.mutatePackage(
+                action: .update,
+                source: package.source,
+                local: package.scope == .project,
+                target: requestedTarget,
+                surfaceError: false
+            )
         }
+        let task = Task { @MainActor in
+            defer {
+                finishMutation(
+                    operation,
+                    target: requestedTarget,
+                    token: token,
+                    profileRevision: profileRevision,
+                    invalidationGeneration: invalidationGeneration
+                )
+            }
+            do {
+                try await authoritative.value
+                guard mutationIsCurrent(
+                    target: requestedTarget,
+                    operation: operation,
+                    token: token,
+                    profileRevision: profileRevision,
+                    invalidationGeneration: invalidationGeneration
+                ) else { return }
+                recordMutationSuccess(operation)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard mutationIsCurrent(
+                    target: requestedTarget,
+                    operation: operation,
+                    token: token,
+                    profileRevision: profileRevision,
+                    invalidationGeneration: invalidationGeneration
+                ) else { return }
+                recordMutationFailure(operation, error: error)
+            }
+        }
+        activeMutations[operation] = OwnedMutation(token: token, task: task)
     }
 
     private func remove(_ package: PackageSummary) {
-        workingSources.insert(package.id)
+        let operation = PackageMutationOperation.remove(package.id)
+        let requestedTarget = target
+        let profileRevision = model.profileRevision
+        let invalidationGeneration = model.packageInvalidationGeneration
+        let token = beginMutation(operation)
         packageToRemove = nil
-        Task {
-            defer { workingSources.remove(package.id) }
-            do {
-                try await model.mutatePackage(
-                    action: .remove,
-                    source: package.source,
-                    local: package.scope == .project,
-                    target: target,
-                    surfaceError: false
-                )
-                packageError = nil
-            } catch { packageError = error.localizedDescription }
+        let authoritative = Task { @MainActor in
+            try await model.mutatePackage(
+                action: .remove,
+                source: package.source,
+                local: package.scope == .project,
+                target: requestedTarget,
+                surfaceError: false
+            )
         }
+        let task = Task { @MainActor in
+            defer {
+                finishMutation(
+                    operation,
+                    target: requestedTarget,
+                    token: token,
+                    profileRevision: profileRevision,
+                    invalidationGeneration: invalidationGeneration
+                )
+            }
+            do {
+                try await authoritative.value
+                guard mutationIsCurrent(
+                    target: requestedTarget,
+                    operation: operation,
+                    token: token,
+                    profileRevision: profileRevision,
+                    invalidationGeneration: invalidationGeneration
+                ) else { return }
+                recordMutationSuccess(operation)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard mutationIsCurrent(
+                    target: requestedTarget,
+                    operation: operation,
+                    token: token,
+                    profileRevision: profileRevision,
+                    invalidationGeneration: invalidationGeneration
+                ) else { return }
+                recordMutationFailure(operation, error: error)
+            }
+        }
+        activeMutations[operation] = OwnedMutation(token: token, task: task)
     }
 }
 

@@ -54,6 +54,10 @@ final class PackageConfigurationCoordinator {
     private var updateGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
     private var mutationGenerationByTarget: [PackageConfigurationTarget: Int] = [:]
     private var errorByTarget: [PackageConfigurationTarget: String] = [:]
+    // A confirmed mutation owns the post-mutation reload. Ordinary refreshes
+    // are coalesced while it runs instead of invalidating its load admission.
+    // The value is retained so an older mutation cannot revoke a newer owner.
+    private var mutationReloadingTargets: [PackageConfigurationTarget: TargetAdmission] = [:]
     private var profileGeneration = 0
 
     private(set) var invalidationGeneration = 0
@@ -90,6 +94,9 @@ final class PackageConfigurationCoordinator {
         requiring mutationAdmission: TargetAdmission?,
         surfaceError: Bool
     ) async -> Bool {
+        if mutationAdmission == nil, mutationReloadingTargets[target] != nil {
+            return true
+        }
         let admission = beginAdmission(target: target, generations: &loadGenerationByTarget)
         do {
             let inventory: PackageInventory = try await client.request(
@@ -105,6 +112,8 @@ final class PackageConfigurationCoordinator {
             inventoryByTarget[target] = admitted
             errorByTarget[target] = nil
             return true
+        } catch is CancellationError {
+            return false
         } catch {
             guard admits(admission, generations: loadGenerationByTarget),
                   mutationAdmission.map({ admits($0, generations: mutationGenerationByTarget) }) ?? true else {
@@ -118,6 +127,9 @@ final class PackageConfigurationCoordinator {
 
     @discardableResult
     func checkUpdates(target: PackageConfigurationTarget, surfaceError: Bool = true) async -> Bool {
+        if mutationReloadingTargets[target] != nil {
+            return true
+        }
         let admission = beginAdmission(target: target, generations: &updateGenerationByTarget)
         do {
             let response: UpdateResponse = try await client.request(
@@ -130,6 +142,8 @@ final class PackageConfigurationCoordinator {
             updatesByTarget[target] = admitted
             errorByTarget[target] = nil
             return true
+        } catch is CancellationError {
+            return false
         } catch {
             guard admits(admission, generations: updateGenerationByTarget) else { return false }
             errorByTarget[target] = error.localizedDescription
@@ -165,6 +179,17 @@ final class PackageConfigurationCoordinator {
             throw error
         }
         try require(admission, generations: mutationGenerationByTarget)
+        // The confirmed mutation owns the following reload. Revoke any load
+        // or update admitted before confirmation so obsolete projections cannot
+        // be published after the mutation's authoritative reload starts.
+        loadGenerationByTarget[target] = (loadGenerationByTarget[target] ?? 0) &+ 1
+        updateGenerationByTarget[target] = (updateGenerationByTarget[target] ?? 0) &+ 1
+        mutationReloadingTargets[target] = admission
+        defer {
+            if mutationReloadingTargets[target] == admission {
+                mutationReloadingTargets[target] = nil
+            }
+        }
 
         switch (action, source) {
         case (.update, nil):
@@ -199,6 +224,7 @@ final class PackageConfigurationCoordinator {
         loadGenerationByTarget = loadGenerationByTarget.mapValues { $0 &+ 1 }
         updateGenerationByTarget = updateGenerationByTarget.mapValues { $0 &+ 1 }
         mutationGenerationByTarget = mutationGenerationByTarget.mapValues { $0 &+ 1 }
+        mutationReloadingTargets.removeAll()
         inventoryByTarget.removeAll()
         updatesByTarget.removeAll()
         errorByTarget.removeAll()

@@ -93,6 +93,22 @@ describe("ExtensionPresentationStore", () => {
     expect(store.state().revision).toBe(0);
   });
 
+  it("rejects cross-method interaction fields at the Gateway boundary", () => {
+    const store = new ExtensionPresentationStore(() => {});
+    const invalid = [
+      { method: "confirm", options: ["yes"] },
+      { method: "confirm", questionnaire: { version: 1, question: "q", options: [{ label: "yes" }], allowMultiple: false, allowFreeform: false } },
+      { method: "select", options: ["yes"], placeholder: "bad" },
+      { method: "input", options: ["bad"] },
+      { method: "editor", questionnaire: { version: 1, question: "q", options: [{ label: "yes" }], allowMultiple: false, allowFreeform: false } },
+    ];
+    invalid.forEach((fields, index) => {
+      expect(() => store.transact((draft) => {
+        draft.pendingInteractions.push({ id: `bad-${index}`, hostEpoch: "", presentationRevision: 0, title: "bad", ...fields } as never);
+      })).toThrow(/interactions/);
+    });
+  });
+
   it("projects input lease and generic lifecycle activity", () => {
     const store = new ExtensionPresentationStore(() => {});
     store.transact((draft) => {

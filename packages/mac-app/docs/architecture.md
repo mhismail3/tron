@@ -101,8 +101,9 @@ gateway authentication and is left untouched for explicit migration.
 
 The installed Release wrapper owns only the stable launcher. Developer tooling
 owns the independent dev channel. Each launcher first
-checks the selected channel (`TRON_GATEWAY_CHANNEL`, with `stable` as the
-compatibility default) under the selected Tron home:
+checks the selected channel (`TRON_GATEWAY_CHANNEL`, accepting only `stable` or
+`dev`, with `stable` as the compatibility default) as a single bounded path component before touching any
+channel-derived marker or lock under the selected Tron home:
 
 ```
 ~/.tron/gateway/payloads/<channel>/current.json

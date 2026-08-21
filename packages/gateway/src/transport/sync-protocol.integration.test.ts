@@ -271,6 +271,7 @@ describe("synchronization catch-up overflow recovery", () => {
     let recoveryStartedResolve: (() => void) | undefined;
     let releaseRecovery: (() => void) | undefined;
     let releaseTimedOutOpen: (() => void) | undefined;
+    const openCounts = new Map<string, number>();
     const recoveryStarted = new Promise<void>((resolve) => { recoveryStartedResolve = resolve; });
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
@@ -290,6 +291,8 @@ describe("synchronization catch-up overflow recovery", () => {
       invoke: async (context: any, method: string, params: any) => {
         const sessionId = params.sessionId as string;
         if (method === "session.open") {
+          const openCount = (openCounts.get(sessionId) ?? 0) + 1;
+          openCounts.set(sessionId, openCount);
           const syncToken = context.beginSynchronization(sessionId);
           if (sessionId === "timeout") {
             await new Promise<void>((resolve) => { releaseTimedOutOpen = resolve; });
@@ -302,7 +305,7 @@ describe("synchronization catch-up overflow recovery", () => {
               revision: 2,
               data: { message: "buffered" },
             } as any);
-          } else {
+          } else if (!(sessionId === "gone" && openCount > 1)) {
             // One frame larger than the quarantine byte budget forces overflow.
             gateway.broadcastSession(sessionId, "session.progress", {
               runtimeGeneration: `generation-${sessionId}`,
@@ -407,6 +410,22 @@ describe("synchronization catch-up overflow recovery", () => {
     const resync = frames.find((frame) => frame.topic === "transport.resyncRequired");
     expect(resync.sessionId).toBe("gone");
     expect(resync.payload).toMatchObject({ reason: "subscription catch-up overflow" });
+    expect(sessions.unsubscribe).toHaveBeenCalledWith(expect.any(String), "gone");
+    const goneResyncIndex = frames.indexOf(resync);
+    gateway.broadcastSession("gone", "session.progress", {
+      runtimeGeneration: "generation-gone", eventSequence: 500, revision: 500,
+    } as any);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(frames.slice(goneResyncIndex + 1).some((frame) => frame.topic === "session.progress" && frame.sessionId === "gone")).toBe(false);
+    await openAndSync("gone-again", "gone");
+    gateway.broadcastSession("gone", "session.progress", {
+      runtimeGeneration: "generation-gone", eventSequence: 501, revision: 501,
+    } as any);
+    const reopenedDeadline = Date.now() + 5_000;
+    while (!frames.some((frame) => frame.topic === "session.progress" && frame.sessionId === "gone" && frame.payload.eventSequence === 501)) {
+      if (Date.now() >= reopenedDeadline) throw new Error("authoritative reopen did not restore event delivery");
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
 
     await openAndSync("oversized", "oversized");
     const oversizedResyncDeadline = Date.now() + 5_000;
@@ -416,6 +435,12 @@ describe("synchronization catch-up overflow recovery", () => {
     }
     expect(frames.filter((frame) => frame.topic === "transport.resyncRequired" && frame.sessionId === "oversized")).toHaveLength(1);
     expect(frames.some((frame) => frame.topic === "session.rebaseline" && frame.sessionId === "oversized")).toBe(false);
+    const fallbackEnd = frames.length;
+    gateway.broadcastSession("oversized", "session.progress", {
+      runtimeGeneration: "generation-oversized", eventSequence: 500, revision: 500,
+    } as any);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(frames.slice(fallbackEnd).some((frame) => frame.topic === "session.progress" && frame.sessionId === "oversized")).toBe(false);
 
     socket.send(JSON.stringify({ type: "request", id: "open-timeout", method: "session.open", params: { sessionId: "timeout" } }));
     const timeoutDeadline = Date.now() + 5_000;
@@ -443,6 +468,10 @@ describe("connection-wide synchronization ownership", () => {
     await new Promise<void>((resolve) => probe.close(() => resolve()));
 
     let gateway!: GatewayServer;
+    let releasePendingOpen: (() => void) | undefined;
+    let pendingOpenBlocked = false;
+    let pendingOpenStartedResolve: (() => void) | undefined;
+    const pendingOpenStarted = new Promise<void>((resolve) => { pendingOpenStartedResolve = resolve; });
     const service = {
       info: () => ({ gatewayVersion: "test", piVersion: "test", protocolVersion: 3, minProtocolVersion: 3, machineId: "machine", machineName: "test", capabilities: [] }),
       terminalBelongsToSession: (terminalId: string, sessionId: string) => terminalId === "terminal-before" && sessionId === "before",
@@ -451,6 +480,11 @@ describe("connection-wide synchronization ownership", () => {
       invoke: async (context: any, method: string, params: any) => {
         const sessionId = params.sessionId as string;
         if (method === "session.open") {
+          if (sessionId === "pending-before" && !pendingOpenBlocked) {
+            pendingOpenBlocked = true;
+            pendingOpenStartedResolve?.();
+            await new Promise<void>((resolve) => { releasePendingOpen = resolve; });
+          }
           const syncToken = context.beginSynchronization(sessionId);
           const session = { sessionId, runtimeGeneration: `generation-${sessionId}`, eventSequence: 1, revision: 1 };
           context.establishSynchronization(sessionId, session);
@@ -505,6 +539,16 @@ describe("connection-wide synchronization ownership", () => {
       runtimeGeneration: `generation-${sessionId}`, eventSequence: sequence, revision: sequence,
       data: "x".repeat(500),
     });
+
+    socket.send(JSON.stringify({ type: "request", id: "pending-open", method: "session.open", params: { sessionId: "pending-before" } }));
+    await pendingOpenStarted;
+    gateway.rekeySession("pending-before", "pending-after");
+    releasePendingOpen?.();
+    await waitFor(() => frames.some((frame) => frame.id === "pending-open"));
+    const pendingOpened = frames.find((frame) => frame.id === "pending-open");
+    expect(pendingOpened.ok).toBe(true);
+    expect(sessions.subscribe).toHaveBeenCalledWith(expect.any(String), "pending-after");
+    await request("pending-sync", "session.sync", "pending-before", { syncToken: pendingOpened.result.syncToken });
 
     const openedA = await request("open-a", "session.open", "a");
     gateway.broadcastSession("a", "session.progress", event("a", 2) as any);

@@ -42,6 +42,7 @@ struct SharedProtocolFixtureTests {
         #expect(snapshot.toolExecutions.first?.groupId == fixtureToolCall?.groupId)
         #expect(snapshot.toolExecutions.first?.groupFinalized == true)
         #expect(snapshot.transcript.first(where: { $0.toolCallId == "tool-call" })?.durationMs == 1_000)
+        #expect(snapshot.transcript.first(where: { $0.toolCallId == "tool-call" })?.extensionOrigin == ExtensionToolOrigin(source: "fixture-extension", owner: ExtensionOwner(id: "fixture-owner", title: "Fixture Extension", source: "fixture-extension")))
         #expect(snapshot.extensionPresentation.version == 2)
         #expect(snapshot.extensionPresentation.surfaces.first?.frame.plainText == "Readable fallback")
         #expect(snapshot.extensionPresentation.inputLease?.id == "fixture-lease")

@@ -166,7 +166,11 @@
       "completedAt": "2026-01-01T00:00:02Z",
       "durationMs": 1000,
       "lastProgressAt": "2026-01-01T00:00:02Z",
-      "progressSequence": 3
+      "progressSequence": 3,
+      "extensionOrigin": {
+        "source": "fixture-extension",
+        "owner": { "id": "fixture-owner", "title": "Fixture Extension", "source": "fixture-extension" }
+      }
     },
     {
       "id": "bash-entry",

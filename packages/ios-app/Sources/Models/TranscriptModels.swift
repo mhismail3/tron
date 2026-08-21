@@ -159,7 +159,16 @@ struct ExtensionToolOrigin: Codable, Hashable, Sendable {
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         source = try values.decode(String.self, forKey: .source)
+        guard !source.isEmpty, source.utf8.count <= 8_192,
+              !source.unicodeScalars.contains(where: { $0.value < 0x20 || $0.value == 0x7f }) else {
+            throw DecodingError.dataCorruptedError(forKey: .source, in: values, debugDescription: "Extension origin source is invalid")
+        }
         owner = try values.decodeIfPresent(ExtensionOwner.self, forKey: .owner)
+        if let owner {
+            guard !owner.source.isEmpty, owner.source.utf8.count <= 8_192 else {
+                throw DecodingError.dataCorruptedError(forKey: .owner, in: values, debugDescription: "Extension owner source is invalid")
+            }
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -191,12 +200,54 @@ struct MessageTranscriptItem: TranscriptPayload {
     let durationMs: Int?
     let lastProgressAt: String?
     let progressSequence: Int?
-    let extensionOrigin: ExtensionToolOrigin? = nil
+    var extensionOrigin: ExtensionToolOrigin? = nil
 
     private enum CodingKeys: String, CodingKey {
         case id, parentId, timestamp, kind, role, presentationId, content, provider, modelId, stopReason,
              errorMessage, toolCallId, toolName, isError, details, usage, startedAt,
              completedAt, durationMs, lastProgressAt, progressSequence, extensionOrigin
+    }
+
+    init(
+        id: String, parentId: String?, timestamp: String, kind: TranscriptItem.Kind, role: TranscriptItem.Role,
+        presentationId: String, content: [ContentPart], provider: String? = nil, modelId: String? = nil,
+        stopReason: String? = nil, errorMessage: String? = nil, toolCallId: String? = nil, toolName: String? = nil,
+        isError: Bool? = nil, details: JSONValue? = nil, usage: JSONValue? = nil, startedAt: String? = nil,
+        completedAt: String? = nil, durationMs: Int? = nil, lastProgressAt: String? = nil,
+        progressSequence: Int? = nil, extensionOrigin: ExtensionToolOrigin? = nil
+    ) {
+        self.id = id; self.parentId = parentId; self.timestamp = timestamp; self.kind = kind; self.role = role
+        self.presentationId = presentationId; self.content = content; self.provider = provider; self.modelId = modelId
+        self.stopReason = stopReason; self.errorMessage = errorMessage; self.toolCallId = toolCallId; self.toolName = toolName
+        self.isError = isError; self.details = details; self.usage = usage; self.startedAt = startedAt; self.completedAt = completedAt
+        self.durationMs = durationMs; self.lastProgressAt = lastProgressAt; self.progressSequence = progressSequence
+        self.extensionOrigin = extensionOrigin
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        parentId = try values.decodeIfPresent(String.self, forKey: .parentId)
+        timestamp = try values.decode(String.self, forKey: .timestamp)
+        kind = try values.decode(TranscriptItem.Kind.self, forKey: .kind)
+        role = try values.decode(TranscriptItem.Role.self, forKey: .role)
+        presentationId = try values.decode(String.self, forKey: .presentationId)
+        content = try values.decode([ContentPart].self, forKey: .content)
+        provider = try values.decodeIfPresent(String.self, forKey: .provider)
+        modelId = try values.decodeIfPresent(String.self, forKey: .modelId)
+        stopReason = try values.decodeIfPresent(String.self, forKey: .stopReason)
+        errorMessage = try values.decodeIfPresent(String.self, forKey: .errorMessage)
+        toolCallId = try values.decodeIfPresent(String.self, forKey: .toolCallId)
+        toolName = try values.decodeIfPresent(String.self, forKey: .toolName)
+        isError = try values.decodeIfPresent(Bool.self, forKey: .isError)
+        details = try values.decodeIfPresent(JSONValue.self, forKey: .details)
+        usage = try values.decodeIfPresent(JSONValue.self, forKey: .usage)
+        startedAt = try values.decodeIfPresent(String.self, forKey: .startedAt)
+        completedAt = try values.decodeIfPresent(String.self, forKey: .completedAt)
+        durationMs = try values.decodeIfPresent(Int.self, forKey: .durationMs)
+        lastProgressAt = try values.decodeIfPresent(String.self, forKey: .lastProgressAt)
+        progressSequence = try values.decodeIfPresent(Int.self, forKey: .progressSequence)
+        extensionOrigin = try values.decodeIfPresent(ExtensionToolOrigin.self, forKey: .extensionOrigin)
     }
 }
 

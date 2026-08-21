@@ -60,9 +60,13 @@ final class SystemCameraSessionProvider: CameraSessionProviding {
             }
             session.addInput(input)
             let output = AVCapturePhotoOutput()
-            if session.canAddOutput(output) { session.addOutput(output) }
+            guard session.canAddOutput(output) else {
+                session.commitConfiguration()
+                Task { @MainActor in completion(nil) }
+                return
+            }
+            session.addOutput(output)
             session.commitConfiguration()
-            session.startRunning()
             let configuration = CameraSessionConfiguration(
                 session: session,
                 photoOutput: output,

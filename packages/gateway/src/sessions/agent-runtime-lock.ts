@@ -38,10 +38,21 @@ export async function acquireAgentRuntimeLocks(
   try {
     for (const directory of unique) releases.push(await acquireAgentRuntimeLock(directory));
   } catch (error) {
-    for (const release of releases.reverse()) await release();
+    // Snapshot the reverse order without mutating the acquisition list. This
+    // also keeps a partially acquired aggregate safe to inspect while it is
+    // being unwound.
+    for (const release of [...releases].reverse()) await release();
     throw error;
   }
-  return async () => {
-    for (const release of releases.reverse()) await release();
+  const releaseOrder = [...releases].reverse();
+  let releasePromise: Promise<void> | undefined;
+  return (): Promise<void> => {
+    // All callers, including concurrent shutdown paths, await one release
+    // operation. proper-lockfile release functions are not themselves
+    // idempotent, so the aggregate owns that guarantee.
+    releasePromise ??= (async () => {
+      for (const release of releaseOrder) await release();
+    })();
+    return releasePromise;
   };
 }

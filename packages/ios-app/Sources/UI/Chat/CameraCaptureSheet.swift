@@ -2,6 +2,28 @@ import SwiftUI
 import UIKit
 @preconcurrency import AVFoundation
 
+private final class CameraPhotoDelegateProxy: NSObject, AVCapturePhotoCaptureDelegate {
+    weak var model: CameraModel?
+    let generation: Int
+
+    init(model: CameraModel, generation: Int) {
+        self.model = model
+        self.generation = generation
+    }
+
+    nonisolated func photoOutput(
+        _ output: AVCapturePhotoOutput,
+        didFinishProcessingPhoto photo: AVCapturePhoto,
+        error: Error?
+    ) {
+        let image = error == nil ? photo.fileDataRepresentation().flatMap(UIImage.init(data:)) : nil
+        let generation = self.generation
+        Task { @MainActor [weak model] in
+            model?.finishCapture(generation: generation, image: image)
+        }
+    }
+}
+
 @Observable
 @MainActor
 final class CameraModel: NSObject {
@@ -10,12 +32,19 @@ final class CameraModel: NSObject {
     var cameraUnavailable = false
     var isTorchOn = false
     var hasTorch = false
+    var isCapturing = false
     var session: AVCaptureSession?
-    var isReady: Bool { isAuthorized && session != nil && !cameraUnavailable && !configuring }
+    var isReady: Bool {
+        isAuthorized && !permissionDenied && session != nil && !cameraUnavailable && !configuring
+    }
 
     private var photoOutput: AVCapturePhotoOutput?
     private var position: AVCaptureDevice.Position = .back
     private var completion: ((UIImage?) -> Void)?
+    private var captureDelegate: CameraPhotoDelegateProxy?
+    private var captureGeneration = 0
+    private var lifecycleGeneration = 0
+    private var configurationGeneration = 0
     private var configuring = false
     private let authorization: any CameraAuthorizationProviding
     private let sessions: any CameraSessionProviding
@@ -29,27 +58,56 @@ final class CameraModel: NSObject {
     }
 
     func requestPermissionAndSetup() async {
-        switch authorization.authorizationStatus() {
-        case .authorized:
-            isAuthorized = true
-            setup()
-        case .notDetermined:
-            let granted = await authorization.requestAccess()
-            isAuthorized = granted
-            permissionDenied = !granted
-            if granted { setup() }
-        case .denied, .restricted:
-            permissionDenied = true
-        @unknown default:
-            permissionDenied = true
+        let lifecycle = lifecycleGeneration
+        do {
+            try Task.checkCancellation()
+            switch authorization.authorizationStatus() {
+            case .authorized:
+                try Task.checkCancellation()
+                guard lifecycle == lifecycleGeneration else { return }
+                isAuthorized = true
+                permissionDenied = false
+                setup()
+            case .notDetermined:
+                let granted = await authorization.requestAccess()
+                try Task.checkCancellation()
+                guard lifecycle == lifecycleGeneration else { return }
+                isAuthorized = granted
+                permissionDenied = !granted
+                if granted { setup() }
+            case .denied, .restricted:
+                try Task.checkCancellation()
+                guard lifecycle == lifecycleGeneration else { return }
+                isAuthorized = false
+                permissionDenied = true
+            @unknown default:
+                try Task.checkCancellation()
+                guard lifecycle == lifecycleGeneration else { return }
+                isAuthorized = false
+                permissionDenied = true
+            }
+        } catch is CancellationError {
+            // A dismissed sheet must not surface task cancellation as a camera
+            // failure or publish a partial permission state.
+            return
+        } catch {
+            return
         }
     }
 
     private func setup() {
-        guard !configuring else { return }
+        guard !Task.isCancelled, !configuring else { return }
         configuring = true
-        sessions.configure(position: position) { [weak self] configuration in
-            guard let self else { return }
+        configurationGeneration &+= 1
+        let generation = configurationGeneration
+        let lifecycle = lifecycleGeneration
+        let requestedPosition = position
+        sessions.configure(position: requestedPosition) { [weak self] configuration in
+            guard let self,
+                  !Task.isCancelled,
+                  lifecycle == self.lifecycleGeneration,
+                  generation == self.configurationGeneration,
+                  requestedPosition == self.position else { return }
             configuring = false
             guard let configuration else {
                 cameraUnavailable = true
@@ -59,12 +117,20 @@ final class CameraModel: NSObject {
             photoOutput = configuration.photoOutput
             hasTorch = configuration.hasTorch
             cameraUnavailable = false
+            // Configuration is admitted above against every lifecycle and
+            // position generation before the session is allowed to run.
+            sessions.start(configuration.session)
         }
     }
 
     func stopSession() {
-        guard let session else { return }
-        sessions.stop(session)
+        // Sheet dismissal is also capture cancellation. Invalidate both
+        // callbacks before invoking client code to make reentrancy harmless.
+        lifecycleGeneration &+= 1
+        configurationGeneration &+= 1
+        configuring = false
+        cancelCapture()
+        if let session { sessions.stop(session) }
     }
 
     func startSession() {
@@ -73,6 +139,9 @@ final class CameraModel: NSObject {
     }
 
     func flipCamera() {
+        guard !isCapturing else { return }
+        configurationGeneration &+= 1
+        configuring = false
         stopSession()
         session = nil
         photoOutput = nil
@@ -82,39 +151,53 @@ final class CameraModel: NSObject {
     }
 
     func toggleTorch() {
-        guard let session else { return }
+        guard !isCapturing, let session else { return }
+        let lifecycle = lifecycleGeneration
         sessions.setTorch(on: !isTorchOn, session: session) { [weak self] enabled in
-            self?.isTorchOn = enabled
+            guard let self,
+                  lifecycle == self.lifecycleGeneration,
+                  !self.isCapturing else { return }
+            self.isTorchOn = enabled
         }
     }
 
     func capturePhoto(completion: @escaping (UIImage?) -> Void) {
+        guard !isCapturing else { return }
+        captureGeneration &+= 1
+        let generation = captureGeneration
+        isCapturing = true
         self.completion = completion
-        guard let photoOutput else { finish(nil); return }
+        guard let photoOutput else { finishCapture(generation: generation, image: nil); return }
+        let delegate = CameraPhotoDelegateProxy(model: self, generation: generation)
+        captureDelegate = delegate
         sessions.capturePhoto(
             CameraPhotoCaptureRequest(
                 output: photoOutput,
                 settings: AVCapturePhotoSettings(),
-                delegate: self
+                delegate: delegate
             )
         )
     }
 
-    private func finish(_ image: UIImage?) {
+    func cancelCapture() {
+        guard isCapturing else { return }
+        captureGeneration &+= 1
+        settleCapture(image: nil)
+    }
+
+    fileprivate func finishCapture(generation: Int, image: UIImage?) {
+        guard isCapturing, generation == captureGeneration else { return }
+        settleCapture(image: image)
+    }
+
+    private func settleCapture(image: UIImage?) {
         let callback = completion
         completion = nil
+        captureDelegate = nil
+        isCapturing = false
+        // Clear ownership before invoking client code so a callback can safely
+        // start the next capture without replacing this callback.
         callback?(image)
-    }
-}
-
-extension CameraModel: AVCapturePhotoCaptureDelegate {
-    nonisolated func photoOutput(
-        _ output: AVCapturePhotoOutput,
-        didFinishProcessingPhoto photo: AVCapturePhoto,
-        error: Error?
-    ) {
-        let image = error == nil ? photo.fileDataRepresentation().flatMap(UIImage.init(data:)) : nil
-        Task { @MainActor in finish(image) }
     }
 }
 
@@ -220,7 +303,7 @@ struct CameraCaptureSheet: View {
         HStack(alignment: .center, spacing: CameraControlMetrics.captureSpacing) {
             cameraIconButton(
                 systemImage: cameraModel.isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill",
-                isEnabled: !showingPreview && cameraModel.isReady && cameraModel.hasTorch,
+                isEnabled: !showingPreview && cameraModel.isReady && cameraModel.hasTorch && !cameraModel.isCapturing,
                 isActive: cameraModel.isTorchOn,
                 isVisible: !showingPreview,
                 accessibilityLabel: "Flashlight",
@@ -231,7 +314,7 @@ struct CameraCaptureSheet: View {
 
             cameraIconButton(
                 systemImage: showingPreview ? "arrow.counterclockwise" : "arrow.triangle.2.circlepath.camera",
-                isEnabled: showingPreview || cameraModel.isReady,
+                isEnabled: showingPreview || (cameraModel.isReady && !cameraModel.isCapturing),
                 accessibilityLabel: showingPreview ? "Go back to capture" : "Switch Camera",
                 action: {
                     if showingPreview { retake() }
@@ -273,12 +356,12 @@ struct CameraCaptureSheet: View {
     }
 
     private var centerCameraButtonIsEnabled: Bool {
-        showingPreview ? capturedImage != nil : cameraModel.isReady
+        showingPreview ? capturedImage != nil : cameraModel.isReady && !cameraModel.isCapturing
     }
 
     private var centerCameraButtonTint: Color {
         if showingPreview { return Color.tronEmerald.opacity(0.44) }
-        return .white.opacity(cameraModel.isReady ? 0.44 : 0.14)
+        return .white.opacity(cameraModel.isReady && !cameraModel.isCapturing ? 0.44 : 0.14)
     }
 
     private func cameraIconButton(
@@ -348,7 +431,8 @@ struct CameraCaptureSheet: View {
     }
 
     private func usePhoto() {
-        if let image = capturedImage { onImageCaptured(image) }
+        guard let capturedImage else { return }
+        onImageCaptured(capturedImage)
         dismiss()
     }
 

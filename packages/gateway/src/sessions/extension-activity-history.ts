@@ -38,6 +38,13 @@ function finiteTime(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 
+function monotonicReceiptTimeline(startedAt: string, terminalAt: string, observedAt: string): boolean {
+  const started = Date.parse(startedAt);
+  const terminal = Date.parse(terminalAt);
+  const observed = Date.parse(observedAt);
+  return started <= terminal && terminal <= observed;
+}
+
 function nonnegativeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
@@ -71,7 +78,8 @@ export function makeExtensionActivityReceipt(activity: ExtensionRunActivity, ses
   const activityId = bounded(activity.activityId ?? activity.id, 256);
   const observedAt = activity.lifecycle?.observedAt ?? activity.updatedAt;
   if (!state || !activityId || !bounded(sessionId, 256) || !bounded(activity.toolCallId, 256)
-    || !finiteTime(terminalAt) || !finiteTime(activity.startedAt) || !finiteTime(observedAt)) return undefined;
+    || !finiteTime(terminalAt) || !finiteTime(activity.startedAt) || !finiteTime(observedAt)
+    || !monotonicReceiptTimeline(activity.startedAt, terminalAt, observedAt)) return undefined;
   const children: NonNullable<NonNullable<ExtensionActivityReceipt["summary"]>["children"]> = activity.children.slice(0, 32).flatMap((child) => {
     const id = bounded(child.id, 256); const label = bounded(child.label, 256);
     const state = child.lifecycle ?? (child.status === "failed" ? "failed" : child.status === "completed" ? "completed" : "running");
@@ -127,7 +135,8 @@ export function admitExtensionActivityReceipt(value: unknown, expectedSessionId?
   const observedAt = candidate.observedAt;
   if (candidate.version !== 1 || !state || !activityId || !sessionId || !toolCallId
     || (expectedSessionId !== undefined && sessionId !== expectedSessionId)
-    || !finiteTime(startedAt) || !finiteTime(terminalAt) || !finiteTime(observedAt)) return undefined;
+    || !finiteTime(startedAt) || !finiteTime(terminalAt) || !finiteTime(observedAt)
+    || !monotonicReceiptTimeline(startedAt, terminalAt, observedAt)) return undefined;
   const owner = candidate.owner === undefined ? undefined : ownerValue(candidate.owner);
   if (candidate.owner !== undefined && owner === undefined) return undefined;
   const source = bounded(candidate.source, 256);
@@ -184,11 +193,20 @@ export interface ExtensionActivityHistoryPage {
 }
 
 export function extensionActivityHistoryRevision(entries: readonly unknown[], sessionId: string, branchRevision = ""): string {
-  return revisionOf(extensionActivityReceipts(entries, sessionId), branchRevision);
+  return revisionOf(canonicalReceiptSequence(extensionActivityReceipts(entries, sessionId)), sessionId, branchRevision);
 }
 
-function revisionOf(entries: Array<{ id?: string; parentId?: string | null; receipt: ExtensionActivityReceipt }>, branchRevision = ""): string {
-  return createHash("sha256").update(`${branchRevision}\n${entries.map((entry) => `${entry.id ?? ""}\0${entry.parentId ?? ""}\0${entry.receipt.activityId}\0${entry.receipt.terminalAt}`).join("\n")}`).digest("hex").slice(0, 32);
+function canonicalReceiptSequence(entries: Array<{ id?: string; parentId?: string | null; receipt: ExtensionActivityReceipt }>): Array<{ id?: string; parentId?: string | null; receipt: ExtensionActivityReceipt }> {
+  return [...entries].sort((left, right) =>
+    right.receipt.terminalAt.localeCompare(left.receipt.terminalAt)
+    || right.receipt.activityId.localeCompare(left.receipt.activityId)
+    || (right.id ?? "").localeCompare(left.id ?? "")
+    || (right.parentId ?? "").localeCompare(left.parentId ?? "")
+  );
+}
+
+function revisionOf(entries: Array<{ id?: string; parentId?: string | null; receipt: ExtensionActivityReceipt }>, sessionId: string, branchRevision = ""): string {
+  return createHash("sha256").update(`${sessionId}\n${branchRevision}\n${entries.map((entry) => `${entry.id ?? ""}\0${entry.parentId ?? ""}\0${entry.receipt.activityId}\0${entry.receipt.terminalAt}`).join("\n")}`).digest("hex").slice(0, 32);
 }
 
 /** Reads reserved custom entries only. Callers may pass SessionManager.getEntries()
@@ -209,11 +227,14 @@ export function extensionActivityReceipts(entries: readonly unknown[], sessionId
 }
 
 export function listExtensionActivityHistory(entries: readonly unknown[], sessionId: string, cursor?: string, limit = 25, branchRevision?: string, filter?: { ownerId?: string; runId?: string; state?: ExtensionActivityReceipt["state"] }): ExtensionActivityHistoryPage {
-  const sorted = extensionActivityReceipts(entries, sessionId)
+  const canonical = canonicalReceiptSequence(extensionActivityReceipts(entries, sessionId));
+  // Filters and duplicate collapse select page content only. Revision identity
+  // remains global so detail and filtered list cursors agree.
+  const historyRevision = revisionOf(canonical, sessionId, branchRevision);
+  const sorted = canonical
     .filter(({ receipt }) => (!filter?.ownerId || receipt.owner?.id === filter.ownerId)
       && (!filter?.runId || receipt.runId === filter.runId)
-      && (!filter?.state || receipt.state === filter.state))
-    .sort((left, right) => right.receipt.terminalAt.localeCompare(left.receipt.terminalAt) || right.receipt.activityId.localeCompare(left.receipt.activityId));
+      && (!filter?.state || receipt.state === filter.state));
   const seenActivityIDs = new Set<string>();
   const all = sorted.filter(({ receipt }) => {
     if (seenActivityIDs.has(receipt.activityId)) return false;
@@ -222,7 +243,6 @@ export function listExtensionActivityHistory(entries: readonly unknown[], sessio
   });
   // Receipt identity changes still invalidate cursors even when duplicate
   // activity IDs are collapsed from the returned page.
-  const historyRevision = revisionOf(sorted, branchRevision);
   const boundedLimit = Math.min(MAX_EXTENSION_HISTORY_PAGE, Math.max(1, Math.floor(limit)));
   let offset = 0;
   if (cursor) {
@@ -258,8 +278,9 @@ export function listExtensionActivityHistory(entries: readonly unknown[], sessio
 }
 
 export function extensionReceiptActivity(receipt: ExtensionActivityReceipt): ExtensionRunActivity {
-  const source: ExtensionToolOrigin = receipt.owner
-    ? { owner: receipt.owner }
+  const owner = receipt.owner;
+  const source: ExtensionToolOrigin = owner
+    ? { source: owner.source, owner }
     : { source: receipt.source ?? "unknown" };
   const children = receipt.summary?.children?.map((child) => ({
     id: child.id,

@@ -559,7 +559,10 @@ enum ExtensionPresentationPolicy {
               interaction.placeholder.map({ boundedSafe($0, 4 * 1_024) }) ?? true,
               interaction.prefill.map({ boundedSafe($0, 192 * 1_024, newlines: true) }) ?? true,
               interaction.expiresAt.map({ GatewayTimestamp.parse($0) != nil }) ?? true,
-              (interaction.method != .select || (interaction.options?.isEmpty == false)),
+              (interaction.method != .select || (interaction.options?.isEmpty == false && interaction.placeholder == nil && interaction.prefill == nil)),
+              (interaction.method != .confirm || (interaction.options == nil && interaction.placeholder == nil && interaction.prefill == nil && interaction.questionnaire == nil)),
+              (interaction.method != .input || interaction.options == nil),
+              (interaction.method != .editor || (interaction.options == nil && interaction.questionnaire == nil)),
               interaction.options.map({ options in
                   interaction.method == .select && options.count <= 64 && Set(options).count == options.count
                     && options.allSatisfy({ boundedSafe($0, 2 * 1_024) })

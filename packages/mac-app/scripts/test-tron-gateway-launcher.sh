@@ -48,12 +48,45 @@ chmod -R a-w "$TMP/home/.tron"
 valid="$(HOME="$TMP/home" "$HELPER" --version)"
 EXTERNAL_REAL="$(cd "$EXTERNAL" && pwd -P)"
 [[ "$valid" == "$EXTERNAL_REAL" ]] || { echo "valid fixture did not select external payload: $valid" >&2; exit 1; }
+BUNDLE_REAL="$(cd "$BUNDLE" && pwd -P)"
+# Channel names are exact selectors, stable/dev, and the empty-value default.
+# Invalid values must be rejected before recovery can touch a sibling marker or lock.
+for supported_channel in stable dev; do
+  supported_result="$(TRON_GATEWAY_CHANNEL="$supported_channel" HOME="$TMP/home" "$HELPER" --version)"
+  [[ "$supported_result" == "$BUNDLE_REAL" || "$supported_result" == "$EXTERNAL_REAL" ]] || { echo "supported channel failed: $supported_channel" >&2; exit 1; }
+done
+default_result="$(TRON_GATEWAY_CHANNEL= HOME="$TMP/home" "$HELPER" --version)"
+[[ "$default_result" == "$EXTERNAL_REAL" ]] || { echo "empty channel did not default to stable: $default_result" >&2; exit 1; }
+for invalid_channel in debug ../ a/b "$(printf 'x%.0s' {1..65})"; do
+  set +e
+  TRON_GATEWAY_CHANNEL="$invalid_channel" HOME="$TMP/home" "$HELPER" --version > "$TMP/invalid-channel-result" 2> "$TMP/invalid-channel-error"
+  INVALID_STATUS=$?
+  set -e
+  [[ "$INVALID_STATUS" -eq 78 ]] || { echo "invalid channel was not rejected: $invalid_channel ($INVALID_STATUS)" >&2; exit 1; }
+  [[ ! -e "$TMP/home/.tron/gateway/pending-attempt.json" && ! -e "$TMP/home/.tron/gateway/pending-attempt.json.lock" ]] || { echo "invalid channel touched an outside marker or lock: $invalid_channel" >&2; exit 1; }
+done
+# An existing channel root symlink is unsafe: no marker or selection access may
+# escape into its target, and bundled fallback is not allowed to hide it.
+chmod -R u+w "$TMP/home"
+mkdir -p "$TMP/outside"
+ln -s "$TMP/outside" "$TMP/home/.tron/gateway/payloads/dev"
+set +e
+TRON_GATEWAY_CHANNEL=dev HOME="$TMP/home" "$HELPER" --version > "$TMP/symlink-result" 2> "$TMP/symlink-error"
+SYMLINK_STATUS=$?
+set -e
+[[ "$SYMLINK_STATUS" -eq 78 ]] || { echo "symlinked channel root was accepted: $SYMLINK_STATUS" >&2; exit 1; }
+[[ ! -e "$TMP/outside/pending-attempt.json" && ! -e "$TMP/outside/current.json" ]] || { echo "symlinked channel escaped into outside store" >&2; exit 1; }
+rm "$TMP/home/.tron/gateway/payloads/dev"
+chmod -R a-w "$TMP/home"
 chmod -R u+w "$EXTERNAL"
 printf '# tampered\n' >> "$EXTERNAL/app/dist/index.js"
 chmod -R a-w "$EXTERNAL"
-fallback="$(HOME="$TMP/home" "$HELPER" --version)"
-BUNDLE_REAL="$(cd "$BUNDLE" && pwd -P)"
-[[ "$fallback" == "$BUNDLE_REAL" ]] || { echo "tampered fixture did not fall back to bundle: $fallback" >&2; exit 1; }
+set +e
+tampered_result="$(HOME="$TMP/home" "$HELPER" --version 2> "$TMP/tampered-error")"
+tampered_status=$?
+set -e
+[[ "$tampered_status" -eq 0 ]] || { echo "tampered existing external payload did not use bundled fallback: $tampered_status" >&2; exit 1; }
+[[ "$tampered_result" == "$BUNDLE_REAL" ]] || { echo "tampered external payload did not fall back to bundled payload: $tampered_result" >&2; exit 1; }
 # A published candidate gets one launch attempt. A second launch with the
 # still-pending marker must restore the validated previous selection atomically.
 chmod -R u+w "$TMP/home"
@@ -128,4 +161,4 @@ set -e
 [[ "$MALFORMED_STATUS" -eq 75 ]] || { echo "malformed attempt marker did not return retry status: $MALFORMED_STATUS" >&2; exit 1; }
 [[ ! -s "$TMP/malformed-result" ]] || { echo "malformed attempt marker executed a payload" >&2; exit 1; }
 
-printf 'launcher fixture: valid external fingerprint passes; tampered payload falls back safely; pending candidate crash-rolls back; committed candidate persists; held locks fail closed; stale locks recover; malformed markers fail closed\n'
+printf 'launcher fixture: valid external fingerprint passes; tampered payload uses trusted bundled fallback; pending candidate crash-rolls back; committed candidate persists; held locks fail closed; stale locks recover; malformed markers fail closed\n'

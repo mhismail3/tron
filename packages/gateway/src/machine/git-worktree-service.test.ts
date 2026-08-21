@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { GitWorktreeService } from "./git-worktree-service.js";
@@ -57,6 +57,25 @@ describe("GitWorktreeService", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(tronHome, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a pre-existing managed repository symlink before invoking Git", async () => {
+    const { root, tronHome } = await repository();
+    const outside = await mkdtemp(join(tmpdir(), "tron-worktree-escape-"));
+    try {
+      const managed = join(tronHome, "gateway", "worktrees");
+      await mkdir(managed, { recursive: true });
+      await symlink(outside, join(managed, basename(root)));
+      const service = new GitWorktreeService(tronHome);
+      await expect(service.prepare(root, {
+        mode: "newBranchWorktree",
+        branch: "feature/escape",
+      })).rejects.toThrow("Managed Git worktree path is not a directory");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(tronHome, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
     }
   });
 

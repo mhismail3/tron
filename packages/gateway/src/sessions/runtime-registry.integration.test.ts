@@ -1100,6 +1100,42 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     }]);
   });
 
+  it("scans beyond the selected prefix before prioritizing an active artifact", async () => {
+    const fixture = await coldFixture("artifact-priority-scan");
+    const runId = "late-active-run";
+    const toolCallId = "late-active-tool";
+    const slot = await fixture.registry.acquire(fixture.manager.getSessionId());
+    const projectRoot = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs");
+    await mkdir(projectRoot, { recursive: true });
+    fixture.manager.appendMessage({
+      role: "toolResult",
+      toolCallId,
+      toolName: "subagent",
+      content: [{ type: "text", text: "launched" }],
+      details: { runId, asyncDir: join(projectRoot, runId), state: "running" },
+      isError: false,
+      timestamp: Date.now(),
+    });
+    await Promise.all(Array.from({ length: 1_025 }, (_, index) => mkdir(join(projectRoot, `early-${String(index).padStart(4, "0")}`))));
+    const activeDir = join(projectRoot, runId);
+    await mkdir(activeDir);
+    const now = Date.now();
+    await writeFile(join(activeDir, "status.json"), JSON.stringify({
+      lifecycleArtifactVersion: 3,
+      runId,
+      state: "running",
+      startedAt: now - 1_000,
+      lastUpdate: now,
+    }));
+    vi.spyOn(slot as unknown as { extensionToolOrigin: (name: string) => { source: string } | undefined }, "extensionToolOrigin")
+      .mockReturnValue({ source: "pi-subagents" });
+
+    const discovered = vi.spyOn(slot, "discoverExtensionArtifact");
+    await (fixture.registry as unknown as { discoverExtensionArtifacts: () => Promise<void> }).discoverExtensionArtifacts();
+    expect(discovered).toHaveBeenCalledTimes(1);
+    expect(discovered.mock.calls[0]?.[0]).toMatch(/async-subagent-runs[\\/]late-active-run$/u);
+  });
+
   it("fails closed on a stale running artifact after canonical completion", async () => {
     const fixture = await coldFixture("stale-subagent-artifact");
     fixture.manager.appendMessage({
@@ -1180,7 +1216,7 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(slot.snapshot().extensionActivities ?? []).toEqual([]);
   });
 
-  it("binds artifact refresh to the canonical run directory and preserves terminal completion time", async () => {
+  it("binds artifact refresh to the canonical run directory and keeps admission time authoritative", async () => {
     const fixture = await coldFixture("artifact-binding-integrity");
     for (const duplicateToolCallId of ["canonical-first", "canonical-second"]) {
       fixture.manager.appendMessage({
@@ -1227,14 +1263,16 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       state: "completed",
       startedAt: Date.parse(activity.startedAt),
       lastUpdate: Date.parse(artifactCompletedAt),
+      endedAt: Date.parse(artifactCompletedAt),
     }));
     await internal.refreshSubagentActivityFromArtifact(asyncDir);
-    expect(slot.snapshot().extensionActivities).toMatchObject([{
+    const admitted = slot.snapshot().extensionActivities?.find((candidate) => candidate.toolCallId === toolCallId);
+    expect(admitted).toMatchObject({
       toolCallId,
       status: "completed",
       completedAt: artifactCompletedAt,
-      lifecycle: { terminalAt: artifactCompletedAt },
-    }]);
+    });
+    expect(admitted?.lifecycle?.terminalAt).toBe(admitted?.lifecycle?.observedAt);
 
     const foreignDir = join(fixture.cwd, ".pi", "subagents", "async-subagent-runs", "foreign-run");
     await mkdir(foreignDir, { recursive: true });
@@ -1251,8 +1289,9 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       toolCallId,
       status: "completed",
       completedAt: artifactCompletedAt,
-      lifecycle: { terminalAt: artifactCompletedAt },
     }]);
+    const afterForeign = slot.snapshot().extensionActivities?.find((candidate) => candidate.toolCallId === toolCallId);
+    expect(afterForeign?.lifecycle?.terminalAt).toBe(admitted?.lifecycle?.terminalAt);
 
     expect(internal.bindExtensionRunOwnership(runId, {
       toolCallId: "second-real-tool-call",

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -18,7 +18,7 @@ describe("DeviceStore", () => {
     const enrollment = await store.ensureEnrollment();
     const paired = await store.pair(enrollment.code, "Phone");
 
-    expect((await store.authenticate(paired.token))?.kind).toBe("device");
+    expect(await store.authenticate(paired.token)).toEqual({ kind: "device", deviceId: paired.deviceId });
     await expect(store.pair(enrollment.code, "Other")).rejects.toThrow();
     const deviceFile = await readFile(join(root, "gateway", "devices.json"), "utf8");
     expect(deviceFile).not.toContain(paired.token);
@@ -49,6 +49,20 @@ describe("DeviceStore", () => {
     await expect(store.pair(secondEnrollment.code, "Second")).rejects.toMatchObject({ code: "conflict" });
     await expect(store.ensureEnrollment()).resolves.toMatchObject({ code: secondEnrollment.code });
     expect(await store.listDevices()).toHaveLength(1);
+  });
+
+  it("reads legacy lastSeenAt but normalizes it on the next owned write", async () => {
+    const { root, store } = await fixture();
+    const enrollment = await store.ensureEnrollment();
+    const paired = await store.pair(enrollment.code, "Phone");
+    const path = join(root, "gateway", "devices.json");
+    const document = JSON.parse(await readFile(path, "utf8"));
+    document.devices[0].lastSeenAt = "2026-01-01T00:00:00.000Z";
+    await writeFile(path, `${JSON.stringify(document)}\n`);
+    expect(await store.listDevices()).toEqual([expect.objectContaining({ id: paired.deviceId })]);
+    expect(await readFile(path, "utf8")).toContain("lastSeenAt");
+    await store.revoke(paired.deviceId);
+    expect(await readFile(path, "utf8")).not.toContain("lastSeenAt");
   });
 
   it("rejects duplicate or oversized persisted device catalogs", async () => {
@@ -108,6 +122,57 @@ describe("DeviceStore", () => {
     await writeFile(join(gateway, "local-auth.json"), "x".repeat(4 * 1_024 + 1), { mode: 0o600 });
     await chmod(join(gateway, "local-auth.json"), 0o600);
     await expect(new DeviceStore(root, "machine-id").initialize()).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("requires owner-only regular credential and invitation files and fails closed on wrong credentials", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-gateway-device-boundary-"));
+    const gateway = join(root, "gateway");
+    await mkdir(gateway, { recursive: true });
+    const external = join(root, "external-auth.json");
+    await writeFile(external, JSON.stringify({
+      version: 2, bearerToken: "x".repeat(32), purpose: "local-wrapper-health",
+      lastUpdated: "2026-01-01T00:00:00.000Z",
+    }));
+    await symlink(external, join(gateway, "local-auth.json"));
+    await expect(new DeviceStore(root, "machine-id").initialize()).rejects.toMatchObject({ code: "conflict" });
+
+    await rm(join(gateway, "local-auth.json"), { force: true });
+    await writeFile(join(gateway, "local-auth.json"), JSON.stringify({
+      version: 1, bearerToken: "x".repeat(32), purpose: "legacy", lastUpdated: "2026-01-01T00:00:00.000Z",
+    }), { mode: 0o600 });
+    await expect(new DeviceStore(root, "machine-id").initialize()).rejects.toMatchObject({ code: "conflict" });
+
+    await rm(join(gateway, "local-auth.json"), { force: true });
+    const store = new DeviceStore(root, "machine-id");
+    await store.initialize();
+    const enrollment = await store.ensureEnrollment();
+    const outsideEnrollment = join(root, "outside-enrollment.json");
+    await writeFile(outsideEnrollment, JSON.stringify(enrollment));
+    await rm(join(gateway, "enrollment.json"), { force: true });
+    await symlink(outsideEnrollment, join(gateway, "enrollment.json"));
+    await expect(store.ensureEnrollment()).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("rejects unsafe, empty, and malformed persisted device catalogs", async () => {
+    const { root, store } = await fixture();
+    const path = join(root, "gateway", "devices.json");
+    const external = join(root, "external-devices.json");
+    await writeFile(external, JSON.stringify({ version: 1, devices: [] }), { mode: 0o600 });
+    await rm(path, { force: true });
+    await symlink(external, path);
+    await expect(store.listDevices()).rejects.toMatchObject({ code: "conflict" });
+
+    await rm(path, { force: true });
+    await writeFile(path, JSON.stringify({ version: 1, devices: [] }), { mode: 0o640 });
+    await chmod(path, 0o640);
+    await expect(store.listDevices()).rejects.toMatchObject({ code: "conflict" });
+
+    await chmod(path, 0o600);
+    await writeFile(path, "", { mode: 0o600 });
+    await expect(store.listDevices()).rejects.toMatchObject({ code: "conflict" });
+
+    await writeFile(path, "{not-json", { mode: 0o600 });
+    await expect(store.listDevices()).rejects.toMatchObject({ code: "conflict" });
   });
 
   it("fails closed for bounded JSON corruption and replaces wrong invitation identity", async () => {

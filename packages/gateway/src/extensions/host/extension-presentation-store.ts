@@ -368,14 +368,18 @@ export class ExtensionPresentationStore implements ExtensionHostActivity {
         || (item.placeholder !== undefined && !boundedSafe(item.placeholder, MAX_TITLE_BYTES))
         || (item.prefill !== undefined && !boundedSafe(item.prefill, MAX_EDITOR_DIRECTIVE_BYTES, true))
         || (item.expiresAt !== undefined && (!boundedSafe(item.expiresAt, MAX_ID_BYTES) || Number.isNaN(Date.parse(item.expiresAt))))
-        || (item.method === "select" && (item.options === undefined || item.options.length === 0))
+        || (item.method === "select" && (item.options === undefined || item.options.length === 0
+          || item.placeholder !== undefined || item.prefill !== undefined))
+        || (item.method === "confirm" && (item.options !== undefined || item.placeholder !== undefined
+          || item.prefill !== undefined || item.questionnaire !== undefined))
+        || (item.method === "input" && item.options !== undefined)
+        || (item.method === "editor" && (item.options !== undefined || item.questionnaire !== undefined))
         || (item.options !== undefined && (item.method !== "select" || item.options.length > EXTENSION_MAX_SELECT_OPTIONS
           || new Set(item.options).size !== item.options.length
           || item.options.some((option) => !boundedSafe(option, MAX_OPTION_BYTES))))
         || (item.questionnaire !== undefined && (!validQuestionnaire(item.questionnaire)
           || (item.method !== "select" && item.method !== "input")
-          || (item.method === "select" && item.options?.length !== item.questionnaire.options.length + (item.questionnaire.allowFreeform ? 1 : 0))
-          || (item.method === "input" && item.options !== undefined)))
+          || (item.method === "select" && item.options?.length !== item.questionnaire.options.length + (item.questionnaire.allowFreeform ? 1 : 0))))
         || bytes(item) > MAX_INTERACTION_BYTES)) {
       throw new GatewayError("conflict", "Extension interactions are invalid");
     }

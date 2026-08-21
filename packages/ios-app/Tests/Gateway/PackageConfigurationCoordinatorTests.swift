@@ -7,6 +7,20 @@ import Testing
 @MainActor
 @Suite("Package configuration coordinator")
 struct PackageConfigurationCoordinatorTests {
+    @Test("package refresh identity includes profile revision and row operation identity")
+    func packageOwnershipIdentity() {
+        let target = PackageConfigurationTarget.workspace(cwd: "/workspace/project")
+        #expect(PackageLoadID(target: target, profileRevision: 1, invalidationGeneration: 2, refreshGeneration: 3) != PackageLoadID(target: target, profileRevision: 2, invalidationGeneration: 2, refreshGeneration: 3))
+        #expect(PackageLoadID(target: target, profileRevision: 1, invalidationGeneration: 2, refreshGeneration: 3) != PackageLoadID(target: target, profileRevision: 1, invalidationGeneration: 3, refreshGeneration: 3))
+        #expect(PackageInstallDraftPolicy.afterSuccess(current: "new draft", captured: "installed") == "new draft")
+        #expect(PackageInstallDraftPolicy.afterSuccess(current: "installed", captured: "installed").isEmpty)
+        let package = PackageSummary(source: "tool", scope: .project, filtered: false, installedPath: nil)
+        let sameRowUpdate = PackageMutationOperation.update(package.id)
+        let sameRowRemove = PackageMutationOperation.remove(package.id)
+        #expect(package.id == "project:tool")
+        #expect(sameRowUpdate != sameRowRemove)
+    }
+
     @Test("resolved resource overview uses bounded top-level summaries")
     func resourceSummary() {
         #expect(PackageResourceSummaryPolicy.summary(for: .object(["skills": .array([])])) == "1 top-level category")
@@ -162,6 +176,91 @@ struct PackageConfigurationCoordinatorTests {
         }
     }
 
+    @Test("confirmed mutation reload rejects a pre-confirmation load response that arrives last")
+    func mutationReloadRevokesPreConfirmationLoad() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            let older = Task { await harness.owner.load(target: .global, surfaceError: false) }
+            try await harness.socket.waitUntilSent(count: 2)
+            let olderRequest = try request(await harness.socket.sentFrames()[1])
+
+            let mutation = Task {
+                try await harness.owner.mutate(.install, source: "package", local: false, target: .global)
+            }
+            try await harness.socket.waitUntilSent(count: 3)
+            let mutationRequest = try request(await harness.socket.sentFrames()[2])
+            await harness.socket.enqueue(response(id: mutationRequest.id, result: .object([:])))
+            try await harness.socket.waitUntilSent(count: 4)
+            let reloadRequest = try request(await harness.socket.sentFrames()[3])
+
+            await harness.socket.enqueue(response(id: reloadRequest.id, result: inventory("confirmed")))
+            try await mutation.value
+            await harness.socket.enqueue(response(id: olderRequest.id, result: inventory("stale")))
+            #expect(!(await older.value))
+            #expect(harness.owner.inventory(for: .global)?.packages.first?.source == "confirmed")
+            await harness.client.close()
+        }
+    }
+
+    @Test("ordinary refresh cannot supersede a confirmed mutation reload")
+    func mutationReloadHasPriority() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            let mutation = Task {
+                try await harness.owner.mutate(.install, source: "package", local: false, target: .global)
+            }
+            try await harness.socket.waitUntilSent(count: 2)
+            let mutationRequest = try request(await harness.socket.sentFrames()[1])
+            await harness.socket.enqueue(response(id: mutationRequest.id, result: .object([:])))
+            try await harness.socket.waitUntilSent(count: 3)
+            let reloadRequest = try request(await harness.socket.sentFrames()[2])
+            let ordinary = Task { await harness.owner.load(target: .global, surfaceError: false) }
+            #expect(await ordinary.value)
+            let sentCount = await harness.socket.sentFrames().count
+            #expect(sentCount == 3)
+            await harness.socket.enqueue(response(id: reloadRequest.id, result: inventory("confirmed")))
+            try await mutation.value
+            #expect(harness.owner.inventory(for: .global)?.packages.first?.source == "confirmed")
+            await harness.client.close()
+        }
+    }
+
+    @Test("overlapping confirmed reloads retain the newer target owner")
+    func overlappingConfirmedReloadOwnership() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            let older = Task {
+                try await harness.owner.mutate(.install, source: "older", local: false, target: .global)
+            }
+            try await harness.socket.waitUntilSent(count: 2)
+            let olderMutation = try request(await harness.socket.sentFrames()[1])
+            await harness.socket.enqueue(response(id: olderMutation.id, result: .object([:])))
+            try await harness.socket.waitUntilSent(count: 3)
+            let olderReload = try request(await harness.socket.sentFrames()[2])
+
+            let newer = Task {
+                try await harness.owner.mutate(.install, source: "newer", local: false, target: .global)
+            }
+            try await harness.socket.waitUntilSent(count: 4)
+            let newerMutation = try request(await harness.socket.sentFrames()[3])
+            await harness.socket.enqueue(response(id: newerMutation.id, result: .object([:])))
+            try await harness.socket.waitUntilSent(count: 5)
+            let newerReload = try request(await harness.socket.sentFrames()[4])
+
+            await harness.socket.enqueue(response(id: olderReload.id, result: inventory("stale")))
+            await #expect(throws: CancellationError.self) { try await older.value }
+
+            let ordinary = Task { await harness.owner.load(target: .global, surfaceError: false) }
+            #expect(await ordinary.value)
+            #expect(await harness.socket.sentFrames().count == 5)
+
+            await harness.socket.enqueue(response(id: newerReload.id, result: inventory("newer")))
+            try await newer.value
+            #expect(harness.owner.inventory(for: .global)?.packages.first?.source == "newer")
+            await harness.client.close()
+        }
+    }
+
     @Test("retired and superseded mutation failures become cancellation")
     func staleMutationFailuresCancel() async throws {
         try await runScenario {
@@ -227,6 +326,31 @@ struct PackageConfigurationCoordinatorTests {
             await harness.socket.enqueue(failure(id: newerMutation.id, message: "current mutation failure"))
             await #expect(throws: GatewayFailure.self) { try await newer.value }
             #expect(delegate.messages.isEmpty)
+            await harness.client.close()
+        }
+    }
+
+    @Test("confirmed mutation reload revokes an in-flight update check")
+    func mutationRevokesUpdateCheck() async throws {
+        try await runScenario {
+            let harness = try await makeHarness()
+            harness.owner.installHostedUpdates([update("before", scope: .user)], for: .global)
+            let check = Task { await harness.owner.checkUpdates(target: .global, surfaceError: false) }
+            try await harness.socket.waitUntilSent(count: 2)
+            let checkRequest = try request(await harness.socket.sentFrames()[1])
+            let mutation = Task {
+                try await harness.owner.mutate(.install, source: "package", local: false, target: .global)
+            }
+            try await harness.socket.waitUntilSent(count: 3)
+            let mutationRequest = try request(await harness.socket.sentFrames()[2])
+            await harness.socket.enqueue(response(id: mutationRequest.id, result: .object([:])))
+            try await harness.socket.waitUntilSent(count: 4)
+            let reloadRequest = try request(await harness.socket.sentFrames()[3])
+            await harness.socket.enqueue(response(id: checkRequest.id, result: updates(["stale"])))
+            #expect(!(await check.value))
+            await harness.socket.enqueue(response(id: reloadRequest.id, result: inventory("confirmed")))
+            try await mutation.value
+            #expect(harness.owner.updates(for: .global).map(\.source) == ["before"])
             await harness.client.close()
         }
     }

@@ -36,7 +36,11 @@ struct ChatTranscriptPresentationStoreTests {
                 .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 1),
             ]
             queued.queued = .init(steering: ["next"], followUp: [])
-            let queuedTag = ChatTranscriptProjectionTag(snapshot: queued, presentationGeneration: 7)
+            let queuedTag = ChatTranscriptProjectionTag(
+                snapshot: queued,
+                presentationGeneration: 7,
+                queueManagementCapability: true
+            )
             let store = ChatTranscriptPresentationStore()
 
             store.submit(snapshot: queued, tag: queuedTag)
@@ -56,7 +60,8 @@ struct ChatTranscriptPresentationStoreTests {
             consumed.transcriptTotal = consumed.transcript.count
             let consumedTag = ChatTranscriptProjectionTag(
                 snapshot: consumed,
-                presentationGeneration: 7
+                presentationGeneration: 7,
+                queueManagementCapability: true
             )
 
             store.submit(snapshot: consumed, tag: consumedTag)
@@ -65,6 +70,136 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(second.queueRevision == 5)
             #expect(second.timeline.items.count >= first.timeline.items.count)
             #expect(store.installed == second)
+        }
+    }
+
+    @Test("supported capability replacement revokes queue management atomically")
+    func supportedToUnsupportedCapabilityReplacement() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_216)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.queueRevision = 4
+            snapshot.queuedItems = [
+                .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 0),
+            ]
+            snapshot.queued = .init(steering: ["next"], followUp: [])
+            let store = ChatTranscriptPresentationStore()
+            let supportedTag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7,
+                queueManagementCapability: true
+            )
+            store.submit(snapshot: snapshot, tag: supportedTag)
+            let supported = try await store.waitForInstall(of: supportedTag)
+            #expect(supported.supportsQueueManagement)
+
+            let unsupportedTag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7,
+                queueManagementCapability: false
+            )
+            #expect(unsupportedTag != supportedTag)
+            #expect(store.submit(snapshot: snapshot, tag: unsupportedTag))
+            let unsupported = try await store.waitForInstall(of: unsupportedTag)
+            #expect(!unsupported.supportsQueueManagement)
+            #expect(store.installed?.tag == unsupportedTag)
+
+            var mutationInvoked = false
+            let revokedCommit = try QueuedMessageManagementPolicy.mutationCommit(
+                for: unsupported
+            ) { _ in
+                mutationInvoked = true
+            }
+            #expect(revokedCommit == nil)
+            #expect(!mutationInvoked)
+        }
+    }
+
+    @Test("unsupported capability replacement enables queue management atomically")
+    func unsupportedToSupportedCapabilityReplacement() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_217)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.queueRevision = 4
+            snapshot.queuedItems = [
+                .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 0),
+            ]
+            snapshot.queued = .init(steering: ["next"], followUp: [])
+            let store = ChatTranscriptPresentationStore()
+            let unsupportedTag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7,
+                queueManagementCapability: false
+            )
+            store.submit(snapshot: snapshot, tag: unsupportedTag)
+            let unsupported = try await store.waitForInstall(of: unsupportedTag)
+            #expect(!unsupported.supportsQueueManagement)
+
+            let supportedTag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7,
+                queueManagementCapability: true
+            )
+            #expect(supportedTag != unsupportedTag)
+            #expect(store.submit(snapshot: snapshot, tag: supportedTag))
+            let supported = try await store.waitForInstall(of: supportedTag)
+            #expect(supported.supportsQueueManagement)
+
+            var mutationInvoked = false
+            let restoredCommit = try QueuedMessageManagementPolicy.mutationCommit(
+                for: supported
+            ) { items in
+                mutationInvoked = true
+                items.removeAll()
+            }
+            #expect(restoredCommit?.expectedRevision == 4)
+            #expect(restoredCommit?.items == [])
+            #expect(mutationInvoked)
+            #expect(store.installed?.tag == supportedTag)
+        }
+    }
+
+    @Test("ordinary timeline replacement preserves installed queue availability until commit")
+    func ordinaryTimelineReplacementPreservesInstalledAvailability() async throws {
+        try await withTestWatchdog { @MainActor in
+            var baseline = try SessionScenarioBuilder(seed: 1_218)
+                .openingTail(targetEncodedBytes: 8_000)
+            baseline.queueRevision = 4
+            baseline.queuedItems = [
+                .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 0),
+            ]
+            baseline.queued = .init(steering: ["next"], followUp: [])
+            let barrier = TranscriptProjectionBarrier()
+            let store = ChatTranscriptPresentationStore(workGate: barrier.block)
+            let baselineTag = ChatTranscriptProjectionTag(
+                snapshot: baseline,
+                presentationGeneration: 7,
+                queueManagementCapability: true
+            )
+            store.submit(snapshot: baseline, tag: baselineTag)
+            await barrier.waitForBuildCount(1)
+            barrier.releaseBuild(at: 0)
+            let installed = try await store.waitForInstall(of: baselineTag)
+            #expect(installed.supportsQueueManagement)
+
+            var replacement = baseline
+            replacement.revision += 1
+            replacement.eventSequence += 1
+            replacement.transcript.append(contentsOf: SessionScenarioBuilder(seed: 1_219)
+                .historyPage(count: 1, longRowBytes: 16))
+            replacement.transcriptTotal = replacement.transcript.count
+            let replacementTag = ChatTranscriptProjectionTag(
+                snapshot: replacement,
+                presentationGeneration: 7,
+                queueManagementCapability: true
+            )
+            #expect(store.submit(snapshot: replacement, tag: replacementTag))
+            await barrier.waitForBuildCount(2)
+            #expect(store.installed?.tag == baselineTag)
+            #expect(store.installed?.supportsQueueManagement == true)
+            barrier.releaseBuild(at: 1)
+            let committed = try await store.waitForInstall(of: replacementTag)
+            #expect(committed.supportsQueueManagement)
         }
     }
 

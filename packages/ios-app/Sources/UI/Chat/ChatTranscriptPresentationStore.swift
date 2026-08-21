@@ -12,6 +12,9 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     let transcriptCount: Int
     let firstTranscriptID: String?
     let lastTranscriptID: String?
+    /// The exact Gateway capability fact captured by this immutable source.
+    /// A missing Gateway defaults to false for callers and tests.
+    let queueManagementCapability: Bool
     /// Foreground reconciliation installs the authoritative aggregate without
     /// replaying every row that arrived while the app was suspended. The
     /// generation is consumed by the presentation store exactly once.
@@ -22,7 +25,8 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         presentationGeneration: Int,
         canonicalGeneration: Int? = nil,
         timelineGeneration: Int? = nil,
-        entranceSuppressionGeneration: Int? = nil
+        entranceSuppressionGeneration: Int? = nil,
+        queueManagementCapability: Bool = false
     ) {
         sessionID = snapshot.sessionId
         self.presentationGeneration = presentationGeneration
@@ -34,6 +38,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         transcriptCount = snapshot.transcript.count
         firstTranscriptID = snapshot.transcript.first?.id
         lastTranscriptID = snapshot.transcript.last?.id
+        self.queueManagementCapability = queueManagementCapability
         self.entranceSuppressionGeneration = entranceSuppressionGeneration
     }
 
@@ -628,7 +633,8 @@ final class ChatTranscriptPresentationStore {
                 presentationGeneration: tag.presentationGeneration,
                 canonicalGeneration: tag.canonicalGeneration,
                 timelineGeneration: tag.timelineGeneration,
-                entranceSuppressionGeneration: tag.entranceSuppressionGeneration
+                entranceSuppressionGeneration: tag.entranceSuppressionGeneration,
+                queueManagementCapability: tag.queueManagementCapability
             ) == tag
         )
         if installed?.tag == tag || buildingTag == tag || readyToInstall?.tag == tag {
@@ -831,7 +837,10 @@ final class ChatTranscriptPresentationStore {
                     preparedTextByRenderedID: built.preparedTextByRenderedID,
                     queuedMessages: next.snapshot.displayedQueuedMessages,
                     queueRevision: next.snapshot.queueRevision,
-                    supportsQueueManagement: next.snapshot.queuedItems != nil,
+                    // Rich queue facts are only manageable when this exact
+                    // commit also carries the explicit Gateway capability.
+                    supportsQueueManagement: next.tag.queueManagementCapability
+                        && next.snapshot.queuedItems != nil,
                     sourceWindow: .init(snapshot: next.snapshot)
                 )
                 guard built.isInternallyConsistent,

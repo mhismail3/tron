@@ -94,6 +94,29 @@ describe("RemotePiExtensionHost retained component foundation", () => {
     host.retire();
   });
 
+  it("rejects an over-capacity replacement without changing placement or activity", async () => {
+    const { host, presentation } = fixture();
+    const context = host.context();
+    context.setWidget("kept", (() => component(["kept"])) as never, { placement: "aboveEditor" });
+    await Promise.resolve();
+    const pending = Array.from({ length: MAX_HOST_COMPONENTS }, () => deferred<Component>());
+    // Keep the mounted widget while spending every pending-factory slot on
+    // retired generations of a separate admitted key.
+    pending.forEach((item) => context.setWidget("saturating", (() => item.promise) as never));
+    expect(presentation.hasPendingComponentFactory).toBe(true);
+    const replacement = vi.fn(() => component(["replacement"]));
+    context.setWidget("kept", replacement as never, { placement: "belowEditor" });
+    expect(replacement).not.toHaveBeenCalled();
+    const kept = presentation.state().surfaces.find((surface) => surface.id === widgetSurfaceId("kept"));
+    expect(kept?.frame.plainText).toBe("kept");
+    expect(kept?.placement).toBe("aboveEditor");
+    expect(presentation.hasPendingComponentFactory).toBe(true);
+    pending.forEach((item) => item.resolve(component(["pending"])));
+    await Promise.resolve();
+    host.retire();
+    expect(presentation.hasPendingComponentFactory).toBe(false);
+  });
+
   it("publishes bounded fallbacks for throwing, rejecting, and invalid factories", async () => {
     const { host, presentation } = fixture();
     const context = host.context();

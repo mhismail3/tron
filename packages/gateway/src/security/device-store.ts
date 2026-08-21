@@ -1,8 +1,9 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { chmod, mkdir, stat } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { AsyncMutex } from "../util/async-mutex.js";
-import { atomicWriteJson, readJson, removeIfExists } from "../util/json.js";
+import { atomicWriteJson, removeIfExists } from "../util/json.js";
+import { readSecureJson, SecureJsonFileError } from "../util/secure-json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
 import { GatewayError } from "../errors.js";
 
@@ -13,13 +14,20 @@ interface LocalAuthDocument {
   lastUpdated: string;
 }
 
+/** Internal credential-bearing record. Never expose this over RPC or auth context. */
 export interface DeviceRecord {
   id: string;
   name: string;
   tokenHash: string;
   createdAt: string;
-  lastSeenAt?: string;
 }
+
+export interface DeviceIdentity {
+  kind: "device";
+  deviceId: string;
+}
+
+export type DeviceListEntry = Omit<DeviceRecord, "tokenHash">;
 
 export const MAXIMUM_PAIRED_DEVICES = 256;
 const MAXIMUM_DEVICE_DOCUMENT_BYTES = 1 * 1_024 * 1_024;
@@ -100,6 +108,23 @@ function makeEnrollmentCode(): string {
   return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
 }
 
+interface OwnedDocument<T> {
+  present: boolean;
+  value?: T;
+}
+
+async function readOwnedDocument<T>(path: string, maximumBytes: number, description: string): Promise<OwnedDocument<T>> {
+  try {
+    const result = await readSecureJson<T>(path, maximumBytes);
+    return result.present ? { present: true, value: result.value } : { present: false };
+  } catch (error) {
+    if (error instanceof SecureJsonFileError || error instanceof RangeError || error instanceof SyntaxError) {
+      throw new GatewayError("conflict", `${description} is unsafe, malformed, or oversized`);
+    }
+    throw error;
+  }
+}
+
 export class DeviceStore {
   private readonly gatewayDir: string;
   private readonly authPath: string;
@@ -128,19 +153,12 @@ export class DeviceStore {
   }
 
   private async readDevices(): Promise<DeviceDocument> {
-    let document: DeviceDocument;
-    try {
-      document = await readJson<DeviceDocument>(
-        this.devicePath,
-        { version: 1, devices: [] },
-        MAXIMUM_DEVICE_DOCUMENT_BYTES,
-      );
-    } catch (error) {
-      if (error instanceof RangeError || error instanceof SyntaxError) {
-        throw new GatewayError("conflict", "Paired device storage is malformed or exceeds its bounded catalog");
-      }
-      throw error;
-    }
+    const result = await readOwnedDocument<DeviceDocument>(
+      this.devicePath,
+      MAXIMUM_DEVICE_DOCUMENT_BYTES,
+      "Paired device storage",
+    );
+    const document = result.present ? result.value : { version: 1 as const, devices: [] };
     if (!document || typeof document !== "object"
       || !hasOnlyKeys(document as unknown as Record<string, unknown>, ["version", "devices"])
       || document.version !== 1 || !Array.isArray(document.devices)
@@ -150,30 +168,39 @@ export class DeviceStore {
     const ids = new Set<string>();
     const hashes = new Set<string>();
     for (const device of document.devices) {
+      const legacy = device as DeviceRecord & { lastSeenAt?: unknown };
       if (!device || typeof device !== "object" || Array.isArray(device)
         || !hasOnlyKeys(device as unknown as Record<string, unknown>, [
-          "id", "name", "tokenHash", "createdAt", ...(device.lastSeenAt === undefined ? [] : ["lastSeenAt"]),
+          "id", "name", "tokenHash", "createdAt", ...(legacy.lastSeenAt === undefined ? [] : ["lastSeenAt"]),
         ])
         || typeof device.id !== "string" || device.id.length === 0 || Buffer.byteLength(device.id) > 100
         || typeof device.name !== "string" || device.name.length === 0 || Buffer.byteLength(device.name) > 320
         || /[\u0000-\u001f\u007f]/.test(device.name)
         || typeof device.tokenHash !== "string" || canonicalTokenHash(device.tokenHash) === null
         || typeof device.createdAt !== "string" || !isGatewayTimestamp(device.createdAt)
-        || (device.lastSeenAt !== undefined && (typeof device.lastSeenAt !== "string" || !isGatewayTimestamp(device.lastSeenAt)))
+        || (legacy.lastSeenAt !== undefined && (typeof legacy.lastSeenAt !== "string" || !isGatewayTimestamp(legacy.lastSeenAt)))
         || ids.has(device.id) || hashes.has(device.tokenHash)) {
         throw new GatewayError("conflict", "Paired device storage is malformed or ambiguous");
       }
       ids.add(device.id);
       hashes.add(device.tokenHash);
     }
-    return document;
+    // Legacy lastSeenAt is accepted for migration, but is deliberately not part
+    // of the current in-memory or persisted projection.
+    return {
+      version: 1,
+      devices: document.devices.map(({ id, name, tokenHash, createdAt }) => ({ id, name, tokenHash, createdAt })),
+    };
   }
 
   async initialize(): Promise<void> {
     await mkdir(this.gatewayDir, { recursive: true, mode: 0o700 });
     const existing = await this.readSecureAuth();
-    if (isLocalAuthDocument(existing)) {
-      this.localToken = existing.bearerToken;
+    if (existing.present) {
+      if (!isLocalAuthDocument(existing.value)) {
+        throw new GatewayError("conflict", "Local Gateway credential storage is malformed or has the wrong purpose");
+      }
+      this.localToken = existing.value.bearerToken;
     } else {
       this.localToken = makeToken();
       const document: LocalAuthDocument = {
@@ -187,72 +214,40 @@ export class DeviceStore {
     await this.ensureEnrollment();
   }
 
-  private async readSecureAuth(): Promise<LocalAuthDocument | null> {
-    try {
-      const metadata = await stat(this.authPath);
-      if ((metadata.mode & 0o077) !== 0) return null;
-      try {
-        return await readJson<LocalAuthDocument | null>(
-          this.authPath,
-          null,
-          MAXIMUM_LOCAL_AUTH_DOCUMENT_BYTES,
-        );
-      } catch (error) {
-        if (error instanceof RangeError || error instanceof SyntaxError) {
-          throw new GatewayError("conflict", "Local Gateway credential storage is malformed or oversized");
-        }
-        throw error;
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw error;
+  private async readSecureAuth(): Promise<OwnedDocument<LocalAuthDocument>> {
+    return readOwnedDocument(this.authPath, MAXIMUM_LOCAL_AUTH_DOCUMENT_BYTES, "Local Gateway credential storage");
+  }
+
+  private async ensureEnrollmentLocked(now: Date): Promise<EnrollmentDocument> {
+    const current = (await readOwnedDocument<EnrollmentDocument>(
+      this.enrollmentPath,
+      MAXIMUM_ENROLLMENT_DOCUMENT_BYTES,
+      "Pairing invitation storage",
+    )).value ?? null;
+    if (isEnrollmentDocument(current, this.machineId) && Date.parse(current.expiresAt) > now.getTime()) {
+      return current;
     }
+    const enrollment: EnrollmentDocument = {
+      version: 1,
+      code: makeEnrollmentCode(),
+      expiresAt: new Date(now.getTime() + 10 * 60_000).toISOString(),
+      machineId: this.machineId,
+    };
+    await atomicWriteJson(this.enrollmentPath, enrollment);
+    return enrollment;
   }
 
   async ensureEnrollment(now = new Date()): Promise<EnrollmentDocument> {
-    return this.mutex.run(async () => {
-      let current: EnrollmentDocument | null;
-      try {
-        current = await readJson<EnrollmentDocument | null>(
-          this.enrollmentPath,
-          null,
-          MAXIMUM_ENROLLMENT_DOCUMENT_BYTES,
-        );
-      } catch (error) {
-        if (error instanceof RangeError || error instanceof SyntaxError) {
-          throw new GatewayError("conflict", "Pairing invitation storage is malformed or oversized");
-        }
-        throw error;
-      }
-      if (isEnrollmentDocument(current, this.machineId) && Date.parse(current.expiresAt) > now.getTime()) {
-        return current;
-      }
-      const enrollment: EnrollmentDocument = {
-        version: 1,
-        code: makeEnrollmentCode(),
-        expiresAt: new Date(now.getTime() + 10 * 60_000).toISOString(),
-        machineId: this.machineId,
-      };
-      await atomicWriteJson(this.enrollmentPath, enrollment);
-      return enrollment;
-    });
+    return this.mutex.run(() => this.ensureEnrollmentLocked(now));
   }
 
   async pair(code: string, deviceName: string): Promise<PairingResult> {
     return this.mutex.run(async () => {
-      let enrollment: EnrollmentDocument | null;
-      try {
-        enrollment = await readJson<EnrollmentDocument | null>(
-          this.enrollmentPath,
-          null,
-          MAXIMUM_ENROLLMENT_DOCUMENT_BYTES,
-        );
-      } catch (error) {
-        if (error instanceof RangeError || error instanceof SyntaxError) {
-          throw new GatewayError("conflict", "Pairing invitation storage is malformed or oversized");
-        }
-        throw error;
-      }
+      const enrollment = (await readOwnedDocument<EnrollmentDocument>(
+        this.enrollmentPath,
+        MAXIMUM_ENROLLMENT_DOCUMENT_BYTES,
+        "Pairing invitation storage",
+      )).value ?? null;
       if (!isEnrollmentDocument(enrollment, this.machineId) || Date.parse(enrollment.expiresAt) <= Date.now()) {
         await removeIfExists(this.enrollmentPath);
         throw new GatewayError("unauthenticated", "Pairing code expired");
@@ -276,14 +271,22 @@ export class DeviceStore {
         throw new GatewayError("conflict", "Paired device capacity is full; revoke an old device before pairing another");
       }
       document.devices.push(record);
-      await atomicWriteJson(this.devicePath, document);
+      // Consume first: once pairing has been accepted, a persistence failure
+      // must not leave the invitation reusable. Regenerate explicitly while
+      // still holding the mutex if the device write fails.
       await removeIfExists(this.enrollmentPath);
+      try {
+        await atomicWriteJson(this.devicePath, document);
+      } catch (error) {
+        await this.ensureEnrollmentLocked(new Date()).catch(() => {});
+        throw error;
+      }
       queueMicrotask(() => void this.ensureEnrollment());
       return { deviceId: record.id, token };
     });
   }
 
-  async authenticate(token: string | undefined): Promise<{ kind: "local" } | { kind: "device"; device: DeviceRecord } | null> {
+  async authenticate(token: string | undefined): Promise<{ kind: "local" } | DeviceIdentity | null> {
     if (!token) return null;
     const localActual = tokenHash(token);
     const localExpected = tokenHash(this.localToken);
@@ -292,10 +295,10 @@ export class DeviceStore {
     }
     const document = await this.readDevices();
     const device = document.devices.find((candidate) => equalHash(token, candidate.tokenHash));
-    return device ? { kind: "device", device } : null;
+    return device ? { kind: "device", deviceId: device.id } : null;
   }
 
-  async listDevices(): Promise<Omit<DeviceRecord, "tokenHash">[]> {
+  async listDevices(): Promise<DeviceListEntry[]> {
     const document = await this.readDevices();
     return document.devices.map(({ tokenHash: _tokenHash, ...device }) => device);
   }

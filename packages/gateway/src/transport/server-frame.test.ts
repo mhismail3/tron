@@ -6,13 +6,11 @@ describe("bounded outbound gateway frames", () => {
   it("rejects an overlapping open without replacing the current owner", () => {
     const pending = new Map([["session", "open-1"]]);
     const synchronizations = new Map<string, any>();
-    const tokens = new Map<string, string>();
-    expect(existingSessionOpenOwner(pending, synchronizations, tokens, "session")).toBe("open-1");
-    expect(existingSessionOpenOwner(pending, synchronizations, tokens, "other")).toBeUndefined();
+    expect(existingSessionOpenOwner(pending, synchronizations, "session")).toBe("open-1");
+    expect(existingSessionOpenOwner(pending, synchronizations, "other")).toBeUndefined();
     pending.delete("session");
     synchronizations.set("session", { requestId: "open-1", subscriptionToken: "token-1" });
-    tokens.set("session", "token-1");
-    expect(existingSessionOpenOwner(pending, synchronizations, tokens, "session")).toBe("open-1");
+    expect(existingSessionOpenOwner(pending, synchronizations, "session")).toBe("open-1");
   });
 
   it("keeps completion ownership exact while independent sessions finish in either order", () => {
@@ -71,7 +69,7 @@ describe("bounded outbound gateway frames", () => {
       ["other", { requestId: "other-open", timeout: otherTimeout, subscriptionToken: "other-token" }],
     ]);
     const tokens = new Map([["session", "failed-token"], ["other", "other-token"]]);
-    const subscriptions = new Set(["session", "other"]);
+    const subscriptions = new Map([["session", "session-token"], ["other", "other-token"]]);
     const runtimeUnsubscribed: string[] = [];
     try {
       const revoked: string[] = [];
@@ -133,13 +131,13 @@ describe("bounded outbound gateway frames", () => {
   });
 
   it("terminal attachment follows current subscription ownership", () => {
-    const subscriptions = new Set(["session"]);
+    const subscriptions = new Map([["session", "session-token"]]);
     const belongs = (terminalId: string, sessionId: string) => terminalId === "terminal" && sessionId === "session";
     expect(canAttachTerminal(subscriptions, "terminal", belongs)).toBe(true);
 
     subscriptions.delete("session");
     expect(canAttachTerminal(subscriptions, "terminal", belongs)).toBe(false);
-    subscriptions.add("replacement");
+    subscriptions.set("replacement", "replacement-token");
     expect(canAttachTerminal(subscriptions, "terminal", belongs)).toBe(false);
   });
 

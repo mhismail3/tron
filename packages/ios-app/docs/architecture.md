@@ -172,9 +172,12 @@ no rendered row or semantic scroll anchor exists; an anchor is optional viewport
 Only this bounded authoritative continuity tail enters the disk cache.
 `ChatTranscriptPresentationStore` serializes snapshot-to-timeline preparation off MainActor,
 coalesces a burst to one pending newest source, and keeps the last complete installed commit
-visible while a replacement builds. Load-earlier state, transcript rows, and queue rows all come
-from that one installed source window; mismatched controls remain explicitly unavailable until the
-complete replacement swaps atomically. It installs only an exact tag
+visible while a replacement builds. Transcript rows and Load-earlier availability come from the
+installed source window, while queue management stays owned by the installed queue revision/items
+and the exact Gateway capability authority; generic transcript build lag never locks a stable queue
+card. An admitted Load-earlier page owns one local exact token from click through Gateway paging,
+projection installation, and anchored prepend (or unanchored installation); ordinary projection
+updates do not relabel or disable the pill. It installs only an exact tag
 containing session, mounted presentation, runtime, canonical/timeline generations, and paging
 bounds/edge identity. It retains at most one installed, one building, and one pending immutable
 snapshot/timeline; it is disposable projection state, not a session mirror or event journal.
@@ -554,9 +557,9 @@ If final bottom geometry arrives before native ownership, that exact callback pa
 manual return immediately, clears unread state, and removes the catch-up control without a tap.
 A mixed viewport/scroll callback does the same only when direct interaction and measured movement
 toward the tail are both present; keyboard resize alone cannot release detachment. Bottom
-distance uses SwiftUI's atomically derived native `visibleRect.maxY` plus the bottom content
-inset, rather than reconstructing a visible edge from offset/container values that may belong
-to different lazy-layout or keyboard frames.
+distance subtracts SwiftUI's atomically derived native `visibleRect.maxY` from the physical
+content edge (`contentSize.height + contentInsets.bottom`), rather than reconstructing a visible
+edge from offset/container values that may belong to different lazy-layout or keyboard frames.
 While detached, a fixed action-sized circular
 glass down-arrow morphs from the composer's trailing edge; multiline editor height can never
 resize it. Reaching the practical tail boundary (with a small inset-rounding tolerance) or
@@ -577,8 +580,9 @@ restore a surviving detached semantic anchor within one point. Persistent idle n
 not disable preservation, but active interaction, pending native geometry, or user-driven settling does.
 After each point correction, both a newer semantic sample and a newer scroll-geometry revision are
 required in either callback order before another correction or binding release. Stale generations and
-direct interaction cannot correct. Content shrink outside such an installed mutation remains inert for
-both pinned and detached readers and never creates an automatic position write.
+direct interaction cannot correct. An ordinary shrink whose native viewport remains within the physical
+content edge is inert. A structural shrink that leaves a released pinned offset beyond that edge receives
+one frame-gated tail clamp; detached or directly owned viewports remain untouched.
 Progress-only tool mutations cannot request a tail position. Keyboard and complete-composer layout keep
 a logically pinned reader at the latest tail, while a detached reader receives no position write
 and retains the same semantic reading position. These layout changes cannot change the durable

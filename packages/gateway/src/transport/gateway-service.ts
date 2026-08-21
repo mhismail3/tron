@@ -39,21 +39,25 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
     "newBranchWorktree",
     "existingBranchWorktree",
   ] as const);
-  const result: SessionSourceControlRequest = { mode };
-  if (mode === "existingCheckout") {
-    if (source.branch !== undefined || source.base !== undefined) {
-      throw new GatewayError("invalid_request", "sourceControl existingCheckout does not accept branch or base");
+  const keys = new Set(Object.keys(source));
+  const requireKeys = (allowed: readonly string[]) => {
+    if ([...keys].some((key) => !allowed.includes(key))) {
+      throw new GatewayError("invalid_request", "sourceControl contains unknown fields");
     }
-    return result;
+  };
+  if (mode === "existingCheckout") {
+    requireKeys(["mode"]);
+    return { mode };
   }
-  result.branch = string(source.branch, "sourceControl.branch", { max: 255 });
+  const branch = string(source.branch, "sourceControl.branch", { max: 255 });
   if (mode === "newBranchWorktree") {
+    requireKeys(["mode", "branch", "base"]);
+    if (source.base === null) throw new GatewayError("invalid_request", "sourceControl.base must be omitted or a string");
     const base = optionalString(source.base, "sourceControl.base", 255);
-    if (base !== undefined) result.base = base;
-  } else if (source.base !== undefined) {
-    throw new GatewayError("invalid_request", "sourceControl.base is only valid for newBranchWorktree");
+    return base === undefined ? { mode, branch } : { mode, branch, base };
   }
-  return result;
+  requireKeys(["mode", "branch"]);
+  return { mode, branch };
 }
 
 const restartDrainMethods = new Set([

@@ -413,9 +413,9 @@ static int read_selection(const char *path, const char *channel, char *version, 
     return 0;
 }
 
-static int recover_pending_attempt_unlocked(const char *home, const char *channel) {
+static int recover_pending_attempt_unlocked(const char *channelRoot, const char *channel) {
     char markerPath[PATH_MAX], marker[MAX_MANIFEST_BYTES + 1];
-    if (snprintf(markerPath, sizeof(markerPath), "%s/gateway/payloads/%s/pending-attempt.json", home, channel) >= (int)sizeof(markerPath)) return -1;
+    if (snprintf(markerPath, sizeof(markerPath), "%s/pending-attempt.json", channelRoot) >= (int)sizeof(markerPath)) return -1;
     if (bounded_file(markerPath, marker, sizeof(marker)) != 0) {
         return access(markerPath, F_OK) != 0 && errno == ENOENT ? 0 : -1;
     }
@@ -436,7 +436,7 @@ static int recover_pending_attempt_unlocked(const char *home, const char *channe
         !valid_component(candidateVersion, MAX_COMPONENT_BYTES - 1) || !valid_component(previousVersion, MAX_COMPONENT_BYTES - 1) ||
         !valid_fingerprint(candidateFingerprint) || !valid_fingerprint(previousFingerprint)) return -1;
     char currentPath[PATH_MAX], currentVersion[MAX_COMPONENT_BYTES], currentFingerprint[65];
-    if (snprintf(currentPath, sizeof(currentPath), "%s/gateway/payloads/%s/current.json", home, channel) >= (int)sizeof(currentPath)
+    if (snprintf(currentPath, sizeof(currentPath), "%s/current.json", channelRoot) >= (int)sizeof(currentPath)
         || read_selection(currentPath, channel, currentVersion, sizeof(currentVersion), currentFingerprint, sizeof(currentFingerprint)) != 0
         || strcmp(currentVersion, candidateVersion) != 0 || strcmp(currentFingerprint, candidateFingerprint) != 0) return -1;
 
@@ -466,7 +466,7 @@ static int recover_pending_attempt_unlocked(const char *home, const char *channe
 
     char previousPath[PATH_MAX], node[PATH_MAX], entrypoint[PATH_MAX], helper[PATH_MAX];
     PayloadIdentity previousIdentity;
-    if (snprintf(previousPath, sizeof(previousPath), "%s/gateway/payloads/%s/versions/%s", home, channel, previousVersion) >= (int)sizeof(previousPath)
+    if (snprintf(previousPath, sizeof(previousPath), "%s/versions/%s", channelRoot, previousVersion) >= (int)sizeof(previousPath)
         || validate_payload(previousPath, channel, previousVersion, previousFingerprint, node, entrypoint, helper, &previousIdentity) != 0) return -1;
     char temporary[PATH_MAX];
     if (snprintf(temporary, sizeof(temporary), "%s.tmp-recovery-%ld", currentPath, (long)getpid()) >= (int)sizeof(temporary)) return -1;
@@ -481,14 +481,14 @@ static int recover_pending_attempt_unlocked(const char *home, const char *channe
     return 1;
 }
 
-static int recover_pending_attempt(const char *home, const char *channel) {
+static int recover_pending_attempt(const char *channelRoot, const char *channel) {
     char markerPath[PATH_MAX], lockPath[PATH_MAX];
-    if (snprintf(markerPath, sizeof(markerPath), "%s/gateway/payloads/%s/pending-attempt.json", home, channel) >= (int)sizeof(markerPath)
+    if (snprintf(markerPath, sizeof(markerPath), "%s/pending-attempt.json", channelRoot) >= (int)sizeof(markerPath)
         || access(markerPath, F_OK) != 0
         || snprintf(lockPath, sizeof(lockPath), "%s.lock", markerPath) >= (int)sizeof(lockPath)) return 0;
     for (int attempt = 0; attempt < 200; ++attempt) {
         if (mkdir(lockPath, 0700) == 0) {
-            int result = recover_pending_attempt_unlocked(home, channel);
+            int result = recover_pending_attempt_unlocked(channelRoot, channel);
             (void)rmdir(lockPath);
             return result;
         }
@@ -507,16 +507,32 @@ static int recover_pending_attempt(const char *home, const char *channel) {
     return -1;
 }
 
-static int external_payload(const char *home, const char *channel, char *node, char *entrypoint, char *helper, char *selectedRoot, PayloadIdentity *selectedIdentity) {
-    char payloadsPath[PATH_MAX], payloadsRoot[PATH_MAX], channelRootPath[PATH_MAX], channelRoot[PATH_MAX];
+/* Return 1 only when the external store/channel is genuinely absent. Any
+ * existing but symlinked or malformed root is unsafe and must not fall back. */
+static int admit_channel_root(const char *home, const char *channel, char *admittedRoot) {
+    char gatewayPath[PATH_MAX], payloadsPath[PATH_MAX], payloadsRoot[PATH_MAX], channelPath[PATH_MAX];
+    if (!valid_component(channel, 64) ||
+        snprintf(gatewayPath, sizeof(gatewayPath), "%s/gateway", home) >= (int)sizeof(gatewayPath) ||
+        snprintf(payloadsPath, sizeof(payloadsPath), "%s/payloads", gatewayPath) >= (int)sizeof(payloadsPath)) return -1;
+    struct stat info;
+    if (lstat(gatewayPath, &info) != 0) return errno == ENOENT ? 1 : -1;
+    if (!S_ISDIR(info.st_mode) || S_ISLNK(info.st_mode)) return -1;
+    if (lstat(payloadsPath, &info) != 0) return errno == ENOENT ? 1 : -1;
+    if (!S_ISDIR(info.st_mode) || S_ISLNK(info.st_mode) || realpath(payloadsPath, payloadsRoot) == NULL) return -1;
+    if (snprintf(channelPath, sizeof(channelPath), "%s/%s", payloadsRoot, channel) >= (int)sizeof(channelPath)) return -1;
+    if (lstat(channelPath, &info) != 0) return errno == ENOENT ? 1 : -1;
+    if (!S_ISDIR(info.st_mode) || S_ISLNK(info.st_mode) || realpath(channelPath, admittedRoot) == NULL ||
+        !path_is_under(payloadsRoot, admittedRoot)) return -1;
+    char versionsPath[PATH_MAX];
+    if (snprintf(versionsPath, sizeof(versionsPath), "%s/versions", admittedRoot) >= (int)sizeof(versionsPath) ||
+        !regular_directory_path(versionsPath)) return -1;
+    return 0;
+}
+
+static int external_payload(const char *channelRoot, const char *channel, char *node, char *entrypoint, char *helper, char *selectedRoot, PayloadIdentity *selectedIdentity) {
     char versionsPath[PATH_MAX], versionsRoot[PATH_MAX], currentPath[PATH_MAX];
     char selection[MAX_MANIFEST_BYTES + 1], version[128], fingerprint[65], selectedChannel[64];
-    if (!valid_component(channel, 64) ||
-        snprintf(payloadsPath, sizeof(payloadsPath), "%s/gateway/payloads", home) >= (int)sizeof(payloadsPath) ||
-        !regular_directory_path(payloadsPath) || realpath(payloadsPath, payloadsRoot) == NULL ||
-        snprintf(channelRootPath, sizeof(channelRootPath), "%s/%s", payloadsRoot, channel) >= (int)sizeof(channelRootPath) ||
-        !regular_directory_path(channelRootPath) || realpath(channelRootPath, channelRoot) == NULL || !path_is_under(payloadsRoot, channelRoot) ||
-        snprintf(versionsPath, sizeof(versionsPath), "%s/versions", channelRoot) >= (int)sizeof(versionsPath) ||
+    if (snprintf(versionsPath, sizeof(versionsPath), "%s/versions", channelRoot) >= (int)sizeof(versionsPath) ||
         !regular_directory_path(versionsPath) || realpath(versionsPath, versionsRoot) == NULL || !path_is_under(channelRoot, versionsRoot) ||
         snprintf(currentPath, sizeof(currentPath), "%s/current.json", channelRoot) >= (int)sizeof(currentPath) ||
         bounded_file(currentPath, selection, sizeof(selection)) != 0 || json_schema_one(selection) != 0) return -1;
@@ -530,11 +546,10 @@ static int external_payload(const char *home, const char *channel, char *node, c
         json_string(selection, "version", version, sizeof(version)) != 0 ||
         json_string(selection, "payloadFingerprint", fingerprint, sizeof(fingerprint)) != 0 ||
         strcmp(selectedChannel, channel) != 0 || !valid_component(version, 128) || !valid_fingerprint(fingerprint)) return -1;
-    char payload[PATH_MAX];
-    if (snprintf(payload, sizeof(payload), "%s/%s", versionsRoot, version) >= (int)sizeof(payload)) return -1;
-    char payloadRoot[PATH_MAX];
-    if (realpath(payload, payloadRoot) == NULL || !path_is_under(versionsRoot, payloadRoot)) return -1;
-    if (snprintf(selectedRoot, PATH_MAX, "%s", payloadRoot) >= PATH_MAX) return -1;
+    char payload[PATH_MAX], payloadRoot[PATH_MAX];
+    if (snprintf(payload, sizeof(payload), "%s/%s", versionsRoot, version) >= (int)sizeof(payload) ||
+        realpath(payload, payloadRoot) == NULL || !path_is_under(versionsRoot, payloadRoot) ||
+        snprintf(selectedRoot, PATH_MAX, "%s", payloadRoot) >= PATH_MAX) return -1;
     return validate_payload(payloadRoot, channel, version, fingerprint, node, entrypoint, helper, selectedIdentity);
 }
 
@@ -576,11 +591,34 @@ int main(int argc, char **argv) {
     char selectedPayloadRoot[PATH_MAX];
     const char *channel = getenv("TRON_GATEWAY_CHANNEL");
     if (channel == NULL || channel[0] == '\0') channel = "stable";
-    if (selected_home(home, sizeof(home)) == 0 && recover_pending_attempt(home, channel) < 0) {
-        fprintf(stderr, "Tron Gateway candidate attempt is locked; retrying without launching an uncommitted payload.\n");
-        return 75;
+    /* Only the two shipped channels are admitted. Validate before any
+     * channel-derived marker, lock, or selection path is touched. */
+    if (strcmp(channel, "stable") != 0 && strcmp(channel, "dev") != 0) {
+        fprintf(stderr, "Invalid TRON_GATEWAY_CHANNEL.\n");
+        return 78;
     }
-    int external = selected_home(home, sizeof(home)) == 0 && external_payload(home, channel, node, entrypoint, helper, selectedPayloadRoot, &selectedIdentity) == 0;
+    char admittedChannelRoot[PATH_MAX];
+    int externalState = selected_home(home, sizeof(home)) == 0
+        ? admit_channel_root(home, channel, admittedChannelRoot)
+        : 1;
+    if (externalState < 0) {
+        fprintf(stderr, "Tron Gateway external payload store is unsafe or invalid.\n");
+        return 78;
+    }
+    int external = 0;
+    if (externalState == 0) {
+        if (recover_pending_attempt(admittedChannelRoot, channel) < 0) {
+            fprintf(stderr, "Tron Gateway candidate attempt is locked; retrying without launching an uncommitted payload.\n");
+            return 75;
+        }
+        external = external_payload(admittedChannelRoot, channel, node, entrypoint, helper, selectedPayloadRoot, &selectedIdentity) == 0;
+        if (!external) {
+            // The external root was safely admitted, but its current selection
+            // or payload no longer validates. Never execute it; retain the
+            // trusted bundled payload as the bounded resilience fallback.
+            fprintf(stderr, "Tron Gateway external payload selection is invalid; using bundled payload.\n");
+        }
+    }
     if (!external && snprintf(selectedPayloadRoot, sizeof(selectedPayloadRoot), "%s", bundledRoot) >= (int)sizeof(selectedPayloadRoot)) return 70;
     if (!external && validate_payload(bundledRoot, NULL, NULL, NULL, node, entrypoint, helper, &selectedIdentity) != 0) {
         fprintf(stderr, "Tron Gateway payload is incomplete or invalid at %s. Reinstall Tron.\n", bundledRoot);

@@ -27,12 +27,11 @@ const releaseAgentRuntimeLock = await acquireAgentRuntimeLocks([
   config.agentDir,
   ...(configuredSessionDir ? [configuredSessionDir] : []),
 ]);
-let agentRuntimeLockReleased = false;
-async function releaseRuntimeLock(): Promise<void> {
-  if (agentRuntimeLockReleased) return;
-  agentRuntimeLockReleased = true;
-  await releaseAgentRuntimeLock();
-}
+const releaseRuntimeLock = releaseAgentRuntimeLock;
+// Keep the bootstrap transaction inside a top-level catch: composition or
+// listen initialization failures must release locks immediately rather than
+// relying on the stale-lock timeout or a later process signal.
+try {
 process.env.PI_CODING_AGENT_DIR = config.agentDir;
 process.env.PI_CODING_AGENT ??= "true";
 process.env.AI_AGENT ??= "pi";
@@ -203,3 +202,7 @@ process.on("unhandledRejection", (error) => {
 const enrollmentTimer = setInterval(() => void devices.ensureEnrollment(), 60_000);
 enrollmentTimer.unref();
 await transport.listen(() => sessions.initializeBlobStorage());
+} catch (error) {
+  await releaseRuntimeLock();
+  throw error;
+}

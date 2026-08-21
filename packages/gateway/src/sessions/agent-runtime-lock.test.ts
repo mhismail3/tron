@@ -19,6 +19,12 @@ describe("agent runtime lock", () => {
     const shared = join(root, "shared-sessions");
     const release = await acquireAgentRuntimeLocks([join(root, "agent-a"), shared]);
     await expect(acquireAgentRuntimeLocks([join(root, "agent-b"), shared])).rejects.toMatchObject({ code: "conflict" });
-    await release();
+    const first = release();
+    const second = release();
+    expect(second).toBe(first);
+    await Promise.all([first, second, release()]);
+
+    const reacquired = await acquireAgentRuntimeLocks([join(root, "agent-a"), shared]);
+    await reacquired();
   });
 });

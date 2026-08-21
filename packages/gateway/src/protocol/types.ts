@@ -136,10 +136,10 @@ export type TranscriptItem =
     };
 
 export interface ExtensionToolOrigin {
+  /** Bounded producer source attribution. This is required even when owner is present. */
+  source: string;
   /** Exact opaque owner attribution captured at the extension boundary. */
   owner?: ExtensionOwner;
-  /** Bounded legacy fallback only; never treated as a filesystem path or identity. */
-  source?: string;
 }
 
 export type ExtensionRunStatus = "running" | "completed" | "failed";
@@ -294,20 +294,53 @@ export interface ExtensionQuestionnaireAnswer {
   freeform?: string;
 }
 
-export type ExtensionInteraction = {
+interface ExtensionInteractionBase {
   id: string;
   hostEpoch: string;
   presentationRevision: number;
-  method: "select" | "confirm" | "input" | "editor";
   title: string;
   message?: string;
-  options?: string[];
-  placeholder?: string;
-  prefill?: string;
   expiresAt?: string;
-  /** Additive descriptor; old clients ignore it and answer the primitive dialog. */
-  questionnaire?: ExtensionQuestionnaireDescriptor;
-};
+}
+
+/** Method-discriminated in Gateway code while retaining the existing flat JSON shape. */
+export type ExtensionInteraction =
+  | (ExtensionInteractionBase & {
+      method: "select";
+      options: string[];
+      placeholder?: never;
+      prefill?: never;
+      /** Additive descriptor; old clients ignore it and answer the primitive dialog. */
+      questionnaire?: ExtensionQuestionnaireDescriptor;
+    })
+  | (ExtensionInteractionBase & {
+      method: "confirm";
+      options?: never;
+      placeholder?: never;
+      prefill?: never;
+      questionnaire?: never;
+    })
+  | (ExtensionInteractionBase & {
+      method: "input";
+      options?: never;
+      placeholder?: string;
+      prefill?: string;
+      /** Additive descriptor; old clients ignore it and answer the primitive dialog. */
+      questionnaire?: ExtensionQuestionnaireDescriptor;
+    })
+  | (ExtensionInteractionBase & {
+      method: "editor";
+      options?: never;
+      placeholder?: string;
+      prefill?: string;
+      questionnaire?: never;
+    });
+
+export type ExtensionInteractionInput =
+  | Omit<Extract<ExtensionInteraction, { method: "select" }>, "id" | "hostEpoch" | "presentationRevision" | "expiresAt">
+  | Omit<Extract<ExtensionInteraction, { method: "confirm" }>, "id" | "hostEpoch" | "presentationRevision" | "expiresAt">
+  | Omit<Extract<ExtensionInteraction, { method: "input" }>, "id" | "hostEpoch" | "presentationRevision" | "expiresAt">
+  | Omit<Extract<ExtensionInteraction, { method: "editor" }>, "id" | "hostEpoch" | "presentationRevision" | "expiresAt">;
 
 export interface ExtensionOwner {
   id: string;

@@ -302,6 +302,33 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("actual ChatView executor corrects a pinned viewport beyond shortened content once")
+    func pinnedOvershootCorrectsOnce() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 1_194) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                }
+                let baseline = harness.probeObservation.automaticScrollCommandCount
+                let bottom = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_000, containerHeight: 400,
+                    visibleTopY: 600, visibleBottomY: 1_000
+                )
+                let overshoot = ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 900, containerHeight: 400,
+                    visibleTopY: 600, visibleBottomY: 1_000
+                )
+                #expect(overshoot.isPastBottomEdge)
+                harness.driveGeometry(previous: bottom, current: overshoot)
+                try await harness.driveFrameBoundary()
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.automaticScrollCommandCount == baseline + 1
+                }
+                #expect(harness.probeObservation.automaticScrollCommandCount == baseline + 1)
+            }
+        }
+    }
+
     @Test("visible discrete insertion reveals once without smooth viewport motion")
     func discreteInsertionEntrance() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {

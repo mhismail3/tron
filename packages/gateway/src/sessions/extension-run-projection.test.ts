@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasStructuredExtensionRunActivity, projectExtensionRunActivity } from "./extension-run-projection.js";
+import { admitExtensionLifecycleArtifact, boundExtensionActivities, extensionActivityStatusFromTool, extensionLifecycleState, hasStructuredExtensionRunActivity, normalizeExtensionArtifact, projectExtensionRunActivity } from "./extension-run-projection.js";
 
 const base = {
   id: "tool-call",
@@ -12,6 +12,53 @@ const base = {
 };
 
 describe("projectExtensionRunActivity", () => {
+  it("normalizes artifact status and timestamps identically for discovery and watcher callers", () => {
+    const raw = { state: "complete", startedAt: 1_700_000_000_000, lastUpdate: 1_700_000_001_000, endedAt: 1_700_000_002_000, durationMs: 2_000 };
+    const options = { now: "2026-01-01T00:00:00.000Z", fallbackStartedAt: "2025-12-31T23:59:00.000Z", fallbackUpdatedAt: "2025-12-31T23:59:30.000Z" };
+    expect(normalizeExtensionArtifact(raw, options)).toEqual({
+      lifecycleState: "completed",
+      status: "completed",
+      terminal: true,
+      startedAt: new Date(1_700_000_000_000).toISOString(),
+      updatedAt: new Date(1_700_000_001_000).toISOString(),
+      completedAt: new Date(1_700_000_002_000).toISOString(),
+      durationMs: 2_000,
+    });
+    expect(normalizeExtensionArtifact({ state: "running" }, options)).toEqual({
+      lifecycleState: "running",
+      status: "running",
+      terminal: false,
+      startedAt: options.fallbackStartedAt,
+      updatedAt: options.fallbackUpdatedAt,
+    });
+    expect(normalizeExtensionArtifact({ state: "future" }, options)).toBeUndefined();
+    expect(normalizeExtensionArtifact({ state: "completed", startedAt: 1_700_000_001_000, lastUpdate: 1_700_000_002_000 }, options)).toBeUndefined();
+    expect(normalizeExtensionArtifact({ state: "running", startedAt: 1_700_000_002_000, lastUpdate: 1_700_000_001_000 }, options)).toBeUndefined();
+    expect(normalizeExtensionArtifact({ state: "completed", startedAt: 1_700_000_002_000, lastUpdate: 1_700_000_003_000, completedAt: 1_700_000_004_000 }, options)?.completedAt)
+      .toBe(new Date(1_700_000_004_000).toISOString());
+    const divergent = { state: "running", startedAt: 1_767_226_800_000, lastUpdate: 1_767_230_400_000 };
+    const authoritative = { ...options, fallbackStartedAt: "2026-01-01T00:00:00.000Z", useArtifactStartedAt: false };
+    const discovery = normalizeExtensionArtifact(divergent, authoritative);
+    const watcher = normalizeExtensionArtifact(divergent, authoritative);
+    expect(discovery).toEqual(watcher);
+    expect(discovery?.startedAt).toBe(authoritative.fallbackStartedAt);
+  });
+  it("fails closed on impossible artifact timelines while retaining legacy aliases", () => {
+    const valid = {
+      lifecycleArtifactVersion: 3,
+      runId: "timeline",
+      state: "completed",
+      startedAt: 100,
+      lastUpdate: 200,
+      completedAt: 300,
+    };
+    expect(admitExtensionLifecycleArtifact(valid)).toEqual(valid);
+    expect(admitExtensionLifecycleArtifact({ ...valid, lastUpdate: 99 })).toBeUndefined();
+    expect(admitExtensionLifecycleArtifact({ ...valid, endedAt: 199 })).toBeUndefined();
+    expect(admitExtensionLifecycleArtifact({ ...valid, endedAt: undefined, completedAt: undefined })).toBeUndefined();
+    expect(admitExtensionLifecycleArtifact({ ...valid, state: "running", endedAt: 50 })).toBeUndefined();
+  });
+
   it("admits only explicit delegated-run conventions for ambient activity", () => {
     expect(hasStructuredExtensionRunActivity(undefined)).toBe(false);
     expect(hasStructuredExtensionRunActivity({ content: [{ type: "text", text: "ordinary tool output" }] })).toBe(false);

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdir, realpath, rm } from "node:fs/promises";
+import { lstat, mkdir, realpath, rm } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { GatewayError } from "../errors.js";
@@ -15,11 +15,10 @@ export type SessionSourceControlMode =
   | "newBranchWorktree"
   | "existingBranchWorktree";
 
-export interface SessionSourceControlRequest {
-  mode: SessionSourceControlMode;
-  branch?: string;
-  base?: string;
-}
+export type SessionSourceControlRequest =
+  | { mode: "existingCheckout" }
+  | { mode: "newBranchWorktree"; branch: string; base?: string }
+  | { mode: "existingBranchWorktree"; branch: string };
 
 export interface PreparedSessionWorkspace {
   cwd: string;
@@ -34,6 +33,19 @@ interface GitCommandResult {
 function inside(root: string, candidate: string): boolean {
   const delta = relative(root, candidate);
   return delta === "" || (!delta.startsWith(`..${sep}`) && delta !== ".." && !isAbsolute(delta));
+}
+
+async function ensureDirectoryNoSymlink(path: string): Promise<void> {
+  try {
+    const metadata = await lstat(path);
+    if (!metadata.isDirectory()) throw new GatewayError("conflict", "Managed Git worktree path is not a directory", false);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  await mkdir(path, { mode: 0o700 });
+  const metadata = await lstat(path);
+  if (!metadata.isDirectory()) throw new GatewayError("conflict", "Managed Git worktree path is not a directory", false);
 }
 
 function cleanField(value: string | undefined): string | undefined {
@@ -81,7 +93,7 @@ export class GitWorktreeService {
     const repositoryRoot = await this.repositoryRoot(cwd);
     const branch = validateBranch(request.branch, "branch");
     await this.verifyBranchName(repositoryRoot, branch);
-    const base = cleanField(request.base);
+    const base = request.mode === "newBranchWorktree" ? cleanField(request.base) : undefined;
     if (request.mode === "newBranchWorktree" && base && (base.startsWith("-") || /\s/.test(base))) {
       throw new GatewayError("invalid_request", "base must be a valid local Git ref");
     }
@@ -94,7 +106,6 @@ export class GitWorktreeService {
     }
 
     const target = await this.allocateTarget(repositoryRoot, branch);
-    await mkdir(dirname(target), { recursive: true, mode: 0o700 });
     try {
       if (request.mode === "newBranchWorktree") {
         await runGit(repositoryRoot, ["worktree", "add", "-b", branch, target, base ?? "HEAD"]);
@@ -164,9 +175,34 @@ export class GitWorktreeService {
   private async allocateTarget(repositoryRoot: string, branch: string): Promise<string> {
     const repositoryName = basename(repositoryRoot).replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) || "repository";
     const branchName = branch.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 100) || "worktree";
-    const folder = join(this.worktreeRoot, repositoryName);
+    const managedRoot = resolve(this.worktreeRoot);
+    const folder = join(managedRoot, repositoryName);
+    // Never use recursive mkdir here: it follows a pre-existing symlink in an
+    // intermediate component. Both components are checked before Git sees the
+    // target, then realpath containment proves the resolved parent remains owned.
+    await ensureDirectoryNoSymlink(dirname(managedRoot));
+    await ensureDirectoryNoSymlink(managedRoot);
+    const canonicalRoot = await realpath(managedRoot);
+    await ensureDirectoryNoSymlink(folder);
+    const canonicalFolder = await realpath(folder);
+    if (!inside(canonicalRoot, canonicalFolder)) {
+      throw new GatewayError("internal", "Git worktree path escaped its managed root", false);
+    }
     const target = join(folder, `${branchName}-${randomUUID().slice(0, 8)}`);
-    if (!inside(resolve(this.worktreeRoot), resolve(target))) {
+    if (!inside(canonicalRoot, canonicalFolder) || !inside(resolve(managedRoot), resolve(target))) {
+      throw new GatewayError("internal", "Git worktree path escaped its managed root", false);
+    }
+    try {
+      const metadata = await lstat(target);
+      // A pre-existing target, especially a symlink, must never be handed to
+      // worktree add or removed by the failure cleanup path.
+      if (metadata) throw new GatewayError("conflict", "Managed Git worktree target already exists", false);
+    } catch (error) {
+      if (error instanceof GatewayError) throw error;
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    const canonicalParent = await realpath(dirname(target));
+    if (!inside(canonicalRoot, canonicalParent)) {
       throw new GatewayError("internal", "Git worktree path escaped its managed root", false);
     }
     return target;

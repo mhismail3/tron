@@ -8,6 +8,7 @@ import {
 import { GatewayError } from "../errors.js";
 import type {
   ExtensionInteraction,
+  ExtensionInteractionInput,
   ExtensionQuestionnaireAnswer,
   ExtensionQuestionnaireDescriptor,
   ExtensionSemanticState,
@@ -170,13 +171,22 @@ export class SemanticUIBroker {
     if (method === "select" && (!primitiveOptions || primitiveOptions.length === 0)) {
       return Promise.reject(new GatewayError("conflict", "Extension questionnaire select options are invalid"));
     }
+    if (method === "select") {
+      // Keep the select/input discriminant visible to TypeScript. The wire
+      // contract intentionally forbids options on input interactions.
+      return this.request({
+        method: "select",
+        title: input.title,
+        options: primitiveOptions!,
+        questionnaire: descriptor,
+      }, input);
+    }
     return this.request({
-      method,
+      method: "input",
       title: input.title,
-      ...(primitiveOptions === undefined ? {} : { options: primitiveOptions }),
       ...(input.placeholder === undefined ? {} : { placeholder: input.placeholder }),
       questionnaire: descriptor,
-    }, input).then((value) => value);
+    }, input);
   }
 
   updateEditor(hostEpoch: string, baseRevision: number, operationId: string, text: string): { revision: number; text: string; applied: boolean } {
@@ -233,19 +243,49 @@ export class SemanticUIBroker {
   }
 
   private request(
-    input: Omit<ExtensionInteraction, "id" | "hostEpoch" | "presentationRevision" | "expiresAt">,
+    input: ExtensionInteractionInput,
     options?: { signal?: AbortSignal; timeout?: number },
   ): Promise<unknown> {
     try {
       this.assertActive();
-      input = {
-        ...input,
-        title: typeof input.title === "string" ? stripTerminalPresentation(input.title) : input.title,
-        ...(input.message === undefined ? {} : { message: typeof input.message === "string" ? stripTerminalPresentation(input.message) : input.message }),
-        ...(input.placeholder === undefined ? {} : { placeholder: typeof input.placeholder === "string" ? stripTerminalPresentation(input.placeholder) : input.placeholder }),
-        ...(input.prefill === undefined ? {} : { prefill: typeof input.prefill === "string" ? stripTerminalPresentation(input.prefill) : input.prefill }),
-        ...(input.options === undefined ? {} : { options: Array.isArray(input.options) ? input.options.map((option) => typeof option === "string" ? stripTerminalPresentation(option) : option) : input.options }),
-      };
+      const title = stripTerminalPresentation(input.title);
+      // Sanitize each discriminated interaction independently. Keeping these
+      // branches explicit prevents forbidden fields from being cast into the
+      // flat wire shape.
+      switch (input.method) {
+        case "select":
+          input = {
+            ...input,
+            title,
+            options: Array.isArray(input.options)
+              ? input.options.map((option) => typeof option === "string" ? stripTerminalPresentation(option) : option)
+              : input.options,
+          };
+          break;
+        case "confirm":
+          input = {
+            ...input,
+            title,
+            ...(input.message === undefined ? {} : { message: stripTerminalPresentation(input.message) }),
+          };
+          break;
+        case "input":
+          input = {
+            ...input,
+            title,
+            ...(input.placeholder === undefined ? {} : { placeholder: stripTerminalPresentation(input.placeholder) }),
+            ...(input.prefill === undefined ? {} : { prefill: stripTerminalPresentation(input.prefill) }),
+          };
+          break;
+        case "editor":
+          input = {
+            ...input,
+            title,
+            ...(input.placeholder === undefined ? {} : { placeholder: stripTerminalPresentation(input.placeholder) }),
+            ...(input.prefill === undefined ? {} : { prefill: stripTerminalPresentation(input.prefill) }),
+          };
+          break;
+      }
       if (options?.signal?.aborted) return Promise.resolve(input.method === "confirm" ? false : undefined);
       requireBoundedString(input.title, MAX_TITLE_BYTES, "interaction title");
       if (input.message !== undefined) requireBoundedString(input.message, MAX_MESSAGE_BYTES, "interaction message");

@@ -12,6 +12,10 @@ struct GatewayPayloadStore {
     static let maxManifestBytes = 64 * 1024
     static let channelComponentLimit = 64
     static let versionComponentLimit = 128
+    static let gatewayVersionByteLimit = 127
+    static let nodeVersionByteLimit = 127
+    static let sourceRevisionByteLimit = 255
+    static let runtimeEpochComponentLimit = 127
 
     let home: URL
     let channel: String
@@ -45,7 +49,11 @@ struct GatewayPayloadStore {
 
     static func channel(environment: [String: String]) -> String {
         let value = environment[TronPaths.gatewayChannelEnv] ?? "stable"
-        return validComponent(value, maximumLength: channelComponentLimit) ? value : "stable"
+        return validChannel(value) ? value : "stable"
+    }
+
+    static func validChannel(_ value: String) -> Bool {
+        value == "stable" || value == "dev"
     }
 
     static func selected(home: URL = TronPaths.tronHome, environment: [String: String]) -> GatewayPayloadStore {
@@ -125,6 +133,10 @@ struct GatewayPayloadSelection: Codable, Equatable, Sendable {
 }
 
 enum GatewayPayloadValidationError: Equatable, Error, Sendable {
+    /// The path exists but cannot be trusted as part of the payload store.
+    /// Unsafe external paths must not be replaced by the bundled fallback: the
+    /// launcher fails closed for the same condition.
+    case unsafePath(String)
     case missing(String)
     case notRegularFile(String)
     case tooLarge(String)
@@ -148,6 +160,10 @@ enum GatewayPayloadResolver {
         bundled: Result<GatewayPayloadValidationResult, GatewayPayloadValidationError>
     ) -> GatewayPayloadValidationResult? {
         if case let .success(payload) = external { return payload }
+        // Keep the fallback for ordinary absent, malformed, or tampered
+        // selections. Existing unsafe roots are a launcher fail-closed signal,
+        // not a reason for health to claim the bundled payload is active.
+        if case .failure(.unsafePath) = external { return nil }
         if case let .success(payload) = bundled { return payload }
         return nil
     }
@@ -165,12 +181,21 @@ enum GatewayPayloadValidator {
         fileManager: FileManager = .default
     ) -> Result<GatewayPayloadValidationResult, GatewayPayloadValidationError> {
         var rootInfo = stat()
-        guard lstat(payloadRoot.path, &rootInfo) == 0, (rootInfo.st_mode & S_IFMT) == S_IFDIR else {
+        guard lstat(payloadRoot.path, &rootInfo) == 0 else {
             return .failure(.missing("payload root"))
+        }
+        guard (rootInfo.st_mode & S_IFMT) == S_IFDIR else {
+            return .failure(.unsafePath("payload root"))
+        }
+        guard isImmutable(rootInfo) else {
+            return .failure(.incomplete("writable payload root"))
         }
         let root = payloadRoot.resolvingSymlinksInPath().standardizedFileURL
         guard isDirectory(root, fileManager: fileManager) else {
             return .failure(.missing("payload root"))
+        }
+        guard immutableTree(root, under: root, fileManager: fileManager) else {
+            return .failure(.incomplete("writable payload entry"))
         }
 
         guard let manifestURL = containedRegularURL("manifest.json", under: root, directory: false),
@@ -185,12 +210,14 @@ enum GatewayPayloadValidator {
         }
         guard manifest.schema == GatewayPayloadStore.schema,
               manifest.kind == GatewayPayloadManifest.payloadKind,
-              GatewayPayloadStore.validComponent(manifest.channel, maximumLength: GatewayPayloadStore.channelComponentLimit),
+              GatewayPayloadStore.validChannel(manifest.channel),
               GatewayPayloadStore.validComponent(manifest.version, maximumLength: GatewayPayloadStore.versionComponentLimit),
               !manifest.gatewayVersion.isEmpty,
+              manifest.gatewayVersion.utf8.count <= GatewayPayloadStore.gatewayVersionByteLimit,
               !manifest.nodeVersion.isEmpty,
-              manifest.sourceRevision.map({ !$0.isEmpty }) == true,
-              manifest.runtimeEpoch.map({ GatewayPayloadStore.validComponent($0, maximumLength: GatewayPayloadStore.versionComponentLimit) }) == true,
+              manifest.nodeVersion.utf8.count <= GatewayPayloadStore.nodeVersionByteLimit,
+              manifest.sourceRevision.map({ !$0.isEmpty && $0.utf8.count <= GatewayPayloadStore.sourceRevisionByteLimit }) == true,
+              manifest.runtimeEpoch.map({ GatewayPayloadStore.validComponent($0, maximumLength: GatewayPayloadStore.runtimeEpochComponentLimit) }) == true,
               isFingerprint(manifest.payloadFingerprint) else {
             return .failure(.invalidManifest("manifest identity"))
         }
@@ -242,31 +269,45 @@ enum GatewayPayloadValidator {
         store: GatewayPayloadStore,
         fileManager: FileManager = .default
     ) -> Result<GatewayPayloadValidationResult, GatewayPayloadValidationError> {
-        guard GatewayPayloadStore.validComponent(store.channel, maximumLength: GatewayPayloadStore.channelComponentLimit) else {
+        guard GatewayPayloadStore.validChannel(store.channel) else {
             return .failure(.invalidManifest("channel"))
         }
+        for (url, label) in [(store.payloadsRoot, "payloads root"), (store.channelRoot, "channel root"), (store.versionsRoot, "versions root")] {
+            var info = stat()
+            guard lstat(url.path, &info) == 0 else {
+                return .failure(.missing("payload store roots"))
+            }
+            guard (info.st_mode & S_IFMT) == S_IFDIR else {
+                return .failure(.unsafePath(label))
+            }
+        }
         var currentInfo = stat()
-        guard lstat(store.currentManifestURL.path, &currentInfo) == 0,
-              (currentInfo.st_mode & S_IFMT) == S_IFREG else {
+        guard lstat(store.currentManifestURL.path, &currentInfo) == 0 else {
             return .failure(.missing("current.json"))
         }
-        var payloadsInfo = stat()
-        var channelInfo = stat()
-        var versionsInfo = stat()
-        guard lstat(store.payloadsRoot.path, &payloadsInfo) == 0,
-              lstat(store.channelRoot.path, &channelInfo) == 0,
-              lstat(store.versionsRoot.path, &versionsInfo) == 0,
-              (payloadsInfo.st_mode & S_IFMT) == S_IFDIR,
-              (channelInfo.st_mode & S_IFMT) == S_IFDIR,
-              (versionsInfo.st_mode & S_IFMT) == S_IFDIR else {
-            return .failure(.missing("payload store roots"))
+        guard (currentInfo.st_mode & S_IFMT) == S_IFREG else {
+            return .failure(.unsafePath("current.json"))
         }
         let payloadsRoot = store.payloadsRoot.resolvingSymlinksInPath().standardizedFileURL
         let channelRoot = store.channelRoot.resolvingSymlinksInPath().standardizedFileURL
         let versionsRoot = store.versionsRoot.resolvingSymlinksInPath().standardizedFileURL
-        guard isContained(channelRoot, under: payloadsRoot),
-              let currentManifest = containedURL("current.json", under: channelRoot),
-              let data = boundedData(at: currentManifest, fileManager: fileManager) else {
+        let expectedPayloadsRoot = store.payloadsRoot.standardizedFileURL
+        let expectedChannelRoot = store.channelRoot.standardizedFileURL
+        let expectedVersionsRoot = store.versionsRoot.standardizedFileURL
+        guard payloadsRoot == expectedPayloadsRoot else {
+            return .failure(.unsafePath("payloads root"))
+        }
+        guard channelRoot == expectedChannelRoot, isContained(channelRoot, under: payloadsRoot) else {
+            return .failure(.unsafePath("channel root"))
+        }
+        guard versionsRoot == expectedVersionsRoot, isContained(versionsRoot, under: channelRoot) else {
+            return .failure(.unsafePath("versions root"))
+        }
+        guard let currentManifest = containedURL("current.json", under: channelRoot),
+              isContained(currentManifest.resolvingSymlinksInPath().standardizedFileURL, under: channelRoot) else {
+            return .failure(.unsafePath("current.json"))
+        }
+        guard let data = boundedData(at: currentManifest, fileManager: fileManager) else {
             return .failure(.missing("current.json"))
         }
         let selection: GatewayPayloadSelection
@@ -282,10 +323,18 @@ enum GatewayPayloadValidator {
               isFingerprint(selection.payloadFingerprint) else {
             return .failure(.invalidManifest("selection identity"))
         }
-        let versionRoot = store.versionRoot(selection.version).resolvingSymlinksInPath().standardizedFileURL
-        guard isContained(versionsRoot, under: channelRoot),
+        var versionInfo = stat()
+        let selectedVersionRoot = store.versionRoot(selection.version)
+        guard lstat(selectedVersionRoot.path, &versionInfo) == 0 else {
+            return .failure(.missing("version root"))
+        }
+        guard (versionInfo.st_mode & S_IFMT) == S_IFDIR else {
+            return .failure(.unsafePath("version root"))
+        }
+        let versionRoot = selectedVersionRoot.resolvingSymlinksInPath().standardizedFileURL
+        guard versionRoot == selectedVersionRoot.standardizedFileURL,
               isContained(versionRoot, under: versionsRoot) else {
-            return .failure(.identityMismatch("version path"))
+            return .failure(.unsafePath("version root"))
         }
         return validate(
             payloadRoot: versionRoot,
@@ -327,9 +376,31 @@ enum GatewayPayloadValidator {
         return SHA256.hash(data: lines).map { String(format: "%02x", $0) }.joined()
     }
 
+    private static func immutableTree(_ url: URL, under root: URL, fileManager: FileManager) -> Bool {
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else { return false }
+        if (info.st_mode & S_IFMT) == S_IFLNK {
+            let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+            var targetInfo = stat()
+            guard isContained(resolved, under: root),
+                  lstat(resolved.path, &targetInfo) == 0,
+                  (targetInfo.st_mode & S_IFMT) == S_IFREG || (targetInfo.st_mode & S_IFMT) == S_IFDIR else { return false }
+            return true
+        }
+        guard isImmutable(info) else { return false }
+        guard (info.st_mode & S_IFMT) == S_IFDIR else {
+            return (info.st_mode & S_IFMT) == S_IFREG
+        }
+        guard let entries = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil, options: []) else {
+            return false
+        }
+        return entries.allSatisfy { immutableTree($0, under: root, fileManager: fileManager) }
+    }
+
     private static func collectRegularFiles(_ directory: URL, relativePrefix: String, root: URL, files: inout [(String, URL, String?)]) -> Bool {
         var info = stat()
         guard lstat(directory.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
+              isImmutable(info),
               let entries = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: []) else { return false }
         for entry in entries {
             var entryInfo = stat()
@@ -346,15 +417,22 @@ enum GatewayPayloadValidator {
                       (targetInfo.st_mode & S_IFMT) == S_IFREG || (targetInfo.st_mode & S_IFMT) == S_IFDIR else { return false }
                 files.append((relative, entry, linkTarget))
             } else if (entryInfo.st_mode & S_IFMT) == S_IFDIR {
-                guard collectRegularFiles(entry, relativePrefix: relative, root: root, files: &files) else { return false }
+                guard isImmutable(entryInfo), collectRegularFiles(entry, relativePrefix: relative, root: root, files: &files) else { return false }
             } else if (entryInfo.st_mode & S_IFMT) == S_IFREG {
+                guard isImmutable(entryInfo) else { return false }
                 files.append((relative, entry, nil))
             } else { return false }
         }
         return true
     }
 
+    private static func isImmutable(_ info: stat) -> Bool {
+        (info.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)) == 0
+    }
+
     private static func usableFile(_ url: URL, minimumBytes: Int64, fileManager: FileManager) -> Bool {
+        var info = stat()
+        guard lstat(url.path, &info) == 0, isImmutable(info) else { return false }
         guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
               (attributes[.type] as? FileAttributeType) == .typeRegular,
               let size = (attributes[.size] as? NSNumber)?.int64Value,

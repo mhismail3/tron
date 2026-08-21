@@ -8,21 +8,54 @@ enum QueuedMessageManagementAvailability: Equatable, Sendable {
     case available
     case requiresGatewayUpdate
     case invalidProjection
-    case updatingProjection
 
     var isManageable: Bool { self == .available }
+}
+
+struct QueuedMessageManagementCommit: Equatable, Sendable {
+    let expectedRevision: Int
+    let items: [SessionSnapshot.QueuedMessage]
 }
 
 enum QueuedMessageManagementPolicy {
     static let capability = "queue-management.v1"
 
     static func availability(
-        capabilities: [String],
+        queueManagementCapability: Bool,
         queueRevision: Int?,
         hasAuthoritativeItems: Bool
     ) -> QueuedMessageManagementAvailability {
-        guard capabilities.contains(capability) else { return .requiresGatewayUpdate }
+        guard queueManagementCapability else { return .requiresGatewayUpdate }
         return queueRevision != nil && hasAuthoritativeItems ? .available : .invalidProjection
+    }
+
+    /// Queue mutations must be prepared from one immutable installed commit.
+    /// In particular, a capability-only replacement can revoke management
+    /// while an editor is still presenting the previous commit.
+    static func installedCommit(
+        for installed: InstalledChatTranscript?
+    ) -> QueuedMessageManagementCommit? {
+        guard let installed,
+              installed.tag.queueManagementCapability,
+              installed.supportsQueueManagement,
+              let expectedRevision = installed.queueRevision else { return nil }
+        return QueuedMessageManagementCommit(
+            expectedRevision: expectedRevision,
+            items: installed.queuedMessages
+        )
+    }
+
+    static func mutationCommit(
+        for installed: InstalledChatTranscript?,
+        mutation: (inout [SessionSnapshot.QueuedMessage]) throws -> Void
+    ) throws -> QueuedMessageManagementCommit? {
+        guard let installedCommit = installedCommit(for: installed) else { return nil }
+        var items = installedCommit.items
+        try mutation(&items)
+        return QueuedMessageManagementCommit(
+            expectedRevision: installedCommit.expectedRevision,
+            items: items
+        )
     }
 }
 
@@ -257,8 +290,6 @@ struct QueuedMessageRow: View {
             "Update Tron on Mac to edit or remove queued messages"
         case .invalidProjection:
             "Reconnect to Tron on Mac to restore queue editing"
-        case .updatingProjection:
-            "Updating the conversation; queue editing is temporarily unavailable"
         }
     }
 }

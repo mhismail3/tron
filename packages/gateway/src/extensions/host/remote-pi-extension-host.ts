@@ -132,10 +132,17 @@ export class RemotePiExtensionHost {
         }
         const placement = options?.placement === "belowEditor" ? "belowEditor" : "aboveEditor";
         if (!host.admitComponent(key)) return;
+        const previousPlacement = host.placements.get(key);
+        const previousMeta = host.surfaceMeta.get(key);
         host.placements.set(key, placement);
         const owner = currentExtensionOwner();
         host.surfaceMeta.set(key, { kind: "widget", placement, lifecycle: "retained", inputMode: "none", ...(owner ? { owner: { source: owner.source } } : {}) });
-        host.mountComponent(key, content as RemoteComponentFactory, placement);
+        // Registry admission may reject a replacement while a bounded factory
+        // is pending. Restore metadata when that admission does not commit.
+        if (!host.mountComponent(key, content as RemoteComponentFactory)) {
+          if (previousPlacement === undefined) host.placements.delete(key); else host.placements.set(key, previousPlacement);
+          if (previousMeta === undefined) host.surfaceMeta.delete(key); else host.surfaceMeta.set(key, previousMeta);
+        }
       },
       custom<T>(factory: CustomFactory<T>, options?: CustomOptions) {
         return host.mountCustom(factory, options);
@@ -193,11 +200,12 @@ export class RemotePiExtensionHost {
     return { tui: this.tuiProxy, theme: this.baseContext.theme as Theme, keybindings: this.keybindings };
   }
 
-  private mountComponent(key: string, factory: RemoteComponentFactory, placement: SurfacePlacement): void {
+  private mountComponent(key: string, factory: RemoteComponentFactory): boolean {
     const { tui } = this.ensureTui();
-    this.placements.set(key, placement);
-    if (!this.registry?.set(key, factory)) this.recordDiagnostic({ code: "render-invalid", message: "Extension component capacity is full" });
+    const admitted = this.registry?.set(key, factory) ?? false;
+    if (!admitted) this.recordDiagnostic({ code: "render-invalid", message: "Extension component capacity is full" });
     void tui;
+    return admitted;
   }
 
   private mountCustom<T>(factory: CustomFactory<T>, options?: CustomOptions): Promise<T> {
@@ -230,7 +238,13 @@ export class RemotePiExtensionHost {
     this.surfaceMeta.set(key, { kind: "custom", placement: "fullscreen", lifecycle: "blocking", inputMode: "keys", callId, ...(owner ? { owner: { source: owner.source } } : {}) });
     const done = (value: T): void => this.finishCustom(key, value, undefined);
     const customFactory: RemoteComponentFactory = () => factory(tui, theme, keybindings, done);
-    if (!this.registry?.set(key, customFactory)) this.failCustom(key, new Error("Extension component capacity is full"));
+    if (!this.registry?.set(key, customFactory)) {
+      // No factory callback will settle a rejected admission, so release the
+      // metadata transaction here rather than leaving an orphan blocking
+      // surface behind.
+      call.factorySettled = true;
+      this.failCustom(key, new Error("Extension component capacity is full"));
+    }
     return result;
   }
 

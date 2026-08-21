@@ -1,4 +1,4 @@
-import { rm, stat } from "node:fs/promises";
+import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import WebSocket from "ws";
@@ -6,6 +6,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
 import { readJson, updateJsonLocked } from "../util/json.js";
+import { readSecureJson } from "../util/secure-json.js";
 
 interface LegacySession {
   sessionId: string;
@@ -401,10 +402,11 @@ export class LegacyImportService {
 
   private async readLegacyToken(): Promise<string | undefined> {
     try {
-      const metadata = await stat(this.legacyAuthPath);
-      if ((metadata.mode & 0o077) !== 0) return undefined;
-      const document = await readJson<{ bearerToken?: unknown }>(this.legacyAuthPath, {}, MAX_AUTH_BYTES);
-      if (typeof document.bearerToken !== "string") return undefined;
+      const result = await readSecureJson<{ bearerToken?: unknown }>(this.legacyAuthPath, MAX_AUTH_BYTES);
+      if (!result.present) return undefined;
+      const document = result.value;
+      if (!document || typeof document !== "object" || Array.isArray(document)
+        || typeof document.bearerToken !== "string") return undefined;
       const token = document.bearerToken.trim();
       return token.length >= 32 && Buffer.byteLength(token, "utf8") <= MAX_TOKEN_BYTES ? token : undefined;
     } catch { return undefined; }

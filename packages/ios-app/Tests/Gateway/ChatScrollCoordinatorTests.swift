@@ -161,6 +161,141 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("pinned projection shortening rejects overflow and releases only after corrected geometry")
+    func pinnedProjectionShorteningCorrectsPhysicalTail() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let previous = try installedToolTranscript(
+                ids: ["one"], statuses: [.running], timelineGeneration: 1
+            )
+            let grouped = try installedToolTranscript(
+                ids: ["one", "two"], statuses: [.completed, .completed], timelineGeneration: 2
+            )
+            coordinator.geometryChanged(previous: .zero, current: bottom)
+            let initialRelease = try #require(coordinator.command)
+            #expect(initialRelease.destination == .releaseBinding)
+            coordinator.commandApplied(initialRelease)
+
+            coordinator.transcriptProjectionWillChange(from: previous)
+            coordinator.installedTranscriptChanged(grouped)
+            let overshoot = ChatTranscriptGeometry(
+                offsetY: 600, contentHeight: 900, containerHeight: 400,
+                visibleTopY: 600, visibleBottomY: 1_000
+            )
+            coordinator.geometryChanged(previous: bottom, current: overshoot)
+            #expect(overshoot.isPastBottomEdge)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let correction = try await coordinator.hostedNextCommand()
+            #expect(correction.origin == .automaticFollow)
+            #expect(correction.destination == .tail)
+            #expect(correction.animation == .disabled)
+            coordinator.commandApplied(correction)
+            coordinator.geometryChanged(previous: overshoot, current: overshoot)
+            #expect(frames.requestCount == 1)
+            #expect(coordinator.command == correction)
+
+            let corrected = ChatTranscriptGeometry(
+                offsetY: 500, contentHeight: 900, containerHeight: 400,
+                visibleTopY: 500, visibleBottomY: 900
+            )
+            coordinator.geometryChanged(previous: overshoot, current: corrected)
+            let release = try #require(coordinator.command)
+            #expect(!corrected.isPastBottomEdge)
+            #expect(release.origin == .binding)
+            #expect(release.destination == .releaseBinding)
+        }
+    }
+
+    @Test("direct takeover between projection submission and install suppresses shortening correction")
+    func projectionShorteningDefersToDirectTakeover() throws {
+        let frames = ManualScrollFrameScheduler()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+        let previous = try installedToolTranscript(
+            ids: ["one"], statuses: [.running], timelineGeneration: 1
+        )
+        let grouped = try installedToolTranscript(
+            ids: ["one", "two"], statuses: [.completed, .completed], timelineGeneration: 2
+        )
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        if let release = coordinator.command { coordinator.commandApplied(release) }
+        coordinator.transcriptProjectionWillChange(from: previous)
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.installedTranscriptChanged(grouped)
+
+        let overshoot = ChatTranscriptGeometry(
+            offsetY: 600, contentHeight: 900, containerHeight: 400,
+            visibleTopY: 600, visibleBottomY: 1_000
+        )
+        coordinator.geometryChanged(previous: bottom, current: overshoot)
+        #expect(overshoot.isPastBottomEdge)
+        #expect(frames.requestCount == 0)
+        #expect(coordinator.command == nil)
+        #expect(coordinator.hostedIsNativeUserOwned)
+    }
+
+    @Test("past-bottom shrink retires an applied automatic token before proof or reissue")
+    func appliedAutomaticTailDoesNotBlockShrinkCorrection() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.geometryChanged(previous: .zero, current: bottom)
+            if let release = coordinator.command { coordinator.commandApplied(release) }
+            let grown = ChatTranscriptGeometry(
+                offsetY: 600, contentHeight: 1_100, containerHeight: 400,
+                visibleTopY: 600, visibleBottomY: 1_000
+            )
+            coordinator.geometryChanged(previous: bottom, current: grown)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let firstTail = try await coordinator.hostedNextCommand()
+            coordinator.commandApplied(firstTail)
+
+            let overshoot = ChatTranscriptGeometry(
+                offsetY: 600, contentHeight: 900, containerHeight: 400,
+                visibleTopY: 600, visibleBottomY: 1_000
+            )
+            coordinator.geometryChanged(previous: grown, current: overshoot)
+            #expect(coordinator.command == nil)
+            await frames.waitForRequest(count: 2)
+
+            // The still-applied edge binding can heal before the decision frame.
+            // In that case no duplicate tail write is needed; only safe release.
+            let corrected = ChatTranscriptGeometry(
+                offsetY: 500, contentHeight: 900, containerHeight: 400,
+                visibleTopY: 500, visibleBottomY: 900
+            )
+            coordinator.geometryChanged(previous: overshoot, current: corrected)
+            frames.releaseNext()
+            let release = try await coordinator.hostedNextCommand()
+            #expect(release.origin == .binding)
+            #expect(release.destination == .releaseBinding)
+        }
+    }
+
+    @Test("retained foreground presentation still corrects a shortened pinned tail")
+    func retainedPinnedPresentationCorrectsShortening() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.geometryChanged(previous: .zero, current: bottom)
+            if let release = coordinator.command { coordinator.commandApplied(release) }
+            coordinator.resetForPresentation(2, retainingVisibleViewport: true)
+            let overshoot = ChatTranscriptGeometry(
+                offsetY: 600, contentHeight: 900, containerHeight: 400,
+                visibleTopY: 600, visibleBottomY: 1_000
+            )
+            coordinator.geometryChanged(previous: bottom, current: overshoot)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let correction = try await coordinator.hostedNextCommand()
+            #expect(correction.presentation == 2)
+            #expect(correction.origin == .automaticFollow)
+            #expect(correction.destination == .tail)
+        }
+    }
+
     @Test("detached projection topology change preserves a fresh surviving semantic anchor")
     func detachedProjectionMutationPreservesAnchor() throws {
         let coordinator = detachedCoordinator(at: away, withUnread: false)
@@ -555,6 +690,87 @@ struct ChatScrollCoordinatorTests {
         #expect(detachedFrames.requestCount == 0)
         #expect(detached.command == nil)
         #expect(detached.userScrolledAway)
+    }
+
+    @Test("ordinary shrink is inert while pinned overshoot is clamped and detached overshoot is preserved")
+    func shrinkAndOvershootOwnership() async throws {
+        let pinnedFrames = ManualScrollFrameScheduler()
+        let pinned = ChatScrollCoordinator(frameScheduler: pinnedFrames.scheduler)
+        let pinnedBefore = ChatTranscriptGeometry(
+            offsetY: 600, contentHeight: 1_200, containerHeight: 400
+        )
+        let pinnedAfter = ChatTranscriptGeometry(
+            offsetY: 600, contentHeight: 1_150, containerHeight: 400
+        )
+        pinned.geometryChanged(previous: pinnedBefore, current: pinnedAfter)
+        #expect(pinnedFrames.requestCount == 0)
+        #expect(pinned.command == nil)
+
+        let overshootFrames = ManualScrollFrameScheduler()
+        let overshootCoordinator = ChatScrollCoordinator(frameScheduler: overshootFrames.scheduler)
+        let settledBottom = ChatTranscriptGeometry(
+            offsetY: 600, contentHeight: 1_000, containerHeight: 400,
+            visibleTopY: 600, visibleBottomY: 1_000
+        )
+        overshootCoordinator.geometryChanged(previous: .zero, current: settledBottom)
+        if let release = overshootCoordinator.command { overshootCoordinator.commandApplied(release) }
+        let pinnedOvershoot = ChatTranscriptGeometry(
+            offsetY: 600, contentHeight: 900, containerHeight: 400,
+            visibleTopY: 600, visibleBottomY: 1_000
+        )
+        #expect(pinnedOvershoot.distanceFromBottom == 0)
+        #expect(pinnedOvershoot.isPastBottomEdge)
+        #expect(!pinnedOvershoot.isAtCatchUpBoundary)
+        overshootCoordinator.geometryChanged(previous: settledBottom, current: pinnedOvershoot)
+        await overshootFrames.waitForRequest(count: 1)
+        overshootFrames.releaseNext()
+        let correction = try await overshootCoordinator.hostedNextCommand()
+        #expect(correction.destination == .tail)
+        #expect(correction.origin == .automaticFollow)
+
+        let detachedFrames = ManualScrollFrameScheduler()
+        let detached = detachedCoordinator(at: away, frames: detachedFrames)
+        let detachedAfter = ChatTranscriptGeometry(
+            offsetY: 300, contentHeight: 950, containerHeight: 400
+        )
+        detached.geometryChanged(previous: away, current: detachedAfter)
+        #expect(detachedFrames.requestCount == 0)
+        #expect(detached.command == nil)
+        #expect(detached.userScrolledAway)
+
+        let detachedOvershoot = ChatTranscriptGeometry(
+            offsetY: 700, contentHeight: 900, containerHeight: 400,
+            visibleTopY: 700, visibleBottomY: 1_100
+        )
+        detached.geometryChanged(previous: detachedAfter, current: detachedOvershoot)
+        #expect(detachedOvershoot.isPastBottomEdge)
+        #expect(detachedFrames.requestCount == 0)
+        #expect(detached.command == nil)
+        #expect(detached.userScrolledAway)
+    }
+
+    @Test("phase-only automatic overshoot corrects while direct rubber-band remains native-owned")
+    func phaseOnlyOvershootRespectsOwnership() {
+        let overshoot = ChatTranscriptGeometry(
+            offsetY: 600, contentHeight: 900, containerHeight: 400,
+            visibleTopY: 600, visibleBottomY: 1_000
+        )
+        let automaticFrames = ManualScrollFrameScheduler()
+        let automatic = ChatScrollCoordinator(frameScheduler: automaticFrames.scheduler)
+        automatic.geometryChanged(previous: .zero, current: bottom)
+        if let release = automatic.command { automatic.commandApplied(release) }
+        automatic.scrollPhaseChanged(from: .idle, to: .animating, finalGeometry: bottom)
+        automatic.scrollPhaseChanged(from: .animating, to: .idle, finalGeometry: overshoot)
+        #expect(automaticFrames.requestCount == 1)
+
+        let directFrames = ManualScrollFrameScheduler()
+        let direct = ChatScrollCoordinator(frameScheduler: directFrames.scheduler)
+        direct.geometryChanged(previous: .zero, current: bottom)
+        if let release = direct.command { direct.commandApplied(release) }
+        direct.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
+        direct.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: overshoot)
+        #expect(directFrames.requestCount == 0)
+        #expect(direct.command == nil)
     }
 
     @Test("composer measurement preserves fresh native authority through pending final geometry")

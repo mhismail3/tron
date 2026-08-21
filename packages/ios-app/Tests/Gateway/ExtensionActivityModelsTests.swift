@@ -29,6 +29,17 @@ struct ExtensionActivityModelsTests {
         #expect(ExtensionActivityGroupProjection.ambientGroups([activity], inventory: [first, second]).isEmpty)
     }
 
+    @Test("receipt timelines fail closed for Gateway and legacy rows")
+    func receiptTimeline() {
+        let malformedGateway = ExtensionActivityLifecycle(
+            state: .completed, sequence: 4,
+            observedAt: "2026-01-01T00:00:01Z",
+            terminalAt: "2026-01-01T00:00:02Z"
+        )
+        #expect(!ExtensionActivityAdmissionPolicy.admits(makeActivity(lifecycle: malformedGateway)))
+        #expect(!ExtensionActivityAdmissionPolicy.admits(makeActivity(completedAt: "2026-01-01T00:00:02Z")))
+    }
+
     @Test("negative sequence and duration are rejected")
     func bounds() {
         let lifecycle = ExtensionActivityLifecycle(state: .running, sequence: -1, observedAt: "2026-01-01T00:00:00Z")
@@ -119,6 +130,7 @@ struct ExtensionActivityModelsTests {
 
     private func makeActivity(
         lifecycle: ExtensionActivityLifecycle? = nil,
+        completedAt: String? = nil,
         durationMs: Int? = nil,
         id: String = "activity-1", runId: String? = "run-1", output: String? = nil,
         children: [ExtensionRunChild] = []
@@ -134,7 +146,7 @@ struct ExtensionActivityModelsTests {
                 }
             } ?? .running,
             startedAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:01Z",
-            completedAt: lifecycle?.terminalAt, lastActivityAt: nil,
+            completedAt: completedAt ?? lifecycle?.terminalAt, lastActivityAt: nil,
             currentTool: nil, currentToolStartedAt: nil, currentPath: nil,
             toolCount: 1, turnCount: 1, durationMs: durationMs, output: output,
             children: children, lifecycle: lifecycle
