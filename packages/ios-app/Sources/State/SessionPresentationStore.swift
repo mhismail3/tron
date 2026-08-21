@@ -969,9 +969,9 @@ final class SessionPresentationStore {
         return false
     }
 
-    // Canonical opening and later paging share the same bounded, display-bearing
-    // continuity policy. Keep this in one place so opening cannot silently use a
-    // smaller (or unbounded) history window than live continuity.
+    // In-place reconnect retains this much compatible mounted history when
+    // available. Fresh opening accepts the Gateway's bounded tail immediately;
+    // this continuity preference never triggers history reads inside sync.
     static let minimumRecentTranscriptContinuityMessages = 24
 
     private func performSynchronizationAttempt(
