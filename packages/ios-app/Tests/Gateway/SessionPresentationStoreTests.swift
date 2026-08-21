@@ -915,8 +915,8 @@ struct SessionPresentationStoreTests {
         }
     }
 
-    @Test("active fresh open backfills an empty positive-start recent tail before publication")
-    func freshOpenBackfillsEmptyActiveTail() async throws {
+    @Test("active fresh open publishes an empty positive-start tail before optional history")
+    func freshOpenPublishesEmptyActiveTailImmediately() async throws {
         try await withTestWatchdog { @MainActor in
             let socket = ScriptedGatewaySocket()
             let client = GatewayClient(
@@ -940,7 +940,6 @@ struct SessionPresentationStoreTests {
             baseline.transcript = []
             baseline.transcriptStart = 10
             baseline.transcriptTotal = 10
-            let recent = SessionScenarioBuilder(seed: 8_906).historyPage(count: 10, longRowBytes: 16)
             let store = SessionPresentationStore(
                 client: client,
                 performanceSignposts: SystemPerformanceSignposts.shared
@@ -970,26 +969,73 @@ struct SessionPresentationStoreTests {
                 "result": .object(["synchronized": .bool(true)]),
             ])))
 
-            try await socket.waitUntilSent(count: 4)
-            frame = await socket.sentFrames()[3]
-            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
-            requestID = try #require(request.objectValue?["id"]?.stringValue)
-            #expect(request.objectValue?["method"]?.stringValue == "session.transcript")
-            #expect(request.objectValue?["params"]?.objectValue?["before"]?.intValue == 10)
+            _ = try await opening.value
+            #expect(store.snapshot?.phase == .compacting)
+            #expect(store.snapshot?.transcriptStart == 10)
+            #expect(store.snapshot?.transcript.isEmpty == true)
+            #expect(await socket.sentFrames().count == 3)
+            await client.close()
+        }
+    }
+
+    @Test("active fresh open publishes a sparse fitted tail without mandatory history catch-up")
+    func freshOpenPublishesSparseActiveTailImmediately() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory
+            )
+            let profile = GatewayProfile(
+                id: "gateway",
+                label: "Mac",
+                host: "gateway.test",
+                port: 9_847,
+                machineId: "machine",
+                deviceId: "device"
+            )
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            var baseline = try SessionScenarioBuilder(seed: 8_907).openingTail(targetEncodedBytes: 4_096)
+            baseline.phase = .running
+            baseline.transcript = SessionScenarioBuilder(seed: 8_908).historyPage(count: 20, longRowBytes: 16)
+            baseline.transcriptStart = 10
+            baseline.transcriptTotal = 30
+            let store = SessionPresentationStore(
+                client: client,
+                performanceSignposts: SystemPerformanceSignposts.shared
+            )
+            let opening = Task { try await store.open(baseline.sessionId) }
+
+            try await socket.waitUntilSent(count: 2)
+            var frame = await socket.sentFrames()[1]
+            var request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+            var requestID = try #require(request.objectValue?["id"]?.stringValue)
             await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
                 "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
                 "result": .object([
-                    "items": try JSONValue.encode(recent),
-                    "start": .number(0),
-                    "end": .number(10),
-                    "total": .number(10),
+                    "session": try JSONValue.encode(baseline),
+                    "syncToken": .string("sync"),
+                    "subscriptionToken": .string("subscription"),
                 ]),
             ])))
 
+            try await socket.waitUntilSent(count: 3)
+            frame = await socket.sentFrames()[2]
+            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+            requestID = try #require(request.objectValue?["id"]?.stringValue)
+            #expect(request.objectValue?["method"]?.stringValue == "session.sync")
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
+                "result": .object(["synchronized": .bool(true)]),
+            ])))
+
             _ = try await opening.value
-            #expect(store.snapshot?.phase == .compacting)
-            #expect(store.snapshot?.transcriptStart == 0)
-            #expect(store.snapshot?.transcript.map(\.id) == recent.map(\.id))
+            #expect(store.snapshot?.phase == .running)
+            #expect(store.snapshot?.transcript.map(\.id) == baseline.transcript.map(\.id))
+            #expect(await socket.sentFrames().count == 3)
             await client.close()
         }
     }
@@ -1016,9 +1062,8 @@ struct SessionPresentationStoreTests {
 
             var baseline = try SessionScenarioBuilder(seed: 8_901)
                 .openingTail(targetEncodedBytes: 8_000)
-            // Five-item fixtures contain one hidden tool-result row, so 30
-            // canonical entries provide exactly 24 display-bearing rows and
-            // do not exercise opening backfill in this replay-specific test.
+            // Retain enough rows to exercise replay continuity independently
+            // of the now post-mount transcript paging path.
             baseline.transcript = SessionScenarioBuilder(seed: 8_902).historyPage(count: 30, longRowBytes: 16)
             baseline.transcriptStart = 10
             baseline.transcriptTotal = baseline.transcript.count + 10

@@ -162,7 +162,7 @@ cancels that arm. The composer
 remains visible throughout opening, while sending stays disabled until readiness.
 Session subscription ownership is token-scoped end to end. The open response remains
 provisional until sync acknowledgement and exact route-intent revalidation; baseline plus its
-already-drained contiguous event suffix then publish in one MainActor turn. A stale or failed
+already-drained contiguous event suffix then publish in one MainActor turn. The fitted tail mounts immediately regardless of its display-bearing count; earlier-page reads begin only from the mounted presentation and cannot make the conversation unavailable. A stale or failed
 attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Active
 protocol-v3 peers always provide explicit subscription ownership. If a reconnect installs a new runtime generation for the same canonical session,
 iOS clears context/tree/resource/command projections, invalidates their in-flight request generations,
@@ -178,8 +178,7 @@ exact ordinal/parent/leaf/ID suffix remains compatible. iOS also merges an overl
 tail with any earlier pages already loaded in that open chat, so a tool burst, keyboard
 transition, or resync cannot collapse the mounted chat to an empty Load earlier view. A later navigation presentation always begins again from the
 bounded latest page; this cold-presentation rule is distinct from in-place reconnect. History paging is owned by the session presentation reducer,
-not scroll geometry: an empty display tail with a positive canonical cursor is backfilled once under the provisional subscription before publication,
-and a mounted Load earlier request starts without requiring a semantic anchor. Page admission validates the projected cursor, echoed next projected
+not scroll geometry: the bounded authoritative tail publishes immediately even when it is sparse or empty, and a mounted Load earlier request starts without requiring a semantic anchor. Optional history reads never extend the open/sync replay barrier or determine conversation availability. Page admission validates the projected cursor, echoed next projected
 entry, runtime, branch leaf, range, total, and IDs; it never mistakes raw parent links through filtered canonical entries for visible-row adjacency.
 Tail/keyboard settlement never discards loaded transcript coverage.
 Phase, operation, tool ordering, and canonical paging cursors remain authoritative. A rolling-upgrade

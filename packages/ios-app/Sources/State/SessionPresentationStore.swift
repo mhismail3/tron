@@ -974,86 +974,6 @@ final class SessionPresentationStore {
     // smaller (or unbounded) history window than live continuity.
     static let minimumRecentTranscriptContinuityMessages = 24
 
-    private static func displayBearingTranscriptCount(_ snapshot: SessionSnapshot) -> Int {
-        snapshot.transcript.reduce(into: 0) { count, item in
-            if !(item.kind == .message && item.role == .toolResult) { count += 1 }
-        }
-    }
-
-    private func backfillOpeningTailIfNeeded(
-        _ baseline: SessionSnapshot,
-        sessionID: String,
-        subscriptionToken: String,
-        connectionGeneration: Int
-    ) async throws -> SessionSnapshot {
-        guard let before = baseline.transcriptStart,
-              before > 0,
-              baseline.transcript.isEmpty
-                || Self.displayBearingTranscriptCount(baseline) < Self.minimumRecentTranscriptContinuityMessages else {
-            return baseline
-        }
-        struct Params: Codable {
-            let sessionId: String
-            let before: Int
-            let expectedNextEntryId: String?
-            let expectedRuntimeGeneration: String
-            let expectedLeafEntryId: String?
-        }
-        struct Response: Decodable {
-            let items: [TranscriptItem]
-            let start: Int
-            let end: Int?
-            let total: Int
-            let nextEntryId: String?
-            let runtimeGeneration: String?
-            let leafEntryId: String?
-        }
-        let response: Response = try await client.request(
-            "session.transcript",
-            Params(
-                sessionId: sessionID,
-                before: before,
-                expectedNextEntryId: baseline.transcript.first?.id,
-                expectedRuntimeGeneration: baseline.runtimeGeneration,
-                expectedLeafEntryId: baseline.leafEntryId
-            ),
-            timeout: .seconds(15)
-        )
-        let expectedTotal = baseline.transcriptTotal ?? before + baseline.transcript.count
-        guard connectionGeneration == self.connectionGeneration,
-              pendingSubscriptionTokens[sessionID] == subscriptionToken,
-              response.total == expectedTotal,
-              (response.runtimeGeneration == nil || response.runtimeGeneration == baseline.runtimeGeneration),
-              (response.leafEntryId == nil || baseline.leafEntryId == nil || response.leafEntryId == baseline.leafEntryId),
-              Self.admitsTranscriptPageAnchor(
-                expectedNextEntryID: baseline.transcript.first?.id,
-                echoedNextEntryID: response.nextEntryId
-              ),
-              (response.end ?? before) == before,
-              response.start >= 0,
-              response.start <= before,
-              response.items.count == before - response.start,
-              response.items.count <= ChatTranscriptPageRequest.maximumItemCount,
-              Self.admitsTranscriptPage(response.items) else {
-            throw GatewayFailure(code: "history_changed", message: "The session history changed while opening.", retryable: true, details: nil)
-        }
-        let existingIDs = Set(baseline.transcript.map(\.id))
-        guard Set(response.items.map(\.id)).count == response.items.count,
-              response.items.allSatisfy({ !existingIDs.contains($0.id) }) else {
-            throw GatewayFailure(code: "history_changed", message: "The session branch changed while opening.", retryable: true, details: nil)
-        }
-        var result = baseline
-        result.transcript = response.items + baseline.transcript
-        result.transcriptStart = response.start
-        result.transcriptTotal = response.total
-        if result.transcript.count > ChatTranscriptPageRequest.maximumItemCount {
-            let omitted = result.transcript.count - ChatTranscriptPageRequest.maximumItemCount
-            result.transcript = Array(result.transcript.suffix(ChatTranscriptPageRequest.maximumItemCount))
-            result.transcriptStart = response.start + omitted
-        }
-        return result
-    }
-
     private func performSynchronizationAttempt(
         sessionID: String,
         lease: SessionSynchronizationCoordinator.Lease,
@@ -1135,12 +1055,11 @@ final class SessionPresentationStore {
             } else {
                 authoritativeResponse = response.session
             }
-            authoritativeResponse = try await backfillOpeningTailIfNeeded(
-                authoritativeResponse,
-                sessionID: sessionID,
-                subscriptionToken: response.subscriptionToken,
-                connectionGeneration: attemptConnectionGeneration
-            )
+            // Resume from the bounded authoritative tail before any optional
+            // history work. Paging inside this barrier extends the replay race
+            // for active sessions and can turn a usable baseline into repeated
+            // open/sync/page/close failures. Older pages remain available after
+            // the presentation mounts and never gate conversation availability.
             let mode: SessionSnapshotInstallationMode
             switch lease.intent {
             case .presentation:
