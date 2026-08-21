@@ -18,6 +18,53 @@ struct ChatTranscriptPresentationTests {
         #expect(geometry.isAtCatchUpBoundary)
     }
 
+    @Test("physical bottom edge includes inset and rejects overshoot smaller than that inset")
+    func insetBottomEdge() {
+        let bottom = ChatTranscriptGeometry(
+            offsetY: 800,
+            contentHeight: 1_000,
+            containerHeight: 400,
+            bottomInset: 200,
+            visibleTopY: 800,
+            visibleBottomY: 1_200
+        )
+        let overshootWithinInsetMagnitude = ChatTranscriptGeometry(
+            offsetY: 850,
+            contentHeight: 1_000,
+            containerHeight: 400,
+            bottomInset: 200,
+            visibleTopY: 850,
+            visibleBottomY: 1_250
+        )
+        let undersized = ChatTranscriptGeometry(
+            offsetY: 0,
+            contentHeight: 180,
+            containerHeight: 400,
+            bottomInset: 50,
+            visibleTopY: 0,
+            visibleBottomY: 400
+        )
+        let undersizedOvershoot = ChatTranscriptGeometry(
+            offsetY: 10,
+            contentHeight: 180,
+            containerHeight: 400,
+            bottomInset: 50,
+            visibleTopY: 10,
+            visibleBottomY: 410
+        )
+
+        #expect(bottom.distanceFromBottom == 0)
+        #expect(!bottom.isPastBottomEdge)
+        #expect(bottom.isAtCatchUpBoundary)
+        #expect(overshootWithinInsetMagnitude.distanceFromBottom == 0)
+        #expect(overshootWithinInsetMagnitude.isPastBottomEdge)
+        #expect(!overshootWithinInsetMagnitude.isAtCatchUpBoundary)
+        #expect(!undersized.isPastBottomEdge)
+        #expect(undersized.isAtCatchUpBoundary)
+        #expect(undersizedOvershoot.isPastBottomEdge)
+        #expect(!undersizedOvershoot.isAtCatchUpBoundary)
+    }
+
     @Test("opening plausibility distinguishes a physical tail from overflow overshoot")
     func openingViewportPlausibility() {
         let bottom = ChatTranscriptGeometry(
@@ -49,10 +96,15 @@ struct ChatTranscriptPresentationTests {
 
         #expect(bottom.isPlausibleOpeningViewport)
         #expect(bottom.isAtCatchUpBoundary)
+        #expect(!bottom.isPastBottomEdge)
         #expect(!overshoot.isPlausibleOpeningViewport)
-        #expect(overshoot.isAtCatchUpBoundary)
+        #expect(overshoot.isPastBottomEdge)
+        #expect(!overshoot.isAtCatchUpBoundary)
         #expect(undersized.isPlausibleOpeningViewport)
+        #expect(!undersized.isPastBottomEdge)
         #expect(!undersizedOvershoot.isPlausibleOpeningViewport)
+        #expect(undersizedOvershoot.isPastBottomEdge)
+        #expect(!undersizedOvershoot.isAtCatchUpBoundary)
     }
 
     @Test("extension widgets project into their generic composer slots")

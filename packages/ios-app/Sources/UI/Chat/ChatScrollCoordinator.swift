@@ -105,6 +105,10 @@ final class ChatScrollCoordinator {
     /// A command write is not a native acknowledgement. Automatic tail
     /// commands remain owned until fresh geometry proves the physical tail.
     private var pendingAutomaticTailCommandToken: Int?
+    /// The one correction issued for a physically invalid past-bottom sample.
+    /// Its applied edge binding owns settlement until plausible geometry or
+    /// direct cancellation; repeated stale samples cannot submit another write.
+    private var pastBottomCorrectionCommandToken: Int?
     private var automaticTailCommandStartGeometryRevision: Int?
     private var automaticTailCommandStartOffsetY: CGFloat?
     private var pendingContinuousGrowthFollow = false
@@ -246,6 +250,7 @@ final class ChatScrollCoordinator {
         boundaryCameFromViewportWithoutTailMovement = false
         pendingGrowthFollow = false
         pendingAutomaticTailCommandToken = nil
+        pastBottomCorrectionCommandToken = nil
         automaticTailCommandStartGeometryRevision = nil
         automaticTailCommandStartOffsetY = nil
         pendingContinuousGrowthFollow = false
@@ -412,6 +417,15 @@ final class ChatScrollCoordinator {
         userInteractionStartOffsetY = nil
         userInteractionStartDistanceFromBottom = nil
 
+        if let finalGeometry,
+           requestPinnedTailCorrectionIfNeeded(
+               finalGeometry,
+               hasDirectUserAuthority: wasInteracting || wasSettling || hadUserInteraction
+                   || pendingNativeUserGeometry || directTailReturnArmed
+           ) {
+            directTailReturnArmed = false
+            return
+        }
         if finalGeometry?.isAtCatchUpBoundary == true {
             let directlyOwnedReturn = directTailReturnArmed && movedTowardLatest
             admitTailBoundary(directlyOwned: directlyOwnedReturn)
@@ -470,6 +484,9 @@ final class ChatScrollCoordinator {
         let attributed = !preservesRejectedViewportAuthority
             && (isUserInteracting || hadUserInteraction
                 || pendingNativeUserGeometry || isUserDrivenSettling || directTailReturnArmed)
+        if requestPinnedTailCorrectionIfNeeded(current, hasDirectUserAuthority: attributed) {
+            return
+        }
 
         if current.isAtCatchUpBoundary {
             admitTailBoundary(directlyOwned: attributed)
@@ -510,6 +527,14 @@ final class ChatScrollCoordinator {
         if openingTailSettlementPending { return }
         guard current.hasViewportChange(from: previous) else { return }
         pendingUnattributedOlderMovement = false
+        let hasDirectUserAuthority = isUserInteracting || isUserDrivenSettling
+            || pendingNativeUserGeometry || directTailReturnArmed
+        if requestPinnedTailCorrectionIfNeeded(
+            current,
+            hasDirectUserAuthority: hasDirectUserAuthority
+        ) {
+            return
+        }
         if userScrolledAway {
             let movedTowardLatest = (
                 current.offsetY > previous.offsetY + 1
@@ -858,6 +883,7 @@ final class ChatScrollCoordinator {
     private func acknowledgeAutomaticTailIfSettled(_ current: ChatTranscriptGeometry) {
         guard pendingAutomaticTailCommandToken != nil,
               command?.destination == .tail,
+              !current.isPastBottomEdge,
               let startRevision = automaticTailCommandStartGeometryRevision,
               geometryRevision > startRevision else { return }
         let movedNativeViewport = automaticTailCommandStartOffsetY.map {
@@ -865,6 +891,7 @@ final class ChatScrollCoordinator {
         } == true
         guard movedNativeViewport || current.isAtCatchUpBoundary else { return }
         pendingAutomaticTailCommandToken = nil
+        pastBottomCorrectionCommandToken = nil
         automaticTailCommandStartGeometryRevision = nil
         automaticTailCommandStartOffsetY = nil
         command = nil
@@ -1089,6 +1116,47 @@ final class ChatScrollCoordinator {
         )
     }
 
+    @discardableResult
+    private func requestPinnedTailCorrectionIfNeeded(
+        _ current: ChatTranscriptGeometry,
+        hasDirectUserAuthority: Bool
+    ) -> Bool {
+        guard current.isPastBottomEdge,
+              !hasDirectUserAuthority,
+              !userScrolledAway,
+              catchUpPhase == .none,
+              !isPrependingHistory,
+              !openingTailSettlementPending else { return false }
+        // A released edge binding can retain an obsolete absolute offset when
+        // canonical settlement, compaction, or reconciliation shortens/replaces
+        // the stack. Negative bottom distance is clamped by presentation
+        // geometry, so explicitly restore the physical tail instead of
+        // accepting the blank overshoot as settled.
+        isAtBottom = false
+        isNativeUserOwned = false
+        pendingNativeUserGeometry = false
+        hadUserInteraction = false
+        directTailReturnArmed = false
+        if command?.origin == .automaticFollow,
+           command?.destination == .tail,
+           pendingAutomaticTailCommandToken != nil {
+            if command?.token == pastBottomCorrectionCommandToken {
+                // The one corrective edge binding is already applied. It owns
+                // settlement until plausible geometry or direct cancellation;
+                // repeated stale layout samples must not submit another write.
+                return true
+            }
+            // An ordinary growth-tail token predating the structural shrink
+            // cannot block this frame's proof-or-correction decision.
+            clearCommand()
+        }
+        pendingGrowthFollow = true
+        pendingContinuousGrowthFollow = true
+        pendingInstalledTailSettlement = true
+        scheduleTailFollow()
+        return true
+    }
+
     private func scheduleTailFollow() {
         guard pendingGrowthFollow, command == nil, canAutomaticallyFollow,
               (pendingInstalledTailSettlement
@@ -1114,8 +1182,18 @@ final class ChatScrollCoordinator {
             self.clearDiscreteFollowIDs()
             let followAnimation = self.pendingGrowthFollowAnimation
             self.pendingGrowthFollowAnimation = .disabled
-            if self.geometry.distanceFromBottom > ChatTranscriptGeometry.catchUpDistance {
+            if self.geometry.isPastBottomEdge
+                || self.geometry.distanceFromBottom > ChatTranscriptGeometry.catchUpDistance {
+                let correctsPastBottom = self.geometry.isPastBottomEdge
                 self.publish(.tail, animation: followAnimation, origin: .automaticFollow)
+                if correctsPastBottom {
+                    self.pastBottomCorrectionCommandToken = self.command?.token
+                }
+            } else {
+                // A previously applied edge binding may have corrected the
+                // structural overshoot before this frame. Release it only after
+                // the now-plausible native tail sample.
+                self.requestBindingReleaseIfSettled()
             }
         }
     }
@@ -1155,6 +1233,7 @@ final class ChatScrollCoordinator {
         guard command != nil || pendingAutomaticTailCommandToken != nil else { return }
         command = nil
         pendingAutomaticTailCommandToken = nil
+        pastBottomCorrectionCommandToken = nil
         automaticTailCommandStartGeometryRevision = nil
         automaticTailCommandStartOffsetY = nil
         commandRevision &+= 1
@@ -1179,6 +1258,7 @@ final class ChatScrollCoordinator {
         pendingGrowthFollow = false
         pendingGrowthFollowAnimation = .disabled
         pendingAutomaticTailCommandToken = nil
+        pastBottomCorrectionCommandToken = nil
         automaticTailCommandStartGeometryRevision = nil
         automaticTailCommandStartOffsetY = nil
         pendingContinuousGrowthFollow = false

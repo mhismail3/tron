@@ -554,9 +554,9 @@ If final bottom geometry arrives before native ownership, that exact callback pa
 manual return immediately, clears unread state, and removes the catch-up control without a tap.
 A mixed viewport/scroll callback does the same only when direct interaction and measured movement
 toward the tail are both present; keyboard resize alone cannot release detachment. Bottom
-distance uses SwiftUI's atomically derived native `visibleRect.maxY` plus the bottom content
-inset, rather than reconstructing a visible edge from offset/container values that may belong
-to different lazy-layout or keyboard frames.
+distance subtracts SwiftUI's atomically derived native `visibleRect.maxY` from the physical
+content edge (`contentSize.height + contentInsets.bottom`), rather than reconstructing a visible
+edge from offset/container values that may belong to different lazy-layout or keyboard frames.
 While detached, a fixed action-sized circular
 glass down-arrow morphs from the composer's trailing edge; multiline editor height can never
 resize it. Reaching the practical tail boundary (with a small inset-rounding tolerance) or
@@ -577,8 +577,9 @@ restore a surviving detached semantic anchor within one point. Persistent idle n
 not disable preservation, but active interaction, pending native geometry, or user-driven settling does.
 After each point correction, both a newer semantic sample and a newer scroll-geometry revision are
 required in either callback order before another correction or binding release. Stale generations and
-direct interaction cannot correct. Content shrink outside such an installed mutation remains inert for
-both pinned and detached readers and never creates an automatic position write.
+direct interaction cannot correct. An ordinary shrink whose native viewport remains within the physical
+content edge is inert. A structural shrink that leaves a released pinned offset beyond that edge receives
+one frame-gated tail clamp; detached or directly owned viewports remain untouched.
 Progress-only tool mutations cannot request a tail position. Keyboard and complete-composer layout keep
 a logically pinned reader at the latest tail, while a detached reader receives no position write
 and retains the same semantic reading position. These layout changes cannot change the durable

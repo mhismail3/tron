@@ -118,7 +118,11 @@ admits and reduces mounted-session topics:
   chip-local animation marker; Reduce Motion uses an opacity-only transition. Tool status text
   updates inside its stable row, and automatic tail-follow commands remain
   owned until fresh native geometry acknowledges them, so a second keyboard/composer/tool growth
-  sample cannot replace a pending scroll write;
+  sample cannot replace a pending scroll write. Native bottom distance is bounded for display only:
+  a visible rect beyond the physical content edge is not tail settlement. If reconciliation,
+  compaction, or live row replacement shortens a pinned transcript beneath its released offset,
+  the scroll owner issues one frame-gated physical-tail correction; a deliberately detached
+  reader retains the same viewport authority;
 - structure/context/resource invalidations reload an already-presented History,
   Manage Session, Agent Context, or Project Resources surface from the runtime. Context,
   tree, and resource reads each carry a subscription-scoped request generation, so an older

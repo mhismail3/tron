@@ -441,8 +441,10 @@ visual transforms do not grant detached readers automatic writes or replay same-
 `QueuedMessagePresentationTests` own capability/field admission for editing; presentation guards
 retain intrinsic cards capped at the user-prompt bound, full-shape whole-card interactive Liquid Glass,
 leading-toolbar removal, an explicit legacy lock, and Tron surfaces instead of stock forms.
-Native bottom evidence comes from `ScrollGeometry.visibleRect.maxY`
-plus the bottom inset; the harness no longer substitutes a hard-coded settled distance.
+Native bottom evidence compares `ScrollGeometry.visibleRect.maxY` with the physical
+content edge (`contentSize.height + contentInsets.bottom`); the harness no longer substitutes
+a hard-coded settled distance. A released pinned offset beyond a structurally shortened edge
+receives one frame-gated tail clamp, while ordinary shrink and detached readers remain inert.
 The obsolete visibility modifier is removed; the native SwiftUI geometry modifier still
 reports a multiple-update-per-frame diagnostic in hosted runs and remains a physical checkpoint.
 
@@ -571,8 +573,10 @@ streaming. The sheet uses the shared Tron title/top-blur/toolbar
 chrome with no drag handle. The same rendered tool/group row stays after non-tool streaming
 across running-to-completed updates, retains at most one installed-identity-owned tail settlement while
 pinned, uses one coordinated smooth viewport follow for a newly admitted tool chip,
-preserves a surviving semantic anchor while detached, and emits no unowned automatic write when content
-shrinks. Verify a tool entrance has one correlated chip reveal and viewport command rather than competing writes.
+preserves a surviving semantic anchor while detached, and emits no unowned automatic write for ordinary
+shrink. If settlement shortens content beneath a released pinned offset, verify exactly one physical-tail
+clamp; a detached or directly owned reader receives none. Verify a tool entrance has one correlated chip
+reveal and viewport command rather than competing writes.
 Tool-detail checkpoints open read, edit, bash, and one unknown/extension call at the medium detent: verify the compact status/metadata chips,
 secondary-plus-accent path, faithful single-change diff glance, word-preserving wrapped bash commands in
 the smaller code size, high-signal generic summary, and larger live result are visible before

@@ -641,13 +641,31 @@ struct ChatTranscriptGeometry: Equatable {
         return max(0, rawDistance)
     }
     static let catchUpDistance: CGFloat = 16
-    var isAtBottom: Bool { isValid && distanceFromBottom <= 80 }
-    var isAtExactBottom: Bool { isValid && distanceFromBottom <= 2 }
+    /// A structural shrink can leave SwiftUI's visible rect beyond the new
+    /// content edge while `distanceFromBottom` clamps the negative distance to
+    /// zero. That is not settled bottom geometry and requires one tail clamp.
+    var isPastBottomEdge: Bool {
+        guard isValid else { return false }
+        let contentBottom = contentHeight + bottomInset
+        guard contentBottom.isFinite, offsetY.isFinite else { return false }
+        if contentBottom <= containerHeight + 2 {
+            if let visibleTopY { return visibleTopY.isFinite && visibleTopY > 2 }
+            return offsetY > 2
+        }
+        if let visibleBottomY {
+            return visibleBottomY.isFinite && visibleBottomY > contentBottom + 2
+        }
+        return offsetY > contentBottom - containerHeight + 2
+    }
+    var isAtBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 80 }
+    var isAtExactBottom: Bool { isValid && !isPastBottomEdge && distanceFromBottom <= 2 }
     /// Physical scroll settling commonly stops a few points above the computed
     /// edge because content insets and pixel rounding update in separate frames.
     /// This tighter-than-"near bottom" boundary is user-equivalent to reaching
     /// the tail and is used to dismiss catch-up without requiring a tap.
-    var isAtCatchUpBoundary: Bool { isValid && distanceFromBottom <= Self.catchUpDistance }
+    var isAtCatchUpBoundary: Bool {
+        isValid && !isPastBottomEdge && distanceFromBottom <= Self.catchUpDistance
+    }
 
     /// Opening placement must reject a transient native offset beyond an
     /// overflowing content edge. `distanceFromBottom` intentionally clamps
