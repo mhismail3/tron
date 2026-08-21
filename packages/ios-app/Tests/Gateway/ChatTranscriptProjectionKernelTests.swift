@@ -863,6 +863,48 @@ struct ChatTranscriptProjectionKernelTests {
         #expect(timestampRun.tools.first.flatMap(timestampReversed.toolPayloads.resolving)?.content == "timestamp-newer")
     }
 
+    @Test("terminal live metadata cannot erase canonical tool output")
+    func terminalLiveMetadataPreservesCanonicalOutput() throws {
+        var snapshot = try fixture(transcript: """
+        [
+          {"id":"assistant","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call","type":"toolCall","toolCallId":"settled-call","name":"read","arguments":{"path":"README.md"}}]},
+          {"id":"result","parentId":"assistant","timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"toolResult","content":[{"id":"result-text","type":"text","text":"canonical output"}],"toolCallId":"settled-call","toolName":"read","isError":false}
+        ]
+        """)
+        snapshot.phase = .running
+        snapshot.transcriptTotal = 2
+        func terminalMetadata(output: String?) -> ToolExecutionState {
+            ToolExecutionState(
+                toolCallId: "settled-call",
+                toolName: "read",
+                order: 0,
+                status: .completed,
+                arguments: .object(["path": .string("README.md")]),
+                partialResult: nil,
+                result: nil,
+                output: output,
+                isError: false,
+                startedAt: "2026-01-01T00:00:00Z",
+                updatedAt: "2026-01-01T00:00:01Z",
+                completedAt: "2026-01-01T00:00:01Z"
+            )
+        }
+
+        for output in [nil, ""] as [String?] {
+            snapshot.toolExecutions = [terminalMetadata(output: output)]
+            let candidate = ChatTranscriptProjectionKernel.cold(snapshot: snapshot)
+            guard case .toolRun(let run) = candidate.timeline.items.first else {
+                Issue.record("Expected canonical tool run")
+                return
+            }
+            let detail = try #require(run.tools.first.flatMap(candidate.toolPayloads.resolving))
+            #expect(detail.subtitle == "Completed")
+            #expect(detail.content == "canonical output")
+            #expect(ToolDetailPresentation(tool: detail).readableResult == "canonical output")
+            #expect(ToolTechnicalResultResolver.resolve(detail) == .string("canonical output"))
+        }
+    }
+
     @Test("streaming calls suppress canonical orphan results and join them at stream order")
     func streamingCallJoinsCanonicalResult() throws {
         var snapshot = try fixture(transcript: """

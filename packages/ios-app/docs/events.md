@@ -90,7 +90,7 @@ admits and reduces mounted-session topics:
   sheet continues to consume the newest immutable call presentation, showing status and all bounded readable
   latest bounded live-output frame. Each newer nonempty frame replaces the displayed frame in place rather than
   accumulating repeated status snapshots; an empty advisory frame preserves the last readable output so an open
-  sheet never flashes blank. The terminal nonempty result remains authoritative. Gateway and iOS apply the same
+  sheet never flashes blank. A terminal live projection whose output/result was intentionally stripped after canonical settlement enriches status and timing only; it cannot erase the canonical tool-result text used by detail sheets. The terminal nonempty result remains authoritative. Gateway and iOS apply the same
   replacement rule so reconnect or projection replacement cannot resurrect discarded frames or erase readable output. Explicit output-truncation state appears only when the runtime flag or
   structured truncation contract says `truncated: true`, and the age of the most recent
   runtime update without automatic scrolling. One mounted tool chip hierarchy presents the

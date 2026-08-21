@@ -1056,11 +1056,17 @@ enum ChatTranscriptProjectionKernel {
     private static func resolved(_ canonical: ChatToolPresentation, live: ToolExecutionState?) -> ChatToolPresentation {
         guard let live else { return canonical }
         let response = live.result ?? live.partialResult ?? canonical.response
+        // Terminal live projections intentionally omit output/result once the
+        // canonical tool result exists. Treat an absent or empty live frame as
+        // advisory metadata, not as permission to erase canonical detail.
+        let liveOutput = live.output.flatMap { $0.isEmpty ? nil : $0 }
+        let content = liveOutput ?? canonical.content
         return ChatToolPresentation(
             id: canonical.id, title: canonical.title == "Tool" ? live.toolName : canonical.title,
             subtitle: liveToolSubtitle(live.status), request: canonical.request ?? live.arguments,
-            response: response, content: live.output ?? "",
-            fallbackContent: live.output == nil ? (response ?? canonical.request ?? live.arguments) : nil,
+            response: response, content: content,
+            fallbackContent: liveOutput == nil && content.isEmpty
+                ? (canonical.fallbackContent ?? response ?? canonical.request ?? live.arguments) : nil,
             error: live.isError, startedAt: live.startedAt,
             completedAt: live.completedAt ?? canonical.completedAt,
             durationMs: live.durationMs ?? canonical.durationMs,
