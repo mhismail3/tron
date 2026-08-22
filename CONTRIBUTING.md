@@ -24,7 +24,9 @@ terminology or architecture through compatibility wrappers.
    bounded projection.
 3. Never include personal paths, handles, domains, credentials, or fixture
    secrets. Run `scripts/personal-info-guard.sh`.
-4. Use exact production dependency versions and commit lockfile changes.
+4. Use exact production dependency versions and commit lockfile changes. The
+   repository-wide Node toolchain pin is `.node-version` (currently 22.22.0);
+   package `engines` remain compatibility minimums.
 5. Never add or invoke an automated production deployment command.
 6. Trust is not sandboxing. Copy and docs must say that executable resources run
    with the Mac user's authority.
@@ -32,6 +34,13 @@ terminology or architecture through compatibility wrappers.
 ## Fast validation
 
 Start with the smallest owner and expand only after it passes.
+
+### Toolchain
+
+Node is pinned exactly by `.node-version`; CI and Mac packaging read that file.
+Use `scripts/verify-ci-toolchain.sh node` to verify the current executable and
+reject duplicated version mirrors. Xcode version literals remain intentional
+Apple-toolchain pins.
 
 ### Gateway
 
@@ -57,7 +66,7 @@ builds; it reports the expected endpoint/home, PID start identities, lifecycle
 epoch, source revision, payload fingerprint, and health readiness.
 `scripts/tron dev stop` is also build-free and refuses to trust a stale or
 reused PID based on `kill -0` alone. The supervisor atomically publishes bounded lifecycle state:
-`starting`, `ready`, `draining`, `restarting`, `failed`, or `stopped`. Exit 75
+`starting`, `ready`, `stopping`, `restarting`, `failed`, or `stopped`. Lifecycle writes use the explicit transition table in `scripts/tron-dev-state.mjs`; illegal regressions fail closed. Exit 75
 is the intentional authenticated restart drain; other exits consume a bounded
 restart budget and eventually become `failed`.
 
@@ -67,7 +76,7 @@ live supervisor's recorded host; an explicit conflicting flag fails closed and
 requires `scripts/tron dev stop` before changing exposure. A fresh start without
 a flag defaults to loopback. This sole Debug supervisor uses the signed
 launcher from `/Applications/Tron.app`, builds and stages an immutable candidate,
-preserves accepted-run draining, and waits for truthful exact health identity. It
+preserves accepted-run shutdown draining, and waits for truthful exact health identity. It
 refuses an unknown owner already listening on 9848. After testing, `scripts/tron
 dev handoff --tailscale` performs authenticated pre/post identity checks and
 copies the exact payload into Stable as an inactive candidate only after

@@ -74,7 +74,7 @@ and Engine/Activity client domains are intentionally absent.
 
 - macOS 15 or newer
 - Xcode 26 and XcodeGen 2.45.3
-- Node 22.22.0 for gateway development
+- Node 22.22.0 for gateway development (the exact pin is `.node-version`)
 - Tailscale on the Mac and iPhone for mobile operation
 
 Production dependencies are exact-pinned. The shipped Mac app bundles exact
@@ -136,8 +136,8 @@ packages/mac-app/scripts/ensure-gateway-bundle.sh
 ```
 
 The build preflight and this script stage the Gateway, a separate
-production-only dependency tree, checksum-pinned Node 22.22.0 arm64/x64
-runtimes, and a universal launcher for both Login Item variants. The resulting
+production-only dependency tree, checksum-pinned Node runtimes matching
+`.node-version` (arm64/x64), and a universal launcher for both Login Item variants. The resulting
 Mac app runs without a global Pi or Node installation. Generated payloads are
 ignored; use `bundle-gateway.sh` when you explicitly need to refresh them.
 

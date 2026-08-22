@@ -1,9 +1,17 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+
+const run = (state, command, ...argumentsList) => execFileSync(process.execPath, [helper, command, state, ...argumentsList], { encoding: "utf8" });
+const runAsync = (state, command, ...argumentsList) => new Promise((resolve, reject) => {
+  execFile(process.execPath, [helper, command, state, ...argumentsList], (error, stdout, stderr) => {
+    if (error) reject(Object.assign(error, { stdout, stderr }));
+    else resolve(stdout);
+  });
+});
 
 const helper = new URL("./tron-dev-state.mjs", import.meta.url).pathname;
 const resolveFixture = (fixture) => execFileSync(process.execPath, [helper, "resolve-host-fixture", JSON.stringify(fixture)], { encoding: "utf8" }).trim();
@@ -40,6 +48,48 @@ test("Debug command host inherits a live Tailscale lifecycle and rejects conflic
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("Debug lifecycle accepts the operational start/readiness/stop flow", () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-transition-"));
+  try {
+    const state = join(root, "lifecycle.json");
+    run(state, "transition", "starting", "generation=1");
+    run(state, "transition", "ready", "readiness=ready");
+    run(state, "transition", "stopping", "intentionalExit=true");
+    run(state, "transition", "stopped", "supervisorPid=");
+    assert.equal(JSON.parse(run(state, "read")).lifecycle, "stopped");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Debug lifecycle rejects regressions and permits failed recovery", () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-transition-"));
+  try {
+    const state = join(root, "lifecycle.json");
+    run(state, "transition", "starting");
+    run(state, "transition", "ready");
+    assert.throws(() => run(state, "transition", "starting"));
+    assert.throws(() => run(state, "transition", "stopped"));
+    run(state, "transition", "failed");
+    run(state, "transition", "starting", "restartCount=0");
+    run(state, "transition", "ready", "readiness=ready");
+    run(state, "transition", "stopping");
+    run(state, "transition", "stopped");
+    assert.throws(() => run(state, "transition", "ready", "readiness=not-ready"));
+    assert.throws(() => run(state, "write", "lifecycle=ready"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("Debug lifecycle serializes concurrent generation writes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-transition-"));
+  try {
+    const state = join(root, "lifecycle.json");
+    await Promise.all(Array.from({ length: 24 }, (_, generation) => runAsync(state, "transition", "starting", `generation=${generation}`)));
+    const value = JSON.parse(run(state, "read"));
+    assert.equal(value.lifecycle, "starting");
+    assert.match(String(value.generation), /^\d+$/u);
+    assert.ok(value.updatedAt);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("Debug candidate identity parser rejects noisy stdout", () => {
   const valid = `debug-build ${"a".repeat(64)}`;
   assert.equal(execFileSync(process.execPath, [helper, "validate-build-identity", valid], { encoding: "utf8" }).trim(), valid);
@@ -62,4 +112,34 @@ test("Debug lifecycle fails closed when a recorded supervisor is orphaned", () =
 test("Debug health host orders IPv6 addresses then interface names", () => {
   assert.equal(resolveFixture({ z: [{ address: "fd7a:115c:a1e0::b", family: 6, internal: false }], a: [{ address: "fd7a:115c:a1e0::a", family: "IPv6", internal: false }] }), "fd7a:115c:a1e0::a");
   assert.equal(resolveFixture({ z: [{ address: "fd7a:115c:a1e0::a", family: 6, internal: false }], a: [{ address: "fd7a:115c:a1e0::a", family: 6, internal: false }] }), "fd7a:115c:a1e0::a");
+});
+
+test("Debug start admission recovers only an exact owned orphan", () => {
+  const admission = (lifecycle, supervisorLive, childLive, listenerPresent) => execFileSync(process.execPath, [
+    helper, "start-admission", lifecycle, supervisorLive ? "yes" : "no", childLive ? "yes" : "no", listenerPresent ? "yes" : "no",
+  ], { encoding: "utf8" }).trim();
+  assert.equal(admission("ready", false, true, true), "recover-orphan");
+  assert.equal(admission("ready", false, false, true), "foreign-listener");
+  assert.equal(admission("ready", true, true, true), "supervised");
+  assert.equal(admission("failed", false, false, false), "start");
+});
+
+test("Debug child termination always revalidates exact PID identity", () => {
+  const source = readFileSync(new URL("./tron-dev", import.meta.url), "utf8");
+  assert.match(source, /kill_child\(\)/);
+  assert.match(source, /pid_current "\x24pid" "\x24identity"/);
+  assert.match(source, /kill_child "\x24child" "\x24child_identity"/);
+  assert.match(source, /kill_child "\x24child_pid" "\x24child_identity"/);
+  assert.doesNotMatch(source, /kill(?: -[A-Z0-9]+)? "\x24child(?:_pid)?"/u);
+  assert.match(source, /for _ in \$\(seq 1 80\)/);
+  assert.match(source, /sleep 0\.05/);
+});
+
+test("Debug mutator command lock rejects a concurrent owner", () => {
+  const root = mkdtempSync(join(tmpdir(), "tron-dev-command-lock-"));
+  const lock = join(root, "command.lock");
+  try {
+    execFileSync("/usr/bin/shlock", ["-f", lock, "-p", String(process.pid)]);
+    assert.throws(() => execFileSync("/usr/bin/shlock", ["-f", lock, "-p", String(process.pid)]));
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

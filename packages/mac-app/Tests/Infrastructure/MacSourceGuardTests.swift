@@ -119,9 +119,18 @@ struct MacSourceGuardTests {
         #expect(ensureScript.contains("node_modules"))
 
         let bundleScript = try Self.read(macRoot, "scripts/bundle-gateway.sh")
-        #expect(bundleScript.contains("NODE_VERSION=\"22.22.0\""))
-        #expect(bundleScript.contains("NODE_ARM64_SHA256="))
-        #expect(bundleScript.contains("NODE_X64_SHA256="))
+        #expect(bundleScript.contains("NODE_VERSION_FILE=\"$REPO_ROOT/.node-version\""))
+        #expect(bundleScript.contains("NODE_VERSION=\"$(<\"$NODE_VERSION_FILE\")\""))
+        #expect(!bundleScript.contains("NODE_VERSION=\"22.22.0\""))
+        #expect(bundleScript.contains("NODE_ARM64_SHA256=\"913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4\""))
+        #expect(bundleScript.contains("NODE_X64_SHA256=\"bf0e0ff20d4e5a16436d1ec372e47161e52be8e487db8070ae3f06b01efbba0c\""))
+        #expect(bundleScript.contains("validate_node_runtime"))
+        #expect(bundleScript.contains("--version"))
+        #expect(bundleScript.contains("Mach-O"))
+        #expect(bundleScript.contains("lipo -archs"))
+        #expect(bundleScript.contains("checksum mismatch"))
+        #expect(bundleScript.contains("version mismatch"))
+        #expect(bundleScript.contains("architecture mismatch"))
         #expect(bundleScript.contains("TRON_NODE_BIN"))
         #expect(bundleScript.contains("TRON_NPM_BIN"))
         #expect(bundleScript.contains("override\" != /* || ! -x \"$override\""))
@@ -162,6 +171,25 @@ struct MacSourceGuardTests {
 
         let nodeEntitlements = try Self.read(macRoot, "TronNode.entitlements")
         #expect(nodeEntitlements.contains("com.apple.security.cs.allow-jit"))
+    }
+
+    @Test("Node runtime validation rejects tampered, wrong-version, and wrong-architecture binaries")
+    func nodeRuntimeValidationRejectsInvalidBinaries() throws {
+        let macRoot = try Self.macAppRoot()
+        let script = try Self.read(macRoot, "scripts/bundle-gateway.sh")
+
+        // Keep these as source guards because the generated runtime payload is
+        // intentionally ignored and must not be checked into the repository.
+        for rejection in [
+            "[[ \"$actual\" == \"$expected\" ]] ||",
+            "[[ \"$version\" == \"v${NODE_VERSION}\" ]] ||",
+            "[[ \"$file_description\" == *\"Mach-O\"* ]] ||",
+            "[[ \"$lipo_arches\" == \"$expected_arch\" ]] ||",
+            "neither file nor lipo is available",
+        ] {
+            #expect(script.contains(rejection), "Node runtime guard missing rejection: \(rejection)")
+        }
+        #expect(script.components(separatedBy: "validate_node_runtime \"$arch\" \"$expected\"").count - 1 == 2)
     }
 
     @Test("generated helper payload policy keeps outputs ignored")

@@ -11,7 +11,18 @@ const MAX_TEXT = 512;
 const STATE_LOCK_WAIT_MS = 5_000;
 const STATE_LOCK_RETRY_MS = 25;
 const STATE_LOCK_STALE_MS = 30_000;
-const STATES = new Set(["starting", "ready", "draining", "restarting", "failed", "stopped"]);
+const STATES = new Set(["starting", "ready", "stopping", "restarting", "failed", "stopped"]);
+// Lifecycle writes are deliberately transitions, not arbitrary patches. A
+// failed supervisor may be recovered by a new start; a stopped/ready state may
+// never be skipped or regressed into readiness.
+const LEGAL_TRANSITIONS = Object.freeze({
+  stopped: new Set(["stopped", "starting", "stopping"]),
+  starting: new Set(["starting", "ready", "stopping", "failed"]),
+  ready: new Set(["ready", "restarting", "stopping", "failed"]),
+  restarting: new Set(["restarting", "starting", "stopping", "failed"]),
+  failed: new Set(["failed", "starting", "stopping"]),
+  stopping: new Set(["stopping", "stopped"]),
+});
 const text = (value, fallback = undefined) => {
   if (value === undefined || value === null) return fallback;
   const result = String(value);
@@ -155,27 +166,72 @@ async function health(host, port) {
   }
 }
 
-const [command, ...args] = process.argv.slice(2);
-if (!command) throw new Error("missing lifecycle command");
-if (command === "update" || command === "patch") {
-  const path = args[0];
-  const patch = command === "update" ? JSON.parse(args[1] ?? "{}") : Object.fromEntries(args.slice(1).map((entry) => {
+function parseFields(argumentsList) {
+  if (argumentsList.length === 0) return {};
+  if (argumentsList.length === 1 && argumentsList[0].startsWith("{")) {
+    const parsed = JSON.parse(argumentsList[0]);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid lifecycle fields");
+    return parsed;
+  }
+  return Object.fromEntries(argumentsList.map((entry) => {
     const separator = entry.indexOf("=");
     if (separator < 1) throw new Error("invalid lifecycle field");
     const key = entry.slice(0, separator); const value = entry.slice(separator + 1);
     return [key, value === "true" ? true : value === "false" ? false : /^-?\d+$/u.test(value) ? Number(value) : value];
   }));
-  if (!path || !patch || typeof patch !== "object" || Array.isArray(patch)) throw new Error("invalid lifecycle patch");
+}
+
+function startAdmission({ lifecycle = "stopped", supervisorLive = false, childLive = false, listenerPresent = false }) {
+  if (supervisorLive) return "supervised";
+  // A live child with the exact recorded start identity is ours even when its
+  // supervisor disappeared.  This decision intentionally precedes listener
+  // refusal; the caller may terminate only that exact recorded child.
+  if (childLive) return "recover-orphan";
+  if (listenerPresent) return "foreign-listener";
+  if (["starting", "ready", "restarting"].includes(lifecycle)) return "mark-failed";
+  if (lifecycle === "stopping") return "finish-stopping";
+  if (lifecycle === "stopped" || lifecycle === "failed" || lifecycle === "") return "start";
+  return "invalid-lifecycle";
+}
+
+function checkedFields(fields) {
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) throw new Error("invalid lifecycle fields");
+  for (const [key, value] of Object.entries(fields)) {
+    if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(key)) throw new Error("invalid lifecycle field name");
+    if (key === "lifecycle") throw new Error("lifecycle is only writable through transition");
+    if (typeof value === "string") text(value);
+  }
+  return fields;
+}
+
+async function writeFields(path, fields, lifecycle) {
+  const checked = checkedFields(fields);
   await withStateLock(path, async () => {
     const current = await readState(path);
-    const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
-    if (next.lifecycle !== undefined && !STATES.has(next.lifecycle)) throw new Error("invalid lifecycle state");
-    for (const [key, value] of Object.entries(next)) {
-      if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(key)) throw new Error("invalid lifecycle field name");
-      if (typeof value === "string") next[key] = text(value);
+    const currentLifecycle = current.lifecycle ?? "stopped";
+    if (!STATES.has(currentLifecycle)) throw new Error("invalid lifecycle state");
+    if (lifecycle !== undefined) {
+      if (!STATES.has(lifecycle)) throw new Error("invalid lifecycle state");
+      if (!LEGAL_TRANSITIONS[currentLifecycle]?.has(lifecycle)) {
+        throw new Error(`illegal lifecycle transition: ${currentLifecycle} -> ${lifecycle}`);
+      }
     }
+    const next = { ...current, ...checked, ...(lifecycle === undefined ? {} : { lifecycle }), updatedAt: new Date().toISOString() };
+    for (const [key, value] of Object.entries(next)) if (typeof value === "string") next[key] = text(value);
     await atomicWrite(path, next);
   });
+}
+
+const [command, ...args] = process.argv.slice(2);
+if (!command) throw new Error("missing lifecycle command");
+if (command === "transition") {
+  const path = args[0]; const lifecycle = args[1];
+  if (!path || !lifecycle) throw new Error("transition requires path and state");
+  await writeFields(path, parseFields(args.slice(2)), lifecycle);
+} else if (command === "write") {
+  const path = args[0];
+  if (!path) throw new Error("write requires path");
+  await writeFields(path, parseFields(args.slice(1)));
 } else if (command === "read") {
   process.stdout.write(`${JSON.stringify(await readState(args[0]))}\n`);
 } else if (command === "get") {
@@ -234,6 +290,15 @@ if (command === "update" || command === "patch") {
   } else {
     process.stdout.write(`${requested || "127.0.0.1"}\n`);
   }
+} else if (command === "start-admission") {
+  const lifecycle = args[0] ?? "stopped";
+  const boolean = (value) => value === "yes";
+  process.stdout.write(`${startAdmission({
+    lifecycle,
+    supervisorLive: boolean(args[1]),
+    childLive: boolean(args[2]),
+    listenerPresent: boolean(args[3]),
+  })}\n`);
 } else if (command === "health") {
   process.stdout.write(`${JSON.stringify(await health(args[0], args[1]))}\n`);
 } else if (command === "status") {
@@ -250,7 +315,7 @@ if (command === "update" || command === "patch") {
   const supervisorLive = Boolean(state.supervisorPid && supervisorIdentity && supervisorObservedIdentity !== "" && supervisorObservedIdentity === supervisorIdentity);
   const childLive = Boolean(state.childPid && childIdentity && childObservedIdentity !== "" && childObservedIdentity === childIdentity);
   const recordedLifecycle = state.lifecycle ?? (supervisorLive ? "starting" : "stopped");
-  const activeLifecycle = new Set(["starting", "ready", "draining", "restarting"]);
+  const activeLifecycle = new Set(["starting", "ready", "stopping", "restarting"]);
   const lifecycle = !supervisorLive && activeLifecycle.has(recordedLifecycle) ? "failed" : recordedLifecycle;
   process.stdout.write(`${JSON.stringify({
     expected: { host, port, home: state.expectedHome ?? join(process.env.HOME ?? "", ".tron-dev") },

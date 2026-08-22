@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.22.0
+          node-version-file: .node-version
       - run: scripts/personal-info-guard.sh
       - run: scripts/tron version check
       - run: scripts/tron version test
@@ -32,7 +32,8 @@ jobs:
             scripts/verify-ci-toolchain.sh \
             packages/mac-app/scripts/bundle-gateway.sh \
             packages/mac-app/scripts/ensure-gateway-bundle.sh \
-            packages/mac-app/scripts/package-dmg.sh
+            packages/mac-app/scripts/package-dmg.sh \
+            packages/ios-app/scripts/test-source-policy.sh
 
   gateway:
     runs-on: macos-15
@@ -40,7 +41,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.22.0
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: packages/gateway/package-lock.json
       - run: npm ci
@@ -58,14 +59,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.22.0
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: packages/gateway/package-lock.json
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: "26.3"
       - run: scripts/install-ci-tools.sh xcodegen
-      - run: scripts/verify-ci-toolchain.sh ios xcodegen
+      - run: scripts/verify-ci-toolchain.sh node ios xcodegen
+      - run: packages/ios-app/scripts/test-source-policy.sh
       - run: scripts/ios-ci-test.sh
 
   mac:
@@ -74,14 +76,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.22.0
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: packages/gateway/package-lock.json
       - uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: "26.3"
       - run: scripts/install-ci-tools.sh xcodegen
-      - run: scripts/verify-ci-toolchain.sh xcode xcodegen
+      - run: scripts/verify-ci-toolchain.sh node xcode xcodegen
       - run: packages/mac-app/scripts/bundle-gateway.sh
       - run: xcodegen generate
         working-directory: packages/mac-app

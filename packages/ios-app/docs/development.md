@@ -23,7 +23,10 @@ xcodebuild build -project TronMobile.xcodeproj -scheme 'Tron Fast' \
 ```
 
 The generated Xcode project is not architectural truth; edit `project.yml` and
-source files, then regenerate.
+source files, then regenerate. `packages/ios-app/project.yml` is the sole
+orientation authority: iPhone supports portrait plus both landscape orientations,
+and iPad supports all four orientations. Do not add orientation keys to
+`Sources/Info.plist`; run `scripts/test-source-policy.sh` to guard this boundary.
 
 ## Efficient focused tests
 

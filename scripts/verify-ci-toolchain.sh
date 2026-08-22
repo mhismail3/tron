@@ -4,8 +4,26 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC1091
 source "$ROOT/config/ci-toolchain.env"
+NODE_VERSION_FILE="$ROOT/.node-version"
+[[ -f "$NODE_VERSION_FILE" ]] || { echo "missing canonical Node version file: $NODE_VERSION_FILE" >&2; exit 1; }
+TRON_NODE_VERSION="$(<"$NODE_VERSION_FILE")"
+node_version_lines="$(awk 'END { print NR }' "$NODE_VERSION_FILE")"
+[[ "$node_version_lines" == 1 && "$TRON_NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  || { echo "canonical Node version must be one strict x.y.z line (found $TRON_NODE_VERSION)" >&2; exit 1; }
 for tool in "$@"; do
   case "$tool" in
+    node)
+      [[ "$(node --version 2>/dev/null || true)" == "v${TRON_NODE_VERSION}" ]] \
+        || { echo "Node must be exactly ${TRON_NODE_VERSION}" >&2; exit 1; }
+      workflow_count="$(grep -Rho 'node-version-file: \.node-version' "$ROOT/.github/workflows" 2>/dev/null | wc -l | tr -d ' ')"
+      [[ "$workflow_count" == 4 ]] || { echo "CI setup-node mirrors must use .node-version in all jobs" >&2; exit 1; }
+      ! grep -RqsE 'node-version:[[:space:]]*[0-9]' "$ROOT/.github/workflows" \
+        || { echo "CI contains a duplicated Node version literal" >&2; exit 1; }
+      ! grep -qE '^NODE_VERSION="[0-9]' "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" \
+        || { echo "Mac bundle script contains a duplicated Node version literal" >&2; exit 1; }
+      grep -qF 'NODE_VERSION_FILE="$REPO_ROOT/.node-version"' "$ROOT/packages/mac-app/scripts/bundle-gateway.sh" \
+        || { echo "Mac bundle script does not read .node-version" >&2; exit 1; }
+      ;;
     xcode)
       xcodebuild -version | grep -F "Xcode $TRON_CI_XCODE_VERSION" >/dev/null
       ;;

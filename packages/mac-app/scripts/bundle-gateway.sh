@@ -18,9 +18,17 @@ APP_DIR="$PAYLOAD_DIR/app"
 RUNTIME_DIR="$PAYLOAD_DIR/runtime"
 LIBRARY_DIR="$RESOURCES_DIR/Library"
 HELPER_DIR="$LIBRARY_DIR/LoginItems/Tron Agent.app/Contents"
-NODE_VERSION="22.22.0"
-NODE_ARM64_SHA256="5ed4db0fcf1eaf84d91ad12462631d73bf4576c1377e192d222e48026a902640"
-NODE_X64_SHA256="5ea50c9d6dea3dfa3abb66b2656f7a4e1c8cef23432b558d45fb538c7b5dedce"
+NODE_VERSION_FILE="$REPO_ROOT/.node-version"
+[[ -f "$NODE_VERSION_FILE" ]] || { echo "missing canonical Node version file: $NODE_VERSION_FILE" >&2; exit 3; }
+NODE_VERSION="$(<"$NODE_VERSION_FILE")"
+[[ "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo "invalid canonical Node version in $NODE_VERSION_FILE" >&2
+    exit 3
+}
+# Pinned binary integrity metadata. The canonical version remains .node-version;
+# these hashes only authorize the exact runtime artifacts staged below.
+NODE_ARM64_SHA256="913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
+NODE_X64_SHA256="bf0e0ff20d4e5a16436d1ec372e47161e52be8e487db8070ae3f06b01efbba0c"
 skip_install=0
 skip_download=0
 clean=0
@@ -120,22 +128,79 @@ else
     }
 fi
 
+validate_node_runtime() {
+    local arch="$1" expected="$2" destination="$RUNTIME_DIR/node-$1"
+    local expected_arch="arm64"; [[ "$arch" == x64 ]] && expected_arch="x86_64"
+    [[ -x "$destination" ]] || { echo "missing staged Node runtime: $destination" >&2; exit 2; }
+
+    local actual
+    actual="$(shasum -a 256 "$destination" | awk '{print $1}')" || {
+        echo "unable to hash staged Node runtime: $destination" >&2
+        exit 3
+    }
+    [[ "$actual" == "$expected" ]] || {
+        echo "Node $arch binary checksum mismatch" >&2
+        exit 3
+    }
+
+    local version
+    version="$("$destination" --version 2>/dev/null)" || {
+        echo "unable to execute staged Node $arch runtime" >&2
+        exit 3
+    }
+    [[ "$version" == "v${NODE_VERSION}" ]] || {
+        echo "Node $arch version mismatch (expected v${NODE_VERSION}, got $version)" >&2
+        exit 3
+    }
+
+    local file_tool lipo_tool file_description lipo_arches
+    file_tool="$(command -v file 2>/dev/null || true)"
+    lipo_tool="$(command -v lipo 2>/dev/null || true)"
+    [[ -n "$file_tool" || -n "$lipo_tool" ]] || {
+        echo "unable to verify Mach-O architecture: neither file nor lipo is available" >&2
+        exit 3
+    }
+    if [[ -n "$file_tool" ]]; then
+        file_description="$("$file_tool" "$destination")" || {
+            echo "unable to inspect staged Node $arch runtime" >&2
+            exit 3
+        }
+        [[ "$file_description" == *"Mach-O"* ]] || {
+            echo "Node $arch runtime is not a Mach-O binary" >&2
+            exit 3
+        }
+    fi
+    if [[ -n "$lipo_tool" ]]; then
+        lipo_arches="$("$lipo_tool" -archs "$destination" 2>/dev/null)" || {
+            echo "unable to inspect staged Node $arch architecture" >&2
+            exit 3
+        }
+        [[ "$lipo_arches" == "$expected_arch" ]] || {
+            echo "Node $arch architecture mismatch (expected $expected_arch, got $lipo_arches)" >&2
+            exit 3
+        }
+    elif [[ "$file_description" != *"$expected_arch"* ]]; then
+        echo "Node $arch architecture mismatch (expected $expected_arch)" >&2
+        exit 3
+    fi
+}
+
 stage_node() {
     local arch="$1" expected="$2" destination="$RUNTIME_DIR/node-$1"
     if ((skip_download)); then
-        [[ -x "$destination" ]] || { echo "missing staged Node runtime: $destination" >&2; exit 2; }
+        validate_node_runtime "$arch" "$expected"
         return
     fi
     local archive="node-v${NODE_VERSION}-darwin-${arch}.tar.gz"
     local temp
     temp="$(mktemp -d)"
     curl -fsSL --retry 3 "https://nodejs.org/dist/v${NODE_VERSION}/${archive}" -o "$temp/$archive"
-    local actual
-    actual="$(shasum -a 256 "$temp/$archive" | awk '{print $1}')"
-    [[ "$actual" == "$expected" ]] || { echo "Node $arch checksum mismatch" >&2; rm -rf "$temp"; exit 3; }
     tar -xzf "$temp/$archive" -C "$temp"
     install -m 0755 "$temp/node-v${NODE_VERSION}-darwin-${arch}/bin/node" "$destination"
     rm -rf "$temp"
+    # Downloaded binaries receive the same immutable hash/version/architecture
+    # proof as pre-staged binaries before the payload is published.
+    validate_node_runtime "$arch" "$expected"
 }
 
 mkdir -p "$APP_DIR/dist" "$APP_DIR/scripts" "$RUNTIME_DIR" \

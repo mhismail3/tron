@@ -7,6 +7,8 @@ STATE_DIR="$HOME/.tron-dev/gateway"
 STATE_FILE="$STATE_DIR/lifecycle.json"
 PID_FILE="$STATE_DIR/dev.pid"
 LOG_FILE="$STATE_DIR/dev.log"
+COMMAND_LOCK="$STATE_DIR/command.lock"
+COMMAND_LOCK_HELD=no
 STATE_HELPER="$ROOT/scripts/tron-dev-state.mjs"
 LAUNCHER="/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
 HOST=""
@@ -29,6 +31,14 @@ pid_current() {
   [[ "$(node "$STATE_HELPER" pid-current "$pid" "$identity")" == yes ]]
 }
 
+kill_child() {
+  local pid="${1:-}" identity="${2:-}"
+  # Revalidate immediately before every signal; PID reuse must never turn a
+  # stale lifecycle record into a signal for an unrelated process.
+  pid_current "$pid" "$identity" || return 0
+  kill -TERM "$pid" 2>/dev/null || true
+}
+
 supervisor_live() {
   [[ -f "$STATE_FILE" ]] || return 1
   pid_current "$(node "$STATE_HELPER" get "$STATE_FILE" supervisorPid)" "$(node "$STATE_HELPER" get "$STATE_FILE" supervisorStartIdentity)"
@@ -36,6 +46,15 @@ supervisor_live() {
 
 status() {
   node "$STATE_HELPER" status "$STATE_FILE" "$HOST" 9848
+}
+
+acquire_command_lock() {
+  if ! /usr/bin/shlock -f "$COMMAND_LOCK" -p "$$"; then
+    echo "Debug Gateway command is already running; refusing concurrent mutator" >&2
+    return 75
+  fi
+  COMMAND_LOCK_HELD=yes
+  trap 'if [[ "$COMMAND_LOCK_HELD" == yes ]]; then rm -f "$COMMAND_LOCK"; fi' EXIT
 }
 
 stop_dev() {
@@ -46,8 +65,8 @@ stop_dev() {
     child_pid="$(node "$STATE_HELPER" get "$STATE_FILE" childPid)"
     child_identity="$(node "$STATE_HELPER" get "$STATE_FILE" childStartIdentity)"
   fi
-  node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=draining intentionalExit=true 2>/dev/null || true
-  pid_current "$child_pid" "$child_identity" && kill -TERM "$child_pid" 2>/dev/null || true
+  node "$STATE_HELPER" transition "$STATE_FILE" stopping intentionalExit=true 2>/dev/null || true
+  kill_child "$child_pid" "$child_identity"
   pid_current "$supervisor_pid" "$supervisor_identity" && kill -TERM "$supervisor_pid" 2>/dev/null || true
   for _ in $(seq 1 80); do
     pid_current "$child_pid" "$child_identity" || child_pid=""
@@ -57,7 +76,7 @@ stop_dev() {
   done
   [[ -z "$child_pid" && -z "$supervisor_pid" ]] || { echo "Debug Gateway stop timed out; inspect $LOG_FILE" >&2; return 1; }
   rm -f "$PID_FILE"
-  node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=stopped intentionalExit=true supervisorPid= supervisorStartIdentity= childPid= childStartIdentity=
+  node "$STATE_HELPER" transition "$STATE_FILE" stopped intentionalExit=true supervisorPid= supervisorStartIdentity= childPid= childStartIdentity=
 }
 
 supervise() {
@@ -65,15 +84,15 @@ supervise() {
   require_installed_launcher
   mkdir -p "$STATE_DIR"
   supervisor_identity="$(node "$STATE_HELPER" pid-start "$$")"
-  node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=starting expectedHost="$HOST" expectedPort=9848 expectedHome="$HOME/.tron-dev" supervisorPid="$$" supervisorStartIdentity="$supervisor_identity" intentionalExit=false restartCount=0
+  node "$STATE_HELPER" transition "$STATE_FILE" starting expectedHost="$HOST" expectedPort=9848 expectedHome="$HOME/.tron-dev" supervisorPid="$$" supervisorStartIdentity="$supervisor_identity" intentionalExit=false restartCount=0
   handle_termination() {
     terminating=1
-    node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=draining intentionalExit=true 2>/dev/null || true
+    node "$STATE_HELPER" transition "$STATE_FILE" stopping intentionalExit=true 2>/dev/null || true
     if pid_current "$child" "$child_identity"; then
-      kill -TERM "$child" 2>/dev/null || true
+      kill_child "$child" "$child_identity"
       set +e; wait "$child"; set -e
     fi
-    node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=stopped intentionalExit=true childPid= childStartIdentity= supervisorPid= supervisorStartIdentity= 2>/dev/null || true
+    node "$STATE_HELPER" transition "$STATE_FILE" stopped intentionalExit=true childPid= childStartIdentity= supervisorPid= supervisorStartIdentity= 2>/dev/null || true
     rm -f "$PID_FILE"
     exit 0
   }
@@ -81,45 +100,61 @@ supervise() {
   trap '' HUP
   while true; do
     if ! read -r expected_epoch expected_revision expected_fingerprint <<<"$(node "$STATE_HELPER" selected-identity "$HOME/.tron-dev" dev)"; then
-      node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=failed intentionalExit=false
+      node "$STATE_HELPER" transition "$STATE_FILE" failed intentionalExit=false
       exit 1
     fi
-    node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=starting childPid= childStartIdentity=
+    node "$STATE_HELPER" transition "$STATE_FILE" starting childPid= childStartIdentity=
     TRON_HOME_NAME=.tron-dev TRON_AGENT_DIR_NAME=agent-dev TRON_GATEWAY_CHANNEL=dev TRON_GATEWAY_SUPERVISED=1 "$LAUNCHER" --host "$HOST" --port 9848 &
     child=$!
     child_identity="$(node "$STATE_HELPER" pid-start "$child")"
-    node "$STATE_HELPER" patch "$STATE_FILE" childPid="$child" childStartIdentity="$child_identity"
+    node "$STATE_HELPER" write "$STATE_FILE" childPid="$child" childStartIdentity="$child_identity"
     ready=0
     for _ in $(seq 1 80); do
       health="$(node "$STATE_HELPER" health "$HOST" 9848)"
       if [[ "$health" == *'"readiness":"ready"'* ]]; then
         ready=1
         read -r runtime_epoch source_revision build_fingerprint <<<"$(printf '%s' "$health" | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{const x=JSON.parse(b);console.log([x.runtimeEpoch??"",x.sourceRevision??"",x.buildFingerprint??""].join(" "))})')"
-        [[ "$runtime_epoch" == "$expected_epoch" && "$source_revision" == "$expected_revision" && "$build_fingerprint" == "$expected_fingerprint" ]] || { kill -TERM "$child" 2>/dev/null || true; break; }
-        node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=ready readiness=ready epoch="$runtime_epoch" sourceRevision="$source_revision" buildFingerprint="$build_fingerprint"
+        [[ "$runtime_epoch" == "$expected_epoch" && "$source_revision" == "$expected_revision" && "$build_fingerprint" == "$expected_fingerprint" ]] || { kill_child "$child" "$child_identity"; break; }
+        node "$STATE_HELPER" transition "$STATE_FILE" ready readiness=ready epoch="$runtime_epoch" sourceRevision="$source_revision" buildFingerprint="$build_fingerprint"
         break
       fi
       pid_current "$child" "$child_identity" || break
       sleep 0.25
     done
-    ((ready == 1)) || kill -TERM "$child" 2>/dev/null || true
+    ((ready == 1)) || kill_child "$child" "$child_identity"
     set +e; wait "$child"; code=$?; set -e
     ((terminating == 0)) || exit 0
-    node "$STATE_HELPER" patch "$STATE_FILE" childPid= childStartIdentity= exitCode="$code"
+    node "$STATE_HELPER" write "$STATE_FILE" childPid= childStartIdentity= exitCode="$code"
     if ((code == 75)); then
       failures=0
-      node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=restarting intentionalExit=true
+      node "$STATE_HELPER" transition "$STATE_FILE" restarting intentionalExit=true
       sleep 0.2
       continue
     fi
     failures=$((failures + 1))
     if ((failures >= 5 || ready == 0)); then
-      node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=failed intentionalExit=false restartCount="$failures"
+      node "$STATE_HELPER" transition "$STATE_FILE" failed intentionalExit=false restartCount="$failures"
       exit 1
     fi
-    node "$STATE_HELPER" patch "$STATE_FILE" lifecycle=restarting intentionalExit=false restartCount="$failures"
+    node "$STATE_HELPER" transition "$STATE_FILE" restarting intentionalExit=false restartCount="$failures"
     sleep "$failures"
   done
+}
+
+recover_orphan_child() {
+  local child_pid="$1" child_identity="$2"
+  echo "Debug Gateway supervisor is stale; recovering owned child $child_pid" >&2
+  node "$STATE_HELPER" transition "$STATE_FILE" stopping intentionalExit=true
+  kill_child "$child_pid" "$child_identity"
+  for _ in $(seq 1 80); do
+    pid_current "$child_pid" "$child_identity" || {
+      node "$STATE_HELPER" transition "$STATE_FILE" stopped intentionalExit=true supervisorPid= supervisorStartIdentity= childPid= childStartIdentity=
+      return 0
+    }
+    sleep 0.05
+  done
+  echo "Debug Gateway owned orphan $child_pid did not stop; inspect $LOG_FILE" >&2
+  return 1
 }
 
 build_candidate() {
@@ -147,6 +182,9 @@ while (($#)); do
   shift
 done
 mkdir -p "$STATE_DIR"
+case "$command" in
+  start|restart|stop|handoff) acquire_command_lock || exit $? ;;
+esac
 if supervisor_live; then SUPERVISOR_LIVE=yes; else SUPERVISOR_LIVE=no; fi
 HOST="$(node "$STATE_HELPER" resolve-command-host "$STATE_FILE" "$HOST" "$HOST_EXPLICIT" "$SUPERVISOR_LIVE")" || exit 64
 case "$command" in
@@ -170,10 +208,33 @@ case "$command" in
       echo "Debug Gateway ready on 9848 (version $version, fingerprint ${payload_fingerprint:0:12})" >&2
       printf '%s %s\n' "$version" "$payload_fingerprint"
     else
-      if /usr/sbin/lsof -nP -iTCP:9848 -sTCP:LISTEN >/dev/null 2>&1; then
-        echo "Port 9848 is already owned by another process; refusing Debug takeover" >&2
-        exit 65
-      fi
+      recorded_lifecycle="$(node "$STATE_HELPER" get "$STATE_FILE" lifecycle)"
+      recorded_child_pid="$(node "$STATE_HELPER" get "$STATE_FILE" childPid)"
+      recorded_child_identity="$(node "$STATE_HELPER" get "$STATE_FILE" childStartIdentity)"
+      if pid_current "$recorded_child_pid" "$recorded_child_identity"; then child_recorded_live=yes; else child_recorded_live=no; fi
+      if /usr/sbin/lsof -nP -iTCP:9848 -sTCP:LISTEN >/dev/null 2>&1; then listener_present=yes; else listener_present=no; fi
+      admission="$(node "$STATE_HELPER" start-admission "$recorded_lifecycle" "$SUPERVISOR_LIVE" "$child_recorded_live" "$listener_present")"
+      case "$admission" in
+        recover-orphan)
+          recover_orphan_child "$recorded_child_pid" "$recorded_child_identity" || exit 1
+          if /usr/sbin/lsof -nP -iTCP:9848 -sTCP:LISTEN >/dev/null 2>&1; then
+            echo "Port 9848 is already owned by another process; refusing Debug takeover" >&2
+            exit 65
+          fi
+          ;;
+        foreign-listener)
+          echo "Port 9848 is already owned by another process; refusing Debug takeover" >&2
+          exit 65
+          ;;
+        mark-failed) node "$STATE_HELPER" transition "$STATE_FILE" failed intentionalExit=false ;;
+        finish-stopping) node "$STATE_HELPER" transition "$STATE_FILE" stopped intentionalExit=true ;;
+        start) ;;
+        invalid-lifecycle)
+          echo "Debug Gateway has invalid lifecycle state; refusing start" >&2
+          exit 78
+          ;;
+        *) echo "Debug Gateway start admission failed; refusing start" >&2; exit 78 ;;
+      esac
       TRON_DEV_STOPPED=1 node "$DEPLOY" select-dev --channel dev --home "$HOME/.tron-dev" --version "$version" --fingerprint "$payload_fingerprint" >&2
       if [[ "$HOST" == tailscale ]]; then supervisor_host_arg=--tailscale; else supervisor_host_arg=--loopback; fi
       nohup "$0" __supervise "$supervisor_host_arg" >"$LOG_FILE" 2>&1 &

@@ -190,7 +190,12 @@ scripts/tron dev handoff     # exact tested Debug artifact -> inactive Stable ca
 Fresh starts default to loopback; pass `--tailscale` when iOS must connect.
 Status, restart, handoff, and stop without a host flag inherit a live
 supervisor's recorded host. A conflicting explicit flag is rejected; stop the
-supervisor before changing exposure.
+supervisor before changing exposure. Mutating commands use a short-lived atomic
+command lock, released before the supervisor continues running, so concurrent
+start/restart/stop/handoff commands fail closed. If the supervisor is stale but
+the exact recorded child PID/start identity is still live, start first terminates
+that owned orphan through `stopping` → `stopped`; a listener without that exact
+identity remains foreign and is never killed.
 
 The handoff proves the selected Debug fingerprint/revision/epoch before and
 after copying, rejects runtime drift that requires a manual `Tron.app` update,
