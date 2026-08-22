@@ -164,12 +164,14 @@ oversized or generically truncated WebSocket frame. Page `start`/`end`/`total`, 
 neighbor identity, mount, runtime, and subscription ownership must all agree before prepend.
 The presentation owner keeps the newest authoritative tail separate from explicitly loaded
 older browsing rows. A fitted empty/short positive-start baseline is compatibility-backfilled under
-the provisional subscription before publication, including active and compacting sessions. Every compatible replacement/reconnect tail retains at least the latest
-24 display-bearing canonical entries already mounted, while exact ordinal, parent, leaf, and ID overlap fails
-closed across a branch change. A detached reader retains loaded rows; physical return to latest
-never mutates transcript coverage. History loading is admitted from the canonical cursor even when
-no rendered row or semantic scroll anchor exists; an anchor is optional viewport-preservation evidence.
-Only this bounded authoritative continuity tail enters the disk cache.
+the provisional subscription before publication, including active and compacting sessions. Every
+compatible replacement/reconnect reconciles only an exact visible prefix: the visible coverage end
+is the authority tail end, sliding tails promote covered old-tail rows, backward expansion trims the
+prefix, and ordinal ID overlap, parent, leaf, and runtime/total identity conflicts fail closed. A
+detached reader retains loaded rows; physical return to latest never mutates transcript coverage.
+History loading is admitted from the canonical cursor even when no rendered row or semantic scroll
+anchor exists; an anchor is optional viewport-preservation evidence. Only duplicate-free bounded
+summary rows enter the disk cache.
 `ChatTranscriptPresentationStore` serializes snapshot-to-timeline preparation off MainActor,
 coalesces a burst to one pending newest source, and keeps the last complete installed commit
 visible while a replacement builds. Transcript rows and Load-earlier availability come from the
@@ -1187,18 +1189,16 @@ rounded UIKit fields, or system search and segmented styles.
 
 ## Offline cache
 
-`SnapshotCache` admits duplicate-free snapshots only for the bounded session summary set,
-limits transcript size, individual encoded projections, session count, and each profile file to
-8 MiB, strips transient interactions, diagnostics, and streaming state, and rewrites active phases to
-`interrupted`. Running tool execution states are retained as explicitly cached
-state, so a disconnected snapshot cannot turn still-live Gateway work into a
-false green completion; the first authoritative reconnect snapshot replaces that
-state. File-size admission precedes reads, which consume at most the exact ceiling; conservative
-string/collection shape admission rejects oversized in-memory projections before JSON encoding. Corrupt, obsolete, or oversized
-files self-delete. Cache roots are backup-excluded, files request complete-until-first-authentication
-protection as part of atomic creation, profile removal deletes only its hashed file, and generation
-ordering rejects stale checkpoints. Load/save signposts report only admitted aggregate item and
-encoded-byte counts. It is disposable presentation state, not session truth.
+`SnapshotCache` persists only duplicate-free, bounded session summaries. It never restores or
+writes `SessionSnapshot` transcript/runtime state; legacy snapshot-bearing files decode only far
+enough to retain summaries and their snapshot values are ignored. File-size admission precedes reads,
+which consume at most the exact ceiling. Load and save admit at most 250 unique rows in stored order;
+invalid or oversized rows and duplicate IDs are dropped, while a malformed envelope is discarded as a
+whole. Each admitted row is at most 128 KiB and the file remains below 8 MiB. Corrupt, obsolete, or
+oversized files self-delete. Cache roots are backup-excluded, files request
+complete-until-first-authentication protection as part of atomic creation, profile removal deletes only
+its hashed file, and generation ordering rejects stale checkpoints. Load/save signposts report only
+admitted summary and encoded-byte counts. It is disposable catalog presentation state, not session truth.
 
 ## Removed architecture
 

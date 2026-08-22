@@ -821,7 +821,7 @@ struct ChatTranscriptPageRequest: Equatable {
             && self.presentationGeneration == presentationGeneration
             && self.runtimeGeneration == runtimeGeneration
             && transcriptStart == before
-            && (transcriptTotal == nil || transcriptTotal == expectedTotal)
+            && transcriptTotal == expectedTotal
             && firstTranscriptID == expectedNextEntryID
     }
 

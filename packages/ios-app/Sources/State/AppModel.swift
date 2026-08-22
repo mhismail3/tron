@@ -115,7 +115,6 @@ final class AppModel {
         let profileID: String
         let generation: Int
         let sessions: [SessionSummary]
-        let snapshots: [SessionSnapshot]
     }
 
     private let lifecycle: GatewayLifecycleCoordinator
@@ -407,6 +406,20 @@ final class AppModel {
 
     func authoritativeSnapshot(for sessionID: String) -> SessionSnapshot? {
         sessionPresentation.authoritativeSnapshot(for: sessionID)
+    }
+
+    func transcriptSnapshot(for sessionID: String) -> SessionSnapshot? {
+        sessionPresentation.transcriptSnapshot(for: sessionID)
+    }
+
+    func visibleTranscript(for sessionID: String) -> [TranscriptItem] {
+        guard sessionPresentation.authoritativeSnapshot(for: sessionID) != nil else { return [] }
+        return sessionPresentation.visibleTranscript
+    }
+
+    func visibleTranscriptCoverage(for sessionID: String) -> MountedTranscriptCoverage? {
+        guard sessionPresentation.authoritativeSnapshot(for: sessionID) != nil else { return nil }
+        return sessionPresentation.mountedTranscriptCoverage
     }
 
     func chatMediaIdentity(blobID: String) -> ChatMediaIdentity? {
@@ -2306,16 +2319,6 @@ final class AppModel {
         )
     }
 
-    static func mergingVisibleTranscript(
-        current: SessionSnapshot,
-        authoritative: SessionSnapshot
-    ) -> SessionSnapshot {
-        SessionPresentationStore.mergingVisibleTranscript(
-            current: current,
-            authoritative: authoritative
-        )
-    }
-
     private func apply(_ update: SessionSummaryUpdate) {
         switch sessionCatalog.apply(update) {
         case .stale:
@@ -2484,8 +2487,7 @@ final class AppModel {
         pendingCacheCheckpoint = CacheCheckpoint(
             profileID: profileID,
             generation: cacheCheckpointGeneration,
-            sessions: sessions,
-            snapshots: sessionPresentation.disposableCacheSnapshot.map { [$0] } ?? []
+            sessions: sessions
         )
         guard cacheCheckpointTask == nil else { return }
         cacheCheckpointTaskGeneration &+= 1
@@ -2497,8 +2499,7 @@ final class AppModel {
                 await self.cache.save(
                     profileID: checkpoint.profileID,
                     generation: checkpoint.generation,
-                    sessions: checkpoint.sessions,
-                    snapshots: checkpoint.snapshots
+                    sessions: checkpoint.sessions
                 )
             }
             if self.cacheCheckpointTaskGeneration == taskGeneration {

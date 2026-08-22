@@ -916,7 +916,7 @@ struct ChatTranscriptPresentationTests {
             runtimeGeneration: "runtime-a", transcriptStart: 40,
             transcriptTotal: 48, firstTranscriptID: "entry-40"
         ))
-        #expect(request.canInstall(
+        #expect(!request.canInstall(
             sessionID: "session-a", presentationGeneration: 7,
             runtimeGeneration: "runtime-a", transcriptStart: 40,
             transcriptTotal: nil, firstTranscriptID: "entry-40"

@@ -22,6 +22,327 @@ struct SessionPresentationStoreTests {
         #expect(model.authoritativeSnapshot(for: snapshot.sessionId) == snapshot)
     }
 
+    @Test("mounted transcript window retains only an exact prefix while authority stays unchanged")
+    func mountedTranscriptWindowUsesExactCoverage() throws {
+        var tail = try SessionScenarioBuilder(seed: 8_811).openingTail(targetEncodedBytes: 4_096)
+        tail.transcriptStart = 1
+        tail.transcriptTotal = tail.transcript.count + 1
+        let prefix = try #require(SessionScenarioBuilder(seed: 8_812).historyPage(count: 1, longRowBytes: 16).first)
+        var visible = tail
+        visible.transcript = [prefix] + tail.transcript
+        visible.transcriptStart = max(0, (tail.transcriptStart ?? 1) - 1)
+        visible.transcriptTotal = tail.transcriptTotal
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        store.installHostedSubscription(snapshot: tail, token: "token")
+        store.installHostedLoadedHistory(visible: visible, authoritativeTail: tail)
+        #expect(store.snapshot == tail)
+        #expect(store.visibleTranscript.map(\.id) == visible.transcript.map(\.id))
+        #expect(store.visibleTranscriptStart == visible.transcriptStart)
+        #expect(store.visibleTranscriptEnd == tail.transcriptStart.map { $0 + tail.transcript.count })
+        #expect(store.mountedTranscriptCoverage?.start == visible.transcriptStart)
+        #expect(store.mountedTranscriptCoverage?.end == tail.transcriptStart.map { $0 + tail.transcript.count })
+    }
+
+    @Test("prefix reconciliation handles unchanged, sliding, and backward-expanded tails")
+    func mountedTranscriptWindowReconcilesVisibleOrdinals() throws {
+        let builder = SessionScenarioBuilder(seed: 8_816)
+        let entries = builder.pagedMixedSession(totalEntries: 14).page(before: 10, count: 10)
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        var tail = try builder.openingTail(targetEncodedBytes: 4_096)
+        tail.transcript = Array(entries[7..<10])
+        tail.transcriptStart = 7
+        tail.transcriptTotal = 11
+        var visible = tail
+        visible.transcript = Array(entries[2..<10])
+        visible.transcriptStart = 2
+        store.installHostedSubscription(snapshot: tail, token: "token")
+        store.installHostedLoadedHistory(visible: visible, authoritativeTail: tail)
+
+        // An unchanged tail keeps the exact loaded prefix.
+        var unchanged = tail
+        unchanged.eventSequence += 1
+        store.replaceHostedSnapshot(unchanged)
+        #expect(store.visibleTranscript.map(\.id) == entries[2..<10].map(\.id))
+        #expect(store.mountedTranscriptCoverage?.end == 10)
+
+        // A tail that slides forward promotes the old tail row at ordinal 7
+        // into the prefix rather than dropping it or claiming a gap.
+        var sliding = tail
+        let eleven = builder.pagedMixedSession(totalEntries: 11).page(before: 11, count: 11)
+        sliding.transcript = Array(eleven[8..<11])
+        sliding.transcriptStart = 8
+        sliding.transcriptTotal = 12
+        sliding.leafEntryId = "grown-leaf"
+        sliding.eventSequence += 2
+        store.replaceHostedSnapshot(sliding)
+        #expect(store.visibleTranscript.map(\.id) == eleven[2..<11].map(\.id))
+        #expect(store.mountedTranscriptCoverage?.start == 2)
+        #expect(store.mountedTranscriptCoverage?.end == 11)
+
+        // Expanding backward trims the prefix to the rows before the new tail;
+        // every overlap is still checked against the replacement authority.
+        var expanding = tail
+        expanding.transcript = Array(eleven[5..<10])
+        expanding.transcriptStart = 5
+        expanding.transcriptTotal = 12
+        expanding.eventSequence += 3
+        store.replaceHostedSnapshot(expanding)
+        #expect(store.visibleTranscript.map(\.id) == entries[2..<10].map(\.id))
+        #expect(store.mountedTranscriptCoverage?.start == 2)
+        #expect(store.mountedTranscriptCoverage?.end == 10)
+    }
+
+    @Test("prefix reconciliation admits an exact contiguous append without overlap")
+    func mountedTranscriptWindowAdmitsExactContiguousAppend() async throws {
+        let builder = SessionScenarioBuilder(seed: 8_820)
+        let entries = builder.pagedMixedSession(totalEntries: 12).page(before: 12, count: 12)
+
+        func makeStore() throws -> (SessionPresentationStore, SessionSnapshot) {
+            var tail = try builder.openingTail(targetEncodedBytes: 4_096)
+            tail.transcript = Array(entries[7..<10])
+            tail.transcriptStart = 7
+            tail.transcriptTotal = 10
+            var visible = tail
+            visible.transcript = Array(entries[2..<10])
+            visible.transcriptStart = 2
+            let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+            store.installHostedSubscription(snapshot: tail, token: "token")
+            store.installHostedLoadedHistory(visible: visible, authoritativeTail: tail)
+            return (store, tail)
+        }
+
+        // The replacement starts exactly at the old visible end, so its rows
+        // do not overlap the mounted sequence. A changed leaf and total are
+        // admissible because session/runtime and structure revision remain
+        // unchanged and the replacement is contiguous.
+        do {
+            let (store, tail) = try makeStore()
+            var appended = tail
+            appended.transcript = Array(entries[10..<12])
+            appended.transcriptStart = 10
+            appended.transcriptTotal = 12
+            appended.leafEntryId = "appended-leaf"
+            store.replaceHostedSnapshot(appended)
+            #expect(Set(entries[2..<10].map(\.id)).isDisjoint(with: entries[10..<12].map(\.id)))
+            #expect(store.visibleTranscript.map(\.id) == entries[2..<12].map(\.id))
+            #expect(store.mountedTranscriptCoverage?.start == 2)
+            #expect(store.mountedTranscriptCoverage?.end == 12)
+            #expect(store.mountedTranscriptCoverage?.total == 12)
+            #expect(store.mountedTranscriptCoverage?.leafEntryID == "appended-leaf")
+        }
+
+        // A structure revision change invalidates the old mounted window;
+        // the same adjacent append must not resurrect that prefix.
+        do {
+            let (store, tail) = try makeStore()
+            let sequence = tail.eventSequence + 1
+            await store.admit(GatewayEvent(
+                type: "event",
+                topic: "session.structureChanged",
+                sessionId: tail.sessionId,
+                payload: .object([
+                    "runtimeGeneration": .string(tail.runtimeGeneration),
+                    "eventSequence": .number(Double(sequence)),
+                    "revision": .number(Double(tail.revision + 1)),
+                    "data": .object(["branchChanged": .bool(true)]),
+                ])
+            ))
+            #expect(store.mountedTranscriptCoverage == nil)
+
+            var appended = tail
+            appended.eventSequence = sequence + 1
+            appended.transcript = Array(entries[10..<12])
+            appended.transcriptStart = 10
+            appended.transcriptTotal = 12
+            appended.leafEntryId = "appended-leaf"
+            store.replaceHostedSnapshot(appended)
+            #expect(store.visibleTranscript.map(\.id) == appended.transcript.map(\.id))
+            #expect(store.mountedTranscriptCoverage == nil)
+        }
+    }
+
+    @Test("prefix reconciliation rejects gaps and every identity conflict")
+    func mountedTranscriptWindowRejectsGapsAndIdentityConflicts() throws {
+        let builder = SessionScenarioBuilder(seed: 8_817)
+        let entries = builder.pagedMixedSession(totalEntries: 14).page(before: 10, count: 10)
+
+        func makeStore() throws -> (SessionPresentationStore, SessionSnapshot, [TranscriptItem]) {
+            var tail = try builder.openingTail(targetEncodedBytes: 4_096)
+            tail.transcript = Array(entries[7..<10])
+            tail.transcriptStart = 7
+            tail.transcriptTotal = 14
+            var visible = tail
+            visible.transcript = Array(entries[2..<10])
+            visible.transcriptStart = 2
+            let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+            store.installHostedSubscription(snapshot: tail, token: "token")
+            store.installHostedLoadedHistory(visible: visible, authoritativeTail: tail)
+            return (store, tail, entries)
+        }
+
+        // New authority begins after the visible end: no synthetic rows fill
+        // the gap.
+        do {
+            let (store, tail, _) = try makeStore()
+            var gap = tail
+            gap.transcriptStart = 11
+            gap.transcript = builder.pagedMixedSession(totalEntries: 14).page(before: 14, count: 3)
+            gap.transcriptTotal = 14
+            store.replaceHostedSnapshot(gap)
+            #expect(store.mountedTranscriptCoverage == nil)
+        }
+
+        // A replacement beginning at the visible start needs no prefix.
+        do {
+            let (store, tail, _) = try makeStore()
+            var replacement = tail
+            replacement.transcriptStart = 2
+            replacement.transcript = Array(entries[2..<10])
+            replacement.transcriptTotal = 14
+            store.replaceHostedSnapshot(replacement)
+            #expect(store.mountedTranscriptCoverage == nil)
+        }
+
+        // A mismatched ID at one overlapping ordinal fails closed.
+        do {
+            let (store, tail, _) = try makeStore()
+            var conflict = tail
+            let replacement = SessionScenarioBuilder(seed: 99).pagedMixedSession(totalEntries: 11).page(before: 11, count: 3)
+            conflict.transcript = replacement
+            conflict.transcriptStart = 8
+            conflict.transcriptTotal = 14
+            store.replaceHostedSnapshot(conflict)
+            #expect(store.mountedTranscriptCoverage == nil)
+        }
+
+        for mutation in ["runtime", "total"] {
+            let (store, tail, _) = try makeStore()
+            var conflict = tail
+            switch mutation {
+            case "runtime": conflict.runtimeGeneration += "-changed"
+            default: conflict.transcriptTotal = 13
+            }
+            store.replaceHostedSnapshot(conflict)
+            #expect(store.mountedTranscriptCoverage == nil)
+        }
+
+        // A leaf change alone is admissible when the projected tail overlaps
+        // every visible ordinal exactly; the leaf is updated in coverage.
+        do {
+            let (store, tail, _) = try makeStore()
+            var replacement = tail
+            replacement.leafEntryId = "changed-leaf"
+            store.replaceHostedSnapshot(replacement)
+            #expect(store.visibleTranscript.map(\.id) == entries[2..<10].map(\.id))
+            #expect(store.mountedTranscriptCoverage?.leafEntryID == "changed-leaf")
+        }
+    }
+
+    @Test("nonprojectable leaf changes retain only exact projected overlap")
+    func mountedTranscriptWindowAdmitsProjectedLeafChange() throws {
+        var tail = try SessionScenarioBuilder(seed: 8_813).openingTail(targetEncodedBytes: 4_096)
+        tail.transcriptStart = 1
+        tail.transcriptTotal = tail.transcript.count + 1
+        let prefix = try #require(SessionScenarioBuilder(seed: 8_814).historyPage(count: 1, longRowBytes: 16).first)
+        var visible = tail
+        visible.transcript = [prefix] + tail.transcript
+        visible.transcriptStart = max(0, (tail.transcriptStart ?? 1) - 1)
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        store.installHostedSubscription(snapshot: tail, token: "token")
+        store.installHostedLoadedHistory(visible: visible, authoritativeTail: tail)
+        var replacement = tail
+        replacement.eventSequence += 1
+        replacement.leafEntryId = "different-leaf"
+        store.replaceHostedSnapshot(replacement)
+        #expect(store.snapshot == replacement)
+        #expect(store.visibleTranscript.map(\.id) == visible.transcript.map(\.id))
+        #expect(store.mountedTranscriptCoverage?.leafEntryID == "different-leaf")
+    }
+
+    @Test("branch change discards mounted prefix before an overlapping snapshot")
+    func mountedTranscriptWindowRejectsBranchChangeBeforeSnapshot() async throws {
+        var tail = try SessionScenarioBuilder(seed: 8_818).openingTail(targetEncodedBytes: 4_096)
+        tail.transcriptStart = 1
+        tail.transcriptTotal = tail.transcript.count + 1
+        let prefix = try #require(SessionScenarioBuilder(seed: 8_819).historyPage(count: 1, longRowBytes: 16).first)
+        var visible = tail
+        visible.transcript = [prefix] + tail.transcript
+        visible.transcriptStart = 0
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        store.installHostedSubscription(snapshot: tail, token: "token")
+        store.installHostedLoadedHistory(visible: visible, authoritativeTail: tail)
+        let sequence = tail.eventSequence + 1
+        await store.admit(GatewayEvent(
+            type: "event",
+            topic: "session.structureChanged",
+            sessionId: tail.sessionId,
+            payload: .object([
+                "runtimeGeneration": .string(tail.runtimeGeneration),
+                "eventSequence": .number(Double(sequence)),
+                "revision": .number(Double(tail.revision + 1)),
+                "data": .object(["branchChanged": .bool(true)]),
+            ])
+        ))
+        #expect(store.mountedTranscriptCoverage == nil)
+
+        var replacement = tail
+        replacement.eventSequence = sequence + 1
+        store.replaceHostedSnapshot(replacement)
+        #expect(store.visibleTranscript == replacement.transcript)
+        #expect(store.mountedTranscriptCoverage == nil)
+    }
+
+    @Test("reconnect keeps only compatible prefix facts beside the newer authority")
+    func reconnectInstallsAuthoritativeTailWithoutCopyingPrefix() throws {
+        var current = try SessionScenarioBuilder(seed: 8_815).openingTail(targetEncodedBytes: 4_096)
+        current.eventSequence = 4
+        var incoming = current
+        incoming.eventSequence = 5
+        incoming.transcriptStart = current.transcriptStart
+        #expect(SessionPresentationStore.installingSnapshot(
+            current: current,
+            authoritative: incoming,
+            mode: .reconnect
+        ) == incoming)
+
+        incoming.eventSequence = 3
+        #expect(SessionPresentationStore.installingSnapshot(
+            current: current,
+            authoritative: incoming,
+            mode: .reconnect
+        ) == current)
+        #expect(SessionPresentationStore.installingSnapshot(
+            current: current,
+            authoritative: incoming,
+            mode: .freshPresentation
+        ) == incoming)
+    }
+
+    @Test("page admission requires exact visible total and projected bounds")
+    func pageAdmissionUsesExactFacts() {
+        let request = ChatTranscriptPageRequest(
+            sessionID: "session", presentationGeneration: 1,
+            runtimeGeneration: "runtime", before: 20,
+            expectedTotal: 28, expectedNextEntryID: "first"
+        )
+        #expect(request.canInstall(
+            sessionID: "session", presentationGeneration: 1,
+            runtimeGeneration: "runtime", transcriptStart: 20,
+            transcriptTotal: 28, firstTranscriptID: "first"
+        ))
+        #expect(!request.canInstall(
+            sessionID: "session", presentationGeneration: 1,
+            runtimeGeneration: "runtime", transcriptStart: 20,
+            transcriptTotal: nil, firstTranscriptID: "first"
+        ))
+        #expect(request.canInstallPage(
+            start: 12, end: 20, total: 28, itemCount: 8, visibleItemCount: 8
+        ))
+        #expect(!request.canInstallPage(
+            start: 12, end: 20, total: 28, itemCount: 8, visibleItemCount: 7
+        ))
+    }
+
     @Test("admission preserves allowed LF and CR while rejecting other controls")
     func admissionBoundaryForMultilineValues() throws {
         var snapshot = try SessionScenarioBuilder(seed: 8_810).openingTail(targetEncodedBytes: 4_096)
@@ -535,112 +856,6 @@ struct SessionPresentationStoreTests {
         #expect(store.snapshot?.extensionPresentation.semanticState.statuses.isEmpty == true)
     }
 
-    @Test("stale reconnect retains the newer authoritative tail for history discard")
-    func staleReconnectRetainsTail() throws {
-        var retained = try SessionScenarioBuilder(seed: 8_502)
-            .openingTail(targetEncodedBytes: 4_096)
-        retained.eventSequence = 20
-        retained.revision = 30
-        var stale = retained
-        stale.eventSequence = 18
-        stale.revision = 28
-        stale.transcript.removeLast()
-        stale.transcriptTotal = max(0, (stale.transcriptTotal ?? stale.transcript.count + 1) - 1)
-
-        let installedTail = SessionPresentationStore.installingAuthoritativeTail(
-            current: retained,
-            authoritative: stale,
-            mode: .reconnect
-        )
-        #expect(installedTail == retained)
-        #expect(SessionPresentationStore.installingAuthoritativeTail(
-            current: retained,
-            authoritative: stale,
-            mode: .freshPresentation
-        ) == stale)
-
-        var visible = retained
-        let earlier = try #require(
-            SessionScenarioBuilder(seed: 8_503).historyPage(count: 1, longRowBytes: 16).first
-        )
-        visible.transcript.insert(earlier, at: 0)
-        visible.transcriptStart = max(0, (visible.transcriptStart ?? 1) - 1)
-
-        let store = SessionPresentationStore(
-            client: GatewayClient(),
-            performanceSignposts: SystemPerformanceSignposts.shared
-        )
-        store.installHostedSubscription(snapshot: retained, token: "token")
-        let target = try #require(store.mountedTarget)
-        store.installHostedLoadedHistory(visible: visible, authoritativeTail: installedTail)
-        #expect(store.snapshot == visible)
-        #expect(store.disposableCacheSnapshot == retained)
-    }
-
-    @Test("tail settlement never discards mounted transcript history")
-    func tailSettlementRetainsContinuityFloor() throws {
-        var visible = try SessionScenarioBuilder(seed: 8_505).openingTail(targetEncodedBytes: 4_096)
-        visible.transcript = SessionScenarioBuilder(seed: 8_506).historyPage(count: 40, longRowBytes: 24)
-        visible.transcriptStart = 0
-        visible.transcriptTotal = visible.transcript.count
-
-        var pressureFittedTail = visible
-        pressureFittedTail.transcript = Array(visible.transcript.suffix(2))
-        pressureFittedTail.transcriptStart = visible.transcript.count - 2
-        pressureFittedTail.eventSequence += 1
-        pressureFittedTail.revision += 1
-
-        let retained = SessionPresentationStore.retainingRecentTranscriptContinuity(
-            visible: visible,
-            authoritative: pressureFittedTail
-        )
-        let retainedVisibleMessages = retained.transcript.filter {
-            !($0.kind == .message && $0.role == .toolResult)
-        }
-        #expect(retainedVisibleMessages.count >= SessionPresentationStore.minimumRecentTranscriptContinuityMessages)
-        #expect(retained.transcript.suffix(2).map(\.id) == pressureFittedTail.transcript.map(\.id))
-        #expect((retained.transcriptStart ?? 0) > 0)
-
-        let store = SessionPresentationStore(
-            client: GatewayClient(),
-            performanceSignposts: SystemPerformanceSignposts.shared
-        )
-        store.installHostedSubscription(snapshot: pressureFittedTail, token: "token")
-        let target = try #require(store.mountedTarget)
-        store.installHostedLoadedHistory(visible: visible, authoritativeTail: pressureFittedTail)
-        #expect(store.snapshot?.transcript == visible.transcript)
-        #expect(store.snapshot?.transcriptStart == visible.transcriptStart)
-    }
-
-    @Test("continuity retention fails closed across a changed canonical spine")
-    func continuityRetentionRejectsChangedSpine() throws {
-        var visible = try SessionScenarioBuilder(seed: 8_507).openingTail(targetEncodedBytes: 4_096)
-        visible.transcript = SessionScenarioBuilder(seed: 8_508).historyPage(count: 20, longRowBytes: 24)
-        visible.transcriptStart = 0
-        visible.transcriptTotal = visible.transcript.count
-        var changed = visible
-        changed.transcript = Array(visible.transcript.suffix(2))
-        changed.transcript[0] = try #require(
-            SessionScenarioBuilder(seed: 8_509).historyPage(count: 1, longRowBytes: 24).first
-        )
-        changed.transcriptStart = visible.transcript.count - 2
-
-        #expect(SessionPresentationStore.retainingRecentTranscriptContinuity(
-            visible: visible,
-            authoritative: changed
-        ) == changed)
-
-        var changedLeaf = visible
-        changedLeaf.transcript = Array(visible.transcript.suffix(2))
-        changedLeaf.transcriptStart = visible.transcript.count - 2
-        visible.leafEntryId = "leaf-a"
-        changedLeaf.leafEntryId = "leaf-b"
-        #expect(SessionPresentationStore.retainingRecentTranscriptContinuity(
-            visible: visible,
-            authoritative: changedLeaf
-        ) == changedLeaf)
-    }
-
     @Test("runtime replacement clears secondary projections and advances their reload owners")
     func runtimeReplacementClearsSecondaryProjection() throws {
         var current = try SessionScenarioBuilder(seed: 8_504).openingTail(targetEncodedBytes: 4_096)
@@ -1059,84 +1274,6 @@ struct SessionPresentationStoreTests {
         }
     }
 
-    @Test("synchronization replay retains compatible recent continuity in the cache tail")
-    func synchronizationReplayKeepsBoundedTail() async throws {
-        try await withTestWatchdog { @MainActor in
-            let socket = ScriptedGatewaySocket()
-            let client = GatewayClient(
-                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory
-            )
-            let profile = GatewayProfile(
-                id: "gateway",
-                label: "Mac",
-                host: "gateway.test",
-                port: 9_847,
-                machineId: "machine",
-                deviceId: "device"
-            )
-            let connecting = Task { try await client.connect(profile: profile, token: "token") }
-            try await socket.waitUntilSent(count: 1)
-            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
-            _ = try await connecting.value
-
-            var baseline = try SessionScenarioBuilder(seed: 8_901)
-                .openingTail(targetEncodedBytes: 8_000)
-            // Retain enough rows to exercise replay continuity independently
-            // of the now post-mount transcript paging path.
-            baseline.transcript = SessionScenarioBuilder(seed: 8_902).historyPage(count: 30, longRowBytes: 16)
-            baseline.transcriptStart = 10
-            baseline.transcriptTotal = baseline.transcript.count + 10
-            var shifted = baseline
-            shifted.eventSequence += 1
-            shifted.revision += 1
-            shifted.transcript.removeFirst()
-            shifted.transcriptStart = 11
-            let store = SessionPresentationStore(
-                client: client,
-                performanceSignposts: SystemPerformanceSignposts.shared
-            )
-            let opening = Task { try await store.open(baseline.sessionId) }
-
-            try await socket.waitUntilSent(count: 2)
-            var frame = await socket.sentFrames()[1]
-            var request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
-            var requestID = try #require(request.objectValue?["id"]?.stringValue)
-            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
-                "type": .string("response"),
-                "id": .string(requestID),
-                "ok": .bool(true),
-                "result": .object([
-                    "session": try JSONValue.encode(baseline),
-                    "syncToken": .string("sync"),
-                    "subscriptionToken": .string("subscription"),
-                ]),
-            ])))
-
-            try await socket.waitUntilSent(count: 3)
-            await store.admit(GatewayEvent(
-                type: "event",
-                topic: "session.snapshot",
-                sessionId: baseline.sessionId,
-                payload: try JSONValue.encode(shifted)
-            ))
-            frame = await socket.sentFrames()[2]
-            request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
-            requestID = try #require(request.objectValue?["id"]?.stringValue)
-            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
-                "type": .string("response"),
-                "id": .string(requestID),
-                "ok": .bool(true),
-                "result": .object(["synchronized": .bool(true)]),
-            ])))
-
-            _ = try await opening.value
-            #expect(store.snapshot?.transcript.map(\.id) == baseline.transcript.map(\.id))
-            #expect(store.disposableCacheSnapshot?.transcript.map(\.id) == baseline.transcript.map(\.id))
-            #expect(store.disposableCacheSnapshot?.transcriptStart == baseline.transcriptStart)
-            await client.close()
-        }
-    }
-
     @Test("transient malformed session-open response retries before surfacing failure")
     func transientMalformedOpenRetries() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1550,7 +1687,7 @@ struct SessionPresentationStoreTests {
         }
     }
 
-    @Test("paging compacts back to the authoritative tail and rejects stale leases")
+    @Test("paging keeps the authoritative tail immutable and rejects stale leases")
     func pagingRevalidatesLease() async throws {
         try await withTestWatchdog { @MainActor in
             let socket = ScriptedGatewaySocket()
@@ -1571,7 +1708,7 @@ struct SessionPresentationStoreTests {
             _ = try await connecting.value
 
             var snapshot = try SessionScenarioBuilder(seed: 86).openingTail(targetEncodedBytes: 4_096)
-            snapshot.transcript = []
+            snapshot.transcript = Array(snapshot.transcript.prefix(1))
             snapshot.transcriptStart = 10
             snapshot.transcriptTotal = snapshot.transcript.count + 10
             let store = SessionPresentationStore(
@@ -1583,7 +1720,8 @@ struct SessionPresentationStoreTests {
                 index: Int,
                 items: [TranscriptItem] = [],
                 start: Int = 10,
-                end: Int = 10
+                end: Int = 10,
+                nextEntryId: String? = nil
             ) async throws {
                 try await socket.waitUntilSent(count: index + 1)
                 let frame = await socket.sentFrames()[index]
@@ -1598,6 +1736,9 @@ struct SessionPresentationStoreTests {
                         "start": .number(Double(start)),
                         "end": .number(Double(end)),
                         "total": .number(Double(snapshot.transcriptTotal ?? 10)),
+                        "nextEntryId": (nextEntryId ?? snapshot.transcript.first.map { $0.id }).map(JSONValue.string) ?? .null,
+                        "runtimeGeneration": .string(snapshot.runtimeGeneration),
+                        "leafEntryId": snapshot.leafEntryId.map(JSONValue.string) ?? .null,
                     ]),
                 ])))
             }
@@ -1615,11 +1756,11 @@ struct SessionPresentationStoreTests {
             }
             try await socket.waitUntilSent(count: 2)
             try await respond(index: 1, items: [earlierItem], start: 9, end: 10)
-            await loaded.value
-            #expect(store.snapshot?.transcriptStart == 9)
-            #expect(store.snapshot?.transcript.first?.id == earlierItem.id)
-            #expect(store.snapshot?.transcriptStart == 9)
-            #expect(store.snapshot?.transcript.map(\.id) == [earlierItem.id] + snapshot.transcript.map(\.id))
+            _ = await loaded.value
+            #expect(store.snapshot?.transcriptStart == 10)
+            #expect(store.visibleTranscriptStart == 9)
+            #expect(store.visibleTranscript.first?.id == earlierItem.id)
+            #expect(store.visibleTranscript.map(\.id) == [earlierItem.id] + snapshot.transcript.map(\.id))
 
             let returningWhileLoading = Task {
                 await store.loadEarlier(
@@ -1628,10 +1769,26 @@ struct SessionPresentationStoreTests {
                 )
             }
             try await socket.waitUntilSent(count: 3)
-            try await respond(index: 2, items: [earlierItem], start: 9, end: 10)
-            await returningWhileLoading.value
-            #expect(store.snapshot?.transcriptStart == 9)
-            #expect(store.snapshot?.transcript.map(\.id) == [earlierItem.id] + snapshot.transcript.map(\.id))
+            let streamingItem = try #require(snapshot.transcript.first)
+            let secondEarlierItem = try #require(
+                SessionScenarioBuilder(seed: 8_601).historyPage(count: 1, longRowBytes: 16).first
+            )
+            await store.admit(GatewayEvent(
+                type: "event",
+                topic: "session.progress",
+                sessionId: snapshot.sessionId,
+                payload: .object([
+                    "runtimeGeneration": .string(snapshot.runtimeGeneration),
+                    "eventSequence": .number(Double(snapshot.eventSequence + 1)),
+                    "revision": .number(Double(snapshot.revision + 1)),
+                    "data": .object(["message": try JSONValue.encode(streamingItem)]),
+                ])
+            ))
+            try await respond(index: 2, items: [secondEarlierItem], start: 8, end: 9, nextEntryId: earlierItem.id)
+            #expect(await returningWhileLoading.value == .installed)
+            #expect(store.snapshot?.transcriptStart == 10)
+            #expect(store.visibleTranscriptStart == 8)
+            #expect(store.visibleTranscript.map(\.id) == [secondEarlierItem.id, earlierItem.id] + snapshot.transcript.map(\.id))
 
             store.installHostedSubscription(snapshot: snapshot, token: "revoked")
             target = try #require(store.mountedTarget)
@@ -1641,7 +1798,7 @@ struct SessionPresentationStoreTests {
             try await socket.waitUntilSent(count: 4)
             store.revokeIntake(target)
             try await respond(index: 3)
-            await revoked.value
+            _ = await revoked.value
             #expect(store.snapshot?.transcriptStart == 10)
 
             store.installHostedSubscription(snapshot: snapshot, token: "original")
@@ -1652,7 +1809,7 @@ struct SessionPresentationStoreTests {
             try await socket.waitUntilSent(count: 5)
             store.replaceHostedSubscriptionToken("replacement")
             try await respond(index: 4)
-            await replaced.value
+            _ = await replaced.value
             #expect(store.snapshot?.transcriptStart == 10)
 
             store.installHostedSubscription(snapshot: snapshot, token: "disconnect")
@@ -1663,8 +1820,32 @@ struct SessionPresentationStoreTests {
             try await socket.waitUntilSent(count: 6)
             store.retireConnection()
             try await respond(index: 5)
-            await disconnected.value
+            _ = await disconnected.value
             #expect(store.snapshot?.transcriptStart == 10)
+
+            // A branch change while the page request is suspended invalidates
+            // the captured structure lease immediately rather than retrying a
+            // stale cursor.
+            store.installHostedSubscription(snapshot: snapshot, token: "branch")
+            target = try #require(store.mountedTarget)
+            let branchChanged = Task {
+                await store.loadEarlier(sessionID: snapshot.sessionId, presentationGeneration: target.generation)
+            }
+            try await socket.waitUntilSent(count: 7)
+            await store.admit(GatewayEvent(
+                type: "event",
+                topic: "session.structureChanged",
+                sessionId: snapshot.sessionId,
+                payload: .object([
+                    "runtimeGeneration": .string(snapshot.runtimeGeneration),
+                    "eventSequence": .number(Double(snapshot.eventSequence + 1)),
+                    "revision": .number(Double(snapshot.revision + 1)),
+                    "data": .object(["branchChanged": .bool(true)]),
+                ])
+            ))
+            try await respond(index: 6, items: [earlierItem], start: 9, end: 10)
+            #expect(await branchChanged.value == .stale)
+            #expect(store.visibleTranscriptStart == 10)
             await client.close()
         }
     }
@@ -1740,11 +1921,13 @@ struct SessionPresentationStoreTests {
             ])))
 
             #expect(await loading.value == .installed)
-            #expect(store.snapshot?.transcriptStart == 8)
-            #expect(store.snapshot?.transcript.map(\.id) == page.map(\.id) + snapshot.transcript.map(\.id))
+            #expect(store.snapshot?.transcriptStart == 10)
+            #expect(store.visibleTranscriptStart == 8)
+            #expect(store.visibleTranscript.map(\.id) == page.map(\.id) + snapshot.transcript.map(\.id))
             await client.close()
         }
     }
+
 
     @Test("subscription and paging admissions require every captured identity")
     func exactAdmissionMatrices() throws {
@@ -1785,8 +1968,12 @@ struct SessionPresentationStoreTests {
             expectedNextEntryID: "first",
             echoedNextEntryID: "wrong"
         ))
-        #expect(SessionPresentationStore.admitsTranscriptPageAnchor(
+        #expect(!SessionPresentationStore.admitsTranscriptPageAnchor(
             expectedNextEntryID: "first",
+            echoedNextEntryID: nil
+        ))
+        #expect(SessionPresentationStore.admitsTranscriptPageAnchor(
+            expectedNextEntryID: nil,
             echoedNextEntryID: nil
         ))
         #expect(SessionPresentationStore.admitsTranscriptPageAnchor(

@@ -5,9 +5,12 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     let sessionID: String
     let presentationGeneration: Int
     let runtimeGeneration: String
+    let authorityEventSequence: Int
+    let authorityRevision: Int
     let canonicalGeneration: Int
     let timelineGeneration: Int
     let transcriptStart: Int?
+    let visibleTranscriptEnd: Int?
     let transcriptTotal: Int?
     let transcriptCount: Int
     let firstTranscriptID: String?
@@ -22,6 +25,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
 
     init(
         snapshot: SessionSnapshot,
+        authoritySnapshot: SessionSnapshot? = nil,
         presentationGeneration: Int,
         canonicalGeneration: Int? = nil,
         timelineGeneration: Int? = nil,
@@ -31,9 +35,17 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         sessionID = snapshot.sessionId
         self.presentationGeneration = presentationGeneration
         runtimeGeneration = snapshot.runtimeGeneration
-        self.canonicalGeneration = canonicalGeneration ?? snapshot.revision
-        self.timelineGeneration = timelineGeneration ?? snapshot.eventSequence
+        authorityEventSequence = (authoritySnapshot ?? snapshot).eventSequence
+        authorityRevision = (authoritySnapshot ?? snapshot).revision
+        self.canonicalGeneration = canonicalGeneration ?? (authoritySnapshot ?? snapshot).revision
+        self.timelineGeneration = timelineGeneration ?? (authoritySnapshot ?? snapshot).eventSequence
         transcriptStart = snapshot.transcriptStart
+        if let start = snapshot.transcriptStart {
+            let (end, overflow) = start.addingReportingOverflow(snapshot.transcript.count)
+            visibleTranscriptEnd = overflow ? nil : end
+        } else {
+            visibleTranscriptEnd = nil
+        }
         transcriptTotal = snapshot.transcriptTotal
         transcriptCount = snapshot.transcript.count
         firstTranscriptID = snapshot.transcript.first?.id

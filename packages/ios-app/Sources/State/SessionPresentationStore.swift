@@ -22,6 +22,23 @@ enum SessionTranscriptLoadResult: Equatable, Sendable {
     case failed
 }
 
+struct MountedTranscriptCoverage: Equatable, Sendable {
+    let sessionID: String
+    let runtimeGeneration: String
+    let leafEntryID: String?
+    let total: Int
+    let start: Int
+    let end: Int
+    let structureRevision: Int
+}
+
+/// The mounted transcript owns only the retained prefix. The Gateway tail
+/// remains in SessionSnapshot and is never copied into this window.
+struct MountedTranscriptWindow: Equatable, Sendable {
+    let coverage: MountedTranscriptCoverage
+    let prefixItems: [TranscriptItem]
+}
+
 enum GatewayTokenAdmissionPolicy {
     static let maximumUTF8Bytes = 200
 
@@ -94,8 +111,7 @@ final class SessionPresentationStore {
     private(set) var chatCanonicalGeneration = 0
     private(set) var chatTimelineGeneration = 0
     private(set) var isAuthoritative = false
-    @ObservationIgnored private var authoritativeTailSnapshot: SessionSnapshot?
-    @ObservationIgnored private var hasLoadedTranscriptHistory = false
+    @ObservationIgnored private var mountedTranscriptWindow: MountedTranscriptWindow?
     private(set) var loadingEarlierTranscript = false
     private(set) var transcriptLoadState: SessionTranscriptLoadState = .idle
     @ObservationIgnored private var transcriptLoadTarget: SessionPresentationIdentity?
@@ -147,7 +163,30 @@ final class SessionPresentationStore {
         return snapshot
     }
 
-    var disposableCacheSnapshot: SessionSnapshot? { authoritativeTailSnapshot }
+    var mountedTranscriptCoverage: MountedTranscriptCoverage? {
+        guard let snapshot else { return nil }
+        return mountedWindow(for: snapshot)?.coverage
+    }
+
+    var visibleTranscript: [TranscriptItem] {
+        guard let snapshot else { return [] }
+        return visibleTranscriptItems(for: snapshot)
+    }
+
+    var visibleTranscriptStart: Int? { mountedTranscriptCoverage?.start ?? snapshot?.transcriptStart }
+    var visibleTranscriptEnd: Int? { mountedTranscriptCoverage?.end ?? authorityTranscriptEnd(snapshot) }
+    var visibleTranscriptTotal: Int? { mountedTranscriptCoverage?.total ?? snapshot?.transcriptTotal }
+    var hasEarlierTranscript: Bool { (visibleTranscriptStart ?? 0) > 0 }
+    var hasLoadedTranscriptPrefix: Bool { mountedTranscriptWindow?.prefixItems.isEmpty == false }
+
+    func transcriptSnapshot(for sessionID: String) -> SessionSnapshot? {
+        guard ownsSession(sessionID), let snapshot, snapshot.sessionId == sessionID else { return nil }
+        var projection = snapshot
+        projection.transcript = visibleTranscriptItems(for: snapshot)
+        projection.transcriptStart = visibleTranscriptStart
+        projection.transcriptTotal = visibleTranscriptTotal
+        return projection
+    }
 
     func snapshotForOwnedSession(_ sessionID: String) -> SessionSnapshot? {
         guard ownsSession(sessionID) else { return nil }
@@ -304,11 +343,141 @@ final class SessionPresentationStore {
         loadingEarlierTranscript = false
         transcriptLoadState = .idle
         snapshot = nil
-        authoritativeTailSnapshot = nil
-        hasLoadedTranscriptHistory = false
+        mountedTranscriptWindow = nil
         advanceChatProjection(canonical: true)
         clearSecondaryProjection()
         await closeSubscription(requested.sessionID, expectedTarget: requested)
+    }
+
+    private func authorityTranscriptEnd(_ snapshot: SessionSnapshot?) -> Int? {
+        guard let snapshot, let start = snapshot.transcriptStart,
+              start >= 0 else { return nil }
+        let (end, overflow) = start.addingReportingOverflow(snapshot.transcript.count)
+        return overflow ? nil : end
+    }
+
+    private func mountedWindow(for authority: SessionSnapshot) -> MountedTranscriptWindow? {
+        guard let window = mountedTranscriptWindow,
+              window.coverage.sessionID == authority.sessionId,
+              window.coverage.runtimeGeneration == authority.runtimeGeneration,
+              window.coverage.leafEntryID == authority.leafEntryId,
+              window.coverage.structureRevision == structureRevision,
+              let authorityTotal = authority.transcriptTotal,
+              window.coverage.total == authorityTotal,
+              let tailStart = authority.transcriptStart,
+              tailStart >= window.coverage.start,
+              window.prefixItems.count == tailStart - window.coverage.start,
+              window.coverage.end == authorityTranscriptEnd(authority),
+              Set(window.prefixItems.map(\.id)).count == window.prefixItems.count,
+              Set(authority.transcript.map(\.id)).count == authority.transcript.count,
+              Set(window.prefixItems.map(\.id)).isDisjoint(with: authority.transcript.map(\.id)) else {
+            return nil
+        }
+        return window
+    }
+
+    private func visibleTranscriptItems(for authority: SessionSnapshot) -> [TranscriptItem] {
+        guard let window = mountedWindow(for: authority) else { return authority.transcript }
+        return window.prefixItems + authority.transcript
+    }
+
+    private func coverage(for authority: SessionSnapshot, prefix: [TranscriptItem], start: Int? = nil) -> MountedTranscriptCoverage? {
+        guard let tailStart = authority.transcriptStart,
+              let tailEnd = authorityTranscriptEnd(authority),
+              let total = authority.transcriptTotal else { return nil }
+        let resolvedStart = start ?? (prefix.isEmpty ? tailStart : tailStart - prefix.count)
+        guard resolvedStart >= 0, resolvedStart <= tailStart,
+              prefix.count == tailStart - resolvedStart,
+              total >= tailEnd,
+              Set(prefix.map(\.id)).count == prefix.count,
+              Set(prefix.map(\.id)).isDisjoint(with: authority.transcript.map(\.id)) else { return nil }
+        return MountedTranscriptCoverage(
+            sessionID: authority.sessionId,
+            runtimeGeneration: authority.runtimeGeneration,
+            leafEntryID: authority.leafEntryId,
+            total: total,
+            start: resolvedStart,
+            end: tailEnd,
+            structureRevision: structureRevision
+        )
+    }
+
+    private func reconcilePrefix(
+        _ window: MountedTranscriptWindow?,
+        from oldAuthority: SessionSnapshot?,
+        into authority: SessionSnapshot
+    ) -> MountedTranscriptWindow? {
+        guard let window, let oldAuthority,
+              let oldTailStart = oldAuthority.transcriptStart,
+              let oldTailEnd = authorityTranscriptEnd(oldAuthority),
+              let newTailStart = authority.transcriptStart,
+              let newTailEnd = authorityTranscriptEnd(authority),
+              let oldTotal = oldAuthority.transcriptTotal,
+              let newTotal = authority.transcriptTotal,
+              oldTailStart >= 0,
+              newTailStart >= 0,
+              oldTailEnd >= oldTailStart,
+              newTailEnd >= newTailStart,
+              window.coverage.sessionID == oldAuthority.sessionId,
+              oldAuthority.sessionId == authority.sessionId,
+              window.coverage.runtimeGeneration == oldAuthority.runtimeGeneration,
+              oldAuthority.runtimeGeneration == authority.runtimeGeneration,
+              window.coverage.leafEntryID == oldAuthority.leafEntryId,
+              window.coverage.structureRevision == structureRevision,
+              window.coverage.total == oldTotal,
+              window.coverage.start >= 0,
+              window.coverage.end == oldTailEnd,
+              window.coverage.start <= oldTailStart,
+              window.prefixItems.count == oldTailStart - window.coverage.start,
+              oldTotal >= oldTailEnd,
+              newTotal >= oldTotal,
+              newTotal >= newTailEnd else { return nil }
+
+        // Validate the old mounted window before consulting the replacement.
+        // The prefix and authority tail are one exact visible sequence at
+        // their canonical ordinals; never infer continuity from a leaf alone.
+        let oldVisible = window.prefixItems + oldAuthority.transcript
+        let oldVisibleStart = window.coverage.start
+        let oldVisibleEnd = window.coverage.end
+        guard oldVisible.count == oldVisibleEnd - oldVisibleStart,
+              Set(oldVisible.map(\.id)).count == oldVisible.count else { return nil }
+
+        // A replacement tail must share at least one canonical ordinal with
+        // the old visible sequence, or begin exactly at its end. The latter
+        // is an adjacent append: there is no overlap to validate, but also no
+        // unfillable gap. The only other exception is two empty windows.
+        let bothEmpty = oldVisible.isEmpty && authority.transcript.isEmpty
+        let adjacentAppend = newTailStart == oldVisibleEnd
+        guard bothEmpty || adjacentAppend || (
+            newTailStart < oldVisibleEnd
+                && newTailEnd > oldVisibleStart
+        ), newTailStart <= oldVisibleEnd else { return nil }
+
+        let overlapStart = max(oldVisibleStart, newTailStart)
+        let overlapEnd = min(oldVisibleEnd, newTailEnd)
+        if overlapStart < overlapEnd {
+            for index in overlapStart..<overlapEnd {
+                let oldOffset = index - oldVisibleStart
+                let newOffset = index - newTailStart
+                guard oldVisible[oldOffset].id == authority.transcript[newOffset].id else {
+                    return nil
+                }
+            }
+        }
+
+        // Retain exactly the old visible rows before the replacement tail.
+        // When the replacement reaches or precedes the visible start there is
+        // no mounted prefix to retain; the authority tail remains canonical.
+        let prefixCount = max(0, newTailStart - oldVisibleStart)
+        guard prefixCount <= oldVisible.count else { return nil }
+        guard prefixCount > 0 else { return nil }
+        let retainedPrefix = Array(oldVisible.prefix(prefixCount))
+        guard let coverage = coverage(
+            for: authority,
+            prefix: retainedPrefix,
+            start: oldVisibleStart
+        ), coverage.end == newTailEnd else { return nil }
+        return MountedTranscriptWindow(coverage: coverage, prefixItems: retainedPrefix)
     }
 
     func loadEarlier(sessionID: String, presentationGeneration: Int) async -> SessionTranscriptLoadResult {
@@ -346,6 +515,23 @@ final class SessionPresentationStore {
             let nextEntryId: String?
             let runtimeGeneration: String?
             let leafEntryId: String?
+            let leafEntryIdPresent: Bool
+
+            private enum CodingKeys: String, CodingKey {
+                case items, start, end, total, nextEntryId, runtimeGeneration, leafEntryId
+            }
+
+            init(from decoder: Decoder) throws {
+                let values = try decoder.container(keyedBy: CodingKeys.self)
+                items = try values.decode([TranscriptItem].self, forKey: .items)
+                start = try values.decode(Int.self, forKey: .start)
+                end = try values.decodeIfPresent(Int.self, forKey: .end)
+                total = try values.decode(Int.self, forKey: .total)
+                nextEntryId = try values.decodeIfPresent(String.self, forKey: .nextEntryId)
+                runtimeGeneration = try values.decodeIfPresent(String.self, forKey: .runtimeGeneration)
+                leafEntryId = try values.decodeIfPresent(String.self, forKey: .leafEntryId)
+                leafEntryIdPresent = values.contains(.leafEntryId)
+            }
         }
         // A cursor can become stale while the Gateway request is suspended.
         // Retry a bounded number of times; never recurse through an unbounded
@@ -357,7 +543,7 @@ final class SessionPresentationStore {
                   isAuthoritative,
                   let subscriptionToken = installedSubscriptionToken(for: sessionID),
                   let current = snapshot,
-                  let before = current.transcriptStart,
+                  let before = visibleTranscriptStart,
                   before > 0 else {
                 updateTranscriptLoadState(
                     .failed("Earlier messages are not available on this presentation."),
@@ -365,24 +551,28 @@ final class SessionPresentationStore {
                 )
                 return .unavailable
             }
-            let expectedTotal: Int
-            if let transcriptTotal = current.transcriptTotal {
-                expectedTotal = transcriptTotal
-            } else {
-                let (derivedTotal, overflow) = before.addingReportingOverflow(current.transcript.count)
-                guard !overflow else {
-                    updateTranscriptLoadState(.failed("History bounds are invalid."), for: loadTarget)
-                    return .failed
-                }
-                expectedTotal = derivedTotal
+            guard let expectedTotal = visibleTranscriptTotal,
+                  let visibleEnd = visibleTranscriptEnd,
+                  visibleEnd == expectedTotal else {
+                updateTranscriptLoadState(.failed("History bounds are invalid."), for: loadTarget)
+                return .failed
             }
+            // This lease intentionally excludes eventSequence: ordinary
+            // streaming events may advance that cursor while this request is
+            // suspended. Structure, runtime, branch, and mounted coverage are
+            // exact identities and must not change underneath the page.
+            let leasedTarget = target
+            let leasedStructureRevision = structureRevision
+            let leasedRuntimeGeneration = current.runtimeGeneration
+            let leasedLeafEntryID = current.leafEntryId
+            let leasedCoverage = mountedTranscriptCoverage
             let request = ChatTranscriptPageRequest(
                 sessionID: sessionID,
                 presentationGeneration: presentationGeneration,
-                runtimeGeneration: current.runtimeGeneration,
+                runtimeGeneration: leasedRuntimeGeneration,
                 before: before,
                 expectedTotal: expectedTotal,
-                expectedNextEntryID: current.transcript.first?.id
+                expectedNextEntryID: visibleTranscript.first?.id
             )
             do {
                 let response: Response = try await client.request(
@@ -390,7 +580,7 @@ final class SessionPresentationStore {
                     Params(
                         sessionId: sessionID,
                         before: before,
-                        expectedNextEntryId: current.transcript.first?.id,
+                        expectedNextEntryId: visibleTranscript.first?.id,
                         expectedRuntimeGeneration: current.runtimeGeneration,
                         expectedLeafEntryId: current.leafEntryId
                     ),
@@ -398,20 +588,34 @@ final class SessionPresentationStore {
                 )
                 guard !Task.isCancelled,
                       let currentTarget = self.mountedTarget,
-                      currentTarget == target,
+                      currentTarget == leasedTarget,
                       self.isAuthoritative,
                       self.installedSubscriptionToken(for: sessionID) == subscriptionToken,
                       var installed = self.snapshot else {
                     updateTranscriptLoadState(.idle, for: loadTarget)
                     return .unavailable
                 }
+                // A branch/structure change invalidates the cursor at once;
+                // never retry a page against a changed canonical spine. The
+                // same exact lease also prevents a replacement runtime, leaf,
+                // target, or mounted coverage from accepting stale rows.
+                guard self.structureRevision == leasedStructureRevision,
+                      installed.runtimeGeneration == leasedRuntimeGeneration,
+                      installed.leafEntryId == leasedLeafEntryID,
+                      self.mountedTranscriptCoverage == leasedCoverage else {
+                    updateTranscriptLoadState(
+                        .failed("History changed while loading. Tap to retry."),
+                        for: loadTarget
+                    )
+                    return .stale
+                }
                 guard request.canInstall(
                     sessionID: currentTarget.sessionID,
                     presentationGeneration: currentTarget.generation,
                     runtimeGeneration: installed.runtimeGeneration,
-                    transcriptStart: installed.transcriptStart,
-                    transcriptTotal: installed.transcriptTotal,
-                    firstTranscriptID: installed.transcript.first?.id
+                    transcriptStart: self.visibleTranscriptStart,
+                    transcriptTotal: self.visibleTranscriptTotal,
+                    firstTranscriptID: self.visibleTranscript.first?.id
                 ) else {
                     if attempt < 2 { continue }
                     updateTranscriptLoadState(
@@ -420,18 +624,22 @@ final class SessionPresentationStore {
                     )
                     return .stale
                 }
-                guard (response.runtimeGeneration == nil || response.runtimeGeneration == installed.runtimeGeneration),
-                      (response.leafEntryId == nil || installed.leafEntryId == nil || response.leafEntryId == installed.leafEntryId),
-                      Self.admitsTranscriptPageAnchor(
-                        expectedNextEntryID: request.expectedNextEntryID,
-                        echoedNextEntryID: response.nextEntryId
-                      ),
+                let requiresMountedEchoes = before > 0
+                guard !requiresMountedEchoes || (
+                    response.runtimeGeneration == leasedRuntimeGeneration
+                        && response.leafEntryIdPresent
+                        && response.leafEntryId == leasedLeafEntryID
+                        && Self.admitsTranscriptPageAnchor(
+                            expectedNextEntryID: request.expectedNextEntryID,
+                            echoedNextEntryID: response.nextEntryId
+                        )
+                ),
                       request.canInstallPage(
                     start: response.start,
                     end: response.end ?? before,
                     total: response.total,
                     itemCount: response.items.count,
-                    visibleItemCount: installed.transcript.count
+                    visibleItemCount: self.visibleTranscript.count
                 ), Self.admitsTranscriptPage(response.items) else {
                     // Repeating the same malformed/stale page cannot converge.
                     // Retry only when the mounted canonical cursor itself moved.
@@ -441,7 +649,7 @@ final class SessionPresentationStore {
                     )
                     return .stale
                 }
-                let existingIDs = Set(installed.transcript.map(\.id))
+                let existingIDs = Set(self.visibleTranscript.map(\.id))
                 let pageIDs = Set(response.items.map(\.id))
                 guard pageIDs.count == response.items.count,
                       response.items.allSatisfy({ !existingIDs.contains($0.id) }) else {
@@ -451,17 +659,19 @@ final class SessionPresentationStore {
                     )
                     return .stale
                 }
-                installed.transcript = response.items + installed.transcript
-                installed.transcriptStart = response.start
-                installed.transcriptTotal = response.total
-                self.snapshot = installed
-                if let authoritativeTailSnapshot {
-                    self.authoritativeTailSnapshot = Self.retainingRecentTranscriptContinuity(
-                        visible: installed,
-                        authoritative: authoritativeTailSnapshot
-                    )
+                let retainedPrefix = (self.mountedTranscriptWindow?.prefixItems ?? [])
+                guard let coverage = self.coverage(
+                    for: installed,
+                    prefix: response.items + retainedPrefix,
+                    start: response.start
+                ), coverage.end == (installed.transcriptStart ?? 0) + installed.transcript.count else {
+                    updateTranscriptLoadState(.failed("History bounds are invalid."), for: loadTarget)
+                    return .stale
                 }
-                hasLoadedTranscriptHistory = true
+                self.mountedTranscriptWindow = MountedTranscriptWindow(
+                    coverage: coverage,
+                    prefixItems: response.items + retainedPrefix
+                )
                 advanceChatProjection(canonical: true)
                 updateTranscriptLoadState(.idle, for: loadTarget)
                 delegate?.sessionPresentationStoreCheckpointCache()
@@ -496,12 +706,12 @@ final class SessionPresentationStore {
         expectedNextEntryID: String?,
         echoedNextEntryID: String?
     ) -> Bool {
-        // A positive cursor can accompany an empty fitted tail, so that legacy
-        // request has no anchor to compare even though a new Gateway can echo
-        // the exact projected neighbor. When an anchor was requested, a new
-        // mismatch is invalid while an omitted legacy echo remains compatible.
+        // Mounted paging requires a present, exact canonical boundary echo.
+        // A nil expected anchor is retained only for the empty start=0/no-page
+        // compatibility path.
         guard let expectedNextEntryID else { return true }
-        return echoedNextEntryID == nil || echoedNextEntryID == expectedNextEntryID
+        guard let echoedNextEntryID else { return false }
+        return echoedNextEntryID == expectedNextEntryID
     }
 
     private static func admitsTranscriptPage(_ items: [TranscriptItem]) -> Bool {
@@ -540,8 +750,7 @@ final class SessionPresentationStore {
         target = nil
         pendingTarget = nil
         snapshot = nil
-        authoritativeTailSnapshot = nil
-        hasLoadedTranscriptHistory = false
+        mountedTranscriptWindow = nil
         advanceChatProjection(canonical: true)
         isAuthoritative = false
         revokedTarget = nil
@@ -559,8 +768,7 @@ final class SessionPresentationStore {
         target = nil
         pendingTarget = nil
         snapshot = nil
-        authoritativeTailSnapshot = nil
-        hasLoadedTranscriptHistory = false
+        mountedTranscriptWindow = nil
         advanceChatProjection(canonical: true)
         isAuthoritative = false
         if revokedTarget?.sessionID == sessionID { revokedTarget = nil }
@@ -589,9 +797,12 @@ final class SessionPresentationStore {
                 return
             }
             let replacedRuntime = prepareSecondaryProjectionForRuntimeInstallation(authoritative)
+            mountedTranscriptWindow = reconcilePrefix(
+                mountedTranscriptWindow,
+                from: snapshot,
+                into: authoritative
+            )
             snapshot = authoritative
-            authoritativeTailSnapshot = authoritative
-            hasLoadedTranscriptHistory = false
             if replacedRuntime {
                 Task { [weak self] in await self?.loadCommands(sessionID: authoritative.sessionId) }
             }
@@ -756,6 +967,7 @@ final class SessionPresentationStore {
         guard snapshot?.sessionId == installed.sessionId,
               snapshot?.runtimeGeneration != installed.runtimeGeneration else { return false }
         clearSecondaryProjection()
+        mountedTranscriptWindow = nil
         structureRevision &+= 1
         contextRevision &+= 1
         resourceRevision &+= 1
@@ -991,11 +1203,6 @@ final class SessionPresentationStore {
         return false
     }
 
-    // In-place reconnect retains this much compatible mounted history when
-    // available. Fresh opening accepts the Gateway's bounded tail immediately;
-    // this continuity preference never triggers history reads inside sync.
-    static let minimumRecentTranscriptContinuityMessages = 24
-
     private func performSynchronizationAttempt(
         sessionID: String,
         lease: SessionSynchronizationCoordinator.Lease,
@@ -1090,14 +1297,9 @@ final class SessionPresentationStore {
                 mode = synchronization.consumeFreshInstallRequirement(sessionID: sessionID)
                     ? .freshPresentation : .reconnect
             }
-            let visibleCurrent = snapshot
+            let previousAuthority = snapshot
             var installed = Self.installingSnapshot(
-                current: visibleCurrent,
-                authoritative: authoritativeResponse,
-                mode: mode
-            )
-            var installedTail = Self.installingAuthoritativeTail(
-                current: authoritativeTailSnapshot,
+                current: previousAuthority,
                 authoritative: authoritativeResponse,
                 mode: mode
             )
@@ -1135,21 +1337,10 @@ final class SessionPresentationStore {
                     effects: &replayEffects,
                     chatTimelineChanged: &replayChangedChatTimeline
                 ) != nil { replayRequiresResynchronization = true }
-                var ignoredEffects: [ReducerEffect] = []
-                var ignoredChatTimelineChange = false
-                if reduce(
-                    event,
-                    snapshot: &installedTail,
-                    effects: &ignoredEffects,
-                    chatTimelineChanged: &ignoredChatTimelineChange,
-                    updatesSecondaryRevisions: false,
-                    mergesVisibleTranscript: false
-                ) != nil { replayRequiresResynchronization = true }
             }
             let replayTailSequence = replay.last?.sessionCursor?.eventSequence ?? cursor.eventSequence
             guard !replayRequiresResynchronization,
-                  installed.eventSequence == replayTailSequence,
-                  installedTail.eventSequence == replayTailSequence else {
+                  installed.eventSequence == replayTailSequence else {
                 if case .freshPresentation = mode { synchronization.requireFreshInstall(sessionID: sessionID) }
                 await closeProvisionalSubscription(
                     sessionID,
@@ -1186,22 +1377,19 @@ final class SessionPresentationStore {
                 return .failed(showCatchUpNotice: false)
             }
             let replacedRuntime = prepareSecondaryProjectionForRuntimeInstallation(installed)
-            let continuityTail = Self.retainingRecentTranscriptContinuity(
-                visible: installed,
-                authoritative: installedTail
-            )
-            if !hasLoadedTranscriptHistory { installed = continuityTail }
-            installedTail = continuityTail
+            mountedTranscriptWindow = if case .freshPresentation = mode {
+                nil
+            } else {
+                reconcilePrefix(mountedTranscriptWindow, from: previousAuthority, into: installed)
+            }
             subscribedSessionID = sessionID
             subscriptionToken = response.subscriptionToken
             pendingSubscriptionTokens[sessionID] = nil
             subscriptionTarget = installedTarget
             snapshot = installed
-            authoritativeTailSnapshot = installedTail
             if replacedRuntime {
                 Task { [weak self] in await self?.loadCommands(sessionID: sessionID) }
             }
-            if case .freshPresentation = mode { hasLoadedTranscriptHistory = false }
             advanceChatProjection(canonical: true)
             switch lease.intent {
             case .presentation:
@@ -1410,19 +1598,6 @@ final class SessionPresentationStore {
             effects: &effects,
             chatTimelineChanged: &chatTimelineChanged
         )
-        if var tail = authoritativeTailSnapshot {
-            var ignoredEffects: [ReducerEffect] = []
-            var ignoredChatTimelineChange = false
-            _ = reduce(
-                event,
-                snapshot: &tail,
-                effects: &ignoredEffects,
-                chatTimelineChanged: &ignoredChatTimelineChange,
-                updatesSecondaryRevisions: false,
-                mergesVisibleTranscript: false
-            )
-            authoritativeTailSnapshot = tail
-        }
         snapshot = current
         if chatTimelineChanged { advanceChatProjection(canonical: false) }
         publish(effects, target: mountedTarget)
@@ -1531,8 +1706,7 @@ final class SessionPresentationStore {
         snapshot: inout SessionSnapshot,
         effects: inout [ReducerEffect],
         chatTimelineChanged: inout Bool,
-        updatesSecondaryRevisions: Bool = true,
-        mergesVisibleTranscript: Bool = true
+        updatesSecondaryRevisions: Bool = true
     ) -> String? {
         switch event.topic {
         case "session.summary":
@@ -1554,9 +1728,7 @@ final class SessionPresentationStore {
                     previousLiveRevision: snapshot.liveActivityRevision,
                     previousActivityAsOf: snapshot.extensionActivityAsOf
                 )
-                snapshot = mergesVisibleTranscript
-                    ? Self.mergingVisibleTranscript(current: snapshot, authoritative: admitted)
-                    : admitted
+                snapshot = admitted
             case .ignore:
                 break
             case .resynchronize(let sessionID):
@@ -1659,15 +1831,17 @@ final class SessionPresentationStore {
             advance(&snapshot, envelope)
         case "session.structureChanged":
             guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
-            if updatesSecondaryRevisions,
-               envelope.data.objectValue?["branchChanged"]?.boolValue == true {
-                synchronization.requireFreshInstall(sessionID: snapshot.sessionId)
-            }
-            advance(&snapshot, envelope)
             if updatesSecondaryRevisions {
+                // Invalidate mounted transcript coverage before any later
+                // snapshot/rebaseline can attempt prefix reconciliation.
                 structureRevision &+= 1
                 contextRevision &+= 1
+                mountedTranscriptWindow = nil
+                if envelope.data.objectValue?["branchChanged"]?.boolValue == true {
+                    synchronization.requireFreshInstall(sessionID: snapshot.sessionId)
+                }
             }
+            advance(&snapshot, envelope)
         case "session.contextChanged":
             guard let envelope = admitEnvelope(event, snapshot: snapshot) else { return resyncIfNeeded(event, snapshot: snapshot) }
             advance(&snapshot, envelope)
@@ -1728,21 +1902,15 @@ final class SessionPresentationStore {
                 previousLiveRevision: snapshot?.liveActivityRevision,
                 previousActivityAsOf: snapshot?.extensionActivityAsOf
             )
-            let merged = snapshot.map {
-                Self.mergingVisibleTranscript(current: $0, authoritative: admitted)
-            } ?? admitted
-            let continuityTail = Self.retainingRecentTranscriptContinuity(
-                visible: merged,
-                authoritative: admitted
+            mountedTranscriptWindow = reconcilePrefix(
+                mountedTranscriptWindow,
+                from: snapshot,
+                into: admitted
             )
-            let installed = hasLoadedTranscriptHistory ? merged : continuityTail
-            snapshot = installed
-            authoritativeTailSnapshot = continuityTail
-            hasLoadedTranscriptHistory = (installed.transcriptStart ?? 0)
-                < (continuityTail.transcriptStart ?? 0)
+            snapshot = admitted
             advanceChatProjection(canonical: true)
-            if installed.transcriptStart == incoming.transcriptStart,
-               installed.transcript.count == incoming.transcript.count {
+            if admitted.transcriptStart == incoming.transcriptStart,
+               admitted.transcript.count == incoming.transcript.count {
                 delegate?.sessionPresentationStoreCheckpointCache()
             }
         case .ignore:
@@ -1815,167 +1983,12 @@ final class SessionPresentationStore {
         case .freshPresentation:
             return authoritative
         case .reconnect:
-            guard let current else { return authoritative }
-            if current.runtimeGeneration == authoritative.runtimeGeneration,
-               authoritative.eventSequence < current.eventSequence { return current }
-            return mergingVisibleTranscript(current: current, authoritative: authoritative)
+            guard let current,
+                  current.sessionId == authoritative.sessionId,
+                  current.runtimeGeneration == authoritative.runtimeGeneration,
+                  authoritative.eventSequence < current.eventSequence else { return authoritative }
+            return current
         }
-    }
-
-    static func installingAuthoritativeTail(
-        current: SessionSnapshot?,
-        authoritative: SessionSnapshot,
-        mode: SessionSnapshotInstallationMode
-    ) -> SessionSnapshot {
-        guard case .reconnect = mode,
-              let current,
-              current.sessionId == authoritative.sessionId,
-              current.runtimeGeneration == authoritative.runtimeGeneration,
-              authoritative.eventSequence < current.eventSequence else {
-            return authoritative
-        }
-        return current
-    }
-
-    static func retainingRecentTranscriptContinuity(
-        visible: SessionSnapshot,
-        authoritative: SessionSnapshot
-    ) -> SessionSnapshot {
-        guard visible.sessionId == authoritative.sessionId,
-              visible.runtimeGeneration == authoritative.runtimeGeneration,
-              let visibleStart = visible.transcriptStart,
-              let authoritativeStart = authoritative.transcriptStart,
-              visibleStart >= 0,
-              authoritativeStart >= visibleStart,
-              visible.transcript.count >= authoritative.transcript.count else {
-            return authoritative
-        }
-        if visible.transcriptTotal == authoritative.transcriptTotal,
-           let visibleLeaf = visible.leafEntryId,
-           let authoritativeLeaf = authoritative.leafEntryId,
-           visibleLeaf != authoritativeLeaf {
-            return authoritative
-        }
-        let prefixCount = visible.transcript.count - authoritative.transcript.count
-        let (expectedAuthoritativeStart, startOverflow) = visibleStart.addingReportingOverflow(prefixCount)
-        let suffix = visible.transcript.suffix(authoritative.transcript.count)
-        guard !startOverflow,
-              authoritativeStart == expectedAuthoritativeStart,
-              suffix.map(\.id) == authoritative.transcript.map(\.id) else { return authoritative }
-        if prefixCount > 0,
-           let firstAuthoritative = authoritative.transcript.first,
-           firstAuthoritative.parentId != visible.transcript[prefixCount - 1].id {
-            return authoritative
-        }
-
-        func contributesVisibleMessage(_ item: TranscriptItem) -> Bool {
-            !(item.kind == .message && item.role == .toolResult)
-        }
-
-        var retainedStartIndex = prefixCount
-        var visibleMessages = authoritative.transcript.reduce(into: 0) { count, item in
-            if contributesVisibleMessage(item) { count += 1 }
-        }
-        while retainedStartIndex > 0,
-              visibleMessages < minimumRecentTranscriptContinuityMessages,
-              visible.transcript.count - retainedStartIndex < ChatTranscriptPageRequest.maximumItemCount {
-            retainedStartIndex -= 1
-            if contributesVisibleMessage(visible.transcript[retainedStartIndex]) {
-                visibleMessages += 1
-            }
-        }
-        guard retainedStartIndex < prefixCount else { return authoritative }
-
-        var retained = authoritative
-        retained.transcript = Array(visible.transcript[retainedStartIndex..<prefixCount])
-            + authoritative.transcript
-        retained.transcriptStart = visibleStart + retainedStartIndex
-        let (retainedEnd, overflow) = retained.transcriptStart!.addingReportingOverflow(
-            retained.transcript.count
-        )
-        retained.transcriptTotal = max(
-            max(
-                authoritative.transcriptTotal ?? authoritative.transcript.count,
-                visible.transcriptTotal ?? 0
-            ),
-            overflow ? 0 : retainedEnd
-        )
-        return retained
-    }
-
-    static func mergingVisibleTranscript(
-        current: SessionSnapshot,
-        authoritative incoming: SessionSnapshot
-    ) -> SessionSnapshot {
-        var authoritative = incoming
-        if current.sessionId == authoritative.sessionId,
-           current.runtimeGeneration == authoritative.runtimeGeneration {
-            authoritative.toolExecutions = authoritative.toolExecutions.map { candidate in
-                guard let previous = current.toolExecutions.first(where: { $0.toolCallId == candidate.toolCallId }) else { return candidate }
-                return ToolExecutionStatePolicy.newest(previous, candidate)
-            }
-        }
-        guard current.sessionId == authoritative.sessionId,
-              current.runtimeGeneration == authoritative.runtimeGeneration,
-              !current.transcript.isEmpty,
-              (current.transcriptStart ?? 0) >= 0,
-              (authoritative.transcriptStart ?? 0) >= 0 else { return authoritative }
-        guard !authoritative.transcript.isEmpty else {
-            guard authoritative.phase.isActive else { return authoritative }
-            var merged = authoritative
-            merged.transcript = current.transcript
-            merged.transcriptStart = current.transcriptStart
-            merged.transcriptTotal = max(
-                authoritative.transcriptTotal ?? 0,
-                current.transcriptTotal ?? current.transcript.count
-            )
-            return merged
-        }
-        let currentIndexByID = Dictionary(
-            uniqueKeysWithValues: current.transcript.enumerated().map { ($0.element.id, $0.offset) }
-        )
-        guard let overlap = authoritative.transcript.enumerated().compactMap({ index, item -> (Int, Int)? in
-            currentIndexByID[item.id].map { ($0, index) }
-        }).first else {
-            let currentStart = current.transcriptStart ?? 0
-            let authoritativeStart = authoritative.transcriptStart ?? 0
-            let (currentEnd, currentEndOverflow) = currentStart.addingReportingOverflow(
-                current.transcript.count
-            )
-            guard !currentEndOverflow,
-                  authoritative.phase.isActive,
-                  authoritativeStart == currentEnd else { return authoritative }
-            let (authoritativeEnd, authoritativeEndOverflow) = authoritativeStart
-                .addingReportingOverflow(authoritative.transcript.count)
-            guard !authoritativeEndOverflow else { return authoritative }
-            var merged = authoritative
-            merged.transcript = current.transcript + authoritative.transcript
-            merged.transcriptStart = currentStart
-            merged.transcriptTotal = max(
-                authoritative.transcriptTotal ?? authoritativeEnd,
-                current.transcriptTotal ?? currentEnd
-            )
-            return merged
-        }
-        let currentOverlap = current.transcript[overlap.0...].map(\.id)
-        let authoritativeOverlap = authoritative.transcript[overlap.1...].map(\.id)
-        let sharedCount = min(currentOverlap.count, authoritativeOverlap.count)
-        guard Array(currentOverlap.prefix(sharedCount)) == Array(authoritativeOverlap.prefix(sharedCount)) else {
-            return authoritative
-        }
-        let authoritativeIDs = Set(authoritative.transcript.map(\.id))
-        let loadedPrefix = current.transcript[..<overlap.0].filter { !authoritativeIDs.contains($0.id) }
-        var merged = authoritative
-        merged.transcript = Array(loadedPrefix) + authoritative.transcript
-        merged.transcriptStart = max(0, current.transcriptStart ?? 0)
-        let (mergedEnd, mergedEndOverflow) = merged.transcriptStart!
-            .addingReportingOverflow(merged.transcript.count)
-        let knownTotal = max(
-            authoritative.transcriptTotal ?? authoritative.transcript.count,
-            current.transcriptTotal ?? 0
-        )
-        merged.transcriptTotal = mergedEndOverflow ? knownTotal : max(knownTotal, mergedEnd)
-        return merged
     }
 
     static let sessionCatchUpNotice = "Live session view is catching up; the run continues on your Mac."
@@ -2012,8 +2025,7 @@ final class SessionPresentationStore {
         target = nil
         pendingTarget = nil
         self.snapshot = snapshot
-        authoritativeTailSnapshot = snapshot
-        hasLoadedTranscriptHistory = false
+        mountedTranscriptWindow = nil
         advanceChatProjection(canonical: true)
         isAuthoritative = false
     }
@@ -2039,12 +2051,18 @@ final class SessionPresentationStore {
     ) {
         guard target?.sessionID == visible.sessionId,
               visible.sessionId == authoritativeTail.sessionId else { return }
-        snapshot = visible
-        authoritativeTailSnapshot = Self.retainingRecentTranscriptContinuity(
-            visible: visible,
-            authoritative: authoritativeTail
+        let tailStart = authoritativeTail.transcriptStart ?? 0
+        let prefixCount = visible.transcript.count - authoritativeTail.transcript.count
+        guard prefixCount >= 0,
+              visible.transcript.suffix(authoritativeTail.transcript.count).map(\.id) == authoritativeTail.transcript.map(\.id),
+              visible.transcriptStart == authoritativeTail.transcriptStart.map({ $0 - prefixCount }),
+              prefixCount == max(0, tailStart - (visible.transcriptStart ?? tailStart)),
+              let coverage = coverage(for: authoritativeTail, prefix: Array(visible.transcript.prefix(prefixCount))) else { return }
+        snapshot = authoritativeTail
+        mountedTranscriptWindow = MountedTranscriptWindow(
+            coverage: coverage,
+            prefixItems: Array(visible.transcript.prefix(prefixCount))
         )
-        hasLoadedTranscriptHistory = true
         advanceChatProjection(canonical: true)
     }
 
@@ -2056,20 +2074,12 @@ final class SessionPresentationStore {
                 || $0.transcriptTotal != snapshot.transcriptTotal
                 || $0.transcript != snapshot.transcript
         } ?? true
-        let installsLoadedPrefix = authoritativeTailSnapshot.map { tail in
-            tail.runtimeGeneration == snapshot.runtimeGeneration
-                && (
-                    (snapshot.transcriptStart ?? 0) < (tail.transcriptStart ?? 0)
-                        || snapshot.transcript.count > tail.transcript.count
-                )
-                && !Set(tail.transcript.map(\.id)).isDisjoint(with: snapshot.transcript.map(\.id))
-        } ?? false
+        mountedTranscriptWindow = reconcilePrefix(
+            mountedTranscriptWindow,
+            from: self.snapshot,
+            into: snapshot
+        )
         self.snapshot = snapshot
-        if installsLoadedPrefix {
-            hasLoadedTranscriptHistory = true
-        } else {
-            authoritativeTailSnapshot = snapshot
-        }
         advanceChatProjection(canonical: canonicalChanged)
     }
 
@@ -2087,8 +2097,7 @@ final class SessionPresentationStore {
         loadingEarlierTranscript = false
         transcriptLoadState = .idle
         self.snapshot = snapshot
-        authoritativeTailSnapshot = snapshot
-        hasLoadedTranscriptHistory = false
+        mountedTranscriptWindow = nil
         advanceChatProjection(canonical: true)
         isAuthoritative = true
         if revokedTarget == target { revokedTarget = nil }

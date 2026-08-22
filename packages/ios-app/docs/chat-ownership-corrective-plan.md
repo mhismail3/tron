@@ -1,6 +1,6 @@
 # Chat ownership corrective plan
 
-Status: active corrective milestone. Milestones 0–2 and the user-blocking portions of 4–6 are implemented in the current worktree: open-time bounded backfill, exact runtime/leaf paging, anchorless fallback, no scroll-driven history eviction, retained atomic transcript commits, same-session viewport retention, live projection intake during bounded prepend, operation-ID queue settlement, attachment-only canonical reconciliation, current-frame tool output, and terminal-overlay deduplication. Normalized transcript-window cleanup, removal of the unused cold snapshot cache path, final independent review, Stable Gateway promotion, and physical flow acceptance remain open. This plan supersedes completion claims for mounted chat presentation, recent-tail resume, history paging, scroll settlement, queue settlement, and runtime overlay ownership until every exit gate below passes.
+Status: Milestone 3 transcript ownership is implemented in the current worktree. The session snapshot is the sole whole-session authority; the mounted transcript window retains only an exact prefix before that authority's Gateway tail. Summary-only cache persistence, exact paging admission, reconnect retention, and pure projection inputs are implemented. Independent review and physical flow acceptance remain open; this status makes no physical acceptance claim.
 
 ## Goal
 
@@ -12,8 +12,8 @@ The failures are one architecture defect expressed in several domains: **tempora
 
 One admitted Gateway stream is currently copied into multiple independently advancing representations:
 
-- `SessionPresentationStore.snapshot` and `authoritativeTailSnapshot`;
-- history booleans and discard flags beside transcript bounds that already represent coverage;
+- `SessionPresentationStore.snapshot` as whole-session authority;
+- `MountedTranscriptWindow` as transcript-only exact prefix coverage (never a copied tail);
 - the current canonical snapshot and asynchronously installed transcript projection;
 - queue state in the session snapshot, transcript projection, and local command-response shortcuts;
 - canonical tool declarations/results, streaming declarations, runtime tool overlays, and duplicated extension activity bodies;
@@ -26,7 +26,7 @@ Concrete manifestations:
 
 1. **Only Load earlier is visible:** the pill is derived from the newest `SessionSnapshot`, while rows are derived from a frame-delayed projection that may have been cleared or not yet installed.
 2. **Load earlier is inert:** canonical paging is incorrectly gated by a currently measured semantic scroll anchor. An empty transcript can advertise history but can never obtain that anchor, so no request starts.
-3. **Rows appear and disappear:** generic bottom/keyboard/geometry settlement increments `tailSettlementGeneration`; `ChatView` then replaces the mounted transcript with `authoritativeTailSnapshot`, deleting loaded rows.
+3. **Rows appear and disappear:** generic bottom/keyboard/geometry settlement must never replace the exact mounted prefix coverage; the transcript projection now remains derived from the authority tail plus mounted prefix.
 4. **Resume can mount no recent rows:** fresh open accepts a fitted empty positive-start tail and publishes it without a client compatibility backfill.
 5. **Projection gaps and jumps:** same-session replacement resets scroll state and can clear the old installed projection before the replacement is ready.
 6. **Prepend can wedge:** live projection intake is suppressed during prepend; missing semantic/geometry callbacks have no bounded terminal path.
@@ -52,11 +52,8 @@ No Engine, worker layer, event journal, SQLite mirror, or second runtime is intr
 
 ```swift
 struct MountedTranscriptWindow {
-    let authoritativeTail: TranscriptSegment
-    let retainedPrefix: TranscriptSegment?
-    let total: Int
-    let runtimeGeneration: String
-    let branchLeafID: String?
+    let coverage: MountedTranscriptCoverage
+    let prefixItems: [TranscriptItem] // strictly before snapshot.transcriptStart
 }
 ```
 
@@ -116,8 +113,9 @@ Exit: no legal frame contains new controls with absent/old rows; retained reconn
 
 ### 3 — Normalize transcript ownership
 
-- Replace `snapshot`/`authoritativeTailSnapshot` transcript copying and `hasLoadedTranscriptHistory`/discard flags with exact transcript segments/ranges in the mounted reducer.
-- Remove continuity merge heuristics after range/branch validation owns admission.
+- Complete: `snapshot` is the sole whole-session authority; transcript consumers use a transient projection assembled from `MountedTranscriptWindow` plus the authority tail.
+- Complete: exact runtime/structure-revision/range/ID admission reconciles only contiguous, disjoint prefixes; total decreases and gaps discard the prefix, while leaf changes and total growth require exact canonical overlap and tail expansion trims only exact index/ID overlap.
+- Complete: removed continuity merge heuristics, duplicated-tail flags/hooks, and snapshot cache persistence; summary cache remains backward-compatible with snapshot-bearing files.
 - Keep the recent-tail/page byte and item bounds. The ordinary resume window remains the Gateway’s established bounded latest page (up to 512 items and wire budgets); the display-bearing continuity floor is only a pressure fallback, not a second user-visible paging policy.
 - Cache only the bounded cold recent-tail DTO if an actual offline presentation consumes it; otherwise remove unused snapshot persistence and retain summary caching only.
 

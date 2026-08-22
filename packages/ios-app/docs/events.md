@@ -187,17 +187,17 @@ and advances all three public reload revisions before publishing the replacement
 and failures both require the exact captured subscription token and latest request generation, so a retired
 runtime cannot repopulate data or surface a stale error. A reconnect while that same chat remains mounted instead receives
 complete current runtime state and preserves compatible explicitly paged history
-and the reader's follow/detached mode. If a pathological live tool run exceeds the
-ordinary projection budget, duplicate terminal detail is removed and running detail
-is compacted before canonical transcript continuity. Gateway snapshots and iOS tail
-settlement retain at least 24 recent display-bearing canonical entries whenever their
-exact ordinal/parent/leaf/ID suffix remains compatible. iOS also merges an overlapping authoritative
-tail with any earlier pages already loaded in that open chat, so a tool burst, keyboard
-transition, or resync cannot collapse the mounted chat to an empty Load earlier view. A later navigation presentation always begins again from the
-bounded latest page; this cold-presentation rule is distinct from in-place reconnect. History paging is owned by the session presentation reducer,
+and the reader's follow/detached mode. The session snapshot remains the sole whole-session
+authority. Transcript presentation retains only an exact, contiguous prefix strictly before
+that snapshot's Gateway tail in `MountedTranscriptWindow`; visible ranges and Load earlier
+facts are derived from the same coverage. Runtime, structure-revision, total decreases, range,
+gaps, and ID conflicts fail closed; leaf changes and total growth are admitted only through exact
+canonical overlap, while tail expansion trims prefix overlap only by exact indices and IDs. A later
+navigation presentation begins again from the bounded latest page; this cold-presentation
+rule is distinct from in-place reconnect. History paging is owned by the session presentation reducer,
 not scroll geometry: the bounded authoritative tail publishes immediately even when it is sparse or empty, and a mounted Load earlier request starts without requiring a semantic anchor. Optional history reads never extend the open/sync replay barrier or determine conversation availability. Page admission validates the projected cursor, echoed next projected
 entry, runtime, branch leaf, range, total, and IDs; it never mistakes raw parent links through filtered canonical entries for visible-row adjacency.
-Tail/keyboard settlement never discards loaded transcript coverage.
+Tail/keyboard settlement never discards loaded transcript coverage. Snapshot cache files retain only session summaries; legacy snapshot-bearing files decode safely but their snapshots are ignored.
 Phase, operation, tool ordering, and canonical paging cursors remain authoritative. A rolling-upgrade
 client also normalizes the impossible legacy combination of an idle phase and retained running-tool
 overlay to an interrupted chip; it does not expose a fake Stop action for extension-owned detached

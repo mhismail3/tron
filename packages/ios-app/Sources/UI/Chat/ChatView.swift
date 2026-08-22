@@ -344,7 +344,7 @@ struct ChatView: View {
             // Ignore a callback captured before opening installed its mounted
             // generation; the newer exact source owns submission.
             guard source == currentSource,
-                  let snapshot = selectedAuthoritativeSnapshot,
+                  let snapshot = model.transcriptSnapshot(for: sessionID),
                   snapshot.sessionId == currentSource.sessionID else { return }
             if let target = presentationTarget {
                 rememberCanonicalSubmissionHandoffs(model.composerDrafts.canonicalSubmissionIDs(
@@ -775,7 +775,7 @@ struct ChatView: View {
     }
 
     private var transcriptProjectionSource: ChatTranscriptProjectionTag? {
-        guard let snapshot = selectedAuthoritativeSnapshot,
+        guard let snapshot = model.transcriptSnapshot(for: sessionID),
               let generation = modelPresentationGeneration,
               let projection = model.chatProjectionGenerations(
                 for: sessionID,
@@ -784,6 +784,7 @@ struct ChatView: View {
               snapshot.sessionId == sessionID else { return nil }
         return ChatTranscriptProjectionTag(
             snapshot: snapshot,
+            authoritySnapshot: selectedAuthoritativeSnapshot,
             presentationGeneration: generation,
             canonicalGeneration: projection.canonical,
             timelineGeneration: projection.timeline,
@@ -801,7 +802,7 @@ struct ChatView: View {
         while true {
             try Task.checkCancellation()
             guard modelPresentationGeneration == presentationGeneration,
-                  let snapshot = model.authoritativeSnapshot(for: sessionID),
+                  let snapshot = model.transcriptSnapshot(for: sessionID),
                   let projection = model.chatProjectionGenerations(
                     for: sessionID,
                     presentationGeneration: presentationGeneration
@@ -809,6 +810,7 @@ struct ChatView: View {
                   snapshot.sessionId == sessionID else { throw CancellationError() }
             let tag = ChatTranscriptProjectionTag(
                 snapshot: snapshot,
+                authoritySnapshot: model.authoritativeSnapshot(for: sessionID),
                 presentationGeneration: presentationGeneration,
                 canonicalGeneration: projection.canonical,
                 timelineGeneration: projection.timeline,
@@ -916,7 +918,7 @@ struct ChatView: View {
 
     private var pendingPromptPresentation: ChatPendingPromptPresentation? {
         guard outgoingSubmissionPresentation == nil,
-              let snapshot = selectedAuthoritativeSnapshot,
+              let snapshot = model.transcriptSnapshot(for: sessionID),
               let pending = snapshot.pendingPrompt,
               !hasCanonicalPendingPrompt(pending, in: snapshot) else { return nil }
         return ChatPendingPromptPresentation(
@@ -2080,7 +2082,7 @@ struct ChatView: View {
             let submission = try model.beginComposerSubmission(
                 target: target,
                 behavior: behavior,
-                canonicalTranscript: selectedAuthoritativeSnapshot?.transcript ?? [],
+                canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
                 queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? []
             )
             if !ChatComposerPolicy.preservesFocus(submissionBehavior: behavior) {
