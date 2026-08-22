@@ -32,6 +32,11 @@ struct GatewayProfileLogRecord: Hashable, Identifiable, Sendable {
     var id: String { "\(profileID):\(record.id)" }
 }
 
+struct GatewayLogsLoadResult: Equatable, Sendable {
+    let records: [GatewayProfileLogRecord]
+    let failedProfileIDs: Set<String>
+}
+
 struct IOSClientDiagnosticBuffer: Sendable {
     static let maximumRecords = 200
     private(set) var records: [GatewayProfileLogRecord] = []

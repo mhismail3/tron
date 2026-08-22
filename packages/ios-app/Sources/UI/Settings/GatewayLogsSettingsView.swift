@@ -24,25 +24,63 @@ extension GatewayLogRecord {
 
 struct GatewayLogsSettingsView: View {
     @Environment(AppModel.self) private var model
-    @State private var records: [GatewayProfileLogRecord] = []
+    @State private var recordIndex = GatewayLogRecordIndex()
     @State private var selectedLog: GatewayProfileLogRecord?
     @State private var selectedLevel = "all"
     @State private var loading = false
+    @State private var hasLoaded = false
     @State private var loadGeneration = 0
     @State private var copySucceeded = false
 
     private let levels = ["all", "info", "warning", "error"]
 
-    private var visibleRecords: [GatewayProfileLogRecord] {
-        guard selectedLevel != "all" else { return records }
-        return records.filter { $0.record.level == selectedLevel }
+    private var visibleItems: [GatewayLogListItem] {
+        recordIndex.items(for: selectedLevel)
+    }
+
+    private var automaticLoadID: GatewayLogsLoadID {
+        GatewayLogsLoadID(
+            readinessGeneration: model.diagnosticsReadinessGeneration,
+            isReady: model.diagnosticsAreReady
+        )
     }
 
     var body: some View {
+        let rows = visibleItems
         ScrollView(.vertical, showsIndicators: true) {
             LazyVStack(spacing: 0) {
-                logSummary
-                logRows
+                if hasLoaded || !recordIndex.isEmpty {
+                    logSummary
+                }
+                if !hasLoaded && recordIndex.isEmpty {
+                    TronLoadingState(
+                        label: automaticLoadID.isReady ? "Loading logs…" : "Reconnecting to refresh logs…",
+                        accent: .tronEmerald
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 24)
+                } else if rows.isEmpty {
+                    TronInfoCard(
+                        icon: "doc.text.magnifyingglass",
+                        text: emptyStateMessage,
+                        accent: .tronSlate
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                } else {
+                    ForEach(rows) { item in
+                        Button { selectedLog = item.record } label: {
+                            GatewayLogRow(record: item.record)
+                                .equatable()
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Divider()
+                            .overlay(Color.tronBorder.opacity(0.6))
+                    }
+                    .padding(.horizontal, 16)
+                }
             }
             .padding(.bottom, 24)
         }
@@ -53,12 +91,12 @@ struct GatewayLogsSettingsView: View {
         .tronNavigationTitle("Logs", accent: .tronEmerald)
         .toolbar {
             ToolbarItemGroup(placement: .topBarLeading) {
-                Button { Task { await loadLogs() } } label: {
+                Button { Task { await loadLogs(preserveExistingOnEmpty: false) } } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(TronTypography.buttonSM)
                         .foregroundStyle(Color.tronEmerald)
                 }
-                .disabled(loading)
+                .disabled(loading || !automaticLoadID.isReady)
                 .accessibilityLabel("Refresh logs")
 
                 Button { copyVisibleLogs() } label: {
@@ -67,12 +105,15 @@ struct GatewayLogsSettingsView: View {
                         .foregroundStyle(Color.tronEmerald)
                         .contentTransition(.symbolEffect(.replace.downUp))
                 }
-                .disabled(visibleRecords.isEmpty)
+                .disabled(visibleItems.isEmpty)
                 .accessibilityLabel("Copy visible logs")
             }
         }
         .sensoryFeedback(.success, trigger: copySucceeded)
-        .task { await loadLogs() }
+        .task(id: automaticLoadID) {
+            guard automaticLoadID.isReady else { return }
+            await loadLogs(preserveExistingOnEmpty: true)
+        }
         .sheet(item: $selectedLog) { record in
             GatewayLogDetailView(record: record)
         }
@@ -100,7 +141,7 @@ struct GatewayLogsSettingsView: View {
     }
 
     private var logSummary: some View {
-        Text("\(visibleRecords.count) entries · Newest entries first")
+        Text("\(visibleItems.count) entries · Newest entries first")
             .font(TronTypography.caption)
             .foregroundStyle(Color.tronTextMuted)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -108,53 +149,35 @@ struct GatewayLogsSettingsView: View {
             .padding(.vertical, 10)
     }
 
-    @ViewBuilder
-    private var logRows: some View {
-        if loading && records.isEmpty {
-            VStack(spacing: 12) {
-                ProgressView().tint(Color.tronEmerald)
-                Text("Loading logs…")
-                    .font(TronTypography.bodySM)
-                    .foregroundStyle(Color.tronTextMuted)
-            }
-            .frame(maxWidth: .infinity, minHeight: 280)
-        } else if visibleRecords.isEmpty {
-            ContentUnavailableView {
-                Label("No Matching Logs", systemImage: "text.page.badge.magnifyingglass")
-            } description: {
-                Text("Try another level or refresh.")
-            }
-            .frame(maxWidth: .infinity, minHeight: 280)
-        } else {
-            ForEach(Array(visibleRecords.enumerated()), id: \.offset) { _, record in
-                Button { selectedLog = record } label: {
-                    GatewayLogRow(record: record)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                Divider()
-                    .overlay(Color.tronBorder.opacity(0.6))
-                    .padding(.leading, 54)
-            }
-            .padding(.horizontal, 16)
+    private var emptyStateMessage: String {
+        if selectedLevel == "all" {
+            return "No logs are available yet. Refresh after new Gateway activity."
         }
+        return "No \(selectedLevel) logs match this filter. Try another level or refresh."
     }
 
-    private func loadLogs() async {
+    private func loadLogs(preserveExistingOnEmpty: Bool) async {
         loadGeneration &+= 1
         let generation = loadGeneration
         loading = true
         defer {
             if generation == loadGeneration { loading = false }
         }
-        let loaded = await model.loadGatewayLogs(limit: 1_000)
+        let loaded = await model.loadGatewayLogsResult(limit: 1_000)
         guard generation == loadGeneration, !Task.isCancelled else { return }
-        records = loaded
+        recordIndex = GatewayLogRecordIndex(records: GatewayLogsLoadPolicy.mergedRecords(
+            current: recordIndex.records,
+            loaded: loaded,
+            preserveExistingOnEmpty: preserveExistingOnEmpty,
+            limit: 1_000
+        ))
+        hasLoaded = true
     }
 
     private func copyVisibleLogs() {
-        UIPasteboard.general.string = visibleRecords.map { record in
-            let timestamp = record.record.date?.formatted(.iso8601) ?? record.record.timestamp
+        UIPasteboard.general.string = visibleItems.map { item in
+            let record = item.record
+            let timestamp = record.record.timestamp
             let source = record.record.source.map { " [\($0)]" } ?? ""
             let event = record.record.event.map { " [\($0)]" } ?? ""
             return "\(timestamp) [\(record.profileLabel)] [\(record.record.level.uppercased())]\(source)\(event) \(record.record.message)"
@@ -173,6 +196,64 @@ struct GatewayLogsSettingsView: View {
         case "info": .tronCyan
         default: .tronSlate
         }
+    }
+}
+
+struct GatewayLogsLoadID: Equatable {
+    let readinessGeneration: Int
+    let isReady: Bool
+}
+
+enum GatewayLogsLoadPolicy {
+    static func mergedRecords(
+        current: [GatewayProfileLogRecord],
+        loaded: GatewayLogsLoadResult,
+        preserveExistingOnEmpty: Bool,
+        limit: Int
+    ) -> [GatewayProfileLogRecord] {
+        var merged = loaded.records
+        if !loaded.failedProfileIDs.isEmpty {
+            merged.append(contentsOf: current.filter { loaded.failedProfileIDs.contains($0.profileID) })
+        }
+        if preserveExistingOnEmpty, merged.isEmpty, !current.isEmpty {
+            return current
+        }
+        return Array(merged.sorted { $0.record.timestamp > $1.record.timestamp }.prefix(limit))
+    }
+}
+
+struct GatewayLogListItem: Identifiable, Equatable {
+    struct ID: Hashable {
+        let recordID: String
+        let occurrence: Int
+    }
+
+    let id: ID
+    let record: GatewayProfileLogRecord
+}
+
+struct GatewayLogRecordIndex {
+    private var all: [GatewayLogListItem] = []
+    private var itemsByLevel: [String: [GatewayLogListItem]] = [:]
+
+    init(records: [GatewayProfileLogRecord] = []) {
+        var occurrences: [String: Int] = [:]
+        all = records.map { record in
+            let occurrence = occurrences[record.id, default: 0]
+            occurrences[record.id] = occurrence + 1
+            return GatewayLogListItem(
+                id: .init(recordID: record.id, occurrence: occurrence),
+                record: record
+            )
+        }
+        itemsByLevel = Dictionary(grouping: all, by: { $0.record.record.level })
+    }
+
+    var isEmpty: Bool { all.isEmpty }
+    var records: [GatewayProfileLogRecord] { all.map(\.record) }
+
+    func items(for level: String) -> [GatewayLogListItem] {
+        level == "all" ? all : itemsByLevel[level, default: []]
     }
 }
 
@@ -203,42 +284,62 @@ private struct GatewayLogFilterChip: View {
     }
 }
 
-private struct GatewayLogRow: View {
+private struct GatewayLogRow: View, Equatable {
     let record: GatewayProfileLogRecord
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: record.record.icon)
-                .font(TronTypography.bodySM)
-                .foregroundStyle(record.record.accent)
-                .frame(width: 26, height: 26)
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(record.record.event ?? record.record.levelTitle)
-                        .font(TronTypography.bodySM)
-                        .foregroundStyle(Color.tronTextPrimary)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    Text(record.record.date?.formatted(date: .omitted, time: .shortened) ?? record.record.timestamp)
-                        .font(TronTypography.caption2)
-                        .foregroundStyle(Color.tronTextMuted)
-                        .lineLimit(1)
-                }
-
-                Text(record.profileLabel + (record.record.source.map { " · \($0)" } ?? ""))
-                    .font(TronTypography.caption2)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(actionDescription)
+                    .foregroundStyle(Color.tronTextPrimary)
+                    .lineLimit(1)
+                    .layoutPriority(2)
+                metadataSeparator
+                Text(sourceDescription)
                     .foregroundStyle(Color.tronTextMuted)
                     .lineLimit(1)
-
-                Text(record.record.message)
-                    .font(TronTypography.codeContent)
-                    .foregroundStyle(Color.tronTextSecondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
+                    .truncationMode(.middle)
+                metadataSeparator
+                Text(record.record.levelTitle)
+                    .foregroundStyle(record.record.accent)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+                metadataSeparator
+                Text(timestampDescription)
+                    .foregroundStyle(Color.tronTextMuted)
+                    .lineLimit(1)
+                    .layoutPriority(1)
             }
+            .font(TronTypography.caption2)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(actionDescription), \(sourceDescription), \(record.record.levelTitle) log, \(timestampDescription)")
+
+            Text(record.record.message)
+                .font(TronTypography.codeContent)
+                .foregroundStyle(Color.tronTextSecondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
         }
-        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 7)
+    }
+
+    private var metadataSeparator: some View {
+        Text("·")
+            .foregroundStyle(Color.tronTextMuted)
+            .accessibilityHidden(true)
+    }
+
+    private var actionDescription: String {
+        record.record.event ?? record.record.levelTitle
+    }
+
+    private var sourceDescription: String {
+        record.profileLabel + (record.record.source.map { " · \($0)" } ?? "")
+    }
+
+    private var timestampDescription: String {
+        record.record.date?.formatted(date: .omitted, time: .shortened) ?? record.record.timestamp
     }
 }
 

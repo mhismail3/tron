@@ -187,6 +187,36 @@ struct AppModelCatalogSyncTests {
         }
     }
 
+    @Test("foreground diagnostics readiness advances only after a successful catalog refresh")
+    func foregroundDiagnosticsReadiness() async throws {
+        let socket = ScriptedGatewaySocket()
+        let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(sockets: [socket]).factory)
+        let root = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        let model = AppModel(client: client, cache: SnapshotCache(root: root))
+        let profile = GatewayProfile(
+            id: "profile", label: "Mac", host: "gateway.test", port: 9_847,
+            machineId: "machine", deviceId: "device"
+        )
+        await socket.enqueue(helloFrame())
+        try await model.connectHostedGateway(profile: profile, token: "token")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let baseline = model.diagnosticsReadinessGeneration
+
+        let reconciliation = model.becameActive()
+        let catalog = try await request(socket, index: 1)
+        #expect(catalog.method == "session.list")
+        #expect(model.diagnosticsReadinessGeneration == baseline)
+        await socket.enqueue(response(id: catalog.id, sessions: [], listRevision: 1))
+        await reconciliation?.value
+
+        #expect(model.diagnosticsReadinessGeneration == baseline + 1)
+        #expect(model.diagnosticsAreReady)
+        model.enteredBackground()
+        #expect(!model.diagnosticsAreReady)
+        await model.teardown()
+        await client.close()
+    }
+
     @Test("foreground catalog transport failure does not replace a responsive socket")
     func responsiveSocketSurvivesCatalogFailure() async throws {
         let socket = ScriptedGatewaySocket()

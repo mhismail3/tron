@@ -192,6 +192,11 @@ final class AppModel {
     /// even if the network task finishes before projection preparation does.
     private(set) var isReconcilingForeground = false
     private(set) var foregroundReconciliationGeneration = 0
+    /// Advances only after an admitted Gateway projection is ready for bounded
+    /// on-demand diagnostics such as Logs. Views key refresh work to completion,
+    /// never raw scene activation, a transient connected state, or reconciliation start.
+    private(set) var diagnosticsReadinessGeneration = 0
+    private(set) var diagnosticsAreReady = false
     var commands: [CommandInfo] { sessionPresentation.commands }
     var resources: JSONValue? { sessionPresentation.resources }
     /// Keeps the root setup sheet from reacting to the transient connection
@@ -725,6 +730,7 @@ final class AppModel {
 
     func enteredBackground() {
         sceneAllowsCatalogRefresh = false
+        diagnosticsAreReady = false
         dashboardConnections.retire()
         // The canonical session may still be running on the Gateway, but this
         // mobile projection is intentionally retiring its transport lease.
@@ -1292,9 +1298,10 @@ final class AppModel {
         return try await diagnostics.logs(limit: limit)
     }
 
-    func loadGatewayLogs(limit: Int = 1_000) async -> [GatewayProfileLogRecord] {
+    func loadGatewayLogsResult(limit: Int = 1_000) async -> GatewayLogsLoadResult {
         let profileSnapshot = profiles.profiles
         var loaded = Array(iosClientDiagnostics.records.prefix(limit))
+        var failedProfileIDs: Set<String> = []
         for profile in profileSnapshot {
             do {
                 let records = try await gatewayLogs(for: profile.id, limit: limit)
@@ -1302,12 +1309,22 @@ final class AppModel {
                     GatewayProfileLogRecord(profileID: profile.id, profileLabel: profile.label, record: $0)
                 })
             } catch is CancellationError {
-                return Array(loaded.sorted { $0.record.timestamp > $1.record.timestamp }.prefix(limit))
+                return GatewayLogsLoadResult(
+                    records: Array(loaded.sorted { $0.record.timestamp > $1.record.timestamp }.prefix(limit)),
+                    failedProfileIDs: failedProfileIDs
+                )
             } catch {
-                continue
+                failedProfileIDs.insert(profile.id)
             }
         }
-        return Array(loaded.sorted { $0.record.timestamp > $1.record.timestamp }.prefix(limit))
+        return GatewayLogsLoadResult(
+            records: Array(loaded.sorted { $0.record.timestamp > $1.record.timestamp }.prefix(limit)),
+            failedProfileIDs: failedProfileIDs
+        )
+    }
+
+    func loadGatewayLogs(limit: Int = 1_000) async -> [GatewayProfileLogRecord] {
+        await loadGatewayLogsResult(limit: limit).records
     }
 
     func loadAuthorizedDevices() async -> [GatewayAuthorizedDevice] {
@@ -2261,7 +2278,7 @@ final class AppModel {
             // Retire any visible prompt before reconnect can expose a new
             // client, so the UI never submits a stale operation ID.
             providerAuth.retireConnection()
-            invalidateSessionConnectionOwnership()
+            lifecycleInvalidateSessionConnectionOwnership()
             sessionCatalog.markDisconnected()
             // An established mobile connection ending is already the first
             // failure signal. Retry once immediately; the reconnect loop keeps
@@ -2656,6 +2673,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     }
 
     func lifecycleInvalidateSessionConnectionOwnership() {
+        diagnosticsAreReady = false
         invalidateSessionConnectionOwnership()
     }
 
@@ -2674,6 +2692,8 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
             return
         }
         reconcileDashboardConnections()
+        diagnosticsReadinessGeneration &+= 1
+        diagnosticsAreReady = true
     }
 
     func lifecycleRestoreMountedPresentation(
@@ -2711,9 +2731,12 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
         reconcileDashboardConnections()
         try requireLifecycle(admission)
+        diagnosticsReadinessGeneration &+= 1
+        diagnosticsAreReady = true
     }
 
     func lifecycleRetireProjection(final: Bool) async {
+        diagnosticsAreReady = false
         let catalog = catalogRefreshTask
         let cacheCheckpoint = cacheCheckpointTask
         let events = final ? eventTask : nil

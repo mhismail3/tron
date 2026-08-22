@@ -147,7 +147,7 @@ struct CustomModelsSettingsView: View {
     }
 
     private var providersSection: some View {
-        VStack(alignment: .leading, spacing: TronSpacing.md) {
+        LazyVStack(alignment: .leading, spacing: TronSpacing.md) {
             VStack(alignment: .leading, spacing: TronSpacing.xs) {
                 Text("Providers")
                     .font(TronTypography.sheetSectionHeader)
@@ -167,10 +167,8 @@ struct CustomModelsSettingsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .tronGlassSurface(accent: .tronEmerald, tintOpacity: 0.07)
             } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach($providers) { $provider in
-                        providerRow($provider)
-                    }
+                ForEach($providers) { $provider in
+                    providerRow($provider)
                 }
             }
 
@@ -214,7 +212,7 @@ struct CustomModelsSettingsView: View {
             Image(systemName: "cpu")
                 .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
                 .foregroundStyle(Color.tronEmerald)
-                .frame(width: 20, height: 20, alignment: .center)
+                .frame(width: 22, height: 22, alignment: .center)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(provider.identifier.isEmpty ? "New Provider" : provider.identifier)
@@ -527,7 +525,8 @@ private struct CustomModelProviderRow<Label: View, Destination: View>: View {
             Button { isPresented = true } label: {
                 label
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, TronSpacing.xl)
+                    .padding(.leading, 14)
+                    .padding(.trailing, 60)
                     .padding(.vertical, 14)
                     .contentShape(Rectangle())
             }

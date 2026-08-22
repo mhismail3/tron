@@ -869,7 +869,7 @@ struct PresentationStyleGuardTests {
         #expect(logs.contains("extension GatewayLogRecord"))
         #expect(logs.contains("Newest entries first"))
         #expect(settings.contains("await model.requestGatewayRestart(for: currentProfile)"))
-        #expect(logs.contains("let loaded = await model.loadGatewayLogs(limit: 1_000)"))
+        #expect(logs.contains("let loaded = await model.loadGatewayLogsResult(limit: 1_000)"))
         #expect(!logs.contains("while !Task.isCancelled"))
         #expect(!settings.contains("try? await model."))
         #expect(context.contains("model.gatewayDiagnostics.inspectGit"))
@@ -965,6 +965,78 @@ struct PresentationStyleGuardTests {
         #expect(runtimeSettings.contains("Advanced Mac Overrides"))
         #expect(runtimeSettings.contains("Automatic discovery only"))
         #expect(!runtimeSettings.contains("case .sessionDir"))
+    }
+
+    @Test("custom model and log rows keep aligned lazy lifecycle presentation")
+    func scalableSettingsRows() throws {
+        let customModels = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/CustomModelsSettingsView.swift"),
+            encoding: .utf8
+        )
+        let logs = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Settings/GatewayLogsSettingsView.swift"),
+            encoding: .utf8
+        )
+        let appModel = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/AppModel.swift"),
+            encoding: .utf8
+        )
+        let providersSection = (customModels.components(separatedBy: "private var providersSection: some View").dropFirst().first ?? "")
+            .components(separatedBy: "private func providerRow").first ?? ""
+        let providerSummary = (customModels.components(separatedBy: "private func providerSummary").dropFirst().first ?? "")
+            .components(separatedBy: "private func providerEditorSheet").first ?? ""
+        let customProviderRow = customModels.components(separatedBy: "private struct CustomModelProviderRow").dropFirst().first ?? ""
+        let logRow = (logs.components(separatedBy: "private struct GatewayLogRow").dropFirst().first ?? "")
+            .components(separatedBy: "struct GatewayLogDetailView").first ?? ""
+        let disconnectHandler = (appModel.components(separatedBy: "case \"transport.disconnected\", \"system.stopping\":").dropFirst().first ?? "")
+            .components(separatedBy: "case \"transport.resyncRequired\":").first ?? ""
+
+        #expect(providersSection.contains("LazyVStack(alignment: .leading"))
+        #expect(providersSection.contains("} else {\n                ForEach($providers)"))
+        #expect(!providersSection.contains("} else {\n                VStack"))
+        #expect(providerSummary.contains(".frame(width: 22, height: 22, alignment: .center)"))
+        #expect(customProviderRow.contains(".padding(.leading, 14)"))
+        #expect(customProviderRow.contains(".padding(.trailing, 60)"))
+
+        #expect(logs.contains("@State private var recordIndex = GatewayLogRecordIndex()"))
+        #expect(logs.contains("Dictionary(grouping: all, by:"))
+        #expect(logs.contains("ForEach(rows) { item in"))
+        #expect(logs.contains("GatewayLogRow(record: item.record)\n                                .equatable()"))
+        #expect(!logs.contains("Array(visibleRecords.enumerated())"))
+        #expect(!logs.contains(".padding(.leading, 54)"))
+        #expect(logs.contains("private struct GatewayLogRow: View, Equatable"))
+        #expect(logs.contains(".task(id: automaticLoadID)"))
+        #expect(logs.contains("readinessGeneration: model.diagnosticsReadinessGeneration"))
+        #expect(logs.contains("isReady: model.diagnosticsAreReady"))
+        #expect(!logs.contains("model.connectionState == .connected"))
+        #expect(logs.contains("await model.loadGatewayLogsResult(limit: 1_000)"))
+        #expect(logs.contains("loaded.failedProfileIDs.contains($0.profileID)"))
+        #expect(logs.contains("await loadLogs(preserveExistingOnEmpty: true)"))
+        #expect(logs.contains("await loadLogs(preserveExistingOnEmpty: false)"))
+        #expect(disconnectHandler.contains("lifecycleInvalidateSessionConnectionOwnership()"))
+        #expect(!disconnectHandler.contains("\n            invalidateSessionConnectionOwnership()"))
+        #expect(logs.contains("TronLoadingState("))
+        #expect(logs.contains("TronInfoCard("))
+        #expect(!logs.contains("ContentUnavailableView"))
+        #expect(logRow.contains("VStack(alignment: .leading, spacing: 3)"))
+        #expect(logRow.contains("HStack(alignment: .firstTextBaseline, spacing: 5)"))
+        #expect(logRow.contains(".font(TronTypography.caption2)"))
+        #expect(logRow.components(separatedBy: "metadataSeparator").count == 5)
+        #expect(logRow.contains("Text(record.record.levelTitle)\n                    .foregroundStyle(record.record.accent)"))
+        #expect(!logRow.contains("Image(systemName: record.record.icon)"))
+        #expect(!logRow.contains("TronTypography.bodySM"))
+        #expect(logRow.contains(".frame(maxWidth: .infinity, alignment: .leading)\n        .padding(.vertical, 7)"))
+        let actionPosition = try #require(logRow.firstRange(of: "Text(actionDescription)")?.lowerBound)
+        let sourcePosition = try #require(logRow.firstRange(of: "Text(sourceDescription)")?.lowerBound)
+        let levelPosition = try #require(logRow.firstRange(of: "Text(record.record.levelTitle)")?.lowerBound)
+        let timestampPosition = try #require(logRow.firstRange(of: "Text(timestampDescription)")?.lowerBound)
+        let messagePosition = try #require(logRow.firstRange(of: "Text(record.record.message)")?.lowerBound)
+        #expect(actionPosition < sourcePosition)
+        #expect(sourcePosition < levelPosition)
+        #expect(levelPosition < timestampPosition)
+        #expect(timestampPosition < messagePosition)
+        #expect(logRow.contains(".accessibilityLabel(\"\\(actionDescription), \\(sourceDescription), \\(record.record.levelTitle) log, \\(timestampDescription)\")"))
+        #expect(!logRow.contains("HStack(alignment: .top"))
     }
 
     @Test("removed provisional chat surfaces have no production source call sites")
