@@ -241,6 +241,88 @@ struct TerminalReducerTests {
         #expect(coordinator.replay(for: "terminal").chunks.last?.data == "live")
     }
 
+    @Test("delta replay retains only a contiguous prefix after a missing middle")
+    func missingMiddleReplayRetainsPrefix() throws {
+        var (coordinator, lease) = try coordinatorAndLease(connectionID: 21)
+        let pendingInstallation = coordinator.installReplay(
+            [
+                TerminalChunk(sequence: 1, data: "one"),
+                TerminalChunk(sequence: 3, data: "three"),
+            ],
+            terminal: terminal(sequence: 3),
+            reset: false,
+            after: 0,
+            lease: lease
+        )
+        let installation = try #require(pendingInstallation)
+        #expect(installation.admittedCount == 1)
+        #expect(installation.requiresReconciliation)
+        #expect(coordinator.replay(for: "terminal").chunks.map(\.sequence) == [1])
+    }
+
+    @Test("duplicate and out-of-order replay chunks cannot become canonical output")
+    func malformedReplayChunksRetainOnlyPrefix() throws {
+        for chunks in [
+            [TerminalChunk(sequence: 1, data: "one"), TerminalChunk(sequence: 1, data: "duplicate")],
+            [TerminalChunk(sequence: 1, data: "one"), TerminalChunk(sequence: 3, data: "three"), TerminalChunk(sequence: 2, data: "two")],
+        ] {
+            var (coordinator, lease) = try coordinatorAndLease(connectionID: chunks.count)
+            let pendingInstallation = coordinator.installReplay(
+                chunks,
+                terminal: terminal(sequence: 3),
+                reset: true,
+                after: 0,
+                lease: lease
+            )
+            let installation = try #require(pendingInstallation)
+            #expect(installation.admittedCount == 1)
+            #expect(installation.requiresReconciliation)
+            #expect(coordinator.replay(for: "terminal").chunks == [chunks[0]])
+        }
+    }
+
+    @Test("reset replay accepts a retained contiguous prefix and follows up when terminal advances")
+    func resetRetainedPrefixRequestsFollowUp() throws {
+        var (coordinator, lease) = try coordinatorAndLease(connectionID: 22)
+        let pendingInstallation = coordinator.installReplay(
+            [
+                TerminalChunk(sequence: 3, data: "three"),
+                TerminalChunk(sequence: 4, data: "four"),
+                TerminalChunk(sequence: 6, data: "six"),
+            ],
+            terminal: terminal(sequence: 6),
+            reset: true,
+            after: 0,
+            lease: lease
+        )
+        let installation = try #require(pendingInstallation)
+        #expect(installation.admittedCount == 2)
+        #expect(installation.requiresReconciliation)
+        #expect(coordinator.replay(for: "terminal").chunks.map(\.sequence) == [3, 4])
+    }
+
+    @Test("incomplete replay is completed by a contiguous follow-up")
+    func incompleteReplayFollowUp() throws {
+        var (coordinator, lease) = try coordinatorAndLease(connectionID: 23)
+        let pendingFirst = coordinator.installReplay(
+            [TerminalChunk(sequence: 1, data: "one"), TerminalChunk(sequence: 3, data: "three")],
+            terminal: terminal(sequence: 3), reset: false, after: 0, lease: lease
+        )
+        let first = try #require(pendingFirst)
+        #expect(first.requiresReconciliation)
+        let pendingLease = coordinator.beginAttachment(
+            terminalID: "terminal", intent: lease.intent, connectionID: 23, reconciling: true
+        )
+        lease = try #require(pendingLease)
+        let pendingFollowUp = coordinator.installReplay(
+            [TerminalChunk(sequence: 2, data: "two"), TerminalChunk(sequence: 3, data: "three")],
+            terminal: terminal(sequence: 3), reset: false, after: 1, lease: lease
+        )
+        let followUp = try #require(pendingFollowUp)
+        #expect(!followUp.requiresReconciliation)
+        #expect(coordinator.replay(for: "terminal").chunks.map(\.sequence) == [1, 2, 3])
+    }
+
     @Test("authoritative inventory prunes replay and terminal evidence")
     func authoritativeInventoryPrunesProjections() throws {
         var coordinator = TerminalReducer()
@@ -298,6 +380,17 @@ struct TerminalReducerTests {
             connectionID: 17,
             exitedAt: "unused"
         ) == .reconcile(terminalID: "terminal"))
+    }
+
+    private func coordinatorAndLease(connectionID: Int) throws -> (TerminalReducer, TerminalAttachmentLease) {
+        var coordinator = TerminalReducer()
+        let target = coordinator.beginPresentation(sessionID: "session")
+        let intent = try #require(coordinator.beginIntent(for: target)?.intent)
+        let pendingLease = coordinator.beginAttachment(
+            terminalID: "terminal", intent: intent, connectionID: connectionID
+        )
+        let lease = try #require(pendingLease)
+        return (coordinator, lease)
     }
 
     private func terminal(sequence: Int) -> TerminalSummary {

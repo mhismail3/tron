@@ -102,6 +102,10 @@ struct TerminalReducer {
     private var reconcilingTerminalIDs: Set<String> = []
     private var terminalIDsBySession: [String: Set<String>] = [:]
     private var replayByID: [String: TerminalReplayProjection] = [:]
+    // Replay output is bounded and may retain only a suffix. Keep the highest
+    // sequence proven contiguous separately so admission never infers a cursor
+    // from a truncated projection.
+    private var lastProvenSequenceByTerminalID: [String: Int] = [:]
     private var exitedTerminalIDs: Set<String> = []
 
     mutating func beginPresentation(sessionID: String) -> TerminalPresentationTarget {
@@ -259,10 +263,33 @@ struct TerminalReducer {
         lastInstalledOperationByTerminalID[terminal.id] = lease.operationGeneration
 
         let current = replayByID[terminal.id] ?? .empty
-        let latest = current.chunks.last?.sequence ?? after
-        var admittedSequences = Set<Int>()
-        let admitted = chunks.filter {
-            (reset || $0.sequence > latest) && admittedSequences.insert($0.sequence).inserted
+        let latest = lastProvenSequenceByTerminalID[terminal.id]
+            ?? current.chunks.last?.sequence
+            ?? after
+        let expectedFirst = max(latest, after) + 1
+        var admitted: [TerminalChunk] = []
+        var nextSequence: Int?
+        var requiresReconciliation = false
+        for chunk in chunks {
+            if let nextSequence {
+                guard chunk.sequence == nextSequence else {
+                    requiresReconciliation = true
+                    break
+                }
+            } else if !reset {
+                guard chunk.sequence == expectedFirst else {
+                    requiresReconciliation = true
+                    break
+                }
+            }
+            admitted.append(chunk)
+            nextSequence = chunk.sequence + 1
+        }
+        if admitted.count != chunks.count { requiresReconciliation = true }
+        if let last = admitted.last?.sequence {
+            lastProvenSequenceByTerminalID[terminal.id] = last
+        } else if reset {
+            lastProvenSequenceByTerminalID[terminal.id] = after
         }
         replayByID[terminal.id] = TerminalReplayProjection(
             chunks: Self.boundedReplay(reset ? admitted : current.chunks + admitted),
@@ -273,7 +300,11 @@ struct TerminalReducer {
         else { exitedTerminalIDs.insert(terminal.id) }
         let pending = drainPendingEvents(terminalID: terminal.id)
         pruneUnownedPendingEvents()
-        let requiresReconciliation = pending.requiresReconciliation
+        let provenSequence = lastProvenSequenceByTerminalID[terminal.id]
+            ?? after
+        requiresReconciliation = requiresReconciliation
+            || terminal.sequence > provenSequence
+            || pending.requiresReconciliation
             || pendingOverflowGeneration > lease.quarantineGeneration
         if !requiresReconciliation {
             immediateRecoveryAttemptsByTerminalID.removeValue(forKey: terminal.id)
@@ -320,6 +351,7 @@ struct TerminalReducer {
         for id in priorIDs.subtracting(returnedIDs) {
             replayByID.removeValue(forKey: id)
             lastInstalledOperationByTerminalID.removeValue(forKey: id)
+            lastProvenSequenceByTerminalID.removeValue(forKey: id)
             exitedTerminalIDs.remove(id)
             pendingEventsByTerminalID.removeValue(forKey: id)
             attachmentOwnersByTerminalID.removeValue(forKey: id)
@@ -457,6 +489,7 @@ struct TerminalReducer {
         openOperationByIntent.removeAll()
         attachmentOwnersByTerminalID.removeAll()
         lastInstalledOperationByTerminalID.removeAll()
+        lastProvenSequenceByTerminalID.removeAll()
         pendingEventsByTerminalID.removeAll()
         pendingOverflowGeneration &+= 1
         immediateRecoveryAttemptsByTerminalID.removeAll()
@@ -484,6 +517,7 @@ struct TerminalReducer {
                 // authoritative inventory or a new owner replaces it. Ownership
                 // is already gone, so stale events cannot mutate this projection.
                 lastInstalledOperationByTerminalID.removeValue(forKey: terminalID)
+                lastProvenSequenceByTerminalID.removeValue(forKey: terminalID)
                 exitedTerminalIDs.remove(terminalID)
                 pendingEventsByTerminalID.removeValue(forKey: terminalID)
                 if let connectionID = removed.values.first {
@@ -594,7 +628,9 @@ struct TerminalReducer {
         pending.requiresReconciliation = false
         for sequence in pending.outputBySequence.keys.sorted() {
             guard let chunk = pending.outputBySequence[sequence] else { continue }
-            let latest = replayByID[terminalID]?.chunks.last?.sequence ?? 0
+            let latest = lastProvenSequenceByTerminalID[terminalID]
+                ?? replayByID[terminalID]?.chunks.last?.sequence
+                ?? 0
             if sequence <= latest {
                 pending.outputBytes -= chunk.data.utf8.count
                 pending.outputBySequence.removeValue(forKey: sequence)
@@ -666,9 +702,9 @@ struct TerminalReducer {
     }
 
     private mutating func updateSequence(_ terminalID: String, sequence: Int) {
-        // Replay is the sole sequence projection. Inventory owns terminal
-        // metadata, so no historical summary is retained here.
-        _ = terminalID
-        _ = sequence
+        lastProvenSequenceByTerminalID[terminalID] = max(
+            lastProvenSequenceByTerminalID[terminalID] ?? 0,
+            sequence
+        )
     }
 }

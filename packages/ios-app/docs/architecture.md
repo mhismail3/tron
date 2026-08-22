@@ -141,7 +141,7 @@ presentation/intents, cleanup tasks, receipt-aware commands, attach/replay inter
 and reconnect reattachment. Its sole `TerminalReducer` kernel owns per-terminal operations, shared
 attachment leases, typed terminal-event reduction, a global 16-terminal/256-chunk/1 MiB in-flight event
 quarantine, replay revisions, and post-detach event admission. Authoritative terminal inventory and presentation revocation prune replay, last-install, exited, pending, and attachment projections; no historical summary map is retained. Terminal open/attach uses one replay
-installer and closes its interval only after reset, delta, and contiguous quarantined chunks are admitted.
+installer and closes its interval only after reset, delta, and a strictly contiguous replay prefix are admitted; duplicate, reordered, or missing-middle chunks remain non-canonical and trigger a bounded follow-up reconciliation.
 `terminal.open` requires the exact installed iOS subscription and the Gateway validates the client's
 opened-session ownership before creating a PTY, preventing orphan terminal creation during route/reconnect
 races. Stale successful attachments schedule an exact-connection compensating detach unless a newer
@@ -261,7 +261,7 @@ enter the store's authoritative read gate.
 a two-phase subscription barrier: the authoritative snapshot and ephemeral sync
 token are returned first. The snapshot and subscription token remain provisional and
 unobservable until `session.sync` succeeds and the exact session/presentation intent is
-revalidated; stale or failed opens close only that provisional token. The same opaque token
+revalidated. iOS admits both tokens as nonempty, printable UTF-8 values of at most 200 bytes before installation; stale or failed opens close only the already bounded provisional subscription token. The same opaque token
 then becomes subscription ownership, and `session.close` only releases a subscription whose
 current token matches. Active protocol-v3 peers always provide explicit ownership.
 One intent-keyed synchronization coordinator owns the shared outcome and event quarantine.

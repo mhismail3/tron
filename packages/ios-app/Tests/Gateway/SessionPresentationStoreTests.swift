@@ -1228,6 +1228,54 @@ struct SessionPresentationStoreTests {
         }
     }
 
+    @Test("malformed open tokens close only the bounded provisional subscription")
+    func malformedOpenTokensPreserveProvisionalCleanup() async throws {
+        try await withTestWatchdog { @MainActor in
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            let profile = GatewayProfile(
+                id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            let baseline = try SessionScenarioBuilder(seed: 8_909).openingTail(targetEncodedBytes: 4_096)
+            let store = SessionPresentationStore(client: client, performanceSignposts: SystemPerformanceSignposts.shared)
+            let opening = Task { try await store.open(baseline.sessionId) }
+            let malformedTokens = ["", String(repeating: "x", count: 201), "control\u{1}token"]
+            for (attempt, malformedToken) in malformedTokens.enumerated() {
+                let openFrame = 2 + attempt * 2
+                try await socket.waitUntilSent(count: openFrame)
+                var request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[openFrame - 1])
+                let openID = try #require(request.objectValue?["id"]?.stringValue)
+                await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"), "id": .string(openID), "ok": .bool(true),
+                    "result": .object([
+                        "session": try JSONValue.encode(baseline),
+                        "syncToken": .string(malformedToken),
+                        "subscriptionToken": .string("provisional-\(attempt)"),
+                    ]),
+                ])))
+                try await socket.waitUntilSent(count: openFrame + 1)
+                request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[openFrame])
+                #expect(request.objectValue?["method"]?.stringValue == "session.close")
+                #expect(request.objectValue?["params"]?.objectValue?["subscriptionToken"] == .string("provisional-\(attempt)"))
+                let closeID = try #require(request.objectValue?["id"]?.stringValue)
+                await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"), "id": .string(closeID), "ok": .bool(true),
+                    "result": .object(["closed": .bool(true)]),
+                ])))
+            }
+            await #expect(throws: GatewayFailure.self) { try await opening.value }
+            #expect(!store.hasInstalledSubscription(for: baseline.sessionId))
+            #expect(store.mountedTarget == nil)
+            await client.close()
+        }
+    }
+
     @Test("terminal malformed session-open response propagates actionable failure after two retries")
     func terminalMalformedOpenPropagates() async throws {
         try await withTestWatchdog { @MainActor in

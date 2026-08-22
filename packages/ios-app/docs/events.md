@@ -140,7 +140,9 @@ admits and reduces mounted-session topics:
   event frame before MainActor routing; malformed known payloads remain inert rather than failing
   the transport. Terminal output is admitted only for a current presentation lease, sequence-checked,
   and deduplicated; frames arriving during attach or gap recovery are held in a bounded
-  local quarantine and joined contiguously to `terminal.attach(afterSequence:)` replay.
+  local quarantine and joined contiguously to `terminal.attach(afterSequence:)` replay. Replay responses
+  admit only a strictly contiguous prefix (reset responses may begin at a retained sequence); duplicates,
+  reordering, and missing middles never become canonical output and schedule a bounded follow-up.
   A remaining gap schedules at most three immediate recovery attempts before waiting for
   later lifecycle reconciliation; replay reset advances native renderer
   identity, and detach/revocation rejects buffered output and exit frames. Multiple
@@ -175,7 +177,8 @@ remains visible throughout opening, while sending stays disabled until readiness
 positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
 phase; ordinary follow and correction events do not compete until that phase is idle.
 Session subscription ownership is token-scoped end to end. The open response remains
-provisional until sync acknowledgement and exact route-intent revalidation; baseline plus its
+provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription
+credentials must be nonempty, printable UTF-8 tokens no larger than 200 bytes. Baseline plus its
 already-drained contiguous event suffix then publish in one MainActor turn. The fitted tail mounts immediately regardless of its display-bearing count; earlier-page reads begin only from the mounted presentation and cannot make the conversation unavailable. A stale or failed
 attempt closes only its provisional token, so a stale close cannot unsubscribe a newer same-session mount. Active
 protocol-v3 peers always provide explicit subscription ownership. If a reconnect installs a new runtime generation for the same canonical session,

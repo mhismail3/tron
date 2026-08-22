@@ -22,6 +22,16 @@ enum SessionTranscriptLoadResult: Equatable, Sendable {
     case failed
 }
 
+enum GatewayTokenAdmissionPolicy {
+    static let maximumUTF8Bytes = 200
+
+    static func admit(_ token: String) -> Bool {
+        !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && token.utf8.count <= maximumUTF8Bytes
+            && !token.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    }
+}
+
 struct GatewaySessionOpenResponse: Decodable {
     let session: SessionSnapshot
     let syncToken: String
@@ -36,8 +46,16 @@ struct GatewaySessionOpenResponse: Decodable {
               ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(session) else {
             throw DecodingError.dataCorruptedError(forKey: .session, in: container, debugDescription: "Invalid extension presentation snapshot")
         }
-        syncToken = try container.decode(String.self, forKey: .syncToken)
-        subscriptionToken = try container.decode(String.self, forKey: .subscriptionToken)
+        let decodedSyncToken = try container.decode(String.self, forKey: .syncToken)
+        let decodedSubscriptionToken = try container.decode(String.self, forKey: .subscriptionToken)
+        guard GatewayTokenAdmissionPolicy.admit(decodedSyncToken) else {
+            throw DecodingError.dataCorruptedError(forKey: .syncToken, in: container, debugDescription: "Invalid sync token")
+        }
+        guard GatewayTokenAdmissionPolicy.admit(decodedSubscriptionToken) else {
+            throw DecodingError.dataCorruptedError(forKey: .subscriptionToken, in: container, debugDescription: "Invalid subscription token")
+        }
+        syncToken = decodedSyncToken
+        subscriptionToken = decodedSubscriptionToken
     }
 }
 
@@ -1002,7 +1020,7 @@ final class SessionPresentationStore {
             // the snapshot. Preserve the independently bounded close token so
             // a malformed snapshot can release that ownership before retrying.
             if let token = responseValue.objectValue?["subscriptionToken"]?.stringValue,
-               !token.isEmpty, token.utf8.count <= 200 {
+               GatewayTokenAdmissionPolicy.admit(token) {
                 provisionalToken = token
                 pendingSubscriptionTokens[sessionID] = token
             }
