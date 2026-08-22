@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import TronMobile
 
@@ -87,6 +88,46 @@ struct QueuedMessagePresentationTests {
             from: [first, second],
             to: []
         ) == ["first", "second"])
+    }
+
+    @Test("exact descriptors survive compact chip projection while legacy files fail closed")
+    func attachmentDescriptors() throws {
+        let attachment = SessionSnapshot.PromptAttachment(
+            id: "upload", name: "notes.txt", mimeType: "text/plain", size: 4
+        )
+        let exact = SessionSnapshot.QueuedMessage(
+            id: "exact",
+            behavior: .steer,
+            text: "review",
+            attachmentCount: 1,
+            photoCount: 0,
+            fileAttachmentCount: 1,
+            attachments: [attachment]
+        )
+        let exactChip = try #require(QueuedMessageAttachmentPresentation.chips(for: exact).first)
+        #expect(exactChip.kind == .file)
+        #expect(exactChip.attachment == attachment)
+
+        let legacy = QueuedMessageAttachmentPresentation.chips(
+            attachmentCount: 1,
+            photoCount: 0,
+            fileAttachmentCount: 1
+        )
+        #expect(legacy.count == 1)
+        #expect(legacy[0].kind == .file)
+        #expect(legacy[0].attachment == nil)
+    }
+
+    @Test("queued attachment descriptors decode additively")
+    func attachmentDescriptorDecoding() throws {
+        let data = Data(#"{"id":"queued","behavior":"steer","text":"review","attachmentCount":1,"photoCount":0,"fileAttachmentCount":1,"attachments":[{"id":"upload","name":"notes.txt","mimeType":"text/plain","size":4}]}"#.utf8)
+        let decoded = try JSONDecoder().decode(SessionSnapshot.QueuedMessage.self, from: data)
+        #expect(decoded.attachments == [
+            .init(id: "upload", name: "notes.txt", mimeType: "text/plain", size: 4),
+        ])
+
+        let legacy = Data(#"{"id":"legacy","behavior":"followUp","text":"later","attachmentCount":1}"#.utf8)
+        #expect(try JSONDecoder().decode(SessionSnapshot.QueuedMessage.self, from: legacy).attachments == nil)
     }
 
     @Test("canonical boundary waits for queue mutation outcome before choosing identity")
@@ -267,7 +308,7 @@ struct QueuedMessagePresentationTests {
         admitted.settle(token)
     }
 
-    @Test("queued attachments become one inert mini chip per typed item")
+    @Test("queued attachments become one compact mini chip per typed item")
     func attachmentPresentation() {
         #expect(QueuedMessageAttachmentPresentation.chips(
             attachmentCount: 3,
@@ -312,11 +353,10 @@ struct QueuedMessagePresentationTests {
             PendingAttachment(id: "photo", name: "photo.jpg", mimeType: "image/jpeg", size: 1, previewData: nil),
             PendingAttachment(id: "file-2", name: "data.json", mimeType: "application/json", size: 1, previewData: nil),
         ]
-        #expect(QueuedMessageAttachmentPresentation.chips(for: attachments) == [
-            .init(id: "photo-0", kind: .photo),
-            .init(id: "file-0", kind: .file),
-            .init(id: "file-1", kind: .file),
-        ])
+        let chips = QueuedMessageAttachmentPresentation.chips(for: attachments)
+        #expect(chips.map(\.id) == ["photo-0", "file-0", "file-1"])
+        #expect(chips.map(\.kind) == [.photo, .file, .file])
+        #expect(chips.compactMap(\.attachment?.id) == ["upload:photo", "upload:file", "upload:file-2"])
     }
 
     @Test("queued card geometry keeps compact balanced header spacing")

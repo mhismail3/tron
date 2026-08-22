@@ -6,6 +6,7 @@ import type { ImageContent } from "@earendil-works/pi-ai";
 import { GatewayError } from "../errors.js";
 import { atomicWriteJson, readJson } from "../util/json.js";
 import { isGatewayTimestamp } from "../util/timestamp.js";
+import type { PromptAttachmentState } from "../protocol/types.js";
 
 const UPLOAD_METADATA_MAX_BYTES = 64 * 1_024;
 const DEFAULT_MAXIMUM_ENTRIES = 1_024;
@@ -384,6 +385,7 @@ export class UploadStore {
     envelope: string;
     photoCount: number;
     fileAttachmentCount: number;
+    attachments: PromptAttachmentState[];
   }> {
     if (ids.length > 10) throw new GatewayError("invalid_request", "At most 10 attachments may be sent with one prompt");
     if (new Set(ids).size !== ids.length) throw new GatewayError("invalid_request", "Prompt attachment ids must be unique");
@@ -421,6 +423,9 @@ export class UploadStore {
         envelope: envelopes.join("\n"),
         photoCount,
         fileAttachmentCount,
+        attachments: metadata.map(({ id, name, mimeType, size }) => ({
+          id: `upload:${id}`, name, mimeType, size,
+        })),
       };
     });
   }

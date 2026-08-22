@@ -138,7 +138,7 @@ struct PendingAttachmentChip: View {
 
     @ViewBuilder
     private var previewBase: some View {
-        if let decodedPreviewImage {
+        if !isImage || decodedPreviewImage != nil {
             Button { showPreview = true } label: {
                 AttachmentThumbnailSurface(
                     image: decodedPreviewImage,
@@ -148,7 +148,7 @@ struct PendingAttachmentChip: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Preview \(attachment.name)")
-            .accessibilityHint(attachment.mimeType.hasPrefix("image/") ? "Opens a photo preview" : "Opens the file preview")
+            .accessibilityHint(isImage ? "Opens a photo preview" : "Opens the file preview")
         } else {
             AttachmentThumbnailSurface(
                 image: nil,
@@ -156,9 +156,7 @@ struct PendingAttachmentChip: View {
                 mimeType: attachment.mimeType
             )
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(attachment.mimeType.hasPrefix("image/")
-                ? "Attached photo \(attachment.name)"
-                : "Attached file \(attachment.name)")
+            .accessibilityLabel("Attached photo \(attachment.name)")
         }
     }
 
@@ -191,16 +189,28 @@ struct PendingAttachmentChip: View {
 
     @ViewBuilder
     private var previewSheet: some View {
-        if let thumbnail = decodedPreviewImage,
+        if isImage, let thumbnail = decodedPreviewImage,
            let fullPreviewData = attachment.fullPreviewData {
             PendingAttachmentImagePreviewSheet(
                 thumbnail: thumbnail,
                 fullPreviewData: fullPreviewData,
                 prepareFullPreview: model.chatMedia.prepareLocalFullPreview
             )
-        } else if let decodedPreviewImage {
+        } else if isImage, let decodedPreviewImage {
             AttachmentImagePreviewSheet(image: decodedPreviewImage, title: attachment.name)
+        } else {
+            AttachmentFilePreviewSheet(
+                name: attachment.name,
+                mimeType: attachment.mimeType,
+                source: attachment.fullPreviewData.map {
+                    .local(id: attachment.id, data: $0)
+                } ?? .unavailable
+            )
         }
+    }
+
+    private var isImage: Bool {
+        attachment.mimeType.lowercased().hasPrefix("image/")
     }
 
     private var decodedPreviewImage: UIImage? {

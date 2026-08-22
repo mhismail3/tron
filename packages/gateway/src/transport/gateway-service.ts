@@ -417,6 +417,7 @@ export class GatewayService {
             attachmentCount: uploadIds.length,
             ...(attachments.photoCount > 0 ? { photoCount: attachments.photoCount } : {}),
             ...(attachments.fileAttachmentCount > 0 ? { fileAttachmentCount: attachments.fileAttachmentCount } : {}),
+            ...(attachments.attachments.length > 0 ? { attachments: attachments.attachments } : {}),
           }));
         });
       case "session.abort":

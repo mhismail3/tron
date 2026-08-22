@@ -9,6 +9,7 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
     let text: String
     let detail: String?
     let isInteractive: Bool
+    let onActivate: (() -> Void)?
     let attachmentContent: AttachmentContent
     let statusContent: StatusContent
 
@@ -17,6 +18,7 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
         text: String,
         detail: String? = nil,
         isInteractive: Bool = false,
+        onActivate: (() -> Void)? = nil,
         @ViewBuilder attachmentContent: () -> AttachmentContent,
         @ViewBuilder statusContent: () -> StatusContent
     ) {
@@ -24,6 +26,7 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
         self.text = text
         self.detail = detail
         self.isInteractive = isInteractive
+        self.onActivate = onActivate
         self.attachmentContent = attachmentContent()
         self.statusContent = statusContent()
     }
@@ -41,6 +44,29 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
             cornerRadius: ChatPromptContainerStyle.cornerRadius,
             style: .continuous
         )
+        VStack(alignment: .leading, spacing: QueuedMessageCardLayout.contentSpacing) {
+            if let onActivate {
+                Button(action: onActivate) { promptContent }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("Opens the queued message editor")
+            } else {
+                promptContent
+            }
+            attachmentContent
+        }
+        .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
+        .padding(.top, QueuedMessageCardLayout.contentSpacing)
+        .padding(.bottom, ChatPromptContainerStyle.queuedMessageBottomPadding)
+        .contentShape(shape)
+        .glassEffect(
+            isInteractive
+                ? .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)).interactive()
+                : .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)),
+            in: shape
+        )
+    }
+
+    private var promptContent: some View {
         VStack(alignment: .leading, spacing: QueuedMessageCardLayout.contentSpacing) {
             HStack(alignment: .center, spacing: 10) {
                 Text(behavior.title)
@@ -74,18 +100,7 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
             if !text.isEmpty {
                 UserPromptText(text: text)
             }
-            attachmentContent
         }
-        .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
-        .padding(.top, QueuedMessageCardLayout.contentSpacing)
-        .padding(.bottom, ChatPromptContainerStyle.queuedMessageBottomPadding)
-        .contentShape(shape)
-        .glassEffect(
-            isInteractive
-                ? .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)).interactive()
-                : .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)),
-            in: shape
-        )
     }
 }
 
@@ -102,7 +117,7 @@ struct ChatPendingPromptRow: View, Equatable {
                 queueCard
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .contain)
             .accessibilityLabel(queueAccessibilityLabel)
         } else {
             HStack(alignment: .top, spacing: 10) {
@@ -122,7 +137,8 @@ struct ChatPendingPromptRow: View, Equatable {
                     let attachmentChips = QueuedMessageAttachmentPresentation.chips(
                         attachmentCount: presentation.attachmentCount,
                         photoCount: presentation.photoCount,
-                        fileAttachmentCount: presentation.fileAttachmentCount
+                        fileAttachmentCount: presentation.fileAttachmentCount,
+                        attachments: presentation.attachments
                     )
                     if !attachmentChips.isEmpty {
                         QueuedMessageAttachmentChipRow(chips: attachmentChips, accent: .tronTextSecondary)
@@ -130,7 +146,7 @@ struct ChatPendingPromptRow: View, Equatable {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .contain)
             .accessibilityLabel(presentation.text.isEmpty ? presentation.statusTitle : "\(presentation.statusTitle): \(presentation.text)")
         }
     }
@@ -139,7 +155,8 @@ struct ChatPendingPromptRow: View, Equatable {
         let chips = QueuedMessageAttachmentPresentation.chips(
             attachmentCount: presentation.attachmentCount,
             photoCount: presentation.photoCount,
-            fileAttachmentCount: presentation.fileAttachmentCount
+            fileAttachmentCount: presentation.fileAttachmentCount,
+            attachments: presentation.attachments
         )
         let attachmentLabel = QueuedMessageAttachmentPresentation.accessibilityLabel(chips: chips)
         return [presentation.statusTitle, presentation.text.isEmpty ? nil : presentation.text, attachmentLabel.isEmpty ? nil : attachmentLabel]
@@ -152,7 +169,8 @@ struct ChatPendingPromptRow: View, Equatable {
         let chips = QueuedMessageAttachmentPresentation.chips(
             attachmentCount: presentation.attachmentCount,
             photoCount: presentation.photoCount,
-            fileAttachmentCount: presentation.fileAttachmentCount
+            fileAttachmentCount: presentation.fileAttachmentCount,
+            attachments: presentation.attachments
         )
         ChatPromptCard(
             behavior: presentation.promptBehavior,
@@ -196,7 +214,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                 )
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .contain)
             .accessibilityLabel(promptAccessibilityLabel)
         } else {
             HStack(alignment: .top, spacing: 10) {
@@ -213,7 +231,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .contain)
             .accessibilityLabel(accessibilityLabel)
         }
     }
@@ -247,13 +265,22 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(attachments) { attachment in
-                        AttachmentThumbnailSurface(
-                            image: attachment.preparedThumbnail.map { UIImage(cgImage: $0.image) },
-                            name: attachment.name,
-                            mimeType: attachment.mimeType
-                        )
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Attachment \(attachment.name)")
+                        if attachment.mimeType.lowercased().hasPrefix("image/") {
+                            AttachmentThumbnailSurface(
+                                image: attachment.preparedThumbnail.map { UIImage(cgImage: $0.image) },
+                                name: attachment.name,
+                                mimeType: attachment.mimeType
+                            )
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Attachment \(attachment.name)")
+                        } else {
+                            TranscriptFileChip(
+                                name: attachment.name,
+                                mimeType: attachment.mimeType,
+                                size: attachment.size,
+                                blobID: "upload:\(attachment.id)"
+                            )
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)

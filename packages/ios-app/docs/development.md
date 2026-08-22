@@ -381,9 +381,14 @@ Phase 6.3 routes transcript blobs through `ChatMediaLoader`; transcript views mu
 ID. Tests own exact 192-pixel oriented downsampling, duplicate single-flight behavior, one shared
 preparation slot, the 32-flight ceiling, 64-item and 4 MiB decoded LRU eviction, transport-level 25 MiB
 response admission, stale-identity and late-publication rejection, uncached one-at-a-time full previews,
-and app-lifetime memory-pressure cleanup. The production row retains its 64-point loading/retry
-surface and opens the existing medium preview immediately from a nonoptional thumbnail-backed item route
-while full resolution loads; a sheet must never be admitted with conditional empty content. Physical pixel and
+and app-lifetime memory-pressure cleanup. Images and files share that single exact preview lease/priority slot;
+file bytes are fetched only after sheet intent and are never cached. The production row retains its 64-point
+loading/retry surface. Photos open the existing medium preview immediately from a nonoptional thumbnail-backed
+item route while full resolution loads. Every file chip opens a nonconditional loading/content/unavailable sheet:
+Markdown uses the immutable document renderer, plain/code text uses native selectable TextKit, Unicode-safe
+rendering is capped at the existing 320,000-byte source bound with explicit omission, and PDFKit provides native
+multi-page scrolling up to the 512-page safety cap. Live composer files retain exact bytes within the existing
+25 MiB aggregate limit; frozen handoff strips them before queued/canonical settlement. Physical pixel and
 peak-memory calibration remains required.
 
 `ChatViewScrollHarnessTests` mount the actual `ChatView`, `LazyVStack`, composer

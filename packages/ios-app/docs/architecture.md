@@ -760,13 +760,20 @@ and preserve bounded Gateway error envelopes instead of collapsing quota or body
 a generic photo error. Lifecycle replacement and the
 app-lifetime memory-pressure observer advance exact invalidation generations, cancel flights, and clear
 the cache; late fetch or detached-decode completion cannot repopulate it.
-A preview uses one nonoptional item route, opens the historical medium sheet immediately with its captured
-thumbnail, and may replace it with one uncached full image; presentation never depends on optional content
-after the sheet has already been admitted. Full-preview
-ImageIO decode applies orientation and downsamples before publication to at most 4,096 pixels on either axis
-and 64 MiB of decoded rows, preventing compressed dimensions from forcing an unbounded eager allocation.
-Each sheet owns an exact lease, and dismissal cancels the underlying flight only after its final lease retires,
-so full-preview lifetime remains sheet-owned. One gateway runtime is the sole mutable
+A preview uses one nonoptional item route. Photos open the historical medium sheet immediately with their captured
+thumbnail and may replace it with one uncached full image. Every non-image file chip opens a sheet even when its
+thumbnail or blob is unavailable: canonical and queued files acquire their bytes only after that user intent. Newer
+Gateway snapshots add at most ten metadata-only queued/pending upload descriptors so exact remote identities survive
+queue projection and replacement; older count-only snapshots still open the explicit unavailable state. A live composer
+attachment retains its exact bytes only until its frozen handoff strips them. Image and file sheets
+share the same single exact preview flight and priority work slot; full payloads never enter a second cache.
+Markdown is parsed off-main into the established immutable document, plain/code text uses the native selectable
+read-only view, and a Unicode-safe 320,000-byte prefix explicitly marks omission. PDFKit validates off-main and
+presents native vertically scrolling pages, capped at 512 pages. Unsupported, invalid, missing, or pathological files
+mount a concise unavailable state rather than conditional empty sheet content. Full-preview ImageIO decode applies
+orientation and downsamples before publication to at most 4,096 pixels on either axis and 64 MiB of decoded rows,
+preventing compressed dimensions from forcing an unbounded eager allocation. Each sheet owns an exact lease, and
+dismissal cancels the underlying flight only after its final lease retires, so full-preview lifetime remains sheet-owned. One gateway runtime is the sole mutable
 owner of a canonical session; terminal and mobile chat clients must attach to
 that owner rather than opening the same JSONL in separate Pi processes. Its
 historical context ring projects the

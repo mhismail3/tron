@@ -393,6 +393,13 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
         let followUp: [String]
     }
 
+    struct PromptAttachment: Codable, Hashable, Identifiable, Sendable {
+        let id: String
+        let name: String
+        let mimeType: String
+        let size: Int
+    }
+
     struct QueuedMessage: Codable, Hashable, Identifiable, Sendable {
         enum Behavior: String, Codable, Hashable, Sendable {
             case steer, followUp
@@ -406,6 +413,8 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
         /// Optional typed counts from newer Gateways.
         var photoCount: Int? = nil
         var fileAttachmentCount: Int? = nil
+        /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
+        var attachments: [PromptAttachment]? = nil
     }
 
     struct PendingPrompt: Codable, Hashable, Identifiable, Sendable {
@@ -416,6 +425,8 @@ struct SessionSnapshot: Codable, Hashable, Sendable {
         let attachmentCount: Int
         var photoCount: Int? = nil
         var fileAttachmentCount: Int? = nil
+        /// Optional exact descriptors from newer Gateways; payload bytes remain remote.
+        var attachments: [PromptAttachment]? = nil
     }
 
     var displayedQueuedMessages: [QueuedMessage] {

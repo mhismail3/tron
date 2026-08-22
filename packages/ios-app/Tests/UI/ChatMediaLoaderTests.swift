@@ -406,6 +406,138 @@ struct ChatMediaLoaderTests {
         #expect(!loader.metrics().hasFullPreviewFlight)
     }
 
+    @Test("file preview leases share the exact uncached preview flight")
+    func filePreviewLeaseCancellation() async throws {
+        let gate = MediaFetchGate(payload: .init(
+            data: Data("# Shared preview".utf8),
+            mimeType: "text/markdown"
+        ))
+        let loader = ChatMediaLoader(
+            fetch: { identity in try await gate.fetch(identity) },
+            admits: { _ in true }
+        )
+        let identity = mediaIdentity(blobID: "shared-file-preview")
+        let firstLease = UUID(uuidString: "00000000-0000-0000-0000-000000000021")!
+        let secondLease = UUID(uuidString: "00000000-0000-0000-0000-000000000022")!
+        let first = Task { try await loader.filePreviewPayload(for: identity, leaseID: firstLease) }
+        await gate.waitForStarts(1)
+        let second = Task { try await loader.filePreviewPayload(for: identity, leaseID: secondLease) }
+        await loader.hostedWaitForPreviewLeaseCount(2)
+
+        loader.cancelFilePreview(for: identity, leaseID: firstLease)
+        #expect(loader.metrics().hasFullPreviewFlight)
+        await gate.release()
+        await #expect(throws: ChatMediaLoadError.staleIdentity) { try await first.value }
+        let payload = try await second.value
+        #expect(String(data: payload.data, encoding: .utf8) == "# Shared preview")
+        #expect(await gate.startCount == 1)
+        #expect(!loader.metrics().hasFullPreviewFlight)
+    }
+
+    @Test("image and file previews serialize through one replacement flight and work slot")
+    func imageAndFilePreviewOwnership() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_315).generatedImageFixture(
+            format: .png,
+            pixelWidth: 24,
+            pixelHeight: 24,
+            orientation: .up
+        )
+        let image = try #require(UIImage(data: fixture.encodedData))
+        let decodeGate = MediaDecodeGate(image: image)
+        let fileGate = MediaFetchGate(payload: .init(
+            data: Data("serialized file".utf8),
+            mimeType: "text/plain"
+        ))
+        let loader = ChatMediaLoader(
+            fetch: { identity in
+                if identity.blobID == "image-preview" {
+                    return .init(data: fixture.encodedData, mimeType: "image/png")
+                }
+                return try await fileGate.fetch(identity)
+            },
+            fullPreviewDecode: { data in try await decodeGate.decodeFull(data) },
+            admits: { _ in true }
+        )
+        let imageFlight = Task {
+            try await loader.fullPreview(
+                for: mediaIdentity(blobID: "image-preview"),
+                leaseID: UUID()
+            )
+        }
+        await decodeGate.waitForStarts(1)
+        let fileFlight = Task {
+            try await loader.filePreviewPayload(
+                for: mediaIdentity(blobID: "file-preview"),
+                leaseID: UUID()
+            )
+        }
+        await loader.hostedWaitForFilePreviewFlight()
+        #expect(await fileGate.startCount == 0)
+        await decodeGate.release()
+        await fileGate.waitForStarts(1)
+        await fileGate.release()
+        await #expect(throws: CancellationError.self) { try await imageFlight.value }
+        let payload = try await fileFlight.value
+        #expect(String(data: payload.data, encoding: .utf8) == "serialized file")
+        #expect(!loader.metrics().hasFullPreviewFlight)
+    }
+
+    @Test("file preview admission, encoded bounds, and removal share image preview ownership")
+    func filePreviewAdmissionAndRetirement() async throws {
+        var admitted = false
+        let staleCounter = MediaFetchCounter(payload: .init(
+            data: Data("stale".utf8),
+            mimeType: "text/plain"
+        ))
+        let staleLoader = ChatMediaLoader(
+            fetch: { identity in await staleCounter.fetch(identity) },
+            admits: { _ in admitted }
+        )
+        await #expect(throws: ChatMediaLoadError.staleIdentity) {
+            try await staleLoader.filePreviewPayload(
+                for: mediaIdentity(blobID: "stale-file"),
+                leaseID: UUID()
+            )
+        }
+        #expect(await staleCounter.count == 0)
+
+        admitted = true
+        let oversizedLoader = ChatMediaLoader(
+            fetch: { _ in .init(
+                data: Data(count: ChatMediaPolicy.maximumEncodedBytes + 1),
+                mimeType: "text/plain"
+            ) },
+            admits: { _ in true }
+        )
+        await #expect(throws: ChatMediaLoadError.encodedPayloadTooLarge) {
+            try await oversizedLoader.filePreviewPayload(
+                for: mediaIdentity(blobID: "oversized-file"),
+                leaseID: UUID()
+            )
+        }
+
+        let gate = MediaFetchGate(payload: .init(
+            data: Data("retired".utf8),
+            mimeType: "text/plain"
+        ))
+        let loader = ChatMediaLoader(
+            fetch: { identity in try await gate.fetch(identity) },
+            admits: { _ in true }
+        )
+        let flight = Task {
+            try await loader.filePreviewPayload(
+                for: mediaIdentity(blobID: "retired-file"),
+                leaseID: UUID()
+            )
+        }
+        await gate.waitForStarts(1)
+        #expect(loader.metrics().hasFullPreviewFlight)
+        loader.removeAll()
+        #expect(!loader.metrics().hasFullPreviewFlight)
+        await gate.release()
+        await #expect(throws: CancellationError.self) { try await flight.value }
+    }
+
     @Test("full previews are single-flight but never enter the thumbnail cache")
     func fullPreviewLifetime() async throws {
         let fixture = try SessionScenarioBuilder(seed: 6_307).generatedImageFixture(

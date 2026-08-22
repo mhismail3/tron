@@ -83,6 +83,49 @@ describe("session transcript paging", () => {
     expect(rename).toHaveBeenCalledWith("Dashboard rename");
   });
 
+  it("passes bounded upload descriptors into prompt projection without bytes", async () => {
+    const descriptor = {
+      id: "upload:00000000-0000-4000-8000-000000000001",
+      name: "notes.txt", mimeType: "text/plain", size: 4,
+    };
+    const prompt = vi.fn(async () => ({ operationId: "operation" }));
+    const execute = vi.fn(async (
+      _identity: string,
+      _method: string,
+      _commandId: string,
+      operation: () => Promise<unknown>,
+    ) => operation());
+    const service = new GatewayService({
+      sessions: {
+        isSubscribed: () => true,
+        acquire: async () => ({ id: "session", prompt }),
+      },
+      uploads: {
+        materialize: async () => ({
+          envelope: '<attachment name="notes.txt" />',
+          images: [],
+          photoCount: 0,
+          fileAttachmentCount: 1,
+          attachments: [descriptor],
+        }),
+      },
+      receipts: { execute },
+    } as unknown as GatewayServiceDependencies);
+
+    await expect(service.invoke(client, "session.prompt", {
+      sessionId: "session",
+      text: "review",
+      uploadIds: ["upload"],
+      commandId: "00000000-0000-4000-8000-000000000002",
+    })).resolves.toEqual({ operationId: "operation" });
+    expect(prompt).toHaveBeenCalledWith(
+      'review\n\n<attachment name="notes.txt" />',
+      [],
+      undefined,
+      expect.objectContaining({ attachmentCount: 1, attachments: [descriptor] }),
+    );
+  });
+
   it("rejects terminal control until this connection attaches", async () => {
     const write = vi.fn();
     const resize = vi.fn();

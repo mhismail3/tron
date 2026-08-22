@@ -700,7 +700,12 @@ struct TranscriptFileChip: View {
     let blobID: String?
     @State private var thumbnail: UIImage?
     @State private var thumbnailIdentity: ChatMediaIdentity?
-    @State private var showPreview = false
+    @State private var previewRequest: FilePreviewRequest?
+
+    private struct FilePreviewRequest: Identifiable {
+        let id = UUID()
+        let identity: ChatMediaIdentity?
+    }
 
     private var identity: ChatMediaIdentity? {
         blobID.flatMap { model.chatMediaIdentity(blobID: $0) }
@@ -713,19 +718,15 @@ struct TranscriptFileChip: View {
     }
 
     var body: some View {
-        Group {
-            if let currentThumbnail {
-                Button { showPreview = true } label: {
-                    AttachmentThumbnailSurface(image: currentThumbnail, name: name, mimeType: mimeType)
-                }
-                .buttonStyle(.plain)
-                .accessibilityHint("Opens the first-page preview")
-            } else {
-                AttachmentThumbnailSurface(image: nil, name: name, mimeType: mimeType)
-            }
+        Button {
+            previewRequest = FilePreviewRequest(identity: identity)
+        } label: {
+            AttachmentThumbnailSurface(image: currentThumbnail, name: name, mimeType: mimeType)
         }
+        .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("File attachment, \(name), \(detail)")
+        .accessibilityHint("Opens the file preview")
         .task(id: identity) {
             guard let identity,
                   thumbnailIdentity != identity || thumbnail == nil else { return }
@@ -737,11 +738,15 @@ struct TranscriptFileChip: View {
             thumbnail = loaded
             thumbnailIdentity = identity
         }
-        .onChange(of: identity) { _, _ in showPreview = false }
-        .sheet(isPresented: $showPreview) {
-            if let currentThumbnail {
-                AttachmentImagePreviewSheet(image: currentThumbnail, title: name)
-            }
+        .onChange(of: identity) { _, _ in previewRequest = nil }
+        .sheet(item: $previewRequest) { request in
+            AttachmentFilePreviewSheet(
+                name: name,
+                mimeType: mimeType,
+                source: request.identity.map {
+                    .remote(identity: $0, leaseID: request.id)
+                } ?? .unavailable
+            )
         }
     }
 

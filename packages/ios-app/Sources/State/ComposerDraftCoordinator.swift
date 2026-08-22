@@ -13,6 +13,8 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
     let mimeType: String
     let size: Int
     let previewData: Data?
+    /// Exact bytes retained only by the live composer under its 25 MiB aggregate
+    /// attachment bound. Frozen queue/canonical handoffs always strip them.
     let fullPreviewData: Data?
     /// The immutable decoded form of `previewData`, prepared off-main once.
     /// Equality and hashing deliberately use `previewIdentity`, not object identity.
@@ -713,7 +715,7 @@ final class ComposerDraftCoordinator {
             mimeType: mimeType,
             size: data.count,
             previewData: preparedThumbnail?.encodedData,
-            fullPreviewData: mimeType.hasPrefix("image/") && preparedThumbnail != nil ? data : nil,
+            fullPreviewData: data,
             preparedThumbnail: preparedThumbnail
         ))
     }
@@ -809,7 +811,7 @@ final class ComposerDraftCoordinator {
             mimeType: mimeType,
             name: name
         )
-        let fullPreviewData = mimeType.hasPrefix("image/") && preparedThumbnail != nil ? data : nil
+        let fullPreviewData = data
         try require(admission)
         attachmentsByTarget[target, default: []].append(PendingAttachment(
             id: id,

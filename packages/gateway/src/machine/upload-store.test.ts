@@ -26,6 +26,10 @@ describe("UploadStore", () => {
     expect(materialized.images[0]?.mimeType).toBe("image/png");
     expect(materialized.photoCount).toBe(1);
     expect(materialized.fileAttachmentCount).toBe(1);
+    expect(materialized.attachments).toEqual([
+      { id: `upload:${image.id}`, name: "photo.png", mimeType: "image/png", size: 5 },
+      { id: `upload:${document.id}`, name: "notes.txt", mimeType: "text/plain", size: 4 },
+    ]);
     expect(materialized.envelope).toContain("<attachment");
     expect(materialized.envelope).toContain("notes.txt");
     const lease = await store.acquire(document.id);

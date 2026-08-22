@@ -325,7 +325,9 @@ is authoritative. Clients join
 calls, progress, and results by canonical call ID rather than arrival order.
 
 Active message queues are projected with stable per-entry IDs, delivery behavior,
-display text, total attachment count, optional photo/file counts, and a monotonic queue revision.
+display text, total attachment count, optional photo/file counts, optional bounded upload descriptors,
+and a monotonic queue revision. Descriptors contain only upload/blob ID, safe name, MIME type, and size;
+attachment bytes remain in the owned upload store and are fetched only through authenticated blob access.
 For newly admitted steering/follow-up work, the returned prompt operation ID is the queue entry ID;
 clients can therefore settle one optimistic submission without content-based queue guessing.
 A Gateway advertising

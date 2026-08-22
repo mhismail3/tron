@@ -126,8 +126,9 @@ struct ComposerDraftCoordinatorTests {
             #expect(attachments.map(\.id) == ["upload-second", "upload-first"])
             #expect(attachments.map(\.name) == ["second.jpg", "first.bin"])
             #expect(attachments[0].previewData == nil)
-            #expect(attachments[0].fullPreviewData == nil)
+            #expect(attachments[0].fullPreviewData == secondData)
             #expect(attachments[1].previewData == nil)
+            #expect(attachments[1].fullPreviewData == firstData)
         }
     }
 
@@ -165,7 +166,7 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
-    @Test("document file upload stages bytes and retains only a bounded preview")
+    @Test("document file upload stages bytes and retains exact live preview bytes only until handoff")
     func documentFileUpload() async throws {
         try await withTestWatchdog { @MainActor in
             let data = Data("document".utf8)
@@ -200,7 +201,8 @@ struct ComposerDraftCoordinatorTests {
             #expect(attachment.id == "document-id")
             #expect(try #require(attachment.previewData).count <= ComposerAttachmentPreviewPolicy.maximumEncodedBytes)
             #expect(attachment.preparedThumbnail != nil)
-            #expect(attachment.fullPreviewData == nil)
+            #expect(attachment.fullPreviewData == data)
+            #expect(attachment.frozenForHandoff().fullPreviewData == nil)
         }
     }
 

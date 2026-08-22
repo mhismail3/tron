@@ -483,6 +483,14 @@ export interface SessionStats {
   cost: number;
 }
 
+export interface PromptAttachmentState {
+  /** Gateway-owned media identity (`upload:<uuid>` for uploads); content remains out of snapshot JSON. */
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+}
+
 export interface QueuedMessageState {
   id: string;
   behavior: "steer" | "followUp";
@@ -492,6 +500,8 @@ export interface QueuedMessageState {
   /** Optional typed counts added without breaking older clients. */
   photoCount?: number;
   fileAttachmentCount?: number;
+  /** Bounded exact descriptors added without breaking older clients. */
+  attachments?: PromptAttachmentState[];
 }
 
 /** A prompt admitted before its canonical user entry exists, usually while
@@ -506,6 +516,8 @@ export interface PendingPromptState {
   attachmentCount: number;
   photoCount?: number;
   fileAttachmentCount?: number;
+  /** Bounded exact descriptors added without breaking older clients. */
+  attachments?: PromptAttachmentState[];
 }
 
 export interface SessionSnapshot {

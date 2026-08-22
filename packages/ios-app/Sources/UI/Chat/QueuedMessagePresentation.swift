@@ -222,6 +222,17 @@ struct QueuedMessageAttachmentChip: Equatable, Identifiable, Sendable {
 
     let id: String
     let kind: Kind
+    let attachment: SessionSnapshot.PromptAttachment?
+
+    init(
+        id: String,
+        kind: Kind,
+        attachment: SessionSnapshot.PromptAttachment? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.attachment = attachment
+    }
 
     var iconName: String {
         switch kind {
@@ -236,7 +247,8 @@ enum QueuedMessageAttachmentPresentation {
         chips(
             attachmentCount: message.attachmentCount,
             photoCount: message.photoCount,
-            fileAttachmentCount: message.fileAttachmentCount
+            fileAttachmentCount: message.fileAttachmentCount,
+            attachments: message.attachments
         )
     }
 
@@ -246,23 +258,51 @@ enum QueuedMessageAttachmentPresentation {
         // order differs between optimistic and canonical states.
         let photos = attachments.filter { $0.mimeType.hasPrefix("image/") }
         let files = attachments.filter { !$0.mimeType.hasPrefix("image/") }
-        return photos.enumerated().map { index, _ in
-            QueuedMessageAttachmentChip(id: "photo-\(index)", kind: .photo)
-        } + files.enumerated().map { index, _ in
-            QueuedMessageAttachmentChip(id: "file-\(index)", kind: .file)
+        return photos.enumerated().map { index, attachment in
+            QueuedMessageAttachmentChip(
+                id: "photo-\(index)",
+                kind: .photo,
+                attachment: .init(
+                    id: "upload:\(attachment.id)",
+                    name: attachment.name,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size
+                )
+            )
+        } + files.enumerated().map { index, attachment in
+            QueuedMessageAttachmentChip(
+                id: "file-\(index)",
+                kind: .file,
+                attachment: .init(
+                    id: "upload:\(attachment.id)",
+                    name: attachment.name,
+                    mimeType: attachment.mimeType,
+                    size: attachment.size
+                )
+            )
         }
     }
 
     static func chips(
         attachmentCount: Int,
         photoCount: Int?,
-        fileAttachmentCount: Int?
+        fileAttachmentCount: Int?,
+        attachments: [SessionSnapshot.PromptAttachment]? = nil
     ) -> [QueuedMessageAttachmentChip] {
+        if let attachments, attachments.count == attachmentCount {
+            let photos = attachments.filter { $0.mimeType.lowercased().hasPrefix("image/") }
+            let files = attachments.filter { !$0.mimeType.lowercased().hasPrefix("image/") }
+            return photos.enumerated().map { index, attachment in
+                .init(id: "photo-\(index)", kind: .photo, attachment: attachment)
+            } + files.enumerated().map { index, attachment in
+                .init(id: "file-\(index)", kind: .file, attachment: attachment)
+            }
+        }
         let typedCountsAvailable = photoCount != nil || fileAttachmentCount != nil
         let photos = max(0, photoCount ?? 0)
         let files = max(0, fileAttachmentCount ?? (typedCountsAvailable ? 0 : attachmentCount))
-        return (0..<photos).map { .init(id: "photo-\($0)", kind: .photo) }
-            + (0..<files).map { .init(id: "file-\($0)", kind: .file) }
+        return (0..<photos).map { .init(id: "photo-\($0)", kind: .photo, attachment: nil) }
+            + (0..<files).map { .init(id: "file-\($0)", kind: .file, attachment: nil) }
     }
 
     static func accessibilityLabel(for message: SessionSnapshot.QueuedMessage) -> String {
@@ -290,27 +330,66 @@ struct QueuedMessageAttachmentChipRow: View {
     let chips: [QueuedMessageAttachmentChip]
     let accent: Color
 
+    @Environment(AppModel.self) private var model
+    @State private var previewRequest: FilePreviewRequest?
+
+    private struct FilePreviewRequest: Identifiable {
+        let id = UUID()
+        let attachment: SessionSnapshot.PromptAttachment?
+        let identity: ChatMediaIdentity?
+    }
+
     var body: some View {
         ToolChipFlowLayout(spacing: 4) {
             ForEach(chips) { chip in
-                Image(systemName: chip.iconName)
-                    .font(TronTypography.sans(size: 9, weight: .semibold))
-                    .foregroundStyle(accent)
-                    .frame(
-                        width: QueuedMessageCardLayout.attachmentChipSize,
-                        height: QueuedMessageCardLayout.attachmentChipSize
-                    )
-                    .background(
-                        accent.opacity(0.13),
-                        in: RoundedRectangle(
-                            cornerRadius: QueuedMessageCardLayout.attachmentChipCornerRadius,
-                            style: .continuous
+                if chip.kind == .file {
+                    Button {
+                        previewRequest = FilePreviewRequest(
+                            attachment: chip.attachment,
+                            identity: chip.attachment.flatMap {
+                                model.chatMediaIdentity(blobID: $0.id)
+                            }
                         )
-                    )
+                    } label: {
+                        chipSurface(chip)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(chip.attachment.map { "File attachment, \($0.name)" } ?? "File attachment")
+                    .accessibilityHint("Opens the file preview")
+                } else {
+                    chipSurface(chip)
+                        .accessibilityHidden(true)
+                }
             }
         }
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(QueuedMessageAttachmentPresentation.accessibilityLabel(chips: chips))
+        .sheet(item: $previewRequest) { request in
+            AttachmentFilePreviewSheet(
+                name: request.attachment?.name ?? "Attachment",
+                mimeType: request.attachment?.mimeType ?? "application/octet-stream",
+                source: request.identity.map {
+                    .remote(identity: $0, leaseID: request.id)
+                } ?? .unavailable
+            )
+        }
+    }
+
+    private func chipSurface(_ chip: QueuedMessageAttachmentChip) -> some View {
+        Image(systemName: chip.iconName)
+            .font(TronTypography.sans(size: 9, weight: .semibold))
+            .foregroundStyle(accent)
+            .frame(
+                width: QueuedMessageCardLayout.attachmentChipSize,
+                height: QueuedMessageCardLayout.attachmentChipSize
+            )
+            .background(
+                accent.opacity(0.13),
+                in: RoundedRectangle(
+                    cornerRadius: QueuedMessageCardLayout.attachmentChipCornerRadius,
+                    style: .continuous
+                )
+            )
     }
 }
 
@@ -342,10 +421,8 @@ struct QueuedMessageRow: View {
         // Queue cards use the same single bounded layout as prompt bubbles;
         // switching between intrinsic and wrapped ViewThatFits branches after
         // a large queued prompt arrives causes a visible container flash.
-        interactiveCard(
-            card.fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
-        )
+        card.fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)
         .contextMenu {
             if isManageable && !isMutating {
                 if canMoveEarlier {
@@ -361,6 +438,7 @@ struct QueuedMessageRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .contain)
+        .accessibilityHint(isManageable ? "" : readOnlyExplanation)
     }
 
     private var card: some View {
@@ -370,6 +448,7 @@ struct QueuedMessageRow: View {
             text: message.text,
             detail: "\(deliveryDetail) · \(position) of \(total)",
             isInteractive: isManageable,
+            onActivate: isManageable && !isMutating ? onEdit : nil,
             attachmentContent: {
                 if !attachmentChips.isEmpty {
                     QueuedMessageAttachmentChipRow(chips: attachmentChips, accent: accent)
@@ -377,19 +456,6 @@ struct QueuedMessageRow: View {
             },
             statusContent: { trailingStatus }
         )
-    }
-
-    @ViewBuilder
-    private func interactiveCard<Content: View>(_ content: Content) -> some View {
-        if isManageable {
-            Button(action: onEdit) { content }
-                .buttonStyle(.plain)
-                .disabled(isMutating)
-                .accessibilityHint("Opens the queued message editor")
-        } else {
-            content
-                .accessibilityHint(readOnlyExplanation)
-        }
     }
 
     @ViewBuilder

@@ -142,12 +142,23 @@ final class ChatMediaLoader {
         let task: Task<(UIImage, Int), Error>
     }
 
+    private enum PreviewKind: Hashable, Sendable {
+        case image
+        case file
+    }
+
+    private enum PreviewValue: Sendable {
+        case image(UIImage)
+        case file(ChatMediaPayload)
+    }
+
     private struct PreviewFlight {
         let identity: ChatMediaIdentity
+        let kind: PreviewKind
         let token: UInt64
         let invalidationGeneration: UInt64
         let previewGeneration: UInt64
-        let task: Task<UIImage, Error>
+        let task: Task<PreviewValue, Error>
         var leases: Set<UUID>
     }
 
@@ -169,6 +180,7 @@ final class ChatMediaLoader {
     #if HOSTED_TEST
     private var hostedThumbnailFlightWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
     private var hostedPreviewLeaseWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    private var hostedFilePreviewWaiters: [CheckedContinuation<Void, Never>] = []
     #endif
 
     init(
@@ -324,14 +336,51 @@ final class ChatMediaLoader {
         }
     }
 
-    /// Full previews are never inserted into the thumbnail LRU. Only one exact
-    /// profile/lifecycle/connection/blob preview flight may exist at a time.
+    /// Preview payloads are never inserted into the thumbnail LRU. Images and
+    /// files share one exact profile/lifecycle/blob flight and one priority work
+    /// slot, so opening a document cannot create a parallel full-payload cache.
     func fullPreview(
         for identity: ChatMediaIdentity,
         leaseID: UUID
     ) async throws -> UIImage {
+        guard case .image(let image) = try await previewValue(
+            for: identity,
+            kind: .image,
+            leaseID: leaseID
+        ) else { throw ChatMediaLoadError.invalidImage }
+        return image
+    }
+
+    func filePreviewPayload(
+        for identity: ChatMediaIdentity,
+        leaseID: UUID
+    ) async throws -> ChatMediaPayload {
+        guard case .file(let payload) = try await previewValue(
+            for: identity,
+            kind: .file,
+            leaseID: leaseID
+        ) else { throw ChatMediaLoadError.invalidImage }
+        return payload
+    }
+
+    func cancelFullPreview(for identity: ChatMediaIdentity, leaseID: UUID) {
+        cancelPreview(for: identity, kind: .image, leaseID: leaseID)
+    }
+
+    func cancelFilePreview(for identity: ChatMediaIdentity, leaseID: UUID) {
+        cancelPreview(for: identity, kind: .file, leaseID: leaseID)
+    }
+
+    private func previewValue(
+        for identity: ChatMediaIdentity,
+        kind: PreviewKind,
+        leaseID: UUID
+    ) async throws -> PreviewValue {
+        guard admits(identity) else { throw ChatMediaLoadError.staleIdentity }
         let flight: PreviewFlight
-        if var current = previewFlight, current.identity == identity {
+        if var current = previewFlight,
+           current.identity == identity,
+           current.kind == kind {
             current.leases.insert(leaseID)
             previewFlight = current
             hostedNotifyMediaCounts()
@@ -346,17 +395,23 @@ final class ChatMediaLoader {
             let fetch = self.fetch
             let fullPreviewDecode = self.fullPreviewDecode
             let workLimiter = self.workLimiter
-            let task = Task {
+            let task = Task<PreviewValue, Error> {
                 try await workLimiter.run(priority: true) {
                     let payload = try await fetch(identity)
                     guard ChatMediaPolicy.admitsEncodedByteCount(payload.data.count) else {
                         throw ChatMediaLoadError.encodedPayloadTooLarge
                     }
-                    return try await fullPreviewDecode(payload.data)
+                    switch kind {
+                    case .image:
+                        return .image(try await fullPreviewDecode(payload.data))
+                    case .file:
+                        return .file(payload)
+                    }
                 }
             }
             flight = PreviewFlight(
                 identity: identity,
+                kind: kind,
                 token: token,
                 invalidationGeneration: invalidationGeneration,
                 previewGeneration: previewGeneration,
@@ -368,7 +423,7 @@ final class ChatMediaLoader {
         }
 
         defer { releasePreviewLease(token: flight.token, leaseID: leaseID) }
-        let image = try await flight.task.value
+        let value = try await flight.task.value
         guard !Task.isCancelled else { throw CancellationError() }
         guard flight.invalidationGeneration == invalidationGeneration,
               flight.previewGeneration == previewGeneration,
@@ -377,12 +432,17 @@ final class ChatMediaLoader {
               previewFlight?.leases.contains(leaseID) == true else {
             throw ChatMediaLoadError.staleIdentity
         }
-        return image
+        return value
     }
 
-    func cancelFullPreview(for identity: ChatMediaIdentity, leaseID: UUID) {
+    private func cancelPreview(
+        for identity: ChatMediaIdentity,
+        kind: PreviewKind,
+        leaseID: UUID
+    ) {
         guard var flight = previewFlight,
               flight.identity == identity,
+              flight.kind == kind,
               flight.leases.remove(leaseID) != nil else { return }
         if flight.leases.isEmpty {
             previewGeneration &+= 1
@@ -483,6 +543,11 @@ final class ChatMediaLoader {
         if (previewFlight?.leases.count ?? 0) >= count { return }
         await withCheckedContinuation { hostedPreviewLeaseWaiters.append((count, $0)) }
     }
+
+    func hostedWaitForFilePreviewFlight() async {
+        if previewFlight?.kind == .file { return }
+        await withCheckedContinuation { hostedFilePreviewWaiters.append($0) }
+    }
     #endif
 
     private func hostedNotifyMediaCounts() {
@@ -494,6 +559,11 @@ final class ChatMediaLoader {
         let readyPreview = hostedPreviewLeaseWaiters.filter { previewCount >= $0.0 }
         hostedPreviewLeaseWaiters.removeAll { previewCount >= $0.0 }
         readyPreview.forEach { $0.1.resume() }
+        if previewFlight?.kind == .file {
+            let readyFile = hostedFilePreviewWaiters
+            hostedFilePreviewWaiters.removeAll()
+            readyFile.forEach { $0.resume() }
+        }
         #endif
     }
 

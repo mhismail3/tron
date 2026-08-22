@@ -792,6 +792,7 @@ struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendabl
     let attachmentCount: Int
     let photoCount: Int?
     let fileAttachmentCount: Int?
+    var attachments: [SessionSnapshot.PromptAttachment]? = nil
     let isCompacting: Bool
 
     init(snapshot: SessionSnapshot.PendingPrompt, isCompacting: Bool) {
@@ -802,6 +803,7 @@ struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendabl
         attachmentCount = snapshot.attachmentCount
         photoCount = snapshot.photoCount
         fileAttachmentCount = snapshot.fileAttachmentCount
+        attachments = snapshot.attachments
         self.isCompacting = isCompacting
     }
 
@@ -871,7 +873,8 @@ enum ChatPendingCanonicalSuppressionPolicy {
                 text: pending.text,
                 attachmentCount: pending.attachmentCount,
                 photoCount: pending.photoCount,
-                fileAttachmentCount: pending.fileAttachmentCount
+                fileAttachmentCount: pending.fileAttachmentCount,
+                attachments: pending.attachments
             ),
             in: transcript
         )

@@ -82,6 +82,7 @@ type PendingManualCompaction = {
 };
 
 const MAXIMUM_QUEUED_MESSAGES = 32;
+const MAXIMUM_PROMPT_ATTACHMENTS = 10;
 const MAXIMUM_QUEUED_MESSAGE_BYTES = 64 * 1_024;
 const MAXIMUM_PENDING_PROMPT_BYTES = MAXIMUM_QUEUED_MESSAGE_BYTES;
 const MAXIMUM_QUEUED_TOTAL_BYTES = 256 * 1_024;
@@ -1868,6 +1869,7 @@ export class RuntimeSlot {
           attachmentCount: admission?.attachmentCount ?? 0,
           ...(admission?.photoCount === undefined ? {} : { photoCount: admission.photoCount }),
           ...(admission?.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: admission.fileAttachmentCount }),
+          ...(admission?.attachments === undefined ? {} : { attachments: admission.attachments }),
           runtimeText,
           attachmentEnvelope: admission?.attachmentEnvelope ?? "",
           images: admission?.images ?? [],
@@ -1888,7 +1890,8 @@ export class RuntimeSlot {
         || item.runtimeText !== next.runtimeText
         || item.attachmentCount !== next.attachmentCount
         || item.photoCount !== next.photoCount
-        || item.fileAttachmentCount !== next.fileAttachmentCount;
+        || item.fileAttachmentCount !== next.fileAttachmentCount
+        || JSON.stringify(item.attachments) !== JSON.stringify(next.attachments);
     });
     this.queuedMessages = reconciled;
     if (changed) this.queueRevision += 1;
@@ -1896,13 +1899,16 @@ export class RuntimeSlot {
 
   private projectedQueue(): QueuedMessageState[] {
     this.reconcileQueuedMessages();
-    return this.queuedMessages.map(({ id, behavior, text, attachmentCount, photoCount, fileAttachmentCount }) => ({
+    return this.queuedMessages.map(({
+      id, behavior, text, attachmentCount, photoCount, fileAttachmentCount, attachments,
+    }) => ({
       id,
       behavior,
       text,
       attachmentCount,
       ...(photoCount === undefined ? {} : { photoCount }),
       ...(fileAttachmentCount === undefined ? {} : { fileAttachmentCount }),
+      ...(attachments === undefined ? {} : { attachments }),
     }));
   }
 
@@ -2120,12 +2126,18 @@ export class RuntimeSlot {
       attachmentCount: number;
       photoCount?: number;
       fileAttachmentCount?: number;
+      attachments?: QueuedMessageState["attachments"];
     },
   ): Promise<{ operationId: string }> {
     return this.lane.run(async () => {
       this.assertUsable();
       if (this.lifecycle.isDraining) throw new GatewayError("busy", "Session is draining for an administrative restart", true);
       const session = this.runtime.session;
+      if (queueDisplay?.attachments !== undefined
+        && (queueDisplay.attachments.length > MAXIMUM_PROMPT_ATTACHMENTS
+          || queueDisplay.attachments.length !== queueDisplay.attachmentCount)) {
+        throw new GatewayError("invalid_request", "Prompt attachment descriptors do not match the bounded attachment count");
+      }
       const extensionCommandName = text.startsWith("/") ? text.slice(1).split(/\s/u, 1)[0] : undefined;
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
@@ -2151,6 +2163,7 @@ export class RuntimeSlot {
           ...(display.fileAttachmentCount === undefined
             ? {}
             : { fileAttachmentCount: display.fileAttachmentCount }),
+          ...(display.attachments === undefined ? {} : { attachments: display.attachments }),
           attachmentEnvelope: display.attachmentEnvelope, images,
         };
       }
@@ -2183,6 +2196,7 @@ export class RuntimeSlot {
                 fileAttachmentCount: queueDisplay?.fileAttachmentCount
                   ?? Math.max(0, (queueDisplay?.attachmentCount ?? images.length) - (queueDisplay?.photoCount ?? images.length)),
               }),
+          ...(queueDisplay?.attachments === undefined ? {} : { attachments: queueDisplay.attachments }),
         };
         this.revision += 1;
         // Publish before entering Pi preflight. Automatic compaction can begin

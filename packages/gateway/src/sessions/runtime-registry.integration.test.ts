@@ -1786,12 +1786,24 @@ export default function (pi) {
 
     vi.useFakeTimers();
     try {
-      const prompting = slot.prompt("delayed preflight");
+      const attachment = {
+        id: "upload:00000000-0000-4000-8000-000000000001",
+        name: "notes.txt", mimeType: "text/plain", size: 4,
+      };
+      const prompting = slot.prompt("delayed preflight", [], undefined, {
+        text: "delayed preflight",
+        attachmentEnvelope: '<attachment name="notes.txt" />',
+        attachmentCount: 1,
+        photoCount: 0,
+        fileAttachmentCount: 1,
+        attachments: [attachment],
+      });
       await started;
       expect(slot.snapshot().pendingPrompt).toMatchObject({
         id: expect.any(String),
         text: "delayed preflight",
-        attachmentCount: 0,
+        attachmentCount: 1,
+        attachments: [attachment],
       });
       await vi.advanceTimersByTimeAsync(6_000);
       await expect(prompting).resolves.toMatchObject({ operationId: expect.any(String) });
@@ -1911,10 +1923,27 @@ export default function (pi) {
     await slot.prompt("start");
     await waitUntil(() => slot.isBusy);
 
+    const oversizedDescriptors = Array.from({ length: 11 }, (_, index) => ({
+      id: `upload-${index}`, name: `file-${index}.txt`, mimeType: "text/plain", size: 1,
+    }));
+    await expect(slot.prompt("invalid", [], "steer", {
+      text: "invalid",
+      attachmentEnvelope: "",
+      attachmentCount: oversizedDescriptors.length,
+      attachments: oversizedDescriptors,
+    })).rejects.toMatchObject({ code: "invalid_request" });
+
+    const attachment = {
+      id: "upload:00000000-0000-4000-8000-000000000001",
+      name: "notes.txt", mimeType: "text/plain", size: 4,
+    };
     await slot.prompt("first steer", [], "steer", {
       text: "first steer",
-      attachmentEnvelope: "",
-      attachmentCount: 0,
+      attachmentEnvelope: '<attachment name="notes.txt" />',
+      attachmentCount: 1,
+      photoCount: 0,
+      fileAttachmentCount: 1,
+      attachments: [attachment],
     });
     await slot.prompt("first steer", [], "steer", {
       text: "first steer",
@@ -1931,6 +1960,7 @@ export default function (pi) {
     expect(queued.queuedItems?.map((item) => item.behavior)).toEqual(["steer", "steer", "followUp"]);
     expect(queued.queuedItems?.map((item) => item.text)).toEqual(["first steer", "first steer", "later follow-up"]);
     expect(new Set(queued.queuedItems?.map((item) => item.id)).size).toBe(3);
+    expect(queued.queuedItems?.[0]?.attachments).toEqual([attachment]);
 
     const [first, duplicate, followUp] = queued.queuedItems!;
     const replaced = await slot.replaceQueue(queued.queueRevision!, [
@@ -1943,6 +1973,7 @@ export default function (pi) {
       { id: followUp!.id, behavior: "steer", text: "edited and earlier" },
       { id: first!.id, behavior: "followUp", text: "first steer" },
     ]);
+    expect(replaced.items[2]?.attachments).toEqual([attachment]);
     await expect(slot.replaceQueue(queued.queueRevision!, [])).rejects.toMatchObject({ code: "conflict" });
 
     const removed = await slot.replaceQueue(replaced.queueRevision, [replaced.items[1]!]);
