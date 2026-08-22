@@ -17,9 +17,11 @@
 typedef struct {
     char channel[MAX_COMPONENT_BYTES];
     char version[MAX_COMPONENT_BYTES];
+    char gatewayVersion[MAX_COMPONENT_BYTES];
     char fingerprint[65];
     char sourceRevision[256];
     char runtimeEpoch[MAX_COMPONENT_BYTES];
+    char nodeVersion[MAX_COMPONENT_BYTES];
 } PayloadIdentity;
 
 static int executable_path(char *output, size_t capacity) {
@@ -97,6 +99,52 @@ static int json_key_count(const char *json, const char *key) {
     return count;
 }
 
+static int json_manifest_exact(const char *json) {
+    const char *keys[] = {"schema", "kind", "gatewayVersion", "nodeVersion", "sourceRevision", "runtimeEpoch", "channel", "version", "payloadFingerprint", "dependencyTreeCoverage"};
+    int seen[10] = {0};
+    const char *cursor = skip_space(json);
+    if (*cursor++ != '{') return -1;
+    for (;;) {
+        cursor = skip_space(cursor);
+        if (*cursor == '}') {
+            cursor = skip_space(cursor + 1);
+            if (*cursor != '\0') return -1;
+            for (size_t index = 0; index < 10; ++index) if (!seen[index]) return -1;
+            return 0;
+        }
+        if (*cursor++ != '"') return -1;
+        const char *start = cursor;
+        while (*cursor != '\0' && *cursor != '"') {
+            if (*cursor == '\\' || (unsigned char)*cursor < 0x20) return -1;
+            cursor++;
+        }
+        if (*cursor++ != '"') return -1;
+        size_t length = (size_t)(cursor - start - 1);
+        int found = -1;
+        for (size_t index = 0; index < 10; ++index) {
+            if (strlen(keys[index]) == length && strncmp(start, keys[index], length) == 0) { found = (int)index; break; }
+        }
+        if (found < 0 || seen[found]++) return -1;
+        cursor = skip_space(cursor);
+        if (*cursor++ != ':') return -1;
+        cursor = skip_space(cursor);
+        if (found == 0) {
+            if (*cursor++ != '1' || (*cursor >= '0' && *cursor <= '9')) return -1;
+        } else {
+            if (*cursor++ != '"') return -1;
+            while (*cursor != '\0' && *cursor != '"') {
+                if (*cursor == '\\' || (unsigned char)*cursor < 0x20) return -1;
+                cursor++;
+            }
+            if (*cursor++ != '"') return -1;
+        }
+        cursor = skip_space(cursor);
+        if (*cursor == ',') { cursor++; continue; }
+        if (*cursor == '}') continue;
+        return -1;
+    }
+}
+
 static int json_schema_one(const char *json) {
     const char *cursor = strstr(json, "\"schema\"");
     if (cursor == NULL) return -1;
@@ -116,6 +164,25 @@ static int valid_component(const char *value, size_t maxLength) {
               (character >= '0' && character <= '9') || character == '.' || character == '-' || character == '_')) {
             return 0;
         }
+    }
+    return 1;
+}
+
+static int valid_revision(const char *value) {
+    if (strlen(value) != 40) return 0;
+    for (size_t index = 0; index < 40; ++index) {
+        char character = value[index];
+        if (!((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f'))) return 0;
+    }
+    return 1;
+}
+
+static int valid_uuid(const char *value) {
+    if (strlen(value) != 36) return 0;
+    for (size_t index = 0; index < 36; ++index) {
+        if (index == 8 || index == 13 || index == 18 || index == 23) { if (value[index] != '-') return 0; continue; }
+        char character = value[index];
+        if (!((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f'))) return 0;
     }
     return 1;
 }
@@ -315,17 +382,20 @@ static int read_payload_manifest(const char *root, PayloadIdentity *identity) {
     char path[PATH_MAX];
     char json[MAX_MANIFEST_BYTES + 1];
     if (snprintf(path, sizeof(path), "%s/manifest.json", root) >= (int)sizeof(path) ||
-        bounded_file(path, json, sizeof(json)) != 0 || json_schema_one(json) != 0) return -1;
-    const char *keys[] = {"schema", "kind", "gatewayVersion", "nodeVersion", "sourceRevision", "runtimeEpoch", "channel", "version", "payloadFingerprint"};
-    for (size_t index = 0; index < sizeof(keys) / sizeof(keys[0]); ++index) {
-        if (json_key_count(json, keys[index]) != 1) return -1;
-    }
-    char kind[64], gatewayVersion[128], nodeVersion[128];
+        bounded_file(path, json, sizeof(json)) != 0 || json_manifest_exact(json) != 0) return -1;
+    char kind[64], gatewayVersion[128], nodeVersion[128], coverage[128];
     if (json_string(json, "kind", kind, sizeof(kind)) != 0 || strcmp(kind, "tron-gateway-payload") != 0 ||
-        json_string(json, "gatewayVersion", gatewayVersion, sizeof(gatewayVersion)) != 0 || gatewayVersion[0] == '\0' ||
-        json_string(json, "nodeVersion", nodeVersion, sizeof(nodeVersion)) != 0 || nodeVersion[0] == '\0' ||
-        json_string(json, "sourceRevision", identity->sourceRevision, sizeof(identity->sourceRevision)) != 0 || identity->sourceRevision[0] == '\0' ||
-        json_string(json, "runtimeEpoch", identity->runtimeEpoch, sizeof(identity->runtimeEpoch)) != 0 || !valid_component(identity->runtimeEpoch, MAX_COMPONENT_BYTES - 1) ||
+        json_string(json, "gatewayVersion", gatewayVersion, sizeof(gatewayVersion)) != 0 ||
+        !valid_component(gatewayVersion, MAX_COMPONENT_BYTES - 1) ||
+        snprintf(identity->gatewayVersion, sizeof(identity->gatewayVersion), "%s", gatewayVersion) >= (int)sizeof(identity->gatewayVersion) ||
+        json_string(json, "dependencyTreeCoverage", coverage, sizeof(coverage)) != 0 ||
+        strcmp(coverage, "app/** and runtime/** regular files") != 0 ||
+        json_string(json, "nodeVersion", nodeVersion, sizeof(nodeVersion)) != 0 ||
+        !valid_component(nodeVersion, MAX_COMPONENT_BYTES - 1) ||
+        snprintf(identity->nodeVersion, sizeof(identity->nodeVersion), "%s", nodeVersion) >= (int)sizeof(identity->nodeVersion) ||
+        json_string(json, "sourceRevision", identity->sourceRevision, sizeof(identity->sourceRevision)) != 0 ||
+        !valid_revision(identity->sourceRevision) ||
+        json_string(json, "runtimeEpoch", identity->runtimeEpoch, sizeof(identity->runtimeEpoch)) != 0 || !valid_uuid(identity->runtimeEpoch) ||
         json_string(json, "channel", identity->channel, sizeof(identity->channel)) != 0 ||
         json_string(json, "version", identity->version, sizeof(identity->version)) != 0 ||
         json_string(json, "payloadFingerprint", identity->fingerprint, sizeof(identity->fingerprint)) != 0 ||
@@ -554,6 +624,21 @@ static int external_payload(const char *channelRoot, const char *channel, char *
 }
 
 int main(int argc, char **argv) {
+    // Build verification compiles this source afresh and uses this mode rather
+    // than trusting the staged helper. It validates the bounded manifest,
+    // immutable payload tree, required entries, and canonical fingerprint.
+    if (argc == 6 && strcmp(argv[1], "--verify-payload") == 0) {
+        PayloadIdentity identity;
+        char node[PATH_MAX], entrypoint[PATH_MAX], helper[PATH_MAX];
+        if (validate_payload(argv[2], "stable", NULL, NULL, node, entrypoint, helper, &identity) != 0 ||
+            strcmp(identity.nodeVersion, argv[3]) != 0 || strcmp(identity.gatewayVersion, argv[4]) != 0 ||
+            strcmp(identity.version, argv[4]) != 0 || strcmp(identity.sourceRevision, argv[5]) != 0) {
+            fputs("Tron Gateway payload verification failed.\n", stderr);
+            return 78;
+        }
+        return 0;
+    }
+
     // Build and verification tooling may ask the already-built trusted helper
     // to hash an arbitrary payload. This avoids the process-per-file shell
     // implementation on large production dependency trees.

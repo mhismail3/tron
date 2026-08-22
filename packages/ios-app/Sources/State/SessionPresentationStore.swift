@@ -591,7 +591,7 @@ final class SessionPresentationStore {
                       currentTarget == leasedTarget,
                       self.isAuthoritative,
                       self.installedSubscriptionToken(for: sessionID) == subscriptionToken,
-                      var installed = self.snapshot else {
+                      let installed = self.snapshot else {
                     updateTranscriptLoadState(.idle, for: loadTarget)
                     return .unavailable
                 }
@@ -760,7 +760,7 @@ final class SessionPresentationStore {
 
     func closeSubscriptionIfInstalled(sessionID: String) async {
         guard subscribedSessionID == sessionID else { return }
-        await closeCurrentSubscription()
+        _ = await closeCurrentSubscription()
     }
 
     func remove(sessionID: String) {

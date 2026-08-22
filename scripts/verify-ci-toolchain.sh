@@ -7,9 +7,23 @@ source "$ROOT/config/ci-toolchain.env"
 NODE_VERSION_FILE="$ROOT/.node-version"
 [[ -f "$NODE_VERSION_FILE" ]] || { echo "missing canonical Node version file: $NODE_VERSION_FILE" >&2; exit 1; }
 TRON_NODE_VERSION="$(<"$NODE_VERSION_FILE")"
+CHECKOUT_PIN='11d5960a326750d5838078e36cf38b85af677262'
+SETUP_NODE_PIN='49933ea5288caeca8642d1e84afbd3f7d6820020'
 node_version_lines="$(awk 'END { print NR }' "$NODE_VERSION_FILE")"
 [[ "$node_version_lines" == 1 && "$TRON_NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
   || { echo "canonical Node version must be one strict x.y.z line (found $TRON_NODE_VERSION)" >&2; exit 1; }
+workflow_action_count() {
+  local action="$1" pin="$2" expected actual
+  expected="$(grep -RhEc "uses:[[:space:]]*actions/${action}@${pin}[[:space:]]+# v4[[:space:]]*$" "$ROOT/.github/workflows" 2>/dev/null | awk '{ total += $1 } END { print total + 0 }')"
+  actual="$(grep -RhEc "uses:[[:space:]]*actions/${action}@" "$ROOT/.github/workflows" 2>/dev/null | awk '{ total += $1 } END { print total + 0 }')"
+  [[ "$expected" == "$actual" && "$actual" != 0 ]] || {
+    echo "CI actions/${action} uses must be pinned to ${pin} with a trailing v4 comment" >&2
+    return 1
+  }
+}
+workflow_action_count checkout "$CHECKOUT_PIN"
+workflow_action_count setup-node "$SETUP_NODE_PIN"
+
 for tool in "$@"; do
   case "$tool" in
     node)

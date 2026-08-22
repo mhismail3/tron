@@ -3,6 +3,9 @@
 
 set -euo pipefail
 
+NODE_ARM64_SHA256="913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
+NODE_X64_SHA256="bf0e0ff20d4e5a16436d1ec372e47161e52be8e487db8070ae3f06b01efbba0c"
+
 usage() {
     echo "Usage: package-dmg.sh --app PATH --output PATH --volume-name NAME --layout structural|release"
 }
@@ -52,7 +55,7 @@ verify_app_bundle() {
     local required_file
     local required_directory
     local manifest="$root/$gateway_root/manifest.json"
-    local expected_fingerprint actual_fingerprint runtime expected_arch actual_arch entitlements version_output helper_archs
+    local expected_fingerprint actual_fingerprint runtime expected_arch actual_arch entitlements helper_archs node_version
     local required_files=(
         "$helper"
         "$launch_agent"
@@ -87,6 +90,9 @@ verify_app_bundle() {
         || die "Gateway manifest kind is invalid"
     [[ "$(plutil -extract channel raw -o - "$manifest" 2>/dev/null || true)" == "stable" ]] \
         || die "Gateway manifest channel is not stable"
+    node_version="$(cat "$(cd "$(dirname "$0")/../../.." && pwd -P)/.node-version" 2>/dev/null || true)"
+    [[ "$(plutil -extract nodeVersion raw -o - "$manifest" 2>/dev/null || true)" == "$node_version" ]] \
+        || die "Gateway manifest Node version is not canonical"
     actual_fingerprint="$("$root/$helper" --fingerprint "$root/$gateway_root" 2>/dev/null || true)"
     [[ "$actual_fingerprint" == "$expected_fingerprint" ]] \
         || die "Gateway payload fingerprint does not match its authoritative manifest"
@@ -98,6 +104,9 @@ verify_app_bundle() {
             runtime="$root/$gateway_root/runtime/node-x64"
         fi
         [ -x "$runtime" ] || die "Node $expected_arch runtime is not executable"
+        if [[ "$expected_arch" == arm64 ]]; then expected_sha="$NODE_ARM64_SHA256"; else expected_sha="$NODE_X64_SHA256"; fi
+        [[ "$(shasum -a 256 "$runtime" | awk '{print $1}')" == "$expected_sha" ]] \
+            || die "Node $expected_arch runtime checksum is not canonical"
         codesign --verify --strict "$runtime" >/dev/null 2>&1 \
             || die "Node $expected_arch runtime signature is invalid"
         entitlements="$(codesign -d --entitlements :- "$runtime" 2>/dev/null || true)"
@@ -107,9 +116,6 @@ verify_app_bundle() {
         actual_arch="$(lipo -archs "$runtime" 2>/dev/null || true)"
         [[ "$actual_arch" == "$expected_arch" ]] \
             || die "Node runtime architecture mismatch: expected $expected_arch, got $actual_arch"
-        version_output="$("$runtime" --version 2>/dev/null || true)"
-        [[ "$version_output" == v* ]] \
-            || die "Node $expected_arch runtime failed --version execution"
     done
 }
 

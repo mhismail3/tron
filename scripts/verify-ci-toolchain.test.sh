@@ -25,6 +25,26 @@ printf '23.1.4\n' > "$TMP/.node-version"
   FAKE_NODE_VERSION=23.1.4 PATH="$TMP:$PATH" scripts/verify-ci-toolchain.sh node
 )
 
+for mutable in checkout setup-node; do
+  cp "$TMP/.github/workflows/ci.yml" "$TMP/.github/workflows/mutable.yml"
+  if [[ "$mutable" == checkout ]]; then
+    sed 's|actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4|actions/checkout@v4|'  \
+      "$TMP/.github/workflows/mutable.yml" > "$TMP/.github/workflows/mutable.tmp"
+  else
+    sed 's|actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4|actions/setup-node@v4|'  \
+      "$TMP/.github/workflows/mutable.yml" > "$TMP/.github/workflows/mutable.tmp"
+  fi
+  mv "$TMP/.github/workflows/mutable.tmp" "$TMP/.github/workflows/mutable.yml"
+  if (
+    cd "$TMP"
+    FAKE_NODE_VERSION=23.1.4 PATH="$TMP:$PATH" scripts/verify-ci-toolchain.sh node
+  ); then
+    echo "mutable actions/$mutable pin was accepted" >&2
+    exit 1
+  fi
+  rm "$TMP/.github/workflows/mutable.yml"
+done
+
 for malformed in $'23.1\n' $'23.1.4\n\n'; do
   printf '%s' "$malformed" > "$TMP/.node-version"
   if (

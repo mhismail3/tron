@@ -12,8 +12,8 @@ jobs:
   policy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
       - run: scripts/personal-info-guard.sh
@@ -32,14 +32,17 @@ jobs:
             scripts/verify-ci-toolchain.sh \
             packages/mac-app/scripts/bundle-gateway.sh \
             packages/mac-app/scripts/ensure-gateway-bundle.sh \
+            packages/mac-app/scripts/verify-gateway-payload.sh \
+            packages/mac-app/scripts/test-gateway-payload-verifier.sh \
+            packages/mac-app/scripts/test-tron-gateway-launcher.sh \
             packages/mac-app/scripts/package-dmg.sh \
             packages/ios-app/scripts/test-source-policy.sh
 
   gateway:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
           cache: npm
@@ -56,8 +59,8 @@ jobs:
   ios:
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
           cache: npm
@@ -73,8 +76,8 @@ jobs:
   mac:
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .node-version
           cache: npm
@@ -85,6 +88,8 @@ jobs:
       - run: scripts/install-ci-tools.sh xcodegen
       - run: scripts/verify-ci-toolchain.sh node xcode xcodegen
       - run: packages/mac-app/scripts/bundle-gateway.sh
+      - run: packages/mac-app/scripts/test-tron-gateway-launcher.sh
+      - run: packages/mac-app/scripts/test-gateway-payload-verifier.sh
       - run: xcodegen generate
         working-directory: packages/mac-app
       - name: Build Mac test products

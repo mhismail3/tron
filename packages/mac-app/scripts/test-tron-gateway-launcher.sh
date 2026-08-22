@@ -11,6 +11,7 @@ HELPER="$APP_ROOT/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
 HASH="$SCRIPT_DIR/hash-gateway-payload.sh"
 mkdir -p "$(dirname "$HELPER")" "$BUNDLE"
 xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations \
+  -arch arm64 -arch x86_64 -mmacosx-version-min=15.0 \
   "$SCRIPT_DIR/tron-gateway-launcher.c" -o "$HELPER"
 
 make_payload() {
@@ -30,14 +31,17 @@ make_payload() {
   cp "$root/runtime/node-arm64" "$root/runtime/node-x64"
   chmod 755 "$root/runtime/node-arm64" "$root/runtime/node-x64"
   fingerprint="$("$HASH" "$root")"
-  printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","nodeVersion":"fixture","sourceRevision":"%s","runtimeEpoch":"epoch-%s","payloadFingerprint":"%s"}\n' "$version" "$marker" "$marker" "$fingerprint" > "$root/manifest.json"
+  printf '{"schema":1,"kind":"tron-gateway-payload","channel":"stable","version":"%s","gatewayVersion":"fixture","nodeVersion":"fixture","sourceRevision":"0123456789abcdef0123456789abcdef01234567","runtimeEpoch":"01234567-89ab-cdef-0123-456789abcdef","payloadFingerprint":"%s","dependencyTreeCoverage":"app/** and runtime/** regular files"}\n' "$version" "$fingerprint" > "$root/manifest.json"
   chmod -R a-w "$root"
 }
 
-make_payload "$BUNDLE" bundled bundled
+make_payload "$BUNDLE" fixture bundled
 expected_bundle_fingerprint="$(sed -n 's/.*payloadFingerprint":"\([0-9a-f]*\)".*/\1/p' "$BUNDLE/manifest.json")"
 [[ "$("$HELPER" --fingerprint "$BUNDLE")" == "$expected_bundle_fingerprint" ]] || {
   echo "launcher fingerprint mode diverged from the canonical shell hash" >&2; exit 1;
+}
+"$HELPER" --verify-payload "$BUNDLE" fixture fixture 0123456789abcdef0123456789abcdef01234567 || {
+  echo "launcher payload verification mode rejected the valid fixture" >&2; exit 1;
 }
 EXTERNAL="$TMP/home/.tron/gateway/payloads/stable/versions/v2"
 make_payload "$EXTERNAL" v2 external

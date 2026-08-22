@@ -7,9 +7,10 @@
 #   bundle-gateway.sh --skip-install   reuse an existing gateway node_modules
 #   bundle-gateway.sh --skip-download  reuse already staged Node runtimes
 #   bundle-gateway.sh --clean          remove only generated payloads
+#   bundle-gateway.sh --verify-only    verify existing payload without mutation
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 GATEWAY_DIR="$REPO_ROOT/packages/gateway"
 RESOURCES_DIR="$SCRIPT_DIR/../Sources/Resources"
@@ -37,12 +38,14 @@ fi
 skip_install=0
 skip_download=0
 clean=0
+verify_only=0
 
 while (($#)); do
     case "$1" in
         --skip-install) skip_install=1 ;;
         --skip-download) skip_download=1 ;;
         --clean) clean=1 ;;
+        --verify-only) verify_only=1 ;;
         --help|-h) grep '^# ' "$0" | sed 's/^# //'; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 64 ;;
     esac
@@ -52,10 +55,50 @@ done
 launchers=(
     "$HELPER_DIR/MacOS/tron"
 )
+
+# Generated output is disposable, but its parents are owned source-tree
+# directories. Walk with lstat and unlink symlinks instead of ever allowing a
+# recursive operation to follow an attacker-controlled ancestor.
+assert_owned_ancestors() {
+    local path="$1" cursor="$1" info
+    while [[ "$cursor" == "$REPO_ROOT"/* || "$cursor" == "$REPO_ROOT" ]]; do
+        if [[ -e "$cursor" || -L "$cursor" ]]; then
+            info="$(stat -f '%HT' "$cursor" 2>/dev/null || true)"
+            [[ "$info" != "Symbolic Link" && ! -L "$cursor" ]] || {
+                echo "generated bundle path has a symlinked ancestor: $path" >&2
+                exit 78
+            }
+        fi
+        [[ "$cursor" == "$REPO_ROOT" ]] && break
+        cursor="$(dirname "$cursor")"
+    done
+}
+safe_remove_tree() {
+    local path="$1" entry
+    [[ -e "$path" || -L "$path" ]] || return 0
+    if [[ -L "$path" ]]; then
+        unlink "$path"
+        return 0
+    fi
+    if [[ -d "$path" ]]; then
+        chmod u+w "$path"
+        while IFS= read -r -d '' entry; do safe_remove_tree "$entry"; done < <(find "$path" -mindepth 1 -maxdepth 1 -print0)
+        rmdir "$path"
+    else
+        unlink "$path"
+    fi
+}
+assert_owned_ancestors "$RESOURCES_DIR"
+assert_owned_ancestors "$PAYLOAD_DIR"
+assert_owned_ancestors "$APP_DIR"
+assert_owned_ancestors "$RUNTIME_DIR"
+assert_owned_ancestors "$HELPER_DIR"
+assert_owned_ancestors "$HELPER_DIR/MacOS"
+assert_owned_ancestors "$HELPER_DIR/Resources"
 if ((clean)); then
-    rm -rf "$PAYLOAD_DIR"
-    rm -f "${launchers[@]}" \
-        "$HELPER_DIR/Resources/AppIcon.icns"
+    safe_remove_tree "$PAYLOAD_DIR"
+    safe_remove_tree "$HELPER_DIR/MacOS/tron"
+    safe_remove_tree "$HELPER_DIR/Resources/AppIcon.icns"
     echo "cleaned generated Tron Gateway payloads"
     exit 0
 fi
@@ -65,12 +108,18 @@ required=(
     "$GATEWAY_DIR/package-lock.json"
     "$REPO_ROOT/scripts/gateway-payload-deploy.mjs"
     "$SCRIPT_DIR/tron-gateway-launcher.c"
+    "$SCRIPT_DIR/verify-gateway-payload.sh"
     "$HELPER_DIR/Info.plist"
     "$LIBRARY_DIR/LaunchAgents/com.tron.server.plist"
 )
 for path in "${required[@]}"; do
     [[ -f "$path" ]] || { echo "missing required source: $path" >&2; exit 3; }
 done
+
+if ((verify_only)); then
+    "$SCRIPT_DIR/verify-gateway-payload.sh" "$PAYLOAD_DIR" "$HELPER_DIR/MacOS/tron"
+    exit 0
+fi
 
 # Xcode and LaunchAgents may provide a sanitized PATH. Resolve the exact
 # canonical Node once, before any install/build work, and derive npm from that
@@ -143,16 +192,6 @@ validate_node_runtime() {
         exit 3
     }
 
-    local version
-    version="$("$destination" --version 2>/dev/null)" || {
-        echo "unable to execute staged Node $arch runtime" >&2
-        exit 3
-    }
-    [[ "$version" == "v${NODE_VERSION}" ]] || {
-        echo "Node $arch version mismatch (expected v${NODE_VERSION}, got $version)" >&2
-        exit 3
-    }
-
     local file_tool lipo_tool file_description lipo_arches
     file_tool="$(command -v file 2>/dev/null || true)"
     lipo_tool="$(command -v lipo 2>/dev/null || true)"
@@ -221,8 +260,9 @@ stage_node arm64 "$NODE_ARM64_SHA256"
 stage_node x64 "$NODE_X64_SHA256"
 
 launcher_temp="$(mktemp -d)/tron"
-xcrun clang -Os -Wall -Wextra -arch arm64 -arch x86_64 \
-    -mmacosx-version-min=15.0 "$SCRIPT_DIR/tron-gateway-launcher.c" -o "$launcher_temp"
+xcrun --sdk macosx clang -O2 -Wall -Wextra -Werror -Wno-deprecated-declarations \
+    -arch arm64 -arch x86_64 -mmacosx-version-min=15.0 \
+    "$SCRIPT_DIR/tron-gateway-launcher.c" -o "$launcher_temp"
 for destination in "${launchers[@]}"; do
     install -m 0755 "$launcher_temp" "$destination"
 done

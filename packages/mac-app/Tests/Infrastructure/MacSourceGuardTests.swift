@@ -122,20 +122,23 @@ struct MacSourceGuardTests {
 
         let ensureScript = try Self.read(macRoot, "scripts/ensure-gateway-bundle.sh")
         #expect(ensureScript.contains("bundle-gateway.sh"))
-        #expect(ensureScript.contains("manifest.json"))
-        #expect(ensureScript.contains("tron-gateway-payload"))
-        #expect(ensureScript.contains("node-arm64"))
-        #expect(ensureScript.contains("node-x64"))
-        #expect(ensureScript.contains("node_modules"))
+        #expect(ensureScript.contains("--verify-only"))
+        #expect(ensureScript.contains("failed verification; explicitly rebuilding"))
+        #expect(!ensureScript.contains("exec \"$SCRIPT_DIR/bundle-gateway.sh\""))
 
         let bundleScript = try Self.read(macRoot, "scripts/bundle-gateway.sh")
+        #expect(bundleScript.contains("manifest.json"))
+        #expect(bundleScript.contains("tron-gateway-payload"))
+        #expect(bundleScript.contains("node-arm64"))
+        #expect(bundleScript.contains("node-x64"))
+        #expect(bundleScript.contains("node_modules"))
         #expect(bundleScript.contains("NODE_VERSION_FILE=\"$REPO_ROOT/.node-version\""))
         #expect(bundleScript.contains("NODE_VERSION=\"$(<\"$NODE_VERSION_FILE\")\""))
         #expect(!bundleScript.contains("NODE_VERSION=\"22.22.0\""))
         #expect(bundleScript.contains("NODE_ARM64_SHA256=\"913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4\""))
         #expect(bundleScript.contains("NODE_X64_SHA256=\"bf0e0ff20d4e5a16436d1ec372e47161e52be8e487db8070ae3f06b01efbba0c\""))
         #expect(bundleScript.contains("validate_node_runtime"))
-        #expect(bundleScript.contains("--version"))
+        #expect(!bundleScript.contains("$destination --version"))
         #expect(bundleScript.contains("Mach-O"))
         #expect(bundleScript.contains("lipo -archs"))
         #expect(bundleScript.contains("checksum mismatch"))
@@ -156,8 +159,16 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("gateway-payload-deploy.mjs"))
         #expect(bundleScript.contains("dependencyTreeCoverage"))
         #expect(bundleScript.contains("runtimeEpoch"))
+        #expect(bundleScript.contains("--verify-only"))
+        #expect(bundleScript.contains("verify-gateway-payload.sh"))
+        #expect(bundleScript.contains("-arch arm64 -arch x86_64"))
         #expect(bundleScript.contains("-arch arm64 -arch x86_64"))
         #expect(!bundleScript.contains("cargo build"))
+
+        let verifierScript = try Self.read(macRoot, "scripts/verify-gateway-payload.sh")
+        for required in ["--verify-payload", "NODE_ARM64_SHA256", "NODE_X64_SHA256", "payload tree is writable", "Mach-O", "lipo -archs", "realpath", "-arch arm64 -arch x86_64", "cmp -s", "gatewayVersion", "sourceRevision"] {
+            #expect(verifierScript.contains(required), "payload verifier missing marker: \(required)")
+        }
 
         let hashScript = try Self.read(macRoot, "scripts/hash-gateway-payload.sh")
         #expect(hashScript.contains("find \"$ROOT/app\" \"$ROOT/runtime\""))
@@ -165,7 +176,7 @@ struct MacSourceGuardTests {
         #expect(hashScript.contains("shasum -a 256"))
 
         let launcher = try Self.read(macRoot, "scripts/tron-gateway-launcher.c")
-        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "immutable_tree", "CC_SHA256", "S_IWUSR"] {
+        for required in ["TRON_GATEWAY_CHANNEL", "current.json", "realpath", "O_NOFOLLOW", "MAX_MANIFEST_BYTES", "tron-gateway-selection", "TRON_GATEWAY_SOURCE_REVISION", "TRON_GATEWAY_BUILD_FINGERPRINT", "TRON_GATEWAY_RUNTIME_EPOCH", "TRON_GATEWAY_UPDATE_HELPER", "gateway-payload-deploy.mjs", "immutable_tree", "CC_SHA256", "S_IWUSR", "--verify-payload", "nodeVersion"] {
             #expect(launcher.contains(required), "launcher missing external payload safety marker: \(required)")
         }
 
@@ -191,7 +202,6 @@ struct MacSourceGuardTests {
         // intentionally ignored and must not be checked into the repository.
         for rejection in [
             "[[ \"$actual\" == \"$expected\" ]] ||",
-            "[[ \"$version\" == \"v${NODE_VERSION}\" ]] ||",
             "[[ \"$file_description\" == *\"Mach-O\"* ]] ||",
             "[[ \"$lipo_arches\" == \"$expected_arch\" ]] ||",
             "neither file nor lipo is available",
@@ -240,15 +250,15 @@ struct MacSourceGuardTests {
         #expect(packageScript.contains("--fingerprint"))
         #expect(packageScript.contains("payloadFingerprint"))
         #expect(packageScript.contains("lipo -archs"))
-        #expect(packageScript.contains("--version"))
+        #expect(!packageScript.contains("$runtime --version"))
         #expect(packageScript.contains("mounted DMG"))
         let cleanBlock = try #require(script.range(of: "if ((clean)); then"))
         let requiredSources = try #require(script.range(of: "required=("))
         let block = String(script[cleanBlock.lowerBound..<requiredSources.lowerBound])
 
         #expect(script.contains("--clean"))
-        #expect(block.contains("rm -rf \"$PAYLOAD_DIR\""))
-        #expect(block.contains("rm -f \"${launchers[@]}\""))
+        #expect(block.contains("safe_remove_tree \"$PAYLOAD_DIR\""))
+        #expect(block.contains("safe_remove_tree \"$HELPER_DIR/MacOS/tron\""))
         #expect(!block.contains("Info.plist"))
         #expect(!block.contains("LaunchAgents"))
     }

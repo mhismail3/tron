@@ -52,6 +52,24 @@ both manifests and all required paths before selecting an external payload,
 otherwise it uses the validated bundled payload. Promotion additionally checks
 the complete fingerprint before publishing.
 
+Before accepting an existing generated payload, `ensure-gateway-bundle.sh`
+invokes `bundle-gateway.sh --verify-only`. Verification is read-only: it checks
+bounded manifest identity against `.node-version`, compiles a fresh trusted
+launcher verifier for the complete fingerprint, validates runtime hashes,
+architectures, required paths, safe symlinks, immutable publication modes,
+exact source/package manifest identity, and byte equality with a freshly
+compiled unsigned universal helper. Staged runtimes are never executed during
+validation; only the host build Node selected by `.node-version` is executed.
+A failed check triggers one
+explicit rebuild and a second verification; malformed or tampered output is never silently accepted. `runtimeEpoch` is a freshness nonce bound by the immutable payload tree and its
+subsequent Xcode code signature; it is not an externally reproducible source
+input or a standalone secret. This milestone binds all other deterministic
+identity fields to source/build inputs
+without redesigning the production fingerprint algorithm. The isolated fixture
+command below copies a payload to
+a temporary directory and exercises valid, tampered, forged-helper, runtime,
+writable-tree, symlink-escape, valid-identity-tamper, and malformed-manifest cases.
+
 The Xcode post-build signing phase signs the embedded Node runtimes with
 `TronNode.entitlements`. Node executes V8 JIT code, so the
 `com.apple.security.cs.allow-jit` entitlement is required when the runtime is
@@ -70,8 +88,14 @@ packages/mac-app/scripts/bundle-gateway.sh --skip-install --skip-download
 # Remove generated payloads only
 packages/mac-app/scripts/bundle-gateway.sh --clean
 
+# Read-only publication verification (does not build, install, or redownload)
+packages/mac-app/scripts/bundle-gateway.sh --verify-only
+
 # Pure helper check against a staged payload (does not build or install)
 packages/mac-app/scripts/hash-gateway-payload.sh Sources/Resources/Gateway
+
+# Isolated publication-policy fixtures (requires a staged payload; uses mktemp)
+packages/mac-app/scripts/test-gateway-payload-verifier.sh
 
 # Launcher boundary fixture (also covers channel path-component rejection)
 packages/mac-app/scripts/test-tron-gateway-launcher.sh
