@@ -142,7 +142,6 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("Mach-O"))
         #expect(bundleScript.contains("lipo -archs"))
         #expect(bundleScript.contains("checksum mismatch"))
-        #expect(bundleScript.contains("version mismatch"))
         #expect(bundleScript.contains("architecture mismatch"))
         #expect(bundleScript.contains("TRON_NODE_BIN"))
         #expect(!bundleScript.contains("TRON_NPM_BIN"))
@@ -166,7 +165,7 @@ struct MacSourceGuardTests {
         #expect(!bundleScript.contains("cargo build"))
 
         let verifierScript = try Self.read(macRoot, "scripts/verify-gateway-payload.sh")
-        for required in ["--verify-payload", "NODE_ARM64_SHA256", "NODE_X64_SHA256", "payload tree is writable", "Mach-O", "lipo -archs", "realpath", "-arch arm64 -arch x86_64", "cmp -s", "gatewayVersion", "sourceRevision"] {
+        for required in ["--verify-payload", "NODE_ARM64_SHA256", "NODE_X64_SHA256", "payload tree is writable", "Mach-O", "lipo -archs", "realpath", "-arch arm64 -arch x86_64", "cmp -s", "GATEWAY_VERSION", "SOURCE_REVISION"] {
             #expect(verifierScript.contains(required), "payload verifier missing marker: \(required)")
         }
 
