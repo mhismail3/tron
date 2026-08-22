@@ -25,6 +25,15 @@ monolith: gateway connection, session catalog, transcript, session runtime, reso
 workspace, and terminal files. Cross-file references remain plain value composition; no split model becomes a
 second cache or reducer.
 
+Chat transcript formatting publishes one immutable `InstalledChatTranscript`: canonical timeline,
+queue facts, hidden-thinking semantics, and a `ChatTranscriptHandoffCommit` are admitted together.
+The handoff is either none, an authoritative pending prompt, or an outgoing submission with bounded,
+frozen attachment DTOs. `ChatTranscriptProjectionTag.HandoffIdentity` contains only compact scalar
+attachment preview identities, never preview bytes. Composer and authoritative snapshots are captured
+once before submission; handoff-only changes reuse the cached canonical timeline, and the prior complete
+commit remains installed until its replacement reaches the frame gate. Canonical JSONL remains the sole
+owner of transcript truth.
+
 ## State flow
 
 `GatewayClient` performs one authenticated WebSocket connection, protocol hello,

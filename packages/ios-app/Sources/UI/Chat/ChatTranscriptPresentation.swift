@@ -556,7 +556,7 @@ enum ChatExtensionWidgetPolicy {
 /// Exact-target presentation-only outgoing state. This is never inserted into
 /// the canonical transcript or JSONL; it disappears only after canonical user
 /// message reconciliation (or a definitive rejection).
-struct ChatOutgoingSubmissionPresentation: Equatable, Identifiable, Sendable {
+struct ChatOutgoingSubmissionPresentation: Equatable, Hashable, Identifiable, Sendable {
     let id: String
     let text: String
     let attachmentIDs: [String]
@@ -583,7 +583,7 @@ struct ChatOutgoingSubmissionPresentation: Equatable, Identifiable, Sendable {
 /// Authoritative prompt admission that has not reached canonical JSONL yet.
 /// Unlike the composer-owned outgoing row, this survives chat re-navigation
 /// because it is reconstructed from the Gateway session snapshot.
-struct ChatPendingPromptPresentation: Equatable, Identifiable, Sendable {
+struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendable {
     let id: String
     let createdAt: String?
     let text: String
@@ -596,8 +596,8 @@ struct ChatPendingPromptPresentation: Equatable, Identifiable, Sendable {
     init(snapshot: SessionSnapshot.PendingPrompt, isCompacting: Bool) {
         id = snapshot.id
         createdAt = snapshot.createdAt
-        text = snapshot.text
         behavior = snapshot.behavior
+        text = snapshot.text
         attachmentCount = snapshot.attachmentCount
         photoCount = snapshot.photoCount
         fileAttachmentCount = snapshot.fileAttachmentCount
@@ -617,6 +617,86 @@ struct ChatPendingPromptPresentation: Equatable, Identifiable, Sendable {
         case .followUp: return "Follow-up pending"
         case nil: return "Sending"
         }
+    }
+}
+
+/// Suppresses a pending runtime row only when canonical evidence identifies the
+/// same prompt. Legacy pending rows without a valid timestamp use one bounded
+/// candidate (the newest canonical user message), never an arbitrary history
+/// match for repeated text.
+enum ChatPendingCanonicalSuppressionPolicy {
+    static func suppresses(
+        _ pending: SessionSnapshot.PendingPrompt,
+        in transcript: [TranscriptItem]
+    ) -> Bool {
+        if let pendingDate = pending.createdAt.flatMap(GatewayTimestamp.parse) {
+            return transcript.contains { item in
+                guard item.kind == .message,
+                      item.role == .user,
+                      let itemDate = GatewayTimestamp.parse(item.timestamp),
+                      itemDate >= pendingDate else { return false }
+                return matches(pending, item: item)
+            }
+        }
+
+        // Canonical transcript projections are page-bounded. Restrict the
+        // compatibility fallback to that bounded tail and exactly one user row.
+        guard let latest = transcript
+            .suffix(ChatTranscriptPageRequest.maximumItemCount)
+            .reversed()
+            .first(where: { $0.kind == .message && $0.role == .user }) else {
+            return false
+        }
+        return matches(pending, item: latest)
+    }
+
+    private static func matches(
+        _ pending: SessionSnapshot.PendingPrompt,
+        item: TranscriptItem
+    ) -> Bool {
+        guard item.text == pending.text else { return false }
+        let attachments = (item.content ?? []).filter {
+            $0.type == .image || $0.attachment != nil
+        }
+        let photoCount = attachments.count(where: { $0.type == .image })
+        let fileAttachmentCount = attachments.count - photoCount
+        guard attachments.count == pending.attachmentCount else { return false }
+        if let expected = pending.photoCount, expected != photoCount { return false }
+        if let expected = pending.fileAttachmentCount, expected != fileAttachmentCount { return false }
+        return true
+    }
+}
+
+/// One immutable presentation commit for the interval before a submitted
+/// prompt is represented by canonical JSONL. The outgoing attachment DTOs are
+/// copied into this commit so a composer mutation cannot alter an installed row.
+enum ChatTranscriptHandoffCommit: Hashable, Sendable {
+    case none
+    case pending(ChatPendingPromptPresentation)
+    case outgoing(
+        presentation: ChatOutgoingSubmissionPresentation,
+        attachments: [PendingAttachment]
+    )
+
+    var outgoingPresentation: ChatOutgoingSubmissionPresentation? {
+        guard case .outgoing(let presentation, _) = self else { return nil }
+        return presentation
+    }
+
+    var outgoingAttachments: [PendingAttachment] {
+        guard case .outgoing(_, let attachments) = self else { return [] }
+        return attachments
+    }
+
+    /// Strips upload-only bytes before this value crosses into transcript
+    /// presentation. Installed projections retain only row metadata and the
+    /// bounded thumbnail preview.
+    func frozenForHandoff() -> Self {
+        guard case .outgoing(let presentation, let attachments) = self else { return self }
+        return .outgoing(
+            presentation: presentation,
+            attachments: attachments.map { $0.frozenForHandoff() }
+        )
     }
 }
 

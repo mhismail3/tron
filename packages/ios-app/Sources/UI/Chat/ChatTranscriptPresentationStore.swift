@@ -2,6 +2,77 @@ import Foundation
 import Observation
 
 struct ChatTranscriptProjectionTag: Hashable, Sendable {
+    struct HandoffIdentity: Hashable, Sendable {
+        struct Attachment: Hashable, Sendable {
+            let id: String
+            let name: String
+            let mimeType: String
+            let size: Int
+            let previewIdentity: UInt64?
+
+            init(_ attachment: PendingAttachment) {
+                id = attachment.id
+                name = attachment.name
+                mimeType = attachment.mimeType
+                size = attachment.size
+                // The digest is cached when the attachment is admitted. Never
+                // inspect either fullPreviewData or preview bytes here.
+                previewIdentity = attachment.previewIdentity
+            }
+        }
+
+        let kind: Kind
+        let outgoingID: String?
+        let outgoingText: String?
+        let outgoingBehavior: String?
+        let outgoingAttachmentIDs: [String]
+        let outgoingAttachments: [Attachment]
+        let transportActive: Bool?
+        let pendingID: String?
+        let pendingText: String?
+        let pendingBehavior: String?
+        let pendingAttachmentCount: Int?
+        let pendingPhotoCount: Int?
+        let pendingFileAttachmentCount: Int?
+        let pendingIsCompacting: Bool?
+
+        enum Kind: Hashable, Sendable { case none, pending, outgoing }
+
+        static let none = Self(commit: .none)
+
+        init(commit: ChatTranscriptHandoffCommit) {
+            switch commit {
+            case .none:
+                kind = .none
+                outgoingID = nil; outgoingText = nil; outgoingBehavior = nil
+                outgoingAttachmentIDs = []; outgoingAttachments = []; transportActive = nil
+                pendingID = nil; pendingText = nil; pendingBehavior = nil
+                pendingAttachmentCount = nil; pendingPhotoCount = nil
+                pendingFileAttachmentCount = nil; pendingIsCompacting = nil
+            case .pending(let presentation):
+                kind = .pending
+                outgoingID = nil; outgoingText = nil; outgoingBehavior = nil
+                outgoingAttachmentIDs = []; outgoingAttachments = []; transportActive = nil
+                pendingID = presentation.id; pendingText = presentation.text
+                pendingBehavior = presentation.behavior?.rawValue
+                pendingAttachmentCount = presentation.attachmentCount
+                pendingPhotoCount = presentation.photoCount
+                pendingFileAttachmentCount = presentation.fileAttachmentCount
+                pendingIsCompacting = presentation.isCompacting
+            case .outgoing(let presentation, let attachments):
+                kind = .outgoing
+                outgoingID = presentation.id; outgoingText = presentation.text
+                outgoingBehavior = presentation.behavior
+                outgoingAttachmentIDs = presentation.attachmentIDs
+                outgoingAttachments = attachments.map(Attachment.init)
+                transportActive = presentation.transportActive
+                pendingID = nil; pendingText = nil; pendingBehavior = nil
+                pendingAttachmentCount = nil; pendingPhotoCount = nil
+                pendingFileAttachmentCount = nil; pendingIsCompacting = nil
+            }
+        }
+    }
+
     let sessionID: String
     let presentationGeneration: Int
     let runtimeGeneration: String
@@ -18,6 +89,8 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     /// The exact Gateway capability fact captured by this immutable source.
     /// A missing Gateway defaults to false for callers and tests.
     let queueManagementCapability: Bool
+    let handoffIdentity: HandoffIdentity
+    let hiddenThinkingLabel: String?
     /// Foreground reconciliation installs the authoritative aggregate without
     /// replaying every row that arrived while the app was suspended. The
     /// generation is consumed by the presentation store exactly once.
@@ -30,7 +103,9 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         canonicalGeneration: Int? = nil,
         timelineGeneration: Int? = nil,
         entranceSuppressionGeneration: Int? = nil,
-        queueManagementCapability: Bool = false
+        queueManagementCapability: Bool = false,
+        handoff: ChatTranscriptHandoffCommit = .none,
+        handoffIdentity: HandoffIdentity? = nil
     ) {
         sessionID = snapshot.sessionId
         self.presentationGeneration = presentationGeneration
@@ -51,6 +126,9 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         firstTranscriptID = snapshot.transcript.first?.id
         lastTranscriptID = snapshot.transcript.last?.id
         self.queueManagementCapability = queueManagementCapability
+        self.handoffIdentity = handoffIdentity ?? HandoffIdentity(commit: handoff)
+        hiddenThinkingLabel = (authoritySnapshot ?? snapshot)
+            .extensionPresentation.semanticState.hiddenThinkingLabel
         self.entranceSuppressionGeneration = entranceSuppressionGeneration
     }
 
@@ -119,6 +197,8 @@ struct InstalledChatTranscript: Hashable, Sendable {
     }
 
     let tag: ChatTranscriptProjectionTag
+    let handoff: ChatTranscriptHandoffCommit
+    let hiddenThinkingLabel: String?
     let timeline: ChatTranscriptTimeline
     let toolPayloads: ChatToolPayloadIndex
     let runtimeItems: [ChatTranscriptRenderItem]
@@ -132,6 +212,8 @@ struct InstalledChatTranscript: Hashable, Sendable {
 
     init(
         tag: ChatTranscriptProjectionTag,
+        handoff: ChatTranscriptHandoffCommit = .none,
+        hiddenThinkingLabel: String? = nil,
         timeline: ChatTranscriptTimeline,
         toolPayloads: ChatToolPayloadIndex = .init(),
         runtimeItems: [ChatTranscriptRenderItem],
@@ -142,6 +224,8 @@ struct InstalledChatTranscript: Hashable, Sendable {
         sourceWindow: SourceWindow
     ) {
         self.tag = tag
+        self.handoff = handoff.frozenForHandoff()
+        self.hiddenThinkingLabel = hiddenThinkingLabel ?? tag.hiddenThinkingLabel
         self.timeline = timeline
         self.toolPayloads = toolPayloads
         self.runtimeItems = runtimeItems
@@ -206,6 +290,8 @@ struct InstalledChatTranscript: Hashable, Sendable {
     func removingPreparedText() -> InstalledChatTranscript {
         InstalledChatTranscript(
             tag: tag,
+            handoff: handoff,
+            hiddenThinkingLabel: hiddenThinkingLabel,
             timeline: timeline,
             toolPayloads: toolPayloads,
             runtimeItems: runtimeItems,
@@ -335,6 +421,8 @@ typealias ChatTranscriptProjectionWorkGate = @Sendable (ChatTranscriptProjection
 #endif
 
 private struct BuiltChatTranscript: Sendable {
+    let handoff: ChatTranscriptHandoffCommit
+    let hiddenThinkingLabel: String?
     let timeline: ChatTranscriptTimeline
     let toolPayloads: ChatToolPayloadIndex
     let preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
@@ -462,6 +550,7 @@ private actor ChatTranscriptProjectionWorker {
 
     func build(
         snapshot: SessionSnapshot,
+        handoff: ChatTranscriptHandoffCommit,
         tag: ChatTranscriptProjectionTag,
         cacheEpoch: Int
     ) async -> BuiltChatTranscript? {
@@ -483,6 +572,8 @@ private actor ChatTranscriptProjectionWorker {
         let canonicalKey = CanonicalKey(tag: tag)
         if let basis, basis.scope == scope, basis.projectionKey == projectionKey {
             return BuiltChatTranscript(
+                handoff: handoff,
+                hiddenThinkingLabel: tag.hiddenThinkingLabel,
                 timeline: basis.candidate.timeline,
                 toolPayloads: basis.candidate.toolPayloads,
                 preparedTextByRenderedID: basis.preparedTextByRenderedID,
@@ -542,6 +633,8 @@ private actor ChatTranscriptProjectionWorker {
             )
         }
         return BuiltChatTranscript(
+            handoff: handoff,
+            hiddenThinkingLabel: tag.hiddenThinkingLabel,
             timeline: candidate.timeline,
             toolPayloads: candidate.toolPayloads,
             preparedTextByRenderedID: slices,
@@ -558,6 +651,7 @@ private actor ChatTranscriptProjectionWorker {
 final class ChatTranscriptPresentationStore {
     private struct PendingProjection: Sendable {
         let snapshot: SessionSnapshot
+        let handoff: ChatTranscriptHandoffCommit
         let tag: ChatTranscriptProjectionTag
         let generation: Int
     }
@@ -639,16 +733,26 @@ final class ChatTranscriptPresentationStore {
     /// Returns true only when this exact source introduced new projection work.
     @discardableResult
     func submit(snapshot: SessionSnapshot, tag: ChatTranscriptProjectionTag) -> Bool {
-        precondition(
-            ChatTranscriptProjectionTag(
-                snapshot: snapshot,
-                presentationGeneration: tag.presentationGeneration,
-                canonicalGeneration: tag.canonicalGeneration,
-                timelineGeneration: tag.timelineGeneration,
-                entranceSuppressionGeneration: tag.entranceSuppressionGeneration,
-                queueManagementCapability: tag.queueManagementCapability
-            ) == tag
-        )
+        submit(snapshot: snapshot, handoff: .none, tag: tag)
+    }
+
+    /// Snapshot and handoff are one admission unit. A caller that captured a
+    /// different commit must coalesce and recapture rather than install a tag
+    /// whose row facts came from another moment.
+    @discardableResult
+    func submit(
+        snapshot: SessionSnapshot,
+        handoff: ChatTranscriptHandoffCommit,
+        tag: ChatTranscriptProjectionTag
+    ) -> Bool {
+        precondition(tag.sessionID == snapshot.sessionId)
+        // Commit only the row-sized frozen attachment projection. This also
+        // protects callers that constructed a handoff directly rather than via
+        // ChatView's source capture.
+        let frozenHandoff = handoff.frozenForHandoff()
+        guard tag.handoffIdentity == ChatTranscriptProjectionTag.HandoffIdentity(commit: frozenHandoff) else {
+            return false
+        }
         if installed?.tag == tag || buildingTag == tag || readyToInstall?.tag == tag {
             desiredTag = tag
             pending = nil
@@ -667,7 +771,12 @@ final class ChatTranscriptPresentationStore {
         // The replacement is admitted as one frame-gated install below; clearing
         // here would expose a blank interval and let controls race ahead of rows.
         desiredTag = tag
-        pending = PendingProjection(snapshot: snapshot, tag: tag, generation: generation)
+        pending = PendingProjection(
+            snapshot: snapshot,
+            handoff: frozenHandoff,
+            tag: tag,
+            generation: generation
+        )
         failWaiters(except: tag, error: .superseded)
         #if HOSTED_TEST
         failHostedCompletionWaiters(except: tag, error: .superseded)
@@ -834,6 +943,7 @@ final class ChatTranscriptPresentationStore {
                 self.buildingTag = next.tag
                 guard let built = await self.projectionWorker.build(
                     snapshot: next.snapshot,
+                    handoff: next.handoff,
                     tag: next.tag,
                     cacheEpoch: next.generation
                 ), !Task.isCancelled else { break }
@@ -843,6 +953,8 @@ final class ChatTranscriptPresentationStore {
                 let runtimeItems = ChatTranscriptProjectionKernel.runtimeItems(in: next.snapshot)
                 let output = InstalledChatTranscript(
                     tag: next.tag,
+                    handoff: built.handoff,
+                    hiddenThinkingLabel: built.hiddenThinkingLabel,
                     timeline: built.timeline,
                     toolPayloads: built.toolPayloads,
                     runtimeItems: runtimeItems,

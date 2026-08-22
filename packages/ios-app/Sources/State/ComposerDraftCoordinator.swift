@@ -14,6 +14,9 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
     let size: Int
     let previewData: Data?
     let fullPreviewData: Data?
+    /// Cached when the attachment is admitted. Handoff identity must not hash
+    /// the payload again while the view recomputes its projection tag.
+    let previewIdentity: UInt64?
 
     init(
         id: String,
@@ -21,14 +24,65 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
         mimeType: String,
         size: Int,
         previewData: Data?,
-        fullPreviewData: Data? = nil
+        fullPreviewData: Data? = nil,
+        previewIdentity: UInt64? = nil
     ) {
         self.id = id
         self.name = name
         self.mimeType = mimeType
         self.size = size
-        self.previewData = previewData
+        let boundedPreview = previewData.map {
+            $0.count <= ComposerAttachmentPreviewPolicy.maximumEncodedBytes
+                ? $0
+                : Data($0.prefix(ComposerAttachmentPreviewPolicy.maximumEncodedBytes))
+        }
+        self.previewData = boundedPreview
         self.fullPreviewData = fullPreviewData
+        self.previewIdentity = previewIdentity ?? boundedPreview.map(Self.identity)
+    }
+
+    /// A frozen handoff owns only the bounded thumbnail used by the row. The
+    /// upload's full bytes remain available only to the live composer until
+    /// this source is admitted to transcript presentation.
+    func frozenForHandoff() -> Self {
+        Self(
+            id: id,
+            name: name,
+            mimeType: mimeType,
+            size: size,
+            previewData: previewData,
+            fullPreviewData: nil,
+            previewIdentity: previewIdentity
+        )
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.id == rhs.id
+            && lhs.name == rhs.name
+            && lhs.mimeType == rhs.mimeType
+            && lhs.size == rhs.size
+            && lhs.previewData == rhs.previewData
+            && lhs.previewIdentity == rhs.previewIdentity
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(mimeType)
+        hasher.combine(size)
+        hasher.combine(previewIdentity)
+        // `previewData` is bounded thumbnail data; fullPreviewData is
+        // deliberately excluded from value identity and hashing.
+    }
+
+    private static func identity(_ data: Data) -> UInt64 {
+        var value: UInt64 = 14695981039346656037
+        for byte in data {
+            value ^= UInt64(byte)
+            value &*= 1099511628211
+        }
+        value ^= UInt64(data.count)
+        return value
     }
 }
 

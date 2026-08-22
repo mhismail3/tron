@@ -1861,6 +1861,68 @@ struct ChatTranscriptPresentationTests {
         #expect(ledger.contains("submission-\(capacity + 3)"))
     }
 
+    @Test("legacy pending suppression uses exact newest canonical evidence")
+    func legacyPendingCanonicalSuppression() throws {
+        let pending = SessionSnapshot.PendingPrompt(
+            id: "pending", createdAt: nil, behavior: .steer,
+            text: "repeat", attachmentCount: 0, photoCount: 0, fileAttachmentCount: 0
+        )
+        let matching = try fixture(transcript: """
+        [{"id":"user","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"repeat"}]}]
+        """)
+        #expect(ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: matching.transcript))
+
+        let malformed = SessionSnapshot.PendingPrompt(
+            id: "pending", createdAt: "not-a-timestamp", behavior: .steer,
+            text: "repeat", attachmentCount: 0, photoCount: 0, fileAttachmentCount: 0
+        )
+        #expect(ChatPendingCanonicalSuppressionPolicy.suppresses(malformed, in: matching.transcript))
+
+        let repeatedOlder = try fixture(transcript: """
+        [
+          {"id":"old","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"repeat"}]},
+          {"id":"new","parentId":"old","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"different"}]}
+        ]
+        """)
+        #expect(!ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: repeatedOlder.transcript))
+    }
+
+    @Test("pending suppression requires exact attachment evidence")
+    func pendingCanonicalAttachmentEvidence() throws {
+        let pending = SessionSnapshot.PendingPrompt(
+            id: "pending", createdAt: nil, behavior: nil,
+            text: "photo", attachmentCount: 1, photoCount: 1, fileAttachmentCount: 0
+        )
+        let mismatch = try fixture(transcript: """
+        [{"id":"user","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"photo"}]}]
+        """)
+        #expect(!ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: mismatch.transcript))
+
+        let match = try fixture(transcript: """
+        [{"id":"user","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"photo"},{"id":"image","type":"image","mimeType":"image/png"}]}]
+        """)
+        #expect(ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: match.transcript))
+    }
+
+    @Test("timestamped pending suppression preserves canonical ordering")
+    func timestampedPendingCanonicalOrdering() throws {
+        let pending = SessionSnapshot.PendingPrompt(
+            id: "pending", createdAt: "2026-01-01T00:00:02Z", behavior: nil,
+            text: "same", attachmentCount: 0, photoCount: nil, fileAttachmentCount: nil
+        )
+        let olderOnly = try fixture(transcript: """
+        [{"id":"older","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"same"}]}]
+        """)
+        #expect(!ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: olderOnly.transcript))
+        let ordered = try fixture(transcript: """
+        [
+          {"id":"older","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"same"}]},
+          {"id":"newer","parentId":"older","timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"same"}]}
+        ]
+        """)
+        #expect(ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: ordered.transcript))
+    }
+
     @Test("entrance geometry follows exact displayed install across desired and identity replacements")
     func entranceGeometryAdmissionPolicy() throws {
         var displayed = try fixture(transcript: "[]")

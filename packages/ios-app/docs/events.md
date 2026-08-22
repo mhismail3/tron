@@ -68,7 +68,11 @@ admits and reduces mounted-session topics:
   stable queue-item ID, so a concurrent same-text item cannot settle the wrong optimistic admission;
   attachment-only canonical settlement uses an exact attachment metadata multiset even when Pi
   persists synthesized envelope text. `automaticCompactionEnabled` likewise reports
-  runtime truth rather than a mobile inference; older snapshots may omit these fields;
+  runtime truth rather than a mobile inference; older snapshots may omit these fields.
+  Transcript projection captures the authoritative snapshot and composer handoff
+  as one immutable commit; pending/outgoing rows render only from installed
+  handoff state, while canonical reconciliation installs handoff `none`. A
+  frame gate retains the previous complete commit until the replacement is ready;
 - provider, package, settings, trust, and custom-model mutation invalidations
   advance owner revisions across connected clients; each visible surface reloads
   its explicit global or project scope instead of sharing a wrong-scope payload;

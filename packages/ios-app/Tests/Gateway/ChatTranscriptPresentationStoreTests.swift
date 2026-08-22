@@ -26,6 +26,142 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("handoff identity freezes outgoing text and attachment preview facts")
+    func handoffIdentityFreezesOutgoingFacts() throws {
+        let target = SessionPresentationIdentity(sessionID: "session", generation: 3)
+        let submission = ComposerSubmissionSnapshot(
+            target: target,
+            textRevision: 1,
+            outgoingText: "first",
+            attachmentIDs: ["attachment"],
+            behavior: "steer"
+        )
+        let attachment = PendingAttachment(
+            id: "attachment",
+            name: "photo.png",
+            mimeType: "image/png",
+            size: 3,
+            previewData: Data([1, 2, 3])
+        )
+        let commit = ChatTranscriptHandoffCommit.outgoing(
+            presentation: ChatOutgoingSubmissionPresentation(
+                snapshot: submission,
+                transportActive: true
+            ),
+            attachments: [attachment]
+        )
+        let snapshot = try SessionScenarioBuilder(seed: 1_205).openingTail(targetEncodedBytes: 8_000)
+        let firstTag = ChatTranscriptProjectionTag(
+            snapshot: snapshot,
+            presentationGeneration: 7,
+            handoff: commit
+        )
+        let changed = ChatTranscriptHandoffCommit.outgoing(
+            presentation: ChatOutgoingSubmissionPresentation(
+                snapshot: ComposerSubmissionSnapshot(
+                    target: target,
+                    textRevision: 2,
+                    outgoingText: "second",
+                    attachmentIDs: ["attachment"],
+                    behavior: "steer"
+                ),
+                transportActive: true
+            ),
+            attachments: [attachment]
+        )
+        let secondTag = ChatTranscriptProjectionTag(
+            snapshot: snapshot,
+            presentationGeneration: 7,
+            handoff: changed
+        )
+        #expect(firstTag.handoffIdentity != secondTag.handoffIdentity)
+        #expect(firstTag.handoffIdentity.outgoingAttachments[0].previewIdentity != nil)
+        #expect(firstTag.handoffIdentity.outgoingAttachments[0].previewIdentity == secondTag.handoffIdentity.outgoingAttachments[0].previewIdentity)
+        let pending = ChatPendingPromptPresentation(
+            snapshot: .init(id: "pending", createdAt: nil, behavior: .steer, text: "next", attachmentCount: 1, photoCount: 1, fileAttachmentCount: 0),
+            isCompacting: false
+        )
+        let compacting = ChatPendingPromptPresentation(
+            snapshot: .init(id: "pending", createdAt: nil, behavior: .steer, text: "next", attachmentCount: 1, photoCount: 1, fileAttachmentCount: 0),
+            isCompacting: true
+        )
+        #expect(ChatTranscriptProjectionTag.HandoffIdentity(commit: .pending(pending)) != ChatTranscriptProjectionTag.HandoffIdentity(commit: .pending(compacting)))
+    }
+
+    @Test("maximum full preview bytes are excluded from frozen identity and installed handoff")
+    func fullPreviewBytesNeverEnterFrozenHandoff() async throws {
+        let snapshot = try SessionScenarioBuilder(seed: 1_207).openingTail(targetEncodedBytes: 8_000)
+        let target = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: 1)
+        let submission = ComposerSubmissionSnapshot(
+            target: target, textRevision: 1, outgoingText: "photo", attachmentIDs: ["attachment"], behavior: nil
+        )
+        let preview = Data([1, 2, 3])
+        let first = PendingAttachment(
+            id: "attachment", name: "photo.png", mimeType: "image/png", size: 3,
+            previewData: preview,
+            fullPreviewData: Data(repeating: 0xA5, count: ComposerAttachmentPolicy.maximumTotalBytes)
+        )
+        let second = PendingAttachment(
+            id: "attachment", name: "photo.png", mimeType: "image/png", size: 3,
+            previewData: preview,
+            fullPreviewData: Data(repeating: 0x5A, count: ComposerAttachmentPolicy.maximumTotalBytes)
+        )
+        func commit(_ attachment: PendingAttachment) -> ChatTranscriptHandoffCommit {
+            .outgoing(
+                presentation: ChatOutgoingSubmissionPresentation(snapshot: submission, transportActive: true),
+                attachments: [attachment]
+            )
+        }
+        let firstCommit = commit(first)
+        let secondCommit = commit(second)
+        let firstTag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 7, handoff: firstCommit)
+        let secondTag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 7, handoff: secondCommit)
+        #expect(firstCommit == secondCommit)
+        #expect(firstTag == secondTag)
+        #expect(firstTag.handoffIdentity == secondTag.handoffIdentity)
+
+        let store = ChatTranscriptPresentationStore()
+        #expect(store.submit(snapshot: snapshot, handoff: firstCommit, tag: firstTag))
+        let installed = try await store.waitForInstall(of: firstTag)
+        #expect(installed.handoff.outgoingAttachments.count == 1)
+        #expect(installed.handoff.outgoingAttachments[0].previewData == preview)
+        #expect(installed.handoff.outgoingAttachments[0].fullPreviewData == nil)
+        #expect(installed == installed)
+    }
+
+    @Test("installed handoff remains visible until canonical replacement installs")
+    func installedHandoffRetainsUntilReplacement() async throws {
+        try await withTestWatchdog { @MainActor in
+            let snapshot = try SessionScenarioBuilder(seed: 1_206).openingTail(targetEncodedBytes: 8_000)
+            let target = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: 1)
+            let submission = ComposerSubmissionSnapshot(
+                target: target, textRevision: 1, outgoingText: "pending", attachmentIDs: [], behavior: nil
+            )
+            let handoff = ChatTranscriptHandoffCommit.outgoing(
+                presentation: ChatOutgoingSubmissionPresentation(snapshot: submission, transportActive: true),
+                attachments: []
+            )
+            let firstTag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 7, handoff: handoff)
+            let barrier = TranscriptProjectionBarrier()
+            let store = ChatTranscriptPresentationStore(workGate: barrier.block)
+            #expect(store.submit(snapshot: snapshot, handoff: handoff, tag: firstTag))
+            await barrier.waitForBuildCount(1)
+            barrier.releaseBuild(at: 0)
+            _ = try await store.waitForInstall(of: firstTag)
+
+            var canonical = snapshot
+            canonical.revision += 1
+            canonical.eventSequence += 1
+            let canonicalTag = ChatTranscriptProjectionTag(snapshot: canonical, presentationGeneration: 7)
+            #expect(store.submit(snapshot: canonical, handoff: .none, tag: canonicalTag))
+            await barrier.waitForBuildCount(2)
+            #expect(store.installed?.handoff == handoff)
+            barrier.releaseBuild(at: 1)
+            _ = try await store.waitForInstall(of: canonicalTag)
+            #expect(store.installed?.handoff == ChatTranscriptHandoffCommit.none)
+        }
+    }
+
     @Test("queue cards install atomically with their exact transcript source")
     func queueInstallsWithTranscript() async throws {
         try await withTestWatchdog { @MainActor in

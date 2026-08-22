@@ -69,7 +69,12 @@ The formatting worker remains pure and disposable. Its output is one immutable i
 - outgoing/pending handoff rows;
 - queue rows and revision.
 
-The prior complete commit remains visible until a complete replacement is ready. `ChatView` never combines controls from one commit with rows from another.
+`ChatTranscriptHandoffCommit` freezes pending prompt presentation or outgoing presentation plus
+bounded submitted attachment DTOs. Its compact `HandoffIdentity` includes all row-affecting
+text, behavior, counts, transport, metadata, and preview identities without storing preview bytes
+in the tag. The prior complete commit remains visible until a complete replacement is ready.
+`ChatView` never combines controls from one commit with rows from another; canonical reconciliation
+publishes the canonical timeline with handoff `none`.
 
 ### Scroll coordinator
 

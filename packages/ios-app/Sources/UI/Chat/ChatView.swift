@@ -32,6 +32,12 @@ private struct ChatScrollGeometryObservation: Equatable {
     let phase: ChatOpenPresentationPhase
 }
 
+private struct ChatTranscriptProjectionCapture: Sendable {
+    let snapshot: SessionSnapshot
+    let handoff: ChatTranscriptHandoffCommit
+    let tag: ChatTranscriptProjectionTag
+}
+
 struct BoundedChatIdentityLedger: Equatable {
     private(set) var ids: Set<String> = []
     private var order: [String] = []
@@ -333,7 +339,7 @@ struct ChatView: View {
             self.suppressedInteractionScope = nil
         }
         .onChange(of: transcriptProjectionSource, initial: true) { _, source in
-            guard let currentSource = transcriptProjectionSource else {
+            guard let capture = transcriptProjectionCapture else {
                 // A recycled same-session owner can briefly have no exact
                 // generation while the retained canonical snapshot is still
                 // valid. Keep the mounted projection until its replacement
@@ -343,9 +349,9 @@ struct ChatView: View {
             }
             // Ignore a callback captured before opening installed its mounted
             // generation; the newer exact source owns submission.
-            guard source == currentSource,
-                  let snapshot = model.transcriptSnapshot(for: sessionID),
-                  snapshot.sessionId == currentSource.sessionID else { return }
+            guard source == capture.tag else { return }
+            let currentSource = capture.tag
+            let snapshot = capture.snapshot
             if let target = presentationTarget {
                 rememberCanonicalSubmissionHandoffs(model.composerDrafts.canonicalSubmissionIDs(
                     target: target,
@@ -357,7 +363,11 @@ struct ChatView: View {
             // newest complete desired commit; dropping intake here could leave
             // streaming/canonical rows stale indefinitely.
             let installedBeforeSubmission = transcriptPresentation.installed
-            let startedWork = transcriptPresentation.submit(snapshot: snapshot, tag: currentSource)
+            let startedWork = transcriptPresentation.submit(
+                snapshot: snapshot,
+                handoff: capture.handoff,
+                tag: currentSource
+            )
             if startedWork {
                 scrollCoordinator.transcriptProjectionWillChange(from: installedBeforeSubmission)
             }
@@ -462,7 +472,7 @@ struct ChatView: View {
                                     ChatTranscriptRenderRow(
                                         item: item,
                                         preparedText: installed.preparedText(for: item),
-                                        hiddenThinkingLabel: selectedAuthoritativeSnapshot?.extensionPresentation.semanticState.hiddenThinkingLabel,
+                                        hiddenThinkingLabel: installed.hiddenThinkingLabel,
                                         installationTag: installed.tag,
                                         resolveToolDetails: { callIDs, tag in
                                             transcriptPresentation.resolveToolDetails(
@@ -481,40 +491,35 @@ struct ChatView: View {
                                 }
                             }
                         }
-                        if let pendingPrompt = pendingPromptPresentation {
+                        switch installed.handoff {
+                        case .none:
+                            EmptyView()
+                        case .pending(let pendingPrompt):
                             stableTranscriptRow(
                                 id: "pending-prompt-\(pendingPrompt.id)",
-                                installedTag: nil,
+                                installedTag: installed.tag,
                                 entranceState: .none
                             ) {
                                 ChatOutgoingSubmissionEntranceRow(
                                     reduceMotion: reduceMotion,
-                                    animatesEntrance: !model.isReconcilingForeground
+                                    animatesEntrance: installed.tag.entranceSuppressionGeneration == nil
                                 ) {
                                     ChatPendingPromptRow(presentation: pendingPrompt)
                                 }
                             }
-                        }
-                        if displaysComposerOutgoingSubmission,
-                           let outgoing = outgoingSubmissionPresentation {
+                        case .outgoing(let outgoing, let attachments):
                             stableTranscriptRow(
                                 id: outgoing.id,
-                                installedTag: nil,
+                                installedTag: installed.tag,
                                 entranceState: .none
                             ) {
                                 ChatOutgoingSubmissionEntranceRow(
                                     reduceMotion: reduceMotion,
-                                    // Submission admission is already the
-                                    // ownership handoff. Do not animate a
-                                    // second, partially realized photo/prompt
-                                    // row while the composer is collapsing.
                                     animatesEntrance: false
                                 ) {
                                     ChatOutgoingSubmissionRow(
                                         presentation: outgoing,
-                                        attachments: submittedAttachments.filter {
-                                            outgoing.attachmentIDs.contains($0.id)
-                                        }
+                                        attachments: attachments
                                     )
                                 }
                             }
@@ -626,11 +631,12 @@ struct ChatView: View {
         ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
             stableTranscriptRow(
                 id: "queued-message-\(message.id)",
-                installedTag: nil,
+                installedTag: installed.tag,
                 entranceState: .none
             ) {
                 ChatQueuedMessageEntranceRow(
-                    animatesEntrance: isTranscriptReady && !model.isReconcilingForeground,
+                    animatesEntrance: isTranscriptReady
+                        && installed.tag.entranceSuppressionGeneration == nil,
                     reduceMotion: reduceMotion
                 ) {
                     QueuedMessageRow(
@@ -774,7 +780,7 @@ struct ChatView: View {
         return gatewayInfo.capabilities.contains(QueuedMessageManagementPolicy.capability)
     }
 
-    private var transcriptProjectionSource: ChatTranscriptProjectionTag? {
+    private var transcriptProjectionCapture: ChatTranscriptProjectionCapture? {
         guard let snapshot = model.transcriptSnapshot(for: sessionID),
               let generation = modelPresentationGeneration,
               let projection = model.chatProjectionGenerations(
@@ -782,17 +788,25 @@ struct ChatView: View {
                 presentationGeneration: generation
               ),
               snapshot.sessionId == sessionID else { return nil }
-        return ChatTranscriptProjectionTag(
+        let authority = selectedAuthoritativeSnapshot
+        let handoff = transcriptHandoffCommit(snapshot: snapshot)
+        let tag = ChatTranscriptProjectionTag(
             snapshot: snapshot,
-            authoritySnapshot: selectedAuthoritativeSnapshot,
+            authoritySnapshot: authority,
             presentationGeneration: generation,
             canonicalGeneration: projection.canonical,
             timelineGeneration: projection.timeline,
             entranceSuppressionGeneration: model.foregroundReconciliationGeneration == 0
                 ? nil
                 : model.foregroundReconciliationGeneration,
-            queueManagementCapability: queueManagementCapabilityForProjection
+            queueManagementCapability: queueManagementCapabilityForProjection,
+            handoff: handoff
         )
+        return ChatTranscriptProjectionCapture(snapshot: snapshot, handoff: handoff, tag: tag)
+    }
+
+    private var transcriptProjectionSource: ChatTranscriptProjectionTag? {
+        transcriptProjectionCapture?.tag
     }
 
     @MainActor
@@ -802,30 +816,22 @@ struct ChatView: View {
         while true {
             try Task.checkCancellation()
             guard modelPresentationGeneration == presentationGeneration,
-                  let snapshot = model.transcriptSnapshot(for: sessionID),
-                  let projection = model.chatProjectionGenerations(
-                    for: sessionID,
-                    presentationGeneration: presentationGeneration
-                  ),
-                  snapshot.sessionId == sessionID else { throw CancellationError() }
-            let tag = ChatTranscriptProjectionTag(
-                snapshot: snapshot,
-                authoritySnapshot: model.authoritativeSnapshot(for: sessionID),
-                presentationGeneration: presentationGeneration,
-                canonicalGeneration: projection.canonical,
-                timelineGeneration: projection.timeline,
-                entranceSuppressionGeneration: model.foregroundReconciliationGeneration == 0
-                    ? nil
-                    : model.foregroundReconciliationGeneration,
-                queueManagementCapability: queueManagementCapabilityForProjection
-            )
-            transcriptPresentation.submit(snapshot: snapshot, tag: tag)
+                  let capture = transcriptProjectionCapture,
+                  capture.tag.presentationGeneration == presentationGeneration else {
+                throw CancellationError()
+            }
+            let snapshot = capture.snapshot
+            let tag = capture.tag
+            transcriptPresentation.submit(snapshot: snapshot, handoff: capture.handoff, tag: tag)
             do {
                 let installed = try await transcriptPresentation.waitForInstall(of: tag)
                 guard modelPresentationGeneration == presentationGeneration else {
                     throw CancellationError()
                 }
-                if transcriptProjectionSource == tag { return installed }
+                if transcriptProjectionSource == tag,
+                   transcriptProjectionCapture?.handoff == capture.handoff {
+                    return installed
+                }
             } catch ChatTranscriptPresentationStoreError.superseded {
                 continue
             }
@@ -907,50 +913,45 @@ struct ChatView: View {
         presentationTarget.map(model.composerDrafts.isSending(target:)) ?? false
     }
 
-    private var outgoingSubmissionPresentation: ChatOutgoingSubmissionPresentation? {
-        guard let target = presentationTarget,
-              let snapshot = model.composerDrafts.outgoingSubmission(for: target) else { return nil }
-        return ChatOutgoingSubmissionPresentation(
-            snapshot: snapshot,
-            transportActive: model.composerDrafts.isSending(target: target)
-        )
-    }
-
-    private var pendingPromptPresentation: ChatPendingPromptPresentation? {
-        guard outgoingSubmissionPresentation == nil,
-              let snapshot = model.transcriptSnapshot(for: sessionID),
-              let pending = snapshot.pendingPrompt,
-              !hasCanonicalPendingPrompt(pending, in: snapshot) else { return nil }
-        return ChatPendingPromptPresentation(
+    /// Builds the complete handoff exactly once with the canonical snapshot.
+    /// The resulting immutable value, not the live composer, is what enters the
+    /// projection worker and the installed transcript.
+    private func transcriptHandoffCommit(snapshot: SessionSnapshot) -> ChatTranscriptHandoffCommit {
+        if let target = presentationTarget,
+           let submission = model.composerDrafts.outgoingSubmission(for: target) {
+            let canonicalIDs = model.composerDrafts.canonicalSubmissionIDs(
+                target: target,
+                canonicalTranscript: snapshot.transcript
+            )
+            if canonicalIDs.isEmpty {
+                let attachments = model.composerDrafts.submittedAttachments(for: target)
+                    .filter { submission.attachmentIDs.contains($0.id) }
+                    .prefix(ComposerAttachmentPolicy.maximumCount)
+                    .map { $0.frozenForHandoff() }
+                return .outgoing(
+                    presentation: ChatOutgoingSubmissionPresentation(
+                        snapshot: submission,
+                        transportActive: model.composerDrafts.isSending(target: target)
+                    ),
+                    attachments: Array(attachments)
+                )
+            }
+            return .none
+        }
+        guard let pending = snapshot.pendingPrompt,
+              !hasCanonicalPendingPrompt(pending, in: snapshot) else { return .none }
+        return .pending(ChatPendingPromptPresentation(
             snapshot: pending,
             isCompacting: snapshot.phase == .compacting
                 || snapshot.operation?.kind == .compaction
-        )
+        ))
     }
 
     private func hasCanonicalPendingPrompt(
         _ pending: SessionSnapshot.PendingPrompt,
         in snapshot: SessionSnapshot
     ) -> Bool {
-        guard let pendingDate = pending.createdAt.flatMap(GatewayTimestamp.parse) else { return false }
-        return snapshot.transcript.contains { item in
-            guard item.kind == .message,
-                  item.role == .user,
-                  let itemDate = GatewayTimestamp.parse(item.timestamp),
-                  itemDate >= pendingDate,
-                  item.text == pending.text else { return false }
-            let attachmentCount = (item.content ?? []).reduce(into: 0) { count, part in
-                if part.type == .image || part.attachment != nil { count += 1 }
-            }
-            return attachmentCount >= pending.attachmentCount
-        }
-    }
-
-    private var displaysComposerOutgoingSubmission: Bool {
-        // Keep the composer-owned visual row through Gateway pending admission.
-        // It is the continuous handoff surface until the installed canonical
-        // projection is ready to replace it in the same render transaction.
-        outgoingSubmissionPresentation != nil
+        ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: snapshot.transcript)
     }
 
     private var submissionPending: Bool {
