@@ -17,6 +17,148 @@ struct QueuedMessageManagementCommit: Equatable, Sendable {
     let items: [SessionSnapshot.QueuedMessage]
 }
 
+/// One-shot suspension point for projection installers that encounter the one
+/// locally admitted queue mutation. Every waiter is resumed on command outcome
+/// or lifecycle retirement; cancellation removes only that caller's waiter.
+@MainActor
+final class ChatQueueMutationResolutionOwner {
+    typealias Token = UInt64
+
+    enum Resolution: Equatable, Sendable {
+        case commandCompleted
+        case retired
+    }
+
+    enum WaitError: Error, Equatable {
+        case waiterLimitReached
+    }
+
+    private struct Waiter {
+        let id: UInt64
+        let token: Token
+        let continuation: CheckedContinuation<Resolution, Error>
+    }
+
+    static let maximumWaiters = 32
+
+    private(set) var activeToken: Token?
+    private(set) var waiterCount = 0
+    private var nextToken: Token = 0
+    private var nextWaiterID: UInt64 = 0
+    private var waiters: [Waiter] = []
+
+    func begin() -> Token? {
+        guard activeToken == nil else { return nil }
+        nextToken &+= 1
+        activeToken = nextToken
+        return nextToken
+    }
+
+    func isActive(_ token: Token) -> Bool {
+        activeToken == token
+    }
+
+    func wait(for token: Token) async throws -> Resolution {
+        guard activeToken == token else { return .retired }
+        nextWaiterID &+= 1
+        let waiterID = nextWaiterID
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                guard activeToken == token else {
+                    continuation.resume(returning: .retired)
+                    return
+                }
+                if waiters.count >= Self.maximumWaiters {
+                    continuation.resume(throwing: WaitError.waiterLimitReached)
+                    return
+                }
+                waiters.append(.init(id: waiterID, token: token, continuation: continuation))
+                waiterCount = waiters.count
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancelWaiter(id: waiterID)
+            }
+        }
+    }
+
+    @discardableResult
+    func resolve(_ token: Token, as resolution: Resolution) -> Bool {
+        guard activeToken == token else { return false }
+        activeToken = nil
+        let pending = waiters.filter { $0.token == token }
+        waiters.removeAll { $0.token == token }
+        waiterCount = waiters.count
+        for waiter in pending {
+            waiter.continuation.resume(returning: resolution)
+        }
+        return true
+    }
+
+    func retire() {
+        guard let activeToken else { return }
+        _ = resolve(activeToken, as: .retired)
+    }
+
+    private func cancelWaiter(id: UInt64) {
+        guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+        let waiter = waiters.remove(at: index)
+        waiterCount = waiters.count
+        waiter.continuation.resume(throwing: CancellationError())
+    }
+}
+
+enum ChatQueueMutationProjectionPolicy {
+    enum Outcome: Equatable, Sendable {
+        case success
+        case failure
+    }
+
+    /// Defers only evidence whose suppression meaning depends on the unresolved
+    /// local command. Ordinary transcript streaming continues to install.
+    static func shouldDefer(
+        affectedOperationIDs: Set<String>,
+        receiptOperationID: String?,
+        fallbackHandoffWithoutExclusions: String?,
+        fallbackHandoffWithExclusions: String?
+    ) -> Bool {
+        guard !affectedOperationIDs.isEmpty else { return false }
+        if let receiptOperationID,
+           affectedOperationIDs.contains(receiptOperationID) {
+            return true
+        }
+        return fallbackHandoffWithoutExclusions != nil
+            && fallbackHandoffWithExclusions == nil
+    }
+
+    /// A successful local edit/removal retires the affected lineage. Failure
+    /// restores the pre-command settlement interpretation of the deferred fact.
+    static func exclusions(
+        for outcome: Outcome,
+        affectedOperationIDs: Set<String>
+    ) -> Set<String> {
+        outcome == .success ? affectedOperationIDs : []
+    }
+
+    /// Newer queue authority retires mutation controls only after the command
+    /// outcome is known. A frame racing ahead of the response cannot discard
+    /// the lineage exclusions needed to interpret that response correctly.
+    static func shouldRetirePresentationState(
+        commandIsPending: Bool,
+        expectedRevision: Int?,
+        installedRevision: Int?
+    ) -> Bool {
+        guard !commandIsPending,
+              let expectedRevision,
+              let installedRevision else { return false }
+        return installedRevision > expectedRevision
+    }
+}
+
 enum QueuedMessageManagementPolicy {
     static let capability = "queue-management.v1"
 
@@ -56,6 +198,22 @@ enum QueuedMessageManagementPolicy {
             expectedRevision: installedCommit.expectedRevision,
             items: items
         )
+    }
+
+    /// Returns only operations whose content/behavior changed or whose row was
+    /// removed. Pure reordering preserves causal settlement lineage.
+    static func changedOperationIDs(
+        from previous: [SessionSnapshot.QueuedMessage],
+        to next: [SessionSnapshot.QueuedMessage]
+    ) -> Set<String> {
+        guard Set(previous.map(\.id)).count == previous.count,
+              Set(next.map(\.id)).count == next.count else {
+            return Set(previous.map(\.id))
+        }
+        let nextByID = Dictionary(uniqueKeysWithValues: next.map { ($0.id, $0) })
+        return Set(previous.compactMap { item in
+            nextByID[item.id] == item ? nil : item.id
+        })
     }
 }
 

@@ -95,7 +95,11 @@ struct ChatView: View {
     @State private var showSettings = false
     @State private var queuedMessageEditor: QueuedMessageEditorRoute?
     @State private var mutatingQueuedMessageIDs: Set<String> = []
+    @State private var locallyMutatedQueueOperationIDs: Set<String> = []
+    @State private var deferredQueueMutationProjection: ChatTranscriptProjectionCapture?
+    @State private var queueMutationCommandIsPending = false
     @State private var pendingQueueMutationRevision: Int?
+    @State private var queueMutationResolution = ChatQueueMutationResolutionOwner()
     @State private var earlierMessagesOperation = ChatEarlierMessagesOperationOwner()
     @State private var openPresentation: ChatOpenPresentationState
     @State private var openingTask: Task<Void, Never>?
@@ -116,12 +120,6 @@ struct ChatView: View {
     @State private var composerFocused = false
     @State private var suppressedInteractionScope: ExtensionInteractionScope?
     @State private var canonicalSubmissionHandoffs = BoundedChatIdentityLedger()
-    // Once an explicit lifecycle crossfade retires its source card, keep the
-    // canonical destination plain instead of replaying a generic entrance.
-    @State private var settledPromptLifecycleIDs = BoundedChatIdentityLedger()
-    @State private var promptLifecycleTransitions: [String: ChatPromptLifecycleTransitionSource] = [:]
-    @State private var promptLifecycleTransitionOrder: [String] = []
-    private static let maximumPromptLifecycleTransitions = 4
 
     #if HOSTED_TEST
     init(
@@ -366,73 +364,16 @@ struct ChatView: View {
             // Ignore a callback captured before opening installed its mounted
             // generation; the newer exact source owns submission.
             guard source == capture.tag else { return }
-            let currentSource = capture.tag
-            let snapshot = capture.snapshot
-            if let target = presentationTarget {
-                var canonicalHandoffIDs = model.composerDrafts.canonicalSubmissionIDs(
-                    target: target,
-                    canonicalTranscript: snapshot.transcript
-                )
-                if let receipt = model.composerDrafts.consumeCanonicalSubmissionHandoff(target: target) {
-                    canonicalHandoffIDs.insert(receipt)
-                }
-                rememberCanonicalSubmissionHandoffs(canonicalHandoffIDs)
-            }
-            let installedBeforeSubmission = transcriptPresentation.installed
-            if let installedBeforeSubmission,
-               let transition = ChatPromptLifecycleReplacementPolicy.replacement(
-                   previousQueue: installedBeforeSubmission.queuedMessages,
-                   incomingQueue: snapshot.displayedQueuedMessages,
-                   previousCanonicalIDs: previousCanonicalIDs(in: installedBeforeSubmission),
-                   previousSourceWindow: installedBeforeSubmission.sourceWindow,
-                   incomingSourceWindow: .init(snapshot: snapshot),
-                   incomingTranscript: snapshot.transcript
-               ) {
-                rememberPromptLifecycleTransition(transition)
-            }
-            if let previousPending = installedBeforeSubmission?.handoff.pendingPromptPresentation {
-                // The replacement snapshot normally no longer carries
-                // pendingPrompt. Compare the previously installed immutable
-                // handoff against the incoming canonical facts before submit,
-                // so the canonical row gets one intentional settling animation
-                // rather than replaying its entrance entitlement.
-                rememberCanonicalSubmissionHandoffs(
-                    ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
-                        for: previousPending,
-                        in: snapshot.transcript
-                    )
-                )
-                if previousPending.promptBehavior.isQueuedKind,
-                   ChatPromptLifecycleTransitionPolicy.suppressesQueueReplacement(
-                       pendingOperationID: previousPending.id,
-                       authoritativeQueueIDs: Set(snapshot.displayedQueuedMessages.map(\.id))
-                   ) {
-                    rememberCanonicalSubmissionHandoffs(["queued-message-\(previousPending.id)"])
-                }
-            }
-            // Projection intake remains live during prepend. The scroll owner
-            // preserves the exact anchor, while this store coalesces to the
-            // newest complete desired commit; dropping intake here could leave
-            // streaming/canonical rows stale indefinitely.
-            let startedWork = transcriptPresentation.submit(
-                snapshot: snapshot,
-                handoff: capture.handoff,
-                tag: currentSource
-            )
-            if startedWork {
-                scrollCoordinator.transcriptProjectionWillChange(from: installedBeforeSubmission)
-            }
-            #if HOSTED_TEST
-            hostedProbe?.recordProjectionSubmit(startedWork: startedWork)
-            #endif
+            intakeTranscriptProjection(capture)
         }
         .onChange(of: transcriptPresentation.installed?.tag) { _, _ in
             let installed = transcriptPresentation.installed
-            if let pendingQueueMutationRevision,
-               let installedRevision = installed?.queueRevision,
-               installedRevision > pendingQueueMutationRevision {
-                self.pendingQueueMutationRevision = nil
-                mutatingQueuedMessageIDs.removeAll()
+            if ChatQueueMutationProjectionPolicy.shouldRetirePresentationState(
+                commandIsPending: queueMutationCommandIsPending,
+                expectedRevision: pendingQueueMutationRevision,
+                installedRevision: installed?.queueRevision
+            ) {
+                clearSettledQueueMutationPresentationState()
             }
             // Optimistic submission settlement is owned by authoritative
             // SessionPresentationStore publication, never by this delayed
@@ -461,9 +402,7 @@ struct ChatView: View {
             transcriptPresentation.reset()
             earlierMessagesOperation.cancel()
             canonicalSubmissionHandoffs.removeAll()
-            settledPromptLifecycleIDs.removeAll()
-            promptLifecycleTransitions.removeAll()
-            promptLifecycleTransitionOrder.removeAll(keepingCapacity: false)
+            retireQueueMutationPresentationState()
             performanceTracker.cancelAll()
             cancelAttachmentPresentation(includingActive: true)
             photoImportTask?.cancel()
@@ -479,6 +418,187 @@ struct ChatView: View {
         canonicalSubmissionHandoffs.formUnion(ids)
     }
 
+    /// Keeps the installed queue boundary visible while a local queue command
+    /// decides whether a simultaneous canonical row consumed that operation or
+    /// is unrelated. Once deferral starts, newer complete captures coalesce here
+    /// until the one in-flight command resolves.
+    @MainActor
+    private func deferQueueMutationProjectionIfNeeded(
+        _ capture: ChatTranscriptProjectionCapture
+    ) -> Bool {
+        guard queueMutationCommandIsPending,
+              !locallyMutatedQueueOperationIDs.isEmpty else { return false }
+        if deferredQueueMutationProjection != nil {
+            deferredQueueMutationProjection = capture
+            return true
+        }
+        guard let installed = transcriptPresentation.installed else { return false }
+        let snapshot = capture.snapshot
+        let receiptOperationID = presentationTarget.flatMap { target in
+            model.composerDrafts.canonicalSubmissionHandoff(target: target).flatMap { receipt in
+                snapshot.transcript.contains(where: { $0.id == receipt.canonicalID })
+                    ? receipt.operationID
+                    : nil
+            }
+        }
+        let fallbackWithoutExclusions = ChatPromptLifecycleReplacementPolicy.canonicalHandoffID(
+            previousQueue: installed.queuedMessages,
+            incomingQueue: snapshot.displayedQueuedMessages,
+            previousCanonicalIDs: previousCanonicalIDs(in: installed),
+            previousSourceWindow: installed.sourceWindow,
+            incomingSourceWindow: .init(snapshot: snapshot),
+            incomingTranscript: snapshot.transcript
+        )
+        let fallbackWithExclusions = ChatPromptLifecycleReplacementPolicy.canonicalHandoffID(
+            previousQueue: installed.queuedMessages,
+            incomingQueue: snapshot.displayedQueuedMessages,
+            excludedOperationIDs: locallyMutatedQueueOperationIDs,
+            previousCanonicalIDs: previousCanonicalIDs(in: installed),
+            previousSourceWindow: installed.sourceWindow,
+            incomingSourceWindow: .init(snapshot: snapshot),
+            incomingTranscript: snapshot.transcript
+        )
+        guard ChatQueueMutationProjectionPolicy.shouldDefer(
+            affectedOperationIDs: locallyMutatedQueueOperationIDs,
+            receiptOperationID: receiptOperationID,
+            fallbackHandoffWithoutExclusions: fallbackWithoutExclusions,
+            fallbackHandoffWithExclusions: fallbackWithExclusions
+        ) else { return false }
+        deferredQueueMutationProjection = capture
+        return true
+    }
+
+    @MainActor
+    private func resolveDeferredQueueMutationProjection() {
+        guard let capture = deferredQueueMutationProjection else { return }
+        deferredQueueMutationProjection = nil
+        guard capture.tag.presentationGeneration == modelPresentationGeneration,
+              transcriptProjectionSource == capture.tag else { return }
+        intakeTranscriptProjection(capture, permitsQueueMutationDeferral: false)
+    }
+
+    @MainActor
+    private func clearSettledQueueMutationPresentationState() {
+        pendingQueueMutationRevision = nil
+        mutatingQueuedMessageIDs.removeAll()
+        locallyMutatedQueueOperationIDs.removeAll()
+    }
+
+    @MainActor
+    private func retireQueueMutationPresentationState() {
+        queueMutationResolution.retire()
+        mutatingQueuedMessageIDs.removeAll()
+        pendingQueueMutationRevision = nil
+        locallyMutatedQueueOperationIDs.removeAll()
+        deferredQueueMutationProjection = nil
+        queueMutationCommandIsPending = false
+    }
+
+    @MainActor
+    private func intakeTranscriptProjection(
+        _ capture: ChatTranscriptProjectionCapture,
+        permitsQueueMutationDeferral: Bool = true
+    ) {
+        guard capture.tag.presentationGeneration == modelPresentationGeneration,
+              transcriptProjectionSource == capture.tag else { return }
+        if permitsQueueMutationDeferral,
+           deferQueueMutationProjectionIfNeeded(capture) {
+            return
+        }
+
+        let currentSource = capture.tag
+        let snapshot = capture.snapshot
+        if let target = presentationTarget {
+            var canonicalHandoffIDs = model.composerDrafts.canonicalSubmissionIDs(
+                target: target,
+                canonicalTranscript: snapshot.transcript
+            )
+            if canonicalHandoffIDs.count == 1,
+               let canonicalID = canonicalHandoffIDs.first {
+                seedCanonicalMediaPreviews(
+                    from: CanonicalSubmissionHandoffReceipt(
+                        canonicalID: canonicalID,
+                        attachments: model.composerDrafts.submittedAttachments(for: target)
+                            .map { $0.frozenForHandoff() }
+                    ),
+                    in: snapshot
+                )
+            }
+            if let pendingReceipt = model.composerDrafts.canonicalSubmissionHandoff(target: target),
+               snapshot.transcript.contains(where: { $0.id == pendingReceipt.canonicalID }),
+               pendingReceipt.operationID.map({ locallyMutatedQueueOperationIDs.contains($0) }) != true,
+               let receipt = model.composerDrafts.consumeCanonicalSubmissionHandoff(target: target) {
+                canonicalHandoffIDs.insert(receipt.canonicalID)
+                seedCanonicalMediaPreviews(from: receipt, in: snapshot)
+            }
+            rememberCanonicalSubmissionHandoffs(canonicalHandoffIDs)
+        }
+        let installedBeforeSubmission = transcriptPresentation.installed
+        if let installedBeforeSubmission,
+           let canonicalHandoffID = ChatPromptLifecycleReplacementPolicy.canonicalHandoffID(
+               previousQueue: installedBeforeSubmission.queuedMessages,
+               incomingQueue: snapshot.displayedQueuedMessages,
+               excludedOperationIDs: locallyMutatedQueueOperationIDs,
+               previousCanonicalIDs: previousCanonicalIDs(in: installedBeforeSubmission),
+               previousSourceWindow: installedBeforeSubmission.sourceWindow,
+               incomingSourceWindow: .init(snapshot: snapshot),
+               incomingTranscript: snapshot.transcript
+           ) {
+            rememberCanonicalSubmissionHandoffs([canonicalHandoffID])
+        }
+        if let previousPending = installedBeforeSubmission?.handoff.pendingPromptPresentation {
+            // The replacement snapshot normally no longer carries
+            // pendingPrompt. Compare the previously installed immutable
+            // handoff against the incoming canonical facts before submit, so
+            // the canonical row installs directly visible rather than
+            // replaying its entrance entitlement.
+            rememberCanonicalSubmissionHandoffs(
+                ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
+                    for: previousPending,
+                    in: snapshot.transcript
+                )
+            )
+            if previousPending.promptBehavior.isQueuedKind,
+               ChatPromptLifecycleTransitionPolicy.suppressesQueueReplacement(
+                   pendingOperationID: previousPending.id,
+                   authoritativeQueueIDs: Set(snapshot.displayedQueuedMessages.map(\.id))
+               ) {
+                rememberCanonicalSubmissionHandoffs(["queued-message-\(previousPending.id)"])
+            }
+        }
+        // Projection intake remains live during prepend. The scroll owner
+        // preserves the exact anchor, while this store coalesces to the newest
+        // complete desired commit.
+        let startedWork = transcriptPresentation.submit(
+            snapshot: snapshot,
+            handoff: capture.handoff,
+            tag: currentSource
+        )
+        if startedWork {
+            scrollCoordinator.transcriptProjectionWillChange(from: installedBeforeSubmission)
+        }
+        #if HOSTED_TEST
+        hostedProbe?.recordProjectionSubmit(startedWork: startedWork)
+        #endif
+    }
+
+    private func seedCanonicalMediaPreviews(
+        from receipt: CanonicalSubmissionHandoffReceipt,
+        in snapshot: SessionSnapshot
+    ) {
+        guard let canonicalItem = snapshot.transcript.first(where: {
+            $0.id == receipt.canonicalID
+        }) else { return }
+        for seed in ChatCanonicalMediaPreviewPolicy.seeds(
+            attachments: receipt.attachments,
+            canonicalItem: canonicalItem
+        ) {
+            guard let identity = model.chatMediaIdentity(blobID: seed.blobID),
+                  let prepared = seed.attachment.preparedThumbnail else { continue }
+            try? model.chatMedia.seedPreparedThumbnail(prepared, for: identity)
+        }
+    }
+
     private func previousCanonicalIDs(in installed: InstalledChatTranscript) -> Set<String> {
         Set(installed.timeline.items.compactMap { item in
             switch item {
@@ -487,28 +607,6 @@ struct ChatView: View {
             case .toolRun, .notification: return nil
             }
         })
-    }
-
-    private func rememberPromptLifecycleTransition(_ transition: ChatPromptLifecycleTransitionSource) {
-        if promptLifecycleTransitions[transition.canonicalID] == nil {
-            promptLifecycleTransitionOrder.append(transition.canonicalID)
-        }
-        promptLifecycleTransitions[transition.canonicalID] = transition
-        // Eviction is retirement, not a silent drop: every canonical ID
-        // enters the settled ledger or re-realization can replay the generic
-        // entrance animation.
-        for oldest in ChatPromptLifecycleTransitionPolicy.transitionIDsToRetire(
-            in: promptLifecycleTransitionOrder,
-            maximum: Self.maximumPromptLifecycleTransitions
-        ) {
-            retirePromptLifecycleTransition(oldest)
-        }
-    }
-
-    private func retirePromptLifecycleTransition(_ canonicalID: String) {
-        promptLifecycleTransitions.removeValue(forKey: canonicalID)
-        promptLifecycleTransitionOrder.removeAll { $0 == canonicalID }
-        settledPromptLifecycleIDs.formUnion([canonicalID])
     }
 
     private var topBlur: some View {
@@ -539,60 +637,35 @@ struct ChatView: View {
                                 entranceState: entranceState,
                                 entranceKind: entranceKind
                             ) {
-                                Group {
-                                    if let transition = promptLifecycleTransitions[item.id] {
-                                        ChatPromptLifecycleCrossfadeRow(
-                                            source: transition,
-                                            reduceMotion: reduceMotion,
-                                            onSettled: {
-                                                retirePromptLifecycleTransition(item.id)
-                                            }
-                                        ) {
-                                            transcriptRenderRow(
-                                                item: item,
-                                                installed: installed
+                                if canonicalSubmissionHandoffs.contains(item.id) {
+                                    // This prompt already consumed its one entrance as
+                                    // outgoing, pending, or queued content. Canonical
+                                    // settlement is a direct visible replacement.
+                                    transcriptRenderRow(
+                                        item: item,
+                                        installed: installed
+                                    )
+                                } else {
+                                    ChatTranscriptEntranceRow(
+                                        state: entranceState,
+                                        admissionTag: installed.tag,
+                                        kind: entranceKind,
+                                        reduceMotion: reduceMotion,
+                                        onFailsafeReveal: {
+                                            _ = transcriptPresentation.resolveEntrance(
+                                                id: item.id,
+                                                installationTag: installed.tag,
+                                                isVisible: false
                                             )
+                                            #if HOSTED_TEST
+                                            hostedProbe?.recordEntranceFailsafeReveal()
+                                            #endif
                                         }
-                                    } else if settledPromptLifecycleIDs.contains(item.id) {
-                                        // The explicit queue-card crossfade has
-                                        // completed; preserve the visible
-                                        // canonical row without a second motion.
+                                    ) {
                                         transcriptRenderRow(
                                             item: item,
                                             installed: installed
                                         )
-                                    } else if canonicalSubmissionHandoffs.contains(item.id) {
-                                        ChatPromptLifecycleReplacementEntranceRow(
-                                            reduceMotion: reduceMotion,
-                                            kind: entranceKind
-                                        ) {
-                                            transcriptRenderRow(
-                                                item: item,
-                                                installed: installed
-                                            )
-                                        }
-                                    } else {
-                                        ChatTranscriptEntranceRow(
-                                            state: entranceState,
-                                            admissionTag: installed.tag,
-                                            kind: entranceKind,
-                                            reduceMotion: reduceMotion,
-                                            onFailsafeReveal: {
-                                                _ = transcriptPresentation.resolveEntrance(
-                                                    id: item.id,
-                                                    installationTag: installed.tag,
-                                                    isVisible: false
-                                                )
-                                                #if HOSTED_TEST
-                                                hostedProbe?.recordEntranceFailsafeReveal()
-                                                #endif
-                                            }
-                                        ) {
-                                            transcriptRenderRow(
-                                                item: item,
-                                                installed: installed
-                                            )
-                                        }
                                     }
                                 }
                             }
@@ -1017,6 +1090,12 @@ struct ChatView: View {
             }
             let snapshot = capture.snapshot
             let tag = capture.tag
+            if deferQueueMutationProjectionIfNeeded(capture) {
+                guard let token = queueMutationResolution.activeToken else { continue }
+                let resolution = try await queueMutationResolution.wait(for: token)
+                guard resolution == .commandCompleted else { throw CancellationError() }
+                continue
+            }
             transcriptPresentation.submit(snapshot: snapshot, handoff: capture.handoff, tag: tag)
             do {
                 let installed = try await transcriptPresentation.waitForInstall(of: tag)
@@ -1229,6 +1308,7 @@ struct ChatView: View {
         // Retiring/restarting presentation authority cancels any local page
         // admission; late model/scroll completions are token-gated.
         earlierMessagesOperation.cancel()
+        retireQueueMutationPresentationState()
         if composerScope == nil, let profileID = model.profiles.selected?.id {
             composerScope = model.composerDrafts.prepareDraft(
                 profileID: profileID,
@@ -2243,18 +2323,29 @@ struct ChatView: View {
         mutation: (inout [SessionSnapshot.QueuedMessage]) throws -> Void
     ) async {
         guard mutatingQueuedMessageIDs.isEmpty,
-              let target = presentationTarget else { return }
+              let target = presentationTarget,
+              let presentationGeneration = modelPresentationGeneration else { return }
         let commit: QueuedMessageManagementCommit
+        let previousItems: [SessionSnapshot.QueuedMessage]
         do {
-            guard let prepared = try QueuedMessageManagementPolicy.mutationCommit(
-                for: transcriptPresentation.installed,
-                mutation: mutation
-            ) else { return }
+            guard let installed = transcriptPresentation.installed,
+                  let prepared = try QueuedMessageManagementPolicy.mutationCommit(
+                    for: installed,
+                    mutation: mutation
+                  ) else { return }
+            previousItems = installed.queuedMessages
             commit = prepared
         } catch {
             return
         }
+        let changedOperationIDs = QueuedMessageManagementPolicy.changedOperationIDs(
+            from: previousItems,
+            to: commit.items
+        )
+        guard let mutationToken = queueMutationResolution.begin() else { return }
         mutatingQueuedMessageIDs.insert(affectedID)
+        locallyMutatedQueueOperationIDs.formUnion(changedOperationIDs)
+        queueMutationCommandIsPending = true
         pendingQueueMutationRevision = commit.expectedRevision
         do {
             try await model.replaceQueue(
@@ -2262,11 +2353,48 @@ struct ChatView: View {
                 expectedRevision: commit.expectedRevision,
                 items: commit.items
             )
-            // Keep controls inert until the exact newer sequenced queue frame
-            // installs. A command response alone is not projection authority.
+            guard queueMutationResolution.isActive(mutationToken),
+                  modelPresentationGeneration == presentationGeneration,
+                  presentationTarget == target else {
+                _ = queueMutationResolution.resolve(mutationToken, as: .retired)
+                return
+            }
+            model.composerDrafts.invalidateSettledQueueHandoff(
+                target: target,
+                affectedOperationIDs: changedOperationIDs
+            )
+            locallyMutatedQueueOperationIDs.formUnion(
+                ChatQueueMutationProjectionPolicy.exclusions(
+                    for: .success,
+                    affectedOperationIDs: changedOperationIDs
+                )
+            )
+            queueMutationCommandIsPending = false
+            resolveDeferredQueueMutationProjection()
+            _ = queueMutationResolution.resolve(mutationToken, as: .commandCompleted)
+            if ChatQueueMutationProjectionPolicy.shouldRetirePresentationState(
+                commandIsPending: queueMutationCommandIsPending,
+                expectedRevision: pendingQueueMutationRevision,
+                installedRevision: transcriptPresentation.installed?.queueRevision
+            ) {
+                clearSettledQueueMutationPresentationState()
+            }
+            // Response-before-snapshot keeps controls inert and lineage excluded
+            // until the exact newer sequenced queue frame installs. If that
+            // frame raced ahead, the outcome-known check above clears now.
         } catch {
-            pendingQueueMutationRevision = nil
-            mutatingQueuedMessageIDs.remove(affectedID)
+            guard queueMutationResolution.isActive(mutationToken),
+                  modelPresentationGeneration == presentationGeneration,
+                  presentationTarget == target else {
+                _ = queueMutationResolution.resolve(mutationToken, as: .retired)
+                return
+            }
+            queueMutationCommandIsPending = false
+            clearSettledQueueMutationPresentationState()
+            // Failure restores the pre-command interpretation before the held
+            // canonical boundary installs, preserving its consumed entrance.
+            resolveDeferredQueueMutationProjection()
+            _ = queueMutationResolution.resolve(mutationToken, as: .commandCompleted)
             model.presentComposerActionError(error, target: target)
         }
     }

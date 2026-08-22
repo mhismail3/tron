@@ -14,6 +14,9 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
     let size: Int
     let previewData: Data?
     let fullPreviewData: Data?
+    /// The immutable decoded form of `previewData`, prepared off-main once.
+    /// Equality and hashing deliberately use `previewIdentity`, not object identity.
+    let preparedThumbnail: ComposerPreparedAttachmentThumbnail?
     /// Cached when the attachment is admitted. Handoff identity must not hash
     /// the payload again while the view recomputes its projection tag.
     let previewIdentity: UInt64?
@@ -25,7 +28,8 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
         size: Int,
         previewData: Data?,
         fullPreviewData: Data? = nil,
-        previewIdentity: UInt64? = nil
+        previewIdentity: UInt64? = nil,
+        preparedThumbnail: ComposerPreparedAttachmentThumbnail? = nil
     ) {
         self.id = id
         self.name = name
@@ -39,6 +43,9 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
         self.previewData = boundedPreview
         self.fullPreviewData = fullPreviewData
         self.previewIdentity = previewIdentity ?? boundedPreview.map(Self.identity)
+        self.preparedThumbnail = preparedThumbnail.flatMap {
+            $0.encodedData == boundedPreview ? $0 : nil
+        }
     }
 
     /// A frozen handoff owns only the bounded thumbnail used by the row. The
@@ -52,7 +59,8 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
             size: size,
             previewData: previewData,
             fullPreviewData: nil,
-            previewIdentity: previewIdentity
+            previewIdentity: previewIdentity,
+            preparedThumbnail: preparedThumbnail
         )
     }
 
@@ -83,6 +91,23 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
         }
         value ^= UInt64(data.count)
         return value
+    }
+}
+
+struct CanonicalSubmissionHandoffReceipt: Equatable, Sendable {
+    let canonicalID: String
+    let attachments: [PendingAttachment]
+    /// Present only when this receipt descends from a Gateway queue operation.
+    let operationID: String?
+
+    init(
+        canonicalID: String,
+        attachments: [PendingAttachment],
+        operationID: String? = nil
+    ) {
+        self.canonicalID = canonicalID
+        self.attachments = attachments
+        self.operationID = operationID
     }
 }
 
@@ -286,6 +311,13 @@ final class ComposerDraftCoordinator {
         let baselineQueueIDs: Set<String>
     }
 
+    private struct SettledQueueHandoff: Equatable {
+        let operationID: String
+        let snapshot: ComposerSubmissionSnapshot
+        let submittedAttachments: [PendingAttachment]
+        let baselineTranscriptIDs: Set<String>
+    }
+
     private let uploadOperation: ComposerUploadOperation
     private let fileUploadOperation: ComposerFileUploadOperation
     private let attachmentFileAccess: ComposerAttachmentFileAccess
@@ -300,9 +332,15 @@ final class ComposerDraftCoordinator {
     private var uploadAdmissions = Set<UploadAdmission>()
     private var uploadTasks: [UploadAdmission: Task<String, Error>] = [:]
     private var submissionByTarget: [SessionPresentationIdentity: SubmissionAdmission] = [:]
-    private var canonicalHandoffReceipts: [SessionPresentationIdentity: [String]] = [:]
+    /// Only the newest exact canonical handoff for the mounted presentation is
+    /// retained. This bounds rich thumbnail payloads to one prompt lifecycle.
+    private var canonicalHandoffReceipts: [SessionPresentationIdentity: CanonicalSubmissionHandoffReceipt] = [:]
     private static let maximumSettledQueueAliases = SessionSnapshot.maximumQueuedMessages
     private var settledQueueAliases: [SessionPresentationIdentity: [String: SettledQueueAlias]] = [:]
+    /// At most one consumed queue lifecycle is retained for the mounted
+    /// presentation until its canonical user entry resolves. Attachments may be
+    /// empty; rich previews therefore remain bounded to one prompt lifecycle.
+    private var settledQueueHandoffs: [SessionPresentationIdentity: SettledQueueHandoff] = [:]
     private var sequence: UInt64 = 0
 
     init(
@@ -441,17 +479,43 @@ final class ComposerDraftCoordinator {
         return submissionByTarget[target]?.submittedAttachments ?? []
     }
 
+    /// Reads the one-shot canonical replacement receipt without consuming it.
+    /// Queue mutation ordering uses this to defer an ambiguous projection until
+    /// the command outcome determines whether the receipt remains causal.
+    func canonicalSubmissionHandoff(
+        target: SessionPresentationIdentity
+    ) -> CanonicalSubmissionHandoffReceipt? {
+        guard admits(target) else { return nil }
+        return canonicalHandoffReceipts[target]
+    }
+
     /// Consumes the one-shot canonical replacement receipt created before a
     /// submission admission is retired. The receipt is presentation-only;
     /// canonical transcript IDs remain authoritative.
     func consumeCanonicalSubmissionHandoff(
         target: SessionPresentationIdentity
-    ) -> String? {
-        guard admits(target), var receipts = canonicalHandoffReceipts[target],
-              !receipts.isEmpty else { return nil }
-        let receipt = receipts.removeFirst()
-        canonicalHandoffReceipts[target] = receipts.isEmpty ? nil : receipts
-        return receipt
+    ) -> CanonicalSubmissionHandoffReceipt? {
+        guard admits(target) else { return nil }
+        return canonicalHandoffReceipts.removeValue(forKey: target)
+    }
+
+    /// A confirmed local edit/removal owns retirement of its exact queue
+    /// lineage. Unrelated queue mutations must not disturb the one retained
+    /// consumed-operation handoff.
+    func invalidateSettledQueueHandoff(
+        target: SessionPresentationIdentity,
+        affectedOperationIDs: Set<String>
+    ) {
+        guard admits(target) else { return }
+        if let handoff = settledQueueHandoffs[target],
+           affectedOperationIDs.contains(handoff.operationID) {
+            settledQueueHandoffs[target] = nil
+        }
+        if let receipt = canonicalHandoffReceipts[target],
+           let operationID = receipt.operationID,
+           affectedOperationIDs.contains(operationID) {
+            canonicalHandoffReceipts[target] = nil
+        }
     }
 
     func canonicalSubmissionIDs(
@@ -546,7 +610,8 @@ final class ComposerDraftCoordinator {
         guard admits(target), var admission = submissionByTarget[target] else {
             retireSettledQueueAliases(
                 target: target,
-                authoritativeQueueIDs: Set(queuedMessages.map(\.id))
+                authoritativeQueueIDs: Set(queuedMessages.map(\.id)),
+                canonicalTranscript: canonicalTranscript
             )
             return
         }
@@ -563,7 +628,9 @@ final class ComposerDraftCoordinator {
         // makes exactly one causal candidate available; ambiguity must not
         // retire the outgoing row or create a handoff receipt.
         let transcriptObserved = canonicalMatches.count == 1
-        admission.canonicalHandoffID = transcriptObserved ? canonicalMatches[0] : nil
+        if transcriptObserved, admission.canonicalHandoffID == nil {
+            admission.canonicalHandoffID = canonicalMatches[0]
+        }
         let queuedCandidates = queuedMessages.filter { message in
             guard !admission.snapshot.baselineQueuedMessageIDs.contains(message.id) else {
                 return false
@@ -580,7 +647,8 @@ final class ComposerDraftCoordinator {
         admission.transcriptObserved = admission.transcriptObserved || transcriptObserved
         retireSettledQueueAliases(
             target: target,
-            authoritativeQueueIDs: Set(queuedMessages.map(\.id))
+            authoritativeQueueIDs: Set(queuedMessages.map(\.id)),
+            canonicalTranscript: canonicalTranscript
         )
         if canonicalMatches.count > 1 {
             // Do not let an independent queue observation settle an admission
@@ -633,7 +701,7 @@ final class ComposerDraftCoordinator {
             try require(admission)
             throw error
         }
-        let previewData = await ComposerAttachmentPreviewPolicy.prepare(
+        let preparedThumbnail = await ComposerAttachmentPreviewPolicy.prepare(
             data,
             mimeType: mimeType,
             name: name
@@ -644,8 +712,9 @@ final class ComposerDraftCoordinator {
             name: name,
             mimeType: mimeType,
             size: data.count,
-            previewData: previewData,
-            fullPreviewData: mimeType.hasPrefix("image/") && previewData != nil ? data : nil
+            previewData: preparedThumbnail?.encodedData,
+            fullPreviewData: mimeType.hasPrefix("image/") && preparedThumbnail != nil ? data : nil,
+            preparedThumbnail: preparedThumbnail
         ))
     }
 
@@ -735,20 +804,21 @@ final class ComposerDraftCoordinator {
             throw error
         }
         let data = try await attachmentFileAccess.previewData(staged, size)
-        let previewData = await ComposerAttachmentPreviewPolicy.prepare(
+        let preparedThumbnail = await ComposerAttachmentPreviewPolicy.prepare(
             data,
             mimeType: mimeType,
             name: name
         )
-        let fullPreviewData = mimeType.hasPrefix("image/") && previewData != nil ? data : nil
+        let fullPreviewData = mimeType.hasPrefix("image/") && preparedThumbnail != nil ? data : nil
         try require(admission)
         attachmentsByTarget[target, default: []].append(PendingAttachment(
             id: id,
             name: name,
             mimeType: mimeType,
             size: size,
-            previewData: previewData,
-            fullPreviewData: previewData == nil ? nil : fullPreviewData
+            previewData: preparedThumbnail?.encodedData,
+            fullPreviewData: fullPreviewData,
+            preparedThumbnail: preparedThumbnail
         ))
     }
 
@@ -951,6 +1021,10 @@ final class ComposerDraftCoordinator {
             transcriptObserved: false,
             canonicalHandoffID: nil
         )
+        // A newly admitted prompt is newer presentation ownership. Any
+        // unresolved consumed-queue heuristic from the prior lifecycle can no
+        // longer claim a future same-text canonical row.
+        settledQueueHandoffs[target] = nil
         submissionByTarget[target] = admission
         setText("", for: scope)
         return admission
@@ -1022,14 +1096,11 @@ final class ComposerDraftCoordinator {
         let target = admission.snapshot.target
         guard let current = submissionByTarget[target], current.id == admission.id else { return }
         if let canonicalHandoffID = current.canonicalHandoffID {
-            var receipts = canonicalHandoffReceipts[target] ?? []
-            if !receipts.contains(canonicalHandoffID) {
-                receipts.append(canonicalHandoffID)
-                if receipts.count > SessionSnapshot.maximumQueuedMessages {
-                    receipts.removeFirst(receipts.count - SessionSnapshot.maximumQueuedMessages)
-                }
-                canonicalHandoffReceipts[target] = receipts
-            }
+            canonicalHandoffReceipts[target] = CanonicalSubmissionHandoffReceipt(
+                canonicalID: canonicalHandoffID,
+                attachments: current.submittedAttachments.map { $0.frozenForHandoff() },
+                operationID: current.snapshot.behavior == nil ? nil : current.operationID
+            )
         }
         if !current.transcriptObserved,
            let operationID = current.operationID,
@@ -1044,6 +1115,12 @@ final class ComposerDraftCoordinator {
                     aliases.removeValue(forKey: aliases.keys.sorted().first!)
                 }
                 settledQueueAliases[target] = aliases
+                settledQueueHandoffs[target] = SettledQueueHandoff(
+                    operationID: operationID,
+                    snapshot: current.snapshot,
+                    submittedAttachments: current.submittedAttachments.map { $0.frozenForHandoff() },
+                    baselineTranscriptIDs: current.baselineTranscriptIDs
+                )
             }
         }
         let submitted = Set(current.snapshot.attachmentIDs)
@@ -1054,8 +1131,28 @@ final class ComposerDraftCoordinator {
 
     private func retireSettledQueueAliases(
         target: SessionPresentationIdentity,
-        authoritativeQueueIDs: Set<String>
+        authoritativeQueueIDs: Set<String>,
+        canonicalTranscript: [TranscriptItem]
     ) {
+        if let handoff = settledQueueHandoffs[target],
+           !authoritativeQueueIDs.contains(handoff.operationID) {
+            let matches = canonicalTranscript.filter {
+                Self.canonicalUserMessage(
+                    $0,
+                    matches: handoff.snapshot,
+                    submittedAttachments: handoff.submittedAttachments,
+                    baselineTranscriptIDs: handoff.baselineTranscriptIDs
+                )
+            }
+            if matches.count == 1 {
+                canonicalHandoffReceipts[target] = CanonicalSubmissionHandoffReceipt(
+                    canonicalID: matches[0].id,
+                    attachments: handoff.submittedAttachments,
+                    operationID: handoff.operationID
+                )
+                settledQueueHandoffs[target] = nil
+            }
+        }
         guard var aliases = settledQueueAliases[target] else { return }
         aliases = aliases.filter { authoritativeQueueIDs.contains($0.key) }
         settledQueueAliases[target] = aliases.isEmpty ? nil : aliases
@@ -1088,9 +1185,11 @@ final class ComposerDraftCoordinator {
         } else {
             guard text == snapshot.outgoingText else { return false }
         }
-        guard !submittedAttachments.isEmpty else { return true }
-
         let contents = item.content ?? []
+        guard !submittedAttachments.isEmpty else {
+            return !contents.contains { $0.type == .image || $0.attachment != nil }
+        }
+
         let imageAttachments = submittedAttachments.filter { $0.mimeType.hasPrefix("image/") }
         let canonicalImages = contents.filter { $0.type == .image }
         var unmatchedImages = canonicalImages
@@ -1141,6 +1240,7 @@ final class ComposerDraftCoordinator {
         submissionByTarget[lease.target] = nil
         canonicalHandoffReceipts[lease.target] = nil
         settledQueueAliases[lease.target] = nil
+        settledQueueHandoffs[lease.target] = nil
         for (admission, task) in uploadTasks where admission.target == lease.target {
             task.cancel()
         }

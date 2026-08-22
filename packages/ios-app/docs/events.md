@@ -48,7 +48,14 @@ admits and reduces mounted-session topics:
   authoritative pair. Legacy string-only projections remain visibly locked and direct the user to
   update Tron on Mac. A mutation response never rewrites queue projection locally: clear,
   edit, reorder, and remove keep controls inert until a strictly newer sequenced queue revision
-  installs from the Gateway. The installed queue revision/items and capability authority own the
+  installs from the Gateway. While that mutation is pending, its exact changed/removed operation IDs
+  cannot claim queue-to-canonical continuity. If a canonical snapshot would settle one of those IDs,
+  iOS keeps the installed queue visible and coalesces only the newest complete conflicting capture until
+  the command resolves: success retires and excludes the matching handoff before installation, while
+  failure restores exact settlement before installation. A newer queue revision that races ahead of the
+  response cannot clear mutation ownership or exclusions until that outcome is known. Presentation
+  retirement wakes suspended projection installers and target/generation-gates late command completion.
+  The installed queue revision/items and capability authority own the
   card controls; unrelated transcript projection work does not make an installed queue card flicker
   read-only. An explicit user-admitted earlier-page request owns one exact local token through
   paging, projection installation, and anchored prepend settlement (or unanchored installation),
@@ -61,8 +68,8 @@ admits and reduces mounted-session topics:
   whose canonical user entry is still being prepared, including automatic compaction
   during prompt preflight. iOS renders that exact prompt after runtime feedback and
   reconstructs it from every authoritative snapshot until the canonical user entry
-  arrives; a mounted submission keeps one visual handoff through pending and canonical
-  installation, with one smooth role-aware settlement rather than a replayed entrance. Optimistic composer settlement consumes every
+  arrives; a mounted submission keeps one complete representation visible through pending and canonical
+  installation. Its initial role-aware entrance is the only motion in that lifecycle; canonical settlement is direct and unanimated. Optimistic composer settlement consumes every
   authoritative session-reducer publication directly rather than waiting for delayed transcript
   formatting. For queued steering/follow-up, the returned prompt operation ID is also the Gateway's
   stable queue-item ID, so a concurrent same-text item cannot settle the wrong optimistic admission. That exact
@@ -70,8 +77,10 @@ operation identity may coalesce the optimistic queue-kind row with its newly adm
 operation IDs are never reused for aliasing, and aliases retire when authoritative queue items disappear. The queue row
 never borrows an identity from pre-existing or unrelated items. Behavior is normalized before first render,
 unknown values stay neutral, and each newly admitted prompt uses its role-aware entrance animation exactly once.
-Queue admission suppresses a second entrance animation; pending-to-canonical replacement preserves canonical IDs and
-uses one bounded role-aware settling animation. Canonical settlement inherits no unrelated animation. Attachment-only canonical settlement uses an exact attachment metadata multiset even when Pi
+Queue admission and canonical handoff receipts suppress every later entrance; pending/queued-to-canonical replacement
+preserves canonical IDs and installs directly visible without crossfade or hidden mount state. Exact off-main-prepared file
+previews map through upload blob identity, and prepared image previews transfer by order only when complete count/MIME facts
+agree; settlement performs no decode, while ambiguity uses normal media loading. Attachment-only canonical settlement uses an exact attachment metadata multiset even when Pi
   persists synthesized envelope text. `automaticCompactionEnabled` likewise reports
   runtime truth rather than a mobile inference; older snapshots may omit these fields.
   Transcript projection captures the authoritative snapshot and composer handoff

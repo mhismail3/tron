@@ -1615,6 +1615,63 @@ struct PresentationStyleGuardTests {
         #expect(streamingReveal.contains("revealedIDs.formUnion(currentIDs)"))
     }
 
+    @Test("canonical prompt settlement is direct and has no replacement motion")
+    func canonicalPromptSettlementHasNoReplacementMotion() throws {
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let entranceRows = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatEntranceRows.swift"),
+            encoding: .utf8
+        )
+        let outgoingRows = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatOutgoingSubmissionRow.swift"),
+            encoding: .utf8
+        )
+        let motion = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatContentTransition.swift"),
+            encoding: .utf8
+        )
+        let media = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/ChatMediaLoader.swift"),
+            encoding: .utf8
+        )
+        let preparedSeed = (media.components(separatedBy: "func seedPreparedThumbnail").dropFirst().first ?? "")
+            .components(separatedBy: "func cachedThumbnail").first ?? ""
+
+        #expect(!entranceRows.contains("ChatPromptLifecycleReplacementEntranceRow"))
+        #expect(!outgoingRows.contains("ChatPromptLifecycleCrossfadeRow"))
+        #expect(!outgoingRows.contains("ChatPromptLifecycleTransitionSourceCard"))
+        #expect(!motion.contains("replacementAnimation"))
+        #expect(chat.contains("if canonicalSubmissionHandoffs.contains(item.id)"))
+        #expect(chat.contains("settlement is a direct visible replacement."))
+        #expect(chat.contains("seedCanonicalMediaPreviews(from: receipt, in: snapshot)"))
+        #expect(chat.contains("seedPreparedThumbnail(prepared, for: identity)"))
+        #expect(chat.contains("excludedOperationIDs: locallyMutatedQueueOperationIDs"))
+        #expect(chat.contains("receipt.operationID.map({ locallyMutatedQueueOperationIDs.contains($0) }) != true"))
+        #expect(chat.contains("invalidateSettledQueueHandoff("))
+        #expect(chat.contains("guard let mutationToken = queueMutationResolution.begin()"))
+        #expect(chat.contains("queueMutationResolution.wait(for: token)"))
+        #expect(chat.contains("guard resolution == .commandCompleted else { throw CancellationError() }"))
+        #expect(chat.contains("modelPresentationGeneration == presentationGeneration"))
+        #expect(chat.contains("presentationTarget == target"))
+        #expect(chat.occurrences(of: "retireQueueMutationPresentationState()") >= 2)
+        let deferredInstall = try #require(
+            chat.range(of: "if deferQueueMutationProjectionIfNeeded(capture)"),
+            "deferred projection branch missing"
+        )
+        let deferredInstallTail = String(chat[deferredInstall.lowerBound...].prefix(900))
+        let resolutionWait = try #require(
+            deferredInstallTail.range(of: "queueMutationResolution.wait(for: token)")
+        )
+        let projectionWait = try #require(
+            deferredInstallTail.range(of: "transcriptPresentation.waitForInstall(of: tag)")
+        )
+        #expect(resolutionWait.lowerBound < projectionWait.lowerBound)
+        #expect(!preparedSeed.contains("decodeThumbnail"))
+    }
+
     @Test("queued messages remain visible and individually manageable in chat")
     func queuedMessagePresentation() throws {
         let chat = try String(

@@ -195,6 +195,40 @@ final class ChatMediaLoader {
         try await thumbnail(for: identity, decode: thumbnailDecode)
     }
 
+    /// Aliases a composer thumbnail that was already decoded and bounded
+    /// off-main under the exact canonical blob identity. Settlement performs no
+    /// ImageIO work and can therefore install the canonical row immediately.
+    func seedPreparedThumbnail(
+        _ prepared: ComposerPreparedAttachmentThumbnail,
+        for identity: ChatMediaIdentity
+    ) throws {
+        guard admits(identity) else { throw ChatMediaLoadError.staleIdentity }
+        let (decodedBytes, overflow) = prepared.image.bytesPerRow.multipliedReportingOverflow(
+            by: prepared.image.height
+        )
+        guard !overflow,
+              prepared.encodedData.count <= ComposerAttachmentPreviewPolicy.maximumEncodedBytes,
+              prepared.image.width <= ComposerAttachmentPreviewPolicy.maximumPixelDimension,
+              prepared.image.height <= ComposerAttachmentPreviewPolicy.maximumPixelDimension,
+              prepared.decodedBytes == decodedBytes,
+              decodedBytes <= ChatMediaPolicy.maximumDecodedThumbnailBytes else {
+            throw ChatMediaLoadError.decodedPayloadTooLarge
+        }
+        if thumbnails[identity] != nil { return }
+        admitThumbnail(
+            UIImage(cgImage: prepared.image),
+            decodedBytes: prepared.decodedBytes,
+            for: identity
+        )
+    }
+
+    /// Read-only synchronous lookup used by a newly mounted canonical chip so
+    /// it never paints a loading placeholder over the thumbnail just displayed.
+    func cachedThumbnail(for identity: ChatMediaIdentity) -> UIImage? {
+        guard admits(identity) else { return nil }
+        return thumbnails[identity]?.image
+    }
+
     func fileThumbnail(
         for identity: ChatMediaIdentity,
         name: String,

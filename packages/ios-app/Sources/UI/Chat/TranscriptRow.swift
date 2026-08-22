@@ -588,7 +588,9 @@ private struct TranscriptImageChip: View {
     }
 
     private var currentThumbnail: UIImage? {
-        thumbnailIdentity == identity ? thumbnail : nil
+        guard let identity else { return nil }
+        if thumbnailIdentity == identity, let thumbnail { return thumbnail }
+        return model.chatMedia.cachedThumbnail(for: identity)
     }
 
     private var loadKey: LoadKey {
@@ -705,7 +707,9 @@ struct TranscriptFileChip: View {
     }
 
     private var currentThumbnail: UIImage? {
-        thumbnailIdentity == identity ? thumbnail : nil
+        guard let identity else { return nil }
+        if thumbnailIdentity == identity, let thumbnail { return thumbnail }
+        return model.chatMedia.cachedThumbnail(for: identity)
     }
 
     var body: some View {

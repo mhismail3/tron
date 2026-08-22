@@ -147,16 +147,56 @@ struct ChatTranscriptPresentationTests {
             TranscriptItem.self,
             from: Data(#"{"id":"canonical-mixed","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","presentationId":"canonical-mixed","content":[{"id":"text","ordinal":0,"type":"text","text":"ship it"},{"id":"photo","ordinal":1,"type":"image","text":null,"mimeType":"image/jpeg"},{"id":"file","ordinal":2,"type":"text","text":null,"attachment":{"name":"notes.txt","mimeType":"text/plain","size":3}}]}"#.utf8)
         )
-        let replacement = ChatPromptLifecycleReplacementPolicy.replacement(
+        let canonicalHandoffID = ChatPromptLifecycleReplacementPolicy.canonicalHandoffID(
             previousQueue: [queued],
             incomingQueue: [],
             previousCanonicalIDs: [],
             incomingTranscript: [canonical]
         )
-        #expect(replacement?.canonicalID == "canonical-mixed")
-        #expect(replacement?.operationID == "operation-mixed")
-        #expect(replacement?.position == 1)
-        #expect(replacement?.total == 1)
+        #expect(canonicalHandoffID == "canonical-mixed")
+        #expect(ChatPromptLifecycleReplacementPolicy.canonicalHandoffID(
+            previousQueue: [queued],
+            incomingQueue: [],
+            excludedOperationIDs: [queued.id],
+            previousCanonicalIDs: [],
+            incomingTranscript: [canonical]
+        ) == nil)
+    }
+
+    @Test("canonical media previews map exact files and only an exact ordered image sequence")
+    func canonicalMediaPreviewMapping() throws {
+        let photoPreview = Data([1, 2])
+        let filePreview = Data([3, 4])
+        let attachments = [
+            PendingAttachment(
+                id: "photo-upload", name: "photo.jpg", mimeType: "image/jpeg", size: 2,
+                previewData: photoPreview
+            ),
+            PendingAttachment(
+                id: "file-upload", name: "notes.txt", mimeType: "text/plain", size: 2,
+                previewData: filePreview
+            ),
+        ]
+        let canonical = try decodeTranscriptFixture(
+            TranscriptItem.self,
+            from: Data(#"{"id":"canonical-media","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","presentationId":"canonical-media","content":[{"id":"text","ordinal":0,"type":"text","text":"ship it"},{"id":"photo","ordinal":1,"type":"image","mimeType":"image/jpeg","blobId":"image-blob"},{"id":"file","ordinal":2,"type":"text","text":"notes.txt","blobId":"upload:file-upload","attachment":{"name":"notes.txt","mimeType":"text/plain","size":2}}]}"#.utf8)
+        )
+        #expect(ChatCanonicalMediaPreviewPolicy.seeds(
+            attachments: attachments,
+            canonicalItem: canonical
+        ) == [
+            .init(blobID: "image-blob", attachment: attachments[0]),
+            .init(blobID: "upload:file-upload", attachment: attachments[1]),
+        ])
+
+        let mismatchedImage = PendingAttachment(
+            id: "photo-upload", name: "photo.png", mimeType: "image/png", size: 2,
+            previewData: photoPreview
+        )
+        #expect(ChatCanonicalMediaPreviewPolicy.seeds(
+            attachments: [mismatchedImage, attachments[1]],
+            canonicalItem: canonical
+        ) == [.init(blobID: "upload:file-upload", attachment: attachments[1])])
     }
 
     @Test("attachment-only queue replacement admits Pi envelope only with exact typed counts")
@@ -169,13 +209,13 @@ struct ChatTranscriptPresentationTests {
             TranscriptItem.self,
             from: Data(#"{"id":"canonical-attachment","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","presentationId":"canonical-attachment","content":[{"id":"envelope","ordinal":0,"type":"text","text":"[Attached image context]"},{"id":"photo","ordinal":1,"type":"image","text":null,"mimeType":"image/jpeg"}]}"#.utf8)
         )
-        #expect(ChatPromptLifecycleReplacementPolicy.replacement(
+        #expect(ChatPromptLifecycleReplacementPolicy.canonicalHandoffID(
             previousQueue: [queued], incomingQueue: [], previousCanonicalIDs: [], incomingTranscript: [canonical]
-        )?.canonicalID == "canonical-attachment")
+        ) == "canonical-attachment")
         let untyped = SessionSnapshot.QueuedMessage(
             id: queued.id, behavior: queued.behavior, text: "", attachmentCount: 1
         )
-        #expect(ChatPromptLifecycleReplacementPolicy.replacement(
+        #expect(ChatPromptLifecycleReplacementPolicy.canonicalHandoffID(
             previousQueue: [untyped], incomingQueue: [], previousCanonicalIDs: [], incomingTranscript: [canonical]
         ) == nil)
     }
@@ -196,11 +236,11 @@ struct ChatTranscriptPresentationTests {
             TranscriptItem.self,
             from: Data(#"{"id":"canonical-two","parentId":null,"timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"user","presentationId":"canonical-two","content":[{"id":"text","ordinal":0,"type":"text","text":"repeat"}]}"#.utf8)
         )
-        #expect(ChatPromptLifecycleReplacementPolicy.replacement(
+        #expect(ChatPromptLifecycleReplacementPolicy.canonicalHandoffID(
             previousQueue: [first], incomingQueue: [], previousCanonicalIDs: [],
             incomingTranscript: [candidateOne, candidateTwo]
         ) == nil)
-        #expect(ChatPromptLifecycleReplacementPolicy.replacement(
+        #expect(ChatPromptLifecycleReplacementPolicy.canonicalHandoffID(
             previousQueue: [first, second], incomingQueue: [], previousCanonicalIDs: [],
             incomingTranscript: [candidateOne]
         ) == nil)
@@ -215,7 +255,7 @@ struct ChatTranscriptPresentationTests {
             TranscriptItem.self,
             from: Data(#"{"id":"old","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","presentationId":"old","content":[{"id":"text","ordinal":0,"type":"text","text":"same"}]}"#.utf8)
         )
-        #expect(ChatPromptLifecycleReplacementPolicy.replacement(
+        #expect(ChatPromptLifecycleReplacementPolicy.canonicalHandoffID(
             previousQueue: [queued], incomingQueue: [], previousCanonicalIDs: ["old"],
             incomingTranscript: [old]
         ) == nil)

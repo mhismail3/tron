@@ -160,6 +160,7 @@ struct ComposerDraftCoordinatorTests {
             #expect(attachment.size == fixture.encodedData.count)
             #expect(preview != fixture.encodedData)
             #expect(preview.count <= ComposerAttachmentPreviewPolicy.maximumEncodedBytes)
+            #expect(attachment.preparedThumbnail != nil)
             #expect(attachment.fullPreviewData == fixture.encodedData)
         }
     }
@@ -198,6 +199,7 @@ struct ComposerDraftCoordinatorTests {
             let attachment = try #require(coordinator.pendingAttachments(for: target).first)
             #expect(attachment.id == "document-id")
             #expect(try #require(attachment.previewData).count <= ComposerAttachmentPreviewPolicy.maximumEncodedBytes)
+            #expect(attachment.preparedThumbnail != nil)
             #expect(attachment.fullPreviewData == nil)
         }
     }
@@ -231,6 +233,7 @@ struct ComposerDraftCoordinatorTests {
             let attachment = try #require(coordinator.pendingAttachments(for: target).first)
             #expect(attachment.fullPreviewData == fixture.encodedData)
             #expect(try #require(attachment.previewData).count <= ComposerAttachmentPreviewPolicy.maximumEncodedBytes)
+            #expect(attachment.preparedThumbnail != nil)
         }
     }
 
@@ -692,8 +695,296 @@ struct ComposerDraftCoordinatorTests {
                 canonicalTranscript: [canonical]
             )
             #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
-            #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) == "canonical-direct")
+            let receipt = try #require(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target))
+            #expect(receipt.canonicalID == "canonical-direct")
+            #expect(receipt.attachments.isEmpty)
             #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) == nil)
+        }
+    }
+
+    @Test("canonical handoff retains only the newest unconsumed lifecycle receipt")
+    func canonicalHandoffReceiptIsSingleBounded() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 51)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "first"
+            )
+            func canonical(_ id: String, text: String) throws -> TranscriptItem {
+                try decodeTranscriptFixture(
+                    TranscriptItem.self,
+                    from: Data("{\"id\":\"\(id)\",\"parentId\":null,\"timestamp\":\"2026-01-01T00:00:01Z\",\"kind\":\"message\",\"role\":\"user\",\"presentationId\":\"\(id)\",\"content\":[{\"id\":\"text\",\"ordinal\":0,\"type\":\"text\",\"text\":\"\(text)\"}]}".utf8)
+                )
+            }
+
+            let firstSend = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(firstSend)
+            let first = try canonical("canonical-first", text: "first")
+            harness.coordinator.reconcileSubmission(target: target, canonicalTranscript: [first])
+
+            harness.coordinator.setText("second", for: scope)
+            let secondSend = Task {
+                try await harness.coordinator.send(
+                    target: target, behavior: nil, canonicalTranscript: [first]
+                )
+            }
+            try await harness.waitForSends(2)
+            harness.completeSend(index: 1, result: .success(()))
+            try await valueOfOwnedTask(secondSend)
+            let second = try canonical("canonical-second", text: "second")
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [first, second]
+            )
+
+            #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target)?.canonicalID == "canonical-second")
+            #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) == nil)
+        }
+    }
+
+    @Test("canonical handoff freezes one bounded attachment preview and strips full bytes")
+    func canonicalHandoffFreezesPreview() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 50)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "photo"
+            )
+            let fixture = try SessionScenarioBuilder(seed: 9_501).generatedImageFixture(
+                format: .jpeg, pixelWidth: 600, pixelHeight: 400, orientation: .up
+            )
+            let prepared = try #require(ComposerAttachmentPreviewPolicy.preparePayloadSynchronously(
+                fixture.encodedData, mimeType: "image/jpeg", name: "photo.jpg"
+            ))
+            let preview = prepared.encodedData
+            harness.coordinator.installHostedAttachment(
+                .init(
+                    id: "photo-upload", name: "photo.jpg", mimeType: "image/jpeg", size: 8,
+                    previewData: preview, fullPreviewData: fixture.encodedData,
+                    preparedThumbnail: prepared
+                ),
+                target: target
+            )
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            let canonical = TranscriptItem.message(MessageTranscriptItem(
+                id: "canonical-photo", parentId: nil, timestamp: "2026-01-01T00:00:01Z",
+                kind: .message, role: .user, presentationId: "canonical-photo",
+                content: [
+                    ContentPart(id: "text", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "photo", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "image", ordinal: 1, thinkingRunOrdinal: nil, type: .image, text: nil, attachment: nil, redacted: nil, mimeType: "image/jpeg", blobId: "canonical-blob", toolCallId: nil, name: nil, arguments: nil),
+                ],
+                provider: nil, modelId: nil, stopReason: nil, errorMessage: nil,
+                toolCallId: nil, toolName: nil, isError: nil, details: nil, usage: nil,
+                startedAt: nil, completedAt: nil, durationMs: nil,
+                lastProgressAt: nil, progressSequence: nil
+            ))
+            harness.coordinator.reconcileSubmission(target: target, canonicalTranscript: [canonical])
+
+            let receipt = try #require(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target))
+            #expect(receipt.canonicalID == "canonical-photo")
+            #expect(receipt.attachments.count == 1)
+            #expect(receipt.attachments[0].previewData == preview)
+            #expect(receipt.attachments[0].preparedThumbnail != nil)
+            #expect(receipt.attachments[0].fullPreviewData == nil)
+        }
+    }
+
+    @Test("queued steering carries its frozen preview into later canonical settlement")
+    func queuedCanonicalHandoffCarriesPreview() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 52)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "queued photo"
+            )
+            let fixture = try SessionScenarioBuilder(seed: 9_502).generatedImageFixture(
+                format: .jpeg, pixelWidth: 600, pixelHeight: 400, orientation: .up
+            )
+            let prepared = try #require(ComposerAttachmentPreviewPolicy.preparePayloadSynchronously(
+                fixture.encodedData, mimeType: "image/jpeg", name: "photo.jpg"
+            ))
+            let preview = prepared.encodedData
+            harness.coordinator.installHostedAttachment(
+                .init(
+                    id: "photo-upload", name: "photo.jpg", mimeType: "image/jpeg", size: 3,
+                    previewData: preview, fullPreviewData: fixture.encodedData,
+                    preparedThumbnail: prepared
+                ),
+                target: target
+            )
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            let queued = SessionSnapshot.QueuedMessage(
+                id: "operation-0", behavior: .steer, text: "queued photo",
+                attachmentCount: 1, photoCount: 1, fileAttachmentCount: 0
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                queuedMessages: [queued]
+            )
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+            #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) == nil)
+            // Queue removal and canonical append may publish in separate
+            // snapshots. The lifecycle must survive the intermediate gap.
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                queuedMessages: []
+            )
+            #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) == nil)
+
+            let canonical = TranscriptItem.message(MessageTranscriptItem(
+                id: "canonical-queued-photo", parentId: nil, timestamp: "2026-01-01T00:00:02Z",
+                kind: .message, role: .user, presentationId: "canonical-queued-photo",
+                content: [
+                    ContentPart(id: "text", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "queued photo", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "image", ordinal: 1, thinkingRunOrdinal: nil, type: .image, text: nil, attachment: nil, redacted: nil, mimeType: "image/jpeg", blobId: "canonical-queued-blob", toolCallId: nil, name: nil, arguments: nil),
+                ],
+                provider: nil, modelId: nil, stopReason: nil, errorMessage: nil,
+                toolCallId: nil, toolName: nil, isError: nil, details: nil, usage: nil,
+                startedAt: nil, completedAt: nil, durationMs: nil,
+                lastProgressAt: nil, progressSequence: nil
+            ))
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [canonical],
+                queuedMessages: []
+            )
+            let receipt = try #require(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target))
+            #expect(receipt.canonicalID == "canonical-queued-photo")
+            #expect(receipt.operationID == queued.id)
+            #expect(receipt.attachments.count == 1)
+            #expect(receipt.attachments[0].previewData == preview)
+            #expect(receipt.attachments[0].preparedThumbnail != nil)
+            #expect(receipt.attachments[0].fullPreviewData == nil)
+        }
+    }
+
+    @Test("text-only queued steering survives a queue-absent snapshot before canonical settlement")
+    func queuedTextCanonicalHandoffSurvivesGap() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 53)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "queued text"
+            )
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            let queued = SessionSnapshot.QueuedMessage(
+                id: "operation-0", behavior: .steer, text: "queued text", attachmentCount: 0
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [], queuedMessages: [queued]
+            )
+            harness.coordinator.invalidateSettledQueueHandoff(
+                target: target,
+                affectedOperationIDs: ["unrelated-operation"]
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [], queuedMessages: []
+            )
+            #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) == nil)
+
+            let canonical = try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: Data(#"{"id":"canonical-queued-text","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","presentationId":"canonical-queued-text","content":[{"id":"text","ordinal":0,"type":"text","text":"queued text"}]}"#.utf8)
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [canonical], queuedMessages: []
+            )
+            let receipt = try #require(
+                harness.coordinator.consumeCanonicalSubmissionHandoff(target: target)
+            )
+            #expect(receipt.canonicalID == "canonical-queued-text")
+            #expect(receipt.operationID == queued.id)
+            #expect(receipt.attachments.isEmpty)
+        }
+    }
+
+    @Test("a confirmed local queue mutation invalidates only its exact settlement owner")
+    func localQueueMutationInvalidatesExactHandoff() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 56)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "locally removed"
+            )
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            let queued = SessionSnapshot.QueuedMessage(
+                id: "operation-0", behavior: .steer, text: "locally removed", attachmentCount: 0
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [], queuedMessages: [queued]
+            )
+            harness.coordinator.invalidateSettledQueueHandoff(
+                target: target,
+                affectedOperationIDs: [queued.id]
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [], queuedMessages: []
+            )
+            let laterCanonical = try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: Data(#"{"id":"later-unrelated","parentId":null,"timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"user","presentationId":"later-unrelated","content":[{"id":"text","ordinal":0,"type":"text","text":"locally removed"}]}"#.utf8)
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [laterCanonical], queuedMessages: []
+            )
+            #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) == nil)
+        }
+    }
+
+    @Test("confirmed queue mutation retires a receipt prepared before command success")
+    func localQueueMutationInvalidatesPreparedReceipt() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 57)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "simultaneous canonical"
+            )
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            let queued = SessionSnapshot.QueuedMessage(
+                id: "operation-0", behavior: .steer, text: "simultaneous canonical", attachmentCount: 0
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [], queuedMessages: [queued]
+            )
+            let canonical = try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: Data(#"{"id":"canonical-before-success","parentId":null,"timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"user","presentationId":"canonical-before-success","content":[{"id":"text","ordinal":0,"type":"text","text":"simultaneous canonical"}]}"#.utf8)
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [canonical], queuedMessages: []
+            )
+            #expect(harness.coordinator.canonicalSubmissionHandoff(target: target)?.operationID == queued.id)
+
+            harness.coordinator.invalidateSettledQueueHandoff(
+                target: target,
+                affectedOperationIDs: [queued.id]
+            )
+            #expect(harness.coordinator.canonicalSubmissionHandoff(target: target) == nil)
         }
     }
 
@@ -722,6 +1013,73 @@ struct ComposerDraftCoordinatorTests {
                 target: target,
                 canonicalTranscript: [canonicalOne, canonicalTwo]
             )
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+            #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) == nil)
+        }
+    }
+
+    @Test("an exact canonical handoff survives later ambiguity until transport accepts")
+    func exactCanonicalHandoffSurvivesLaterAmbiguity() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 54)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "repeat"
+            )
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(1)
+            let canonicalOne = try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: Data(#"{"id":"canonical-exact","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"user","presentationId":"canonical-exact","content":[{"id":"text","ordinal":0,"type":"text","text":"repeat"}]}"#.utf8)
+            )
+            let canonicalTwo = try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: Data(#"{"id":"canonical-later","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","presentationId":"canonical-later","content":[{"id":"text","ordinal":0,"type":"text","text":"repeat"}]}"#.utf8)
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [canonicalOne]
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [canonicalOne, canonicalTwo]
+            )
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+
+            let receipt = try #require(
+                harness.coordinator.consumeCanonicalSubmissionHandoff(target: target)
+            )
+            #expect(receipt.canonicalID == "canonical-exact")
+        }
+    }
+
+    @Test("text-only submissions reject same-text canonical rows with attachments")
+    func textOnlySubmissionRejectsCanonicalAttachments() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 55)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "same"
+            )
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            let canonical = TranscriptItem.message(MessageTranscriptItem(
+                id: "canonical-with-photo", parentId: nil, timestamp: "2026-01-01T00:00:01Z",
+                kind: .message, role: .user, presentationId: "canonical-with-photo",
+                content: [
+                    ContentPart(id: "text", ordinal: 0, thinkingRunOrdinal: nil, type: .text, text: "same", attachment: nil, redacted: nil, mimeType: nil, blobId: nil, toolCallId: nil, name: nil, arguments: nil),
+                    ContentPart(id: "image", ordinal: 1, thinkingRunOrdinal: nil, type: .image, text: nil, attachment: nil, redacted: nil, mimeType: "image/jpeg", blobId: "unrelated", toolCallId: nil, name: nil, arguments: nil),
+                ],
+                provider: nil, modelId: nil, stopReason: nil, errorMessage: nil,
+                toolCallId: nil, toolName: nil, isError: nil, details: nil, usage: nil,
+                startedAt: nil, completedAt: nil, durationMs: nil,
+                lastProgressAt: nil, progressSequence: nil
+            ))
+            harness.coordinator.reconcileSubmission(target: target, canonicalTranscript: [canonical])
+
             #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
             #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) == nil)
         }

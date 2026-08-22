@@ -89,134 +89,6 @@ struct ChatPromptCard<AttachmentContent: View, StatusContent: View>: View {
     }
 }
 
-/// A source card retained briefly while one authoritative queue operation
-/// becomes its canonical user message. It is inert: queue controls stay owned
-/// by the authoritative queue row, never by this transition surface.
-struct ChatPromptLifecycleTransitionSourceCard: View {
-    let source: ChatPromptLifecycleTransitionSource
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Spacer(minLength: 24)
-            ChatPromptCard(
-                behavior: source.behavior,
-                text: source.text,
-                detail: detail,
-                attachmentContent: {
-                    let chips = QueuedMessageAttachmentPresentation.chips(
-                        attachmentCount: source.attachmentCount,
-                        photoCount: source.photoCount,
-                        fileAttachmentCount: source.fileAttachmentCount
-                    )
-                    if !chips.isEmpty {
-                        QueuedMessageAttachmentChipRow(
-                            chips: chips,
-                            accent: source.behavior == .followUp ? .tronPurple : .tronEmerald
-                        )
-                    }
-                },
-                statusContent: { EmptyView() }
-            )
-        }
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .accessibilityHidden(true)
-        .allowsHitTesting(false)
-    }
-
-    private var detail: String {
-        let delivery = source.behavior == .steer ? "After the current turn" : "After current work"
-        return "\(delivery) · \(source.position) of \(source.total)"
-    }
-}
-
-/// Crossfades one authoritative queue card into its canonical user row. Both
-/// surfaces share one bounded row slot; no list-wide animation or scroll write
-/// is involved. The caller retires this view after the bounded animation.
-struct ChatPromptLifecycleCrossfadeRow<Destination: View>: View {
-    let source: ChatPromptLifecycleTransitionSource
-    let reduceMotion: Bool
-    let onSettled: () -> Void
-    @ViewBuilder let destination: Destination
-    @State private var destinationVisible = false
-    @State private var didFinalize = false
-    @State private var settleTask: Task<Void, Never>?
-
-    init(
-        source: ChatPromptLifecycleTransitionSource,
-        reduceMotion: Bool,
-        onSettled: @escaping () -> Void,
-        @ViewBuilder destination: () -> Destination
-    ) {
-        self.source = source
-        self.reduceMotion = reduceMotion
-        self.onSettled = onSettled
-        self.destination = destination()
-    }
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            ChatPromptLifecycleTransitionSourceCard(source: source)
-                .opacity(destinationVisible ? 0 : 1)
-                .scaleEffect(
-                    ChatPromptLifecycleTransitionPolicy.replacementScale(
-                        reduceMotion: reduceMotion,
-                        destinationVisible: destinationVisible
-                    ),
-                    anchor: .trailing
-                )
-            destination
-                .opacity(destinationVisible ? 1 : 0)
-                .scaleEffect(
-                    ChatPromptLifecycleTransitionPolicy.replacementDestinationScale(
-                        reduceMotion: reduceMotion,
-                        destinationVisible: destinationVisible
-                    ),
-                    anchor: .trailing
-                )
-                .allowsHitTesting(destinationVisible)
-                .accessibilityHidden(!destinationVisible)
-        }
-        .onAppear {
-            guard !destinationVisible,
-                  ChatPromptLifecycleTransitionPolicy.shouldFinalizeCrossfade(
-                      hasFinalized: didFinalize
-                  ) else { return }
-            let animation = ChatPromptLifecycleTransitionPolicy.replacementAnimation(
-                reduceMotion: reduceMotion
-            )
-            withAnimation(animation) { destinationVisible = true }
-            settleTask?.cancel()
-            settleTask = Task { @MainActor in
-                do {
-                    try await Task.sleep(for: .milliseconds(
-                        ChatPromptLifecycleTransitionPolicy.replacementDurationMilliseconds(
-                            reduceMotion: reduceMotion
-                        )
-                    ))
-                    finalizeCrossfade()
-                } catch {
-                    // Cancellation commonly means LazyVStack evicted this
-                    // row. Retire it anyway so re-realization cannot replay.
-                    finalizeCrossfade()
-                }
-            }
-        }
-        .onDisappear {
-            settleTask?.cancel()
-            settleTask = nil
-            finalizeCrossfade()
-        }
-    }
-
-    private func finalizeCrossfade() {
-        guard ChatPromptLifecycleTransitionPolicy.shouldFinalizeCrossfade(
-            hasFinalized: didFinalize
-        ) else { return }
-        didFinalize = true
-        onSettled()
-    }
-}
-
 /// An authoritative pending prompt reconstructed from the Gateway snapshot.
 /// It stays in the user-message position while compaction or prompt preflight
 /// delays the canonical transcript entry.
@@ -376,7 +248,7 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                 HStack(spacing: 8) {
                     ForEach(attachments) { attachment in
                         AttachmentThumbnailSurface(
-                            image: attachment.previewData.flatMap(UIImage.init(data:)),
+                            image: attachment.preparedThumbnail.map { UIImage(cgImage: $0.image) },
                             name: attachment.name,
                             mimeType: attachment.mimeType
                         )

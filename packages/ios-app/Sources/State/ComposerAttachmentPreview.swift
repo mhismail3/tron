@@ -3,6 +3,15 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
+/// Immutable decoded composer thumbnail prepared off-main. `CGImage` is safe to
+/// share after construction; the wrapper is unchecked only because CoreGraphics
+/// does not annotate that immutable contract as `Sendable`.
+struct ComposerPreparedAttachmentThumbnail: @unchecked Sendable {
+    let encodedData: Data
+    let image: CGImage
+    let decodedBytes: Int
+}
+
 enum ComposerAttachmentPreviewPolicy {
     static let maximumPixelDimension = 192
     static let maximumEncodedBytes = 1 * 1_048_576
@@ -11,9 +20,9 @@ enum ComposerAttachmentPreviewPolicy {
         _ data: Data,
         mimeType: String? = nil,
         name: String? = nil
-    ) async -> Data? {
+    ) async -> ComposerPreparedAttachmentThumbnail? {
         await Task.detached(priority: .userInitiated) {
-            prepareSynchronously(data, mimeType: mimeType, name: name)
+            preparePayloadSynchronously(data, mimeType: mimeType, name: name)
         }.value
     }
 
@@ -22,6 +31,14 @@ enum ComposerAttachmentPreviewPolicy {
         mimeType: String? = nil,
         name: String? = nil
     ) -> Data? {
+        preparePayloadSynchronously(data, mimeType: mimeType, name: name)?.encodedData
+    }
+
+    nonisolated static func preparePayloadSynchronously(
+        _ data: Data,
+        mimeType: String? = nil,
+        name: String? = nil
+    ) -> ComposerPreparedAttachmentThumbnail? {
         guard let image = imageThumbnail(data)
                 ?? pdfThumbnail(data, mimeType: mimeType, name: name)
                 ?? textThumbnail(data, mimeType: mimeType, name: name),
@@ -39,7 +56,11 @@ enum ComposerAttachmentPreviewPolicy {
         ) else { return nil }
         CGImageDestinationAddImage(destination, image, nil)
         guard CGImageDestinationFinalize(destination), output.length <= maximumEncodedBytes else { return nil }
-        return output as Data
+        return ComposerPreparedAttachmentThumbnail(
+            encodedData: output as Data,
+            image: image,
+            decodedBytes: decodedBytes
+        )
     }
 
     private nonisolated static func imageThumbnail(_ data: Data) -> CGImage? {

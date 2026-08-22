@@ -388,7 +388,7 @@ completion order—not newest-request arbitration—orders staged IDs. A confirm
 captured by its submission and never clears newer text or attachments. Admission installs one exact-target,
 bounded outgoing presentation row immediately; submitted attachments leave the composer strip and remain owned by
 that row until the exact tagged canonical projection installs, including Gateway pending-prompt snapshots. The
-handoff preserves one visual row rather than removing and reinserting optimistic/pending/canonical variants. The
+frame gate keeps one complete lifecycle representation visible until its direct canonical replacement is ready. The
 admission is completed synchronously before ordinary-send keyboard dismissal, so the large prompt/photo outgoing
 shape, steering/follow-up label, and responder transition share one MainActor boundary; transport is a separate
 settlement of that exact admission. Prompt behavior is normalized once into ordinary, steering, follow-up, or neutral
@@ -398,10 +398,14 @@ a left-aligned optimistic variant before canonical reconciliation. Prompt and qu
 intrinsic/wrapped layout rather than a `ViewThatFits` branch swap, so large pasted text chooses its final
 container geometry on the first measurement. The admitted operation ID may alias only its exact newly admitted queue
 item to the immutable outgoing presentation ID; aliases remain bounded to the Gateway's 32-item queue capacity and
-are retired only when their authoritative operation IDs disappear or the presentation is revoked. Pre-existing or unrelated
-queue rows retain Gateway IDs, and canonical transcript IDs are never aliased. Queue admission disables a second entrance
-animation, while pending-to-canonical replacement consumes the existing canonical entrance-suppression ledger exactly once
-and applies one bounded role-aware settling animation to the canonical row. Installed-row updates inherit no unrelated
+are retired only when their authoritative operation IDs disappear or the presentation is revoked. A confirmed local edit,
+remove, or clear retires continuity only for its exact changed operation IDs. If a canonical boundary arrives before that
+command resolves and its continuity decision depends on the outcome, the newest complete capture is held behind the installed
+queue boundary: success retires and excludes the changed lineage before installation, while failure restores exact settlement
+before installation. Pure reordering preserves lineage. Pre-existing or unrelated queue rows
+retain Gateway IDs, and canonical transcript IDs are never aliased. A prompt lifecycle consumes its role-aware
+entrance only when the outgoing, pending, or queued representation first appears. Canonical settlement consumes the exact
+entrance-suppression receipt and installs directly visible without a crossfade, hidden frame, scale transition, or inherited
 animation. Definitive rejection restores outgoing text before newer input,
 while a possibly-sent transport outcome retains the row and captured IDs without replay. Retired completions publish neither restoration
 nor errors. Extension editor requests auto-apply only to an empty exact draft; nonempty drafts require the
@@ -742,7 +746,11 @@ Every attachment uses the same 64-point rounded-square surface as a pending phot
 zero for supported images and paged documents, while bounded UTF-8 text files render a first-page text
 preview; unsupported formats fall back to a file glyph and middle-truncated filename inside that square.
 Pending, optimistic outgoing, and canonical transcript attachments reuse this primitive rather than
-introducing file-only capsules. Transcript media resolves through one `ChatMediaLoader` keyed by profile,
+introducing file-only capsules. Staging prepares each bounded encoded and decoded thumbnail once off-main. An exact
+canonical handoff carries that immutable prepared thumbnail: file previews map by their upload blob identity, while image
+previews map by order only when the complete count and MIME sequence agree. Settlement aliases the already-decoded image
+into the existing bounded media cache before canonical installation, so the chip synchronously retains the image
+already displayed; ambiguous mappings use normal loading. Transcript media resolves through one `ChatMediaLoader` keyed by profile,
 lifecycle generation, and blob ID; views never fetch blobs directly. Authenticated blob reads and upload staging are paired-profile HTTP operations rather than disposable WebSocket-epoch operations, so a same-profile reconnect neither dismisses an open preview nor replaces its thumbnail with a retry state. Thumbnail fetch/decode is identity-single-flight behind one shared preparation slot and a
 32-flight admission ceiling. Its bounded HTTP delegate rejects declared or streamed bodies over 25 MiB
 while receiving them, then applies image orientation or first-page file rendering off-main at no more than
@@ -965,10 +973,9 @@ strictly an optional visual optimization: reconnect can temporarily project both
 still-live predecessor, so the complete rewritten row/key set is checked for uniqueness before any semantic map is
 constructed. A collision retains the authoritative next timeline unchanged rather than trapping in dictionary
 construction. Submission handoffs carry a bounded one-shot canonical receipt across the synchronous reconciliation
-boundary; the matching canonical row consumes it once for an intentional role-aware replacement reveal and never
-replays it on later snapshots. Queue-card replacements use the stricter one-removed/one-new-candidate policy and
-fail closed for repeated or causally ambiguous prompts; no Gateway operation link is inferred. Reduce Motion retains
-only a brief opacity reveal. Canonical
+boundary; the matching canonical row consumes it once and installs directly visible without replaying an entrance.
+Queue-card replacements use the stricter one-removed/one-new-candidate policy and fail closed for repeated or causally
+ambiguous prompts; no Gateway operation link is inferred. Canonical
 compaction/branch/configuration entries, embedded assistant failures, and exact admitted custom/retry
 working detail share one semantic notification projection and capsule primitive. Ordinary default running
 state instead drives only the bottom-safe-area blur and never changes transcript geometry. Extension status

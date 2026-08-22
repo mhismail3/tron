@@ -204,7 +204,7 @@ struct PendingAttachmentChip: View {
     }
 
     private var decodedPreviewImage: UIImage? {
-        attachment.previewData.flatMap(UIImage.init(data:))
+        attachment.preparedThumbnail.map { UIImage(cgImage: $0.image) }
     }
 }
 

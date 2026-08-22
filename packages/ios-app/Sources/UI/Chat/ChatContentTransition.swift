@@ -51,44 +51,6 @@ enum ChatPromptLifecycleTransitionPolicy {
         authoritativeQueueIDs.contains(pendingOperationID)
     }
 
-    static func replacementAnimation(reduceMotion: Bool) -> Animation {
-        reduceMotion ? .easeOut(duration: 0.14) : .smooth(duration: 0.28)
-    }
-
-    static func replacementScale(
-        reduceMotion: Bool,
-        destinationVisible: Bool
-    ) -> CGFloat {
-        guard !reduceMotion else { return 1 }
-        return destinationVisible ? 0.985 : 1
-    }
-
-    static func replacementDestinationScale(
-        reduceMotion: Bool,
-        destinationVisible: Bool
-    ) -> CGFloat {
-        guard !reduceMotion else { return 1 }
-        return destinationVisible ? 1 : 0.985
-    }
-
-    static func replacementDurationMilliseconds(reduceMotion: Bool) -> Int {
-        reduceMotion ? 180 : 360
-    }
-
-    /// Crossfade ownership must survive LazyVStack eviction. Both the normal
-    /// completion and disappearance/cancellation paths call this predicate,
-    /// making settlement idempotent at the row boundary.
-    static func shouldFinalizeCrossfade(hasFinalized: Bool) -> Bool {
-        !hasFinalized
-    }
-
-    static func transitionIDsToRetire(
-        in insertionOrder: [String],
-        maximum: Int
-    ) -> [String] {
-        guard maximum >= 0, insertionOrder.count > maximum else { return [] }
-        return Array(insertionOrder.prefix(insertionOrder.count - maximum))
-    }
 }
 
 struct ChatContentEntranceTransform: Equatable, Sendable {

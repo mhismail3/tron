@@ -165,53 +165,6 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
     }
 }
 
-/// Canonical prompt replacement uses the same role-aware transform as a new
-/// user row, but owns one explicit settling animation. This is distinct from
-/// entrance bookkeeping: the prior optimistic/pending card already consumed
-/// its insertion animation, so the canonical ID must not be admitted again.
-struct ChatPromptLifecycleReplacementEntranceRow<Content: View>: View {
-    let reduceMotion: Bool
-    let kind: ChatContentEntranceKind
-    @ViewBuilder let content: Content
-    @State private var revealed = false
-
-    init(
-        reduceMotion: Bool,
-        kind: ChatContentEntranceKind,
-        @ViewBuilder content: () -> Content
-    ) {
-        self.reduceMotion = reduceMotion
-        self.kind = kind
-        self.content = content()
-    }
-
-    var body: some View {
-        let hidden = ChatContentTransitionPolicy.hiddenTransform(
-            for: kind,
-            reduceMotion: reduceMotion
-        )
-        content
-            .opacity(revealed ? 1 : 0)
-            .scaleEffect(
-                revealed ? 1 : hidden.scale,
-                anchor: hidden.anchor.unitPoint
-            )
-            .offset(
-                x: revealed ? 0 : hidden.offsetX,
-                y: revealed ? 0 : hidden.offsetY
-            )
-            .onAppear {
-                guard !revealed else { return }
-                withAnimation(ChatContentTransitionPolicy.revealAnimation(
-                    for: kind,
-                    reduceMotion: reduceMotion
-                )) {
-                    revealed = true
-                }
-            }
-    }
-}
-
 struct ChatQueuedMessageEntranceRow<Content: View>: View {
     let animatesEntrance: Bool
     let reduceMotion: Bool

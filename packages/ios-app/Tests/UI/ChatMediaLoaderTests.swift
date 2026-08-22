@@ -66,6 +66,55 @@ struct ChatMediaLoaderTests {
         #expect(decoded.1 <= 192 * 192 * 4)
     }
 
+    @Test("seeded local previews are synchronous, admission checked, bounded, and avoid fetch")
+    func seededThumbnailContinuity() async throws {
+        let fixture = try SessionScenarioBuilder(seed: 6_314).generatedImageFixture(
+            format: .jpeg,
+            pixelWidth: 600,
+            pixelHeight: 400,
+            orientation: .up
+        )
+        let counter = MediaFetchCounter(payload: .init(
+            data: fixture.encodedData,
+            mimeType: "image/jpeg"
+        ))
+        let prepared = try #require(await ComposerAttachmentPreviewPolicy.prepare(
+            fixture.encodedData,
+            mimeType: "image/jpeg",
+            name: "seeded.jpg"
+        ))
+        let decodeGate = MediaDecodeGate(image: UIImage(cgImage: prepared.image))
+        await decodeGate.release()
+        var admitted = true
+        let loader = ChatMediaLoader(
+            fetch: { identity in await counter.fetch(identity) },
+            thumbnailDecode: { data in try await decodeGate.decode(data) },
+            admits: { _ in admitted }
+        )
+        let identity = mediaIdentity(blobID: "seeded")
+
+        try loader.seedPreparedThumbnail(prepared, for: identity)
+        #expect(loader.cachedThumbnail(for: identity) != nil)
+        _ = try await loader.thumbnail(for: identity)
+        #expect(await counter.count == 0)
+        #expect(await decodeGate.count == 0)
+
+        for index in 0...ChatMediaPolicy.maximumThumbnailCount {
+            try loader.seedPreparedThumbnail(
+                prepared,
+                for: mediaIdentity(blobID: "seeded-\(index)")
+            )
+        }
+        #expect(loader.metrics().thumbnailCount <= ChatMediaPolicy.maximumThumbnailCount)
+        #expect(loader.metrics().decodedThumbnailBytes <= ChatMediaPolicy.maximumDecodedThumbnailBytes)
+
+        admitted = false
+        #expect(loader.cachedThumbnail(for: identity) == nil)
+        #expect(throws: ChatMediaLoadError.staleIdentity) {
+            try loader.seedPreparedThumbnail(prepared, for: identity)
+        }
+    }
+
     @Test("file thumbnails render bounded first-page text through the shared cache")
     func fileThumbnail() async throws {
         let loader = ChatMediaLoader(
@@ -535,6 +584,8 @@ private actor MediaDecodeGate {
         }
         return (image, image.cgImage.map { $0.bytesPerRow * $0.height } ?? 1)
     }
+
+    var count: Int { startCount }
 
     func decodeFull(_ data: Data) async throws -> UIImage {
         let value = try await decode(data)

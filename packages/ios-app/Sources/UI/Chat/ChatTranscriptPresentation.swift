@@ -569,37 +569,27 @@ enum ChatAttachmentEnvelopePolicy {
     }
 }
 
-struct ChatPromptLifecycleTransitionSource: Hashable, Sendable {
-    let canonicalID: String
-    let operationID: String
-    let behavior: ChatPromptBehavior
-    let text: String
-    let attachmentCount: Int
-    let photoCount: Int?
-    let fileAttachmentCount: Int?
-    let position: Int
-    let total: Int
-}
-
 enum ChatPromptLifecycleReplacementPolicy {
     /// Finds one unambiguous queue-to-canonical replacement from two
     /// authoritative projection boundaries. Multiple removals or candidates
     /// deliberately fail closed so a repeated prompt can never borrow the
     /// wrong queue card's visual identity.
-    static func replacement(
+    static func canonicalHandoffID(
         previousQueue: [SessionSnapshot.QueuedMessage],
         incomingQueue: [SessionSnapshot.QueuedMessage],
+        excludedOperationIDs: Set<String> = [],
         previousCanonicalIDs: Set<String>,
         previousSourceWindow: InstalledChatTranscript.SourceWindow? = nil,
         incomingSourceWindow: InstalledChatTranscript.SourceWindow? = nil,
         incomingTranscript: [TranscriptItem]
-    ) -> ChatPromptLifecycleTransitionSource? {
+    ) -> String? {
         guard Set(previousQueue.map(\.id)).count == previousQueue.count,
               Set(incomingQueue.map(\.id)).count == incomingQueue.count else { return nil }
         let incomingQueueIDs = Set(incomingQueue.map(\.id))
         let removed = previousQueue.enumerated().filter { !incomingQueueIDs.contains($0.element.id) }
         guard removed.count == 1 else { return nil }
-        let (index, queue) = removed[0]
+        let queue = removed[0].element
+        guard !excludedOperationIDs.contains(queue.id) else { return nil }
         let candidates = incomingTranscript.filter { item in
             guard !previousCanonicalIDs.contains(item.id),
                   item.kind == .message, item.role == .user else { return false }
@@ -612,17 +602,7 @@ enum ChatPromptLifecycleReplacementPolicy {
             )
         }
         guard candidates.count == 1 else { return nil }
-        return ChatPromptLifecycleTransitionSource(
-            canonicalID: candidates[0].id,
-            operationID: queue.id,
-            behavior: ChatPromptBehavior(queue.behavior),
-            text: queue.text,
-            attachmentCount: queue.attachmentCount,
-            photoCount: queue.photoCount,
-            fileAttachmentCount: queue.fileAttachmentCount,
-            position: index + 1,
-            total: previousQueue.count
-        )
+        return candidates[0].id
     }
 
     private static func admitsForwardTailCandidate(
@@ -925,6 +905,53 @@ enum ChatPendingCanonicalSuppressionPolicy {
         if let expected = pending.photoCount, expected != photoCount { return false }
         if let expected = pending.fileAttachmentCount, expected != fileAttachmentCount { return false }
         return true
+    }
+}
+
+/// One exact, already-decoded local thumbnail admitted for a canonical media blob.
+struct ChatCanonicalMediaPreviewSeed: Equatable, Sendable {
+    let blobID: String
+    let attachment: PendingAttachment
+}
+
+enum ChatCanonicalMediaPreviewPolicy {
+    /// Maps only exact local/canonical attachment facts. File blobs preserve the
+    /// upload identity on the wire. Images receive content-addressed blob IDs,
+    /// so their bounded previews may transfer by order only when the complete
+    /// image count and MIME sequence agree.
+    static func seeds(
+        attachments: [PendingAttachment],
+        canonicalItem: TranscriptItem
+    ) -> [ChatCanonicalMediaPreviewSeed] {
+        guard canonicalItem.kind == .message, canonicalItem.role == .user else { return [] }
+        let content = canonicalItem.content ?? []
+        var result: [ChatCanonicalMediaPreviewSeed] = []
+
+        let pendingImages = attachments.filter { $0.mimeType.hasPrefix("image/") }
+        let canonicalImages = content.filter { $0.type == .image }
+        if pendingImages.count == canonicalImages.count,
+           zip(pendingImages, canonicalImages).allSatisfy({ pending, canonical in
+               pending.previewData != nil
+                   && canonical.mimeType == pending.mimeType
+                   && canonical.blobId != nil
+           }) {
+            for (pending, canonical) in zip(pendingImages, canonicalImages) {
+                if let blobID = canonical.blobId {
+                    result.append(.init(blobID: blobID, attachment: pending))
+                }
+            }
+        }
+
+        for pending in attachments where !pending.mimeType.hasPrefix("image/") {
+            guard pending.previewData != nil else { continue }
+            let blobID = "upload:\(pending.id)"
+            let matches = content.filter {
+                $0.attachment?.mimeType == pending.mimeType && $0.blobId == blobID
+            }
+            guard matches.count == 1 else { continue }
+            result.append(.init(blobID: blobID, attachment: pending))
+        }
+        return result
     }
 }
 
