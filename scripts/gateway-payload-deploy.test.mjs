@@ -623,8 +623,11 @@ test("apply accepts only bounded update controls and fails closed for source mod
   assert.throws(() => validateApplyRequest({ channel: "stable", mode: "source", commandId: "short" }), /command ID/);
   const supervised = process.env.TRON_GATEWAY_SUPERVISED;
   const runtimeChannel = process.env.TRON_GATEWAY_CHANNEL;
+  const dataDirectory = process.env.TRON_DATA_DIR;
+  const isolatedHome = await mkdtemp(join(tmpdir(), "tron-apply-policy-"));
   process.env.TRON_GATEWAY_SUPERVISED = "1";
   process.env.TRON_GATEWAY_CHANNEL = "stable";
+  process.env.TRON_DATA_DIR = isolatedHome;
   try {
     await assert.rejects(applyPayload({ channel: "dev", mode: "source", commandId: "command-1" }), /cannot update dev/);
     await assert.rejects(applyPayload({ channel: "stable", mode: "source", commandId: "command-1" }), /trusted Gateway update config/);
@@ -633,6 +636,9 @@ test("apply accepts only bounded update controls and fails closed for source mod
     else process.env.TRON_GATEWAY_SUPERVISED = supervised;
     if (runtimeChannel === undefined) delete process.env.TRON_GATEWAY_CHANNEL;
     else process.env.TRON_GATEWAY_CHANNEL = runtimeChannel;
+    if (dataDirectory === undefined) delete process.env.TRON_DATA_DIR;
+    else process.env.TRON_DATA_DIR = dataDirectory;
+    await rm(isolatedHome, { recursive: true, force: true });
   }
 });
 
