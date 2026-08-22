@@ -41,8 +41,8 @@ admits and reduces mounted-session topics:
   `inputLease` leaves the prior lease unchanged, an explicit JSON `null` clears it, and a value replaces it only when it
   identifies an admitted surface revision; malformed values fail closed without publishing a partial mutation. Explicit acknowledged open/sync remains the only
   path allowed to replace a cursor or runtime baseline. The same snapshot carries the full
-  bounded queue projection (including total attachment count and optional photo/file counts) and queue
-  revision; queue updates therefore replace the visible
+  bounded queue projection (at most 32 authoritative items, including total attachment count and optional photo/file counts)
+  and queue revision; queue updates therefore replace the visible
   queued-message cards atomically rather than applying per-row mobile deltas. A Gateway advertising
   `queue-management.v1` must supply both rich fields; iOS admits Edit/Remove only for that
   authoritative pair. Legacy string-only projections remain visibly locked and direct the user to
@@ -62,11 +62,16 @@ admits and reduces mounted-session topics:
   during prompt preflight. iOS renders that exact prompt after runtime feedback and
   reconstructs it from every authoritative snapshot until the canonical user entry
   arrives; a mounted submission keeps one visual handoff through pending and canonical
-  installation, and it never replays the prompt. Optimistic composer settlement consumes every
+  installation, with one smooth role-aware settlement rather than a replayed entrance. Optimistic composer settlement consumes every
   authoritative session-reducer publication directly rather than waiting for delayed transcript
   formatting. For queued steering/follow-up, the returned prompt operation ID is also the Gateway's
-  stable queue-item ID, so a concurrent same-text item cannot settle the wrong optimistic admission;
-  attachment-only canonical settlement uses an exact attachment metadata multiset even when Pi
+  stable queue-item ID, so a concurrent same-text item cannot settle the wrong optimistic admission. That exact
+operation identity may coalesce the optimistic queue-kind row with its newly admitted authoritative queue card; baseline
+operation IDs are never reused for aliasing, and aliases retire when authoritative queue items disappear. The queue row
+never borrows an identity from pre-existing or unrelated items. Behavior is normalized before first render,
+unknown values stay neutral, and each newly admitted prompt uses its role-aware entrance animation exactly once.
+Queue admission suppresses a second entrance animation; pending-to-canonical replacement preserves canonical IDs and
+uses one bounded role-aware settling animation. Canonical settlement inherits no unrelated animation. Attachment-only canonical settlement uses an exact attachment metadata multiset even when Pi
   persists synthesized envelope text. `automaticCompactionEnabled` likewise reports
   runtime truth rather than a mobile inference; older snapshots may omit these fields.
   Transcript projection captures the authoritative snapshot and composer handoff

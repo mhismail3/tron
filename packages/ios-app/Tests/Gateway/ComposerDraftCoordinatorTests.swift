@@ -461,6 +461,7 @@ struct ComposerDraftCoordinatorTests {
                 )
             }
             try await harness.waitForSends(1)
+            let admittedPresentationID = harness.coordinator.submissionSnapshot(for: target)!.presentationID
             harness.completeSend(index: 0, result: .success(()))
             try await valueOfOwnedTask(sending)
 
@@ -496,6 +497,233 @@ struct ComposerDraftCoordinatorTests {
                 queuedMessages: [existing, unrelated, admitted]
             )
             #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target,
+                message: existing
+            ) == nil)
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target,
+                message: unrelated
+            ) == nil)
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target,
+                message: admitted
+            ) == admittedPresentationID)
+        }
+    }
+
+    @Test("duplicate authoritative queue IDs cannot settle an outgoing submission")
+    func duplicateQueueIDsFailClosedBeforeSettlement() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 46)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "duplicate"
+            )
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            let duplicate = SessionSnapshot.QueuedMessage(
+                id: "operation-0", behavior: .steer, text: "duplicate", attachmentCount: 0
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                queuedMessages: [duplicate, duplicate]
+            )
+            // Invalid queue data cannot settle or hide the outgoing lifecycle
+            // row. The projection owner rejects this same malformed snapshot.
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+        }
+    }
+
+    @Test("settled aliases reject a reused baseline operation ID")
+    func reusedBaselineOperationIDDoesNotAlias() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 47)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "reused"
+            )
+            let baseline = SessionSnapshot.QueuedMessage(
+                id: "operation-0", behavior: .steer, text: "old", attachmentCount: 0
+            )
+            let sending = Task {
+                try await harness.coordinator.send(
+                    target: target, behavior: "steer", queuedMessages: [baseline]
+                )
+            }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            let reused = baseline
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                queuedMessages: [reused]
+            )
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target, message: reused
+            ) == nil)
+        }
+    }
+
+    @Test("settled queue aliases are operation keyed, bounded, editable, and retired")
+    func settledQueueAliasLifecycle() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 44)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "first"
+            )
+            let first = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
+            try await harness.waitForSends(1)
+            let firstID = harness.coordinator.submissionSnapshot(for: target)!.presentationID
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(first)
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                queuedMessages: [.init(id: "operation-0", behavior: .steer, text: "first", attachmentCount: 0)]
+            )
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target,
+                message: .init(id: "operation-0", behavior: .steer, text: "edited", attachmentCount: 9)
+            ) == firstID)
+
+            harness.coordinator.setText("second", for: scope)
+            let second = Task { try await harness.coordinator.send(target: target, behavior: "followUp") }
+            try await harness.waitForSends(2)
+            harness.completeSend(index: 1, result: .success(()))
+            try await valueOfOwnedTask(second)
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                queuedMessages: [
+                    .init(id: "operation-0", behavior: .steer, text: "edited", attachmentCount: 9),
+                    .init(id: "operation-1", behavior: .followUp, text: "second", attachmentCount: 0),
+                ]
+            )
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target,
+                message: .init(id: "operation-0", behavior: .steer, text: "edited", attachmentCount: 9)
+            ) == firstID)
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target,
+                message: .init(id: "operation-1", behavior: .followUp, text: "changed", attachmentCount: 1)
+            ) != nil)
+
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                queuedMessages: [.init(id: "operation-1", behavior: .followUp, text: "changed", attachmentCount: 1)]
+            )
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target,
+                message: .init(id: "operation-0", behavior: .steer, text: "edited", attachmentCount: 9)
+            ) == nil)
+            harness.coordinator.revoke(target)
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target,
+                message: .init(id: "operation-1", behavior: .followUp, text: "changed", attachmentCount: 1)
+            ) == nil)
+        }
+    }
+
+    @Test("consecutive attachment-only submissions receive distinct local presentation IDs")
+    func attachmentOnlyPresentationIDsAreUnique() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 45)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: ""
+            )
+            harness.coordinator.installHostedAttachment(
+                .init(id: "first", name: "one.jpg", mimeType: "image/jpeg", size: 1, previewData: nil),
+                target: target
+            )
+            let first = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
+            try await harness.waitForSends(1)
+            let firstID = harness.coordinator.submissionSnapshot(for: target)!.presentationID
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(first)
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [],
+                queuedMessages: [.init(id: "operation-0", behavior: .steer, text: "", attachmentCount: 1)]
+            )
+            harness.coordinator.installHostedAttachment(
+                .init(id: "second", name: "two.jpg", mimeType: "image/jpeg", size: 1, previewData: nil),
+                target: target
+            )
+            let second = Task { try await harness.coordinator.send(target: target, behavior: "steer") }
+            try await harness.waitForSends(2)
+            let secondID = harness.coordinator.submissionSnapshot(for: target)!.presentationID
+            #expect(firstID != secondID)
+            harness.completeSend(index: 1, result: .success(()))
+            try await valueOfOwnedTask(second)
+        }
+    }
+
+    @Test("canonical handoff receipt is preserved before admission retirement and consumed once")
+    func canonicalHandoffReceiptIsOneShot() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 48)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "direct"
+            )
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            let canonical = try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: Data("{\"id\":\"canonical-direct\",\"parentId\":null,\"timestamp\":\"2026-01-01T00:00:01Z\",\"kind\":\"message\",\"role\":\"user\",\"presentationId\":\"canonical-direct\",\"content\":[{\"id\":\"text\",\"ordinal\":0,\"type\":\"text\",\"text\":\"direct\"}]}".utf8))
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [canonical]
+            )
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+            #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) == "canonical-direct")
+            #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) == nil)
+        }
+    }
+
+    @Test("ambiguous canonical matches retain the outgoing admission and no receipt")
+    func ambiguousCanonicalMatchesRemainUnsettled() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 49)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "repeat"
+            )
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            let canonicalOne = try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: Data("{\"id\":\"canonical-repeat-a\",\"parentId\":null,\"timestamp\":\"2026-01-01T00:00:01Z\",\"kind\":\"message\",\"role\":\"user\",\"content\":[{\"id\":\"text\",\"ordinal\":0,\"type\":\"text\",\"text\":\"repeat\"}]}".utf8)
+            )
+            let canonicalTwo = try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: Data("{\"id\":\"canonical-repeat-b\",\"parentId\":null,\"timestamp\":\"2026-01-01T00:00:02Z\",\"kind\":\"message\",\"role\":\"user\",\"content\":[{\"id\":\"text\",\"ordinal\":0,\"type\":\"text\",\"text\":\"repeat\"}]}".utf8)
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [canonicalOne, canonicalTwo]
+            )
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+            #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) == nil)
         }
     }
 

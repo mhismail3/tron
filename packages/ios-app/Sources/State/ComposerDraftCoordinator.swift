@@ -132,6 +132,7 @@ enum ComposerAttachmentPolicy {
 struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let target: SessionPresentationIdentity
     let textRevision: Int
+    let localNonce: UInt64?
     let outgoingText: String
     let attachmentIDs: [String]
     let behavior: String?
@@ -143,20 +144,24 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         outgoingText: String,
         attachmentIDs: [String],
         behavior: String?,
-        baselineQueuedMessageIDs: Set<String> = []
+        baselineQueuedMessageIDs: Set<String> = [],
+        localNonce: UInt64? = nil
     ) {
         self.target = target
         self.textRevision = textRevision
+        self.localNonce = localNonce
         self.outgoingText = outgoingText
         self.attachmentIDs = attachmentIDs
         self.behavior = behavior
         self.baselineQueuedMessageIDs = baselineQueuedMessageIDs
     }
 
-    /// Stable only for the owning presentation and draft revision. This is a
-    /// presentation identity, never a transcript/event ID.
+    /// Stable only for the owning presentation and admitted submission. This
+    /// is a presentation identity, never a transcript/event ID. Test fixtures
+    /// may omit the nonce and retain the historical deterministic identity.
     var presentationID: String {
-        "outgoing-submission:\(target.sessionID):\(target.generation):\(textRevision)"
+        let suffix = localNonce.map(String.init) ?? String(textRevision)
+        return "outgoing-submission:\(target.sessionID):\(target.generation):\(suffix)"
     }
 }
 
@@ -272,6 +277,13 @@ final class ComposerDraftCoordinator {
         var operationID: String?
         var observedQueuedCandidateIDs: Set<String>
         var canonicalObserved: Bool
+        var transcriptObserved: Bool
+        var canonicalHandoffID: String?
+    }
+
+    private struct SettledQueueAlias: Equatable {
+        let presentationID: String
+        let baselineQueueIDs: Set<String>
     }
 
     private let uploadOperation: ComposerUploadOperation
@@ -288,6 +300,9 @@ final class ComposerDraftCoordinator {
     private var uploadAdmissions = Set<UploadAdmission>()
     private var uploadTasks: [UploadAdmission: Task<String, Error>] = [:]
     private var submissionByTarget: [SessionPresentationIdentity: SubmissionAdmission] = [:]
+    private var canonicalHandoffReceipts: [SessionPresentationIdentity: [String]] = [:]
+    private static let maximumSettledQueueAliases = SessionSnapshot.maximumQueuedMessages
+    private var settledQueueAliases: [SessionPresentationIdentity: [String: SettledQueueAlias]] = [:]
     private var sequence: UInt64 = 0
 
     init(
@@ -426,19 +441,36 @@ final class ComposerDraftCoordinator {
         return submissionByTarget[target]?.submittedAttachments ?? []
     }
 
+    /// Consumes the one-shot canonical replacement receipt created before a
+    /// submission admission is retired. The receipt is presentation-only;
+    /// canonical transcript IDs remain authoritative.
+    func consumeCanonicalSubmissionHandoff(
+        target: SessionPresentationIdentity
+    ) -> String? {
+        guard admits(target), var receipts = canonicalHandoffReceipts[target],
+              !receipts.isEmpty else { return nil }
+        let receipt = receipts.removeFirst()
+        canonicalHandoffReceipts[target] = receipts.isEmpty ? nil : receipts
+        return receipt
+    }
+
     func canonicalSubmissionIDs(
         target: SessionPresentationIdentity,
         canonicalTranscript: [TranscriptItem]
     ) -> Set<String> {
         guard admits(target), let admission = submissionByTarget[target] else { return [] }
-        return Set(canonicalTranscript.compactMap { item in
+        let matches = canonicalTranscript.compactMap { item in
             Self.canonicalUserMessage(
                 item,
                 matches: admission.snapshot,
                 submittedAttachments: admission.submittedAttachments,
                 baselineTranscriptIDs: admission.baselineTranscriptIDs
             ) ? item.id : nil
-        })
+        }
+        // Presentation suppression is fail-closed for the same reason as
+        // reconciliation: never suppress multiple identical canonical rows.
+        guard matches.count == 1 else { return [] }
+        return Set(matches)
     }
 
     func editorRequest(for target: SessionPresentationIdentity) -> ComposerEditorRequest? {
@@ -463,6 +495,37 @@ final class ComposerDraftCoordinator {
         outgoingSubmission(for: target) != nil
     }
 
+    /// Returns the exact optimistic identity only when the Gateway queue item
+    /// is the admitted operation for this presentation. Arbitrary matching
+    /// queue rows never borrow a local identity.
+    func queuedSubmissionPresentationID(
+        target: SessionPresentationIdentity,
+        message: SessionSnapshot.QueuedMessage
+    ) -> String? {
+        guard admits(target) else { return nil }
+        if let admission = submissionByTarget[target],
+           let operationID = admission.operationID,
+           operationID == message.id,
+           admission.snapshot.behavior != nil,
+           !admission.snapshot.baselineQueuedMessageIDs.contains(message.id) {
+            return admission.snapshot.presentationID
+        }
+        if let alias = settledQueueAliases[target]?[message.id],
+           !alias.baselineQueueIDs.contains(message.id) {
+            return alias.presentationID
+        }
+        return nil
+    }
+
+    func hasQueuedSubmission(
+        target: SessionPresentationIdentity,
+        queuedMessages: [SessionSnapshot.QueuedMessage]
+    ) -> Bool {
+        queuedMessages.contains {
+            queuedSubmissionPresentationID(target: target, message: $0) != nil
+        }
+    }
+
     /// Reconciles exactly once against authoritative user-message state. A
     /// transport acknowledgement alone is not enough: canonical JSONL/events
     /// remain the sole source of transcript truth.
@@ -471,24 +534,60 @@ final class ComposerDraftCoordinator {
         canonicalTranscript: [TranscriptItem],
         queuedMessages: [SessionSnapshot.QueuedMessage] = []
     ) {
-        guard admits(target), var admission = submissionByTarget[target] else { return }
-        let transcriptObserved = canonicalTranscript.contains(where: {
+        let queueIDs = queuedMessages.map(\.id)
+        guard Set(queueIDs).count == queueIDs.count,
+              queuedMessages.count <= SessionSnapshot.maximumQueuedMessages else {
+            // Malformed authoritative queue data must not settle a submission
+            // or retire an already-settled alias. The projection store rejects
+            // the same invalid commit at installation, leaving the current
+            // lifecycle row visible while recovery obtains a valid snapshot.
+            return
+        }
+        guard admits(target), var admission = submissionByTarget[target] else {
+            retireSettledQueueAliases(
+                target: target,
+                authoritativeQueueIDs: Set(queuedMessages.map(\.id))
+            )
+            return
+        }
+        let canonicalMatches = canonicalTranscript.compactMap { item in
             Self.canonicalUserMessage(
-                $0,
+                item,
                 matches: admission.snapshot,
                 submittedAttachments: admission.submittedAttachments,
                 baselineTranscriptIDs: admission.baselineTranscriptIDs
-            )
-        })
-        let queuedCandidates = admission.snapshot.behavior.map { behavior in
-            queuedMessages.filter { message in
-                !admission.snapshot.baselineQueuedMessageIDs.contains(message.id)
-                    && message.behavior.rawValue == behavior
-                    && message.text == admission.snapshot.outgoingText
-                    && message.attachmentCount == admission.submittedAttachments.count
+            ) ? item.id : nil
+        }
+        // A repeated prompt can produce multiple new canonical matches in one
+        // snapshot. Keep the admission alive until the authoritative stream
+        // makes exactly one causal candidate available; ambiguity must not
+        // retire the outgoing row or create a handoff receipt.
+        let transcriptObserved = canonicalMatches.count == 1
+        admission.canonicalHandoffID = transcriptObserved ? canonicalMatches[0] : nil
+        let queuedCandidates = queuedMessages.filter { message in
+            guard !admission.snapshot.baselineQueuedMessageIDs.contains(message.id) else {
+                return false
             }
-        } ?? []
+            if let operationID = admission.operationID {
+                return message.id == operationID
+            }
+            guard let behavior = admission.snapshot.behavior else { return false }
+            return message.behavior.rawValue == behavior
+                && message.text == admission.snapshot.outgoingText
+                && message.attachmentCount == admission.submittedAttachments.count
+        }
         admission.observedQueuedCandidateIDs.formUnion(queuedCandidates.map(\.id))
+        admission.transcriptObserved = admission.transcriptObserved || transcriptObserved
+        retireSettledQueueAliases(
+            target: target,
+            authoritativeQueueIDs: Set(queuedMessages.map(\.id))
+        )
+        if canonicalMatches.count > 1 {
+            // Do not let an independent queue observation settle an admission
+            // while canonical identity is ambiguous in this snapshot.
+            submissionByTarget[target] = admission
+            return
+        }
         let queuedObserved = admission.operationID.map {
             admission.observedQueuedCandidateIDs.contains($0)
         } ?? false
@@ -498,6 +597,9 @@ final class ComposerDraftCoordinator {
         }
         admission.canonicalObserved = true
         if admission.transportState == .accepted {
+            // Publish the enriched local admission before retirement so the
+            // exact canonical ID receipt survives this synchronous boundary.
+            submissionByTarget[target] = admission
             finishSubmission(admission)
         } else {
             submissionByTarget[target] = admission
@@ -833,7 +935,8 @@ final class ComposerDraftCoordinator {
             outgoingText: outgoing,
             attachmentIDs: attachmentIDs,
             behavior: behavior,
-            baselineQueuedMessageIDs: Set(queuedMessages.map(\.id))
+            baselineQueuedMessageIDs: Set(queuedMessages.map(\.id)),
+            localNonce: sequence
         )
         let admission = SubmissionAdmission(
             id: sequence,
@@ -844,7 +947,9 @@ final class ComposerDraftCoordinator {
             transportState: .sending,
             operationID: nil,
             observedQueuedCandidateIDs: [],
-            canonicalObserved: false
+            canonicalObserved: false,
+            transcriptObserved: false,
+            canonicalHandoffID: nil
         )
         submissionByTarget[target] = admission
         setText("", for: scope)
@@ -916,10 +1021,44 @@ final class ComposerDraftCoordinator {
     private func finishSubmission(_ admission: SubmissionAdmission) {
         let target = admission.snapshot.target
         guard let current = submissionByTarget[target], current.id == admission.id else { return }
+        if let canonicalHandoffID = current.canonicalHandoffID {
+            var receipts = canonicalHandoffReceipts[target] ?? []
+            if !receipts.contains(canonicalHandoffID) {
+                receipts.append(canonicalHandoffID)
+                if receipts.count > SessionSnapshot.maximumQueuedMessages {
+                    receipts.removeFirst(receipts.count - SessionSnapshot.maximumQueuedMessages)
+                }
+                canonicalHandoffReceipts[target] = receipts
+            }
+        }
+        if !current.transcriptObserved,
+           let operationID = current.operationID,
+           current.snapshot.behavior != nil {
+            if !current.snapshot.baselineQueuedMessageIDs.contains(operationID) {
+                var aliases = settledQueueAliases[target] ?? [:]
+                aliases[operationID] = SettledQueueAlias(
+                    presentationID: current.snapshot.presentationID,
+                    baselineQueueIDs: current.snapshot.baselineQueuedMessageIDs
+                )
+                if aliases.count > Self.maximumSettledQueueAliases {
+                    aliases.removeValue(forKey: aliases.keys.sorted().first!)
+                }
+                settledQueueAliases[target] = aliases
+            }
+        }
         let submitted = Set(current.snapshot.attachmentIDs)
         attachmentsByTarget[target]?.removeAll { submitted.contains($0.id) }
         if attachmentsByTarget[target]?.isEmpty == true { attachmentsByTarget[target] = nil }
         submissionByTarget[target] = nil
+    }
+
+    private func retireSettledQueueAliases(
+        target: SessionPresentationIdentity,
+        authoritativeQueueIDs: Set<String>
+    ) {
+        guard var aliases = settledQueueAliases[target] else { return }
+        aliases = aliases.filter { authoritativeQueueIDs.contains($0.key) }
+        settledQueueAliases[target] = aliases.isEmpty ? nil : aliases
     }
 
     private static func isPossiblySent(_ error: Error) -> Bool {
@@ -944,7 +1083,11 @@ final class ComposerDraftCoordinator {
         // even though the user-facing steering/follow-up text was empty. Exact
         // attachment evidence below owns this fallback; text-only submissions
         // still require exact display-text equality.
-        guard isAttachmentOnlySubmission || text == snapshot.outgoingText else { return false }
+        if isAttachmentOnlySubmission {
+            guard ChatAttachmentEnvelopePolicy.isBounded(text) else { return false }
+        } else {
+            guard text == snapshot.outgoingText else { return false }
+        }
         guard !submittedAttachments.isEmpty else { return true }
 
         let contents = item.content ?? []
@@ -996,6 +1139,8 @@ final class ComposerDraftCoordinator {
         attachmentsByTarget[lease.target] = nil
         editorRequestByTarget[lease.target] = nil
         submissionByTarget[lease.target] = nil
+        canonicalHandoffReceipts[lease.target] = nil
+        settledQueueAliases[lease.target] = nil
         for (admission, task) in uploadTasks where admission.target == lease.target {
             task.cancel()
         }

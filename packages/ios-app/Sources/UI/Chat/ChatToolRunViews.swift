@@ -256,7 +256,6 @@ private struct ToolActivityChip: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var displayedState: ChatCompactPillVisualState?
     @State private var transitionState = ChatToolChipTransitionState()
-    @State private var transitionTask: Task<Void, Never>?
 
     private var targetState: ChatCompactPillVisualState {
         .toolRun(run)
@@ -280,7 +279,10 @@ private struct ToolActivityChip: View {
             }
         }
         .buttonStyle(.plain)
-        .contentShape(Rectangle())
+        .contentShape(RoundedRectangle(
+            cornerRadius: ChatCompactPillLayoutPolicy.cornerRadius(for: visual.tone),
+            style: .continuous
+        ))
         .accessibilityLabel(accessibilityLabel(visual))
         .accessibilityValue(visual.title)
         .onAppear {
@@ -291,27 +293,21 @@ private struct ToolActivityChip: View {
         .onChange(of: targetState) { _, target in
             retarget(target)
         }
-        .onDisappear {
-            transitionTask?.cancel()
-            transitionTask = nil
-        }
     }
 
     private func retarget(_ target: ChatCompactPillVisualState) {
-        transitionTask?.cancel()
         let token = transitionState.retarget(target)
-        transitionTask = Task { @MainActor in
-            do { try await Task.sleep(for: .milliseconds(16)) }
-            catch { return }
-            guard !Task.isCancelled, transitionState.admits(token) else { return }
-            let animation: Animation = reduceMotion
-                ? .linear(duration: 0.10)
-                : .smooth(duration: 0.20)
-            var transaction = Transaction(animation: animation)
-            transaction.admitsChatToolChipAnimation = true
-            withTransaction(transaction) { displayedState = target }
-            recordSample(target, token: token)
-        }
+        guard transitionState.admits(token) else { return }
+        let animation: Animation = reduceMotion
+            ? .linear(duration: 0.10)
+            : .smooth(duration: 0.20)
+        var transaction = Transaction(animation: animation)
+        transaction.admitsChatToolChipAnimation = true
+        // Admit the shallow state in the same MainActor turn as the latest
+        // projection. Native interactive glass remains the sole touch owner;
+        // no deferred task may interrupt its press/drag transaction.
+        withTransaction(transaction) { displayedState = target }
+        recordSample(target, token: token)
     }
 
     private func recordSample(_ visual: ChatCompactPillVisualState, token: Int) {

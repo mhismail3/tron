@@ -209,6 +209,58 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("duplicate authoritative queue IDs fail closed before installation")
+    func duplicateQueueIDsRejectProjection() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_213)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.queueRevision = 4
+            snapshot.queuedItems = [
+                .init(id: "duplicate", behavior: .steer, text: "one", attachmentCount: 0),
+                .init(id: "duplicate", behavior: .followUp, text: "two", attachmentCount: 0),
+            ]
+            snapshot.queued = .init(steering: ["one"], followUp: ["two"])
+            let tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7,
+                queueManagementCapability: true
+            )
+            let store = ChatTranscriptPresentationStore()
+            store.submit(snapshot: snapshot, tag: tag)
+            await #expect(throws: ChatTranscriptPresentationStoreError.invalidProjection) {
+                try await store.waitForInstall(of: tag)
+            }
+            #expect(store.installed == nil)
+        }
+    }
+
+    @Test("oversized authoritative queues fail closed before installation")
+    func oversizedQueueRejectsProjection() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_214)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.queueRevision = 4
+            snapshot.queuedItems = (0..<SessionSnapshot.maximumQueuedMessages + 1).map { index in
+                .init(id: "queued-\(index)", behavior: .steer, text: "message-\(index)", attachmentCount: 0)
+            }
+            snapshot.queued = .init(
+                steering: snapshot.queuedItems!.map(\.text),
+                followUp: []
+            )
+            let tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7,
+                queueManagementCapability: true
+            )
+            let store = ChatTranscriptPresentationStore()
+            store.submit(snapshot: snapshot, tag: tag)
+            await #expect(throws: ChatTranscriptPresentationStoreError.invalidProjection) {
+                try await store.waitForInstall(of: tag)
+            }
+            #expect(store.installed == nil)
+        }
+    }
+
     @Test("supported capability replacement revokes queue management atomically")
     func supportedToUnsupportedCapabilityReplacement() async throws {
         try await withTestWatchdog { @MainActor in

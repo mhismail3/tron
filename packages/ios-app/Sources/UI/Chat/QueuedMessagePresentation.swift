@@ -82,6 +82,19 @@ enum QueuedMessageAttachmentPresentation {
         )
     }
 
+    static func chips(for attachments: [PendingAttachment]) -> [QueuedMessageAttachmentChip] {
+        // Match the Gateway's bounded typed-count projection exactly: photos
+        // precede files, and slot IDs remain stable when the source attachment
+        // order differs between optimistic and canonical states.
+        let photos = attachments.filter { $0.mimeType.hasPrefix("image/") }
+        let files = attachments.filter { !$0.mimeType.hasPrefix("image/") }
+        return photos.enumerated().map { index, _ in
+            QueuedMessageAttachmentChip(id: "photo-\(index)", kind: .photo)
+        } + files.enumerated().map { index, _ in
+            QueuedMessageAttachmentChip(id: "file-\(index)", kind: .file)
+        }
+    }
+
     static func chips(
         attachmentCount: Int,
         photoCount: Int?,
@@ -157,16 +170,14 @@ struct QueuedMessageRow: View {
 
     private var isManageable: Bool { managementAvailability.isManageable }
 
-    private var accent: Color {
-        message.behavior == .steer ? .tronEmerald : .tronPurple
-    }
+    private var behavior: ChatPromptBehavior { ChatPromptBehavior(message.behavior) }
 
-    private var title: String {
-        message.behavior == .steer ? "Steer next" : "Follow up"
+    private var accent: Color {
+        behavior == .steer ? .tronEmerald : .tronPurple
     }
 
     private var deliveryDetail: String {
-        message.behavior == .steer ? "After the current turn" : "After current work"
+        behavior == .steer ? "After the current turn" : "After current work"
     }
 
     var body: some View {
@@ -195,60 +206,18 @@ struct QueuedMessageRow: View {
     }
 
     private var card: some View {
-        let shape = RoundedRectangle(
-            cornerRadius: ChatPromptContainerStyle.cornerRadius,
-            style: .continuous
-        )
-        return VStack(alignment: .leading, spacing: QueuedMessageCardLayout.contentSpacing) {
-            HStack(alignment: .center, spacing: 10) {
-                Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
-                    .foregroundStyle(Color.tronTextPrimary)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-
-                Spacer(minLength: 8)
-                HStack(alignment: .center, spacing: 8) {
-                    Text("\(deliveryDetail) · \(position) of \(total)")
-                        .font(TronTypography.caption)
-                        .foregroundStyle(Color.tronTextSecondary)
-                        .multilineTextAlignment(.trailing)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-
-                    Image(systemName: message.behavior == .steer
-                        ? "arrow.turn.up.right"
-                        : "text.line.last.and.arrowtriangle.forward")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
-                        .foregroundStyle(accent)
-                        .frame(
-                            width: QueuedMessageCardLayout.arrowContainerSize,
-                            height: QueuedMessageCardLayout.arrowContainerSize
-                        )
-                        .background(accent.opacity(0.13), in: Circle())
-
-                    trailingStatus
+        let attachmentChips = QueuedMessageAttachmentPresentation.chips(for: message)
+        return ChatPromptCard(
+            behavior: behavior,
+            text: message.text,
+            detail: "\(deliveryDetail) · \(position) of \(total)",
+            isInteractive: isManageable,
+            attachmentContent: {
+                if !attachmentChips.isEmpty {
+                    QueuedMessageAttachmentChipRow(chips: attachmentChips, accent: accent)
                 }
-            }
-
-            if !message.text.isEmpty {
-                UserPromptText(text: message.text)
-            }
-
-            let attachmentChips = QueuedMessageAttachmentPresentation.chips(for: message)
-            if !attachmentChips.isEmpty {
-                QueuedMessageAttachmentChipRow(chips: attachmentChips, accent: accent)
-            }
-        }
-        .padding(.horizontal, ChatPromptContainerStyle.horizontalPadding)
-        .padding(.top, QueuedMessageCardLayout.contentSpacing)
-        .padding(.bottom, ChatPromptContainerStyle.queuedMessageBottomPadding)
-        .contentShape(shape)
-        .glassEffect(
-            isManageable
-                ? .regular.tint(accent.opacity(ChatPromptContainerStyle.tintOpacity)).interactive()
-                : .regular.tint(accent.opacity(0.12)),
-            in: shape
+            },
+            statusContent: { trailingStatus }
         )
     }
 

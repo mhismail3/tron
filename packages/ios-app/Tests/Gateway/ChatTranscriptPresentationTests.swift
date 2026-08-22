@@ -4,6 +4,256 @@ import Testing
 
 @Suite("Chat transcript presentation")
 struct ChatTranscriptPresentationTests {
+    @Test("prompt behavior normalizes wire values before first rendering")
+    func promptBehaviorNormalization() {
+        #expect(ChatPromptBehavior(rawValue: nil) == .ordinary)
+        #expect(ChatPromptBehavior(rawValue: "steer") == .steer)
+        #expect(ChatPromptBehavior(rawValue: "followUp") == .followUp)
+        #expect(ChatPromptBehavior(rawValue: "future-mode") == .unknown)
+        #expect(ChatPromptBehavior(rawValue: "steer").isQueuedKind)
+        #expect(!ChatPromptBehavior(rawValue: nil).isQueuedKind)
+    }
+
+    @Test("handoff behavior selects the first-frame component kind")
+    func handoffBehaviorSelectsFirstFrameKind() {
+        let target = SessionPresentationIdentity(sessionID: "session", generation: 1)
+        func behavior(_ raw: String?) -> ChatPromptBehavior {
+            ChatTranscriptHandoffCommit.outgoing(
+                presentation: ChatOutgoingSubmissionPresentation(
+                    snapshot: ComposerSubmissionSnapshot(
+                        target: target, textRevision: 1, outgoingText: "prompt",
+                        attachmentIDs: [], behavior: raw
+                    ),
+                    transportActive: true
+                ),
+                attachments: []
+            ).promptBehavior
+        }
+        #expect(behavior(nil) == .ordinary)
+        #expect(behavior("steer") == .steer)
+        #expect(behavior("followUp") == .followUp)
+        #expect(behavior("unrecognized") == .unknown)
+        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: behavior("steer")) == .queuedPrompt)
+        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: behavior("followUp")) == .queuedPrompt)
+        #expect(ChatPromptLifecycleTransitionPolicy.entranceKind(for: behavior(nil)) == .userPrompt)
+    }
+    @Test("pending direct prompts consume canonical entrance entitlement exactly once")
+    func pendingCanonicalReplacementSuppressesSecondEntrance() throws {
+        let pending = SessionSnapshot.PendingPrompt(
+            id: "operation-1",
+            createdAt: "2026-01-01T00:00:01Z",
+            behavior: nil,
+            text: "hello",
+            attachmentCount: 0
+        )
+        let data = Data(#"{"id":"canonical","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"hello"}]}"#.utf8)
+        let canonical = try decodeTranscriptFixture(TranscriptItem.self, from: data)
+        let ids = ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
+            for: pending,
+            in: [canonical]
+        )
+        #expect(ids == ["canonical"])
+        #expect(ChatPendingCanonicalSuppressionPolicy.suppresses(pending, in: [canonical]))
+        // The owning ChatView records the exact pending operation as
+        // `queued-message-operation-1` in its suppression ledger when a
+        // pending prompt becomes a queue item; the queue entrance is then
+        // intentionally not replayed.
+        #expect(!ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
+            isReady: true,
+            entranceSuppressed: false,
+            hasIdentityAlias: true
+        ))
+    }
+
+    @Test("previous installed pending handoff suppresses replacement when new snapshot omits pending")
+    func previousPendingHandoffSuppressesReplacement() throws {
+        let pending = ChatPendingPromptPresentation(
+            snapshot: .init(
+                id: "operation-2",
+                createdAt: "2026-01-01T00:00:01Z",
+                behavior: .steer,
+                text: "steer now",
+                attachmentCount: 0
+            ),
+            isCompacting: false
+        )
+        let data = Data(#"{"id":"canonical-2","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"text","type":"text","text":"steer now"}]}"#.utf8)
+        let canonical = try decodeTranscriptFixture(TranscriptItem.self, from: data)
+        // This models the next authoritative snapshot: pendingPrompt is gone,
+        // but the canonical row is now present. The prior installed handoff is
+        // the only owner that can identify the replacement.
+        #expect(ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
+            for: pending,
+            in: [canonical]
+        ) == ["canonical-2"])
+        #expect(!ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
+            isReady: true,
+            entranceSuppressed: false,
+            hasIdentityAlias: true
+        ))
+        #expect(ChatContentTransitionPolicy.revealAnimation(
+            for: .userPrompt,
+            reduceMotion: false
+        ) != ChatContentTransitionPolicy.revealAnimation(
+            for: .userPrompt,
+            reduceMotion: true
+        ))
+    }
+
+    @Test("queued replacement suppresses only the exact pending operation identity")
+    func previousPendingQueueReplacementUsesOperationID() {
+        let pending = ChatPendingPromptPresentation(
+            snapshot: .init(
+                id: "operation-3",
+                createdAt: "2026-01-01T00:00:01Z",
+                behavior: .followUp,
+                text: "follow up",
+                attachmentCount: 0
+            ),
+            isCompacting: false
+        )
+        let queue = SessionSnapshot.QueuedMessage(
+            id: "operation-3",
+            behavior: .followUp,
+            text: "follow up",
+            attachmentCount: 0
+        )
+        let unrelated = SessionSnapshot.QueuedMessage(
+            id: "operation-other",
+            behavior: .followUp,
+            text: "follow up",
+            attachmentCount: 0
+        )
+        #expect(queue.id == pending.id)
+        #expect(unrelated.id != pending.id)
+        #expect(ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
+            isReady: true,
+            entranceSuppressed: false,
+            hasIdentityAlias: true
+        ) == false)
+    }
+
+    @Test("queue-to-canonical replacement requires one exact mixed-attachment candidate")
+    func queueToCanonicalReplacement() throws {
+        let queued = SessionSnapshot.QueuedMessage(
+            id: "operation-mixed",
+            behavior: .steer,
+            text: "ship it",
+            attachmentCount: 2,
+            photoCount: 1,
+            fileAttachmentCount: 1
+        )
+        let canonical = try decodeTranscriptFixture(
+            TranscriptItem.self,
+            from: Data(#"{"id":"canonical-mixed","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","presentationId":"canonical-mixed","content":[{"id":"text","ordinal":0,"type":"text","text":"ship it"},{"id":"photo","ordinal":1,"type":"image","text":null,"mimeType":"image/jpeg"},{"id":"file","ordinal":2,"type":"text","text":null,"attachment":{"name":"notes.txt","mimeType":"text/plain","size":3}}]}"#.utf8)
+        )
+        let replacement = ChatPromptLifecycleReplacementPolicy.replacement(
+            previousQueue: [queued],
+            incomingQueue: [],
+            previousCanonicalIDs: [],
+            incomingTranscript: [canonical]
+        )
+        #expect(replacement?.canonicalID == "canonical-mixed")
+        #expect(replacement?.operationID == "operation-mixed")
+        #expect(replacement?.position == 1)
+        #expect(replacement?.total == 1)
+    }
+
+    @Test("attachment-only queue replacement admits Pi envelope only with exact typed counts")
+    func attachmentOnlyQueueReplacement() throws {
+        let queued = SessionSnapshot.QueuedMessage(
+            id: "operation-attachment", behavior: .steer, text: "",
+            attachmentCount: 1, photoCount: 1, fileAttachmentCount: 0
+        )
+        let canonical = try decodeTranscriptFixture(
+            TranscriptItem.self,
+            from: Data(#"{"id":"canonical-attachment","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","presentationId":"canonical-attachment","content":[{"id":"envelope","ordinal":0,"type":"text","text":"[Attached image context]"},{"id":"photo","ordinal":1,"type":"image","text":null,"mimeType":"image/jpeg"}]}"#.utf8)
+        )
+        #expect(ChatPromptLifecycleReplacementPolicy.replacement(
+            previousQueue: [queued], incomingQueue: [], previousCanonicalIDs: [], incomingTranscript: [canonical]
+        )?.canonicalID == "canonical-attachment")
+        let untyped = SessionSnapshot.QueuedMessage(
+            id: queued.id, behavior: queued.behavior, text: "", attachmentCount: 1
+        )
+        #expect(ChatPromptLifecycleReplacementPolicy.replacement(
+            previousQueue: [untyped], incomingQueue: [], previousCanonicalIDs: [], incomingTranscript: [canonical]
+        ) == nil)
+    }
+
+    @Test("queue-to-canonical replacement fails closed for ambiguity and multiple removals")
+    func queueToCanonicalReplacementAmbiguity() throws {
+        let first = SessionSnapshot.QueuedMessage(
+            id: "operation-one", behavior: .followUp, text: "repeat", attachmentCount: 0
+        )
+        let second = SessionSnapshot.QueuedMessage(
+            id: "operation-two", behavior: .followUp, text: "other", attachmentCount: 0
+        )
+        let candidateOne = try decodeTranscriptFixture(
+            TranscriptItem.self,
+            from: Data(#"{"id":"canonical-one","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","presentationId":"canonical-one","content":[{"id":"text","ordinal":0,"type":"text","text":"repeat"}]}"#.utf8)
+        )
+        let candidateTwo = try decodeTranscriptFixture(
+            TranscriptItem.self,
+            from: Data(#"{"id":"canonical-two","parentId":null,"timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"user","presentationId":"canonical-two","content":[{"id":"text","ordinal":0,"type":"text","text":"repeat"}]}"#.utf8)
+        )
+        #expect(ChatPromptLifecycleReplacementPolicy.replacement(
+            previousQueue: [first], incomingQueue: [], previousCanonicalIDs: [],
+            incomingTranscript: [candidateOne, candidateTwo]
+        ) == nil)
+        #expect(ChatPromptLifecycleReplacementPolicy.replacement(
+            previousQueue: [first, second], incomingQueue: [], previousCanonicalIDs: [],
+            incomingTranscript: [candidateOne]
+        ) == nil)
+    }
+
+    @Test("queue-to-canonical replacement preserves canonical identity and ignores old transcript")
+    func queueToCanonicalReplacementIdentity() throws {
+        let queued = SessionSnapshot.QueuedMessage(
+            id: "operation-stable", behavior: .steer, text: "same", attachmentCount: 0
+        )
+        let old = try decodeTranscriptFixture(
+            TranscriptItem.self,
+            from: Data(#"{"id":"old","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"user","presentationId":"old","content":[{"id":"text","ordinal":0,"type":"text","text":"same"}]}"#.utf8)
+        )
+        #expect(ChatPromptLifecycleReplacementPolicy.replacement(
+            previousQueue: [queued], incomingQueue: [], previousCanonicalIDs: ["old"],
+            incomingTranscript: [old]
+        ) == nil)
+    }
+
+    @Test("prepended history cannot become a forward queue replacement candidate")
+    func prependedHistoryFailsForwardTailAdmission() {
+        #expect(!ChatPromptLifecycleReplacementPolicy.isForwardTailCandidate(
+            itemID: "older-repeat",
+            previousSourceIDs: ["prior-a", "prior-b"],
+            incomingSourceIDs: ["older-repeat", "prior-a", "prior-b"]
+        ))
+        #expect(ChatPromptLifecycleReplacementPolicy.isForwardTailCandidate(
+            itemID: "new-repeat",
+            previousSourceIDs: ["prior-a", "prior-b"],
+            incomingSourceIDs: ["prior-a", "prior-b", "new-repeat"]
+        ))
+    }
+
+    @Test("timestamped pending suppression rejects repeated matching canonical rows")
+    func pendingSuppressionRejectsAmbiguousMatches() throws {
+        let pending = SessionSnapshot.PendingPrompt(
+            id: "pending-repeat", createdAt: "2026-01-01T00:00:01Z", behavior: nil,
+            text: "repeat", attachmentCount: 0
+        )
+        let first = try decodeTranscriptFixture(
+            TranscriptItem.self,
+            from: Data(#"{"id":"canonical-a","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"user","content":[{"id":"text","ordinal":0,"type":"text","text":"repeat"}]}"#.utf8)
+        )
+        let second = try decodeTranscriptFixture(
+            TranscriptItem.self,
+            from: Data(#"{"id":"canonical-b","parentId":null,"timestamp":"2026-01-01T00:00:03Z","kind":"message","role":"user","content":[{"id":"text","ordinal":0,"type":"text","text":"repeat"}]}"#.utf8)
+        )
+        #expect(ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
+            for: pending, in: [first, second]
+        ).isEmpty)
+    }
+
     @Test("native visible edge is authoritative over independently settling inset fields")
     func nativeVisibleBottomDistance() {
         let geometry = ChatTranscriptGeometry(

@@ -208,6 +208,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
     let supportsQueueManagement: Bool
     let sourceWindow: SourceWindow
     private let runtimeIDSet: Set<String>
+    private let queueIDSet: Set<String>
     private let toolDescriptorByID: [String: ChatToolDescriptor]?
 
     init(
@@ -235,6 +236,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
         self.supportsQueueManagement = supportsQueueManagement
         self.sourceWindow = sourceWindow
         runtimeIDSet = Set(runtimeItems.map(\.id))
+        queueIDSet = Set(queuedMessages.map(\.id))
         let descriptors = timeline.items.flatMap { item -> [ChatToolDescriptor] in
             guard case .toolRun(let run) = item else { return [] }
             return run.tools
@@ -254,6 +256,8 @@ struct InstalledChatTranscript: Hashable, Sendable {
             && toolDescriptorByID != nil
             && runtimeIDSet.count == runtimeItems.count
             && runtimeIDSet.allSatisfy { !timeline.containsID($0) }
+            && queuedMessages.count <= SessionSnapshot.maximumQueuedMessages
+            && queueIDSet.count == queuedMessages.count
     }
     func containsDisplayedID(_ id: String) -> Bool {
         timeline.containsID(id) || runtimeIDSet.contains(id)

@@ -391,11 +391,19 @@ that row until the exact tagged canonical projection installs, including Gateway
 handoff preserves one visual row rather than removing and reinserting optimistic/pending/canonical variants. The
 admission is completed synchronously before ordinary-send keyboard dismissal, so the large prompt/photo outgoing
 shape, steering/follow-up label, and responder transition share one MainActor boundary; transport is a separate
-settlement of that exact admission. Outgoing attachment strips are right-anchored from their first frame, avoiding
+settlement of that exact admission. Prompt behavior is normalized once into ordinary, steering, follow-up, or neutral
+unknown; queued-kind optimistic and pending prompts therefore render the queue-card core in their first frame instead
+of flashing through an ordinary bubble. Outgoing attachment strips are right-anchored from their first frame, avoiding
 a left-aligned optimistic variant before canonical reconciliation. Prompt and queue cards use one bounded
 intrinsic/wrapped layout rather than a `ViewThatFits` branch swap, so large pasted text chooses its final
-container geometry on the first measurement. Definitive rejection restores outgoing text before newer input, while a possibly-sent
-transport outcome retains the row and captured IDs without replay. Retired completions publish neither restoration
+container geometry on the first measurement. The admitted operation ID may alias only its exact newly admitted queue
+item to the immutable outgoing presentation ID; aliases remain bounded to the Gateway's 32-item queue capacity and
+are retired only when their authoritative operation IDs disappear or the presentation is revoked. Pre-existing or unrelated
+queue rows retain Gateway IDs, and canonical transcript IDs are never aliased. Queue admission disables a second entrance
+animation, while pending-to-canonical replacement consumes the existing canonical entrance-suppression ledger exactly once
+and applies one bounded role-aware settling animation to the canonical row. Installed-row updates inherit no unrelated
+animation. Definitive rejection restores outgoing text before newer input,
+while a possibly-sent transport outcome retains the row and captured IDs without replay. Retired completions publish neither restoration
 nor errors. Extension editor requests auto-apply only to an empty exact draft; nonempty drafts require the
 existing explicit Use/Keep disposition. Route-provided initial editor text seeds only an absent exact
 profile/session draft; reopen and repeated preparation cannot overwrite retained edits. `SessionShellView`
@@ -956,7 +964,10 @@ assistant/tool rows preserve their mounted visual IDs instead of replaying an en
 strictly an optional visual optimization: reconnect can temporarily project both a settled canonical row and its
 still-live predecessor, so the complete rewritten row/key set is checked for uniqueness before any semantic map is
 constructed. A collision retains the authoritative next timeline unchanged rather than trapping in dictionary
-construction. Submission handoffs also suppress the canonical replacement entrance because the outgoing row already owns that reveal. Reduce Motion retains
+construction. Submission handoffs carry a bounded one-shot canonical receipt across the synchronous reconciliation
+boundary; the matching canonical row consumes it once for an intentional role-aware replacement reveal and never
+replays it on later snapshots. Queue-card replacements use the stricter one-removed/one-new-candidate policy and
+fail closed for repeated or causally ambiguous prompts; no Gateway operation link is inferred. Reduce Motion retains
 only a brief opacity reveal. Canonical
 compaction/branch/configuration entries, embedded assistant failures, and exact admitted custom/retry
 working detail share one semantic notification projection and capsule primitive. Ordinary default running
@@ -998,7 +1009,11 @@ receive no writes and Reduce Motion removes spatial effects. Agent tool and grou
 the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.
 
 Every tool chip owns a tappable, top-anchored detail sheet, including
-read/write/edit and filesystem search tools. The immersive camera retains the
+read/write/edit and filesystem search tools. Inline chips use the same native
+interactive Liquid Glass touch response as the composer; their Button owns only
+activation and the visible rounded hit shape, while transcript scrolling remains
+authoritative for drags. Tool-state projection updates are admitted synchronously
+so they cannot delay or interrupt that touch transaction. The immersive camera retains the
 pre-gateway flashlight, morphing shutter/confirmation, and flip/retake controls
 over a full-sheet preview. A tool call and its canonical result are presented as
 one progressively updated chip when both are in the bounded transcript page; an

@@ -38,6 +38,12 @@ private struct ChatTranscriptProjectionCapture: Sendable {
     let tag: ChatTranscriptProjectionTag
 }
 
+private struct ChatQueuedMessageRenderEntry: Identifiable {
+    let id: String
+    let index: Int
+    let message: SessionSnapshot.QueuedMessage
+}
+
 struct BoundedChatIdentityLedger: Equatable {
     private(set) var ids: Set<String> = []
     private var order: [String] = []
@@ -51,6 +57,10 @@ struct BoundedChatIdentityLedger: Equatable {
     }
 
     func contains(_ id: String) -> Bool { ids.contains(id) }
+    mutating func remove(_ id: String) {
+        ids.remove(id)
+        order.removeAll { $0 == id }
+    }
     mutating func removeAll() {
         ids.removeAll(keepingCapacity: false)
         order.removeAll(keepingCapacity: false)
@@ -106,6 +116,12 @@ struct ChatView: View {
     @State private var composerFocused = false
     @State private var suppressedInteractionScope: ExtensionInteractionScope?
     @State private var canonicalSubmissionHandoffs = BoundedChatIdentityLedger()
+    // Once an explicit lifecycle crossfade retires its source card, keep the
+    // canonical destination plain instead of replaying a generic entrance.
+    @State private var settledPromptLifecycleIDs = BoundedChatIdentityLedger()
+    @State private var promptLifecycleTransitions: [String: ChatPromptLifecycleTransitionSource] = [:]
+    @State private var promptLifecycleTransitionOrder: [String] = []
+    private static let maximumPromptLifecycleTransitions = 4
 
     #if HOSTED_TEST
     init(
@@ -353,16 +369,51 @@ struct ChatView: View {
             let currentSource = capture.tag
             let snapshot = capture.snapshot
             if let target = presentationTarget {
-                rememberCanonicalSubmissionHandoffs(model.composerDrafts.canonicalSubmissionIDs(
+                var canonicalHandoffIDs = model.composerDrafts.canonicalSubmissionIDs(
                     target: target,
                     canonicalTranscript: snapshot.transcript
-                ))
+                )
+                if let receipt = model.composerDrafts.consumeCanonicalSubmissionHandoff(target: target) {
+                    canonicalHandoffIDs.insert(receipt)
+                }
+                rememberCanonicalSubmissionHandoffs(canonicalHandoffIDs)
+            }
+            let installedBeforeSubmission = transcriptPresentation.installed
+            if let installedBeforeSubmission,
+               let transition = ChatPromptLifecycleReplacementPolicy.replacement(
+                   previousQueue: installedBeforeSubmission.queuedMessages,
+                   incomingQueue: snapshot.displayedQueuedMessages,
+                   previousCanonicalIDs: previousCanonicalIDs(in: installedBeforeSubmission),
+                   previousSourceWindow: installedBeforeSubmission.sourceWindow,
+                   incomingSourceWindow: .init(snapshot: snapshot),
+                   incomingTranscript: snapshot.transcript
+               ) {
+                rememberPromptLifecycleTransition(transition)
+            }
+            if let previousPending = installedBeforeSubmission?.handoff.pendingPromptPresentation {
+                // The replacement snapshot normally no longer carries
+                // pendingPrompt. Compare the previously installed immutable
+                // handoff against the incoming canonical facts before submit,
+                // so the canonical row gets one intentional settling animation
+                // rather than replaying its entrance entitlement.
+                rememberCanonicalSubmissionHandoffs(
+                    ChatPendingCanonicalSuppressionPolicy.canonicalIDs(
+                        for: previousPending,
+                        in: snapshot.transcript
+                    )
+                )
+                if previousPending.promptBehavior.isQueuedKind,
+                   ChatPromptLifecycleTransitionPolicy.suppressesQueueReplacement(
+                       pendingOperationID: previousPending.id,
+                       authoritativeQueueIDs: Set(snapshot.displayedQueuedMessages.map(\.id))
+                   ) {
+                    rememberCanonicalSubmissionHandoffs(["queued-message-\(previousPending.id)"])
+                }
             }
             // Projection intake remains live during prepend. The scroll owner
             // preserves the exact anchor, while this store coalesces to the
             // newest complete desired commit; dropping intake here could leave
             // streaming/canonical rows stale indefinitely.
-            let installedBeforeSubmission = transcriptPresentation.installed
             let startedWork = transcriptPresentation.submit(
                 snapshot: snapshot,
                 handoff: capture.handoff,
@@ -410,6 +461,9 @@ struct ChatView: View {
             transcriptPresentation.reset()
             earlierMessagesOperation.cancel()
             canonicalSubmissionHandoffs.removeAll()
+            settledPromptLifecycleIDs.removeAll()
+            promptLifecycleTransitions.removeAll()
+            promptLifecycleTransitionOrder.removeAll(keepingCapacity: false)
             performanceTracker.cancelAll()
             cancelAttachmentPresentation(includingActive: true)
             photoImportTask?.cancel()
@@ -423,6 +477,38 @@ struct ChatView: View {
 
     private func rememberCanonicalSubmissionHandoffs(_ ids: Set<String>) {
         canonicalSubmissionHandoffs.formUnion(ids)
+    }
+
+    private func previousCanonicalIDs(in installed: InstalledChatTranscript) -> Set<String> {
+        Set(installed.timeline.items.compactMap { item in
+            switch item {
+            case .transcript(let transcript): return transcript.id
+            case .message(let message): return message.semanticID
+            case .toolRun, .notification: return nil
+            }
+        })
+    }
+
+    private func rememberPromptLifecycleTransition(_ transition: ChatPromptLifecycleTransitionSource) {
+        if promptLifecycleTransitions[transition.canonicalID] == nil {
+            promptLifecycleTransitionOrder.append(transition.canonicalID)
+        }
+        promptLifecycleTransitions[transition.canonicalID] = transition
+        // Eviction is retirement, not a silent drop: every canonical ID
+        // enters the settled ledger or re-realization can replay the generic
+        // entrance animation.
+        for oldest in ChatPromptLifecycleTransitionPolicy.transitionIDsToRetire(
+            in: promptLifecycleTransitionOrder,
+            maximum: Self.maximumPromptLifecycleTransitions
+        ) {
+            retirePromptLifecycleTransition(oldest)
+        }
+    }
+
+    private func retirePromptLifecycleTransition(_ canonicalID: String) {
+        promptLifecycleTransitions.removeValue(forKey: canonicalID)
+        promptLifecycleTransitionOrder.removeAll { $0 == canonicalID }
+        settledPromptLifecycleIDs.formUnion([canonicalID])
     }
 
     private var topBlur: some View {
@@ -453,41 +539,61 @@ struct ChatView: View {
                                 entranceState: entranceState,
                                 entranceKind: entranceKind
                             ) {
-                                ChatTranscriptEntranceRow(
-                                    state: entranceState,
-                                    admissionTag: installed.tag,
-                                    kind: entranceKind,
-                                    reduceMotion: reduceMotion,
-                                    onFailsafeReveal: {
-                                        _ = transcriptPresentation.resolveEntrance(
-                                            id: item.id,
-                                            installationTag: installed.tag,
-                                            isVisible: false
-                                        )
-                                        #if HOSTED_TEST
-                                        hostedProbe?.recordEntranceFailsafeReveal()
-                                        #endif
-                                    }
-                                ) {
-                                    ChatTranscriptRenderRow(
-                                        item: item,
-                                        preparedText: installed.preparedText(for: item),
-                                        hiddenThinkingLabel: installed.hiddenThinkingLabel,
-                                        installationTag: installed.tag,
-                                        resolveToolDetails: { callIDs, tag in
-                                            transcriptPresentation.resolveToolDetails(
-                                                callIDs: callIDs,
-                                                installationTag: tag
+                                Group {
+                                    if let transition = promptLifecycleTransitions[item.id] {
+                                        ChatPromptLifecycleCrossfadeRow(
+                                            source: transition,
+                                            reduceMotion: reduceMotion,
+                                            onSettled: {
+                                                retirePromptLifecycleTransition(item.id)
+                                            }
+                                        ) {
+                                            transcriptRenderRow(
+                                                item: item,
+                                                installed: installed
                                             )
-                                        },
-                                        recordToolChip: { sample in
-                                            #if HOSTED_TEST
-                                            hostedProbe?.recordToolChip(sample)
-                                            #endif
                                         }
-                                    )
-                                    .equatable()
-                                    .chatStableTranscriptUpdates()
+                                    } else if settledPromptLifecycleIDs.contains(item.id) {
+                                        // The explicit queue-card crossfade has
+                                        // completed; preserve the visible
+                                        // canonical row without a second motion.
+                                        transcriptRenderRow(
+                                            item: item,
+                                            installed: installed
+                                        )
+                                    } else if canonicalSubmissionHandoffs.contains(item.id) {
+                                        ChatPromptLifecycleReplacementEntranceRow(
+                                            reduceMotion: reduceMotion,
+                                            kind: entranceKind
+                                        ) {
+                                            transcriptRenderRow(
+                                                item: item,
+                                                installed: installed
+                                            )
+                                        }
+                                    } else {
+                                        ChatTranscriptEntranceRow(
+                                            state: entranceState,
+                                            admissionTag: installed.tag,
+                                            kind: entranceKind,
+                                            reduceMotion: reduceMotion,
+                                            onFailsafeReveal: {
+                                                _ = transcriptPresentation.resolveEntrance(
+                                                    id: item.id,
+                                                    installationTag: installed.tag,
+                                                    isVisible: false
+                                                )
+                                                #if HOSTED_TEST
+                                                hostedProbe?.recordEntranceFailsafeReveal()
+                                                #endif
+                                            }
+                                        ) {
+                                            transcriptRenderRow(
+                                                item: item,
+                                                installed: installed
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -500,11 +606,27 @@ struct ChatView: View {
                                 installedTag: installed.tag,
                                 entranceState: .none
                             ) {
-                                ChatOutgoingSubmissionEntranceRow(
-                                    reduceMotion: reduceMotion,
-                                    animatesEntrance: installed.tag.entranceSuppressionGeneration == nil
-                                ) {
-                                    ChatPendingPromptRow(presentation: pendingPrompt)
+                                if pendingPrompt.promptBehavior.isQueuedKind {
+                                    ChatQueuedMessageEntranceRow(
+                                        animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
+                                            isReady: isTranscriptReady,
+                                            entranceSuppressed: installed.tag.entranceSuppressionGeneration != nil,
+                                            hasIdentityAlias: false
+                                        ),
+                                        reduceMotion: reduceMotion
+                                    ) {
+                                        ChatPendingPromptRow(presentation: pendingPrompt)
+                                    }
+                                } else {
+                                    ChatOutgoingSubmissionEntranceRow(
+                                        reduceMotion: reduceMotion,
+                                        animatesEntrance: installed.tag.entranceSuppressionGeneration == nil,
+                                        kind: ChatPromptLifecycleTransitionPolicy.entranceKind(
+                                            for: pendingPrompt.promptBehavior
+                                        )
+                                    ) {
+                                        ChatPendingPromptRow(presentation: pendingPrompt)
+                                    }
                                 }
                             }
                         case .outgoing(let outgoing, let attachments):
@@ -513,14 +635,36 @@ struct ChatView: View {
                                 installedTag: installed.tag,
                                 entranceState: .none
                             ) {
-                                ChatOutgoingSubmissionEntranceRow(
-                                    reduceMotion: reduceMotion,
-                                    animatesEntrance: false
-                                ) {
-                                    ChatOutgoingSubmissionRow(
-                                        presentation: outgoing,
-                                        attachments: attachments
-                                    )
+                                if outgoing.promptBehavior.isQueuedKind {
+                                    ChatQueuedMessageEntranceRow(
+                                        animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
+                                            isReady: isTranscriptReady,
+                                            entranceSuppressed: installed.tag.entranceSuppressionGeneration != nil,
+                                            hasIdentityAlias: false
+                                        ),
+                                        reduceMotion: reduceMotion
+                                    ) {
+                                        ChatOutgoingSubmissionRow(
+                                            presentation: outgoing,
+                                            attachments: attachments
+                                        )
+                                    }
+                                } else {
+                                    ChatOutgoingSubmissionEntranceRow(
+                                        reduceMotion: reduceMotion,
+                                        animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateUserEntrance(
+                                            isReady: isTranscriptReady,
+                                            entranceSuppressed: installed.tag.entranceSuppressionGeneration != nil
+                                        ),
+                                        kind: ChatPromptLifecycleTransitionPolicy.entranceKind(
+                                            for: outgoing.promptBehavior
+                                        )
+                                    ) {
+                                        ChatOutgoingSubmissionRow(
+                                            presentation: outgoing,
+                                            attachments: attachments
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -628,15 +772,40 @@ struct ChatView: View {
             queueRevision: installed.queueRevision,
             hasAuthoritativeItems: installed.supportsQueueManagement
         )
-        ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+        let entries = messages.enumerated().map { pair in
+            ChatQueuedMessageRenderEntry(
+                id: presentationTarget.flatMap { target in
+                    model.composerDrafts.queuedSubmissionPresentationID(
+                        target: target,
+                        message: pair.element
+                    )
+                } ?? "queued-message-\(pair.element.id)",
+                index: pair.offset,
+                message: pair.element
+            )
+        }
+        ForEach(entries) { entry in
+            let index = entry.index
+            let message = entry.message
+            let aliasID = presentationTarget.flatMap { target in
+                model.composerDrafts.queuedSubmissionPresentationID(
+                    target: target,
+                    message: message
+                )
+            }
+            let renderedID = aliasID ?? "queued-message-\(message.id)"
+            let hasSuppressedEntrance = canonicalSubmissionHandoffs.contains(renderedID)
             stableTranscriptRow(
-                id: "queued-message-\(message.id)",
+                id: renderedID,
                 installedTag: installed.tag,
                 entranceState: .none
             ) {
                 ChatQueuedMessageEntranceRow(
-                    animatesEntrance: isTranscriptReady
-                        && installed.tag.entranceSuppressionGeneration == nil,
+                    animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
+                        isReady: isTranscriptReady,
+                        entranceSuppressed: installed.tag.entranceSuppressionGeneration != nil,
+                        hasIdentityAlias: aliasID != nil || hasSuppressedEntrance
+                    ),
                     reduceMotion: reduceMotion
                 ) {
                     QueuedMessageRow(
@@ -656,6 +825,32 @@ struct ChatView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func transcriptRenderRow(
+        item: ChatTranscriptRenderItem,
+        installed: InstalledChatTranscript
+    ) -> some View {
+        ChatTranscriptRenderRow(
+            item: item,
+            preparedText: installed.preparedText(for: item),
+            hiddenThinkingLabel: installed.hiddenThinkingLabel,
+            installationTag: installed.tag,
+            resolveToolDetails: { callIDs, tag in
+                transcriptPresentation.resolveToolDetails(
+                    callIDs: callIDs,
+                    installationTag: tag
+                )
+            },
+            recordToolChip: { sample in
+                #if HOSTED_TEST
+                hostedProbe?.recordToolChip(sample)
+                #endif
+            }
+        )
+        .equatable()
+        .chatStableTranscriptUpdates()
     }
 
     @ViewBuilder
@@ -924,6 +1119,12 @@ struct ChatView: View {
                 canonicalTranscript: snapshot.transcript
             )
             if canonicalIDs.isEmpty {
+                if model.composerDrafts.hasQueuedSubmission(
+                    target: target,
+                    queuedMessages: snapshot.displayedQueuedMessages
+                ) {
+                    return .none
+                }
                 let attachments = model.composerDrafts.submittedAttachments(for: target)
                     .filter { submission.attachmentIDs.contains($0.id) }
                     .prefix(ComposerAttachmentPolicy.maximumCount)

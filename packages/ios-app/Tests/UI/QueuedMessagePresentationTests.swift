@@ -142,6 +142,30 @@ struct QueuedMessagePresentationTests {
         ])
     }
 
+    @Test("frozen submission attachments use typed queue chips and labels")
+    func frozenAttachmentChips() {
+        let chips = QueuedMessageAttachmentPresentation.chips(for: [
+            PendingAttachment(id: "photo", name: "one.jpg", mimeType: "image/jpeg", size: 1, previewData: nil),
+            PendingAttachment(id: "file", name: "notes.txt", mimeType: "text/plain", size: 2, previewData: nil),
+        ])
+        #expect(chips.map(\.kind) == [.photo, .file])
+        #expect(QueuedMessageAttachmentPresentation.accessibilityLabel(chips: chips) == "1 photo, 1 file")
+    }
+
+    @Test("optimistic mixed attachments use canonical photo-then-file slot IDs")
+    func mixedAttachmentOrderingMatchesCanonicalCounts() {
+        let attachments = [
+            PendingAttachment(id: "file", name: "notes.txt", mimeType: "text/plain", size: 1, previewData: nil),
+            PendingAttachment(id: "photo", name: "photo.jpg", mimeType: "image/jpeg", size: 1, previewData: nil),
+            PendingAttachment(id: "file-2", name: "data.json", mimeType: "application/json", size: 1, previewData: nil),
+        ]
+        #expect(QueuedMessageAttachmentPresentation.chips(for: attachments) == [
+            .init(id: "photo-0", kind: .photo),
+            .init(id: "file-0", kind: .file),
+            .init(id: "file-1", kind: .file),
+        ])
+    }
+
     @Test("queued card geometry keeps compact balanced header spacing")
     func compactCardGeometry() {
         #expect(QueuedMessageCardLayout.contentSpacing == 6)

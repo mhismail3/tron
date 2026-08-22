@@ -553,6 +553,225 @@ enum ChatExtensionWidgetPolicy {
     }
 }
 
+/// Normalized behavior for every prompt lifecycle shell. Unknown wire values
+/// are deliberately neutral rather than silently becoming steering.
+enum ChatAttachmentEnvelopePolicy {
+    /// Pi may retain a bounded attachment-context text part in canonical JSONL
+    /// for an attachment-only prompt. It is not user-entered text and must be
+    /// admitted only with exact typed attachment evidence.
+    static func isBounded(_ text: String) -> Bool {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.utf8.count <= 4_096,
+              value.hasPrefix("[Attached "),
+              value.hasSuffix(" context]"),
+              !value.contains("\n") else { return false }
+        return value.count > "[Attached  context]".count
+    }
+}
+
+struct ChatPromptLifecycleTransitionSource: Hashable, Sendable {
+    let canonicalID: String
+    let operationID: String
+    let behavior: ChatPromptBehavior
+    let text: String
+    let attachmentCount: Int
+    let photoCount: Int?
+    let fileAttachmentCount: Int?
+    let position: Int
+    let total: Int
+}
+
+enum ChatPromptLifecycleReplacementPolicy {
+    /// Finds one unambiguous queue-to-canonical replacement from two
+    /// authoritative projection boundaries. Multiple removals or candidates
+    /// deliberately fail closed so a repeated prompt can never borrow the
+    /// wrong queue card's visual identity.
+    static func replacement(
+        previousQueue: [SessionSnapshot.QueuedMessage],
+        incomingQueue: [SessionSnapshot.QueuedMessage],
+        previousCanonicalIDs: Set<String>,
+        previousSourceWindow: InstalledChatTranscript.SourceWindow? = nil,
+        incomingSourceWindow: InstalledChatTranscript.SourceWindow? = nil,
+        incomingTranscript: [TranscriptItem]
+    ) -> ChatPromptLifecycleTransitionSource? {
+        guard Set(previousQueue.map(\.id)).count == previousQueue.count,
+              Set(incomingQueue.map(\.id)).count == incomingQueue.count else { return nil }
+        let incomingQueueIDs = Set(incomingQueue.map(\.id))
+        let removed = previousQueue.enumerated().filter { !incomingQueueIDs.contains($0.element.id) }
+        guard removed.count == 1 else { return nil }
+        let (index, queue) = removed[0]
+        let candidates = incomingTranscript.filter { item in
+            guard !previousCanonicalIDs.contains(item.id),
+                  item.kind == .message, item.role == .user else { return false }
+            guard matches(queue: queue, item: item) else { return false }
+            return admitsForwardTailCandidate(
+                itemID: item.id,
+                incomingTranscript: incomingTranscript,
+                previousSourceWindow: previousSourceWindow,
+                incomingSourceWindow: incomingSourceWindow
+            )
+        }
+        guard candidates.count == 1 else { return nil }
+        return ChatPromptLifecycleTransitionSource(
+            canonicalID: candidates[0].id,
+            operationID: queue.id,
+            behavior: ChatPromptBehavior(queue.behavior),
+            text: queue.text,
+            attachmentCount: queue.attachmentCount,
+            photoCount: queue.photoCount,
+            fileAttachmentCount: queue.fileAttachmentCount,
+            position: index + 1,
+            total: previousQueue.count
+        )
+    }
+
+    private static func admitsForwardTailCandidate(
+        itemID: String,
+        incomingTranscript: [TranscriptItem],
+        previousSourceWindow: InstalledChatTranscript.SourceWindow?,
+        incomingSourceWindow: InstalledChatTranscript.SourceWindow?
+    ) -> Bool {
+        guard let previousSourceWindow, let incomingSourceWindow else {
+            // Keep the pure policy usable by legacy fixtures; mounted ChatView
+            // always supplies both authoritative source windows.
+            return true
+        }
+        guard isExactForwardEvolution(
+            from: previousSourceWindow,
+            to: incomingSourceWindow
+        ) else { return false }
+        guard !previousSourceWindow.ids.isEmpty else { return true }
+        return isForwardTailCandidate(
+            itemID: itemID,
+            previousSourceIDs: previousSourceWindow.ids,
+            incomingSourceIDs: incomingTranscript.map(\.id)
+        )
+    }
+
+    static func isForwardTailCandidate(
+        itemID: String,
+        previousSourceIDs: [String],
+        incomingSourceIDs: [String]
+    ) -> Bool {
+        guard let previousTailID = previousSourceIDs.last,
+              let previousTailIndex = incomingSourceIDs.firstIndex(of: previousTailID),
+              let candidateIndex = incomingSourceIDs.firstIndex(of: itemID) else {
+            return false
+        }
+        return candidateIndex > previousTailIndex
+    }
+
+    private static func isExactForwardEvolution(
+        from previous: InstalledChatTranscript.SourceWindow,
+        to next: InstalledChatTranscript.SourceWindow
+    ) -> Bool {
+        guard previous.hasExactBounds, next.hasExactBounds,
+              previous.hasUniqueIDs, next.hasUniqueIDs,
+              let previousOriginalStart = previous.originalStart,
+              let nextOriginalStart = next.originalStart,
+              nextOriginalStart >= previousOriginalStart,
+              let previousStart = previous.start, let previousTotal = previous.total,
+              let nextStart = next.start, let nextTotal = next.total,
+              nextStart >= previousStart,
+              nextTotal >= previousTotal else { return false }
+
+        let overlapStart = max(previousStart, nextStart)
+        let overlapEnd = min(previousTotal, nextTotal)
+        if overlapStart == overlapEnd {
+            return previous.ids.isEmpty && nextStart == previousTotal
+        }
+        guard overlapStart < overlapEnd else { return false }
+        let overlapCount = overlapEnd - overlapStart
+        let previousOffset = overlapStart - previousStart
+        let nextOffset = overlapStart - nextStart
+        guard previousOffset >= 0, nextOffset >= 0,
+              previousOffset <= previous.ids.count,
+              nextOffset <= next.ids.count,
+              overlapCount <= previous.ids.count - previousOffset,
+              overlapCount <= next.ids.count - nextOffset else { return false }
+        let previousEnd = previousOffset + overlapCount
+        let nextEnd = nextOffset + overlapCount
+        return previous.ids[previousOffset..<previousEnd].elementsEqual(
+            next.ids[nextOffset..<nextEnd]
+        )
+    }
+
+    static func matches(queue: SessionSnapshot.QueuedMessage, item: TranscriptItem) -> Bool {
+        let text = (item.content ?? []).compactMap { part -> String? in
+            guard part.type == .text, part.attachment == nil else { return nil }
+            return part.text
+        }.joined()
+        if queue.text.isEmpty {
+            guard queue.attachmentCount > 0,
+                  queue.photoCount != nil,
+                  queue.fileAttachmentCount != nil,
+                  ChatAttachmentEnvelopePolicy.isBounded(text) else { return false }
+        } else {
+            guard text == queue.text else { return false }
+        }
+        let attachments = (item.content ?? []).filter {
+            $0.type == .image || $0.attachment != nil
+        }
+        let photos = attachments.count(where: { $0.type == .image })
+        let files = attachments.count - photos
+        guard attachments.count == queue.attachmentCount else { return false }
+        if let expected = queue.photoCount, expected != photos { return false }
+        if let expected = queue.fileAttachmentCount, expected != files { return false }
+        // A rich queue with attachments but no typed facts is not exact enough
+        // to animate as a card replacement. Empty prompts remain exact.
+        if queue.attachmentCount > 0,
+           queue.photoCount == nil, queue.fileAttachmentCount == nil {
+            return false
+        }
+        return true
+    }
+}
+
+enum ChatPromptBehavior: Hashable, Sendable {
+    case ordinary
+    case steer
+    case followUp
+    case unknown
+
+    init(rawValue: String?) {
+        switch rawValue {
+        case nil: self = .ordinary
+        case "steer": self = .steer
+        case "followUp": self = .followUp
+        default: self = .unknown
+        }
+    }
+
+    init(_ behavior: SessionSnapshot.QueuedMessage.Behavior?) {
+        switch behavior {
+        case .steer: self = .steer
+        case .followUp: self = .followUp
+        case nil: self = .ordinary
+        }
+    }
+
+    var isQueuedKind: Bool {
+        self == .steer || self == .followUp
+    }
+
+    var title: String {
+        switch self {
+        case .ordinary: return "Message"
+        case .steer: return "Steer next"
+        case .followUp: return "Follow up"
+        case .unknown: return "Message"
+        }
+    }
+
+    var queueBehavior: SessionSnapshot.QueuedMessage.Behavior? {
+        switch self {
+        case .steer: return .steer
+        case .followUp: return .followUp
+        case .ordinary, .unknown: return nil
+        }
+    }
+}
+
 /// Exact-target presentation-only outgoing state. This is never inserted into
 /// the canonical transcript or JSONL; it disappears only after canonical user
 /// message reconciliation (or a definitive rejection).
@@ -571,11 +790,13 @@ struct ChatOutgoingSubmissionPresentation: Equatable, Hashable, Identifiable, Se
         self.transportActive = transportActive
     }
 
+    var promptBehavior: ChatPromptBehavior { ChatPromptBehavior(rawValue: behavior) }
+
     var statusTitle: String? {
-        switch behavior {
-        case "steer": return "Steering next"
-        case "followUp": return "Follow-up pending"
-        default: return nil
+        switch promptBehavior {
+        case .steer: return "Steering next"
+        case .followUp: return "Follow-up pending"
+        case .ordinary, .unknown: return nil
         }
     }
 }
@@ -604,18 +825,20 @@ struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendabl
         self.isCompacting = isCompacting
     }
 
+    var promptBehavior: ChatPromptBehavior { ChatPromptBehavior(behavior) }
+
     var statusTitle: String {
         if isCompacting {
-            switch behavior {
+            switch promptBehavior {
             case .steer: return "Steering after compaction"
             case .followUp: return "Follow-up after compaction"
-            case nil: return "Sending after compaction"
+            case .ordinary, .unknown: return "Sending after compaction"
             }
         }
-        switch behavior {
+        switch promptBehavior {
         case .steer: return "Steering next"
         case .followUp: return "Follow-up pending"
-        case nil: return "Sending"
+        case .ordinary, .unknown: return "Sending"
         }
     }
 }
@@ -625,18 +848,23 @@ struct ChatPendingPromptPresentation: Equatable, Hashable, Identifiable, Sendabl
 /// candidate (the newest canonical user message), never an arbitrary history
 /// match for repeated text.
 enum ChatPendingCanonicalSuppressionPolicy {
-    static func suppresses(
-        _ pending: SessionSnapshot.PendingPrompt,
+    /// Returns canonical IDs that replace this exact pending prompt. The IDs
+    /// remain canonical; callers use them only in the existing entrance
+    /// suppression ledger so the replacement does not replay an insertion.
+    static func canonicalIDs(
+        for pending: SessionSnapshot.PendingPrompt,
         in transcript: [TranscriptItem]
-    ) -> Bool {
+    ) -> Set<String> {
         if let pendingDate = pending.createdAt.flatMap(GatewayTimestamp.parse) {
-            return transcript.contains { item in
+            let candidates: [String] = transcript.compactMap { item in
                 guard item.kind == .message,
                       item.role == .user,
                       let itemDate = GatewayTimestamp.parse(item.timestamp),
-                      itemDate >= pendingDate else { return false }
-                return matches(pending, item: item)
+                      itemDate >= pendingDate,
+                      matches(pending, item: item) else { return nil }
+                return item.id
             }
+            return candidates.count == 1 ? Set(candidates) : []
         }
 
         // Canonical transcript projections are page-bounded. Restrict the
@@ -644,17 +872,50 @@ enum ChatPendingCanonicalSuppressionPolicy {
         guard let latest = transcript
             .suffix(ChatTranscriptPageRequest.maximumItemCount)
             .reversed()
-            .first(where: { $0.kind == .message && $0.role == .user }) else {
-            return false
+            .first(where: { $0.kind == .message && $0.role == .user }),
+              matches(pending, item: latest) else {
+            return []
         }
-        return matches(pending, item: latest)
+        return [latest.id]
+    }
+
+    static func canonicalIDs(
+        for pending: ChatPendingPromptPresentation,
+        in transcript: [TranscriptItem]
+    ) -> Set<String> {
+        canonicalIDs(
+            for: SessionSnapshot.PendingPrompt(
+                id: pending.id,
+                createdAt: pending.createdAt,
+                behavior: pending.behavior,
+                text: pending.text,
+                attachmentCount: pending.attachmentCount,
+                photoCount: pending.photoCount,
+                fileAttachmentCount: pending.fileAttachmentCount
+            ),
+            in: transcript
+        )
+    }
+
+    static func suppresses(
+        _ pending: SessionSnapshot.PendingPrompt,
+        in transcript: [TranscriptItem]
+    ) -> Bool {
+        !canonicalIDs(for: pending, in: transcript).isEmpty
     }
 
     private static func matches(
         _ pending: SessionSnapshot.PendingPrompt,
         item: TranscriptItem
     ) -> Bool {
-        guard item.text == pending.text else { return false }
+        if pending.text.isEmpty {
+            guard pending.attachmentCount > 0,
+                  pending.photoCount != nil,
+                  pending.fileAttachmentCount != nil,
+                  ChatAttachmentEnvelopePolicy.isBounded(item.text) else { return false }
+        } else {
+            guard item.text == pending.text else { return false }
+        }
         let attachments = (item.content ?? []).filter {
             $0.type == .image || $0.attachment != nil
         }
@@ -686,6 +947,19 @@ enum ChatTranscriptHandoffCommit: Hashable, Sendable {
     var outgoingAttachments: [PendingAttachment] {
         guard case .outgoing(_, let attachments) = self else { return [] }
         return attachments
+    }
+
+    var pendingPromptPresentation: ChatPendingPromptPresentation? {
+        guard case .pending(let presentation) = self else { return nil }
+        return presentation
+    }
+
+    var promptBehavior: ChatPromptBehavior {
+        switch self {
+        case .none: return .ordinary
+        case .pending(let presentation): return presentation.promptBehavior
+        case .outgoing(let presentation, _): return presentation.promptBehavior
+        }
     }
 
     /// Strips upload-only bytes before this value crosses into transcript
