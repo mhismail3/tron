@@ -1267,6 +1267,50 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("opening timeout preserves binding through reveal and two stable frames")
+    func openingTailTimeoutRevealsThenReleasesBinding() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(
+                frameScheduler: frames.scheduler,
+                clock: clock.clock,
+                openingTailTimeout: .seconds(1)
+            )
+            coordinator.resetForPresentation(1)
+            coordinator.commandApplied(coordinator.command!)
+            let positioning = Task {
+                await coordinator.positionOpeningTail(targetRenderedID: "tail")
+            }
+
+            try await clock.waitUntilSleeping(count: 1)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let exactTail = try await coordinator.hostedNextCommand()
+            #expect(exactTail.destination == .openingTail("tail"))
+            coordinator.commandApplied(exactTail)
+            clock.advance(by: .seconds(1))
+            #expect(await positioning.value)
+            #expect(coordinator.command == nil)
+
+            coordinator.semanticFrameChanged(
+                renderedID: "tail",
+                layoutEpoch: coordinator.layoutEpoch,
+                frame: CGRect(x: 0, y: 350, width: 100, height: 40)
+            )
+            coordinator.geometryChanged(previous: .zero, current: bottom)
+            let firstStableFrame = frames.requestCount + 1
+            coordinator.openingRevealCompleted()
+            await frames.waitForRequest(count: firstStableFrame)
+            frames.releaseAll()
+            let secondStableFrame = firstStableFrame + 1
+            await frames.waitForRequest(count: secondStableFrame)
+            frames.releaseAll()
+            let release = try await coordinator.hostedNextCommand()
+            #expect(release.destination == .releaseBinding)
+        }
+    }
+
     @Test("physical positioning cancels the deadline before reveal settlement")
     func openingTailDeadlineEndsAtPhysicalPositioning() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1361,6 +1405,34 @@ struct ChatScrollCoordinatorTests {
             let release = try await coordinator.hostedNextCommand()
             #expect(release.destination == .releaseBinding)
         }
+    }
+
+    @Test("opening phase owns composer, insertion, projection, and pinned overshoot")
+    func openingPhaseSuppressesOrdinaryTailWork() throws {
+        let frames = ManualScrollFrameScheduler()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+        coordinator.resetForPresentation(1)
+        coordinator.commandApplied(coordinator.command!)
+        coordinator.requestOpeningTail(targetRenderedID: "tail")
+        coordinator.geometryChanged(previous: .zero, current: away)
+
+        #expect(!coordinator.canAutomaticallyFollow)
+        coordinator.composerViewportTransitionBegan()
+        coordinator.discreteContentInserted(renderedID: "extension-pill")
+        coordinator.transcriptProjectionWillChange(from: try installedToolTranscript(
+            ids: ["one"], statuses: [.running], timelineGeneration: 1
+        ))
+        coordinator.installedTranscriptChanged(try installedToolTranscript(
+            ids: ["one"], statuses: [.completed], timelineGeneration: 2
+        ))
+        let overshoot = ChatTranscriptGeometry(
+            offsetY: 1_200, contentHeight: 1_000, containerHeight: 400, visibleBottomY: 1_600
+        )
+        coordinator.geometryChanged(previous: away, current: overshoot)
+
+        #expect(coordinator.command == nil)
+        #expect(coordinator.hostedDiscreteFollowRenderedIDs.isEmpty)
+        coordinator.cancel()
     }
 
     @Test("opening tail admits exact physical evidence in either callback order")

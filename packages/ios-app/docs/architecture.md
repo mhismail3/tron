@@ -528,8 +528,8 @@ raw geometry and semantic-row frame intake; pinned/detached and unread
 state; presentation and command generations; display-frame follow and catch-up tasks;
 and the exact ordinary-layout and paging semantic-anchor transactions. It publishes one exact-token typed
 command for `ChatView` to execute and acknowledge; presentation reset and settled
-binding release are command destinations rather than direct view policy. Opening arms final tail settlement
-with the exact physical marker after installed transcript and queue rows. Auxiliary/runtime rows cannot admit
+binding release are command destinations rather than direct view policy. Opening owns final tail settlement through one mutually exclusive `OpeningTailPhase` (`idle`,
+`positioning`, `positioned`, or `postReveal`) with the exact physical marker after installed transcript and queue rows. Auxiliary/runtime rows cannot admit
 it, transient boundary geometry cannot clear it, and native visible geometry beyond an overflowing content edge
 is treated as overshoot rather than a settled bottom. If the marker is unrealized, one frame-gated exact-ID command
 forces lazy realization; command submission remains owned until current-layout marker and correlated native

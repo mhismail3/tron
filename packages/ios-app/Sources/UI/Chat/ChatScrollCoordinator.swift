@@ -65,6 +65,44 @@ final class ChatScrollCoordinator {
         let continuation: CheckedContinuation<Void, Never>
     }
 
+    private struct OpeningTailContext: Equatable {
+        var token: Int
+        var targetRenderedID: String
+        var targetSample: SemanticFrameSample?
+        var presentation: Int
+        var commandToken: Int?
+        var commandSemanticRevision: Int?
+        var commandGeometryRevision: Int?
+        var commandAttemptCount: Int
+    }
+
+    private struct OpeningTailPostRevealContext: Equatable {
+        var base: OpeningTailContext
+        var stableFrameCount = 0
+        var stableSemanticRevision: Int?
+        var stableGeometryRevision: Int?
+    }
+
+    private enum OpeningTailPhase: Equatable {
+        case idle
+        case positioning(OpeningTailContext)
+        case positioned(OpeningTailContext)
+        case postReveal(OpeningTailPostRevealContext)
+
+        var isActive: Bool {
+            if case .idle = self { return false }
+            return true
+        }
+
+        var context: OpeningTailContext? {
+            switch self {
+            case .idle: return nil
+            case .positioning(let context), .positioned(let context): return context
+            case .postReveal(let context): return context.base
+            }
+        }
+    }
+
     private enum CatchUpPhase: Equatable {
         case none
         case staged
@@ -118,20 +156,7 @@ final class ChatScrollCoordinator {
     private var userInteractionStartOffsetY: CGFloat?
     private var userInteractionStartDistanceFromBottom: CGFloat?
     private var bindingIsReleased = false
-    private var openingTailSettlementPending = false
-    private var openingTailToken: Int?
-    private var openingTailTargetRenderedID: String?
-    private var openingTailTargetSample: SemanticFrameSample?
-    private var openingTailPresentation: Int?
-    private var openingTailCommandToken: Int?
-    private var openingTailCommandSemanticRevision: Int?
-    private var openingTailCommandGeometryRevision: Int?
-    private var openingTailCommandAttemptCount = 0
-    private var openingTailPositioned = false
-    private var openingTailRevealCompleted = false
-    private var openingTailStableFrameCount = 0
-    private var openingTailStableSemanticRevision: Int?
-    private var openingTailStableGeometryRevision: Int?
+    private var openingTailPhase: OpeningTailPhase = .idle
     private var openingTailContinuation: CheckedContinuation<Bool, Never>?
     private var openingTailFinalWaiters: [OpeningTailFinalWaiter] = []
     private var nextOpeningTailFinalWaiterID = 0
@@ -217,10 +242,18 @@ final class ChatScrollCoordinator {
     }
 
     var canAutomaticallyFollow: Bool {
+        canAutomaticallyFollowIgnoringOpening && !openingTailPhase.isActive
+    }
+
+    private var canAutomaticallyFollowIgnoringOpening: Bool {
         !userScrolledAway && !isUserInteracting && !isNativeUserOwned
             && !pendingNativeUserGeometry && !isUserDrivenSettling
             && !isPrependingHistory && catchUpPhase == .none
     }
+
+    private var openingTailSettlementPending: Bool { openingTailPhase.isActive }
+    private var openingTailToken: Int? { openingTailPhase.context?.token }
+    private var openingTailPresentation: Int? { openingTailPhase.context?.presentation }
 
     func resetForPresentation(
         _ presentation: Int? = nil,
@@ -293,10 +326,22 @@ final class ChatScrollCoordinator {
         recordPrependExcursionIfOwned(renderedID: renderedID, layoutEpoch: layoutEpoch, frame: frame)
         evaluateLayoutMutationIfReady()
         evaluatePrependMeasurementIfReady()
-        if openingTailSettlementPending,
-           openingTailPresentation == presentation,
-           openingTailTargetRenderedID == renderedID {
-            openingTailTargetSample = semanticFrames[renderedID]
+        if let context = openingTailPhase.context,
+           context.presentation == presentation,
+           context.targetRenderedID == renderedID {
+            switch openingTailPhase {
+            case .positioning(var context):
+                context.targetSample = semanticFrames[renderedID]
+                openingTailPhase = .positioning(context)
+            case .positioned(var context):
+                context.targetSample = semanticFrames[renderedID]
+                openingTailPhase = .positioned(context)
+            case .postReveal(var context):
+                context.base.targetSample = semanticFrames[renderedID]
+                openingTailPhase = .postReveal(context)
+            case .idle:
+                break
+            }
             evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
         }
     }
@@ -366,7 +411,8 @@ final class ChatScrollCoordinator {
     /// Arms pinned following for the next measured keyboard/composer viewport
     /// change. It emits no immediate write, and detached readers are inert.
     func composerViewportTransitionBegan() {
-        guard !userScrolledAway, catchUpPhase == .none, !isPrependingHistory else { return }
+        guard !userScrolledAway, catchUpPhase == .none, !isPrependingHistory,
+              !openingTailPhase.isActive else { return }
         let hasFreshNativeAuthority = isUserInteracting || pendingNativeUserGeometry
             || isUserDrivenSettling || directTailReturnArmed
         if geometry.isAtCatchUpBoundary && !hasFreshNativeAuthority {
@@ -581,9 +627,11 @@ final class ChatScrollCoordinator {
     /// that the target intersects a plausible bottom viewport.
     func positionOpeningTail(targetRenderedID: String?) async -> Bool {
         guard let targetRenderedID else { return true }
+        guard !isPrependingHistory else { return false }
         clearOpeningTailSettlement(positioningSucceeded: false)
         sequence &+= 1
         let token = sequence
+        let admittedPresentation = presentation
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 guard !Task.isCancelled else {
@@ -600,6 +648,7 @@ final class ChatScrollCoordinator {
             Task { @MainActor [weak self] in
                 self?.clearOpeningTailSettlement(
                     ifToken: token,
+                    ifPresentation: admittedPresentation,
                     positioningSucceeded: false
                 )
             }
@@ -608,6 +657,7 @@ final class ChatScrollCoordinator {
 
     /// Test and preview seam for callback-order characterization.
     func requestOpeningTail(targetRenderedID: String?) {
+        guard !isPrependingHistory else { return }
         clearOpeningTailSettlement(positioningSucceeded: false)
         guard let targetRenderedID else { return }
         sequence &+= 1
@@ -622,13 +672,14 @@ final class ChatScrollCoordinator {
     /// Keep the edge binding through the fade/slide transaction, then release it
     /// after animation completion and two unchanged display-frame barriers.
     func openingRevealCompleted() {
-        guard openingTailSettlementPending, openingTailPositioned else { return }
-        openingTailRevealCompleted = true
+        guard case .positioned(let context) = openingTailPhase,
+              context.presentation == presentation else { return }
+        openingTailPhase = .postReveal(.init(base: context))
         scheduleOpeningTailFrame()
     }
 
     func waitForOpeningTailSettlement() async {
-        guard openingTailSettlementPending, let token = openingTailToken else { return }
+        guard let token = openingTailToken else { return }
         let waiterID = nextOpeningTailFinalWaiterID
         nextOpeningTailFinalWaiterID &+= 1
         await withTaskCancellationHandler {
@@ -655,16 +706,21 @@ final class ChatScrollCoordinator {
         targetRenderedID: String,
         continuation: CheckedContinuation<Bool, Never>?
     ) {
-        openingTailSettlementPending = true
-        openingTailToken = token
-        openingTailTargetRenderedID = targetRenderedID
-        openingTailTargetSample = semanticFrames[targetRenderedID]
-        openingTailPresentation = presentation
-        openingTailCommandAttemptCount = 0
+        let context = OpeningTailContext(
+            token: token,
+            targetRenderedID: targetRenderedID,
+            targetSample: semanticFrames[targetRenderedID],
+            presentation: presentation,
+            commandToken: nil,
+            commandSemanticRevision: nil,
+            commandGeometryRevision: nil,
+            commandAttemptCount: 0
+        )
+        openingTailPhase = .positioning(context)
         openingTailContinuation = continuation
-        scheduleOpeningTailTimeout(token: token)
+        scheduleOpeningTailTimeout(token: token, presentation: presentation)
         evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
-        if openingTailSettlementPending, !openingTailPositioned {
+        if case .positioning = openingTailPhase {
             scheduleOpeningTailFrame()
         }
     }
@@ -918,7 +974,9 @@ final class ChatScrollCoordinator {
             bindingIsReleased = false
         }
 
-        if openingTailCommandToken == applied.token {
+        if case .positioning(let context) = openingTailPhase,
+           context.presentation == applied.presentation,
+           context.commandToken == applied.token {
             // Submission is not physical completion. Retain the token until a
             // later display-frame/evidence pair proves settlement, preventing
             // multiple SwiftUI binding writes in one render transaction.
@@ -1399,11 +1457,10 @@ final class ChatScrollCoordinator {
         allowsUnrealizedTailCommand: Bool,
         schedulesPositionedFrame: Bool = true
     ) {
-        guard openingTailSettlementPending,
-              openingTailPresentation == presentation,
-              let targetRenderedID = openingTailTargetRenderedID else { return }
+        guard let context = openingTailPhase.context,
+              context.presentation == presentation else { return }
 
-        let targetSample = openingTailTargetSample
+        let targetSample = context.targetSample
         let hasCurrentTarget = targetSample?.layoutEpoch == layoutEpoch
         let targetIsVisible = hasCurrentTarget
             && targetSample!.frame.maxY > 0
@@ -1413,49 +1470,57 @@ final class ChatScrollCoordinator {
             && targetIsVisible
 
         if physicallyPositioned {
-            openingTailCommandToken = nil
-            openingTailCommandSemanticRevision = nil
-            openingTailCommandGeometryRevision = nil
-            if !openingTailPositioned {
+            switch openingTailPhase {
+            case .positioning(var context):
+                context.commandToken = nil
+                context.commandSemanticRevision = nil
+                context.commandGeometryRevision = nil
+                openingTailPhase = .positioned(context)
                 openingTailTimeoutTask?.cancel()
                 openingTailTimeoutTask = nil
-                openingTailPositioned = true
                 let continuation = openingTailContinuation
                 openingTailContinuation = nil
                 continuation?.resume(returning: true)
-            }
-            if openingTailRevealCompleted, schedulesPositionedFrame {
-                scheduleOpeningTailFrame()
+            case .positioned:
+                break
+            case .postReveal:
+                if schedulesPositionedFrame { scheduleOpeningTailFrame() }
+            case .idle:
+                return
             }
             return
         }
 
-        if let openingCommandToken = openingTailCommandToken {
-            let hasFreshEvidence = semanticFrameRevision > (openingTailCommandSemanticRevision ?? semanticFrameRevision)
-                || geometryRevision > (openingTailCommandGeometryRevision ?? geometryRevision)
+        guard case .positioning(let context) = openingTailPhase else { return }
+        if let openingCommandToken = context.commandToken {
+            let hasFreshEvidence = semanticFrameRevision > (context.commandSemanticRevision ?? semanticFrameRevision)
+                || geometryRevision > (context.commandGeometryRevision ?? geometryRevision)
             if hasFreshEvidence, command?.token != openingCommandToken {
                 scheduleOpeningTailFrame()
             }
             return
         }
 
-        guard canAutomaticallyFollow, command == nil,
+        guard canAutomaticallyFollowIgnoringOpening, command == nil,
               hasCurrentTarget || allowsUnrealizedTailCommand,
               geometry.isValid || allowsUnrealizedTailCommand else { return }
-        publish(.openingTail(targetRenderedID), animation: .disabled, origin: .presentation)
-        openingTailCommandToken = command?.token
-        openingTailCommandSemanticRevision = semanticFrameRevision
-        openingTailCommandGeometryRevision = geometryRevision
-        openingTailCommandAttemptCount &+= 1
+        publish(.openingTail(context.targetRenderedID), animation: .disabled, origin: .presentation)
+        var updated = context
+        updated.commandToken = command?.token
+        updated.commandSemanticRevision = semanticFrameRevision
+        updated.commandGeometryRevision = geometryRevision
+        updated.commandAttemptCount &+= 1
+        openingTailPhase = .positioning(updated)
     }
 
     private func scheduleOpeningTailFrame() {
-        guard openingTailSettlementPending,
-              openingTailPresentation == presentation else { return }
+        guard let context = openingTailPhase.context,
+              context.presentation == presentation else { return }
         openingTailFrameTask?.cancel()
         openingTailFrameTaskGeneration &+= 1
         let taskGeneration = openingTailFrameTaskGeneration
-        let admittedPresentation = presentation
+        let admittedToken = context.token
+        let admittedPresentation = context.presentation
         let admittedSemanticRevision = semanticFrameRevision
         let admittedGeometryRevision = geometryRevision
         openingTailFrameTask = Task { [weak self, frameScheduler] in
@@ -1464,7 +1529,8 @@ final class ChatScrollCoordinator {
                 try Task.checkCancellation()
             } catch {
                 guard let self,
-                      self.presentation == admittedPresentation,
+                      self.openingTailPhase.context?.token == admittedToken,
+                      self.openingTailPhase.context?.presentation == admittedPresentation,
                       self.openingTailFrameTaskGeneration == taskGeneration else { return }
                 // A display-frame helper can be cancelled independently of the
                 // owning presentation task. Physical semantic/geometry callbacks
@@ -1473,62 +1539,66 @@ final class ChatScrollCoordinator {
                 return
             }
             guard let self,
-                  self.presentation == admittedPresentation,
-                  self.openingTailSettlementPending,
+                  self.openingTailPhase.context?.token == admittedToken,
+                  self.openingTailPhase.context?.presentation == admittedPresentation,
                   self.openingTailFrameTaskGeneration == taskGeneration else { return }
             self.openingTailFrameTask = nil
             let revisionsAreStable = self.semanticFrameRevision == admittedSemanticRevision
                 && self.geometryRevision == admittedGeometryRevision
-            let hasFreshCommandEvidence = self.semanticFrameRevision
-                > (self.openingTailCommandSemanticRevision ?? self.semanticFrameRevision)
-                || self.geometryRevision
-                > (self.openingTailCommandGeometryRevision ?? self.geometryRevision)
-            if !self.openingTailPositioned,
-               let openingCommandToken = self.openingTailCommandToken,
-               self.command?.token != openingCommandToken,
-               hasFreshCommandEvidence || self.openingTailCommandAttemptCount < 2 {
-                // Permit one bounded second exact-ID submission if SwiftUI
-                // consumed the first against a provisional lazy layout. Further
-                // writes require new semantic or geometry evidence.
-                self.openingTailCommandToken = nil
-                self.openingTailCommandSemanticRevision = nil
-                self.openingTailCommandGeometryRevision = nil
+            if case .positioning(var context) = self.openingTailPhase,
+               let openingCommandToken = context.commandToken,
+               self.command?.token != openingCommandToken {
+                let hasFreshCommandEvidence = self.semanticFrameRevision
+                    > (context.commandSemanticRevision ?? self.semanticFrameRevision)
+                    || self.geometryRevision
+                    > (context.commandGeometryRevision ?? self.geometryRevision)
+                if hasFreshCommandEvidence || context.commandAttemptCount < 2 {
+                    // Permit one bounded second exact-ID submission if SwiftUI
+                    // consumed the first against a provisional lazy layout. Further
+                    // writes require new semantic or geometry evidence.
+                    context.commandToken = nil
+                    context.commandSemanticRevision = nil
+                    context.commandGeometryRevision = nil
+                    self.openingTailPhase = .positioning(context)
+                }
             }
             self.evaluateOpeningTailIfPossible(
                 allowsUnrealizedTailCommand: true,
                 schedulesPositionedFrame: false
             )
-            guard self.openingTailSettlementPending,
+            guard self.openingTailPhase.context?.token == admittedToken,
+                  self.openingTailPhase.context?.presentation == admittedPresentation,
                   self.openingTailFrameTaskGeneration == taskGeneration else { return }
-            if self.openingTailPositioned,
-               self.openingTailRevealCompleted,
+            if case .postReveal(var context) = self.openingTailPhase,
                revisionsAreStable,
                self.openingTailViewportIsPhysicallySettled {
-                if self.openingTailStableSemanticRevision == admittedSemanticRevision,
-                   self.openingTailStableGeometryRevision == admittedGeometryRevision {
-                    self.openingTailStableFrameCount &+= 1
+                if context.stableSemanticRevision == admittedSemanticRevision,
+                   context.stableGeometryRevision == admittedGeometryRevision {
+                    context.stableFrameCount &+= 1
                 } else {
-                    self.openingTailStableSemanticRevision = admittedSemanticRevision
-                    self.openingTailStableGeometryRevision = admittedGeometryRevision
-                    self.openingTailStableFrameCount = 1
+                    context.stableSemanticRevision = admittedSemanticRevision
+                    context.stableGeometryRevision = admittedGeometryRevision
+                    context.stableFrameCount = 1
                 }
-                if self.openingTailStableFrameCount >= 2 {
+                self.openingTailPhase = .postReveal(context)
+                if context.stableFrameCount >= 2 {
                     self.finishOpeningTailSettlement()
                 } else {
                     self.scheduleOpeningTailFrame()
                 }
-            } else if self.openingTailPositioned && self.openingTailRevealCompleted {
-                self.openingTailStableFrameCount = 0
-                self.openingTailStableSemanticRevision = nil
-                self.openingTailStableGeometryRevision = nil
+            } else if case .postReveal(var context) = self.openingTailPhase {
+                context.stableFrameCount = 0
+                context.stableSemanticRevision = nil
+                context.stableGeometryRevision = nil
+                self.openingTailPhase = .postReveal(context)
                 self.scheduleOpeningTailFrame()
             }
         }
     }
 
     private var openingTailViewportIsPhysicallySettled: Bool {
-        guard openingTailTargetRenderedID != nil,
-              let targetSample = openingTailTargetSample,
+        guard let context = openingTailPhase.context,
+              let targetSample = context.targetSample,
               targetSample.layoutEpoch == layoutEpoch else { return false }
         return geometry.isPlausibleOpeningViewport
             && geometry.isAtCatchUpBoundary
@@ -1543,20 +1613,7 @@ final class ChatScrollCoordinator {
         openingTailFrameTaskGeneration &+= 1
         openingTailFrameTask?.cancel()
         openingTailFrameTask = nil
-        openingTailSettlementPending = false
-        openingTailToken = nil
-        openingTailTargetRenderedID = nil
-        openingTailTargetSample = nil
-        openingTailPresentation = nil
-        openingTailCommandToken = nil
-        openingTailCommandSemanticRevision = nil
-        openingTailCommandGeometryRevision = nil
-        openingTailCommandAttemptCount = 0
-        openingTailPositioned = false
-        openingTailRevealCompleted = false
-        openingTailStableFrameCount = 0
-        openingTailStableSemanticRevision = nil
-        openingTailStableGeometryRevision = nil
+        openingTailPhase = .idle
         let continuation = openingTailContinuation
         openingTailContinuation = nil
         continuation?.resume(returning: true)
@@ -1567,38 +1624,27 @@ final class ChatScrollCoordinator {
 
     private func clearOpeningTailSettlement(
         ifToken expectedToken: Int? = nil,
+        ifPresentation expectedPresentation: Int? = nil,
         positioningSucceeded: Bool = false
     ) {
         if let expectedToken, openingTailToken != expectedToken { return }
+        if let expectedPresentation, openingTailPresentation != expectedPresentation { return }
         let token = openingTailToken
         openingTailTimeoutTask?.cancel()
         openingTailTimeoutTask = nil
         openingTailFrameTaskGeneration &+= 1
         openingTailFrameTask?.cancel()
         openingTailFrameTask = nil
-        if let commandToken = openingTailCommandToken,
+        if let commandToken = openingTailPhase.context?.commandToken,
            command?.token == commandToken { clearCommand() }
-        openingTailSettlementPending = false
-        openingTailToken = nil
-        openingTailTargetRenderedID = nil
-        openingTailTargetSample = nil
-        openingTailPresentation = nil
-        openingTailCommandToken = nil
-        openingTailCommandSemanticRevision = nil
-        openingTailCommandGeometryRevision = nil
-        openingTailCommandAttemptCount = 0
-        openingTailPositioned = false
-        openingTailRevealCompleted = false
-        openingTailStableFrameCount = 0
-        openingTailStableSemanticRevision = nil
-        openingTailStableGeometryRevision = nil
+        openingTailPhase = .idle
         let continuation = openingTailContinuation
         openingTailContinuation = nil
         continuation?.resume(returning: positioningSucceeded)
         if let token { resumeOpeningTailFinalWaiters(token: token) }
     }
 
-    private func scheduleOpeningTailTimeout(token: Int) {
+    private func scheduleOpeningTailTimeout(token: Int, presentation: Int) {
         openingTailTimeoutTask?.cancel()
         openingTailTimeoutTask = Task { [weak self, clock, openingTailTimeout] in
             do {
@@ -1608,17 +1654,31 @@ final class ChatScrollCoordinator {
                 return
             }
             guard let self,
-                  self.openingTailSettlementPending,
-                  self.openingTailToken == token else { return }
+                  self.openingTailPhase.context?.token == token,
+                  self.openingTailPhase.context?.presentation == presentation else { return }
             // Native proof is preferred, but presentation must not become
             // unavailable solely because SwiftUI omits/coalesces geometry.
             // The coordinator already made its bounded exact-ID attempts; keep
             // that binding and reveal the authoritative transcript best-effort.
-            self.clearOpeningTailSettlement(
-                ifToken: token,
-                positioningSucceeded: true
+            self.finishOpeningTailPositioningAfterTimeout(
+                token: token,
+                presentation: presentation
             )
         }
+    }
+
+    private func finishOpeningTailPositioningAfterTimeout(token: Int, presentation: Int) {
+        guard case .positioning(var context) = openingTailPhase,
+              context.token == token,
+              context.presentation == presentation else { return }
+        openingTailTimeoutTask = nil
+        context.commandToken = nil
+        context.commandSemanticRevision = nil
+        context.commandGeometryRevision = nil
+        openingTailPhase = .positioned(context)
+        let continuation = openingTailContinuation
+        openingTailContinuation = nil
+        continuation?.resume(returning: true)
     }
 
     private func resumeOpeningTailFinalWaiter(id: Int, token: Int) {

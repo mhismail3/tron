@@ -171,7 +171,9 @@ bounded exact-ID binding remains owned and the authoritative transcript is revea
 conversation availability. The positioned transcript then fades/rises into view while the tail binding remains
 owned through animation completion and two unchanged display frames. Direct user or accessibility interaction
 cancels that arm. The composer
-remains visible throughout opening, while sending stays disabled until readiness.
+remains visible throughout opening, while sending stays disabled until readiness. Opening tail
+positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
+phase; ordinary follow and correction events do not compete until that phase is idle.
 Session subscription ownership is token-scoped end to end. The open response remains
 provisional until sync acknowledgement and exact route-intent revalidation; baseline plus its
 already-drained contiguous event suffix then publish in one MainActor turn. The fitted tail mounts immediately regardless of its display-bearing count; earlier-page reads begin only from the mounted presentation and cannot make the conversation unavailable. A stale or failed

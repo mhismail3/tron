@@ -413,7 +413,9 @@ exposes only the closed `cold`, `fragmentReuse`, `toolPayloadPatch`, and `isolat
 modes plus numeric entry/fragment/tool/atom/rendered counts; a pure patch must report zero source
 entries and atoms, inspect the complete unique runtime membership, and count only distinct patched tools. `SessionPresentationStoreTests` also
 prove exact page `start`/`end`/count admission and that return-to-latest compacts loaded
-history back to the retained authoritative tail. `ChatScrollCoordinatorTests` use watchdog-bounded
+history back to the retained authoritative tail. Opening ownership is one mutually exclusive
+`OpeningTailPhase` (`idle`, `positioning`, `positioned`, or `postReveal`); ordinary follow,
+insertion, and pinned correction stay independent and are suppressed until it is idle. `ChatScrollCoordinatorTests` use watchdog-bounded
 barriers rather than sleeps or yields to prove callback-order equivalence, immediate
 catch-up dismissal for geometry-first manual return to the tail, pinned keyboard/composer
 following, one follow command per frame, nonanimated settlement for an admitted discrete
