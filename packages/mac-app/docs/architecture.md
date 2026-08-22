@@ -78,10 +78,11 @@ capability so remote restart controls fail closed for direct foreground processe
 Quitting `Tron.app` does not stop accepted work. `ServerStatusPoller` probes the Tron
 Gateway protocol and combines health with registration state. Menu controls can
 pause, resume, restart, inspect bounded persisted Gateway logs, show a fresh
-pairing invitation, and uninstall. Log and feedback capture resolve a nonempty
-host from live Tailscale state or the bounded Tailscale cache and pass it
-explicitly to the Gateway socket; absent host data fails unavailable rather than
-falling back to loopback.
+pairing invitation, and uninstall. Log and feedback capture resolve a validated
+Tailscale host from live state or the bounded owner-only Tailscale cache and pass
+it explicitly to the Gateway socket; absent host data fails unavailable rather
+than falling back to loopback. The cache is an exact-schema version-1 regular
+owner-only file and accepts only canonical Tailscale IPv4/IPv6 addresses.
 
 Installed Release owns only Stable registration and lifecycle. It authenticates
 to the developer-owned Debug Gateway on 9848 to report status and, when Debug
@@ -108,11 +109,13 @@ invalidate an otherwise unchanged admission.
 `LaunchAgentRegistrationPlan` computes keep/refuse/takeover/bootout,
 unregister/register, and refresh sequences from one authoritative status and
 runtime metadata snapshot. Live execution runs that plan without re-deriving
-ownership between operations. Bearer and enrollment credentials use one
-bounded owner-only regular-file/no-symlink JSON reader, followed by separate
-exact-key schema validation. ServerPing and GatewayRestartClient share the
-bounded WebSocket transport handshake and receive deadline while retaining
-frame-specific error taxonomies.
+ownership between operations. Bearer, enrollment, and network-cache credentials
+use one bounded owner-only regular-file/no-symlink descriptor reader, followed
+by separate exact-key schema validation. Stable transport never probes loopback
+when Tailscale resolution is unavailable; Debug admits only the exact lifecycle
+host (`tailscale` or `127.0.0.1`), and loopback Debug is never pairable.
+ServerPing and GatewayRestartClient share the bounded WebSocket transport
+handshake and receive deadline while retaining frame-specific error taxonomies.
 
 The wrapper and gateway share no in-memory state. Their only shared secrets are
 owner-only gateway files. Legacy `~/.tron/auth.json` is neither wrapper nor
@@ -131,9 +134,10 @@ channel-derived marker or lock under the selected Tron home:
 ~/.tron/gateway/payloads/<channel>/versions/<version>/manifest.json
 ```
 
-`scripts/tron dev` builds and stages an immutable dev payload, starts or
-authentically drain-restarts the developer-owned supervisor on 9848, and preserves all
-Debug state. `scripts/tron dev handoff` copies only the exact selected payload
+`scripts/tron dev` resolves the repository's pinned Node before mutating state,
+uses that absolute runtime and its sibling npm for helper/build/deploy commands,
+builds and stages an immutable dev payload, starts or authentically drain-restarts
+the developer-owned supervisor on 9848, and preserves all Debug state. `scripts/tron dev handoff` copies only the exact selected payload
 whose pre/post authenticated identity remains unchanged into the Stable store as
 an inactive candidate. The agent-manageable command remains explicit:
 

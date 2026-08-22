@@ -59,6 +59,16 @@ struct MacSourceGuardTests {
         #expect(source.contains("task.cancel()"))
     }
 
+    @Test("Stable transport never falls back to loopback")
+    func stableTransportNeverFallsBackToLoopback() throws {
+        let macRoot = try Self.macAppRoot()
+        let source = try Self.read(macRoot, "Sources/App/EnvironmentSetup.swift")
+        #expect(source.contains("resolveTailscaleHost"))
+        #expect(!source.contains("?? \"127.0.0.1\""))
+        #expect(source.contains("guard let host else { return .unreachable }"))
+        #expect(source.contains("throw GatewayRestartClient.Failure.transport"))
+    }
+
     @Test("helper-resource layout preserves tracked helper skeletons")
     func helperResourceLayoutPreservesTrackedHelperSkeletons() throws {
         let macRoot = try Self.macAppRoot()
@@ -132,12 +142,11 @@ struct MacSourceGuardTests {
         #expect(bundleScript.contains("version mismatch"))
         #expect(bundleScript.contains("architecture mismatch"))
         #expect(bundleScript.contains("TRON_NODE_BIN"))
-        #expect(bundleScript.contains("TRON_NPM_BIN"))
-        #expect(bundleScript.contains("override\" != /* || ! -x \"$override\""))
-        #expect(bundleScript.contains("command -v \"$tool\""))
-        #expect(bundleScript.contains("${NVM_DIR:-${HOME:-}/.nvm}/versions/node"))
-        #expect(bundleScript.contains("/opt/homebrew/bin/$tool"))
-        #expect(bundleScript.contains("/usr/local/bin/$tool"))
+        #expect(!bundleScript.contains("TRON_NPM_BIN"))
+        #expect(bundleScript.contains("command -v node"))
+        #expect(bundleScript.contains("${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v${NODE_VERSION}/bin/node"))
+        #expect(bundleScript.contains("/opt/homebrew/bin/node"))
+        #expect(bundleScript.contains("/usr/local/bin/node"))
         #expect(bundleScript.contains("\"$NPM_BIN\" ci --omit=dev"))
         #expect(bundleScript.contains("\"$NODE_BIN\" -p"))
         #expect(!bundleScript.contains("&& npm "))

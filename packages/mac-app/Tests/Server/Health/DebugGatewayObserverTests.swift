@@ -112,21 +112,48 @@ struct DebugGatewayObserverTests {
         #expect(first != replacement)
     }
 
-    @Test("pairing is unavailable for loopback Debug")
+    @Test("accepts loopback only when lifecycle and process command agree")
+    func loopbackCommandAdmission() {
+        var loopback = lifecycle
+        loopback.expectedHost = " 127.0.0.1 "
+        let loopbackCommand = "\(root.path)/runtime/node-arm64 \(root.path)/app/dist/index.js --host 127.0.0.1 --port 9848"
+        #expect(validates(lifecycle: loopback, command: loopbackCommand))
+        #expect(!validates(lifecycle: loopback, command: command))
+        var mismatch = lifecycle
+        mismatch.expectedHost = "127.0.0.1"
+        #expect(!validates(lifecycle: mismatch, command: command))
+    }
+
+    @Test("pairing requires a concrete validated Tailscale address")
     func pairingHostPolicy() {
         #expect(!DebugGatewayObserver.isPairingHost("127.0.0.1"))
         #expect(!DebugGatewayObserver.isPairingHost("::1"))
-        #expect(DebugGatewayObserver.isPairingHost("tailscale"))
+        #expect(!DebugGatewayObserver.isPairingHost("tailscale"))
+        #expect(!DebugGatewayObserver.isPairingHost("example.invalid"))
+        #expect(!DebugGatewayObserver.isPairingHost("100.64.0.999"))
+        #expect(!DebugGatewayObserver.isPairingHost("fd7a:115c:a1e0::1%utun0"))
         #expect(DebugGatewayObserver.isPairingHost("100.64.0.8"))
+        #expect(DebugGatewayObserver.isPairingHost("fd7a:115c:a1e0::8"))
+    }
+
+    @Test("Tailscale resolution is validated before transport or pairing")
+    func validatesResolvedHost() {
+        #expect(DebugGatewayObserver.validatedTailscaleHost(" 100.64.0.8 ") == "100.64.0.8")
+        #expect(DebugGatewayObserver.validatedTailscaleHost("127.0.0.1") == nil)
+        #expect(DebugGatewayObserver.validatedTailscaleHost("tailscale") == nil)
+        #expect(DebugGatewayObserver.validatedTailscaleHost("100.64.0.1%en0") == nil)
+        #expect(DebugGatewayObserver.validatedTailscaleHost(nil) == nil)
     }
 
     private func validates(
+        lifecycle: DebugGatewayObserver.Lifecycle? = nil,
         info: ServerPingInfo? = nil,
         supervisorStart: String? = "__expected__",
         childStart: String? = nil,
         listenerPIDs: Set<Int>? = nil,
         command: String? = nil
     ) -> Bool {
+        let lifecycle = lifecycle ?? self.lifecycle
         let actualSupervisor = supervisorStart == "__expected__"
             ? lifecycle.supervisorStartIdentity
             : supervisorStart

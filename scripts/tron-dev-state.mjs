@@ -3,6 +3,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { networkInterfaces } from "node:os";
+import { isIP } from "node:net";
 import { mkdir, readFile, rename, writeFile, readdir, rm, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
@@ -112,10 +113,36 @@ async function fingerprint(root) {
   return hash.digest("hex");
 }
 
+function ipv6Bytes(address) {
+  if (address.includes("%") || isIP(address) !== 6) return null;
+  const halves = address.toLowerCase().split("::");
+  if (halves.length > 2) return null;
+  const parse = (part) => part === "" ? [] : part.split(":").flatMap((piece, index, pieces) => {
+    if (piece.includes(".")) {
+      if (index !== pieces.length - 1) return [];
+      const octets = piece.split(".").map(Number);
+      return octets.length === 4 && octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
+        ? [(octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]] : [];
+    }
+    return /^[0-9a-f]{1,4}$/u.test(piece) ? [Number.parseInt(piece, 16)] : [];
+  });
+  const left = parse(halves[0]);
+  const right = halves.length === 2 ? parse(halves[1]) : [];
+  if (left.length + right.length > 8 || (halves.length === 1 && left.length !== 8)) return null;
+  const words = halves.length === 2 ? [...left, ...Array(8 - left.length - right.length).fill(0), ...right] : left;
+  return words.flatMap((word) => [word >>> 8, word & 0xff]);
+}
+
 function isTailscaleAddress(address) {
-  if (address.toLowerCase().startsWith("fd7a:115c:a1e0:")) return true;
-  const octets = address.split(".").map(Number);
-  return octets.length === 4 && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127;
+  if (typeof address !== "string") return false;
+  if (isIP(address) === 4) {
+    const octets = address.split(".").map(Number);
+    return octets.length === 4 && octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
+      && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127;
+  }
+  const bytes = ipv6Bytes(address);
+  return bytes !== null && bytes[0] === 0xfd && bytes[1] === 0x7a && bytes[2] === 0x11
+    && bytes[3] === 0x5c && bytes[4] === 0xa1 && bytes[5] === 0xe0;
 }
 
 function selectTailscaleAddress(interfaces) {

@@ -11,6 +11,10 @@ describe("gateway configuration", () => {
     expect(isTailscaleAddress("100.128.0.1")).toBe(false);
     expect(isTailscaleAddress("192.168.1.2")).toBe(false);
     expect(isTailscaleAddress("fd7a:115c:a1e0::1")).toBe(true);
+    for (const malformed of [
+      "100.64.0.999", "100.64.0.1.example", "100.63.255.255", "100.128.0.1", "100.64.0.1%en0",
+      "fd7a:115c:a1e0:garbage::1", "fd7a:115c:a1e1::1", "fd7a:115c:a1e0::1%utun0",
+    ]) expect(isTailscaleAddress(malformed)).toBe(false);
   });
 
   it("resolves tailscale deterministically and keeps explicit loopback binding", () => {

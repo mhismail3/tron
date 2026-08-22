@@ -82,12 +82,16 @@ enum DebugGatewayObserver {
         case .failure: return .unavailable
         }
 
+        let normalizedExpectedHost = lifecycle.expectedHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalizedExpectedHost == "tailscale" || normalizedExpectedHost == "127.0.0.1" else {
+            return .unavailable
+        }
         let transportHost: String
-        if lifecycle.expectedHost.lowercased() == "tailscale" {
-            guard let resolved = await resolveTailscale(), !resolved.isEmpty else { return .unavailable }
+        if normalizedExpectedHost == "tailscale" {
+            guard let resolved = validatedTailscaleHost(await resolveTailscale()) else { return .unavailable }
             transportHost = resolved
         } else {
-            transportHost = lifecycle.expectedHost
+            transportHost = "127.0.0.1"
         }
         guard !transportHost.isEmpty else { return .unavailable }
 
@@ -163,19 +167,22 @@ enum DebugGatewayObserver {
               StableGatewayObserver.processCommand(
                 processCommand,
                 owns: selected.root,
-                port: TronGatewayProfile.debug.port
+                expectedHost: lifecycle.expectedHost,
+                profile: TronGatewayProfile.debug
               ) else {
             return false
         }
         return true
     }
 
+    static func validatedTailscaleHost(_ host: String?) -> String? {
+        guard let host else { return nil }
+        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        return TailscaleProbe.isTailscaleAddress(normalized) ? normalized : nil
+    }
+
     static func isPairingHost(_ host: String) -> Bool {
-        let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return !normalized.isEmpty
-            && normalized != "127.0.0.1"
-            && normalized != "localhost"
-            && normalized != "::1"
+        validatedTailscaleHost(host) != nil
     }
 
     private static func lifecycle(home: URL, fileManager: FileManager) -> Lifecycle? {

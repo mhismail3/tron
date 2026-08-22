@@ -98,7 +98,8 @@ enum StableGatewayObserver {
               processCommand(
                 runtimeInfo.processCommand,
                 owns: payload.root,
-                port: profile.port
+                expectedHost: "tailscale",
+                profile: profile
               ),
               authenticatedIdentity(info, matches: payload.manifest, channel: profile.channel) else {
             return false
@@ -135,21 +136,30 @@ enum StableGatewayObserver {
             && info.buildFingerprint == manifest.payloadFingerprint
     }
 
-    static func processCommand(_ command: String?, owns root: URL, port: Int) -> Bool {
+    static func processCommand(
+        _ command: String?,
+        owns root: URL,
+        expectedHost: String,
+        profile: TronGatewayProfile
+    ) -> Bool {
         guard let command else { return false }
         let fields = command.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         let payloadRoot = root.standardizedFileURL.path
-        // launchd's exact six arguments are the ownership contract. In
+        let normalizedHost = expectedHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // launchd's exact arguments are the ownership contract. In
         // particular, do not accept a valid entrypoint from another payload
-        // or a process carrying an unrelated port/flag suffix.
+        // or a process carrying an unrelated port/flag suffix. Stable is
+        // always Tailscale-bound; Debug may explicitly use loopback.
+        guard (profile == TronGatewayProfile.stable && normalizedHost == "tailscale")
+            || (profile == TronGatewayProfile.debug && (normalizedHost == "tailscale" || normalizedHost == "127.0.0.1")) else { return false }
         guard fields == [
             "\(payloadRoot)/runtime/node-arm64",
             "\(payloadRoot)/app/dist/index.js",
-            "--host", "tailscale", "--port", String(port)
+            "--host", normalizedHost, "--port", String(profile.port)
         ] || fields == [
             "\(payloadRoot)/runtime/node-x64",
             "\(payloadRoot)/app/dist/index.js",
-            "--host", "tailscale", "--port", String(port)
+            "--host", normalizedHost, "--port", String(profile.port)
         ] else { return false }
         return true
     }

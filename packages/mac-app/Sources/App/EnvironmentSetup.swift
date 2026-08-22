@@ -134,13 +134,21 @@ struct EnvironmentSetup: Sendable {
         )
     }
 
-    /// Resolves the Gateway's presentation host from the live Tailscale
-    /// source, falling back only to the bounded disposable cache.
+    /// Resolves the Gateway's presentation and transport host from live
+    /// Tailscale state, falling back only to the bounded disposable cache.
+    /// There is deliberately no loopback fallback for Stable.
     func resolvedTailscaleHost() async -> String? {
-        let live = await probeTailscale().displayIP
-        for candidate in [live, readTailscaleIPFromSettings()] {
+        await Self.resolveTailscaleHost(probe: probeTailscale, cache: readTailscaleIPFromSettings)
+    }
+
+    private static func resolveTailscaleHost(
+        probe: @escaping @Sendable () async -> TailscaleStatus,
+        cache: @escaping @Sendable () -> String?
+    ) async -> String? {
+        let live = await probe().displayIP
+        for candidate in [live, cache()] {
             let value = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !value.isEmpty { return value }
+            if TailscaleProbe.isTailscaleAddress(value) { return value }
         }
         return nil
     }
@@ -156,6 +164,12 @@ struct EnvironmentSetup: Sendable {
         let cache = TronPaths.networkCachePath(profile: profile)
         let marker = TronPaths.onboardedMarkerPath(profile: profile)
         let plist = TronPaths.launchAgentPlistPath(profile: profile)
+        let resolveHost: @Sendable () async -> String? = {
+            await Self.resolveTailscaleHost(
+                probe: { await TailscaleProbe.probe() },
+                cache: { GatewayNetworkCacheReader.tailscaleIP(at: cache) }
+            )
+        }
         let ownership: @Sendable () async -> Bool = {
             guard profile == .stable,
                   ExistingInstallDetector.serviceStatus(label: profile.launchAgentLabel) == .enabled else { return false }
@@ -220,8 +234,8 @@ struct EnvironmentSetup: Sendable {
             },
             validateGatewayPayload: { ExistingInstallDetector.validateGatewayPayload() },
             pingServer: { token in
-                let tailscale = await TailscaleProbe.probe()
-                let host = tailscale.displayIP ?? GatewayNetworkCacheReader.tailscaleIP(at: cache) ?? "127.0.0.1"
+                let host = await resolveHost()
+                guard let host else { return .unreachable }
                 do {
                     return try await ServerPing.ping(host: host, port: profile.port, token: token)
                 } catch is CancellationError {
@@ -231,8 +245,8 @@ struct EnvironmentSetup: Sendable {
                 }
             },
             restartGateway: {
-                let tailscale = await TailscaleProbe.probe()
-                let host = tailscale.displayIP ?? GatewayNetworkCacheReader.tailscaleIP(at: cache) ?? "127.0.0.1"
+                let host = await resolveHost()
+                guard let host else { throw GatewayRestartClient.Failure.transport }
                 return try await GatewayRestartClient.restart(
                     host: host, port: profile.port, token: BearerTokenReader.read(at: bearer)
                 )

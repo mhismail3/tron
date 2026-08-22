@@ -125,6 +125,7 @@ enum TailscaleProbe {
     }
 
     static func isTailscaleAddress(_ candidate: String) -> Bool {
+        guard !candidate.contains("%") else { return false }
         if isIPv4(candidate) {
             let octets = ipv4Octets(candidate)
             return octets[0] == 100 && (64...127).contains(octets[1])

@@ -135,6 +135,13 @@ struct StableGatewayObserverTests {
         #expect(transitioned == nil)
     }
 
+    @Test("rejects wrong host even when payload and process otherwise match")
+    func rejectsHostMismatch() {
+        var wrongHost = runtime
+        wrongHost.processCommand = "\(root.path)/runtime/node-arm64 \(root.path)/app/dist/index.js --host 127.0.0.1 --port 9847"
+        #expect(!validates(runtime: wrongHost))
+    }
+
     @Test("rejects wrong listener PID, wrong port, and extra responder")
     func rejectsListenerAndPortMismatch() {
         #expect(!validates(listenerPIDs: [82]))

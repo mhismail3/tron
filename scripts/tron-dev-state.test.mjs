@@ -109,6 +109,13 @@ test("Debug lifecycle fails closed when a recorded supervisor is orphaned", () =
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("Tailscale selection rejects malformed lookalikes and zones", () => {
+  for (const address of [
+    "100.64.0.999", "100.64.0.1.example", "100.63.255.255", "100.128.0.1", "100.64.0.1%en0",
+    "fd7a:115c:a1e0:garbage::1", "fd7a:115c:a1e1::1", "fd7a:115c:a1e0::1%utun0",
+  ]) assert.equal(resolveFixture({ en0: [{ address, family: address.includes(":" ) ? 6 : 4, internal: false }] }), "", address);
+});
+
 test("Debug health host orders IPv6 addresses then interface names", () => {
   assert.equal(resolveFixture({ z: [{ address: "fd7a:115c:a1e0::b", family: 6, internal: false }], a: [{ address: "fd7a:115c:a1e0::a", family: "IPv6", internal: false }] }), "fd7a:115c:a1e0::a");
   assert.equal(resolveFixture({ z: [{ address: "fd7a:115c:a1e0::a", family: 6, internal: false }], a: [{ address: "fd7a:115c:a1e0::a", family: 6, internal: false }] }), "fd7a:115c:a1e0::a");
@@ -133,6 +140,24 @@ test("Debug child termination always revalidates exact PID identity", () => {
   assert.doesNotMatch(source, /kill(?: -[A-Z0-9]+)? "\x24child(?:_pid)?"/u);
   assert.match(source, /for _ in \$\(seq 1 80\)/);
   assert.match(source, /sleep 0\.05/);
+});
+
+test("Debug lifecycle uses one exact pinned Node and sibling npm for every command", () => {
+  const source = readFileSync(new URL("./tron-dev", import.meta.url), "utf8");
+  const bundle = readFileSync(new URL("../packages/mac-app/scripts/bundle-gateway.sh", import.meta.url), "utf8");
+  assert.match(source, /NODE_VERSION_FILE=.*\.node-version/u);
+  assert.match(source, /NODE_VERSION_LINES=.*awk/u);
+  assert.match(source, /relative NVM_DIR is not allowed/u);
+  assert.match(source, /versions\/node\/v\$\{NODE_VERSION\}\/bin\/node/u);
+  assert.match(source, /NPM_BIN=.*dirname.*NODE_BIN.*\/npm/u);
+  assert.match(source, /"\$NPM_BIN" run build/u);
+  assert.match(source, /\$NODE_BIN.*STATE_HELPER/u);
+  assert.match(source, /\$NODE_BIN.*DEPLOY/u);
+  assert.doesNotMatch(source, /(^|\s)node "\$STATE_HELPER/u);
+  assert.doesNotMatch(source, /(^|\s)npm run build/u);
+  assert.match(bundle, /actual=.*\$candidate.*--version/u);
+  assert.match(bundle, /NPM_BIN=.*dirname.*NODE_BIN.*\/npm/u);
+  assert.doesNotMatch(bundle, /resolve_tool\s*\(/u);
 });
 
 test("Debug mutator command lock rejects a concurrent owner", () => {

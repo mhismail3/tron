@@ -16,14 +16,15 @@ packages/mac-app/scripts/ensure-gateway-bundle.sh
 packages/mac-app/scripts/bundle-gateway.sh
 ```
 
-Staging resolves `node` and `npm` independently before installing anything. This
-works with Xcode's sanitized `PATH`: set `TRON_NODE_BIN` and/or `TRON_NPM_BIN`
-to absolute executable paths to override resolution. Without overrides, the
-script checks `PATH`, then the bounded nvm tree under `$HOME` (or `NVM_DIR`),
-then `/opt/homebrew/bin` and `/usr/local/bin`. It fails with the override and
-installation guidance if either tool is unavailable. These variables affect
-staging only; the completed app uses its embedded Node runtimes and does not
-consult this toolchain.
+Staging resolves the exact Node version in the repository's `.node-version`
+before installing anything, then derives `npm` from that Node's sibling `bin`
+directory. A wrong ambient `PATH` Node is skipped; resolution checks the exact
+`$NVM_DIR/versions/node/v<version>/bin/node` directory and Homebrew candidates
+only after proving their version. `TRON_NODE_BIN` may explicitly name an
+absolute executable, but it must print the pinned version; there is no ambient
+npm override. Failure happens before build or payload mutation. These variables
+affect staging only; the completed app uses its embedded Node runtimes and does
+not consult this toolchain.
 
 The script:
 
@@ -190,7 +191,10 @@ scripts/tron dev handoff     # exact tested Debug artifact -> inactive Stable ca
 Fresh starts default to loopback; pass `--tailscale` when iOS must connect.
 Status, restart, handoff, and stop without a host flag inherit a live
 supervisor's recorded host. A conflicting explicit flag is rejected; stop the
-supervisor before changing exposure. Mutating commands use a short-lived atomic
+supervisor before changing exposure. `scripts/tron dev` resolves the pinned
+repository Node once and uses its absolute Node and sibling npm for every
+helper, build, and deployment command; it fails before touching `~/.tron-dev`
+when that toolchain is unavailable. Mutating commands use a short-lived atomic
 command lock, released before the supervisor continues running, so concurrent
 start/restart/stop/handoff commands fail closed. If the supervisor is stale but
 the exact recorded child PID/start identity is still live, start first terminates

@@ -11,6 +11,7 @@ import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from "node
 import { spawn } from "node:child_process";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { isIP } from "node:net";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   access,
@@ -61,10 +62,36 @@ const REQUIREMENTS = [
   ["runtime/node-x64", 1_048_576, false],
 ];
 
+function ipv6Bytes(address) {
+  if (address.includes("%") || isIP(address) !== 6) return null;
+  const halves = address.toLowerCase().split("::");
+  if (halves.length > 2) return null;
+  const parse = (part) => part === "" ? [] : part.split(":").flatMap((piece, index, pieces) => {
+    if (piece.includes(".")) {
+      if (index !== pieces.length - 1) return [];
+      const octets = piece.split(".").map(Number);
+      return octets.length === 4 && octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
+        ? [(octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]] : [];
+    }
+    return /^[0-9a-f]{1,4}$/u.test(piece) ? [Number.parseInt(piece, 16)] : [];
+  });
+  const left = parse(halves[0]);
+  const right = halves.length === 2 ? parse(halves[1]) : [];
+  if (left.length + right.length > 8 || (halves.length === 1 && left.length !== 8)) return null;
+  const words = halves.length === 2 ? [...left, ...Array(8 - left.length - right.length).fill(0), ...right] : left;
+  return words.flatMap((word) => [word >>> 8, word & 0xff]);
+}
+
 export function isTailscaleAddress(address) {
-  if (address.toLowerCase().startsWith("fd7a:115c:a1e0:")) return true;
-  const octets = address.split(".").map(Number);
-  return octets.length === 4 && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127;
+  if (typeof address !== "string") return false;
+  if (isIP(address) === 4) {
+    const octets = address.split(".").map(Number);
+    return octets.length === 4 && octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
+      && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127;
+  }
+  const bytes = ipv6Bytes(address);
+  return bytes !== null && bytes[0] === 0xfd && bytes[1] === 0x7a && bytes[2] === 0x11
+    && bytes[3] === 0x5c && bytes[4] === 0xa1 && bytes[5] === 0xe0;
 }
 
 /** Resolve the documented bind name identically for health and WebSocket traffic. */

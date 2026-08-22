@@ -21,7 +21,8 @@ HELPER_DIR="$LIBRARY_DIR/LoginItems/Tron Agent.app/Contents"
 NODE_VERSION_FILE="$REPO_ROOT/.node-version"
 [[ -f "$NODE_VERSION_FILE" ]] || { echo "missing canonical Node version file: $NODE_VERSION_FILE" >&2; exit 3; }
 NODE_VERSION="$(<"$NODE_VERSION_FILE")"
-[[ "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+NODE_VERSION_LINES="$(awk 'END { print NR }' "$NODE_VERSION_FILE")"
+[[ "$NODE_VERSION_LINES" == 1 && "$NODE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
     echo "invalid canonical Node version in $NODE_VERSION_FILE" >&2
     exit 3
 }
@@ -29,6 +30,10 @@ NODE_VERSION="$(<"$NODE_VERSION_FILE")"
 # these hashes only authorize the exact runtime artifacts staged below.
 NODE_ARM64_SHA256="913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
 NODE_X64_SHA256="bf0e0ff20d4e5a16436d1ec372e47161e52be8e487db8070ae3f06b01efbba0c"
+if [[ -n "${NVM_DIR:-}" && "$NVM_DIR" != /* ]]; then
+    echo "relative NVM_DIR is not allowed" >&2
+    exit 127
+fi
 skip_install=0
 skip_download=0
 clean=0
@@ -67,55 +72,50 @@ for path in "${required[@]}"; do
     [[ -f "$path" ]] || { echo "missing required source: $path" >&2; exit 3; }
 done
 
-# Xcode and LaunchAgents may provide a sanitized PATH. Resolve the development
-# toolchain once, before any install/build work, and use the same paths for all
-# subsequent invocations. The fallback is intentionally bounded: only the
-# user's standard nvm directory and the two conventional Homebrew prefixes are
-# considered.
-resolve_tool() {
-    local tool="$1" override_name="$2" override="${!2:-}" candidate nvm_root version_dir
-    if [[ -n "$override" ]]; then
-        if [[ "$override" != /* || ! -x "$override" ]]; then
-            echo "$override_name must be an absolute path to an executable (got: $override)" >&2
-            exit 127
-        fi
-        printf '%s\n' "$override"
-        return
-    fi
-
-    candidate="$(command -v "$tool" 2>/dev/null || true)"
-    if [[ "$candidate" == /* && -x "$candidate" ]]; then
+# Xcode and LaunchAgents may provide a sanitized PATH. Resolve the exact
+# canonical Node once, before any install/build work, and derive npm from that
+# same directory. A wrong ambient Node is skipped in favor of the exact nvm
+# directory; Homebrew is considered only after its version is proved.
+node_matches_pin() {
+    local candidate="$1" actual
+    [[ -x "$candidate" ]] || return 1
+    actual="$("$candidate" --version 2>/dev/null || true)"
+    [[ "$actual" == "v${NODE_VERSION}" ]]
+}
+resolve_pinned_node() {
+    local candidate nvm_node
+    if [[ -n "${TRON_NODE_BIN:-}" ]]; then
+        candidate="$TRON_NODE_BIN"
+        [[ "$candidate" == /* ]] || { echo "TRON_NODE_BIN must be absolute" >&2; exit 127; }
+        node_matches_pin "$candidate" || { echo "TRON_NODE_BIN is not Node v${NODE_VERSION}" >&2; exit 127; }
         printf '%s\n' "$candidate"
         return
     fi
-
-    nvm_root="${NVM_DIR:-${HOME:-}/.nvm}/versions/node"
-    if [[ -d "$nvm_root" ]]; then
-        # Sorting makes selection stable when multiple nvm versions are present.
-        while IFS= read -r version_dir; do
-            candidate="$version_dir/bin/$tool"
-            if [[ -x "$candidate" ]]; then
-                printf '%s\n' "$candidate"
-                return
-            fi
-        done < <(find "$nvm_root" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | LC_ALL=C sort -r)
+    candidate="$(command -v node 2>/dev/null || true)"
+    if [[ "$candidate" == /* ]] && node_matches_pin "$candidate"; then
+        printf '%s\n' "$candidate"
+        return
     fi
-
-    for candidate in "/opt/homebrew/bin/$tool" "/usr/local/bin/$tool"; do
-        if [[ -x "$candidate" ]]; then
+    nvm_node="${NVM_DIR:-${HOME:-}/.nvm}/versions/node/v${NODE_VERSION}/bin/node"
+    if node_matches_pin "$nvm_node"; then
+        printf '%s\n' "$nvm_node"
+        return
+    fi
+    for candidate in "/opt/homebrew/bin/node" "/usr/local/bin/node"; do
+        if node_matches_pin "$candidate"; then
             printf '%s\n' "$candidate"
             return
         fi
     done
-
-    echo "unable to find executable $tool; set $override_name to an absolute path, put $tool on PATH, or install it under \$HOME/.nvm or Homebrew" >&2
+    echo "unable to find exact Node v${NODE_VERSION}; checked PATH, the pinned nvm directory, and Homebrew" >&2
     exit 127
 }
 
-NODE_BIN="$(resolve_tool node TRON_NODE_BIN)"
-NPM_BIN="$(resolve_tool npm TRON_NPM_BIN)"
-# npm's launcher commonly uses /usr/bin/env node; make the resolved Node
-# directory available even when Xcode supplied no useful PATH.
+NODE_BIN="$(resolve_pinned_node)"
+NPM_BIN="$(dirname "$NODE_BIN")/npm"
+[[ "$NODE_BIN" == /* && "$NPM_BIN" == /* && -x "$NPM_BIN" ]] || { echo "missing npm sibling of pinned Node: $NPM_BIN" >&2; exit 127; }
+# npm's launcher commonly uses /usr/bin/env node; make only the resolved Node
+# directory first on PATH so all subprocesses use this exact toolchain.
 export PATH="$(dirname "$NODE_BIN")${PATH:+:$PATH}"
 
 if ((!skip_install)); then

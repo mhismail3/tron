@@ -10,6 +10,7 @@ import {
   rollbackSelection,
   rollbackSelectionAndClearAttempt,
   resolveDeploymentHost,
+  isTailscaleAddress,
   protocolHandshakeCompatible,
   validateLocalCredentialDocument,
   loadRollbackTarget,
@@ -152,6 +153,10 @@ test("tailscale host selection and restart handshake are bounded and determinist
   assert.equal(resolveDeploymentHost("tailscale", interfaces), "100.90.0.3");
   assert.equal(resolveDeploymentHost("127.0.0.1", interfaces), "127.0.0.1");
   assert.throws(() => resolveDeploymentHost("tailscale", {}), /Tailscale is not connected/);
+  for (const malformed of [
+    "100.64.0.999", "100.64.0.1.example", "100.63.255.255", "100.128.0.1", "100.64.0.1%en0",
+    "fd7a:115c:a1e0:garbage::1", "fd7a:115c:a1e1::1", "fd7a:115c:a1e0::1%utun0",
+  ]) assert.equal(isTailscaleAddress(malformed), false, malformed);
   assert.equal(protocolHandshakeCompatible({ type: "hello", protocolVersion: 3, minProtocolVersion: 3 }), true);
   assert.equal(protocolHandshakeCompatible({ type: "hello", protocolVersion: 2, minProtocolVersion: 2 }), false);
   assert.equal(protocolHandshakeCompatible({ type: "hello", protocolVersion: 3 }), false);
