@@ -2303,9 +2303,7 @@ enum ChatTranscriptPresentation {
             .compactMap { lineIndex, line in
                 let words = line.split(whereSeparator: \.isWhitespace)
                 guard !words.isEmpty else { return nil }
-                var text = words.joined(separator: " ")
-                while text.last == "." || text.last == "…" { text.removeLast() }
-                let presentation = text.isEmpty ? "…" : text + "…"
+                let presentation = words.joined(separator: " ")
                 return ChatThinkingSegment(id: "thinking-\(part.ordinal):line:\(lineIndex)", text: presentation)
             }
     }

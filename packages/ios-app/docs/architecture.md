@@ -1076,8 +1076,8 @@ scrolling; the oldest visible line fades at the top to signal earlier content. T
 trace sheet. The sheet reads the same live presentation source, so an
 active trace updates in place; it uses the shared Tron sheet title, top blur, typography, confirmation
 action, detents, and hidden drag indicator. Short traces remain their natural one-line height. Adjacent
-thinking parts and their nonempty lines form the run, each presentation segment ends in an
-ellipsis, and newly appended words fade in unless Reduce Motion is enabled. Tool chips and system
+thinking parts and their nonempty lines form the run, whitespace is normalized without
+adding or replacing terminal punctuation, and newly appended words fade in unless Reduce Motion is enabled. Tool chips and system
 events share compact capsule geometry while preserving their role alignment and interaction semantics.
 Compaction and branch-summary events use content-sized transcript pills whose sheets
 contain the complete canonical summary;

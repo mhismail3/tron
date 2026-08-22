@@ -243,6 +243,15 @@ struct ChatCompactPillTests {
         #expect(!first.title.contains("Extension activity"))
     }
 
+    @Test("tool chip press feedback shrinks smoothly without spatial Reduce Motion")
+    func toolChipPressPolicy() {
+        #expect(ChatToolChipPressPolicy.scale(isPressed: false, reduceMotion: false) == 1)
+        #expect(ChatToolChipPressPolicy.scale(isPressed: true, reduceMotion: false) < 1)
+        #expect(ChatToolChipPressPolicy.scale(isPressed: true, reduceMotion: true) == 1)
+        #expect(ChatToolChipPressPolicy.opacity(isPressed: true) < 1)
+        #expect(ChatToolChipPressPolicy.opacity(isPressed: false) == 1)
+    }
+
     @Test("tool chip transitions admit only the latest target token")
     func toolChipLatestTarget() {
         var transition = ChatToolChipTransitionState()

@@ -102,6 +102,40 @@ enum ChatCompactPillDetailStyle {
     case summary
 }
 
+enum ChatToolChipPressPolicy {
+    static let pressedScale: CGFloat = 0.975
+    static let pressedOpacity = 0.90
+
+    static func scale(isPressed: Bool, reduceMotion: Bool) -> CGFloat {
+        reduceMotion || !isPressed ? 1 : pressedScale
+    }
+
+    static func opacity(isPressed: Bool) -> Double {
+        isPressed ? pressedOpacity : 1
+    }
+}
+
+struct ChatToolChipPressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(ChatToolChipPressPolicy.scale(
+                isPressed: configuration.isPressed,
+                reduceMotion: reduceMotion
+            ))
+            .opacity(ChatToolChipPressPolicy.opacity(isPressed: configuration.isPressed))
+            .animation(
+                reduceMotion
+                    ? .linear(duration: 0.08)
+                    : configuration.isPressed
+                        ? .smooth(duration: 0.14)
+                        : .spring(duration: 0.24, bounce: 0.16),
+                value: configuration.isPressed
+            )
+    }
+}
+
 /// A shallow animation key: transitions never compare raw request/result JSON,
 /// output bodies, or summary payloads on the render path.
 struct ChatCompactPillVisualState: Hashable, Sendable {

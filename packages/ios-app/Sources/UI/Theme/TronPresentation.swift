@@ -1214,6 +1214,55 @@ extension TronValueRow where Trailing == EmptyView {
     }
 }
 
+enum TronToggleMotionPolicy {
+    static let controlWidth: CGFloat = 50
+    static let controlHeight: CGFloat = 30
+    static let stretchedThumbScale: CGFloat = 1.16
+
+    static func thumbScale(isStretched: Bool, reduceMotion: Bool) -> CGFloat {
+        reduceMotion || !isStretched ? 1 : stretchedThumbScale
+    }
+}
+
+private struct TronToggleControl: View {
+    let isOn: Bool
+    let accent: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack(alignment: isOn ? .trailing : .leading) {
+            Capsule().fill(accent.opacity(isOn ? 0.28 : 0.08))
+            Circle()
+                .fill(isOn ? accent : Color.tronTextMuted)
+                .padding(4)
+                .phaseAnimator([false, true, false], trigger: isOn) { thumb, isStretched in
+                    thumb.scaleEffect(
+                        x: TronToggleMotionPolicy.thumbScale(
+                            isStretched: isStretched,
+                            reduceMotion: reduceMotion
+                        ),
+                        y: 1
+                    )
+                } animation: { isStretched in
+                    if reduceMotion {
+                        .linear(duration: 0.01)
+                    } else if isStretched {
+                        .smooth(duration: 0.09)
+                    } else {
+                        .spring(duration: 0.16, bounce: 0.18)
+                    }
+                }
+        }
+        .frame(
+            width: TronToggleMotionPolicy.controlWidth,
+            height: TronToggleMotionPolicy.controlHeight
+        )
+        .glassEffect(.regular.tint(accent.opacity(isOn ? 0.14 : 0.05)), in: Capsule())
+        .animation(reduceMotion ? .linear(duration: 0.12) : .snappy(duration: 0.18), value: isOn)
+        .accessibilityHidden(true)
+    }
+}
+
 struct TronToggleRow: View {
     let icon: String
     let title: String
@@ -1238,21 +1287,14 @@ struct TronToggleRow: View {
     var body: some View {
         Button { isOn.toggle() } label: {
             TronValueRow(icon: icon, title: title, detail: detail, accent: accent) {
-                ZStack(alignment: isOn ? .trailing : .leading) {
-                    Capsule().fill(accent.opacity(isOn ? 0.28 : 0.08))
-                    Circle()
-                        .fill(isOn ? accent : Color.tronTextMuted)
-                        .padding(4)
-                }
-                .frame(width: 50, height: 30)
-                .glassEffect(.regular.tint(accent.opacity(isOn ? 0.14 : 0.05)), in: Capsule())
-                .animation(.snappy(duration: 0.18), value: isOn)
-                .accessibilityHidden(true)
+                TronToggleControl(isOn: isOn, accent: accent)
             }
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityValue(isOn ? "On" : "Off")
+        .accessibilityRepresentation {
+            Toggle(isOn: $isOn) { Text(title) }
+                .accessibilityHint(detail ?? "")
+        }
     }
 }
 

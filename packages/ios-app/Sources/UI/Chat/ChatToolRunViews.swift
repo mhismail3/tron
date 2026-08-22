@@ -74,7 +74,7 @@ struct ToolCard: View {
                 detailPresentation = ToolDetailRoute(toolID: detailTool.id)
             }
         } label: {
-            ChatCompactPillSurface(tone: tone, material: .glass, interactive: true) {
+            ChatCompactPillSurface(tone: tone, material: .glass) {
                 ChatCompactPillLabel(
                     icon: icon,
                     title: displayTitle,
@@ -90,7 +90,7 @@ struct ToolCard: View {
             }
             .accessibilityHidden(true)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ChatToolChipPressStyle())
         .contentShape(RoundedRectangle(
             cornerRadius: ChatCompactPillLayoutPolicy.cornerRadius(for: tone),
             style: .continuous
@@ -264,7 +264,7 @@ private struct ToolActivityChip: View {
     var body: some View {
         let visual = displayedState ?? targetState
         Button(action: action) {
-            ChatCompactPillSurface(tone: visual.tone, material: visual.material, interactive: true) {
+            ChatCompactPillSurface(tone: visual.tone, material: visual.material) {
                 ChatCompactPillLabel(
                     icon: visual.icon,
                     title: visual.title,
@@ -278,7 +278,7 @@ private struct ToolActivityChip: View {
                 .contentTransition(reduceMotion ? .opacity : .interpolate)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ChatToolChipPressStyle())
         .contentShape(RoundedRectangle(
             cornerRadius: ChatCompactPillLayoutPolicy.cornerRadius(for: visual.tone),
             style: .continuous
@@ -304,8 +304,8 @@ private struct ToolActivityChip: View {
         var transaction = Transaction(animation: animation)
         transaction.admitsChatToolChipAnimation = true
         // Admit the shallow state in the same MainActor turn as the latest
-        // projection. Native interactive glass remains the sole touch owner;
-        // no deferred task may interrupt its press/drag transaction.
+        // projection. Touch feedback is independently owned by the shared
+        // tool-chip press style, so no deferred task interrupts its gesture.
         withTransaction(transaction) { displayedState = target }
         recordSample(target, token: token)
     }

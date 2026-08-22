@@ -34,4 +34,13 @@ struct SettingsRowSemanticsTests {
             placement: placement
         ) == .informational)
     }
+
+    @Test("toggle stretch is local, bounded, and disabled by Reduce Motion")
+    func toggleMotionPolicy() {
+        #expect(TronToggleMotionPolicy.controlWidth == 50)
+        #expect(TronToggleMotionPolicy.controlHeight == 30)
+        #expect(TronToggleMotionPolicy.thumbScale(isStretched: false, reduceMotion: false) == 1)
+        #expect(TronToggleMotionPolicy.thumbScale(isStretched: true, reduceMotion: false) > 1)
+        #expect(TronToggleMotionPolicy.thumbScale(isStretched: true, reduceMotion: true) == 1)
+    }
 }

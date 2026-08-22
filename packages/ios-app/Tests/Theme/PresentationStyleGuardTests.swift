@@ -27,6 +27,37 @@ struct PresentationStyleGuardTests {
             .compactMap { url in String(data: (try? Data(contentsOf: url)) ?? Data(), encoding: .utf8).map { (url, $0) } }
     }
 
+    @Test("shared toggles and tool chips own accessible local motion")
+    func sharedToggleAndToolChipMotion() throws {
+        let presentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Theme/TronPresentation.swift"),
+            encoding: .utf8
+        )
+        let compactPill = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatCompactPill.swift"),
+            encoding: .utf8
+        )
+        let toolRuns = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatToolRunViews.swift"),
+            encoding: .utf8
+        )
+
+        #expect(presentation.contains("enum TronToggleMotionPolicy"))
+        #expect(presentation.contains("private struct TronToggleControl: View"))
+        #expect(presentation.contains("@Environment(\\.accessibilityReduceMotion) private var reduceMotion"))
+        #expect(presentation.contains(".phaseAnimator([false, true, false], trigger: isOn)"))
+        #expect(presentation.contains("width: TronToggleMotionPolicy.controlWidth"))
+        #expect(presentation.contains("height: TronToggleMotionPolicy.controlHeight"))
+        #expect(presentation.contains("TronToggleControl(isOn: isOn, accent: accent)"))
+        #expect(presentation.contains(".accessibilityRepresentation"))
+        #expect(presentation.contains("Toggle(isOn: $isOn) { Text(title) }"))
+
+        #expect(compactPill.contains("struct ChatToolChipPressStyle: ButtonStyle"))
+        #expect(compactPill.contains("@Environment(\\.accessibilityReduceMotion) private var reduceMotion"))
+        #expect(toolRuns.occurrences(of: ".buttonStyle(ChatToolChipPressStyle())") == 2)
+        #expect(!toolRuns.contains("interactive: true"))
+    }
+
     @Test("Markdown rendering has one cold inline-attribution construction and no view parser")
     func markdownParserOwnership() throws {
         let renderer = try String(
@@ -658,6 +689,15 @@ struct PresentationStyleGuardTests {
         #expect(presentation.contains("enum TronSettingsSecondaryRole"))
         #expect(presentation.contains("enum TronSettingsRowSemantics"))
         #expect(presentation.contains("struct TronDynamicValue"))
+        #expect(presentation.contains("enum TronToggleMotionPolicy"))
+        #expect(presentation.contains("private struct TronToggleControl: View"))
+        #expect(presentation.contains("@Environment(\\.accessibilityReduceMotion) private var reduceMotion"))
+        #expect(presentation.contains(".phaseAnimator([false, true, false], trigger: isOn)"))
+        #expect(presentation.contains("width: TronToggleMotionPolicy.controlWidth"))
+        #expect(presentation.contains("height: TronToggleMotionPolicy.controlHeight"))
+        #expect(presentation.contains("TronToggleControl(isOn: isOn, accent: accent)"))
+        #expect(presentation.contains(".accessibilityRepresentation"))
+        #expect(presentation.contains("Toggle(isOn: $isOn) { Text(title) }"))
         #expect(resources.contains("pathEditor(value)"))
         #expect(resources.contains(".multilineTextAlignment(.leading)"))
         #expect(resources.contains("minHeight: value.acceptsMultipleLines ? 120 : 52"))
@@ -1848,11 +1888,11 @@ struct PresentationStyleGuardTests {
         let toolCard = (toolRuns.components(separatedBy: "struct ToolCard").dropFirst().first ?? "")
             .components(separatedBy: "struct ToolRunView").first ?? ""
         let toolCardLabel = (toolCard.components(separatedBy: "var body: some View").dropFirst().first ?? "")
-            .components(separatedBy: ".buttonStyle(.plain)").first ?? ""
+            .components(separatedBy: ".buttonStyle(ChatToolChipPressStyle())").first ?? ""
         let toolRunChip = (toolRuns.components(separatedBy: "private struct ToolActivityChip").dropFirst().first ?? "")
             .components(separatedBy: "private struct ToolRunDetailSheet").first ?? ""
         let toolRunLabel = (toolRunChip.components(separatedBy: "var body: some View").dropFirst().first ?? "")
-            .components(separatedBy: ".buttonStyle(.plain)").first ?? ""
+            .components(separatedBy: ".buttonStyle(ChatToolChipPressStyle())").first ?? ""
         let toolElapsed = (toolRuns.components(separatedBy: "private struct ToolElapsedText").dropFirst().first ?? "")
             .components(separatedBy: "private struct ToolRunElapsedText").first ?? ""
         let toolRunElapsed = (toolRuns.components(separatedBy: "private struct ToolRunElapsedText").dropFirst().first ?? "")
@@ -1899,7 +1939,11 @@ struct PresentationStyleGuardTests {
         #expect(toolRuns.contains("ChatToolChipTransitionState"))
         #expect(!toolRuns.contains("Task.sleep(for: .milliseconds(16))"))
         #expect(toolRunChip.contains(".contentShape(RoundedRectangle("))
-        #expect(toolRunChip.contains("interactive: true"))
+        #expect(toolRuns.occurrences(of: ".buttonStyle(ChatToolChipPressStyle())") == 2)
+        #expect(!toolCard.contains("interactive: true"))
+        #expect(!toolRunChip.contains("interactive: true"))
+        #expect(compactPill.contains("struct ChatToolChipPressStyle: ButtonStyle"))
+        #expect(compactPill.contains("@Environment(\\.accessibilityReduceMotion) private var reduceMotion"))
         #expect(toolRunChip.contains("withTransaction(transaction) { displayedState = target }"))
         #expect(toolElapsed.contains("TimelineView(.periodic(from: .now, by: 0.1)"))
         #expect(toolRunElapsed.contains("TimelineView(.periodic(from: .now, by: 0.1)"))

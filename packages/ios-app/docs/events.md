@@ -124,7 +124,7 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   extension provenance never substitutes **Extension activity**. Structural chip targets
   exclude duration and payload churn, coalesce for one display frame, and use a monotonic
   latest-target token for local interruptible animation while transcript and scroll
-  transactions remain stable. Multi-tool run chips show accumulated time as the sum of their
+  transactions remain stable. Both legacy and consolidated tool chips disable native interactive-glass press zoom and share one Reduce Motion-aware spring press owner; opacity remains the nonspatial pressed-state cue. Multi-tool run chips show accumulated time as the sum of their
   invocation durations. Detail summary and rows install atomically for one projection tag,
   and rows remain in reverse canonical invocation order rather than switching when optional
   timing metadata arrives. Known built-ins

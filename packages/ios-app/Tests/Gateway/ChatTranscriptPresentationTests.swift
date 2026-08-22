@@ -1548,10 +1548,10 @@ struct ChatTranscriptPresentationTests {
             "thinking-2:line:1",
         ])
         #expect(run.segments.map(\.text) == [
-            "Inspecting the transcript…",
-            "Checking spacing…",
+            "Inspecting the transcript",
+            "Checking spacing...",
             "Confirming the grouped lines…",
-            "…",
+            "...",
         ])
         guard case .content(let answer) = parts[1] else {
             Issue.record("Expected answer after thinking")
@@ -1581,7 +1581,7 @@ struct ChatTranscriptPresentationTests {
             return
         }
         #expect(trailingRun.segments.map(\.id) == ["thinking-2:line:0"])
-        #expect(trailingRun.segments.map(\.text) == ["Second…"])
+        #expect(trailingRun.segments.map(\.text) == ["Second"])
     }
 
     @Test("timeline preserves thinking around an intervening tool")
@@ -1611,12 +1611,12 @@ struct ChatTranscriptPresentationTests {
             Issue.record("Expected thinking slices around the tool run")
             return
         }
-        #expect(firstRun.segments.map(\.text) == ["First…"])
+        #expect(firstRun.segments.map(\.text) == ["First"])
         let detail = try #require(toolRun.tools.first.flatMap(candidate.toolPayloads.resolving))
         #expect(detail.content == "")
         #expect(detail.request == .object([:]))
         #expect(detail.fallbackContent == .object([:]))
-        #expect(lastRun.segments.map(\.text) == ["Second…"])
+        #expect(lastRun.segments.map(\.text) == ["Second"])
     }
 
     @Test("thinking barriers preserve exact order across multiple consolidated tool runs")
@@ -1650,7 +1650,7 @@ struct ChatTranscriptPresentationTests {
             return
         }
         #expect(firstRun.tools.map(\.id) == ["call-1", "call-2"])
-        #expect(betweenThinking.segments.map(\.text) == ["Between…"])
+        #expect(betweenThinking.segments.map(\.text) == ["Between"])
         #expect(secondRun.tools.map(\.id) == ["call-3"])
     }
 
