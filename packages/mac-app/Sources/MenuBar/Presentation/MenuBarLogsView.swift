@@ -71,7 +71,15 @@ struct MenuBarLogsView: View {
     @MainActor
     private func refresh() async {
         phase = .loading
-        let result = await MenuBarLogReader.fetchRecentLogs(token: setup.readBearerToken())
+        guard let host = await setup.resolvedTailscaleHost() else {
+            phase = .failed(MenuBarLogReadError.serverUnavailable.message)
+            return
+        }
+        let result = await MenuBarLogReader.fetchRecentLogs(
+            host: host,
+            port: setup.serverPort,
+            token: setup.readBearerToken()
+        )
         switch result {
         case .success(let logs):
             let trimmed = logs.trimmingCharacters(in: .whitespacesAndNewlines)

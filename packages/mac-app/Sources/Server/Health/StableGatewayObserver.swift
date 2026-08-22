@@ -10,9 +10,18 @@ import Foundation
 enum StableGatewayObserver {
     struct Admission: Equatable, Sendable {
         let processID: Int
+        /// Display-only diagnostic. It deliberately does not participate in
+        /// admission equality because elapsed time changes between otherwise
+        /// identical observations.
         let uptime: String?
         let payload: GatewayPayloadValidationResult
         let info: ServerPingInfo
+
+        static func == (lhs: Admission, rhs: Admission) -> Bool {
+            lhs.processID == rhs.processID
+                && lhs.payload == rhs.payload
+                && lhs.info == rhs.info
+        }
     }
 
     static func observe(
@@ -32,6 +41,21 @@ enum StableGatewayObserver {
             expectedHelperPath: TronPaths.serverHelperBinary(profile: .stable).path
         ), let pid = runtime.pid else { return nil }
         return Admission(processID: pid, uptime: runtime.uptime, payload: payload, info: info)
+    }
+
+    /// Re-pings and re-admits immediately before pairing data is read. A
+    /// changed process, payload, or authenticated identity invalidates the
+    /// presentation rather than allowing a stale QR code.
+    static func revalidatePairingAdmission(
+        pinned: Admission,
+        token: String?,
+        ping: @escaping @Sendable (String?) async -> ServerPingResult,
+        admit: @escaping @Sendable (ServerPingInfo) async -> Admission?
+    ) async -> Admission? {
+        guard case .success(let info) = await ping(token),
+              let current = await admit(info),
+              current == pinned else { return nil }
+        return current
     }
 
     static func activePayload(fileManager: FileManager = .default) -> GatewayPayloadValidationResult? {
@@ -114,17 +138,20 @@ enum StableGatewayObserver {
     static func processCommand(_ command: String?, owns root: URL, port: Int) -> Bool {
         guard let command else { return false }
         let fields = command.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        guard fields.count >= 6 else { return false }
         let payloadRoot = root.standardizedFileURL.path
-        guard fields[0] == "\(payloadRoot)/runtime/node-arm64"
-                || fields[0] == "\(payloadRoot)/runtime/node-x64",
-              fields[1] == "\(payloadRoot)/app/dist/index.js",
-              argument("--port", in: fields) == String(port) else { return false }
+        // launchd's exact six arguments are the ownership contract. In
+        // particular, do not accept a valid entrypoint from another payload
+        // or a process carrying an unrelated port/flag suffix.
+        guard fields == [
+            "\(payloadRoot)/runtime/node-arm64",
+            "\(payloadRoot)/app/dist/index.js",
+            "--host", "tailscale", "--port", String(port)
+        ] || fields == [
+            "\(payloadRoot)/runtime/node-x64",
+            "\(payloadRoot)/app/dist/index.js",
+            "--host", "tailscale", "--port", String(port)
+        ] else { return false }
         return true
     }
 
-    private static func argument(_ name: String, in fields: [String]) -> String? {
-        guard let index = fields.firstIndex(of: name), fields.indices.contains(index + 1) else { return nil }
-        return fields[index + 1]
-    }
 }

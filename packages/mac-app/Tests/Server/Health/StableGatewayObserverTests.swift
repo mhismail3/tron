@@ -66,6 +66,75 @@ struct StableGatewayObserverTests {
         #expect(!validates(info: wrongFingerprint))
     }
 
+    @Test("unchanged admission ignores elapsed uptime, but runtime identity transitions fail")
+    func admissionEqualityPinsRuntimeIdentity() {
+        let pinned = StableGatewayObserver.Admission(
+            processID: 81,
+            uptime: "00:10",
+            payload: payload,
+            info: info
+        )
+        let unchanged = StableGatewayObserver.Admission(
+            processID: 81,
+            uptime: "00:11",
+            payload: payload,
+            info: info
+        )
+        var transitionedInfo = info
+        transitionedInfo.runtimeEpoch = "new-runtime"
+        let transitioned = StableGatewayObserver.Admission(
+            processID: 81,
+            uptime: "00:11",
+            payload: payload,
+            info: transitionedInfo
+        )
+
+        #expect(pinned == unchanged)
+        #expect(pinned != transitioned)
+    }
+
+    @Test("final pairing admission re-ping accepts unchanged runtime and rejects transition")
+    func finalPairingAdmissionRevalidation() async {
+        let pinned = StableGatewayObserver.Admission(
+            processID: 81,
+            uptime: "00:10",
+            payload: payload,
+            info: info
+        )
+        let unchanged = await StableGatewayObserver.revalidatePairingAdmission(
+            pinned: pinned,
+            token: "token",
+            ping: { token in
+                #expect(token == "token")
+                return .success(self.info)
+            },
+            admit: { info in
+                StableGatewayObserver.Admission(
+                    processID: 81,
+                    uptime: "00:11",
+                    payload: self.payload,
+                    info: info
+                )
+            }
+        )
+        #expect(unchanged == pinned)
+
+        let transitioned = await StableGatewayObserver.revalidatePairingAdmission(
+            pinned: pinned,
+            token: "token",
+            ping: { _ in .success(self.info) },
+            admit: { info in
+                StableGatewayObserver.Admission(
+                    processID: 82,
+                    uptime: "00:11",
+                    payload: self.payload,
+                    info: info
+                )
+            }
+        )
+        #expect(transitioned == nil)
+    }
+
     @Test("rejects wrong listener PID, wrong port, and extra responder")
     func rejectsListenerAndPortMismatch() {
         #expect(!validates(listenerPIDs: [82]))

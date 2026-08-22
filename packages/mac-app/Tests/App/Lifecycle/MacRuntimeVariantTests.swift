@@ -73,14 +73,17 @@ struct MacCommandLineModeTests {
     }
 }
 
-@Suite("TronMacRuntime")
-struct TronMacRuntimeTests {
-    @Test("only managed onboarded wrappers install a menu bar")
-    func menuBarOwnership() {
-        #expect(TronMacRuntime.menuBarMode(onboarded: false, canManage: true) == .wizard)
-        #expect(TronMacRuntime.menuBarMode(onboarded: true, canManage: true) == .menuBarOnly)
-        #expect(TronMacRuntime.menuBarMode(onboarded: false, canManage: false) == .companion)
-        #expect(TronMacRuntime.menuBarMode(onboarded: true, canManage: false) == .companion)
+@Suite("MacStartupMode")
+struct MacStartupModeTests {
+    @Test("one authority routes release, debug, command, and test hosts")
+    func startupMatrix() {
+        let release = MacRuntimeVariant.installedRelease
+        #expect(MacStartupMode.resolve(variant: release, onboarded: false, command: .normal, underTests: false) == .wizard)
+        #expect(MacStartupMode.resolve(variant: release, onboarded: true, command: .normal, underTests: false) == .onboarded)
+        #expect(MacStartupMode.resolve(variant: .xcodeDebug, onboarded: true, command: .normal, underTests: false) == .debugReadOnly)
+        #expect(MacStartupMode.resolve(variant: .misplacedRelease(actualPath: "/tmp/Tron.app"), onboarded: true, command: .normal, underTests: false) == .misplacedRelease)
+        #expect(MacStartupMode.resolve(variant: release, onboarded: true, command: .startServerAndQuit, underTests: false) == .command(.startServerAndQuit))
+        #expect(MacStartupMode.resolve(variant: release, onboarded: true, command: .normal, underTests: true) == .testHost)
     }
 
     @Test("test-host detection accepts Xcode test environment markers")

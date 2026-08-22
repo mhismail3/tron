@@ -64,8 +64,8 @@ enum DebugGatewayObserver {
             let status = await TailscaleProbe.probe()
             return status.displayIP
         },
-        ping: @escaping @Sendable (String, Int, String?) async -> ServerPingResult = {
-            await ServerPing.ping(host: $0, port: $1, token: $2)
+        ping: @escaping @Sendable (String, Int, String?) async throws -> ServerPingResult = {
+            try await ServerPing.ping(host: $0, port: $1, token: $2)
         }
     ) async -> Observation {
         guard let lifecycle = lifecycle(home: home, fileManager: fileManager),
@@ -91,7 +91,14 @@ enum DebugGatewayObserver {
         }
         guard !transportHost.isEmpty else { return .unavailable }
 
-        let pingResult = await ping(transportHost, lifecycle.expectedPort, token)
+        let pingResult: ServerPingResult
+        do {
+            pingResult = try await ping(transportHost, lifecycle.expectedPort, token)
+        } catch is CancellationError {
+            return .unavailable
+        } catch {
+            return .unavailable
+        }
         let info: ServerPingInfo
         switch pingResult {
         case .success(let value): info = value

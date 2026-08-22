@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 @testable import TronMac
@@ -117,6 +118,15 @@ struct BearerTokenReaderTests {
         let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
         try Data(#"{"version":2,"bearerToken":"abcdef1234567890abcdef1234567890","purpose":"local-wrapper-health","lastUpdated":"2026-04-27T00:00:00Z"}"#.utf8).write(to: path)
         try FileManager.default.setAttributes([.posixPermissions: 0o640], ofItemAtPath: path.path)
+        #expect(BearerTokenReader.read(at: path) == nil)
+    }
+
+    @Test("FIFO is rejected without blocking before type inspection")
+    func fifoIsRejectedWithoutBlocking() throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let path = tmp.appendingPathComponent("auth.json", isDirectory: false)
+        #expect(mkfifo(path.path, mode_t(0o600)) == 0)
         #expect(BearerTokenReader.read(at: path) == nil)
     }
 

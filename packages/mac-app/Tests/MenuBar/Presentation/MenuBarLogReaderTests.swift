@@ -49,6 +49,25 @@ struct MenuBarLogReaderTests {
         #expect(MenuBarLogReader.decodeFrame(data: data) == .malformed)
     }
 
+    @Test("log fetching has no production loopback default")
+    func logFetchingRequiresExplicitHost() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/MenuBar/Presentation/MenuBarLogReader.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        #expect(source.contains("host: String"))
+        #expect(!source.contains("127.0.0.1"))
+    }
+
+    @Test("explicit log host is used to build the Gateway socket URL")
+    func explicitHostBuildsSocketURL() {
+        let url = GatewaySocketURL.make(host: "100.64.0.9", port: 9847)
+        #expect(url?.host == "100.64.0.9")
+    }
+
     @Test("formats structured rows for display")
     func formatsStructuredRows() {
         let text = MenuBarLogReader.format([

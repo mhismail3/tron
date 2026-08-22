@@ -71,60 +71,54 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile)
         )
 
-        if let outcome = Self.preRegistrationOutcome(
-            for: status,
+        let plan = Self.registrationPlan(
+            status: status,
             currentVariant: currentVariant,
             runtimeInfo: runtime,
             runningParentBundleIdentifier: runningParent,
             canManageLaunchAgent: TronPaths.canManageLaunchAgent(profile: profile),
             profile: profile,
             expectedHelperPath: helperBinary.path,
-            shouldRefreshCurrentRegistration: shouldRefreshCurrentRegistration
-        ) {
-            return outcome
+            shouldRefreshCurrentRegistration: shouldRefreshCurrentRegistration,
+            shouldReplaceStaleRuntime: shouldReplaceStaleRuntime,
+            shouldTakeOverRuntime: shouldTakeOverRuntime
+        )
+        switch plan {
+        case .keep:
+            return .alreadyLoaded
+        case .refuse(let message):
+            return .launchdRefused(message: message)
+        default:
+            break
         }
-        if shouldReplaceStaleRuntime || shouldTakeOverRuntime || shouldRefreshCurrentRegistration {
-            let bootout = await Subprocess.run(
-                executable: URL(fileURLWithPath: "/bin/launchctl"),
-                arguments: ["bootout", "gui/\(currentUID())/\(label)"]
-            )
-            guard bootout.exitCode == 0 else {
-                return .launchdRefused(
-                    message: bootout.stderr.isEmpty
-                        ? "Tron Agent could not unload the stale LaunchAgent before re-registering it."
-                        : bootout.stderr
-                )
-            }
-        }
+
         let externalPortBound = await isPortBound(profile.port)
-        if Self.shouldRefuseExternalServer(
-            status: status,
-            runningParentBundleIdentifier: runningParent,
-            portBound: externalPortBound
-        ) {
+        if Self.shouldRefuseExternalServer(status: status, runningParentBundleIdentifier: runningParent, portBound: externalPortBound) {
             return .launchdRefused(message: "Another Tron is already running on port \(profile.port). Stop it before installing this Gateway profile.")
         }
-
-        if Self.shouldUnregisterBeforeRegister(
-            status: status,
-            runningParentBundleIdentifier: runningParent,
-            shouldReplaceStaleRuntime: shouldReplaceStaleRuntime,
-            shouldTakeOverRuntime: shouldTakeOverRuntime,
-            shouldRefreshCurrentRegistration: shouldRefreshCurrentRegistration
-        ) {
-            do {
-                try await service.unregister()
-            } catch {
-                return .launchdRefused(
-                    message: "Tron Agent is registered but launchd has no loaded job, and macOS refused to replace the registration: \(error.localizedDescription)"
+        for step in plan.steps {
+            switch step {
+            case .bootout:
+                let bootout = await Subprocess.run(
+                    executable: URL(fileURLWithPath: "/bin/launchctl"),
+                    arguments: ["bootout", "gui/\(currentUID())/\(label)"]
                 )
+                guard bootout.exitCode == 0 else {
+                    return .launchdRefused(message: bootout.stderr.isEmpty
+                        ? "Tron Agent could not unload the stale LaunchAgent before re-registering it."
+                        : bootout.stderr)
+                }
+            case .unregister:
+                do { try await service.unregister() } catch {
+                    return .launchdRefused(message: "Tron Agent registration could not be replaced: \(error.localizedDescription)")
+                }
+            case .register:
+                do { try service.register() } catch {
+                    return .launchdRefused(message: error.localizedDescription)
+                }
+            case .refresh:
+                break
             }
-        }
-
-        do {
-            try service.register()
-        } catch {
-            return .launchdRefused(message: error.localizedDescription)
         }
 
         switch service.status {
@@ -139,6 +133,70 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         @unknown default:
             return .unknown(message: "Tron Agent registration returned an unknown status.")
         }
+    }
+
+    static func registrationPlan(
+        status: ExistingInstallDetector.ServiceRegistrationStatus,
+        currentVariant: MacRuntimeVariant,
+        runtimeInfo: LaunchAgentRuntimeInfo?,
+        runningParentBundleIdentifier: String?,
+        canManageLaunchAgent: Bool,
+        profile: TronGatewayProfile = .stable,
+        expectedHelperPath: String,
+        shouldRefreshCurrentRegistration: Bool = false,
+        shouldReplaceStaleRuntime: Bool? = nil,
+        shouldTakeOverRuntime: Bool? = nil
+    ) -> LaunchAgentRegistrationPlan {
+        if status == .requiresApproval {
+            return .refuse(message: "Approve Tron Agent in Login Items to finish installation.")
+        }
+        let stale = shouldReplaceStaleRuntime ?? runtimeRequiresReplacement(
+            runtimeInfo: runtimeInfo, profile: profile, expectedHelperPath: expectedHelperPath
+        )
+        let takeover = shouldTakeOverRuntime ?? shouldBootoutForTakeover(
+            status: status, currentVariant: currentVariant,
+            runningParentBundleIdentifier: runningParentBundleIdentifier,
+            canManageLaunchAgent: canManageLaunchAgent
+        )
+        let parent = runtimeInfo?.parentBundleIdentifier ?? runningParentBundleIdentifier
+        guard canManageLaunchAgent else {
+            if stale || parent == nil {
+                return .refuse(message: "This Xcode Debug wrapper is a read-only companion. Use /Applications/Tron.app to manage Stable.")
+            }
+            return .keep
+        }
+        let registrationExists: Bool
+        switch status {
+        case .enabled, .unknown: registrationExists = true
+        case .requiresApproval, .notRegistered, .notFound: registrationExists = false
+        }
+        let needsUnregister = registrationExists && (parent == nil || stale || takeover || shouldRefreshCurrentRegistration)
+        var steps: [LaunchAgentRegistrationPlan.Step] = []
+        if stale || takeover || shouldRefreshCurrentRegistration { steps.append(.bootout) }
+        if needsUnregister { steps.append(.unregister) }
+        if stale { return .bootout(steps: steps + [.register]) }
+        if takeover { return .takeover(steps: steps + [.register]) }
+        if shouldRefreshCurrentRegistration { return .refresh(steps: steps + [.register]) }
+        guard let parent else { return .register(steps: steps + [.register]) }
+        if parent == currentVariant.expectedParentBundleIdentifier { return .keep }
+        if currentVariant.canTakeOverRegistration(ownedBy: parent) {
+            return .takeover(steps: [.bootout] + (registrationExists ? [.unregister] : []) + [.register])
+        }
+        return .refuse(message: "Tron Agent is currently managed by \(parent). Stop that build before installing this one.")
+    }
+
+    /// Executes the already-resolved plan without re-reading launchd state.
+    /// Keeping this tiny interpreter separate makes step ordering observable
+    /// in tests and prevents a refresh/takeover from silently skipping a
+    /// planned operation.
+    static func execute(
+        _ plan: LaunchAgentRegistrationPlan,
+        perform: @escaping @Sendable (LaunchAgentRegistrationPlan.Step) async -> LaunchAgentOutcome?
+    ) async -> LaunchAgentOutcome? {
+        for step in plan.steps {
+            if let outcome = await perform(step) { return outcome }
+        }
+        return nil
     }
 
     static func preRegistrationOutcome(
@@ -308,6 +366,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         expectedParentBundleIdentifier: String?,
         expectedHelperPath: String,
         expectedSupervisionMarker: String = TronPaths.gatewaySupervisionValue,
+        expectedPayloadRoot: URL? = nil,
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> Bool {
         guard let runtimeInfo,
@@ -319,6 +378,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
             runtimeInfo: runtimeInfo,
             profile: profile,
             expectedHelperPath: expectedHelperPath,
+            expectedPayloadRoot: expectedPayloadRoot,
             fileExists: fileExists
         )
     }
@@ -327,6 +387,7 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         runtimeInfo: LaunchAgentRuntimeInfo?,
         profile: TronGatewayProfile = .stable,
         expectedHelperPath: String,
+        expectedPayloadRoot: URL? = nil,
         fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> Bool {
         guard let runtimeInfo else { return false }
@@ -337,7 +398,8 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
         guard fileExists(expected), processCommandOwnsProfile(
             runtimeInfo.processCommand,
             profile: profile,
-            expectedHelperPath: expectedHelperPath
+            expectedHelperPath: expectedHelperPath,
+            expectedPayloadRoot: expectedPayloadRoot
         ) else { return true }
         if let executablePath = runtimeInfo.executablePath, !executablePath.isEmpty {
             let actual = URL(fileURLWithPath: executablePath).standardizedFileURL.path
@@ -355,16 +417,23 @@ struct LiveLaunchAgentManager: LaunchAgentManaging {
     static func processCommandOwnsProfile(
         _ command: String?,
         profile: TronGatewayProfile,
-        expectedHelperPath: String
+        expectedHelperPath: String,
+        expectedPayloadRoot: URL? = nil
     ) -> Bool {
         guard let command, !command.isEmpty else { return false }
         let fields = command.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        guard fields.count >= 2,
+        guard fields.count == 6,
               let runtimeRange = fields[0].range(of: "/runtime/node-", options: .backwards) else {
             return false
         }
         let payloadRoot = String(fields[0][..<runtimeRange.lowerBound])
-        guard fields[1] == "\(payloadRoot)/app/dist/index.js" else { return false }
+        if let expectedPayloadRoot,
+           payloadRoot != expectedPayloadRoot.standardizedFileURL.path { return false }
+        guard fields[0] == "\(payloadRoot)/runtime/node-arm64"
+                || fields[0] == "\(payloadRoot)/runtime/node-x64",
+              fields[1] == "\(payloadRoot)/app/dist/index.js",
+              fields[2] == "--host", fields[3] == "tailscale",
+              fields[4] == "--port", fields[5] == String(profile.port) else { return false }
 
         let helper = URL(fileURLWithPath: expectedHelperPath).standardizedFileURL.path
         guard let contentsRange = helper.range(of: "/Contents/Library/LoginItems/") else { return false }

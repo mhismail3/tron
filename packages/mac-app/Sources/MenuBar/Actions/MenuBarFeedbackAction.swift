@@ -5,14 +5,26 @@ import Foundation
 /// Log capture is best-effort and never routes through Mail.
 @MainActor
 enum MenuBarFeedbackAction {
-    static func present(snapshot: ServerStatusSnapshot, token: String?) async {
+    static func present(snapshot: ServerStatusSnapshot, setup: EnvironmentSetup, token: String?) async {
         let logs: String
-        switch await MenuBarLogReader.fetchRecentLogs(token: token) {
+        guard let host = await setup.resolvedTailscaleHost() else {
+            logs = "Log capture failed: \(MenuBarLogReadError.serverUnavailable.message)"
+            return await presentIssue(snapshot: snapshot, logs: logs)
+        }
+        switch await MenuBarLogReader.fetchRecentLogs(
+            host: host,
+            port: setup.serverPort,
+            token: token
+        ) {
         case .success(let value):
             logs = value
         case .failure(let error):
             logs = "Log capture failed: \(error.message)"
         }
+        await presentIssue(snapshot: snapshot, logs: logs)
+    }
+
+    private static func presentIssue(snapshot: ServerStatusSnapshot, logs: String) async {
 
         let composer = FeedbackIssueComposer(
             appVersion: bundleVersion(key: "TRONCanonicalVersion")

@@ -418,6 +418,32 @@ struct LiveLaunchAgentManagerTests {
         #expect(LiveLaunchAgentManager.preUnregistrationOutcome(for: .enabled) == nil)
         #expect(LiveLaunchAgentManager.preUnregistrationOutcome(for: .requiresApproval) == nil)
     }
+    @Test("resolved plans execute every step exactly once")
+    func executionParity() async {
+        let plans: [LaunchAgentRegistrationPlan] = [
+            .keep,
+            .refuse(message: "nope"),
+            .register(steps: [.register]),
+            .refresh(steps: [.bootout, .unregister, .register]),
+            .takeover(steps: [.bootout, .unregister, .register]),
+            .bootout(steps: [.bootout, .register]),
+            .unregister(steps: [.unregister])
+        ]
+        for plan in plans {
+            let recorder = LaunchAgentStepRecorder()
+            let result = await LiveLaunchAgentManager.execute(plan) { step in
+                await recorder.append(step)
+                return nil
+            }
+            #expect(result == nil)
+            #expect(await recorder.steps == plan.steps)
+        }
+    }
+}
+
+private actor LaunchAgentStepRecorder {
+    var steps: [LaunchAgentRegistrationPlan.Step] = []
+    func append(_ step: LaunchAgentRegistrationPlan.Step) { steps.append(step) }
 }
 
 @Suite("LaunchAgentLoader")
@@ -465,4 +491,43 @@ struct LaunchAgentLoaderTests {
         #expect(outcome == .launchdRefused(message: "stale job would not restart"))
         #expect(mock.calls.map(\.kind) == [.load, .restart])
     }
+
+    @Test("registration plan table preserves keep, refuse, takeover, and refresh sequences")
+    func registrationPlanMatrix() {
+        let helper = "/Applications/Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron"
+        let runtime = LaunchAgentRuntimeInfo(
+            pid: 42,
+            parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+            parentBundleVersion: "1",
+            executablePath: helper,
+            processCommand: nil,
+            gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
+            gatewayChannelMarker: TronGatewayProfile.stable.channel
+        )
+        let cases: [(ExistingInstallDetector.ServiceRegistrationStatus, MacRuntimeVariant, LaunchAgentRuntimeInfo?, Bool, LaunchAgentRegistrationPlan)] = [
+            (.enabled, .installedRelease, runtime, true, .keep),
+            (.requiresApproval, .installedRelease, nil, true, .refuse(message: "Approve Tron Agent in Login Items to finish installation.")),
+            (.notRegistered, .installedRelease, nil, true, .register(steps: [.register])),
+            (.enabled, .installedRelease, runtime, true, .refresh(steps: [.bootout, .unregister, .register]))
+        ]
+        for (status, variant, metadata, canManage, expected) in cases {
+            let plan = LiveLaunchAgentManager.registrationPlan(
+                status: status,
+                currentVariant: variant,
+                runtimeInfo: metadata,
+                runningParentBundleIdentifier: metadata?.parentBundleIdentifier,
+                canManageLaunchAgent: canManage,
+                expectedHelperPath: helper,
+                shouldRefreshCurrentRegistration: expected.steps.contains(.bootout) && expected != .keep,
+                shouldReplaceStaleRuntime: false,
+                shouldTakeOverRuntime: false
+            )
+            if case .refresh = expected {
+                #expect(plan.steps == [.bootout, .unregister, .register])
+            } else {
+                #expect(plan == expected)
+            }
+        }
+    }
+
 }

@@ -2,6 +2,119 @@ import Foundation
 import Testing
 @testable import TronMac
 
+@Suite("GatewayWebSocketTransport")
+struct GatewayWebSocketTransportTests {
+    @Test("parent cancellation closes the socket")
+    func cancellationClosesSocket() async throws {
+        let task = TestWebSocketTask()
+        let session = URLSession(configuration: .ephemeral)
+        let connection = GatewayWebSocketTransport.Connection(
+            task: task,
+            session: session,
+            capture: GatewayWebSocketTransport.StatusCapture()
+        )
+        let pending = Task {
+            try await connection.receiveData(
+                deadline: GatewayWebSocketTransport.Deadline(timeout: 2)
+            )
+        }
+        try await Task.sleep(nanoseconds: 20_000_000)
+        pending.cancel()
+        do {
+            _ = try await pending.value
+            Issue.record("expected cancellation")
+        } catch is CancellationError {
+            // Expected.
+        }
+        #expect(task.cancelCount == 1)
+    }
+
+    @Test("a hanging operation closes and returns within one deadline")
+    func timeoutClosesHangingOperationWithinDeadline() async throws {
+        let task = TestWebSocketTask()
+        let session = URLSession(configuration: .ephemeral)
+        let connection = GatewayWebSocketTransport.Connection(
+            task: task,
+            session: session,
+            capture: GatewayWebSocketTransport.StatusCapture()
+        )
+        let started = DispatchTime.now().uptimeNanoseconds
+        do {
+            _ = try await connection.receiveData(
+                deadline: GatewayWebSocketTransport.Deadline(timeout: 0.05)
+            )
+            Issue.record("expected timeout")
+        } catch GatewayWebSocketTransport.Failure.timeout {
+            // Expected.
+        }
+        let elapsed = DispatchTime.now().uptimeNanoseconds - started
+        #expect(elapsed < 500_000_000)
+        #expect(task.cancelCount == 1)
+    }
+
+    @Test("oversized data frames are rejected before decoding")
+    func oversizedDataFrameRejectedAtTransportBoundary() async throws {
+        let task = TestWebSocketTask(message: .data(Data(repeating: 0, count: GatewayWebSocketTransport.maximumFrameBytes + 1)))
+        let session = URLSession(configuration: .ephemeral)
+        let connection = GatewayWebSocketTransport.Connection(
+            task: task,
+            session: session,
+            capture: GatewayWebSocketTransport.StatusCapture()
+        )
+        var rejected = false
+        do {
+            _ = try await connection.receiveData(
+                deadline: GatewayWebSocketTransport.Deadline(timeout: 1)
+            )
+        } catch GatewayWebSocketTransport.Failure.invalidMessage {
+            rejected = true
+        }
+        #expect(rejected)
+        connection.close()
+    }
+}
+
+private final class TestWebSocketTask: GatewayWebSocketTransport.WebSocketTask, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<URLSessionWebSocketTask.Message, Error>?
+    private var cancelled = false
+    private(set) var cancelCount = 0
+    private let nextMessage: URLSessionWebSocketTask.Message?
+
+    init(message: URLSessionWebSocketTask.Message? = nil) {
+        nextMessage = message
+    }
+
+    func resume() {}
+
+    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        let pending: CheckedContinuation<URLSessionWebSocketTask.Message, Error>?
+        lock.lock()
+        cancelCount += 1
+        cancelled = true
+        pending = continuation
+        continuation = nil
+        lock.unlock()
+        pending?.resume(throwing: CancellationError())
+    }
+
+    func send(_ message: URLSessionWebSocketTask.Message) async throws {}
+
+    func receive() async throws -> URLSessionWebSocketTask.Message {
+        if let nextMessage { return nextMessage }
+        return try await withCheckedThrowingContinuation { continuation in
+            lock.lock()
+            if cancelled {
+                lock.unlock()
+                continuation.resume(throwing: CancellationError())
+            } else {
+                self.continuation = continuation
+                lock.unlock()
+            }
+        }
+    }
+}
+
 /// Network behavior is covered only at the closed-port boundary; the pure
 /// frame decoder owns the cross-language gateway contract assertions.
 @Suite("ServerPing.decodeFrame")
@@ -97,7 +210,7 @@ struct ServerPingResultTests {
 struct ServerPingLiveTests {
     @Test("closed port is never reported as authenticated")
     func closedPortIsUnreachable() async throws {
-        let result = await ServerPing.ping(host: "127.0.0.1", port: 1, token: "anything", timeout: 1)
+        let result = try await ServerPing.ping(host: "127.0.0.1", port: 1, token: "anything", timeout: 1)
         switch result {
         case .unreachable, .timeout: break
         case .success, .unauthorized, .malformedResponse:

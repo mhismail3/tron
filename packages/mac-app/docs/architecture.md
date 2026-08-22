@@ -10,6 +10,13 @@ registrations.
 
 ## Runtime variants
 
+`MacStartupMode.resolve` is the single startup authority. It resolves test-host
+and CLI command paths first, then routes Xcode Debug to read-only observation,
+installed Release to wizard/onboarded lifecycle, and misplaced or unsupported
+Release bundles to a visible companion/error path. RootView, AppDelegate, and
+startup maintenance consume that same resolved mode; Debug never creates a
+LaunchAgent.
+
 | Variant | Login Item | Label | Home | Port |
 |---|---|---|---|---|
 | Installed Stable | `Tron Agent.app` | `com.tron.server` | `~/.tron` | 9847 |
@@ -50,9 +57,11 @@ Each profile's gateway creates `<profile home>/gateway/enrollment.json` (Stable
 one-time code. The wrapper accepts the gateway's
 RFC3339 expiration timestamp with or without fractional seconds.
 `PairingInfoStep` first authenticates a local `system.info` request using
-`gateway/local-auth.json`. The wrapper accepts the Gateway's RFC3339 credential
-timestamp with or without fractional seconds, then reads the current enrollment
-file and emits:
+`gateway/local-auth.json`, retains the exact Stable admission, and repeats the
+ping/admission immediately before reading the current enrollment file. Any
+process, payload, or authenticated runtime transition clears the pairing
+presentation. The wrapper accepts the Gateway's RFC3339 credential timestamp
+with or without fractional seconds, then emits:
 
 ```text
 tron://pair?host=<tailscale>&port=<port>&code=<one-time>&label=<mac>
@@ -69,7 +78,10 @@ capability so remote restart controls fail closed for direct foreground processe
 Quitting `Tron.app` does not stop accepted work. `ServerStatusPoller` probes the Tron
 Gateway protocol and combines health with registration state. Menu controls can
 pause, resume, restart, inspect bounded persisted Gateway logs, show a fresh
-pairing invitation, and uninstall.
+pairing invitation, and uninstall. Log and feedback capture resolve a nonempty
+host from live Tailscale state or the bounded Tailscale cache and pass it
+explicitly to the Gateway socket; absent host data fails unavailable rather than
+falling back to loopback.
 
 Installed Release owns only Stable registration and lifecycle. It authenticates
 to the developer-owned Debug Gateway on 9848 to report status and, when Debug
@@ -92,6 +104,15 @@ newer restart or loopback/Tailscale transition. Admission identity compares the
 exact supervisor/child start identities, transport host, selected payload, and
 authenticated runtime provenance; elapsed uptime is display-only and cannot
 invalidate an otherwise unchanged admission.
+
+`LaunchAgentRegistrationPlan` computes keep/refuse/takeover/bootout,
+unregister/register, and refresh sequences from one authoritative status and
+runtime metadata snapshot. Live execution runs that plan without re-deriving
+ownership between operations. Bearer and enrollment credentials use one
+bounded owner-only regular-file/no-symlink JSON reader, followed by separate
+exact-key schema validation. ServerPing and GatewayRestartClient share the
+bounded WebSocket transport handshake and receive deadline while retaining
+frame-specific error taxonomies.
 
 The wrapper and gateway share no in-memory state. Their only shared secrets are
 owner-only gateway files. Legacy `~/.tron/auth.json` is neither wrapper nor

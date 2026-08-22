@@ -68,41 +68,29 @@ enum GatewayRestartClient {
         commandID: String = "mac-restart-\(UUID().uuidString.lowercased())",
         timeout: TimeInterval = defaultTimeout
     ) async throws -> Response {
+        try Task.checkCancellation()
         guard validCommandID(commandID) else { throw Failure.invalidCommandID }
         guard let token, !token.isEmpty else { throw Failure.missingCredential }
         let request = try makeRequest(host: host, port: port, token: token, timeout: timeout)
-        let capture = GatewayRestartWSStatusCapture()
-        let session = URLSession(configuration: .ephemeral, delegate: capture, delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
-
-        let task = session.webSocketTask(with: request)
-        task.resume()
-        defer { task.cancel(with: .goingAway, reason: nil) }
-
         do {
-            guard let hello = Self.jsonString([
-                "type": "hello",
-                "protocolVersion": protocolVersion,
-                "clientId": UUID().uuidString,
-            ]) else { throw Failure.malformedResponse }
-            try await task.send(.string(hello))
-            guard let hello = messageData(from: try await receive(task: task, timeout: timeout)), decodeHello(data: hello) else {
-                throw Failure.protocolMismatch
-            }
-
-            let requestData = try JSONSerialization.data(withJSONObject: [
+            let deadline = GatewayWebSocketTransport.Deadline(timeout: timeout)
+            let connection = try await GatewayWebSocketTransport.connect(
+                request: request,
+                protocolVersion: protocolVersion,
+                minimumProtocolVersion: minimumProtocolVersion,
+                clientID: UUID().uuidString,
+                deadline: deadline
+            )
+            defer { connection.close() }
+            try await connection.send(jsonObject: [
                 "type": "request",
                 "id": commandID,
                 "method": "gateway.restart",
                 "params": ["commandId": commandID],
-            ])
-            guard let requestString = String(data: requestData, encoding: .utf8) else {
-                throw Failure.malformedResponse
-            }
-            try await task.send(.string(requestString))
+            ], deadline: deadline)
 
             for _ in 0..<8 {
-                guard let data = messageData(from: try await receive(task: task, timeout: timeout)) else {
+                guard let data = try await connection.receiveData(deadline: deadline) else {
                     throw Failure.malformedResponse
                 }
                 switch decodeFrame(data: data, expectedID: commandID) {
@@ -113,10 +101,19 @@ enum GatewayRestartClient {
                 }
             }
             throw Failure.timeout
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let failure as Failure {
             throw failure
+        } catch let transportFailure as GatewayWebSocketTransport.Failure {
+            switch transportFailure {
+            case .timeout: throw Failure.timeout
+            case .invalidHello: throw Failure.protocolMismatch
+            case .upgrade(let statusCode) where statusCode == 401: throw Failure.unauthorized
+            default: throw Failure.transport
+            }
         } catch {
-            if capture.snapshotStatusCode() == 401 { throw Failure.unauthorized }
+            try Task.checkCancellation()
             if let urlError = error as? URLError, urlError.code == .timedOut {
                 throw Failure.timeout
             }
@@ -180,47 +177,4 @@ enum GatewayRestartClient {
         return .result(result)
     }
 
-    private static func receive(
-        task: URLSessionWebSocketTask,
-        timeout: TimeInterval
-    ) async throws -> URLSessionWebSocketTask.Message {
-        guard timeout.isFinite, timeout > 0 else { throw Failure.invalidURL }
-        return try await withThrowingTaskGroup(of: URLSessionWebSocketTask.Message.self) { group in
-            group.addTask { try await task.receive() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(max(1, timeout) * 1_000_000_000))
-                throw Failure.timeout
-            }
-            defer { group.cancelAll() }
-            return try await group.next()!
-        }
-    }
-
-    private static func jsonString(_ object: [String: Any]) -> String? {
-        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    private static func messageData(from message: URLSessionWebSocketTask.Message) -> Data? {
-        switch message {
-        case .data(let data): return data
-        case .string(let string): return Data(string.utf8)
-        @unknown default: return nil
-        }
-    }
-}
-
-private final class GatewayRestartWSStatusCapture: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    private let lock = NSLock()
-    private var statusCode: Int?
-
-    func snapshotStatusCode() -> Int? {
-        lock.lock(); defer { lock.unlock() }
-        return statusCode
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let status = (task.response as? HTTPURLResponse)?.statusCode else { return }
-        lock.lock(); statusCode = status; lock.unlock()
-    }
 }

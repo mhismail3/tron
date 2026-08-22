@@ -8,6 +8,7 @@ import SwiftUI
 /// and timing behavior.
 struct EnvironmentSetup: Sendable {
     var profile: TronGatewayProfile = .stable
+    var runtimeVariant: MacRuntimeVariant = .installedRelease
     var tronHome: URL
     var agentHome: URL = TronPaths.agentHome(profile: .stable)
     var applicationBundle: URL
@@ -118,6 +119,32 @@ struct EnvironmentSetup: Sendable {
         try MacAppVersionMarkerStore.write(version, at: TronPaths.macAppVersionMarkerPath)
     }
 
+    /// Resolves startup once from the bundle variant, command line, test host,
+    /// and authoritative onboarding sentinel.
+    func resolvedStartupMode(
+        command: MacCommandLineMode = .current,
+        underTests: Bool = TronMacRuntime.isRunningUnderTests(),
+        onboardedOverride: Bool? = nil
+    ) -> MacStartupMode {
+        MacStartupMode.resolve(
+            variant: runtimeVariant,
+            onboarded: onboardedOverride ?? onboardedSentinelExists(),
+            command: command,
+            underTests: underTests
+        )
+    }
+
+    /// Resolves the Gateway's presentation host from the live Tailscale
+    /// source, falling back only to the bounded disposable cache.
+    func resolvedTailscaleHost() async -> String? {
+        let live = await probeTailscale().displayIP
+        for candidate in [live, readTailscaleIPFromSettings()] {
+            let value = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !value.isEmpty { return value }
+        }
+        return nil
+    }
+
     static let live = makeLive(profile: .stable)
     /// Read-only authenticated observation of the scripts/tron-dev runtime.
     static let debug = makeDebugObserver()
@@ -132,15 +159,18 @@ struct EnvironmentSetup: Sendable {
         let ownership: @Sendable () async -> Bool = {
             guard profile == .stable,
                   ExistingInstallDetector.serviceStatus(label: profile.launchAgentLabel) == .enabled else { return false }
+            guard let selected = StableGatewayObserver.activePayload() else { return false }
             return LiveLaunchAgentManager.runtimeOwnsProfile(
                 runtimeInfo: await LiveLaunchAgentManager(profile: profile).runtimeInfo(label: profile.launchAgentLabel),
                 profile: profile,
                 expectedParentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
-                expectedHelperPath: TronPaths.serverHelperBinary(profile: profile).path
+                expectedHelperPath: TronPaths.serverHelperBinary(profile: profile).path,
+                expectedPayloadRoot: selected.root
             )
         }
         return EnvironmentSetup(
             profile: profile,
+            runtimeVariant: MacRuntimeVariant.detect(),
             tronHome: home,
             agentHome: TronPaths.agentHome(profile: profile),
             applicationBundle: TronPaths.applicationBundle,
@@ -192,7 +222,13 @@ struct EnvironmentSetup: Sendable {
             pingServer: { token in
                 let tailscale = await TailscaleProbe.probe()
                 let host = tailscale.displayIP ?? GatewayNetworkCacheReader.tailscaleIP(at: cache) ?? "127.0.0.1"
-                return await ServerPing.ping(host: host, port: profile.port, token: token)
+                do {
+                    return try await ServerPing.ping(host: host, port: profile.port, token: token)
+                } catch is CancellationError {
+                    return .timeout
+                } catch {
+                    return .unreachable
+                }
             },
             restartGateway: {
                 let tailscale = await TailscaleProbe.probe()
@@ -222,6 +258,7 @@ struct EnvironmentSetup: Sendable {
         let marker = TronPaths.onboardedMarkerPath(profile: profile)
         return EnvironmentSetup(
             profile: profile,
+            runtimeVariant: .xcodeDebug,
             tronHome: home,
             agentHome: TronPaths.agentHome(profile: profile),
             applicationBundle: TronPaths.applicationBundle,

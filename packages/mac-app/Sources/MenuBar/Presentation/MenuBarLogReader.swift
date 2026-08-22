@@ -24,13 +24,15 @@ enum MenuBarLogReader {
     static let minimumProtocolVersion = 3
 
     static func fetchRecentLogs(
-        host: String = "127.0.0.1",
-        port: Int = TronPaths.defaultServerPort,
+        host: String,
+        port: Int,
         token: String?,
         limit: Int = defaultLimit,
         timeout: TimeInterval = 5
     ) async -> Result<String, MenuBarLogReadError> {
-        guard let url = GatewaySocketURL.make(host: host, port: port) else {
+        let normalizedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedHost.isEmpty,
+              let url = GatewaySocketURL.make(host: normalizedHost, port: port) else {
             return .failure(.serverUnavailable)
         }
 

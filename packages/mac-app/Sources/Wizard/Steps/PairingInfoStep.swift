@@ -240,6 +240,7 @@ struct PairingInfoStep: View {
         }
 
         var debugAdmission: DebugGatewayObserver.Admission?
+        var stableAdmission: StableGatewayObserver.Admission?
         if setup.profile == .debug {
             switch await setup.observeDebugGateway(localToken) {
             case .admitted(let admission):
@@ -259,10 +260,11 @@ struct PairingInfoStep: View {
             let pingResult = await setup.pingServer(localToken)
             switch pingResult {
             case .success(let info):
-                guard await setup.admitStableRuntime(info) != nil else {
+                guard let admission = await setup.admitStableRuntime(info) else {
                     fail(.serverUnreachable)
                     return
                 }
+                stableAdmission = admission
             case .unauthorized:
                 fail(.localAuthenticationFailed)
                 return
@@ -288,6 +290,17 @@ struct PairingInfoStep: View {
                 return
             }
             debugAdmission = current
+        } else if let admitted = stableAdmission {
+            guard let current = await StableGatewayObserver.revalidatePairingAdmission(
+                pinned: admitted,
+                token: localToken,
+                ping: setup.pingServer,
+                admit: setup.admitStableRuntime
+            ) else {
+                fail(.serverUnreachable)
+                return
+            }
+            stableAdmission = current
         }
 
         guard let code = setup.readEnrollmentCode() else {

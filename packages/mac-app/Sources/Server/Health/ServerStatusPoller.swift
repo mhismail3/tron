@@ -21,8 +21,13 @@ struct ServerStatusPoller: Sendable {
             let task = Task {
                 while !Task.isCancelled {
                     let snapshot = await ServerStatusPoller.singleSnapshot(setup: setup)
+                    guard !Task.isCancelled else { break }
                     continuation.yield(snapshot)
-                    try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                    do {
+                        try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                    } catch is CancellationError {
+                        break
+                    }
                 }
                 continuation.finish()
             }
@@ -36,10 +41,12 @@ struct ServerStatusPoller: Sendable {
     /// the wizard's "wait for Tron" loop. The state mapping mirrors
     /// the INVARIANT documented on `ServerPingResult`.
     static func singleSnapshot(setup: EnvironmentSetup) async -> ServerStatusSnapshot {
+        guard !Task.isCancelled else { return ServerStatusSnapshot(state: .checking) }
         let token = setup.readBearerToken()
         if setup.profile == .debug {
             switch await setup.observeDebugGateway(token) {
             case .admitted(let admission):
+                guard !Task.isCancelled else { return ServerStatusSnapshot(state: .checking) }
                 return ServerStatusSnapshot(
                     state: .running(version: admission.info.version, port: setup.serverPort),
                     tailscaleIP: admission.pairingTransportAvailable ? admission.transportHost : nil,
@@ -55,9 +62,11 @@ struct ServerStatusPoller: Sendable {
         }
 
         let result = await setup.pingServer(token)
+        guard !Task.isCancelled else { return ServerStatusSnapshot(state: .checking) }
         switch result {
         case .success(let info):
             let admission = await setup.admitStableRuntime(info)
+            guard !Task.isCancelled else { return ServerStatusSnapshot(state: .checking) }
             let installationState: ServerStatusState
             if admission != nil {
                 installationState = .running(version: info.version, port: setup.serverPort)

@@ -53,7 +53,6 @@ struct MenuBarItemBuilderTests {
             #expect(content.tone == .running)
             #expect(content.pid == 16027)
             #expect(content.uptime == "01:07:42")
-            #expect(content.modeDetail == nil)
         } else {
             Issue.record("status should live in custom header")
         }
@@ -83,10 +82,10 @@ struct MenuBarItemBuilderTests {
     func debugObservation() {
         let absent = Self.build(snapshot: .checking, debugGateway: .unavailable)
         #expect(!absent.map(\.title).contains(where: { $0.contains("Debug") }))
-        let loopback = Self.build(snapshot: .checking, debugGateway: DebugGatewayMenuState(isRunning: true))
+        let loopback = Self.build(snapshot: .checking, debugGateway: DebugGatewayMenuState.admitted(isPairable: false))
         #expect(!loopback.map(\.title).contains("Show Debug pairing info"))
         #expect(loopback.map(\.title).contains("Debug Gateway running on 9848"))
-        let running = Self.build(snapshot: .checking, debugGateway: DebugGatewayMenuState(isRunning: true, isPairable: true))
+        let running = Self.build(snapshot: .checking, debugGateway: DebugGatewayMenuState.admitted(isPairable: true))
         #expect(running.map(\.title).contains("Show Debug pairing info"))
         #expect(running.map(\.title).contains("Debug Gateway running on 9848"))
         #expect(!running.map(\.title).contains(where: { $0.contains("Stop Debug") || $0.contains("Restart Debug") || $0.contains("Repair Debug") }))

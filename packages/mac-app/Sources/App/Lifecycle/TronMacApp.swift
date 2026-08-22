@@ -13,12 +13,10 @@ struct TronMacApp: App {
     var body: some Scene {
         WindowGroup {
             Group {
-                if TronMacRuntime.isRunningUnderTests() {
-                    TestHostView()
-                } else if MacCommandLineMode.current.isCommand {
-                    CommandModeHostView()
-                } else {
-                    RootView()
+                switch EnvironmentSetup.live.resolvedStartupMode() {
+                case .testHost: TestHostView()
+                case .command: CommandModeHostView()
+                default: RootView()
                 }
             }
                 .environment(\.environmentSetup, EnvironmentSetup.live)
@@ -48,7 +46,7 @@ struct TronMacApp: App {
                 // region.
                 .containerBackground(.regularMaterial, for: .window)
                 .configureHostingWindow { window in
-                    if TronMacRuntime.isRunningUnderTests() {
+                    if EnvironmentSetup.live.resolvedStartupMode() == .testHost {
                         window.orderOut(nil)
                         return
                     }
@@ -78,11 +76,6 @@ struct TronMacApp: App {
 }
 
 enum TronMacRuntime {
-    static func menuBarMode(onboarded: Bool, canManage: Bool) -> AppMode {
-        guard canManage else { return .companion }
-        return onboarded ? .menuBarOnly : .wizard
-    }
-
     /// Xcode has exposed different test-host markers across XCTest,
     /// Swift Testing, and runner generations. Treat any known marker as
     /// a test host so CI never boots wizard/menu side effects just to run
@@ -119,6 +112,8 @@ struct RootView: View {
     @Environment(\.environmentSetup) private var setup
     @State private var mode: AppMode = .loading
 
+    private var startupMode: MacStartupMode { setup.resolvedStartupMode() }
+
     var body: some View {
         Group {
             switch mode {
@@ -143,8 +138,14 @@ struct RootView: View {
         .task(id: mode) {
             switch mode {
             case .loading:
-                let onboarded = setup.onboardedSentinelExists()
-                mode = TronMacRuntime.menuBarMode(onboarded: onboarded, canManage: setup.canManageLaunchAgent)
+                switch startupMode {
+                case .testHost: mode = .companion
+                case .command: mode = .companion
+                case .debugReadOnly: mode = .companion
+                case .wizard: mode = .wizard
+                case .onboarded: mode = .menuBarOnly
+                case .misplacedRelease, .unsupported: mode = .companion
+                }
             case .wizard:
                 NSApp.setActivationPolicy(.regular)
                 NSApp.activate(ignoringOtherApps: true)
@@ -224,30 +225,33 @@ struct CommandModeHostView: View {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let startupMode = EnvironmentSetup.live.resolvedStartupMode()
     private var menuBarController: MenuBarController?
     private var wizardCompletionObserver: NSObjectProtocol?
     private var instanceLock: SingleInstanceLock?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        switch MacCommandLineMode.current {
-        case .startServerAndQuit:
+        let setup = EnvironmentSetup.live
+        switch startupMode {
+        case .command(.startServerAndQuit):
             startServerAndQuit()
             return
-        case .uninstallAndQuit:
+        case .command(.uninstallAndQuit):
             uninstallAndQuit()
             return
-        case .normal:
+        case .testHost:
+            return
+        default:
             break
         }
 
         // The test host app launches inside `xcodebuild test`; skip
         // wrapper locks, menu-bar setup, launchd checks, and wizard
         // observers so logic tests do not manage a real server.
-        if TronMacRuntime.isRunningUnderTests() {
+        if startupMode == .testHost {
             return
         }
 
-        let setup = EnvironmentSetup.live
         // Install the per-wrapper lock first. The installed release and
         // an Xcode Debug companion intentionally use different lock
         // files so wrapper UI work can happen while production runs.
@@ -259,10 +263,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         instanceLock = lock
 
-        if TronMacRuntime.menuBarMode(
-            onboarded: setup.onboardedSentinelExists(),
-            canManage: setup.canManageLaunchAgent
-        ) == .menuBarOnly {
+        if case .onboarded = startupMode {
             installMenuBar(setup: setup, context: .existingOnboardedLaunch)
         }
         // Otherwise the WindowGroup shows WizardView; menu bar is installed

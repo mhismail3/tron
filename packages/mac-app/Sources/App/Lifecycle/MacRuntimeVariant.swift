@@ -1,5 +1,44 @@
 import Foundation
 
+/// The one authority for wrapper startup routing. Lifecycle owners consume
+/// this value rather than independently deriving bundle, command, and marker
+/// state.
+enum MacStartupMode: Equatable, Sendable {
+    case testHost
+    case command(MacCommandLineMode)
+    case debugReadOnly
+    case wizard
+    case onboarded
+    case misplacedRelease
+    case unsupported
+
+    static func resolve(
+        variant: MacRuntimeVariant,
+        onboarded: Bool,
+        command: MacCommandLineMode,
+        underTests: Bool
+    ) -> MacStartupMode {
+        if underTests { return .testHost }
+        if command.isCommand { return .command(command) }
+        switch variant {
+        case .xcodeDebug: return .debugReadOnly
+        case .installedRelease: return onboarded ? .onboarded : .wizard
+        case .misplacedRelease: return .misplacedRelease
+        case .unsupported: return .unsupported
+        }
+    }
+
+    var isReadOnlyDebug: Bool {
+        if case .debugReadOnly = self { return true }
+        return false
+    }
+
+    var isManagedRelease: Bool {
+        if case .onboarded = self { return true }
+        return false
+    }
+}
+
 /// The wrapper has three supported operating modes:
 /// - Debug/Xcode (`com.tron.mac.dev`) is a companion and never manages a Gateway.
 /// - Installed Release (`com.tron.mac` at `/Applications/Tron.app`) owns Stable.

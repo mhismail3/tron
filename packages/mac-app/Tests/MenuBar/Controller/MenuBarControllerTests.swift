@@ -23,7 +23,7 @@ struct MenuBarControllerTests {
 
         #expect(controller.debugGatewayAdmission?.processID == 42)
         #expect(controller.debugGatewayAdmission?.transportHost == "127.0.0.1")
-        #expect(controller.debugGatewayState == DebugGatewayMenuState(isRunning: true, isPairable: false))
+        #expect(controller.debugGatewayState == DebugGatewayMenuState.admitted(isPairable: false))
     }
 
     @Test("passive poll refreshes do not overwrite in-flight busy status")

@@ -100,20 +100,17 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         debugRefreshTask?.cancel()
         let task = Task { [weak self] in
             guard let self else { return }
-            let snapshot = await ServerStatusPoller.singleSnapshot(setup: self.debugSetup)
+            let observation = await self.debugSetup.observeDebugGateway(self.debugSetup.readBearerToken())
             guard !Task.isCancelled, generation == self.debugRefreshGeneration else { return }
-            let admission = snapshot.debugAdmission
+            let admission: DebugGatewayObserver.Admission?
+            if case .admitted(let value) = observation { admission = value } else { admission = nil }
             if let pinned = self.debugPairingWindowAdmission, pinned != admission {
                 self.debugPairingInfoWindowController?.close()
                 self.debugPairingInfoWindowController = nil
                 self.debugPairingWindowAdmission = nil
             }
             self.debugGatewayAdmission = admission
-            self.debugGatewayState = DebugGatewayMenuState(
-                isRunning: admission != nil,
-                isPairable: admission?.pairingTransportAvailable == true,
-                isUnauthorized: snapshot.state == .unauthorized
-            )
+            self.debugGatewayState = DebugGatewayMenuState(observation: observation)
             self.rebuildMenu()
         }
         debugRefreshTask = task
@@ -306,7 +303,6 @@ private final class MenuBarHeaderView: NSView {
         let diagnosticRows = 2
             + (content.pid == nil ? 0 : 1)
             + (content.uptime == nil ? 0 : 1)
-            + (content.modeDetail == nil ? 0 : 1)
         let height = CGFloat(26 + diagnosticRows * 17)
         super.init(frame: NSRect(x: 0, y: 0, width: 202, height: height))
         translatesAutoresizingMaskIntoConstraints = false
@@ -351,13 +347,6 @@ private final class MenuBarHeaderView: NSView {
             self.uptimeField = uptimeField
             startUptimeTimer(initialUptime: uptime)
         }
-        if let modeDetail = content.modeDetail {
-            let modeField = NSTextField(labelWithString: modeDetail)
-            modeField.font = .monospacedSystemFont(ofSize: 10.5, weight: .medium)
-            modeField.textColor = .systemOrange
-            rows.append(modeField)
-        }
-
         let body = NSStackView(views: rows)
         body.translatesAutoresizingMaskIntoConstraints = false
         body.orientation = .vertical

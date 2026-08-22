@@ -63,6 +63,33 @@ struct GatewayRestartClientTests {
         #expect(GatewayRestartClient.decodeFrame(data: Data(event.utf8), expectedID: "command-123") == .ignore)
     }
 
+    @Test("one deadline budget is shared and expires monotonically")
+    func deadlineBudget() async throws {
+        let deadline = GatewayWebSocketTransport.Deadline(timeout: 0.05)
+        let initial = try #require(deadline.remainingNanoseconds)
+        try await Task.sleep(nanoseconds: 20_000_000)
+        let remaining = try #require(deadline.remainingNanoseconds)
+        #expect(remaining < initial)
+    }
+
+    @Test("cancellation propagates from the shared socket operation")
+    func cancellationPropagates() async {
+        let task = Task {
+            try await GatewayRestartClient.restart(
+                host: "127.0.0.1", port: 1, token: "local-token", timeout: 10
+            )
+        }
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("expected cancellation")
+        } catch is CancellationError {
+            // Expected: cancellation must not become generic transport failure.
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+    }
+
     @Test("success frames with invalid result shape are rejected")
     func invalidResultIsMalformed() {
         let body = #"{"type":"response","id":"command-123","ok":true,"result":{"restarting":"yes","scheduled":false,"activeSessionIds":[]}}"#

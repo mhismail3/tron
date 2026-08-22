@@ -51,6 +51,28 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
     }
 }
 
+/// Pure registration decision. The plan is computed from one launchd status,
+/// one runtime metadata snapshot, and the current wrapper authority; execution
+/// never re-derives ownership between operations.
+enum LaunchAgentRegistrationPlan: Equatable, Sendable {
+    enum Step: Equatable, Sendable { case bootout, unregister, register, refresh }
+    case keep
+    case refuse(message: String)
+    case takeover(steps: [Step])
+    case bootout(steps: [Step])
+    case unregister(steps: [Step])
+    case register(steps: [Step])
+    case refresh(steps: [Step])
+
+    var steps: [Step] {
+        switch self {
+        case .keep, .refuse: return []
+        case .takeover(let steps), .bootout(let steps), .unregister(let steps),
+             .register(let steps), .refresh(let steps): return steps
+        }
+    }
+}
+
 /// Indirection over `SMAppService` and launchd diagnostics so service-control
 /// callers are testable without mutating Login Items.
 /// Mocks live in `Tests/Infrastructure/Fakes/MockLaunchAgentManager.swift`.

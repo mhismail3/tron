@@ -81,41 +81,45 @@ enum MacAppStartupMaintenance {
         context: MacAppStartupContext
     ) async -> MacAppStartupMaintenanceResult {
         let currentVersion = setup.currentAppVersion()
-        if context == .wizardCompletion,
-           setup.canManageLaunchAgent {
+        let startupMode = setup.resolvedStartupMode(
+            command: .normal,
+            underTests: false,
+            onboardedOverride: context == .wizardCompletion ? false : nil
+        )
+        let canManage = startupMode == .onboarded
+            || (context == .wizardCompletion && startupMode == .wizard)
+        if context == .wizardCompletion, canManage {
             recordCurrentVersion(currentVersion, setup: setup)
             return .recordedCurrentVersion
         }
 
         let recordedVersion = setup.readRecordedAppVersion()
-        let onboarded = setup.onboardedSentinelExists()
+        let onboarded: Bool
+        switch startupMode {
+        case .onboarded: onboarded = true
+        case .wizard: onboarded = false
+        default: onboarded = false
+        }
         if let reason = restartSkipReason(
             currentVersion: currentVersion,
             recordedVersion: recordedVersion,
-            canManageLaunchAgent: setup.canManageLaunchAgent,
+            canManageLaunchAgent: canManage,
             onboarded: onboarded
         ) {
             guard reason == .versionAlreadyRecorded else { return .skipped(reason) }
             let runtime = await setup.launchAgentManager.runtimeInfo(label: setup.launchAgentLabel)
-            let currentVariant = MacRuntimeVariant.detect()
-            let expectedHelperPath = setup.applicationBundle
-                .appendingPathComponent("Contents/Library/LoginItems/\(setup.profile.agentBundleName).app/Contents/MacOS/tron")
-                .path
-            let registrationNeedsRepair = runtime == nil
-                || runtime?.parentBundleIdentifier != currentVariant.expectedParentBundleIdentifier
-                || runtime?.gatewaySupervisionMarker != TronPaths.gatewaySupervisionValue
-                || runtime?.gatewayChannelMarker != setup.profile.channel
-                || LiveLaunchAgentManager.runtimeRequiresReplacement(
-                    runtimeInfo: runtime,
-                    profile: setup.profile,
-                    expectedHelperPath: expectedHelperPath
-                )
-                || LiveLaunchAgentManager.shouldRefreshRegistrationForCurrentBundle(
+            let currentVariant = setup.runtimeVariant
+            // Ownership admission is authoritative for the currently selected
+            // payload. Syntactic command-line checks accept any valid payload and
+            // therefore cannot justify a same-version skip.
+            let ownershipHealthy = await setup.runtimeOwnershipHealthy()
+            let registrationNeedsRepair =
+                LiveLaunchAgentManager.shouldRefreshRegistrationForCurrentBundle(
                     status: .enabled,
                     currentVariant: currentVariant,
                     runtimeInfo: runtime,
                     currentParentBundleVersion: currentVersion.buildNumber,
-                    canManageLaunchAgent: setup.canManageLaunchAgent
+                    canManageLaunchAgent: canManage
                 )
                 || runtime?.needsLaunchConstraintRefresh == true
             let health = await ServerHealthAwaiter.waitForHealthy(
@@ -125,7 +129,7 @@ enum MacAppStartupMaintenance {
                 delayNanoseconds: 0,
                 pingServer: setup.pingServer
             )
-            if case .success = health, !registrationNeedsRepair { return .skipped(reason) }
+            if case .success = health, ownershipHealthy, !registrationNeedsRepair { return .skipped(reason) }
             // A same-version wrapper launch still repairs a stale, unsupervised,
             // or unhealthy LaunchAgent; the version marker is not a health assertion.
         }

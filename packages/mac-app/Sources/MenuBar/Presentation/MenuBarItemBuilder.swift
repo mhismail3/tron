@@ -23,13 +23,24 @@ enum MenuItemDescriptor: Equatable {
     }
 }
 
-struct DebugGatewayMenuState: Equatable, Sendable {
-    /// True only after lifecycle/PID/payload/authenticated identity admission.
-    var isRunning: Bool
-    var isPairable: Bool = false
-    var isUnauthorized: Bool = false
+enum DebugGatewayMenuState: Equatable, Sendable {
+    case unavailable
+    case unauthorized
+    case admitted(isPairable: Bool)
 
-    static let unavailable = DebugGatewayMenuState(isRunning: false)
+    init(observation: DebugGatewayObserver.Observation) {
+        switch observation {
+        case .unavailable: self = .unavailable
+        case .unauthorized: self = .unauthorized
+        case .admitted(let admission): self = .admitted(isPairable: admission.pairingTransportAvailable)
+        }
+    }
+
+    var admissionIsPairable: Bool {
+        if case .admitted(let isPairable) = self { return isPairable }
+        return false
+    }
+
 }
 
 enum MenuBarItemBuilder {
@@ -55,13 +66,16 @@ enum MenuBarItemBuilder {
         items.append(.separator)
 
         items.append(.action(title: "Show pairing info", isEnabled: true, action: .showPairingInfo))
-        if debugGateway.isRunning {
-            if debugGateway.isPairable {
+        switch debugGateway {
+        case .admitted(let isPairable):
+            if isPairable {
                 items.append(.action(title: "Show Debug pairing info", isEnabled: true, action: .showDebugPairingInfo))
             }
             items.append(.action(title: "Debug Gateway running on 9848", isEnabled: false, action: .showDebugPairingInfo))
-        } else if debugGateway.isUnauthorized {
+        case .unauthorized:
             items.append(.action(title: "Debug Gateway needs its local token", isEnabled: false, action: .showDebugPairingInfo))
+        case .unavailable:
+            break
         }
 
         items.append(.openLink(title: "Open Tron folder", url: tronHome))
@@ -114,13 +128,8 @@ enum MenuBarItemBuilder {
             status: statusLabel(snapshot: snapshot),
             tone: snapshot.state.tone,
             pid: snapshot.processID,
-            uptime: snapshot.uptime,
-            modeDetail: modeDetail(snapshot: snapshot)
+            uptime: snapshot.uptime
         )
-    }
-
-    private static func modeDetail(snapshot: ServerStatusSnapshot) -> String? {
-        return nil
     }
 }
 
@@ -140,7 +149,6 @@ struct MenuHeaderContent: Equatable, Sendable {
     var tone: MenuBarTone
     var pid: Int?
     var uptime: String?
-    var modeDetail: String?
 }
 
 enum ServerBusyAction: String, Equatable, Sendable {

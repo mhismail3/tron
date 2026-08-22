@@ -12,6 +12,7 @@ struct MacAppStartupMaintenanceTests {
         onboarded: Bool = true,
         canManageLaunchAgent: Bool = true,
         pingResult: ServerPingResult? = nil,
+        runtimeOwnershipHealthy: Bool = true,
         launchAgentManager: MockLaunchAgentManager = MockLaunchAgentManager()
     ) -> EnvironmentSetup {
         let marker = tmp.appendingPathComponent("internal/run/mac-app-version.json", isDirectory: false)
@@ -28,12 +29,14 @@ struct MacAppStartupMaintenanceTests {
             onboardedMarkerPath: tmp.appendingPathComponent("internal/run/.onboarded", isDirectory: false),
             networkCachePath: tmp.appendingPathComponent("gateway/network.json", isDirectory: false),
             launchAgentPlistPath: tmp.appendingPathComponent("Tron.app/Contents/Library/LaunchAgents/com.tron.server.plist", isDirectory: false),
+            serverHelperBinaryPath: helper,
             launchAgentLabel: "com.tron.server",
             serverPort: 9847,
             canManageLaunchAgent: canManageLaunchAgent,
             wrapperLockPath: tmp.appendingPathComponent("internal/run/.mac-wrapper.com.tron.mac.lock", isDirectory: false),
             onboardedSentinelExists: { onboarded },
             readBearerToken: { nil },
+            runtimeOwnershipHealthy: { runtimeOwnershipHealthy },
             readTailscaleIPFromSettings: { nil },
             cacheTailscaleIP: { _ in },
             probeTailscale: { .notInstalled },
@@ -125,7 +128,7 @@ struct MacAppStartupMaintenanceTests {
         let payload = tmp.appendingPathComponent("Tron.app/Contents/Resources/Gateway").path
         mock.runtimeInfo = LaunchAgentRuntimeInfo(
             pid: 42,
-            parentBundleIdentifier: MacRuntimeVariant.detect().expectedParentBundleIdentifier,
+            parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
             parentBundleVersion: current.buildNumber,
             executablePath: helper,
             processCommand: "\(payload)/runtime/node-arm64 \(payload)/app/dist/index.js --host tailscale --port 9847",
@@ -159,7 +162,7 @@ struct MacAppStartupMaintenanceTests {
         let payload = tmp.appendingPathComponent("Tron.app/Contents/Resources/Gateway").path
         mock.runtimeInfo = LaunchAgentRuntimeInfo(
             pid: 42,
-            parentBundleIdentifier: MacRuntimeVariant.detect().expectedParentBundleIdentifier,
+            parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
             parentBundleVersion: current.buildNumber,
             executablePath: helper,
             processCommand: "\(payload)/runtime/node-arm64 \(payload)/app/dist/index.js --host tailscale --port 9847",
@@ -170,6 +173,41 @@ struct MacAppStartupMaintenanceTests {
             tmp: tmp,
             currentVersion: current,
             recordedVersion: current,
+            runtimeOwnershipHealthy: false,
+            launchAgentManager: mock
+        )
+
+        let result = await MacAppStartupMaintenance.run(
+            setup: setup,
+            controller: nil,
+            context: .existingOnboardedLaunch
+        )
+
+        #expect(result == .restarted(.ok))
+        #expect(mock.calls.map(\.kind) == [.runtimeInfo, .load])
+    }
+
+    @Test("same-version marker repairs when selected payload ownership changes")
+    func recordedVersionRepairsChangedSelectedPayload() async throws {
+        let tmp = TestTempDir.make()
+        defer { TestTempDir.cleanup(tmp) }
+        let current = MacAppVersionIdentity(canonicalVersion: "0.1.0-beta.3", buildNumber: "3")
+        let mock = MockLaunchAgentManager()
+        let helper = tmp.appendingPathComponent("Tron.app/Contents/Library/LoginItems/Tron Agent.app/Contents/MacOS/tron").path
+        let selectedPayload = tmp.appendingPathComponent("gateway/payloads/stable/versions/payload-v2").path
+        mock.runtimeInfo = LaunchAgentRuntimeInfo(
+            pid: 42,
+            parentBundleIdentifier: MacRuntimeVariant.releaseBundleIdentifier,
+            executablePath: helper,
+            processCommand: "\(selectedPayload)/runtime/node-arm64 \(selectedPayload)/app/dist/index.js --host tailscale --port 9847",
+            gatewaySupervisionMarker: TronPaths.gatewaySupervisionValue,
+            gatewayChannelMarker: TronGatewayProfile.stable.channel
+        )
+        let setup = Self.makeSetup(
+            tmp: tmp,
+            currentVersion: current,
+            recordedVersion: current,
+            runtimeOwnershipHealthy: false,
             launchAgentManager: mock
         )
 
