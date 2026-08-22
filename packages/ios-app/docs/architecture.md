@@ -108,7 +108,7 @@ transport-client scoped: disconnect and profile transitions retire them before a
 receive input, while a transient same-profile reconnect retains the last bounded provider/model catalog
 until its atomic replacement arrives. Stale operation responses are treated as a retryable no-op rather
 than a misleading broker error. Pairing pre-encodes profile metadata and uses one transactional profile
-store boundary: atomic Keychain upsert succeeds before a single-document metadata commit, metadata failure
+store boundary: one cached sanitized document is loaded explicitly at init/refresh; atomic Keychain upsert succeeds before a single-document metadata commit, metadata failure
 restores the exact prior credential (or removes a newly created one), credential-deletion failure restores
 removed metadata, and explicit profile selection must commit its metadata before replacement cache or
 socket admission begins. Selection, removal, and rollback failures remain observable to lifecycle ownership,
@@ -140,7 +140,7 @@ mutation. The observable `TerminalCoordinator` owns terminal request DTOs and wi
 presentation/intents, cleanup tasks, receipt-aware commands, attach/replay intervals, gap reconciliation,
 and reconnect reattachment. Its sole `TerminalReducer` kernel owns per-terminal operations, shared
 attachment leases, typed terminal-event reduction, a global 16-terminal/256-chunk/1 MiB in-flight event
-quarantine, replay revisions, and post-detach event admission. Terminal open/attach uses one replay
+quarantine, replay revisions, and post-detach event admission. Authoritative terminal inventory and presentation revocation prune replay, last-install, exited, pending, and attachment projections; no historical summary map is retained. Terminal open/attach uses one replay
 installer and closes its interval only after reset, delta, and contiguous quarantined chunks are admitted.
 `terminal.open` requires the exact installed iOS subscription and the Gateway validates the client's
 opened-session ownership before creating a PTY, preventing orphan terminal creation during route/reconnect

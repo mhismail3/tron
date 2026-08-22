@@ -100,7 +100,7 @@ struct TerminalReducer {
     private var pendingOverflowGeneration = 0
     private var immediateRecoveryAttemptsByTerminalID: [String: Int] = [:]
     private var reconcilingTerminalIDs: Set<String> = []
-    private var summariesByID: [String: TerminalSummary] = [:]
+    private var terminalIDsBySession: [String: Set<String>] = [:]
     private var replayByID: [String: TerminalReplayProjection] = [:]
     private var exitedTerminalIDs: Set<String> = []
 
@@ -239,6 +239,12 @@ struct TerminalReducer {
     ) -> TerminalReplayInstallation? {
         guard terminal.sessionId == lease.intent.presentation.sessionID,
               admits(lease, returnedTerminalID: terminal.id) else { return nil }
+        let lastInstalled = lastInstalledOperationByTerminalID[terminal.id] ?? 0
+        // A response from an older operation is rejected before consuming its
+        // operation or changing ownership/replay state. Callers must treat nil
+        // as a stale attach failure, not as a successful zero-byte install.
+        guard lease.operationGeneration >= lastInstalled else { return nil }
+
         let operationKey = OperationKey(terminalID: terminal.id, intent: lease.intent)
         operationByKey.removeValue(forKey: operationKey)
         openOperationByIntent.removeValue(forKey: lease.intent)
@@ -250,10 +256,6 @@ struct TerminalReducer {
         owners[lease.intent] = lease.connectionID
         attachmentOwnersByTerminalID[terminal.id] = owners
 
-        let lastInstalled = lastInstalledOperationByTerminalID[terminal.id] ?? 0
-        guard lease.operationGeneration >= lastInstalled else {
-            return TerminalReplayInstallation(admittedCount: 0, requiresReconciliation: false)
-        }
         lastInstalledOperationByTerminalID[terminal.id] = lease.operationGeneration
 
         let current = replayByID[terminal.id] ?? .empty
@@ -266,7 +268,7 @@ struct TerminalReducer {
             chunks: Self.boundedReplay(reset ? admitted : current.chunks + admitted),
             revision: current.revision &+ (reset ? 1 : 0)
         )
-        summariesByID[terminal.id] = terminal
+        terminalIDsBySession[terminal.sessionId, default: []].insert(terminal.id)
         if terminal.exitedAt == nil { exitedTerminalIDs.remove(terminal.id) }
         else { exitedTerminalIDs.insert(terminal.id) }
         let pending = drainPendingEvents(terminalID: terminal.id)
@@ -312,15 +314,22 @@ struct TerminalReducer {
     }
 
     mutating func installInventory(_ terminals: [TerminalSummary], sessionID: String) {
-        let returnedIDs = Set(terminals.lazy.filter { $0.sessionId == sessionID }.map(\.id))
-        let removable = summariesByID.values.filter {
-            $0.sessionId == sessionID
-                && !returnedIDs.contains($0.id)
-                && attachmentOwnersByTerminalID[$0.id] == nil
-        }.map(\.id)
-        for id in removable { summariesByID.removeValue(forKey: id) }
-        for terminal in terminals where terminal.sessionId == sessionID {
-            summariesByID[terminal.id] = terminal
+        let returned = terminals.filter { $0.sessionId == sessionID }
+        let returnedIDs = Set(returned.map(\.id))
+        let priorIDs = terminalIDsBySession[sessionID] ?? []
+        for id in priorIDs.subtracting(returnedIDs) {
+            replayByID.removeValue(forKey: id)
+            lastInstalledOperationByTerminalID.removeValue(forKey: id)
+            exitedTerminalIDs.remove(id)
+            pendingEventsByTerminalID.removeValue(forKey: id)
+            attachmentOwnersByTerminalID.removeValue(forKey: id)
+            immediateRecoveryAttemptsByTerminalID.removeValue(forKey: id)
+            reconcilingTerminalIDs.remove(id)
+            operationByKey = operationByKey.filter { $0.key.terminalID != id }
+        }
+        if returnedIDs.isEmpty { terminalIDsBySession.removeValue(forKey: sessionID) }
+        else { terminalIDsBySession[sessionID] = returnedIDs }
+        for terminal in returned {
             if terminal.exitedAt == nil { exitedTerminalIDs.remove(terminal.id) }
             else { exitedTerminalIDs.insert(terminal.id) }
         }
@@ -452,7 +461,7 @@ struct TerminalReducer {
         pendingOverflowGeneration &+= 1
         immediateRecoveryAttemptsByTerminalID.removeAll()
         reconcilingTerminalIDs.removeAll()
-        summariesByID.removeAll()
+        terminalIDsBySession.removeAll()
         replayByID.removeAll()
         exitedTerminalIDs.removeAll()
     }
@@ -471,6 +480,11 @@ struct TerminalReducer {
             owners = owners.filter { owns($0.key) }
             if owners.isEmpty {
                 attachmentOwnersByTerminalID.removeValue(forKey: terminalID)
+                // Keep the last admitted replay as a bounded UI projection until
+                // authoritative inventory or a new owner replaces it. Ownership
+                // is already gone, so stale events cannot mutate this projection.
+                lastInstalledOperationByTerminalID.removeValue(forKey: terminalID)
+                exitedTerminalIDs.remove(terminalID)
                 pendingEventsByTerminalID.removeValue(forKey: terminalID)
                 if let connectionID = removed.values.first {
                     detached.append(TerminalDetachClaim(
@@ -644,28 +658,17 @@ struct TerminalReducer {
         exitedAt: String
     ) {
         exitedTerminalIDs.insert(terminalID)
-        guard let current = summariesByID[terminalID] else { return }
-        summariesByID[terminalID] = TerminalSummary(
-            id: current.id,
-            sessionId: current.sessionId,
-            cwd: current.cwd,
-            createdAt: current.createdAt,
-            exitedAt: exitedAt,
-            exitCode: exitCode,
-            sequence: max(current.sequence, sequence ?? current.sequence)
-        )
+        // Exit state is a bounded terminal projection; the canonical summary
+        // remains owned by the authoritative inventory.
+        _ = sequence
+        _ = exitedAt
+        _ = exitCode
     }
 
     private mutating func updateSequence(_ terminalID: String, sequence: Int) {
-        guard let terminal = summariesByID[terminalID] else { return }
-        summariesByID[terminalID] = TerminalSummary(
-            id: terminal.id,
-            sessionId: terminal.sessionId,
-            cwd: terminal.cwd,
-            createdAt: terminal.createdAt,
-            exitedAt: terminal.exitedAt,
-            exitCode: terminal.exitCode,
-            sequence: max(terminal.sequence, sequence)
-        )
+        // Replay is the sole sequence projection. Inventory owns terminal
+        // metadata, so no historical summary is retained here.
+        _ = terminalID
+        _ = sequence
     }
 }

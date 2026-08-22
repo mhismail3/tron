@@ -81,6 +81,24 @@ struct ExtensionActivityModelsTests {
         #expect(anchor.durationMs(at: anchor.anchor.advanced(by: .milliseconds(250))) >= 1_000)
     }
 
+    @Test("duration anchor clamps observed and elapsed overflow")
+    func durationAnchorOverflow() {
+        let observedMaximum = ExtensionActivityDurationAnchor(
+            startedAt: "2026-01-01T00:00:00Z",
+            observedDurationMs: Int.max,
+            anchor: .now
+        )
+        #expect(observedMaximum.durationMs(at: observedMaximum.anchor) == Int.max)
+
+        let elapsedMaximum = ExtensionActivityDurationAnchor(
+            startedAt: "2026-01-01T00:00:00Z",
+            observedDurationMs: 1_000,
+            anchor: .now
+        )
+        let distant = elapsedMaximum.anchor.advanced(by: .seconds(Int64.max))
+        #expect(elapsedMaximum.durationMs(at: distant) == Int.max)
+    }
+
     @Test("visual deadline cannot promote an expired historical bucket")
     func visualDeadlineExpiry() {
         let deadline = ExtensionActivityVisualDeadline(bucket: .recent, remainingMs: 10, now: .now)

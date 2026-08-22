@@ -101,20 +101,12 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
         case type, topic, sessionId, payload
     }
 
-    private enum SessionEventCodingKeys: String, CodingKey {
-        case runtimeGeneration, eventSequence, revision, data
-    }
-
-    private struct ProgressData: Decodable {
-        let message: TranscriptItem?
-    }
-
     init(type: String, topic: String, sessionId: String?, payload: JSONValue) {
         self.type = type
         self.topic = topic
         self.sessionId = sessionId
         self.payload = payload
-        preparation = Self.prepareRaw(topic: topic, payload: payload)
+        preparation = Self.prepare(topic: topic, adapter: JSONValuePayloadAdapter(payload: payload))
     }
 
     init(from decoder: Decoder) throws {
@@ -124,7 +116,7 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
         sessionId = try container.decodeIfPresent(String.self, forKey: .sessionId)
         payload = try container.decode(JSONValue.self, forKey: .payload)
         let payloadDecoder = try container.superDecoder(forKey: .payload)
-        preparation = Self.prepare(topic: topic, from: payloadDecoder)
+        preparation = Self.prepare(topic: topic, adapter: DecoderPayloadAdapter(decoder: payloadDecoder))
     }
 
     var preparedSessionEvent: PreparedSessionEvent? {
@@ -170,145 +162,68 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
         }
     }
 
-    private static func prepare(topic: String, from decoder: Decoder) -> GatewayEventPreparation {
-        switch topic {
-        case "session.summary":
-            return (try? SessionSummaryUpdate(from: decoder)).map(GatewayEventPreparation.sessionSummary) ?? .none
-        case "session.snapshot":
-            guard let snapshot = try? SessionSnapshot(from: decoder),
-                  ExtensionPresentationPolicy.admit(snapshot.extensionPresentation),
-                  ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(snapshot) else { return .none }
-            return .sessionSnapshot(snapshot)
-        case "session.rebaseline":
-            struct Payload: Decodable { let snapshot: SessionSnapshot; let subscriptionToken: String }
-            guard let payload = try? Payload(from: decoder),
-                  !payload.subscriptionToken.isEmpty,
-                  ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation),
-                  ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(payload.snapshot) else { return .none }
-            return .sessionRebaseline(PreparedSessionRebaseline(
-                snapshot: payload.snapshot,
-                subscriptionToken: payload.subscriptionToken
-            ))
-        case "terminal.output":
-            return (try? PreparedTerminalOutputEvent(from: decoder))
-                .map { .terminalEvent(.output($0)) } ?? .none
-        case "terminal.exit":
-            return (try? PreparedTerminalExitEvent(from: decoder))
-                .map { .terminalEvent(.exit($0)) } ?? .none
-        case let topic where topic.hasPrefix("session.") && topic != "session.listChanged":
-            guard let container = try? decoder.container(keyedBy: SessionEventCodingKeys.self),
-                  let runtimeGeneration = try? container.decode(String.self, forKey: .runtimeGeneration),
-                  let eventSequence = try? container.decode(Int.self, forKey: .eventSequence),
-                  let revision = try? container.decode(Int.self, forKey: .revision),
-                  let data = try? container.decode(JSONValue.self, forKey: .data) else { return .none }
-            let envelope = SessionEventEnvelope(
-                runtimeGeneration: runtimeGeneration,
-                eventSequence: eventSequence,
-                revision: revision,
-                data: data
-            )
-            let preparedData: PreparedSessionEventData
-            switch topic {
-            case "session.progress":
-                if let progress = try? container.decode(ProgressData.self, forKey: .data),
-                   let message = progress.message {
-                    preparedData = .progress(message)
-                } else {
-                    preparedData = .invalid
-                }
-            case "session.toolProgress":
-                if let tool = try? container.decode(ToolExecutionState.self, forKey: .data),
-                   ExtensionActivityAdmissionPolicy.admitsToolFacts(tool) {
-                    preparedData = .toolProgress(tool)
-                } else {
-                    preparedData = .invalid
-                }
-            case "session.extensionActivity":
-                if let delta = try? container.decode(ExtensionActivityDelta.self, forKey: .data),
-                   ExtensionActivityAdmissionPolicy.admitsDelta(delta) {
-                    preparedData = .extensionActivity(delta)
-                } else {
-                    preparedData = .invalid
-                }
-            case "session.extensionPresentation":
-                if let mutation = try? container.decode(ExtensionPresentationMutation.self, forKey: .data),
-                   ExtensionPresentationPolicy.admit(mutation) {
-                    preparedData = .extensionPresentation(mutation)
-                } else { preparedData = .invalid }
-            default:
-                preparedData = .raw
-            }
-            return .sessionEvent(PreparedSessionEvent(envelope: envelope, data: preparedData))
-        default:
-            return .none
-        }
+    private struct RebaselinePayload: Decodable {
+        let snapshot: SessionSnapshot
+        let subscriptionToken: String
     }
 
-    /// Raw construction is reserved for local/synthetic events and test fixtures.
-    /// Network frames use `init(from:)` and decode typed views directly from the
-    /// original decoder without another byte serialization pass.
-    private static func prepareRaw(topic: String, payload: JSONValue) -> GatewayEventPreparation {
+    private protocol PayloadAdapter {
+        func decode<T: Decodable>(_ type: T.Type) throws -> T
+    }
+
+    private struct DecoderPayloadAdapter: PayloadAdapter {
+        let decoder: Decoder
+        func decode<T: Decodable>(_ type: T.Type) throws -> T { try T(from: decoder) }
+    }
+
+    private struct JSONValuePayloadAdapter: PayloadAdapter {
+        let payload: JSONValue
+        func decode<T: Decodable>(_ type: T.Type) throws -> T { try payload.decode(type) }
+    }
+
+    private static func prepare(topic: String, adapter: some PayloadAdapter) -> GatewayEventPreparation {
         switch topic {
         case "session.summary":
-            return (try? payload.decode(SessionSummaryUpdate.self))
-                .map(GatewayEventPreparation.sessionSummary) ?? .none
+            return (try? adapter.decode(SessionSummaryUpdate.self)).map(GatewayEventPreparation.sessionSummary) ?? .none
         case "session.snapshot":
-            guard let snapshot = try? payload.decode(SessionSnapshot.self),
+            guard let snapshot = try? adapter.decode(SessionSnapshot.self),
                   ExtensionPresentationPolicy.admit(snapshot.extensionPresentation),
                   ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(snapshot) else { return .none }
             return .sessionSnapshot(snapshot)
         case "session.rebaseline":
-            struct Payload: Decodable { let snapshot: SessionSnapshot; let subscriptionToken: String }
-            guard let payload = try? payload.decode(Payload.self),
+            guard let payload = try? adapter.decode(RebaselinePayload.self),
                   !payload.subscriptionToken.isEmpty,
                   ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation),
                   ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(payload.snapshot) else { return .none }
-            return .sessionRebaseline(PreparedSessionRebaseline(
-                snapshot: payload.snapshot,
-                subscriptionToken: payload.subscriptionToken
-            ))
+            return .sessionRebaseline(PreparedSessionRebaseline(snapshot: payload.snapshot, subscriptionToken: payload.subscriptionToken))
         case "terminal.output":
-            return (try? payload.decode(PreparedTerminalOutputEvent.self))
-                .map { .terminalEvent(.output($0)) } ?? .none
+            return (try? adapter.decode(PreparedTerminalOutputEvent.self)).map { .terminalEvent(.output($0)) } ?? .none
         case "terminal.exit":
-            return (try? payload.decode(PreparedTerminalExitEvent.self))
-                .map { .terminalEvent(.exit($0)) } ?? .none
+            return (try? adapter.decode(PreparedTerminalExitEvent.self)).map { .terminalEvent(.exit($0)) } ?? .none
         case let topic where topic.hasPrefix("session.") && topic != "session.listChanged":
-            guard let envelope = try? payload.decode(SessionEventEnvelope.self) else { return .none }
+            guard let envelope = try? adapter.decode(SessionEventEnvelope.self) else { return .none }
             let preparedData: PreparedSessionEventData
             switch topic {
             case "session.progress":
                 if let message = envelope.data.objectValue?["message"], message != .null,
-                   let item = try? message.decode(TranscriptItem.self) {
-                    preparedData = .progress(item)
-                } else {
-                    preparedData = .invalid
-                }
+                   let item = try? message.decode(TranscriptItem.self) { preparedData = .progress(item) }
+                else { preparedData = .invalid }
             case "session.toolProgress":
                 if let tool = try? envelope.data.decode(ToolExecutionState.self),
-                   ExtensionActivityAdmissionPolicy.admitsToolFacts(tool) {
-                    preparedData = .toolProgress(tool)
-                } else {
-                    preparedData = .invalid
-                }
+                   ExtensionActivityAdmissionPolicy.admitsToolFacts(tool) { preparedData = .toolProgress(tool) }
+                else { preparedData = .invalid }
             case "session.extensionActivity":
                 if let delta = try? envelope.data.decode(ExtensionActivityDelta.self),
-                   ExtensionActivityAdmissionPolicy.admitsDelta(delta) {
-                    preparedData = .extensionActivity(delta)
-                } else {
-                    preparedData = .invalid
-                }
+                   ExtensionActivityAdmissionPolicy.admitsDelta(delta) { preparedData = .extensionActivity(delta) }
+                else { preparedData = .invalid }
             case "session.extensionPresentation":
                 if let mutation = try? envelope.data.decode(ExtensionPresentationMutation.self),
-                   ExtensionPresentationPolicy.admit(mutation) {
-                    preparedData = .extensionPresentation(mutation)
-                } else { preparedData = .invalid }
-            default:
-                preparedData = .raw
+                   ExtensionPresentationPolicy.admit(mutation) { preparedData = .extensionPresentation(mutation) }
+                else { preparedData = .invalid }
+            default: preparedData = .raw
             }
             return .sessionEvent(PreparedSessionEvent(envelope: envelope, data: preparedData))
-        default:
-            return .none
+        default: return .none
         }
     }
 }

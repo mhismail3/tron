@@ -338,11 +338,23 @@ struct ExtensionActivityDurationAnchor: Sendable, Equatable {
     }
 
     func durationMs(at now: ContinuousClock.Instant = .now) -> Int {
-        let elapsed = now - anchor
-        let components = elapsed.components
-        let seconds = max(Int64(0), components.seconds)
-        let milliseconds = Int(clamping: seconds.multipliedReportingOverflow(by: 1_000).partialValue)
-            + Int(clamping: components.attoseconds / 1_000_000_000_000_000)
-        return max(observedDurationMs, observedDurationMs + max(0, milliseconds))
+        let components = (now - anchor).components
+        guard components.seconds > 0 || (components.seconds == 0 && components.attoseconds > 0) else {
+            return observedDurationMs
+        }
+
+        let secondsMilliseconds = components.seconds.multipliedReportingOverflow(by: 1_000)
+        let elapsedMilliseconds: Int
+        if secondsMilliseconds.overflow {
+            elapsedMilliseconds = Int.max
+        } else {
+            let wholeMilliseconds = Int(clamping: secondsMilliseconds.partialValue)
+            let fractionalMilliseconds = Int(clamping: components.attoseconds / 1_000_000_000_000_000)
+            let combined = wholeMilliseconds.addingReportingOverflow(fractionalMilliseconds)
+            elapsedMilliseconds = combined.overflow ? Int.max : combined.partialValue
+        }
+
+        let total = observedDurationMs.addingReportingOverflow(elapsedMilliseconds)
+        return total.overflow ? Int.max : max(observedDurationMs, total.partialValue)
     }
 }

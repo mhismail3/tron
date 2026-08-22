@@ -81,7 +81,9 @@ final class SessionPresentationStore {
     private(set) var loadingEarlierTranscript = false
     private(set) var transcriptLoadState: SessionTranscriptLoadState = .idle
     @ObservationIgnored private var transcriptLoadTarget: SessionPresentationIdentity?
-    private var revokedTargets = Set<SessionPresentationIdentity>()
+    // At most one target can be mounted or in replacement intake. Keeping the
+    // revoked marker exact avoids retaining every historical presentation.
+    private var revokedTarget: SessionPresentationIdentity?
     private var nextPresentationGeneration = 0
     // Every Gateway connection owns a distinct token namespace. Responses and
     // close completions from an older connection must not mutate new ownership.
@@ -145,12 +147,12 @@ final class SessionPresentationStore {
     }
 
     func owns(_ requested: SessionPresentationIdentity) -> Bool {
-        target == requested && !revokedTargets.contains(requested)
+        target == requested && revokedTarget != requested
     }
 
     func revokeIntake(_ requested: SessionPresentationIdentity) {
         guard target == requested else { return }
-        revokedTargets.insert(requested)
+        revokedTarget = requested
     }
 
     func hasInstalledSubscription(for sessionID: String) -> Bool {
@@ -254,7 +256,7 @@ final class SessionPresentationStore {
         }
         target = requested
         pendingTarget = nil
-        revokedTargets.remove(requested)
+        if revokedTarget == requested { revokedTarget = nil }
         isAuthoritative = true
         // Composer presentation authority must mount before deferred editor
         // effects publish for this exact fresh presentation.
@@ -267,13 +269,15 @@ final class SessionPresentationStore {
     }
 
     func close(_ requested: SessionPresentationIdentity) async {
-        revokedTargets.remove(requested)
-        deferredEffectsByTarget[requested] = nil
-        guard target == requested else { return }
         // A newer open owns the transition while the previously mounted target
         // remains visible. Its eventual close callback must not clear the new
-        // owner's notice or subscription.
-        guard pendingTarget == nil || pendingTarget == requested else { return }
+        // owner's revocation, notice, or subscription.
+        guard target == requested,
+              pendingTarget == nil || pendingTarget == requested else { return }
+        // Only the exact mounted/pending owner may release its revocation. A
+        // stale close during replacement must leave old intake revoked.
+        if revokedTarget == requested { revokedTarget = nil }
+        deferredEffectsByTarget[requested] = nil
         delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
         target = nil
         if pendingTarget == requested { pendingTarget = nil }
@@ -522,7 +526,7 @@ final class SessionPresentationStore {
         hasLoadedTranscriptHistory = false
         advanceChatProjection(canonical: true)
         isAuthoritative = false
-        revokedTargets.removeAll()
+        revokedTarget = nil
         retireConnection()
         clearSecondaryProjection()
     }
@@ -541,7 +545,7 @@ final class SessionPresentationStore {
         hasLoadedTranscriptHistory = false
         advanceChatProjection(canonical: true)
         isAuthoritative = false
-        revokedTargets = revokedTargets.filter { $0.sessionID != sessionID }
+        if revokedTarget?.sessionID == sessionID { revokedTarget = nil }
         deferredEffectsByTarget = deferredEffectsByTarget.filter { $0.key.sessionID != sessionID }
         retireConnection()
         clearSecondaryProjection()
@@ -2069,7 +2073,7 @@ final class SessionPresentationStore {
         hasLoadedTranscriptHistory = false
         advanceChatProjection(canonical: true)
         isAuthoritative = true
-        revokedTargets.remove(target)
+        if revokedTarget == target { revokedTarget = nil }
     }
     #endif
 }

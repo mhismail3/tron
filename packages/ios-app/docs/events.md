@@ -8,7 +8,9 @@ retired profile cannot mutate its replacement. Backgrounding is an explicit tran
 `GatewayLifecycleCoordinator` retires the socket epoch and clears queued deliveries while retaining
 last-good session projections; foreground creates a new epoch and authoritative session baseline.
 `GatewayClient` decodes every inbound response/event frame through one discriminator and prepares large session DTOs on its
-actor before crossing into `AppModel`. The raw event remains beside that typed preparation:
+actor before crossing into `AppModel`. `GatewayEvent` uses one topic dispatcher for network `Decoder` payloads and local
+`JSONValue` fixtures; the adapters share identical topic admission and malformed-event behavior, while the network adapter
+continues decoding directly from the original decoder without JSON reserialization. The raw event remains beside that typed preparation:
 unknown frame discriminators are ignored, valid unknown sequenced session topics still
 advance their cursor, and malformed known session payloads fail closed to authoritative
 catch-up instead of disconnecting the transport or consuming their cursor. A quarantined event that cannot
@@ -35,7 +37,9 @@ admits and reduces mounted-session topics:
   the same runtime; duplicate/stale cursors are no-ops, gaps/runtime replacement/missing
   baselines request authoritative synchronization, and missing authority or route/payload
   mismatch is discarded without creating or caching state. Synchronous intake revocation rejects all
-  later sequenced topics before cursor reduction or cross-domain effects. Explicit acknowledged open/sync remains the only
+  later sequenced topics before cursor reduction or cross-domain effects. Extension input leases are tri-state: an omitted
+  `inputLease` leaves the prior lease unchanged, an explicit JSON `null` clears it, and a value replaces it only when it
+  identifies an admitted surface revision; malformed values fail closed without publishing a partial mutation. Explicit acknowledged open/sync remains the only
   path allowed to replace a cursor or runtime baseline. The same snapshot carries the full
   bounded queue projection (including total attachment count and optional photo/file counts) and queue
   revision; queue updates therefore replace the visible

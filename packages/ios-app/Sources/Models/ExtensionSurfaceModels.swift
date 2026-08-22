@@ -478,6 +478,9 @@ struct ExtensionPresentationMutation: Codable, Hashable, Sendable {
 
 enum ExtensionPresentationPolicy {
     static let maximumSurfaces = 64
+    private static let maximumLeaseIDBytes = 512
+    // JSON numbers admitted by the Gateway must remain exactly representable.
+    private static let maximumSafeRevision = 9_007_199_254_740_991
     static let maximumColumns = 160
     static let maximumLines = 120
     static let maximumRuns = 4_096
@@ -487,7 +490,7 @@ enum ExtensionPresentationPolicy {
     static func admit(_ state: ExtensionPresentationState) -> Bool {
         guard state.version == 2,
               !state.hostEpoch.isEmpty,
-              state.revision >= 0,
+              state.revision >= 0, state.revision <= maximumSafeRevision,
               state.surfaces.count <= maximumSurfaces,
               Set(state.surfaces.map(\.id)).count == state.surfaces.count,
               state.pendingInteractions.count <= 8,
@@ -503,8 +506,9 @@ enum ExtensionPresentationPolicy {
               }) ?? true,
               state.surfaces.allSatisfy(admit),
               state.inputLease.map({ lease in
-                  state.surfaces.contains(where: { $0.id == lease.surfaceId && $0.revision == lease.surfaceRevision })
-                    || state.projection?.omittedSurfaces?.contains(where: { $0.id == lease.surfaceId && $0.revision == lease.surfaceRevision }) == true
+                  admit(lease)
+                    && (state.surfaces.contains(where: { $0.id == lease.surfaceId && $0.revision == lease.surfaceRevision })
+                      || state.projection?.omittedSurfaces?.contains(where: { $0.id == lease.surfaceId && $0.revision == lease.surfaceRevision }) == true)
               }) ?? true,
               let data = try? JSONEncoder.gateway.encode(state),
               data.count <= maximumPresentationBytes else { return false }
@@ -512,18 +516,31 @@ enum ExtensionPresentationPolicy {
     }
 
     static func admit(_ mutation: ExtensionPresentationMutation) -> Bool {
-        guard mutation.version == 2, !mutation.hostEpoch.isEmpty, mutation.revision > 0,
+        guard mutation.version == 2, !mutation.hostEpoch.isEmpty,
+              mutation.revision > 0, mutation.revision <= maximumSafeRevision,
               (mutation.surfaceUpserts ?? []).count <= maximumSurfaces,
               (mutation.surfaceUpserts ?? []).allSatisfy(admit),
               (mutation.surfaceRemovals ?? []).allSatisfy({ !$0.isEmpty }),
               Set((mutation.surfaceUpserts ?? []).map(\.id)).count == (mutation.surfaceUpserts ?? []).count,
-              Set(mutation.surfaceRemovals ?? []).count == (mutation.surfaceRemovals ?? []).count else { return false }
+              Set(mutation.surfaceRemovals ?? []).count == (mutation.surfaceRemovals ?? []).count,
+              mutation.inputLease.map({ value in
+                  value == .null || ((try? value.decode(ExtensionInputLease.self)).map(admit) ?? false)
+              }) ?? true else { return false }
         if let semantic = mutation.semantic,
            semantic.statusOwners?.count ?? 0 > 32
             || semantic.statusOwners?.allSatisfy({ !$0.key.isEmpty && admit($0.value) }) == false { return false }
         if let interactionList = mutation.interactionList,
            (interactionList.count > 8 || !interactionList.allSatisfy({ admit($0, hostEpoch: mutation.hostEpoch, maximumRevision: mutation.revision) })) { return false }
         return true
+    }
+
+    private static func admit(_ lease: ExtensionInputLease) -> Bool {
+        !lease.id.isEmpty && boundedSafe(lease.id, maximumLeaseIDBytes)
+            && !lease.connectionId.isEmpty && boundedSafe(lease.connectionId, maximumLeaseIDBytes)
+            && !lease.surfaceId.isEmpty && boundedSafe(lease.surfaceId, maximumLeaseIDBytes)
+            && lease.surfaceRevision > 0 && lease.surfaceRevision <= maximumSafeRevision
+            && !lease.acquiredAt.isEmpty && boundedSafe(lease.acquiredAt, maximumLeaseIDBytes)
+            && GatewayTimestamp.parse(lease.acquiredAt) != nil
     }
 
     private static func admit(_ owner: ExtensionOwner) -> Bool {
@@ -597,6 +614,7 @@ enum ExtensionPresentationPolicy {
     static func admit(_ surface: ExtensionSurface) -> Bool {
         let runs = surface.frame.lines.reduce(0) { $0 + $1.runs.count }
         guard !surface.id.isEmpty, boundedSafe(surface.id, 512), surface.revision > 0,
+              surface.revision <= maximumSafeRevision,
               surface.provenance.map({ ($0.source.map { boundedSafe($0, 512) } ?? true) && ($0.path.map { boundedSafe($0, 512) } ?? true) }) ?? true,
               (1...maximumColumns).contains(surface.frame.width),
               (0...maximumLines).contains(surface.frame.height),

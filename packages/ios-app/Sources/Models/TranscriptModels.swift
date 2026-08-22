@@ -232,7 +232,20 @@ struct MessageTranscriptItem: TranscriptPayload {
         kind = try values.decode(TranscriptItem.Kind.self, forKey: .kind)
         role = try values.decode(TranscriptItem.Role.self, forKey: .role)
         presentationId = try values.decode(String.self, forKey: .presentationId)
-        content = try values.decode([ContentPart].self, forKey: .content)
+        let decodedContent = try values.decode([ContentPart].self, forKey: .content)
+        let grouped = Dictionary(grouping: decodedContent.filter { $0.groupId != nil }, by: { $0.groupId! })
+        for parts in grouped.values {
+            guard let expectedCount = parts.first?.groupCount,
+                  parts.allSatisfy({ $0.groupCount == expectedCount }),
+                  parts.count == expectedCount,
+                  Set(parts.compactMap(\.groupIndex)) == Set(0..<expectedCount) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .content, in: values,
+                    debugDescription: "Tool invocation group metadata is inconsistent"
+                )
+            }
+        }
+        content = decodedContent
         provider = try values.decodeIfPresent(String.self, forKey: .provider)
         modelId = try values.decodeIfPresent(String.self, forKey: .modelId)
         stopReason = try values.decodeIfPresent(String.self, forKey: .stopReason)

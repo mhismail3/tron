@@ -7,15 +7,8 @@ enum ChatStreamingTextRevealPolicy {
     static let wordIntervalMilliseconds = 55
     static let fadeMilliseconds = 220
     static let maximumAnimatedBacklog = 18
-    static let maximumInitialAnimatedTokens = 12
-
-    static func shouldCatchUp(
-        pendingTokenCount: Int,
-        initialTokenCount: Int? = nil
-    ) -> Bool {
-        if pendingTokenCount > maximumAnimatedBacklog { return true }
-        if let initialTokenCount, initialTokenCount > maximumInitialAnimatedTokens { return true }
-        return false
+    static func shouldCatchUp(pendingTokenCount: Int) -> Bool {
+        pendingTokenCount > maximumAnimatedBacklog
     }
 
     static func opacity(elapsedMilliseconds: Int, fadeMilliseconds: Int = Self.fadeMilliseconds) -> Double {

@@ -402,10 +402,23 @@ private struct ToolElapsedClock: Equatable {
     }
 }
 
+private struct ToolElapsedClockKey: Hashable {
+    let id: String
+    let startedAt: String?
+    let lifecycle: String
+
+    init(_ tool: ChatToolDescriptor) {
+        id = tool.id
+        startedAt = tool.startedAt
+        lifecycle = "\(tool.isRunning)-\(tool.completedAt ?? "")-\(tool.durationMs.map(String.init) ?? "")"
+    }
+}
+
 private struct ToolElapsedText: View {
     let tool: ChatToolDescriptor
     let color: Color
     @State private var localClock: ToolElapsedClock?
+    @State private var clockKey: ToolElapsedClockKey?
 
     private var needsLocalClock: Bool { tool.isRunning && tool.durationMs == nil }
 
@@ -427,6 +440,8 @@ private struct ToolElapsedText: View {
         .onChange(of: tool.id) { _, _ in synchronizeLocalClock() }
         .onChange(of: tool.startedAt) { _, _ in synchronizeLocalClock() }
         .onChange(of: tool.isRunning) { _, _ in synchronizeLocalClock() }
+        .onChange(of: tool.completedAt) { _, _ in synchronizeLocalClock() }
+        .onChange(of: tool.durationMs) { _, _ in synchronizeLocalClock() }
     }
 
     @ViewBuilder private func elapsed(at date: Date) -> some View {
@@ -441,7 +456,9 @@ private struct ToolElapsedText: View {
     }
 
     private func milliseconds(at date: Date) -> Int? {
-        guard needsLocalClock, let localClock else {
+        guard needsLocalClock,
+              clockKey == ToolElapsedClockKey(tool),
+              let localClock else {
             return tool.elapsedMilliseconds(at: date)
         }
         return localClock.milliseconds(at: ProcessInfo.processInfo.systemUptime)
@@ -457,13 +474,14 @@ private struct ToolElapsedText: View {
             baselineMilliseconds: baseline,
             baselineUptime: ProcessInfo.processInfo.systemUptime
         )
+        clockKey = ToolElapsedClockKey(tool)
     }
 }
 
 private struct ToolRunElapsedText: View {
     let run: ChatToolRunPresentation
     let color: Color
-    @State private var localClocks: [String: ToolElapsedClock] = [:]
+    @State private var localClocks: [ToolElapsedClockKey: ToolElapsedClock] = [:]
 
     private var needsLocalClocks: Bool {
         run.tools.contains { $0.isRunning && $0.durationMs == nil }
@@ -498,7 +516,7 @@ private struct ToolRunElapsedText: View {
         let uptime = ProcessInfo.processInfo.systemUptime
         let values = run.tools.compactMap { tool -> Int? in
             guard tool.isRunning, tool.durationMs == nil,
-                  let localClock = localClocks[tool.id] else {
+                  let localClock = localClocks[ToolElapsedClockKey(tool)] else {
                 return tool.elapsedMilliseconds(at: date)
             }
             return localClock.milliseconds(at: uptime)
@@ -513,16 +531,17 @@ private struct ToolRunElapsedText: View {
         let uptime = ProcessInfo.processInfo.systemUptime
         let now = Date.now
         var updated = localClocks
-        let liveIDs = Set(run.tools.map(\.id))
-        updated = updated.filter { liveIDs.contains($0.key) }
+        let liveKeys = Set(run.tools.map(ToolElapsedClockKey.init))
+        updated = updated.filter { liveKeys.contains($0.key) }
         for tool in run.tools {
+            let key = ToolElapsedClockKey(tool)
             guard tool.isRunning && tool.durationMs == nil else {
-                updated.removeValue(forKey: tool.id)
+                updated.removeValue(forKey: key)
                 continue
             }
-            guard updated[tool.id] == nil,
+            guard updated[key] == nil,
                   let baseline = tool.elapsedMilliseconds(at: now) else { continue }
-            updated[tool.id] = ToolElapsedClock(
+            updated[key] = ToolElapsedClock(
                 baselineMilliseconds: baseline,
                 baselineUptime: uptime
             )

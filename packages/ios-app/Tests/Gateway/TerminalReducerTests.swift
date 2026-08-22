@@ -217,6 +217,50 @@ struct TerminalReducerTests {
         #expect(exhaustedAttempt == nil)
     }
 
+    @Test("out-of-order shared-owner replay rejects stale install without suppressing current output")
+    func staleSharedOwnerReplayIsRejected() throws {
+        var coordinator = TerminalReducer()
+        let target = coordinator.beginPresentation(sessionID: "session")
+        let transition = coordinator.beginIntent(for: target)
+        let intent = try #require(transition?.intent)
+        let olderLease = coordinator.beginAttachment(terminalID: "terminal", intent: intent, connectionID: 1)
+        let older = try #require(olderLease)
+        let newerLease = coordinator.beginAttachment(terminalID: "terminal", intent: intent, connectionID: 2)
+        let newer = try #require(newerLease)
+        let currentInstallation = coordinator.installReplay(
+            [TerminalChunk(sequence: 1, data: "current")], terminal: terminal(sequence: 1),
+            reset: true, after: 0, lease: newer
+        )
+        #expect(currentInstallation != nil)
+        #expect(coordinator.installReplay(
+            [TerminalChunk(sequence: 1, data: "stale")], terminal: terminal(sequence: 1),
+            reset: true, after: 0, lease: older
+        ) == nil)
+        #expect(coordinator.replay(for: "terminal").chunks == [TerminalChunk(sequence: 1, data: "current")])
+        #expect(coordinator.admitOutput(terminalID: "terminal", sequence: 2, data: "live", connectionID: 2) == .appended)
+        #expect(coordinator.replay(for: "terminal").chunks.last?.data == "live")
+    }
+
+    @Test("authoritative inventory prunes replay and terminal evidence")
+    func authoritativeInventoryPrunesProjections() throws {
+        var coordinator = TerminalReducer()
+        let target = coordinator.beginPresentation(sessionID: "session")
+        let transition = coordinator.beginIntent(for: target)
+        let intent = try #require(transition?.intent)
+        let pendingLease = coordinator.beginAttachment(terminalID: "terminal", intent: intent, connectionID: 17)
+        let lease = try #require(pendingLease)
+        _ = coordinator.installReplay(
+            [TerminalChunk(sequence: 1, data: "one")], terminal: terminal(sequence: 1),
+            reset: true, after: 0, lease: lease
+        )
+        _ = coordinator.admitExit(terminalID: "terminal", sequence: 1, exitCode: 0,
+                                  exitedAt: "2026-01-01T00:00:03Z", connectionID: 17)
+        coordinator.installInventory([terminal(sequence: 1)], sessionID: "session")
+        coordinator.installInventory([], sessionID: "session")
+        #expect(coordinator.replay(for: "terminal") == .empty)
+        #expect(!coordinator.hasExited("terminal"))
+    }
+
     @Test("typed terminal events reduce through existing replay and recovery rules")
     func typedEventReduction() throws {
         var coordinator = TerminalReducer()

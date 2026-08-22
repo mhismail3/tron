@@ -49,6 +49,21 @@ struct SessionPresentationStoreTests {
         #expect(!ExtensionPresentationPolicy.admit(snapshot.extensionPresentation))
     }
 
+    @Test("full input leases require bounded identities and valid timestamps")
+    func inputLeaseAdmission() throws {
+        var snapshot = try SessionScenarioBuilder(seed: 8_812).openingTail(targetEncodedBytes: 4_096)
+        snapshot.extensionPresentation.inputLease = .init(
+            id: "", connectionId: "connection", surfaceId: "surface",
+            surfaceRevision: 1, acquiredAt: "2026-01-01T00:00:00Z"
+        )
+        #expect(!ExtensionPresentationPolicy.admit(snapshot.extensionPresentation))
+        snapshot.extensionPresentation.inputLease = .init(
+            id: "lease", connectionId: "connection", surfaceId: "surface",
+            surfaceRevision: 1, acquiredAt: "not-a-time"
+        )
+        #expect(!ExtensionPresentationPolicy.admit(snapshot.extensionPresentation))
+    }
+
     @Test("multiline editor, paste, and interaction projections remain admitted")
     func multilineExtensionPresentationValues() throws {
         var snapshot = try SessionScenarioBuilder(seed: 8_811).openingTail(targetEncodedBytes: 4_096)
@@ -887,7 +902,11 @@ struct SessionPresentationStoreTests {
             ])))
 
             try await socket.waitUntilSent(count: 3)
+            store.revokeIntake(oldTarget)
             await store.close(oldTarget)
+            // The close belongs to the superseded owner and must not release
+            // its revocation while the replacement remains pending.
+            #expect(!store.owns(oldTarget))
             frame = await socket.sentFrames()[2]
             request = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
             id = try #require(request.objectValue?["id"]?.stringValue)

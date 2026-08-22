@@ -96,6 +96,67 @@ struct GatewayProfileStoreTests {
         #expect(throws: GatewayProfileStoreError.self) { try store.setEnabled(false, for: second) }
     }
 
+    @Test("transient load failures are observable and never overwrite storage")
+    func loadFailureDoesNotInventEmptyStore() {
+        let metadata = RecordingProfileMetadata(document: nil)
+        metadata.failLoad = true
+        let store = GatewayProfileStore(metadata: metadata, tokens: RecordingTokenStore())
+        #expect(store.loadError != nil)
+        #expect(store.profiles.isEmpty)
+        #expect(metadata.saveCount == 0)
+        #expect(throws: ProfileStorageProbeError.self) { try store.refresh() }
+        #expect(metadata.saveCount == 0)
+    }
+
+    @Test("load failures reject every mutation until a reload succeeds")
+    func loadFailureBlocksMutationsUntilRecovery() throws {
+        let first = profile(id: "first", label: "First")
+        let second = profile(id: "second", label: "Second")
+        let replacement = profile(id: "replacement", label: "Replacement")
+        let original = GatewayProfileDocument(profiles: [first, second], selectedProfileID: first.id)
+        let metadata = RecordingProfileMetadata(document: original)
+        metadata.failLoad = true
+        let tokens = RecordingTokenStore(values: [first.id: "first-token", second.id: "second-token"])
+        let store = GatewayProfileStore(metadata: metadata, tokens: tokens)
+
+        #expect(throws: GatewayProfileStoreError.self) {
+            try store.save(replacement, token: "replacement-token")
+        }
+        #expect(throws: GatewayProfileStoreError.self) { try store.update(first) }
+        #expect(throws: GatewayProfileStoreError.self) { try store.remove(first) }
+        #expect(throws: GatewayProfileStoreError.self) { try store.select(second) }
+        #expect(throws: GatewayProfileStoreError.self) { try store.setEnabled(false, for: second) }
+        #expect(metadata.saveCount == 0)
+        #expect(metadata.document == original)
+        #expect(tokens.values == [first.id: "first-token", second.id: "second-token"])
+
+        metadata.failLoad = false
+        try store.reload()
+        #expect(store.loadError == nil)
+        #expect(store.profiles == [first, second])
+        try store.select(second)
+        var updatedFirst = first
+        updatedFirst.label = "Updated"
+        try store.update(updatedFirst)
+        try store.remove(second)
+        try store.save(replacement, token: "replacement-token", selecting: false)
+        #expect(store.profiles.map(\.id) == [first.id, replacement.id])
+        #expect(store.selected?.id == first.id)
+        #expect(tokens.values[replacement.id] == "replacement-token")
+    }
+
+    @Test("getters read one sanitized cache without write-on-read")
+    func gettersDoNotReloadOrPersist() {
+        let first = profile(id: "first", label: "First")
+        let metadata = RecordingProfileMetadata(document: .init(profiles: [first], selectedProfileID: first.id))
+        let store = GatewayProfileStore(metadata: metadata, tokens: RecordingTokenStore())
+        _ = store.profiles
+        _ = store.selected
+        _ = store.profiles
+        #expect(metadata.loadCount == 1)
+        #expect(metadata.saveCount == 0)
+    }
+
     @Test("successful replacement commits one selected document and token")
     func successfulReplacement() throws {
         let first = profile(id: "first", label: "First")
@@ -246,7 +307,7 @@ struct GatewayProfileStoreTests {
         await model.teardown()
     }
 
-    @Test("corrupt documents self-clean and valid legacy metadata migrates on write")
+    @Test("corrupt documents remain observable while valid legacy metadata migrates")
     func corruptDocumentMigration() throws {
         let suite = "GatewayProfileStoreTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -257,6 +318,10 @@ struct GatewayProfileStoreTests {
         defaults.set(legacy.id, forKey: "selectedGateway.v1")
         let metadata = UserDefaultsGatewayProfileMetadataStore(defaults: defaults)
 
+        #expect(throws: DecodingError.self) { try metadata.load() }
+        #expect(defaults.data(forKey: "gatewayProfiles.v2") == Data("corrupt".utf8))
+
+        defaults.removeObject(forKey: "gatewayProfiles.v2")
         #expect(try metadata.load() == GatewayProfileDocument(profiles: [legacy], selectedProfileID: legacy.id))
         try metadata.save(.init(profiles: [legacy], selectedProfileID: legacy.id))
         #expect(defaults.data(forKey: "gatewayProfiles.v2") != nil)
@@ -302,11 +367,17 @@ private enum ProfileStorageProbeError: Error { case failed }
 private final class RecordingProfileMetadata: GatewayProfileMetadataStoring {
     var document: GatewayProfileDocument?
     var failSaveCalls: Set<Int> = []
+    var failLoad = false
     private(set) var saveCount = 0
+    private(set) var loadCount = 0
 
     init(document: GatewayProfileDocument?) { self.document = document }
 
-    func load() throws -> GatewayProfileDocument? { document }
+    func load() throws -> GatewayProfileDocument? {
+        loadCount += 1
+        if failLoad { throw ProfileStorageProbeError.failed }
+        return document
+    }
 
     func save(_ document: GatewayProfileDocument) throws {
         saveCount += 1

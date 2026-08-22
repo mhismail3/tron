@@ -13,8 +13,8 @@ struct StreamingTextRevealTests {
 
     @Test("large initial and live backlogs catch up instead of lagging authoritative text")
     func backlogCatchesUp() {
-        #expect(!ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: 1, initialTokenCount: 3))
-        #expect(ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: 1, initialTokenCount: 13))
+        #expect(!ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: 1))
+        #expect(!ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: 18))
         #expect(!ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: 18))
         #expect(ChatStreamingTextRevealPolicy.shouldCatchUp(pendingTokenCount: 19))
     }

@@ -153,6 +153,62 @@ struct GatewayProtocolContractTests {
         #expect(throws: DecodingError.self) { try decode(conflictingCount) }
     }
 
+    @Test("typed and JSONValue adapters have parity across prepared topics")
+    func preparedTopicParityMatrix() throws {
+        let topics = [
+            "session.summary", "session.snapshot", "session.rebaseline", "session.progress",
+            "session.toolProgress", "session.extensionActivity", "session.extensionPresentation",
+            "terminal.output", "terminal.exit"
+        ]
+        for topic in topics {
+            let payload: JSONValue = .object(["malformed": .bool(true)])
+            let synthetic = GatewayEvent(type: "event", topic: topic, sessionId: "session", payload: payload)
+            let frame: JSONValue = .object([
+                "type": .string("event"), "topic": .string(topic), "sessionId": .string("session"),
+                "payload": payload
+            ])
+            let network = try JSONDecoder.gateway.decode(
+                GatewayInboundFrame.self,
+                from: try JSONEncoder.gateway.encode(frame)
+            )
+            guard case .event(let decoded) = network else {
+                Issue.record("event frame did not decode for \\(topic)")
+                continue
+            }
+            #expect(decoded.preparation == synthetic.preparation, "adapter parity for \\(topic)")
+        }
+    }
+
+    @Test("input lease decoding preserves omitted, null, value, and malformed states")
+    func inputLeaseTriState() throws {
+        func decode(_ lease: String?) throws -> ExtensionPresentationMutation {
+            let suffix = lease.map { ",\"inputLease\":\($0)" } ?? ""
+            return try JSONDecoder.gateway.decode(
+                ExtensionPresentationMutation.self,
+                from: Data("{\"version\":2,\"hostEpoch\":\"host\",\"revision\":1\(suffix)}".utf8)
+            )
+        }
+        let absent = try decode(nil)
+        #expect(!absent.inputLeasePresent)
+        #expect(absent.inputLease == nil)
+        let cleared = try decode("null")
+        #expect(cleared.inputLeasePresent)
+        #expect(cleared.inputLease == .null)
+        let value = try decode("{\"id\":\"lease\"}")
+        #expect(value.inputLeasePresent)
+        #expect(value.inputLease?.objectValue?["id"] == .string("lease"))
+        #expect(throws: DecodingError.self) { try decode("[") }
+
+        func policy(_ lease: String) throws -> ExtensionPresentationMutation {
+            let data = Data("{\"version\":2,\"hostEpoch\":\"host\",\"revision\":1,\"inputLease\":\(lease)}".utf8)
+            return try JSONDecoder.gateway.decode(ExtensionPresentationMutation.self, from: data)
+        }
+        #expect(ExtensionPresentationPolicy.admit(try policy("null")))
+        #expect(!ExtensionPresentationPolicy.admit(try policy(#"{"id":"","connectionId":"connection","surfaceId":"surface","surfaceRevision":1,"acquiredAt":"2026-01-01T00:00:00Z"}"#)))
+        #expect(!ExtensionPresentationPolicy.admit(try policy(#"{"id":"lease","connectionId":"connection","surfaceId":"surface","surfaceRevision":0,"acquiredAt":"2026-01-01T00:00:00Z"}"#)))
+        #expect(!ExtensionPresentationPolicy.admit(try policy(#"{"id":"lease","connectionId":"connection","surfaceId":"surface","surfaceRevision":1,"acquiredAt":"not-a-time"}"#)))
+    }
+
     @Test("dashboard summary update carries a monotonic revision")
     func summaryUpdateDecodes() throws {
         let data = Data(#"{"sessionId":"session-1","summaryRevision":7,"phase":"running","updatedAt":"2026-01-01T00:00:01Z","messageCount":2,"firstMessage":"hello"}"#.utf8)
