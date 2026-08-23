@@ -2155,13 +2155,9 @@ struct ChatView: View {
             }
             .frame(minHeight: 40)
 
-            if let snapshot = selectedAuthoritativeSnapshot {
-                SessionContextProgressButton(
-                    contextPercentage: contextPercentage(snapshot),
-                    modelName: snapshot.model?.displayDescription,
-                    isCompacting: snapshot.phase == .compacting
-                ) { showContext = true }
-            }
+            SessionContextProgressButton(
+                presentation: contextProgressPresentation
+            ) { showContext = true }
 
             if let composerTrailingMode {
                 ComposerTrailingButton(
@@ -2270,6 +2266,16 @@ struct ChatView: View {
             hasContent: !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !pendingAttachments.isEmpty,
             isSending: sending
+        )
+    }
+
+    private var contextProgressPresentation: SessionContextProgressPresentation {
+        let snapshot = selectedAuthoritativeSnapshot
+        return SessionContextProgressPolicy.presentation(
+            isTranscriptReady: isTranscriptReady && snapshot != nil,
+            contextPercentage: snapshot.map(contextPercentage),
+            modelName: snapshot?.model?.displayDescription,
+            isCompacting: snapshot?.phase == .compacting
         )
     }
 

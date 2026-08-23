@@ -55,6 +55,41 @@ struct MultilineComposerTextViewTests {
         #expect(coordinator.clampedSelection(selection, text: text) == selection)
     }
 
+    @Test("context ring mounts disabled at zero and enables with canonical progress")
+    func contextProgressReadiness() {
+        let loading = SessionContextProgressPolicy.presentation(
+            isTranscriptReady: false,
+            contextPercentage: 68,
+            modelName: "Model",
+            isCompacting: true
+        )
+        #expect(loading == SessionContextProgressPresentation(
+            contextPercentage: 0,
+            modelName: nil,
+            isCompacting: false,
+            isEnabled: false
+        ))
+        #expect(!SessionContextProgressPolicy.presentation(
+            isTranscriptReady: true,
+            contextPercentage: nil,
+            modelName: nil,
+            isCompacting: false
+        ).isEnabled)
+
+        let ready = SessionContextProgressPolicy.presentation(
+            isTranscriptReady: true,
+            contextPercentage: 68,
+            modelName: "Model",
+            isCompacting: true
+        )
+        #expect(ready == SessionContextProgressPresentation(
+            contextPercentage: 68,
+            modelName: "Model",
+            isCompacting: true,
+            isEnabled: true
+        ))
+    }
+
     @Test("active chats keep text entry available for steering")
     func activeChatComposerPolicy() {
         for phase in [SessionPhase.running, .compacting, .retrying] {

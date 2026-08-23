@@ -575,8 +575,7 @@ scrolling. Confirmation checkpoints verify grey cancellation text, a short trail
 toolbar action, and a sentence-length action in the Liquid Glass container below
 content at both default and accessibility Dynamic Type sizes. Dashboard deletion additionally swipes, cancels, and repeats against the same canonical row; the row must remain mounted until confirmation and no delete request may be sent on cancellation. A confirmed mutation response or replayed completion receipt removes the selected projection immediately, and the authoritative catalog event converges every connected dashboard without view-local row suppression or navigating away and back. Chat checkpoints must also verify
 trailing alignment for user turns, historical transcript/tool insertion motion,
-the Settings gear in the chat toolbar, the context ring at the trailing edge of
-an empty idle composer, the nonstructural short bottom blur at default running state, its background-layer
+the Settings gear in the chat toolbar, and the context ring at the trailing edge of an empty idle composer. Resume a cold session and verify that the ring is mounted immediately at zero, visibly disabled while loading, then animates once to the authoritative percentage without changing in-bar geometry; Reduce Motion must update it without the spring. Also verify the nonstructural short bottom blur at default running state, its background-layer
 movement between the device-bottom inset and beneath the keyboard's rounded top corners, static subtle emerald under Reduce Motion,
 retained compact rows for custom/compaction/retry detail, and emerald toolbar/sheet actions. Physical chat spacing acceptance additionally checks that
 a one-visual-line prompt has intrinsic height, sent photo/file chips stay above and outside prompt glass,

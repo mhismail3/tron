@@ -292,14 +292,48 @@ enum ComposerControlMetrics {
     static let contextRingDiameter: CGFloat = 16
 }
 
-/// Historical session-owned context indicator. Its value is projected from the
-/// canonical snapshot and tapping it opens Manage Session; it owns no runtime
-/// state or mutation path.
-struct SessionContextProgressButton: View {
+struct SessionContextProgressPresentation: Equatable {
     let contextPercentage: Int
     let modelName: String?
     let isCompacting: Bool
+    let isEnabled: Bool
+}
+
+enum SessionContextProgressPolicy {
+    static func presentation(
+        isTranscriptReady: Bool,
+        contextPercentage: Int?,
+        modelName: String?,
+        isCompacting: Bool
+    ) -> SessionContextProgressPresentation {
+        guard isTranscriptReady, let contextPercentage else {
+            return SessionContextProgressPresentation(
+                contextPercentage: 0,
+                modelName: nil,
+                isCompacting: false,
+                isEnabled: false
+            )
+        }
+        return SessionContextProgressPresentation(
+            contextPercentage: contextPercentage,
+            modelName: modelName,
+            isCompacting: isCompacting,
+            isEnabled: true
+        )
+    }
+}
+
+/// Historical session-owned context indicator. It remains mounted at zero
+/// while the authoritative chat opens, then animates to the canonical value.
+/// Tapping it opens Manage Session; it owns no runtime state or mutation path.
+struct SessionContextProgressButton: View {
+    let presentation: SessionContextProgressPresentation
     let onTap: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var contextPercentage: Int { presentation.contextPercentage }
+    private var modelName: String? { presentation.modelName }
+    private var isCompacting: Bool { presentation.isCompacting }
 
     private var boundedPercentage: Int { min(max(contextPercentage, 0), 100) }
     private var fraction: Double { Double(boundedPercentage) / 100 }
@@ -335,14 +369,20 @@ struct SessionContextProgressButton: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .disabled(!presentation.isEnabled)
+        .opacity(presentation.isEnabled ? 1 : 0.56)
         .accessibilityIdentifier("session-context-button")
         .accessibilityLabel("Manage Session")
         .accessibilityValue(accessibilityValue)
         .accessibilityHint("Shows context usage, model selection, and session actions")
-        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: fraction)
+        .animation(
+            reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8),
+            value: fraction
+        )
     }
 
     private var accessibilityValue: String {
+        guard presentation.isEnabled else { return "Session context loading" }
         var values = modelName.map { [$0] } ?? []
         values.append("\(boundedPercentage)% context used")
         if isCompacting { values.append("compacting") }

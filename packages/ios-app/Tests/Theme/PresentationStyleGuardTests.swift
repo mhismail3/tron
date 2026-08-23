@@ -400,9 +400,17 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
             encoding: .utf8
         )
+        let controls = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
+            encoding: .utf8
+        )
         #expect(chat.contains("Image(systemName: \"gearshape\")"))
         #expect(chat.contains(".accessibilityLabel(\"Settings\")"))
         #expect(chat.contains("SessionContextProgressButton("))
+        #expect(!chat.contains("if let snapshot = selectedAuthoritativeSnapshot {\n                SessionContextProgressButton("))
+        #expect(controls.contains(".disabled(!presentation.isEnabled)"))
+        #expect(controls.contains("reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.8)"))
+        #expect(controls.contains("Session context loading"))
         #expect(chat.contains("foregroundStyle(Color.tronEmerald)"))
         #expect(!chat.contains("slider.horizontal.3"))
     }

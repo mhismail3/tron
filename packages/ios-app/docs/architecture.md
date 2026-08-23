@@ -784,9 +784,7 @@ preventing compressed dimensions from forcing an unbounded eager allocation. Eac
 dismissal cancels the underlying flight only after its final lease retires, so full-preview lifetime remains sheet-owned. One gateway runtime is the sole mutable
 owner of a canonical session; terminal and mobile chat clients must attach to
 that owner rather than opening the same JSONL in separate Pi processes. Its
-historical context ring projects the
-canonical context percentage and opens Manage Session at the composer's trailing
-edge whenever no Send or Stop action is needed. Attachment, context, and send/stop controls share one
+historical context ring remains mounted at zero from the first composer frame while a resumed chat opens. It is visibly muted, disabled, and exposes a loading accessibility value until the exact authoritative transcript is ready; it then springs from zero to the canonical context percentage (or updates without motion under Reduce Motion) and opens Manage Session at the composer's trailing edge. Attachment, context, and send/stop controls share one
 40-point target and 16-point visual metric, keeping their in-bar geometry stable as modes change. When a draft adds Send, the action
 scales and fades in at its final in-bar position while the context ring springs left;
 Reduce Motion uses a short fade.
