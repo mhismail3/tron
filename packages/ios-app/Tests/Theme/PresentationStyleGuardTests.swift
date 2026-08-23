@@ -193,7 +193,7 @@ struct PresentationStyleGuardTests {
         #expect(presentation.contains("ToolbarItem(placement: .topBarTrailing)"))
         #expect(presentation.contains("if placement == .toolbar"))
         #expect(presentation.contains("if placement == .content"))
-        #expect(presentation.contains(".tronToolbarAction(accent: .tronError)"))
+        #expect(presentation.contains(".tronToolbarAction(accent: .tronTextSecondary)"))
         #expect(presentation.contains("TronActionButtonStyle(role: destructive ? .destructive : .primary)"))
 
         for (url, source) in uiSources {
@@ -215,6 +215,26 @@ struct PresentationStyleGuardTests {
                 )
             }
         }
+    }
+
+    @Test("dashboard deletion waits for confirmation without destructive swipe removal")
+    func dashboardDeletionConfirmationPolicy() throws {
+        let source = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
+            encoding: .utf8
+        )
+        let presentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Theme/TronPresentation.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains(#"confirmTitle: "Delete""#))
+        #expect(source.contains(#"Button("Delete", systemImage: "trash") { sessionToDelete = session }"#))
+        #expect(source.contains(#".accessibilityIdentifier("session-row-\(session.dashboardID)")"#))
+        #expect(source.contains(".tint(Color.tronError)"))
+        #expect(source.contains(#".accessibilityIdentifier("session-delete-action-\(session.dashboardID)")"#))
+        #expect(!source.contains(#"Button("Delete", systemImage: "trash", role: .destructive)"#))
+        #expect(presentation.contains(".tronToolbarAction(accent: .tronTextSecondary)\n                        .accessibilityIdentifier(\"confirmation-cancel\")"))
     }
 
     @Test("confirmation actions use adaptive toolbar placement")

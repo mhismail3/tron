@@ -87,6 +87,7 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         sleep(2)
         app.launchArguments = ["-tronSetupComplete.v1", "YES", "-ApplePersistenceIgnoreState", "YES"]
         app.launch()
+        assertDashboardDeleteCanCancelAndRepeat(app, sessionTitle: "New session")
         let reconnectedInput = reopenSessionAfterColdLaunch(
             app,
             sessionTitle: "New session"
@@ -372,6 +373,69 @@ final class TronGatewayEndToEndUITests: XCTestCase {
         photoCancel.tap()
         XCTAssertTrue(addAttachment.waitForExistence(timeout: 5), file: file, line: line)
         XCTAssertEqual(focusedInput.value as? String, expectedText, file: file, line: line)
+    }
+
+    @MainActor
+    private func assertDashboardDeleteCanCancelAndRepeat(
+        _ app: XCUIApplication,
+        sessionTitle: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for attempt in 1...2 {
+            let session = app.buttons.matching(
+                NSPredicate(
+                    format: "label BEGINSWITH[c] %@ AND label !=[c] %@",
+                    sessionTitle,
+                    sessionTitle
+                )
+            ).firstMatch
+            XCTAssertTrue(
+                session.waitForExistence(timeout: 20),
+                "Delete cancellation attempt \(attempt) must keep the dashboard row",
+                file: file,
+                line: line
+            )
+
+            let rowIdentifierPrefix = "session-row-"
+            XCTAssertTrue(session.identifier.hasPrefix(rowIdentifierPrefix), file: file, line: line)
+            let dashboardID = String(session.identifier.dropFirst(rowIdentifierPrefix.count))
+            session.swipeLeft()
+            let delete = app.buttons["session-delete-action-\(dashboardID)"]
+            XCTAssertTrue(delete.waitForExistence(timeout: 3), file: file, line: line)
+            delete.tap()
+
+            let cancel = app.buttons["confirmation-cancel"]
+            XCTAssertTrue(
+                cancel.waitForExistence(timeout: 5),
+                "Delete cancellation attempt \(attempt) must present the confirmation sheet",
+                file: file,
+                line: line
+            )
+            XCTAssertEqual(cancel.label, "Cancel", file: file, line: line)
+            let primary = app.buttons["confirmation-primary-toolbar"]
+            XCTAssertTrue(primary.exists, file: file, line: line)
+            XCTAssertEqual(primary.label, "Delete", file: file, line: line)
+            cancel.tap()
+            XCTAssertTrue(
+                cancel.waitForNonExistence(timeout: 5),
+                "Delete cancellation attempt \(attempt) must finish dismissing before retry",
+                file: file,
+                line: line
+            )
+            XCTAssertTrue(primary.waitForNonExistence(timeout: 5), file: file, line: line)
+            let rowReady = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in session.exists && session.isHittable },
+                object: session
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [rowReady], timeout: 5),
+                .completed,
+                "Delete cancellation attempt \(attempt) must restore the same hittable row",
+                file: file,
+                line: line
+            )
+        }
     }
 
     @MainActor

@@ -722,7 +722,7 @@ struct TronConfirmationSheet: View {
                             dismiss()
                             onSecondary?()
                         }
-                        .tronToolbarAction(accent: .tronError)
+                        .tronToolbarAction(accent: .tronTextSecondary)
                         .accessibilityIdentifier("confirmation-cancel")
                     }
                     if placement == .toolbar {

@@ -572,9 +572,9 @@ between the simulator and physical hardware. Sheet checkpoints must fling-scroll
 Agent Context, Project Resources, Session History, Runtime Behavior, Providers,
 and model selection; dense rows must retain static tinted geometry without visible
 material churn. Open a large instructions/JSON document and verify immediate native
-scrolling. Confirmation checkpoints verify red cancellation text, a short trailing
+scrolling. Confirmation checkpoints verify grey cancellation text, a short trailing
 toolbar action, and a sentence-length action in the Liquid Glass container below
-content at both default and accessibility Dynamic Type sizes. Chat checkpoints must also verify
+content at both default and accessibility Dynamic Type sizes. Dashboard deletion additionally swipes, cancels, and repeats against the same canonical row; the row must remain mounted until confirmation and no delete request may be sent on cancellation. Chat checkpoints must also verify
 trailing alignment for user turns, historical transcript/tool insertion motion,
 the Settings gear in the chat toolbar, the context ring at the trailing edge of
 an empty idle composer, the nonstructural short bottom blur at default running state, its background-layer

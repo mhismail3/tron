@@ -77,7 +77,7 @@ struct SessionShellView: View {
             TronConfirmationSheet(
                 title: "Delete \(session.title)?",
                 message: "This removes the canonical session from the Mac and cannot be undone.",
-                confirmTitle: "Delete Session",
+                confirmTitle: "Delete",
                 destructive: true,
                 icon: "trash",
                 onConfirm: { delete(session) }
@@ -504,11 +504,14 @@ struct SessionShellView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("session-row-\(session.dashboardID)")
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .listRowInsets(SessionDashboardLayout.rowInsets)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button("Delete", systemImage: "trash", role: .destructive) { sessionToDelete = session }
+            Button("Delete", systemImage: "trash") { sessionToDelete = session }
+                .tint(Color.tronError)
+                .accessibilityIdentifier("session-delete-action-\(session.dashboardID)")
             Button("Rename", systemImage: "pencil") { beginRename(session) }
                 .tint(Color.tronPurple)
         }

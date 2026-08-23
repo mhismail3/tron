@@ -889,8 +889,12 @@ time at each row's trailing edge. Workspace headers and session cards share the
 same 28-point status-icon anchor: 16 points of outer row inset plus 12 points of
 card content padding. Selectable app-owned cards have one full-card
 hit region and no decorative disclosure chevron. Dashboard session rows never
-retain a selected tint; their trailing swipe actions rename or delete the exact
-swiped canonical session without changing navigation selection. Dashboard discovery and refresh never select or open a transcript and global Settings never
+retain a selected tint; their trailing swipe actions rename or request deletion of the exact
+swiped canonical session without changing navigation selection. The delete swipe
+uses a red tint but no destructive button role, so UIKit keeps the row mounted
+until the Tron confirmation sheet completes the canonical mutation. Cancelling
+can therefore close and reopen the flow without optimistic row removal or stale
+swipe state. Dashboard discovery and refresh never select or open a transcript and global Settings never
 infer project scope. Catalog loads are latest-generation-owned, and an asynchronous import may
 navigate only while its exact dashboard intent is still current. Reconnect restores only the
 still-mounted presentation; it never uses a dashboard row as a subscription fallback. The mounted chat route supplies an immutable
@@ -917,7 +921,7 @@ floating bottom safe-area bar immediately above the keyboard. The dashboard show
 user sessions, including ordinary user forks; classified subagent backing sessions remain hidden.
 Disposable caches from before session-kind classification are invalidated rather than briefly
 presenting backing-process sessions as user sessions. Modal detail flows dismiss
-with the native top-right check action. Shared confirmation sheets use a red
+with the native top-right check action. Shared confirmation sheets use a grey
 leading cancellation action; a short primary label remains in system-owned
 trailing toolbar glass, while a label that exceeds the measured toolbar budget,
 contains a line break, or appears at an accessibility Dynamic Type size moves to
