@@ -1,5 +1,15 @@
 import Foundation
 
+enum DashboardCatalogRetryPolicy {
+    nonisolated static func shouldRetry(
+        isDirty: Bool,
+        isCurrent: Bool,
+        transportFailed: Bool
+    ) -> Bool {
+        isDirty && isCurrent && !transportFailed
+    }
+}
+
 @MainActor
 protocol DashboardGatewayConnectionPoolDelegate: AnyObject {
     func dashboardPoolDidUpdate(
@@ -26,18 +36,24 @@ final class DashboardGatewayConnectionPool {
         var reconnectTask: Task<Void, Never>?
         var generation: Int
         var refreshInvalidationGeneration: Int
+        var refreshSatisfiedGeneration: Int
         var refreshRequestGeneration: Int
         var refreshRetryAttempt: Int
     }
 
     weak var delegate: (any DashboardGatewayConnectionPoolDelegate)?
     private let clientFactory: @MainActor () -> GatewayClient
+    private let clock: MonotonicClock
     private var entries: [String: Entry] = [:]
     private var generation = 0
     private var retirementTask: Task<Void, Never>?
 
-    init(clientFactory: @escaping @MainActor () -> GatewayClient = { GatewayClient() }) {
+    init(
+        clientFactory: @escaping @MainActor () -> GatewayClient = { GatewayClient() },
+        clock: MonotonicClock = .continuous
+    ) {
         self.clientFactory = clientFactory
+        self.clock = clock
     }
 
     func reconcile(
@@ -171,6 +187,7 @@ final class DashboardGatewayConnectionPool {
             reconnectTask: nil,
             generation: generation,
             refreshInvalidationGeneration: 0,
+            refreshSatisfiedGeneration: 0,
             refreshRequestGeneration: 0,
             refreshRetryAttempt: 0
         )
@@ -296,10 +313,11 @@ final class DashboardGatewayConnectionPool {
             entries[profileID]?.reconnectTask = nil
         }
         guard entries[profileID]?.reconnectTask == nil else { return }
-        let task = Task { @MainActor [weak self] in
+        let clock = self.clock
+        let task = Task { @MainActor [weak self, clock] in
             var delay: Duration = immediate ? .zero : .seconds(2)
             while !Task.isCancelled {
-                if delay > .zero { try? await Task.sleep(for: delay) }
+                if delay > .zero { try? await clock.sleep(delay) }
                 guard !Task.isCancelled, let self,
                       let entry = self.entries[profileID],
                       entry.generation == generation else { return }
@@ -369,8 +387,9 @@ final class DashboardGatewayConnectionPool {
         entry.refreshRequestGeneration &+= 1
         let requestGeneration = entry.refreshRequestGeneration
         let task = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: delay) } catch { return }
-            guard !Task.isCancelled, let self else { return }
+            guard let self else { return }
+            do { try await self.clock.sleep(delay) } catch { return }
+            guard !Task.isCancelled else { return }
             let result = await self.runRefreshLease(
                 profileID: profileID,
                 generation: generation,
@@ -383,11 +402,15 @@ final class DashboardGatewayConnectionPool {
                   current.refreshRequestGeneration == requestGeneration else { return }
             current.refreshTask = nil
             self.entries[profileID] = current
+            let remainsDirty = current.refreshSatisfiedGeneration < current.refreshInvalidationGeneration
             if result.needsImmediateFollowUp {
                 self.startRefreshLease(profileID: profileID, generation: generation, delay: .zero)
-            } else if result.outcome == .retryRead,
-                      current.refreshRetryAttempt < Self.maximumRefreshRetryAttempts {
-                current.refreshRetryAttempt += 1
+            } else if DashboardCatalogRetryPolicy.shouldRetry(
+                isDirty: remainsDirty,
+                isCurrent: true,
+                transportFailed: result.outcome == .transportFailure
+            ) {
+                current.refreshRetryAttempt = min(3, current.refreshRetryAttempt + 1)
                 self.entries[profileID] = current
                 self.startRefreshLease(
                     profileID: profileID,
@@ -425,6 +448,13 @@ final class DashboardGatewayConnectionPool {
                 requestGeneration: requestGeneration
             ) else {
                 return RefreshLeaseResult(outcome: .retained, needsImmediateFollowUp: false)
+            }
+            if outcome == .published, var satisfied = entries[profileID] {
+                satisfied.refreshSatisfiedGeneration = max(
+                    satisfied.refreshSatisfiedGeneration,
+                    observedInvalidation
+                )
+                entries[profileID] = satisfied
             }
             if outcome == .transportFailure || outcome == .retryRead {
                 return RefreshLeaseResult(outcome: outcome, needsImmediateFollowUp: false)
@@ -479,7 +509,8 @@ final class DashboardGatewayConnectionPool {
                     requestedContinuation = cursor != nil
                     let response: Response = try await seed.client.request(
                         "session.list",
-                        Params(cursor: cursor, limit: 500, scope: "user")
+                        Params(cursor: cursor, limit: 500, scope: "user"),
+                        timeout: .seconds(10)
                     )
                     guard admitsRefresh(
                         profileID: profileID,
@@ -616,10 +647,8 @@ final class DashboardGatewayConnectionPool {
         publish(profileID: profileID)
     }
 
-    private static let maximumRefreshRetryAttempts = 3
-
     private static func refreshRetryDelay(attempt: Int) -> Duration {
-        .seconds(min(8, 1 << max(1, attempt)))
+        .seconds(min(8, 1 << min(3, max(1, attempt))))
     }
 
     private static func invalidDashboardCatalog(_ message: String) -> GatewayFailure {

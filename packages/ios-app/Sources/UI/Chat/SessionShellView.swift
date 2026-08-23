@@ -25,19 +25,6 @@ struct SessionShellProfileRouteOwner {
     }
 }
 
-struct SessionShellDeletionConfirmationOwner {
-    private var confirmedSession: SessionSummary?
-
-    mutating func confirm(_ session: SessionSummary) {
-        confirmedSession = session
-    }
-
-    mutating func consumeAfterDismissal() -> SessionSummary? {
-        defer { confirmedSession = nil }
-        return confirmedSession
-    }
-}
-
 struct SessionShellView: View {
     @Environment(AppModel.self) private var model
     @State private var showNewSession = false
@@ -47,8 +34,6 @@ struct SessionShellView: View {
     @State private var showingSearch = false
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
-    @State private var deletionConfirmationOwner = SessionShellDeletionConfirmationOwner()
-    @State private var confirmedDeletedDashboardIDs: Set<String> = []
     @State private var sessionToRename: SessionSummary?
     @State private var renameName = ""
     @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
@@ -88,14 +73,14 @@ struct SessionShellView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.hidden)
         }
-        .sheet(item: $sessionToDelete, onDismiss: finishConfirmedSessionDeletion) { session in
+        .sheet(item: $sessionToDelete) { session in
             TronConfirmationSheet(
                 title: "Delete \(session.title)?",
                 message: "This removes the canonical session from the Mac and cannot be undone.",
                 confirmTitle: "Delete",
                 destructive: true,
                 icon: "trash",
-                onConfirm: { deletionConfirmationOwner.confirm(session) }
+                onConfirm: { delete(session) }
             )
         }
         .alert("Rename Session", isPresented: renameConfirmationPresented, presenting: sessionToRename) { session in
@@ -118,7 +103,7 @@ struct SessionShellView: View {
                 presentedSession = route
             }
         }
-        .onChange(of: displayedSessions, initial: true) { _, sessions in
+        .onChange(of: model.visibleSessions, initial: true) { _, sessions in
             let groups = SessionListWorkspaceGroup.groups(from: sessions)
             sessionExpansion.reconcile(
                 groupCounts: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.sessions.count) })
@@ -403,17 +388,11 @@ struct SessionShellView: View {
         }
     }
 
-    private func finishConfirmedSessionDeletion() {
-        guard let session = deletionConfirmationOwner.consumeAfterDismissal() else { return }
+    private func delete(_ session: SessionSummary) {
         Task {
-            do {
-                try await model.performOnOwningGateway(session) {
-                    try await model.deleteSession(session.id)
-                }
-                confirmedDeletedDashboardIDs.insert(session.dashboardID)
-            } catch {
-                model.lastError = error.localizedDescription
-            }
+            do { try await model.performOnOwningGateway(session) { try await model.deleteSession(session.id) } }
+            catch { model.lastError = error.localizedDescription }
+            sessionToDelete = nil
         }
     }
 
@@ -616,12 +595,8 @@ struct SessionShellView: View {
         .accessibilityHint(isExpanded ? "Double tap to hide sessions" : "Double tap to show sessions")
     }
 
-    private var displayedSessions: [SessionSummary] {
-        model.visibleSessions.filter { !confirmedDeletedDashboardIDs.contains($0.dashboardID) }
-    }
-
     private var filteredSessions: [SessionSummary] {
-        displayedSessions.filter { session in
+        model.visibleSessions.filter { session in
             serverFilter.allows(session.gatewayProfileID)
                 && (search.isEmpty
                     || session.title.localizedCaseInsensitiveContains(search)

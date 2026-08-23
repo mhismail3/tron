@@ -103,7 +103,10 @@ cannot expose stale rows or leave controls stuck. Successful session creation st
 catalog reconciliation without delaying chat navigation. The Gateway projects a newly created empty row
 while it owns that live runtime slot; if Pi has not persisted content, the disposable row may disappear
 after Gateway restart or idle slot retirement. Initial connection, structural and summary events,
-reconnect, creation, and deletion own dashboard convergence without a manual refresh surface.
+reconnect, creation, and deletion own dashboard convergence without a manual refresh surface. Focused and
+secondary profile owners retain an unsatisfied structural generation across responsive list failures and retry with
+a capped delay until a complete authoritative publication; epoch retirement, backgrounding, and profile removal
+cancel that lease rather than turning it into polling.
 Cache/disconnect/authoritative installs and removals all
 enter that one disposable projection; hidden/local selection policy remains outside it and cannot mount a chat. Cached or stale non-idle rows present as resuming without rewriting
 the canonical phase; only a live Gateway-authoritative interrupted phase uses the amber warning.
@@ -564,10 +567,10 @@ phase, forcing a current geometry replay when the state advances to positioning 
 unchanged; opening-time samples still never admit ordinary follow or detachment policy. At most one bounded
 second exact-ID submission is allowed when SwiftUI consumes the first against provisional lazy layout; later writes require new
 layout evidence. Exact-ID realization does not require a native geometry sample. If physical proof still disappears,
-a five-second deadline retains the bounded exact-ID binding and reveals the authoritative transcript best-effort
+a 750-millisecond deadline retains the bounded exact-ID binding and reveals the authoritative transcript best-effort
 rather than converting a presentation-only callback failure into an unavailable conversation. Undersized content remains top aligned. The opening surface then fades away
 while the binding remains owned through animation completion and two stable presented frames, preventing later
-lazy content-size correction from exposing empty space. An empty timeline takes an explicit no-transcript path,
+lazy content-size correction from exposing empty space. A best-effort timeout releases after those two frames even if SwiftUI never supplies later geometry, so it cannot leave a display-link loop or permanent binding behind. An empty timeline takes an explicit no-transcript path,
 while any direct/native/accessibility interaction cancels the pending target permanently. Automatic streaming growth is
 latest-sample-wins behind one injected display-frame wait, emits at most one tail
 command per presented frame, and emits none inside the practical bottom boundary.
@@ -892,12 +895,12 @@ hit region and no decorative disclosure chevron. Dashboard session rows never
 retain a selected tint; their trailing swipe actions rename or request deletion of the exact
 swiped canonical session without changing navigation selection. The delete swipe
 uses a red tint but no destructive button role, so UIKit keeps the row mounted
-through confirmation. A confirmed intent is consumed only by the sheet's
-post-dismissal callback; the canonical mutation and resulting List removal never
-race the modal transition. A successful mutation records that exact dashboard ID
-in presentation state, so the row is suppressed immediately even if SwiftUI keeps
-a stale native List cell mounted until a later navigation pass. Cancelling consumes nothing and can therefore close
-and reopen the flow without optimistic row removal or stale swipe state. Dashboard discovery and refresh never select or open a transcript and global Settings never
+until the Tron confirmation sheet completes the canonical mutation. The view does
+not stage deletion beyond confirmation or suppress rows locally. The confirmed
+mutation receipt reconciles the selected profile-owned catalog immediately, while
+the revisioned Gateway list event repairs every connected dashboard from canonical truth.
+Cancelling can therefore close and reopen the flow without optimistic row removal
+or stale swipe state. Dashboard discovery and refresh never select or open a transcript and global Settings never
 infer project scope. Catalog loads are latest-generation-owned, and an asynchronous import may
 navigate only while its exact dashboard intent is still current. Reconnect restores only the
 still-mounted presentation; it never uses a dashboard row as a subscription fallback. The mounted chat route supplies an immutable

@@ -1239,6 +1239,11 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.command == nil)
     }
 
+    @Test("opening tail opaque fallback defaults to 750 milliseconds")
+    func openingTailDefaultTimeout() {
+        #expect(ChatScrollCoordinator.defaultOpeningTailTimeout == .milliseconds(750))
+    }
+
     @Test("opening timeout reveals after one exact-ID attempt when geometry disappears")
     func openingTailTimeoutFallsBackToExactBinding() async throws {
         try await withTestWatchdog { @MainActor in
@@ -1308,6 +1313,44 @@ struct ChatScrollCoordinatorTests {
             frames.releaseAll()
             let release = try await coordinator.hostedNextCommand()
             #expect(release.destination == .releaseBinding)
+        }
+    }
+
+    @Test("best-effort timeout releases after two reveal frames without later geometry")
+    func openingTailBestEffortReleaseWithoutGeometry() async throws {
+        try await withTestWatchdog { @MainActor in
+            let clock = ManualClock()
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(
+                frameScheduler: frames.scheduler,
+                clock: clock.clock,
+                openingTailTimeout: .seconds(1)
+            )
+            coordinator.resetForPresentation(1)
+            coordinator.commandApplied(coordinator.command!)
+            let positioning = Task {
+                await coordinator.positionOpeningTail(targetRenderedID: "missing-tail")
+            }
+
+            try await clock.waitUntilSleeping(count: 1)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let exactTail = try await coordinator.hostedNextCommand()
+            coordinator.commandApplied(exactTail)
+            clock.advance(by: .seconds(1))
+            #expect(await positioning.value)
+
+            let firstRevealFrame = frames.requestCount + 1
+            coordinator.openingRevealCompleted()
+            await frames.waitForRequest(count: firstRevealFrame)
+            frames.releaseAll()
+            let secondRevealFrame = firstRevealFrame + 1
+            await frames.waitForRequest(count: secondRevealFrame)
+            frames.releaseAll()
+            let release = try await coordinator.hostedNextCommand()
+            #expect(release.destination == .releaseBinding)
+            try await Task.sleep(for: .milliseconds(20))
+            #expect(frames.requestCount == secondRevealFrame)
         }
     }
 

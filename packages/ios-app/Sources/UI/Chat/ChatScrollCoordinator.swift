@@ -53,6 +53,8 @@ struct ChatPrependPage: Equatable, Sendable {
 @Observable
 @MainActor
 final class ChatScrollCoordinator {
+    static let defaultOpeningTailTimeout: Duration = .milliseconds(750)
+
     private struct SemanticFrameSample: Equatable {
         let layoutEpoch: Int
         let revision: Int
@@ -74,6 +76,7 @@ final class ChatScrollCoordinator {
         var commandSemanticRevision: Int?
         var commandGeometryRevision: Int?
         var commandAttemptCount: Int
+        var positionedBestEffort: Bool
     }
 
     private struct OpeningTailPostRevealContext: Equatable {
@@ -221,7 +224,7 @@ final class ChatScrollCoordinator {
     init(
         frameScheduler: DisplayFrameScheduler = .displayLink,
         clock: MonotonicClock = .continuous,
-        openingTailTimeout: Duration = .seconds(5)
+        openingTailTimeout: Duration = ChatScrollCoordinator.defaultOpeningTailTimeout
     ) {
         self.frameScheduler = frameScheduler
         self.clock = clock
@@ -714,7 +717,8 @@ final class ChatScrollCoordinator {
             commandToken: nil,
             commandSemanticRevision: nil,
             commandGeometryRevision: nil,
-            commandAttemptCount: 0
+            commandAttemptCount: 0,
+            positionedBestEffort: false
         )
         openingTailPhase = .positioning(context)
         openingTailContinuation = continuation
@@ -1570,6 +1574,15 @@ final class ChatScrollCoordinator {
                   self.openingTailPhase.context?.presentation == admittedPresentation,
                   self.openingTailFrameTaskGeneration == taskGeneration else { return }
             if case .postReveal(var context) = self.openingTailPhase,
+               context.base.positionedBestEffort {
+                context.stableFrameCount &+= 1
+                self.openingTailPhase = .postReveal(context)
+                if context.stableFrameCount >= 2 {
+                    self.finishOpeningTailSettlement()
+                } else {
+                    self.scheduleOpeningTailFrame()
+                }
+            } else if case .postReveal(var context) = self.openingTailPhase,
                revisionsAreStable,
                self.openingTailViewportIsPhysicallySettled {
                 if context.stableSemanticRevision == admittedSemanticRevision,
@@ -1608,6 +1621,7 @@ final class ChatScrollCoordinator {
 
     private func finishOpeningTailSettlement() {
         let token = openingTailToken
+        let releasesBestEffortBinding = openingTailPhase.context?.positionedBestEffort == true
         openingTailTimeoutTask?.cancel()
         openingTailTimeoutTask = nil
         openingTailFrameTaskGeneration &+= 1
@@ -1619,7 +1633,11 @@ final class ChatScrollCoordinator {
         continuation?.resume(returning: true)
         if let token { resumeOpeningTailFinalWaiters(token: token) }
         releaseAtBottom()
-        requestBindingReleaseIfSettled()
+        if releasesBestEffortBinding, !bindingIsReleased, command == nil {
+            publish(.releaseBinding, animation: .disabled, origin: .binding)
+        } else {
+            requestBindingReleaseIfSettled()
+        }
     }
 
     private func clearOpeningTailSettlement(
@@ -1675,6 +1693,7 @@ final class ChatScrollCoordinator {
         context.commandToken = nil
         context.commandSemanticRevision = nil
         context.commandGeometryRevision = nil
+        context.positionedBestEffort = true
         openingTailPhase = .positioned(context)
         let continuation = openingTailContinuation
         openingTailContinuation = nil

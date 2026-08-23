@@ -1000,7 +1000,8 @@ final class SessionPresentationStore {
         struct Response: Decodable { let closed: Bool }
         let response: Response? = try? await client.request(
             "session.close",
-            Params(sessionId: sessionID, subscriptionToken: token)
+            Params(sessionId: sessionID, subscriptionToken: token),
+            timeout: .seconds(5)
         )
         guard connectionGeneration == expectedConnectionGeneration,
               subscribedSessionID == sessionID,
@@ -1028,7 +1029,8 @@ final class SessionPresentationStore {
         struct Response: Decodable { let closed: Bool }
         let _: Response? = try? await client.request(
             "session.close",
-            Params(sessionId: sessionID, subscriptionToken: token)
+            Params(sessionId: sessionID, subscriptionToken: token),
+            timeout: .seconds(5)
         )
     }
 
@@ -1221,7 +1223,7 @@ final class SessionPresentationStore {
             let responseValue = try await client.requestValue(
                 "session.open",
                 Params(sessionId: sessionID),
-                timeout: .seconds(60)
+                timeout: .seconds(20)
             )
             // session.open creates synchronization ownership before iOS decodes
             // the snapshot. Preserve the independently bounded close token so

@@ -20,15 +20,30 @@ struct DashboardStateOwnerTests {
         #expect(!admittedDuplicate)
     }
 
-    @Test("dashboard deletion starts only after a confirmed sheet finishes dismissing")
-    func deletionConfirmationDismissalOrdering() {
-        var owner = SessionShellDeletionConfirmationOwner()
-        #expect(owner.consumeAfterDismissal() == nil)
-
-        let session = summary(revision: 1)
-        owner.confirm(session)
-        #expect(owner.consumeAfterDismissal() == session)
-        #expect(owner.consumeAfterDismissal() == nil)
+    @Test("dirty catalog retries are attempt-unbounded and stop only when satisfied or retired")
+    func catalogDirtyRetryPolicy() {
+        for _ in 0..<12 {
+            #expect(DashboardCatalogRetryPolicy.shouldRetry(
+                isDirty: true,
+                isCurrent: true,
+                transportFailed: false
+            ))
+        }
+        #expect(!DashboardCatalogRetryPolicy.shouldRetry(
+            isDirty: false,
+            isCurrent: true,
+            transportFailed: false
+        ))
+        #expect(!DashboardCatalogRetryPolicy.shouldRetry(
+            isDirty: true,
+            isCurrent: false,
+            transportFailed: false
+        ))
+        #expect(!DashboardCatalogRetryPolicy.shouldRetry(
+            isDirty: true,
+            isCurrent: true,
+            transportFailed: true
+        ))
     }
 
     @MainActor
@@ -134,6 +149,74 @@ struct DashboardStateOwnerTests {
             try await Self.waitUntil { pool.state(for: remote.id) == .stale }
 
             #expect(socketFactory.requests.count == 1)
+            #expect(!(await socket.closed()))
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("secondary dirty catalog retries beyond the former cap and stops after publication")
+    func secondaryCatalogDirtyRetryConverges() async throws {
+        try await withTestWatchdog { @MainActor in
+            let selected = GatewayProfile(
+                id: "selected", label: "Selected", host: "selected.test", port: 9_847,
+                machineId: "selected-runtime", machineGroupID: "selected-machine", deviceId: "device"
+            )
+            let remote = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let clock = ManualClock()
+            let socket = ScriptedGatewaySocket()
+            let factory = ScriptedGatewaySocketFactory(socket: socket)
+            let pool = DashboardGatewayConnectionPool(
+                clientFactory: { GatewayClient(socketFactory: factory.factory, clock: clock.clock) },
+                clock: clock.clock
+            )
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":3,"minProtocolVersion":3,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            pool.reconcile(
+                profiles: [selected, remote],
+                selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+
+            try await socket.waitUntilSent(count: 2)
+            var catalog = try Self.requestFrame(await socket.sentFrames()[1])
+            for attempt in 0..<5 {
+                let sleepsBeforeFailure = clock.recordedSleeps().count
+                await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                    "type": .string("response"),
+                    "id": .string(catalog.id),
+                    "ok": .bool(false),
+                    "error": .object([
+                        "code": .string("invalid_dashboard_catalog"),
+                        "message": .string("synthetic catalog failure"),
+                        "retryable": .bool(true),
+                        "details": .null,
+                    ]),
+                ])))
+                try await Self.waitUntil {
+                    clock.recordedSleeps().count > sleepsBeforeFailure
+                }
+                try await clock.waitUntilSleeping(count: 1)
+                clock.advance(by: .seconds(8))
+                let catalogCount = 3 + attempt
+                try await socket.waitUntilSent(count: catalogCount)
+                catalog = try Self.requestFrame(await socket.sentFrames()[catalogCount - 1])
+                #expect(catalog.method == "session.list")
+            }
+
+            await socket.enqueue(Self.catalogResponse(id: catalog.id, sessions: [], listRevision: 6))
+            try await Self.waitUntil { pool.state(for: remote.id) == .connected }
+            let publishedCatalogCount = try (await socket.sentFrames()).dropFirst().map(Self.requestFrame)
+                .filter { $0.method == "session.list" }.count
+            clock.advance(by: .seconds(60))
+            try await Task.sleep(for: .milliseconds(20))
+            let laterCatalogCount = try (await socket.sentFrames()).dropFirst().map(Self.requestFrame)
+                .filter { $0.method == "session.list" }.count
+            #expect(laterCatalogCount == publishedCatalogCount)
+            #expect(factory.requests.count == 1)
             #expect(!(await socket.closed()))
             pool.retire()
             await pool.waitForRetirement()

@@ -229,15 +229,46 @@ struct PresentationStyleGuardTests {
         )
 
         #expect(source.contains(#"confirmTitle: "Delete""#))
-        #expect(source.contains(".sheet(item: $sessionToDelete, onDismiss: finishConfirmedSessionDeletion)"))
-        #expect(source.contains("onConfirm: { deletionConfirmationOwner.confirm(session) }"))
-        #expect(!source.contains("onConfirm: { delete(session) }"))
+        #expect(source.contains(".sheet(item: $sessionToDelete)"))
+        #expect(source.contains("onConfirm: { delete(session) }"))
+        #expect(!source.contains("SessionShellDeletionConfirmationOwner"))
+        #expect(!source.contains("confirmedDeletedDashboardIDs"))
         #expect(source.contains(#"Button("Delete", systemImage: "trash") { sessionToDelete = session }"#))
         #expect(source.contains(#".accessibilityIdentifier("session-row-\(session.dashboardID)")"#))
         #expect(source.contains(".tint(Color.tronError)"))
         #expect(source.contains(#".accessibilityIdentifier("session-delete-action-\(session.dashboardID)")"#))
         #expect(!source.contains(#"Button("Delete", systemImage: "trash", role: .destructive)"#))
         #expect(presentation.contains(".tronToolbarAction(accent: .tronTextSecondary)\n                        .accessibilityIdentifier(\"confirmation-cancel\")"))
+    }
+
+    @Test("dashboard retry and opening deadlines remain bounded without capped dirty attempts")
+    func dashboardRetryAndOpeningDeadlinePolicy() throws {
+        let appModel = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/AppModel.swift"),
+            encoding: .utf8
+        )
+        let pool = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/DashboardGatewayConnectionPool.swift"),
+            encoding: .utf8
+        )
+        let presentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/State/SessionPresentationStore.swift"),
+            encoding: .utf8
+        )
+        let scroll = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatScrollCoordinator.swift"),
+            encoding: .utf8
+        )
+
+        #expect(appModel.contains("catalogSatisfiedGeneration < self.catalogInvalidationGeneration"))
+        #expect(pool.contains("current.refreshSatisfiedGeneration < current.refreshInvalidationGeneration"))
+        #expect(!pool.contains("maximumRefreshRetryAttempts"))
+        #expect(appModel.contains("timeout: .seconds(10)"))
+        #expect(pool.contains("timeout: .seconds(10)"))
+        #expect(presentation.contains(#""session.open","#))
+        #expect(presentation.contains("timeout: .seconds(20)"))
+        #expect(presentation.components(separatedBy: "timeout: .seconds(5)").count >= 3)
+        #expect(scroll.contains("static let defaultOpeningTailTimeout: Duration = .milliseconds(750)"))
     }
 
     @Test("confirmation actions use adaptive toolbar placement")

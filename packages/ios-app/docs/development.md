@@ -574,7 +574,7 @@ and model selection; dense rows must retain static tinted geometry without visib
 material churn. Open a large instructions/JSON document and verify immediate native
 scrolling. Confirmation checkpoints verify grey cancellation text, a short trailing
 toolbar action, and a sentence-length action in the Liquid Glass container below
-content at both default and accessibility Dynamic Type sizes. Dashboard deletion additionally swipes, cancels, and repeats against the same canonical row; the row must remain mounted until confirmation and no delete request may be sent on cancellation. A confirmed delete starts only after the sheet is fully dismissed, and its successful row removal must appear without navigating away from and back to the dashboard. Chat checkpoints must also verify
+content at both default and accessibility Dynamic Type sizes. Dashboard deletion additionally swipes, cancels, and repeats against the same canonical row; the row must remain mounted until confirmation and no delete request may be sent on cancellation. A confirmed mutation response or replayed completion receipt removes the selected projection immediately, and the authoritative catalog event converges every connected dashboard without view-local row suppression or navigating away and back. Chat checkpoints must also verify
 trailing alignment for user turns, historical transcript/tool insertion motion,
 the Settings gear in the chat toolbar, the context ring at the trailing edge of
 an empty idle composer, the nonstructural short bottom blur at default running state, its background-layer

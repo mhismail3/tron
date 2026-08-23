@@ -226,6 +226,8 @@ final class AppModel {
     private var catalogRefreshKey: SessionCatalogLoadKey?
     private var catalogRefreshRequestGeneration = 0
     private var catalogInvalidationGeneration = 0
+    private var catalogSatisfiedGeneration = 0
+    private var catalogRefreshRetryAttempt = 0
     private var catalogDeferredFollowUpKey: SessionCatalogLoadKey?
     private var sceneAllowsCatalogRefresh = true
     private var cacheCheckpointTask: Task<Void, Never>?
@@ -889,6 +891,7 @@ final class AppModel {
             return await task.value
         }
         if catalogRefreshTask != nil { cancelCatalogRefresh() }
+        catalogInvalidationGeneration &+= 1
         return await startCatalogRefresh(key: key).value
     }
 
@@ -905,20 +908,37 @@ final class AppModel {
     }
 
     @discardableResult
-    private func startCatalogRefresh(key: SessionCatalogLoadKey) -> Task<SessionCatalogRefreshOutcome, Never> {
+    private func startCatalogRefresh(
+        key: SessionCatalogLoadKey,
+        delay: Duration = .zero
+    ) -> Task<SessionCatalogRefreshOutcome, Never> {
         catalogRefreshRequestGeneration &+= 1
         let requestGeneration = catalogRefreshRequestGeneration
         let task = Task<SessionCatalogRefreshOutcome, Never> { @MainActor [weak self] in
             guard let self else { return SessionCatalogRefreshOutcome.retained }
+            do { try await self.clock.sleep(delay) } catch { return .retained }
             let outcome = await self.runCatalogRefreshLease(key: key, requestGeneration: requestGeneration)
             if self.catalogRefreshRequestGeneration == requestGeneration,
                self.catalogRefreshKey == key {
                 let needsFollowUp = self.catalogDeferredFollowUpKey == key
+                let remainsDirty = self.catalogSatisfiedGeneration < self.catalogInvalidationGeneration
                 self.catalogDeferredFollowUpKey = nil
                 self.catalogRefreshTask = nil
                 self.catalogRefreshKey = nil
-                if needsFollowUp, self.currentCatalogLoadKey() == key {
-                    _ = self.startCatalogRefresh(key: key)
+                if self.currentCatalogLoadKey() == key {
+                    if needsFollowUp {
+                        _ = self.startCatalogRefresh(key: key)
+                    } else if DashboardCatalogRetryPolicy.shouldRetry(
+                        isDirty: remainsDirty,
+                        isCurrent: true,
+                        transportFailed: outcome == .transportFailure
+                    ) {
+                        self.catalogRefreshRetryAttempt = min(3, self.catalogRefreshRetryAttempt + 1)
+                        _ = self.startCatalogRefresh(
+                            key: key,
+                            delay: Self.catalogRefreshRetryDelay(attempt: self.catalogRefreshRetryAttempt)
+                        )
+                    }
                 }
             }
             return outcome
@@ -937,6 +957,10 @@ final class AppModel {
             let observedInvalidation = catalogInvalidationGeneration
             outcome = await performCatalogTraversal(key: key, requestGeneration: requestGeneration)
             guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration) else { return .retained }
+            if outcome == .published {
+                catalogSatisfiedGeneration = max(catalogSatisfiedGeneration, observedInvalidation)
+                catalogRefreshRetryAttempt = 0
+            }
             if outcome == .transportFailure { return outcome }
             let dirtied = catalogInvalidationGeneration > observedInvalidation
             guard dirtied else { return outcome }
@@ -981,7 +1005,8 @@ final class AppModel {
                     requestedContinuation = cursor != nil
                     let response: Response = try await client.request(
                         "session.list",
-                        Params(cursor: cursor, limit: pageLimit, scope: "user")
+                        Params(cursor: cursor, limit: pageLimit, scope: "user"),
+                        timeout: .seconds(10)
                     )
                     pageCount += 1
                     guard admitsCatalogRefresh(key: key, requestGeneration: requestGeneration),
@@ -1059,8 +1084,13 @@ final class AppModel {
         return .retained
     }
 
+    private static func catalogRefreshRetryDelay(attempt: Int) -> Duration {
+        .seconds(min(8, 1 << min(3, max(1, attempt))))
+    }
+
     private func cancelCatalogRefresh() {
         catalogRefreshRequestGeneration &+= 1
+        catalogRefreshRetryAttempt = 0
         catalogDeferredFollowUpKey = nil
         catalogRefreshTask?.cancel()
         catalogRefreshTask = nil

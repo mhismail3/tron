@@ -186,10 +186,10 @@ a plausible native bottom viewport. An exact-ID command realizes a missing lazy 
 clamped negative bottom distance, auxiliary rows, transient boundary geometry, and overflow overshoot are
 not settlement evidence. The native geometry observation identity includes the opening epoch and phase, so
 entering positioning replays current geometry even when SwiftUI would coalesce equal numeric fields. Exact-ID
-realization can proceed without a geometry sample. If physical proof still cannot settle within five seconds, the
+realization can proceed without a geometry sample. If physical proof still cannot settle within 750 milliseconds, the
 bounded exact-ID binding remains owned and the authoritative transcript is revealed best-effort instead of failing
 conversation availability. The positioned transcript then fades/rises into view while the tail binding remains
-owned through animation completion and two unchanged display frames. Direct user or accessibility interaction
+owned through animation completion and two unchanged display frames; best-effort positioning releases after those frames even when no later geometry arrives. Direct user or accessibility interaction
 cancels that arm. The composer
 remains visible throughout opening, while sending stays disabled until readiness. Opening tail
 positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
