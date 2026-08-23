@@ -894,7 +894,9 @@ swiped canonical session without changing navigation selection. The delete swipe
 uses a red tint but no destructive button role, so UIKit keeps the row mounted
 through confirmation. A confirmed intent is consumed only by the sheet's
 post-dismissal callback; the canonical mutation and resulting List removal never
-race the modal transition. Cancelling consumes nothing and can therefore close
+race the modal transition. A successful mutation records that exact dashboard ID
+in presentation state, so the row is suppressed immediately even if SwiftUI keeps
+a stale native List cell mounted until a later navigation pass. Cancelling consumes nothing and can therefore close
 and reopen the flow without optimistic row removal or stale swipe state. Dashboard discovery and refresh never select or open a transcript and global Settings never
 infer project scope. Catalog loads are latest-generation-owned, and an asynchronous import may
 navigate only while its exact dashboard intent is still current. Reconnect restores only the

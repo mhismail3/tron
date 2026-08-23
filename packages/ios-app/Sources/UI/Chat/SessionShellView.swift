@@ -48,6 +48,7 @@ struct SessionShellView: View {
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
     @State private var deletionConfirmationOwner = SessionShellDeletionConfirmationOwner()
+    @State private var confirmedDeletedDashboardIDs: Set<String> = []
     @State private var sessionToRename: SessionSummary?
     @State private var renameName = ""
     @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
@@ -117,7 +118,7 @@ struct SessionShellView: View {
                 presentedSession = route
             }
         }
-        .onChange(of: model.visibleSessions, initial: true) { _, sessions in
+        .onChange(of: displayedSessions, initial: true) { _, sessions in
             let groups = SessionListWorkspaceGroup.groups(from: sessions)
             sessionExpansion.reconcile(
                 groupCounts: Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.sessions.count) })
@@ -373,8 +374,14 @@ struct SessionShellView: View {
     private func finishConfirmedSessionDeletion() {
         guard let session = deletionConfirmationOwner.consumeAfterDismissal() else { return }
         Task {
-            do { try await model.performOnOwningGateway(session) { try await model.deleteSession(session.id) } }
-            catch { model.lastError = error.localizedDescription }
+            do {
+                try await model.performOnOwningGateway(session) {
+                    try await model.deleteSession(session.id)
+                }
+                confirmedDeletedDashboardIDs.insert(session.dashboardID)
+            } catch {
+                model.lastError = error.localizedDescription
+            }
         }
     }
 
@@ -577,8 +584,12 @@ struct SessionShellView: View {
         .accessibilityHint(isExpanded ? "Double tap to hide sessions" : "Double tap to show sessions")
     }
 
+    private var displayedSessions: [SessionSummary] {
+        model.visibleSessions.filter { !confirmedDeletedDashboardIDs.contains($0.dashboardID) }
+    }
+
     private var filteredSessions: [SessionSummary] {
-        model.visibleSessions.filter { session in
+        displayedSessions.filter { session in
             serverFilter.allows(session.gatewayProfileID)
                 && (search.isEmpty
                     || session.title.localizedCaseInsensitiveContains(search)
