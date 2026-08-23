@@ -92,8 +92,8 @@ delay cancellation, single-attempt ownership, foreground reconciliation slot rel
 exit, and that a selected profile without a credential remains actionable `.unpaired` instead of
 entering a reconnect loop. `AppModelCatalogSyncTests` owns scripted request barriers for known-summary
 zero-read updates, unknown discovery, shared single-flight traversal, dirty follow-up, silent mixed-revision
-recovery, page/item/identity bounds, typed retained/transport outcomes, background/foreground convergence,
-and responsive-socket preservation. `DashboardStateOwnerTests` separately owns synchronous
+recovery, page/item/identity bounds, application-error retention on a responsive socket,
+background/foreground convergence, and responsive-socket preservation. `DashboardStateOwnerTests` separately owns synchronous
 cached/stale/live activity, ID-index integrity, and retention of existing dashboard buckets
 when a background transport is retired. Advance the manual clock only after the expected sleeper/barrier is registered. Every test that
 waits on a scripted orchestration barrier must run inside `withTestWatchdog`; never add an unbounded

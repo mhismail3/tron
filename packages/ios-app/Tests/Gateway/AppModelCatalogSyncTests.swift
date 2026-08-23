@@ -170,18 +170,19 @@ struct AppModelCatalogSyncTests {
         }
     }
 
-    @Test("catalog errors distinguish retained state from transport failure without alerts")
+    @Test("application-level catalog errors retain state while the socket epoch remains responsive")
     func typedFailureOutcomes() async throws {
         try await withHarness { harness in
-            let retained = Task { await harness.model.refreshSessions() }
+            let invalidLoad = Task { await harness.model.refreshSessions() }
             let invalid = try await request(harness.socket, index: 1)
             await harness.socket.enqueue(errorResponse(id: invalid.id, code: "invalid_request"))
-            #expect(await retained.value == .retained)
+            #expect(await invalidLoad.value == .retained)
 
-            let transport = Task { await harness.model.refreshSessions() }
+            let disconnectedLoad = Task { await harness.model.refreshSessions() }
             let disconnected = try await request(harness.socket, index: 2)
             await harness.socket.enqueue(errorResponse(id: disconnected.id, code: "disconnected"))
-            #expect(await transport.value == .transportFailure)
+            #expect(await disconnectedLoad.value == .retained)
+            #expect(await harness.client.activeConnectionID() != nil)
             #expect(harness.model.latestNotice == nil)
             #expect(harness.model.lastError == nil)
         }
