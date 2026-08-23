@@ -296,6 +296,38 @@ struct ChatScrollCoordinatorTests {
         }
     }
 
+    @Test("lifecycle-only graft does not consume an authoritative mutation boundary")
+    func lifecycleGraftPreservesAuthoritativeMutation() throws {
+        let coordinator = detachedCoordinator(at: away, withUnread: false)
+        let previous = try installedToolTranscript(
+            ids: ["one"], statuses: [.running], timelineGeneration: 1
+        )
+        let authoritative = try installedToolTranscript(
+            ids: ["one", "two"], statuses: [.completed, .completed], timelineGeneration: 2
+        )
+        let previousEpoch = coordinator.layoutEpoch
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: previousEpoch,
+            frame: CGRect(x: 0, y: 40, width: 300, height: 44)
+        )
+
+        coordinator.transcriptProjectionWillChange(from: previous)
+        coordinator.installedLifecycleChanged(previous)
+        #expect(coordinator.layoutEpoch == previousEpoch)
+        #expect(coordinator.command == nil)
+
+        coordinator.installedTranscriptChanged(authoritative)
+        #expect(coordinator.layoutEpoch == previousEpoch + 1)
+        coordinator.semanticFrameChanged(
+            renderedID: "tool-run-one",
+            layoutEpoch: coordinator.layoutEpoch,
+            frame: CGRect(x: 0, y: 75, width: 300, height: 44)
+        )
+        coordinator.geometryChanged(previous: away, current: away)
+        #expect(coordinator.command?.origin == .layout)
+    }
+
     @Test("detached projection topology change preserves a fresh surviving semantic anchor")
     func detachedProjectionMutationPreservesAnchor() throws {
         let coordinator = detachedCoordinator(at: away, withUnread: false)

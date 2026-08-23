@@ -777,6 +777,17 @@ final class ChatScrollCoordinator {
         layoutMutationPendingInstall = true
     }
 
+    /// A lifecycle-only graft publishes a complete local row without advancing
+    /// canonical payload. It may request one pinned-tail follow, but deliberately
+    /// leaves any authoritative projection mutation boundary untouched.
+    func installedLifecycleChanged(_ installed: InstalledChatTranscript) {
+        guard installed.hasUniqueDisplayedIDs, canAutomaticallyFollow else { return }
+        pendingInstalledTailSettlement = true
+        pendingGrowthFollow = true
+        pendingContinuousGrowthFollow = true
+        scheduleTailFollow()
+    }
+
     /// An actual installed transition retains a pending entrance entitlement only
     /// while that exact rendered row remains displayed, then starts one owned
     /// layout settlement for the installed generation.

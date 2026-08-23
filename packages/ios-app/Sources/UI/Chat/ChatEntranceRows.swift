@@ -94,12 +94,12 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
                 case .pending:
                     break
                 case .admitted:
-                    withAnimation(ChatContentTransitionPolicy.revealAnimation(
+                    var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
                         for: kind,
                         reduceMotion: reduceMotion
-                    )) {
-                        revealed = true
-                    }
+                    ))
+                    transaction.admitsChatEntranceAnimation = true
+                    withTransaction(transaction) { revealed = true }
                 case .none:
                     var transaction = Transaction()
                     transaction.disablesAnimations = true
@@ -116,6 +116,7 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
     let reduceMotion: Bool
     let animatesEntrance: Bool
     let kind: ChatContentEntranceKind
+    let onEntranceConsumed: () -> Void
     @ViewBuilder let content: Content
     @State private var revealed: Bool
 
@@ -123,11 +124,13 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
         reduceMotion: Bool,
         animatesEntrance: Bool = true,
         kind: ChatContentEntranceKind = .userPrompt,
+        onEntranceConsumed: @escaping () -> Void = {},
         @ViewBuilder content: () -> Content
     ) {
         self.reduceMotion = reduceMotion
         self.animatesEntrance = animatesEntrance
         self.kind = kind
+        self.onEntranceConsumed = onEntranceConsumed
         self.content = content()
         _revealed = State(initialValue: !animatesEntrance)
     }
@@ -148,13 +151,14 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
                 y: revealed ? 0 : hidden.offsetY
             )
             .onAppear {
+                onEntranceConsumed()
                 guard animatesEntrance, !revealed else { return }
-                withAnimation(ChatContentTransitionPolicy.revealAnimation(
+                var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
                     for: kind,
                     reduceMotion: reduceMotion
-                )) {
-                    revealed = true
-                }
+                ))
+                transaction.admitsChatEntranceAnimation = true
+                withTransaction(transaction) { revealed = true }
             }
             .onChange(of: animatesEntrance) { _, enabled in
                 guard !enabled else { return }
@@ -168,16 +172,19 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
 struct ChatQueuedMessageEntranceRow<Content: View>: View {
     let animatesEntrance: Bool
     let reduceMotion: Bool
+    let onEntranceConsumed: () -> Void
     @ViewBuilder let content: Content
     @State private var revealed: Bool
 
     init(
         animatesEntrance: Bool,
         reduceMotion: Bool,
+        onEntranceConsumed: @escaping () -> Void = {},
         @ViewBuilder content: () -> Content
     ) {
         self.animatesEntrance = animatesEntrance
         self.reduceMotion = reduceMotion
+        self.onEntranceConsumed = onEntranceConsumed
         self.content = content()
         _revealed = State(initialValue: !animatesEntrance)
     }
@@ -198,13 +205,14 @@ struct ChatQueuedMessageEntranceRow<Content: View>: View {
                 y: revealed ? 0 : hidden.offsetY
             )
             .onAppear {
+                onEntranceConsumed()
                 guard animatesEntrance, !revealed else { return }
-                withAnimation(ChatContentTransitionPolicy.revealAnimation(
+                var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
                     for: .queuedPrompt,
                     reduceMotion: reduceMotion
-                )) {
-                    revealed = true
-                }
+                ))
+                transaction.admitsChatEntranceAnimation = true
+                withTransaction(transaction) { revealed = true }
             }
             .onChange(of: animatesEntrance) { _, enabled in
                 guard !enabled else { return }

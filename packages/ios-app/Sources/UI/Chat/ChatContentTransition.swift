@@ -151,9 +151,13 @@ extension ChatContentEntranceTransform.Anchor {
 /// Transcript projection is published in complete snapshots while streaming.
 /// Those updates must not inherit an unrelated scroll/composer transaction and
 /// replay an opacity or layout animation over content that is already visible.
-/// Insertions still animate through `ChatTranscriptEntranceRow`; this modifier
-/// only makes updates to an installed row transaction-stable.
+/// The modifier may own the structural transcript stack; explicitly tagged row
+/// entrances and shallow tool-chip transactions still pass through it.
 private enum ChatToolChipAnimationTransactionKey: TransactionKey {
+    static let defaultValue = false
+}
+
+private enum ChatEntranceAnimationTransactionKey: TransactionKey {
     static let defaultValue = false
 }
 
@@ -161,6 +165,11 @@ extension Transaction {
     var admitsChatToolChipAnimation: Bool {
         get { self[ChatToolChipAnimationTransactionKey.self] }
         set { self[ChatToolChipAnimationTransactionKey.self] = newValue }
+    }
+
+    var admitsChatEntranceAnimation: Bool {
+        get { self[ChatEntranceAnimationTransactionKey.self] }
+        set { self[ChatEntranceAnimationTransactionKey.self] = newValue }
     }
 }
 
@@ -171,7 +180,9 @@ private struct ChatStableTranscriptUpdateModifier: ViewModifier {
             // but continuous direct manipulation belongs to the system control
             // beneath this boundary. Clearing that transaction makes native
             // interactive glass jump to its pressed scale before its drag morph.
-            if !transaction.admitsChatToolChipAnimation && !transaction.isContinuous {
+            if !transaction.admitsChatToolChipAnimation,
+               !transaction.admitsChatEntranceAnimation,
+               !transaction.isContinuous {
                 transaction.animation = nil
             }
         }

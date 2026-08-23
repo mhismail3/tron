@@ -517,6 +517,141 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("a unique snapshot-before-response queue candidate borrows visual identity without settling")
+    func uniqueProvisionalQueueCandidateIsVisualOnly() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 45)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "provisional"
+            )
+            let sending = Task {
+                try await harness.coordinator.send(target: target, behavior: "steer")
+            }
+            try await harness.waitForSends(1)
+            let presentationID = try #require(
+                harness.coordinator.submissionSnapshot(for: target)?.presentationID
+            )
+            let candidate = SessionSnapshot.QueuedMessage(
+                id: "operation-0", behavior: .steer, text: "provisional", attachmentCount: 0
+            )
+
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [], queuedMessages: [candidate]
+            )
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+            #expect(harness.coordinator.isSending(target: target))
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target, message: candidate
+            ) == presentationID)
+
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target, message: candidate
+            ) == presentationID)
+        }
+    }
+
+    @Test("ambiguous provisional queue candidates fail closed")
+    func ambiguousProvisionalQueueCandidatesDoNotAlias() async throws {
+        struct Rejected: Error {}
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 46)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "same"
+            )
+            let sending = Task {
+                try await harness.coordinator.send(target: target, behavior: "steer")
+            }
+            try await harness.waitForSends(1)
+            let candidates = [
+                SessionSnapshot.QueuedMessage(
+                    id: "other-a", behavior: .steer, text: "same", attachmentCount: 0
+                ),
+                SessionSnapshot.QueuedMessage(
+                    id: "other-b", behavior: .steer, text: "same", attachmentCount: 0
+                ),
+            ]
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [], queuedMessages: candidates
+            )
+            #expect(candidates.allSatisfy {
+                harness.coordinator.queuedSubmissionPresentationID(
+                    target: target, message: $0
+                ) == nil
+            })
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+
+            harness.completeSend(index: 0, result: .failure(Rejected()))
+            await #expect(throws: Rejected.self) { try await sending.value }
+        }
+    }
+
+    @Test("a conflicting transport ID clears provisional visual continuity")
+    func conflictingOperationIDClearsProvisionalCandidate() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 47)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "race"
+            )
+            let sending = Task {
+                try await harness.coordinator.send(target: target, behavior: "steer")
+            }
+            try await harness.waitForSends(1)
+            let wrong = SessionSnapshot.QueuedMessage(
+                id: "other-operation", behavior: .steer, text: "race", attachmentCount: 0
+            )
+            harness.coordinator.reconcileSubmission(
+                target: target, canonicalTranscript: [], queuedMessages: [wrong]
+            )
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target, message: wrong
+            ) != nil)
+
+            // ComposerHarness returns operation-0 for the first accepted send.
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            #expect(harness.coordinator.queuedSubmissionPresentationID(
+                target: target, message: wrong
+            ) == nil)
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+        }
+    }
+
+    @Test("duplicate queue IDs fail closed when freezing presentation aliases")
+    func duplicateQueueIDsDoNotTrapAliasCapture() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 48)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "duplicate"
+            )
+            let sending = Task {
+                try await harness.coordinator.send(target: target, behavior: "steer")
+            }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(sending)
+            let duplicate = SessionSnapshot.QueuedMessage(
+                id: "operation-0", behavior: .steer, text: "duplicate", attachmentCount: 0
+            )
+
+            #expect(harness.coordinator.queuedSubmissionPresentationIDs(
+                target: target,
+                queuedMessages: [duplicate, duplicate]
+            ).isEmpty)
+            #expect(harness.coordinator.outgoingSubmission(for: target) != nil)
+        }
+    }
+
     @Test("duplicate authoritative queue IDs cannot settle an outgoing submission")
     func duplicateQueueIDsFailClosedBeforeSettlement() async throws {
         try await withTestWatchdog { @MainActor in

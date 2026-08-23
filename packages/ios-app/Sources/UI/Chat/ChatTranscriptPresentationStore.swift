@@ -35,12 +35,24 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         let pendingPhotoCount: Int?
         let pendingFileAttachmentCount: Int?
         let pendingIsCompacting: Bool?
+        let queuePresentationAliases: [QueuePresentationAlias]
+
+        struct QueuePresentationAlias: Hashable, Sendable {
+            let operationID: String
+            let presentationID: String
+        }
 
         enum Kind: Hashable, Sendable { case none, pending, outgoing }
 
         static let none = Self(commit: .none)
 
-        init(commit: ChatTranscriptHandoffCommit) {
+        init(
+            commit: ChatTranscriptHandoffCommit,
+            queuePresentationIDByOperationID: [String: String] = [:]
+        ) {
+            queuePresentationAliases = queuePresentationIDByOperationID
+                .map { QueuePresentationAlias(operationID: $0.key, presentationID: $0.value) }
+                .sorted { lhs, rhs in lhs.operationID < rhs.operationID }
             switch commit {
             case .none:
                 kind = .none
@@ -89,7 +101,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     /// The exact Gateway capability fact captured by this immutable source.
     /// A missing Gateway defaults to false for callers and tests.
     let queueManagementCapability: Bool
-    let handoffIdentity: HandoffIdentity
+    var handoffIdentity: HandoffIdentity
     let hiddenThinkingLabel: String?
     /// Foreground reconciliation installs the authoritative aggregate without
     /// replaying every row that arrived while the app was suspended. The
@@ -105,6 +117,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         entranceSuppressionGeneration: Int? = nil,
         queueManagementCapability: Bool = false,
         handoff: ChatTranscriptHandoffCommit = .none,
+        queuePresentationIDByOperationID: [String: String] = [:],
         handoffIdentity: HandoffIdentity? = nil
     ) {
         sessionID = snapshot.sessionId
@@ -126,7 +139,10 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         firstTranscriptID = snapshot.transcript.first?.id
         lastTranscriptID = snapshot.transcript.last?.id
         self.queueManagementCapability = queueManagementCapability
-        self.handoffIdentity = handoffIdentity ?? HandoffIdentity(commit: handoff)
+        self.handoffIdentity = handoffIdentity ?? HandoffIdentity(
+            commit: handoff,
+            queuePresentationIDByOperationID: queuePresentationIDByOperationID
+        )
         hiddenThinkingLabel = (authoritySnapshot ?? snapshot)
             .extensionPresentation.semanticState.hiddenThinkingLabel
         self.entranceSuppressionGeneration = entranceSuppressionGeneration
@@ -136,6 +152,26 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         sessionID == other.sessionID
             && presentationGeneration == other.presentationGeneration
             && runtimeGeneration == other.runtimeGeneration
+    }
+
+    func matchesProjectionPayload(of other: Self) -> Bool {
+        var lhs = self
+        var rhs = other
+        lhs.handoffIdentity = .none
+        rhs.handoffIdentity = .none
+        return lhs == rhs
+    }
+
+    func replacingLifecycle(
+        handoff: ChatTranscriptHandoffCommit,
+        queuePresentationIDByOperationID: [String: String]
+    ) -> Self {
+        var copy = self
+        copy.handoffIdentity = HandoffIdentity(
+            commit: handoff,
+            queuePresentationIDByOperationID: queuePresentationIDByOperationID
+        )
+        return copy
     }
 }
 
@@ -204,6 +240,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
     let runtimeItems: [ChatTranscriptRenderItem]
     let preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
     let queuedMessages: [SessionSnapshot.QueuedMessage]
+    let queuePresentationIDByOperationID: [String: String]
     let queueRevision: Int?
     let supportsQueueManagement: Bool
     let sourceWindow: SourceWindow
@@ -220,6 +257,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
         runtimeItems: [ChatTranscriptRenderItem],
         preparedTextByRenderedID: [String: ChatTextPreparationSnapshot] = [:],
         queuedMessages: [SessionSnapshot.QueuedMessage] = [],
+        queuePresentationIDByOperationID: [String: String] = [:],
         queueRevision: Int? = nil,
         supportsQueueManagement: Bool = false,
         sourceWindow: SourceWindow
@@ -232,6 +270,7 @@ struct InstalledChatTranscript: Hashable, Sendable {
         self.runtimeItems = runtimeItems
         self.preparedTextByRenderedID = preparedTextByRenderedID
         self.queuedMessages = queuedMessages
+        self.queuePresentationIDByOperationID = queuePresentationIDByOperationID
         self.queueRevision = queueRevision
         self.supportsQueueManagement = supportsQueueManagement
         self.sourceWindow = sourceWindow
@@ -248,6 +287,27 @@ struct InstalledChatTranscript: Hashable, Sendable {
         toolDescriptorByID = descriptorByID.count == descriptors.count ? descriptorByID : nil
     }
 
+    func replacingLifecycle(
+        tag: ChatTranscriptProjectionTag,
+        handoff: ChatTranscriptHandoffCommit,
+        queuePresentationIDByOperationID: [String: String]
+    ) -> Self {
+        Self(
+            tag: tag,
+            handoff: handoff,
+            hiddenThinkingLabel: hiddenThinkingLabel,
+            timeline: timeline,
+            toolPayloads: toolPayloads,
+            runtimeItems: runtimeItems,
+            preparedTextByRenderedID: preparedTextByRenderedID,
+            queuedMessages: queuedMessages,
+            queuePresentationIDByOperationID: queuePresentationIDByOperationID,
+            queueRevision: queueRevision,
+            supportsQueueManagement: supportsQueueManagement,
+            sourceWindow: sourceWindow
+        )
+    }
+
     var displayedItems: ChatDisplayedTranscriptItems {
         ChatDisplayedTranscriptItems(timeline: timeline.items, runtime: runtimeItems)
     }
@@ -258,6 +318,9 @@ struct InstalledChatTranscript: Hashable, Sendable {
             && runtimeIDSet.allSatisfy { !timeline.containsID($0) }
             && queuedMessages.count <= SessionSnapshot.maximumQueuedMessages
             && queueIDSet.count == queuedMessages.count
+            && Set(queuePresentationIDByOperationID.keys).isSubset(of: queueIDSet)
+            && Set(queuePresentationIDByOperationID.values).count
+                == queuePresentationIDByOperationID.count
     }
     func containsDisplayedID(_ id: String) -> Bool {
         timeline.containsID(id) || runtimeIDSet.contains(id)
@@ -303,10 +366,26 @@ struct InstalledChatTranscript: Hashable, Sendable {
                 uniqueKeysWithValues: timeline.ids.map { ($0, ChatTextPreparationSnapshot.empty) }
             ),
             queuedMessages: queuedMessages,
+            queuePresentationIDByOperationID: queuePresentationIDByOperationID,
             queueRevision: queueRevision,
             supportsQueueManagement: supportsQueueManagement,
             sourceWindow: sourceWindow
         )
+    }
+
+    var lifecycleRenderedIDs: Set<String> {
+        var ids = Set(queuedMessages.map { message in
+            queuePresentationIDByOperationID[message.id] ?? "queued-message-\(message.id)"
+        })
+        switch handoff {
+        case .none:
+            break
+        case .pending(let pending):
+            ids.insert("pending-prompt-\(pending.id)")
+        case .outgoing(let outgoing, _):
+            ids.insert(outgoing.id)
+        }
+        return ids
     }
 
     func semanticID(forDisplayedID id: String) -> String? {
@@ -656,6 +735,7 @@ final class ChatTranscriptPresentationStore {
     private struct PendingProjection: Sendable {
         let snapshot: SessionSnapshot
         let handoff: ChatTranscriptHandoffCommit
+        let queuePresentationIDByOperationID: [String: String]
         let tag: ChatTranscriptProjectionTag
         let generation: Int
     }
@@ -693,6 +773,7 @@ final class ChatTranscriptPresentationStore {
     @ObservationIgnored private var workerID: UInt64 = 0
     @ObservationIgnored private var readyToInstall: InstalledChatTranscript?
     @ObservationIgnored private var consumedEntranceSuppressionGeneration: Int?
+    @ObservationIgnored private var consumedLifecycleEntranceIDs: Set<String> = []
     @ObservationIgnored private var installFrameTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var waiters: [Waiter] = []
@@ -747,6 +828,7 @@ final class ChatTranscriptPresentationStore {
     func submit(
         snapshot: SessionSnapshot,
         handoff: ChatTranscriptHandoffCommit,
+        queuePresentationIDByOperationID: [String: String] = [:],
         tag: ChatTranscriptProjectionTag
     ) -> Bool {
         precondition(tag.sessionID == snapshot.sessionId)
@@ -754,7 +836,33 @@ final class ChatTranscriptPresentationStore {
         // protects callers that constructed a handoff directly rather than via
         // ChatView's source capture.
         let frozenHandoff = handoff.frozenForHandoff()
-        guard tag.handoffIdentity == ChatTranscriptProjectionTag.HandoffIdentity(commit: frozenHandoff) else {
+        guard tag.handoffIdentity == ChatTranscriptProjectionTag.HandoffIdentity(
+            commit: frozenHandoff,
+            queuePresentationIDByOperationID: queuePresentationIDByOperationID
+        ) else {
+            return false
+        }
+        if let installed,
+           installed.tag.matchesProjectionPayload(of: tag),
+           installed.sourceWindow == InstalledChatTranscript.SourceWindow(snapshot: snapshot),
+           installed.queuedMessages == snapshot.displayedQueuedMessages,
+           installed.queueRevision == snapshot.queueRevision,
+           installed.supportsQueueManagement
+               == (tag.queueManagementCapability && snapshot.queuedItems != nil),
+           installed.runtimeItems == ChatTranscriptProjectionKernel.runtimeItems(in: snapshot) {
+            desiredTag = tag
+            let replacement = installed.replacingLifecycle(
+                tag: tag,
+                handoff: frozenHandoff,
+                queuePresentationIDByOperationID: queuePresentationIDByOperationID
+            )
+            guard replacement.hasUniqueDisplayedIDs else { return false }
+            install(replacement)
+            resumeWaiters(with: replacement)
+            failWaiters(except: tag, error: .superseded)
+            #if HOSTED_TEST
+            failHostedCompletionWaiters(except: tag, error: .superseded)
+            #endif
             return false
         }
         if installed?.tag == tag || buildingTag == tag || readyToInstall?.tag == tag {
@@ -778,6 +886,7 @@ final class ChatTranscriptPresentationStore {
         pending = PendingProjection(
             snapshot: snapshot,
             handoff: frozenHandoff,
+            queuePresentationIDByOperationID: queuePresentationIDByOperationID,
             tag: tag,
             generation: generation
         )
@@ -786,6 +895,37 @@ final class ChatTranscriptPresentationStore {
         failHostedCompletionWaiters(except: tag, error: .superseded)
         #endif
         startWorkerIfNeeded()
+        return true
+    }
+
+    /// Installs the local outgoing lifecycle in the current complete projection
+    /// synchronously. Canonical payload facts and their tag fields are retained;
+    /// the newest authoritative capture is still submitted immediately after
+    /// this graft and remains the only path that advances canonical truth.
+    @discardableResult
+    func graftLocalLifecycle(
+        handoff: ChatTranscriptHandoffCommit,
+        queuePresentationIDByOperationID: [String: String]
+    ) -> Bool {
+        guard let installed else { return false }
+        let frozenHandoff = handoff.frozenForHandoff()
+        let tag = installed.tag.replacingLifecycle(
+            handoff: frozenHandoff,
+            queuePresentationIDByOperationID: queuePresentationIDByOperationID
+        )
+        let replacement = installed.replacingLifecycle(
+            tag: tag,
+            handoff: frozenHandoff,
+            queuePresentationIDByOperationID: queuePresentationIDByOperationID
+        )
+        guard replacement.hasUniqueDisplayedIDs else { return false }
+        desiredTag = tag
+        install(replacement)
+        resumeWaiters(with: replacement)
+        failWaiters(except: tag, error: .superseded)
+        #if HOSTED_TEST
+        failHostedCompletionWaiters(except: tag, error: .superseded)
+        #endif
         return true
     }
 
@@ -899,6 +1039,17 @@ final class ChatTranscriptPresentationStore {
         return isVisible
     }
 
+    /// Lifecycle rows are lazily mounted, so their one-shot entrance ownership
+    /// lives outside row-local `@State`. Recording a mounted row does not publish
+    /// observation changes and therefore cannot truncate its active animation.
+    func lifecycleEntranceIsConsumed(id: String) -> Bool {
+        consumedLifecycleEntranceIDs.contains(id)
+    }
+
+    func consumeLifecycleEntrance(id: String) {
+        consumedLifecycleEntranceIDs.insert(id)
+    }
+
     /// Direct/native interaction is stronger than a pending visual entrance.
     /// Clearing here prevents lazily realized offscreen rows from replaying later.
     func discardPendingEntrances() {
@@ -926,6 +1077,7 @@ final class ChatTranscriptPresentationStore {
         buildingTag = nil
         readyToInstall = nil
         consumedEntranceSuppressionGeneration = nil
+        consumedLifecycleEntranceIDs.removeAll(keepingCapacity: false)
         installFrameTask?.cancel()
         installFrameTask = nil
         installed = nil
@@ -964,6 +1116,7 @@ final class ChatTranscriptPresentationStore {
                     runtimeItems: runtimeItems,
                     preparedTextByRenderedID: built.preparedTextByRenderedID,
                     queuedMessages: next.snapshot.displayedQueuedMessages,
+                    queuePresentationIDByOperationID: next.queuePresentationIDByOperationID,
                     queueRevision: next.snapshot.queueRevision,
                     // Rich queue facts are only manageable when this exact
                     // commit also carries the explicit Gateway capability.
@@ -1043,6 +1196,7 @@ final class ChatTranscriptPresentationStore {
             clearEntranceBookkeeping(keepingCapacity: true)
         }
         synchronizeEntranceBookkeeping(with: output)
+        consumedLifecycleEntranceIDs.formIntersection(output.lifecycleRenderedIDs)
         appendPendingEntrances(inserted, output: output)
         recordDisplayedSemanticIDs(from: output)
         installed = output

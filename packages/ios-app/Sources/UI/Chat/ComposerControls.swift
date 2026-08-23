@@ -7,7 +7,6 @@ import UIKit
 struct MultilineComposerTextView: UIViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
-    @Binding var height: CGFloat
     let isEditable: Bool
     let keyboardAppearance: UIKeyboardAppearance
     var maximumLines = 8
@@ -46,16 +45,30 @@ struct MultilineComposerTextView: UIViewRepresentable {
             view.text = text
             view.selectedRange = NSRange(location: (text as NSString).length, length: 0)
         }
-        context.coordinator.updateLayout(of: view, keepCaretVisible: true)
-
+        context.coordinator.updateScrolling(of: view, keepCaretVisible: true)
         context.coordinator.reconcileFocus(on: view)
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: UITextView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width, width > 0 else { return nil }
+        context.coordinator.updateFont(on: uiView)
+        let height = context.coordinator.resolvedHeight(of: uiView, width: width)
+        context.coordinator.updateScrolling(
+            of: uiView,
+            width: width,
+            keepCaretVisible: false
+        )
+        return CGSize(width: width, height: height)
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: MultilineComposerTextView
         private var usesInternalScrolling = false
         private var lastWidth: CGFloat = 0
-        private var layoutRevision: UInt = 0
         private var focusReconciliationScheduled = false
         private var caretScrollScheduled = false
         private(set) var hasMirroredFocus = false
@@ -100,7 +113,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
         func textViewDidBeginEditing(_ textView: UITextView) {
             hasMirroredFocus = true
             if !parent.isFocused { parent.isFocused = true }
-            updateLayout(of: textView, keepCaretVisible: true)
+            updateScrolling(of: textView, keepCaretVisible: true)
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
@@ -110,7 +123,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             if parent.text != textView.text { parent.text = textView.text }
-            updateLayout(of: textView, keepCaretVisible: true)
+            updateScrolling(of: textView, keepCaretVisible: true)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
@@ -124,36 +137,43 @@ struct MultilineComposerTextView: UIViewRepresentable {
             if view.font != font { view.font = font }
         }
 
-        func updateLayout(of view: UITextView, keepCaretVisible: Bool) {
-            guard view.bounds.width > 0, let font = view.font else { return }
-            let fitting = view.sizeThatFits(CGSize(width: view.bounds.width, height: .greatestFiniteMagnitude)).height
+        func resolvedHeight(of view: UITextView, width: CGFloat) -> CGFloat {
+            guard width > 0, let font = view.font else { return 0 }
+            let fitting = view.sizeThatFits(
+                CGSize(width: width, height: .greatestFiniteMagnitude)
+            ).height
             let minimum = ceil(font.lineHeight)
             let maximum = ceil(font.lineHeight * CGFloat(max(parent.maximumLines, 1)))
+            return min(max(fitting, minimum), maximum)
+        }
 
-            // Hysteresis prevents the backing scroll view toggling on and off as
-            // the final wrapped line fluctuates by a fraction during typing.
+        func updateScrolling(
+            of view: UITextView,
+            width: CGFloat? = nil,
+            keepCaretVisible: Bool
+        ) {
+            let resolvedWidth = width ?? view.bounds.width
+            guard resolvedWidth > 0, let font = view.font else { return }
+            let fitting = view.sizeThatFits(
+                CGSize(width: resolvedWidth, height: .greatestFiniteMagnitude)
+            ).height
+            let maximum = ceil(font.lineHeight * CGFloat(max(parent.maximumLines, 1)))
+
+            // Subpixel hysteresis prevents toggling at the cap without keeping
+            // UIKit scroll ownership for an entire line after 9→8-line collapse.
             if usesInternalScrolling {
-                usesInternalScrolling = fitting > maximum - font.lineHeight
+                usesInternalScrolling = fitting > maximum - 0.5
             } else {
                 usesInternalScrolling = fitting > maximum + 0.5
             }
             if view.isScrollEnabled != usesInternalScrolling {
                 view.isScrollEnabled = usesInternalScrolling
-            }
-
-            let resolvedHeight = min(max(fitting, minimum), maximum)
-            layoutRevision &+= 1
-            let revision = layoutRevision
-            if abs(parent.height - resolvedHeight) > 0.5 {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self,
-                          self.layoutRevision == revision,
-                          abs(self.parent.height - resolvedHeight) > 0.5 else { return }
-                    self.parent.height = resolvedHeight
+                if !usesInternalScrolling {
+                    view.setContentOffset(.zero, animated: false)
                 }
             }
-            if lastWidth != view.bounds.width {
-                lastWidth = view.bounds.width
+            if lastWidth != resolvedWidth {
+                lastWidth = resolvedWidth
                 view.layoutIfNeeded()
             }
             if keepCaretVisible { self.keepCaretVisible(in: view) }

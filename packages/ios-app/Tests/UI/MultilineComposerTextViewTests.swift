@@ -10,11 +10,9 @@ struct MultilineComposerTextViewTests {
     func tapFocusSurvivesStaleRender() {
         var text = ""
         var focused = false
-        var height: CGFloat = 20
         let control = MultilineComposerTextView(
             text: Binding(get: { text }, set: { text = $0 }),
             isFocused: Binding(get: { focused }, set: { focused = $0 }),
-            height: Binding(get: { height }, set: { height = $0 }),
             isEditable: true,
             keyboardAppearance: .dark
         )
@@ -135,39 +133,49 @@ struct MultilineComposerTextViewTests {
         #expect(!ComposerEditorRequestPolicy.appliesAutomatically(to: "existing"))
     }
 
-    @Test("grows to eight lines then gives scrolling to the text view")
-    func cappedGrowth() async throws {
+    @Test("intrinsic sizing grows to eight lines and collapses synchronously")
+    func cappedGrowth() throws {
         var text = ""
         var focused = true
-        var height: CGFloat = 20
         let control = MultilineComposerTextView(
             text: Binding(get: { text }, set: { text = $0 }),
             isFocused: Binding(get: { focused }, set: { focused = $0 }),
-            height: Binding(get: { height }, set: { height = $0 }),
             isEditable: true,
             keyboardAppearance: .dark
         )
         let coordinator = control.makeCoordinator()
-        let view = UITextView(frame: CGRect(x: 0, y: 0, width: 240, height: 20))
+        let width: CGFloat = 240
+        let view = UITextView(frame: CGRect(x: 0, y: 0, width: width, height: 20))
         view.textContainerInset = .zero
         view.textContainer.lineFragmentPadding = 0
         coordinator.updateFont(on: view)
 
         view.text = "one line"
         coordinator.textViewDidChange(view)
-        try await Task.sleep(for: .milliseconds(20))
-        let oneLineHeight = height
+        let oneLineHeight = coordinator.resolvedHeight(of: view, width: width)
         #expect(!view.isScrollEnabled)
 
         view.text = (1...12).map { "line \($0)" }.joined(separator: "\n")
         view.selectedRange = NSRange(location: (view.text as NSString).length, length: 0)
         coordinator.textViewDidChange(view)
-        try await Task.sleep(for: .milliseconds(20))
+        let cappedHeight = coordinator.resolvedHeight(of: view, width: width)
 
         let lineHeight = try #require(view.font).lineHeight
         #expect(view.isScrollEnabled)
-        #expect(height > oneLineHeight)
-        #expect(abs(height - ceil(lineHeight * 8)) < 1)
+        #expect(cappedHeight > oneLineHeight)
+        #expect(abs(cappedHeight - ceil(lineHeight * 8)) < 1)
         #expect(text.hasSuffix("line 12"))
+
+        view.setContentOffset(CGPoint(x: 0, y: lineHeight * 2), animated: false)
+        view.text = (1...8).map { "line \($0)" }.joined(separator: "\n")
+        coordinator.textViewDidChange(view)
+        #expect(!view.isScrollEnabled)
+        #expect(abs(view.contentOffset.y) < 0.5)
+
+        view.text = ""
+        coordinator.textViewDidChange(view)
+        let collapsedHeight = coordinator.resolvedHeight(of: view, width: width)
+        #expect(!view.isScrollEnabled)
+        #expect(abs(collapsedHeight - oneLineHeight) < 1)
     }
 }

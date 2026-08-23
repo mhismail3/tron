@@ -162,6 +162,110 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("handoff-only replacement reuses the complete installed payload synchronously")
+    func handoffOnlyReplacementIsSynchronous() async throws {
+        try await withTestWatchdog { @MainActor in
+            let snapshot = try SessionScenarioBuilder(seed: 1_208)
+                .openingTail(targetEncodedBytes: 8_000)
+            let baselineTag = ChatTranscriptProjectionTag(
+                snapshot: snapshot, presentationGeneration: 7
+            )
+            let barrier = TranscriptProjectionBarrier()
+            let store = ChatTranscriptPresentationStore(workGate: barrier.block)
+            #expect(store.submit(snapshot: snapshot, tag: baselineTag))
+            await barrier.waitForBuildCount(1)
+            barrier.releaseBuild(at: 0)
+            let baseline = try await store.waitForInstall(of: baselineTag)
+
+            let submission = ComposerSubmissionSnapshot(
+                target: .init(sessionID: snapshot.sessionId, generation: 7),
+                textRevision: 1,
+                outgoingText: "steer now",
+                attachmentIDs: [],
+                behavior: "steer"
+            )
+            let handoff = ChatTranscriptHandoffCommit.outgoing(
+                presentation: .init(snapshot: submission, transportActive: true),
+                attachments: []
+            )
+            let handoffTag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7,
+                handoff: handoff
+            )
+            #expect(!store.submit(snapshot: snapshot, handoff: handoff, tag: handoffTag))
+            let installed = try #require(store.installed)
+            #expect(installed.tag == handoffTag)
+            #expect(installed.handoff == handoff)
+            #expect(installed.timeline == baseline.timeline)
+            #expect(installed.preparedTextByRenderedID == baseline.preparedTextByRenderedID)
+            #expect(barrier.buildCount == 1)
+        }
+    }
+
+    @Test("local lifecycle graft survives an older in-flight worker")
+    func localGraftRejectsStaleWorker() async throws {
+        try await withTestWatchdog { @MainActor in
+            let baselineSnapshot = try SessionScenarioBuilder(seed: 1_209)
+                .openingTail(targetEncodedBytes: 8_000)
+            let baselineTag = ChatTranscriptProjectionTag(
+                snapshot: baselineSnapshot, presentationGeneration: 7
+            )
+            let barrier = TranscriptProjectionBarrier()
+            let store = ChatTranscriptPresentationStore(workGate: barrier.block)
+            #expect(store.submit(snapshot: baselineSnapshot, tag: baselineTag))
+            await barrier.waitForBuildCount(1)
+            barrier.releaseBuild(at: 0)
+            let baseline = try await store.waitForInstall(of: baselineTag)
+
+            var newerSnapshot = baselineSnapshot
+            newerSnapshot.revision += 1
+            newerSnapshot.eventSequence += 1
+            let staleTag = ChatTranscriptProjectionTag(
+                snapshot: newerSnapshot, presentationGeneration: 7
+            )
+            #expect(store.submit(snapshot: newerSnapshot, tag: staleTag))
+            await barrier.waitForBuildCount(2)
+
+            let submission = ComposerSubmissionSnapshot(
+                target: .init(sessionID: baselineSnapshot.sessionId, generation: 7),
+                textRevision: 1,
+                outgoingText: "race-safe",
+                attachmentIDs: [],
+                behavior: "steer"
+            )
+            let handoff = ChatTranscriptHandoffCommit.outgoing(
+                presentation: .init(snapshot: submission, transportActive: true),
+                attachments: []
+            )
+            #expect(store.graftLocalLifecycle(
+                handoff: handoff,
+                queuePresentationIDByOperationID: [:]
+            ))
+            #expect(store.installed?.handoff == handoff)
+            #expect(store.installed?.timeline == baseline.timeline)
+
+            let newestTag = ChatTranscriptProjectionTag(
+                snapshot: newerSnapshot,
+                presentationGeneration: 7,
+                handoff: handoff
+            )
+            #expect(store.submit(
+                snapshot: newerSnapshot,
+                handoff: handoff,
+                tag: newestTag
+            ))
+            barrier.releaseBuild(at: 1)
+            await barrier.waitForBuildCount(3)
+            #expect(store.installed?.handoff == handoff)
+            #expect(store.installed?.timeline == baseline.timeline)
+            barrier.releaseBuild(at: 2)
+            let newest = try await store.waitForInstall(of: newestTag)
+            #expect(newest.tag == newestTag)
+            #expect(newest.handoff == handoff)
+        }
+    }
+
     @Test("queue cards install atomically with their exact transcript source")
     func queueInstallsWithTranscript() async throws {
         try await withTestWatchdog { @MainActor in
@@ -422,24 +526,97 @@ struct ChatTranscriptPresentationStoreTests {
     @Test("installed text preparation is bounded to its exact source and drops on memory pressure")
     func preparedTextMemoryPressure() async throws {
         try await withTestWatchdog { @MainActor in
-            let snapshot = try SessionScenarioBuilder(seed: 1_213)
+            var snapshot = try SessionScenarioBuilder(seed: 1_213)
                 .openingTail(targetEncodedBytes: 16_000)
+            snapshot.queuedItems = [
+                .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 0),
+            ]
+            snapshot.queued = .init(steering: ["next"], followUp: [])
             #expect(!ChatTextPreparationPolicy.sources(in: snapshot).isEmpty)
-            let tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 7)
+            let aliases = ["queued": "local-presentation"]
+            let tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7,
+                queuePresentationIDByOperationID: aliases
+            )
             let store = ChatTranscriptPresentationStore()
 
-            store.submit(snapshot: snapshot, tag: tag)
+            store.submit(
+                snapshot: snapshot,
+                handoff: .none,
+                queuePresentationIDByOperationID: aliases,
+                tag: tag
+            )
             let installed = try await store.waitForInstall(of: tag)
             let textRow = try #require(installed.timeline.items.first(where: {
                 if case .message = $0 { return true }
                 return false
             }))
             #expect(installed.preparedText(for: textRow) != .empty)
+            store.consumeLifecycleEntrance(id: "local-presentation")
 
             store.handleMemoryPressure()
             #expect(store.installed?.tag == tag)
             #expect(store.installed?.timeline == installed.timeline)
             #expect(store.installed?.preparedText(for: textRow) == .empty)
+            #expect(store.installed?.queuePresentationIDByOperationID == aliases)
+            #expect(store.lifecycleEntranceIsConsumed(id: "local-presentation"))
+        }
+    }
+
+    @Test("lifecycle entrance receipt survives replacement and retires with its row")
+    func lifecycleEntranceReceiptIsProjectionOwned() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_214)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.queuedItems = [
+                .init(id: "queued", behavior: .steer, text: "next", attachmentCount: 0),
+            ]
+            snapshot.queued = .init(steering: ["next"], followUp: [])
+            let aliases = ["queued": "local-presentation"]
+            let firstTag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7,
+                queuePresentationIDByOperationID: aliases
+            )
+            let store = ChatTranscriptPresentationStore()
+            store.submit(
+                snapshot: snapshot,
+                handoff: .none,
+                queuePresentationIDByOperationID: aliases,
+                tag: firstTag
+            )
+            _ = try await store.waitForInstall(of: firstTag)
+            store.consumeLifecycleEntrance(id: "local-presentation")
+            #expect(store.lifecycleEntranceIsConsumed(id: "local-presentation"))
+
+            snapshot.revision += 1
+            snapshot.eventSequence += 1
+            let replacementTag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7,
+                queuePresentationIDByOperationID: aliases
+            )
+            store.submit(
+                snapshot: snapshot,
+                handoff: .none,
+                queuePresentationIDByOperationID: aliases,
+                tag: replacementTag
+            )
+            _ = try await store.waitForInstall(of: replacementTag)
+            #expect(store.lifecycleEntranceIsConsumed(id: "local-presentation"))
+
+            snapshot.revision += 1
+            snapshot.eventSequence += 1
+            snapshot.queuedItems = []
+            snapshot.queued = .init(steering: [], followUp: [])
+            let retiredTag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7
+            )
+            store.submit(snapshot: snapshot, tag: retiredTag)
+            _ = try await store.waitForInstall(of: retiredTag)
+            #expect(!store.lifecycleEntranceIsConsumed(id: "local-presentation"))
         }
     }
 

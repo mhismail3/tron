@@ -303,6 +303,10 @@ final class ComposerDraftCoordinator {
         var transportState: SubmissionTransportState
         var operationID: String?
         var observedQueuedCandidateIDs: Set<String>
+        /// Latest-snapshot-only visual continuity before the transport returns
+        /// the exact operation ID. This never settles admission or canonical
+        /// causality and is cleared on ambiguity or an ID mismatch.
+        var provisionalQueuedCandidateID: String?
         var canonicalObserved: Bool
         var transcriptObserved: Bool
         var canonicalHandoffID: String?
@@ -561,26 +565,53 @@ final class ComposerDraftCoordinator {
         outgoingSubmission(for: target) != nil
     }
 
-    /// Returns the exact optimistic identity only when the Gateway queue item
-    /// is the admitted operation for this presentation. Arbitrary matching
-    /// queue rows never borrow a local identity.
+    /// Returns the optimistic identity only for the exact accepted operation or
+    /// one unique, current-snapshot provisional candidate. Provisional identity
+    /// is visual continuity only: it never retires the admission or establishes
+    /// canonical causality before the transport returns an operation ID.
     func queuedSubmissionPresentationID(
         target: SessionPresentationIdentity,
         message: SessionSnapshot.QueuedMessage
     ) -> String? {
         guard admits(target) else { return nil }
         if let admission = submissionByTarget[target],
-           let operationID = admission.operationID,
-           operationID == message.id,
            admission.snapshot.behavior != nil,
            !admission.snapshot.baselineQueuedMessageIDs.contains(message.id) {
-            return admission.snapshot.presentationID
+            if admission.operationID == message.id
+                || (admission.operationID == nil
+                    && admission.provisionalQueuedCandidateID == message.id) {
+                return admission.snapshot.presentationID
+            }
         }
         if let alias = settledQueueAliases[target]?[message.id],
            !alias.baselineQueueIDs.contains(message.id) {
             return alias.presentationID
         }
         return nil
+    }
+
+    /// Freezes every attributable queue identity into one projection capture so
+    /// rendering never re-reads mutable coordinator state against an older
+    /// installed transcript.
+    func queuedSubmissionPresentationIDs(
+        target: SessionPresentationIdentity,
+        queuedMessages: [SessionSnapshot.QueuedMessage]
+    ) -> [String: String] {
+        guard admits(target),
+              queuedMessages.count <= SessionSnapshot.maximumQueuedMessages,
+              Set(queuedMessages.map(\.id)).count == queuedMessages.count else { return [:] }
+        var aliases: [String: String] = [:]
+        var presentationIDs: Set<String> = []
+        for message in queuedMessages {
+            guard let presentationID = queuedSubmissionPresentationID(
+                target: target,
+                message: message
+            ) else { continue }
+            guard aliases[message.id] == nil,
+                  presentationIDs.insert(presentationID).inserted else { return [:] }
+            aliases[message.id] = presentationID
+        }
+        return aliases
     }
 
     func hasQueuedSubmission(
@@ -644,6 +675,12 @@ final class ComposerDraftCoordinator {
             return message.behavior.rawValue == behavior
                 && message.text == admission.snapshot.outgoingText
                 && message.attachmentCount == admission.submittedAttachments.count
+        }
+        admission.provisionalQueuedCandidateID = if admission.operationID == nil,
+                                                    queuedCandidates.count == 1 {
+            queuedCandidates[0].id
+        } else {
+            nil
         }
         admission.observedQueuedCandidateIDs.formUnion(queuedCandidates.map(\.id))
         admission.transcriptObserved = admission.transcriptObserved || transcriptObserved
@@ -1019,6 +1056,7 @@ final class ComposerDraftCoordinator {
             transportState: .sending,
             operationID: nil,
             observedQueuedCandidateIDs: [],
+            provisionalQueuedCandidateID: nil,
             canonicalObserved: false,
             transcriptObserved: false,
             canonicalHandoffID: nil
@@ -1070,6 +1108,9 @@ final class ComposerDraftCoordinator {
         guard var current = submissionByTarget[admission.snapshot.target],
               current.id == admission.id else { return }
         current.operationID = operationID
+        if current.provisionalQueuedCandidateID != operationID {
+            current.provisionalQueuedCandidateID = nil
+        }
         if current.observedQueuedCandidateIDs.contains(operationID) {
             current.canonicalObserved = true
         }

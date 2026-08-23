@@ -35,6 +35,7 @@ private struct ChatScrollGeometryObservation: Equatable {
 private struct ChatTranscriptProjectionCapture: Sendable {
     let snapshot: SessionSnapshot
     let handoff: ChatTranscriptHandoffCommit
+    let queuePresentationIDByOperationID: [String: String]
     let tag: ChatTranscriptProjectionTag
 }
 
@@ -104,7 +105,6 @@ struct ChatView: View {
     @State private var openPresentation: ChatOpenPresentationState
     @State private var openingTask: Task<Void, Never>?
     @State private var modelPresentationGeneration: Int?
-    @State private var composerTextHeight: CGFloat = 20
     @State private var composerLayoutHeight: CGFloat = 0
     @State private var extensionPillGeometry: ExtensionActivityPillComposerGeometry?
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
@@ -366,7 +366,7 @@ struct ChatView: View {
             guard source == capture.tag else { return }
             intakeTranscriptProjection(capture)
         }
-        .onChange(of: transcriptPresentation.installed?.tag) { _, _ in
+        .onChange(of: transcriptPresentation.installed?.tag) { previousTag, _ in
             let installed = transcriptPresentation.installed
             if ChatQueueMutationProjectionPolicy.shouldRetirePresentationState(
                 commandIsPending: queueMutationCommandIsPending,
@@ -375,10 +375,15 @@ struct ChatView: View {
             ) {
                 clearSettledQueueMutationPresentationState()
             }
-            // Optimistic submission settlement is owned by authoritative
-            // SessionPresentationStore publication, never by this delayed
-            // formatting/install callback.
-            scrollCoordinator.installedTranscriptChanged(installed)
+            // Lifecycle-only grafts own one pinned-tail settlement but must not
+            // consume the mutation boundary reserved for a newer authoritative
+            // payload installation.
+            if let previousTag, let installed,
+               previousTag.matchesProjectionPayload(of: installed.tag) {
+                scrollCoordinator.installedLifecycleChanged(installed)
+            } else {
+                scrollCoordinator.installedTranscriptChanged(installed)
+            }
             #if HOSTED_TEST
             if let installed {
                 hostedProbe?.recordProjectionInstall(
@@ -572,6 +577,7 @@ struct ChatView: View {
         let startedWork = transcriptPresentation.submit(
             snapshot: snapshot,
             handoff: capture.handoff,
+            queuePresentationIDByOperationID: capture.queuePresentationIDByOperationID,
             tag: currentSource
         )
         if startedWork {
@@ -674,8 +680,9 @@ struct ChatView: View {
                         case .none:
                             EmptyView()
                         case .pending(let pendingPrompt):
+                            let renderedID = "pending-prompt-\(pendingPrompt.id)"
                             stableTranscriptRow(
-                                id: "pending-prompt-\(pendingPrompt.id)",
+                                id: renderedID,
                                 installedTag: installed.tag,
                                 entranceState: .none
                             ) {
@@ -685,18 +692,25 @@ struct ChatView: View {
                                             isReady: isTranscriptReady,
                                             entranceSuppressed: installed.tag.entranceSuppressionGeneration != nil,
                                             hasIdentityAlias: false
-                                        ),
-                                        reduceMotion: reduceMotion
+                                        ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
+                                        reduceMotion: reduceMotion,
+                                        onEntranceConsumed: {
+                                            transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
+                                        }
                                     ) {
                                         ChatPendingPromptRow(presentation: pendingPrompt)
                                     }
                                 } else {
                                     ChatOutgoingSubmissionEntranceRow(
                                         reduceMotion: reduceMotion,
-                                        animatesEntrance: installed.tag.entranceSuppressionGeneration == nil,
+                                        animatesEntrance: installed.tag.entranceSuppressionGeneration == nil
+                                            && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
                                         kind: ChatPromptLifecycleTransitionPolicy.entranceKind(
                                             for: pendingPrompt.promptBehavior
-                                        )
+                                        ),
+                                        onEntranceConsumed: {
+                                            transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
+                                        }
                                     ) {
                                         ChatPendingPromptRow(presentation: pendingPrompt)
                                     }
@@ -714,8 +728,11 @@ struct ChatView: View {
                                             isReady: isTranscriptReady,
                                             entranceSuppressed: installed.tag.entranceSuppressionGeneration != nil,
                                             hasIdentityAlias: false
-                                        ),
-                                        reduceMotion: reduceMotion
+                                        ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: outgoing.id),
+                                        reduceMotion: reduceMotion,
+                                        onEntranceConsumed: {
+                                            transcriptPresentation.consumeLifecycleEntrance(id: outgoing.id)
+                                        }
                                     ) {
                                         ChatOutgoingSubmissionRow(
                                             presentation: outgoing,
@@ -728,10 +745,13 @@ struct ChatView: View {
                                         animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateUserEntrance(
                                             isReady: isTranscriptReady,
                                             entranceSuppressed: installed.tag.entranceSuppressionGeneration != nil
-                                        ),
+                                        ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: outgoing.id),
                                         kind: ChatPromptLifecycleTransitionPolicy.entranceKind(
                                             for: outgoing.promptBehavior
-                                        )
+                                        ),
+                                        onEntranceConsumed: {
+                                            transcriptPresentation.consumeLifecycleEntrance(id: outgoing.id)
+                                        }
                                     ) {
                                         ChatOutgoingSubmissionRow(
                                             presentation: outgoing,
@@ -747,6 +767,7 @@ struct ChatView: View {
             }
             .padding(.vertical, 12)
             .scrollTargetLayout()
+            .chatStableTranscriptUpdates()
             // Keep rows physically realizable beneath the opaque opening surface.
             // The cover fades away only after exact-tail positioning; opacity-zero
             // lazy content can defer the very target needed to position it.
@@ -847,12 +868,8 @@ struct ChatView: View {
         )
         let entries = messages.enumerated().map { pair in
             ChatQueuedMessageRenderEntry(
-                id: presentationTarget.flatMap { target in
-                    model.composerDrafts.queuedSubmissionPresentationID(
-                        target: target,
-                        message: pair.element
-                    )
-                } ?? "queued-message-\(pair.element.id)",
+                id: installed.queuePresentationIDByOperationID[pair.element.id]
+                    ?? "queued-message-\(pair.element.id)",
                 index: pair.offset,
                 message: pair.element
             )
@@ -860,12 +877,7 @@ struct ChatView: View {
         ForEach(entries) { entry in
             let index = entry.index
             let message = entry.message
-            let aliasID = presentationTarget.flatMap { target in
-                model.composerDrafts.queuedSubmissionPresentationID(
-                    target: target,
-                    message: message
-                )
-            }
+            let aliasID = installed.queuePresentationIDByOperationID[message.id]
             let renderedID = aliasID ?? "queued-message-\(message.id)"
             let hasSuppressedEntrance = canonicalSubmissionHandoffs.contains(renderedID)
             stableTranscriptRow(
@@ -878,8 +890,11 @@ struct ChatView: View {
                         isReady: isTranscriptReady,
                         entranceSuppressed: installed.tag.entranceSuppressionGeneration != nil,
                         hasIdentityAlias: aliasID != nil || hasSuppressedEntrance
-                    ),
-                    reduceMotion: reduceMotion
+                    ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
+                    reduceMotion: reduceMotion,
+                    onEntranceConsumed: {
+                        transcriptPresentation.consumeLifecycleEntrance(id: renderedID)
+                    }
                 ) {
                     QueuedMessageRow(
                         message: message,
@@ -1058,6 +1073,12 @@ struct ChatView: View {
               snapshot.sessionId == sessionID else { return nil }
         let authority = selectedAuthoritativeSnapshot
         let handoff = transcriptHandoffCommit(snapshot: snapshot)
+        let queuePresentationIDs = presentationTarget.map { target in
+            model.composerDrafts.queuedSubmissionPresentationIDs(
+                target: target,
+                queuedMessages: snapshot.displayedQueuedMessages
+            )
+        } ?? [:]
         let tag = ChatTranscriptProjectionTag(
             snapshot: snapshot,
             authoritySnapshot: authority,
@@ -1068,9 +1089,15 @@ struct ChatView: View {
                 ? nil
                 : model.foregroundReconciliationGeneration,
             queueManagementCapability: queueManagementCapabilityForProjection,
-            handoff: handoff
+            handoff: handoff,
+            queuePresentationIDByOperationID: queuePresentationIDs
         )
-        return ChatTranscriptProjectionCapture(snapshot: snapshot, handoff: handoff, tag: tag)
+        return ChatTranscriptProjectionCapture(
+            snapshot: snapshot,
+            handoff: handoff,
+            queuePresentationIDByOperationID: queuePresentationIDs,
+            tag: tag
+        )
     }
 
     private var transcriptProjectionSource: ChatTranscriptProjectionTag? {
@@ -1096,7 +1123,12 @@ struct ChatView: View {
                 guard resolution == .commandCompleted else { throw CancellationError() }
                 continue
             }
-            transcriptPresentation.submit(snapshot: snapshot, handoff: capture.handoff, tag: tag)
+            transcriptPresentation.submit(
+                snapshot: snapshot,
+                handoff: capture.handoff,
+                queuePresentationIDByOperationID: capture.queuePresentationIDByOperationID,
+                tag: tag
+            )
             do {
                 let installed = try await transcriptPresentation.waitForInstall(of: tag)
                 guard modelPresentationGeneration == presentationGeneration else {
@@ -2037,11 +2069,9 @@ struct ChatView: View {
                         get: { composerFocused },
                         set: { composerFocused = $0 }
                     ),
-                    height: $composerTextHeight,
                     isEditable: ChatComposerPolicy.isTextEditable(isTranscriptReady: isTranscriptReady),
                     keyboardAppearance: colorScheme == .dark ? .dark : .light
                 )
-                .frame(height: composerTextHeight)
                 .padding(.horizontal, 2)
                 .padding(.vertical, 10)
             }
@@ -2401,20 +2431,63 @@ struct ChatView: View {
 
     @MainActor
     private func send(behavior explicitBehavior: String? = nil) {
-        guard let target = presentationTarget else { return }
+        guard openingTask == nil,
+              openPresentation.phase == .ready,
+              let target = presentationTarget,
+              model.ownsPresentation(target),
+              let installed = transcriptPresentation.installed,
+              installed.tag.presentationGeneration == target.generation,
+              let source = transcriptProjectionCapture,
+              source.tag.presentationGeneration == target.generation else { return }
         let behavior = explicitBehavior
             ?? ChatComposerPolicy.submissionBehavior(phase: selectedAuthoritativeSnapshot?.phase)
         do {
-            // Admit the complete outgoing presentation before changing UIKit
-            // responder state. The optimistic row, captured photo chips, and
-            // keyboard transition therefore share one MainActor state boundary
-            // instead of arriving as three unrelated renders.
-            let submission = try model.beginComposerSubmission(
-                target: target,
-                behavior: behavior,
-                canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
-                queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? []
+            // Admission, composer collapse, and the local lifecycle graft share
+            // one transaction. The full newest authoritative capture is then
+            // submitted with animations disabled so concurrent streaming cannot
+            // inherit this insertion choreography.
+            let installedBeforeSubmission = transcriptPresentation.installed
+            let entranceKind = ChatPromptLifecycleTransitionPolicy.entranceKind(
+                for: ChatPromptBehavior(rawValue: behavior)
             )
+            var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
+                for: entranceKind,
+                reduceMotion: reduceMotion
+            ))
+            if reduceMotion { transaction.disablesAnimations = true }
+            let submission = try withTransaction(transaction) {
+                let submission = try model.beginComposerSubmission(
+                    target: target,
+                    behavior: behavior,
+                    canonicalTranscript: model.transcriptSnapshot(for: sessionID)?.transcript ?? [],
+                    queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? []
+                )
+                let submittedAttachments = model.composerDrafts.submittedAttachments(for: target)
+                    .filter { submission.attachmentIDs.contains($0.id) }
+                    .prefix(ComposerAttachmentPolicy.maximumCount)
+                    .map { $0.frozenForHandoff() }
+                if let installedBeforeSubmission {
+                    _ = transcriptPresentation.graftLocalLifecycle(
+                        handoff: .outgoing(
+                            presentation: ChatOutgoingSubmissionPresentation(
+                                snapshot: submission,
+                                transportActive: true
+                            ),
+                            attachments: Array(submittedAttachments)
+                        ),
+                        queuePresentationIDByOperationID:
+                            installedBeforeSubmission.queuePresentationIDByOperationID
+                    )
+                }
+                return submission
+            }
+            if let capture = transcriptProjectionCapture {
+                var stableTransaction = Transaction()
+                stableTransaction.disablesAnimations = true
+                withTransaction(stableTransaction) {
+                    intakeTranscriptProjection(capture)
+                }
+            }
             if !ChatComposerPolicy.preservesFocus(submissionBehavior: behavior) {
                 composerFocused = false
                 UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)

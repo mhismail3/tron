@@ -393,7 +393,7 @@ multi-page scrolling up to the 512-page safety cap. Live composer files retain e
 peak-memory calibration remains required.
 
 `ChatViewScrollHarnessTests` mount the actual `ChatView`, `LazyVStack`, composer
-inset, and native `UIScrollView` in a fixed hosted window. Test-only authority
+inset, and native `UIScrollView` in a fixed hosted window. The multiline composer uses synchronous capped representable fitting, and active-turn admission grafts one immutable lifecycle row into the current complete installed projection before normal newest-source preparation; focused composer/store tests pin immediate collapse, lifecycle-only reuse, stale-worker rejection, and snapshot-before-response provisional queue identity without granting canonical settlement. Test-only authority
 admission bypasses network I/O without bypassing `AppModel`'s authoritative read
 gate. Raw geometry, visible semantic IDs, and row frames are reduced to one latest
 sample on each `CADisplayLink` tick; added evidence is aggregate command/frame/count
@@ -443,7 +443,7 @@ exact physical-tail opening settlement, phase-keyed native-geometry replay, boun
 frame-gated unrealized-target correction without geometry, overflow-overshoot rejection, both geometry/frame callback orders,
 empty/undersized top alignment, post-reveal stable-frame binding release, pre-settlement user cancellation,
 stale-presentation rejection, repeat-prepend ownership, post-install layout-epoch rejection, unchanged-frame epoch
-callbacks, and exact semantic remeasurement with at most one late correction and no
+callbacks, lifecycle-graft isolation from a pending authoritative mutation, and exact semantic remeasurement with at most one late correction and no
 frame retry or total-height polling. Hosted controls drive the production
 coordinator/executor; new evidence is bounded aggregate callback/command/frame and
 maximum-excursion data only. Hosted discrete-insertion cases record aggregate entrance and automatic-follow
@@ -455,7 +455,7 @@ line alignment, agent-matched Dynamic Type body sizing, shared prompt/queue Liqu
 flat/detail material policy. `ChatContentTransitionTests` own role
 classification, trailing composer-edge prompt/queue motion, aligned activity motion, and the
 identity transform required by Reduce Motion. Hosted scroll tests remain the authority that these
-visual transforms do not grant detached readers automatic writes or replay same-ID entrances.
+visual transforms do not grant detached readers automatic writes or replay same-ID entrances. Lifecycle entrance receipts live in the projection owner rather than lazy row state, survive memory-pressure text eviction, and are pruned with their installed outgoing/pending/queue identities.
 `GatewayProtocolContractTests`, `SharedProtocolFixtureTests`, and
 `SessionMutationServiceTests` cover revisioned queue projection and replacement commands.
 `QueuedMessagePresentationTests` own capability/field admission for editing, prove that advancing
