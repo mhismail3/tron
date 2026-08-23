@@ -11,17 +11,35 @@ struct MultilineComposerTextView: UIViewRepresentable {
     let keyboardAppearance: UIKeyboardAppearance
     var maximumLines = 8
 
+    final class LayoutAwareTextView: UITextView {
+        var didLayout: ((LayoutAwareTextView) -> Void)?
+        private var isReportingLayout = false
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            guard !isReportingLayout else { return }
+            isReportingLayout = true
+            didLayout?(self)
+            isReportingLayout = false
+        }
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
-    func makeUIView(context: Context) -> UITextView {
-        let view = UITextView()
+    func makeUIView(context: Context) -> LayoutAwareTextView {
+        let view = LayoutAwareTextView()
         view.delegate = context.coordinator
+        view.didLayout = { [weak coordinator = context.coordinator] view in
+            coordinator?.textViewDidLayout(view)
+        }
         view.backgroundColor = .clear
         view.textColor = UIColor(Color.tronEmerald)
         view.tintColor = UIColor(Color.tronEmerald)
         view.textContainerInset = .zero
         view.textContainer.lineFragmentPadding = 0
         view.contentInset = .zero
+        view.contentInsetAdjustmentBehavior = .never
+        view.isScrollEnabled = false
         view.alwaysBounceVertical = false
         view.keyboardDismissMode = .interactive
         view.adjustsFontForContentSizeCategory = true
@@ -29,12 +47,13 @@ struct MultilineComposerTextView: UIViewRepresentable {
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.accessibilityLabel = "Message input"
         context.coordinator.updateFont(on: view)
+        context.coordinator.requestCaretReveal(on: view)
         return view
     }
 
-    func updateUIView(_ view: UITextView, context: Context) {
+    func updateUIView(_ view: LayoutAwareTextView, context: Context) {
         context.coordinator.parent = self
-        context.coordinator.updateFont(on: view)
+        let fontChanged = context.coordinator.updateFont(on: view)
         view.isEditable = isEditable
         view.isSelectable = isEditable
         if view.keyboardAppearance != keyboardAppearance {
@@ -44,33 +63,35 @@ struct MultilineComposerTextView: UIViewRepresentable {
         if view.text != text {
             view.text = text
             view.selectedRange = NSRange(location: (text as NSString).length, length: 0)
+            context.coordinator.requestCaretReveal(on: view)
+        } else if fontChanged {
+            context.coordinator.requestCaretReveal(on: view)
         }
-        context.coordinator.updateScrolling(of: view, keepCaretVisible: true)
         context.coordinator.reconcileFocus(on: view)
     }
 
+    /// SwiftUI may call representable measurement speculatively. Keep this
+    /// callback pure: live scroll mode and caret ownership reconcile only after
+    /// UIKit has installed the returned bounds and completed TextKit layout.
     func sizeThatFits(
         _ proposal: ProposedViewSize,
-        uiView: UITextView,
+        uiView: LayoutAwareTextView,
         context: Context
     ) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
-        context.coordinator.updateFont(on: uiView)
-        let height = context.coordinator.resolvedHeight(of: uiView, width: width)
-        context.coordinator.updateScrolling(
-            of: uiView,
+        return CGSize(
             width: width,
-            keepCaretVisible: false
+            height: context.coordinator.resolvedHeight(of: uiView, width: width)
         )
-        return CGSize(width: width, height: height)
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: MultilineComposerTextView
-        private var usesInternalScrolling = false
-        private var lastWidth: CGFloat = 0
+        private(set) var usesInternalScrolling = false
+        private var lastLayoutSize = CGSize.zero
+        private var needsCaretReveal = false
         private var focusReconciliationScheduled = false
-        private var caretScrollScheduled = false
+        private var isReconcilingLayout = false
         private(set) var hasMirroredFocus = false
 
         init(_ parent: MultilineComposerTextView) { self.parent = parent }
@@ -113,7 +134,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
         func textViewDidBeginEditing(_ textView: UITextView) {
             hasMirroredFocus = true
             if !parent.isFocused { parent.isFocused = true }
-            updateScrolling(of: textView, keepCaretVisible: true)
+            requestCaretReveal(on: textView)
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
@@ -123,18 +144,24 @@ struct MultilineComposerTextView: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             if parent.text != textView.text { parent.text = textView.text }
-            updateScrolling(of: textView, keepCaretVisible: true)
+            requestCaretReveal(on: textView)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard textView.isFirstResponder else { return }
-            keepCaretVisible(in: textView)
+            requestCaretReveal(on: textView)
         }
 
-        func updateFont(on view: UITextView) {
-            let base = TronFontLoader.createUIFont(size: TronTypography.sizeBodyLG, weight: .regular)
+        @discardableResult
+        func updateFont(on view: UITextView) -> Bool {
+            let base = TronFontLoader.createUIFont(
+                size: TronTypography.sizeBodyLG,
+                weight: .regular
+            )
             let font = UIFontMetrics(forTextStyle: .body).scaledFont(for: base)
-            if view.font != font { view.font = font }
+            guard view.font != font else { return false }
+            view.font = font
+            return true
         }
 
         func resolvedHeight(of view: UITextView, width: CGFloat) -> CGFloat {
@@ -147,70 +174,95 @@ struct MultilineComposerTextView: UIViewRepresentable {
             return min(max(fitting, minimum), maximum)
         }
 
-        func updateScrolling(
-            of view: UITextView,
-            width: CGFloat? = nil,
-            keepCaretVisible: Bool
-        ) {
-            let resolvedWidth = width ?? view.bounds.width
-            guard resolvedWidth > 0, let font = view.font else { return }
-            let fitting = view.sizeThatFits(
-                CGSize(width: resolvedWidth, height: .greatestFiniteMagnitude)
-            ).height
+        func requestCaretReveal(on view: UITextView) {
+            needsCaretReveal = true
+            view.setNeedsLayout()
+        }
+
+        /// Runs only from `layoutSubviews`, after SwiftUI has installed the
+        /// representable's capped frame. Scroll ownership and caret visibility
+        /// are therefore reduced from one final bounds/content geometry pair.
+        func textViewDidLayout(_ view: UITextView) {
+            guard !isReconcilingLayout,
+                  view.bounds.width > 0,
+                  view.bounds.height > 0,
+                  let font = view.font else { return }
+            let expectedHeight = resolvedHeight(of: view, width: view.bounds.width)
+            guard abs(view.bounds.height - expectedHeight) <= 0.75 else { return }
+
+            isReconcilingLayout = true
+            defer { isReconcilingLayout = false }
+            let fitting = view.sizeThatFits(CGSize(
+                width: view.bounds.width,
+                height: .greatestFiniteMagnitude
+            )).height
             let maximum = ceil(font.lineHeight * CGFloat(max(parent.maximumLines, 1)))
+            let shouldScroll = fitting > maximum + 0.5
+            let sizeChanged = abs(lastLayoutSize.width - view.bounds.width) > 0.5
+                || abs(lastLayoutSize.height - view.bounds.height) > 0.5
+            lastLayoutSize = view.bounds.size
 
-            // Subpixel hysteresis prevents toggling at the cap without keeping
-            // UIKit scroll ownership for an entire line after 9→8-line collapse.
-            if usesInternalScrolling {
-                usesInternalScrolling = fitting > maximum - 0.5
-            } else {
-                usesInternalScrolling = fitting > maximum + 0.5
-            }
-            if view.isScrollEnabled != usesInternalScrolling {
-                view.isScrollEnabled = usesInternalScrolling
-                if !usesInternalScrolling {
-                    view.setContentOffset(.zero, animated: false)
-                }
-            }
-            if lastWidth != resolvedWidth {
-                lastWidth = resolvedWidth
+            if shouldScroll != usesInternalScrolling {
+                usesInternalScrolling = shouldScroll
+                view.isScrollEnabled = shouldScroll
+                view.setNeedsLayout()
                 view.layoutIfNeeded()
+                if shouldScroll {
+                    needsCaretReveal = true
+                } else {
+                    needsCaretReveal = false
+                    setOffsetY(0, on: view)
+                }
             }
-            if keepCaretVisible { self.keepCaretVisible(in: view) }
+            if sizeChanged && usesInternalScrolling { needsCaretReveal = true }
+            guard usesInternalScrolling, view.isScrollEnabled, needsCaretReveal else { return }
+            needsCaretReveal = false
+            revealCaret(in: view, measuredContentHeight: fitting)
         }
 
-        private func keepCaretVisible(in view: UITextView) {
-            guard usesInternalScrolling else {
-                if abs(view.contentOffset.y) > 0.5 {
-                    view.setContentOffset(.zero, animated: false)
-                }
-                return
+        private func revealCaret(in view: UITextView, measuredContentHeight: CGFloat) {
+            guard let selection = view.selectedTextRange else { return }
+            var caret = view.caretRect(for: selection.end)
+            guard caret.minY.isFinite, caret.maxY.isFinite else { return }
+            let margin = min(4, max(1, (view.font?.lineHeight ?? 4) * 0.18))
+            caret = caret.insetBy(dx: 0, dy: -margin)
+
+            let minimumY = -view.contentInset.top
+            let contentHeight = max(view.contentSize.height, measuredContentHeight)
+            let maximumY = max(
+                minimumY,
+                contentHeight - view.bounds.height + view.contentInset.bottom
+            )
+            let visibleMinimumY = view.contentOffset.y + view.contentInset.top
+            let visibleMaximumY = view.contentOffset.y + view.bounds.height
+                - view.contentInset.bottom
+            var targetY = view.contentOffset.y
+            if caret.maxY > visibleMaximumY {
+                targetY += caret.maxY - visibleMaximumY
+            } else if caret.minY < visibleMinimumY {
+                targetY -= visibleMinimumY - caret.minY
             }
-            // SwiftUI may update this representable several times during the
-            // keyboard/safe-area transition. Coalesce all caret work into one
-            // main-queue pass; repeatedly forcing layout and scrolling from
-            // every update can otherwise form a responder/layout feedback loop.
-            guard !caretScrollScheduled else { return }
-            caretScrollScheduled = true
-            DispatchQueue.main.async { [weak self, weak view] in
-                guard let self else { return }
-                self.caretScrollScheduled = false
-                guard let view, view.window != nil else { return }
-                guard self.usesInternalScrolling, view.isScrollEnabled else {
-                    if abs(view.contentOffset.y) > 0.5 {
-                        view.setContentOffset(.zero, animated: false)
-                    }
-                    return
-                }
-                view.scrollRangeToVisible(view.selectedRange)
-                let minimumY = -view.adjustedContentInset.top
-                let maximumY = max(minimumY, view.contentSize.height - view.bounds.height + view.adjustedContentInset.bottom)
-                let boundedY = min(max(view.contentOffset.y, minimumY), maximumY)
-                if abs(view.contentOffset.y - boundedY) > 0.5 {
-                    view.setContentOffset(CGPoint(x: 0, y: boundedY), animated: false)
-                }
-            }
+            setOffsetY(min(max(targetY, minimumY), maximumY), on: view)
         }
+
+        private func setOffsetY(_ y: CGFloat, on view: UITextView) {
+            guard abs(view.contentOffset.y - y) > 0.5 else { return }
+            view.setContentOffset(CGPoint(x: 0, y: y), animated: false)
+        }
+
+        #if HOSTED_TEST
+        func hostedCaretIsVisible(in view: UITextView) -> Bool {
+            guard let selection = view.selectedTextRange else { return false }
+            let caret = view.caretRect(for: selection.end)
+            // TextKit can report the terminal caret fractionally beyond its
+            // rounded contentSize edge; one physical-point tolerance matches
+            // UIScrollView's own maximum-offset clamp.
+            let minimum = view.contentOffset.y + view.contentInset.top - 1
+            let maximum = view.contentOffset.y + view.bounds.height
+                - view.contentInset.bottom + 1
+            return caret.minY >= minimum && caret.maxY <= maximum
+        }
+        #endif
     }
 }
 

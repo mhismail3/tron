@@ -329,7 +329,7 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("visible discrete insertion reveals once without smooth viewport motion")
+    @Test("visible discrete insertion reveals once with one smooth viewport motion")
     func discreteInsertionEntrance() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_190) { harness in
@@ -352,8 +352,9 @@ struct ChatViewScrollHarnessTests {
                 let revealed = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > installBaseline
                         && $0.observation.animatedEntranceCount == entranceBaseline + 1
+                        && $0.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1
                 }
-                #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
+                #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1)
 
                 // Repeated geometry for the same row cannot replay admission.
                 if let frame = revealed.observation.rowFrames["discrete-tail"] {
@@ -397,15 +398,16 @@ struct ChatViewScrollHarnessTests {
                     $0.observation.projectionInstallCount >= installBaseline + 2
                         && $0.observation.installedProjectionSourceOrdinal == completedOrdinal
                         && $0.observation.lastAnimatedEntranceSourceOrdinal == runningOrdinal
+                        && $0.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1
                 }
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
-                #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
+                #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1)
                 #expect(settled.observation.rowFrames["tool-run-active-race"] != nil)
             }
         }
     }
 
-    @Test("real tool group topology updates one chip without smooth viewport motion")
+    @Test("real tool group topology inserts one chip with one smooth viewport motion")
     func toolGroupTopologySettlement() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_194) { harness in
@@ -438,10 +440,11 @@ struct ChatViewScrollHarnessTests {
                 let settled = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount >= installBaseline + 2
                         && $0.observation.rowFrames["tool-run-group-one"] != nil
+                        && $0.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1
                 }
 
                 #expect(settled.observation.rowFrames["tool-run-group-two"] == nil)
-                #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
+                #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1)
                 let visuallySettled = try await harness.recorder.waitUntil {
                     $0.observation.toolChipSamples.last(where: { $0.runID == "tool-run-group-one" })?.title == "Used 2 tools"
                 }

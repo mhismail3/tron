@@ -54,6 +54,7 @@ struct ChatPrependPage: Equatable, Sendable {
 @MainActor
 final class ChatScrollCoordinator {
     static let defaultOpeningTailTimeout: Duration = .milliseconds(750)
+    static let liveGrowthFollowDuration = 0.16
 
     private struct SemanticFrameSample: Equatable {
         let layoutEpoch: Int
@@ -563,6 +564,7 @@ final class ChatScrollCoordinator {
         }
         pendingGrowthFollow = true
         pendingContinuousGrowthFollow = true
+        pendingGrowthFollowAnimation = .smooth(duration: Self.liveGrowthFollowDuration)
         scheduleTailFollow()
     }
 
@@ -842,13 +844,14 @@ final class ChatScrollCoordinator {
         }
     }
 
-    /// A geometry-admitted visible row insertion requests one coalesced tail
-    /// settlement. Ordinary rows use a disabled animation; tool-chip callers
-    /// may request one smooth viewport follow. Continuous streaming growth uses
-    /// the same viewport policy and never creates a competing write.
+    /// A geometry-admitted visible row insertion requests one coalesced smooth
+    /// pinned-tail settlement. Detached/native-owned readers remain inert, and
+    /// physical overshoot correction is forced nonanimated at publication.
     func discreteContentInserted(
         renderedID: String,
-        followAnimation: ChatScrollAnimation = .disabled
+        followAnimation: ChatScrollAnimation = .smooth(
+            duration: ChatScrollCoordinator.liveGrowthFollowDuration
+        )
     ) {
         guard canAutomaticallyFollow else { return }
         if discreteFollowRenderedIDs.insert(renderedID).inserted {
@@ -1258,7 +1261,11 @@ final class ChatScrollCoordinator {
             if self.geometry.isPastBottomEdge
                 || self.geometry.distanceFromBottom > ChatTranscriptGeometry.catchUpDistance {
                 let correctsPastBottom = self.geometry.isPastBottomEdge
-                self.publish(.tail, animation: followAnimation, origin: .automaticFollow)
+                self.publish(
+                    .tail,
+                    animation: correctsPastBottom ? .disabled : followAnimation,
+                    origin: .automaticFollow
+                )
                 if correctsPastBottom {
                     self.pastBottomCorrectionCommandToken = self.command?.token
                 }

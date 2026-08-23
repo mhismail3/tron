@@ -57,7 +57,10 @@ struct PresentationStyleGuardTests {
         #expect(toolRuns.contains(".onTapGesture(perform: action)"))
         #expect(toolRuns.contains(".accessibilityAddTraits(.isButton)"))
         #expect(!toolRuns.contains("ChatToolChipPressStyle"))
-        #expect(contentTransition.contains("!transaction.admitsChatToolChipAnimation && !transaction.isContinuous"))
+        #expect(contentTransition.contains("!transaction.admitsChatToolChipAnimation,"))
+        #expect(contentTransition.contains("!transaction.admitsChatEntranceAnimation,"))
+        #expect(contentTransition.contains("!transaction.isContinuous"))
+        #expect(!contentTransition.contains("admitsChatLiveGrowthAnimation"))
     }
 
     @Test("Markdown rendering has one cold inline-attribution construction and no view parser")
@@ -1216,13 +1219,15 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
         #expect(composer.contains("struct MultilineComposerTextView: UIViewRepresentable"))
-        #expect(composer.contains("scrollRangeToVisible(view.selectedRange)"))
+        #expect(composer.contains("final class LayoutAwareTextView: UITextView"))
+        #expect(composer.contains("view.contentInsetAdjustmentBehavior = .never"))
+        #expect(composer.contains("func textViewDidLayout(_ view: UITextView)"))
+        #expect(composer.contains("view.caretRect(for: selection.end)"))
+        #expect(!composer.contains("scrollRangeToVisible"))
         #expect(composer.contains("usesInternalScrolling"))
         #expect(composer.contains("context.coordinator.reconcileFocus(on: view)"))
         #expect(composer.contains("hasMirroredFocus"))
         #expect(composer.contains("focusReconciliationScheduled"))
-        #expect(composer.contains("caretScrollScheduled"))
-        #expect(composer.contains("Coalesce all caret work"))
         #expect(chat.contains("MultilineComposerTextView("))
         #expect(!chat.contains("TextField(\"\", text: $text, axis: .vertical)"))
         let attachmentButton = try #require(
@@ -2114,8 +2119,9 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
             encoding: .utf8
         )
-        #expect(composerControl.contains("private var layoutRevision: UInt = 0"))
-        #expect(composerControl.contains("self.layoutRevision == revision"))
+        #expect(composerControl.contains("private var isReconcilingLayout = false"))
+        #expect(composerControl.contains("guard !isReconcilingLayout"))
+        #expect(composerControl.contains("view.bounds.height - expectedHeight"))
         #expect(chat.contains("Opening conversation…"))
         #expect(chat.contains("Conversation unavailable"))
         #expect(chat.contains("positionLatestTail(epoch:"))

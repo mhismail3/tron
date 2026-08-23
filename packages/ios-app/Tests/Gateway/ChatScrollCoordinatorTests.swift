@@ -22,11 +22,14 @@ struct ChatScrollCoordinatorTests {
             frames.releaseNext()
             let command = try await coordinator.hostedNextCommand()
             #expect(command.destination == .tail)
+            #expect(command.animation == .smooth(
+                duration: ChatScrollCoordinator.liveGrowthFollowDuration
+            ))
             #expect(frames.requestCount == 1)
         }
     }
 
-    @Test("discrete and continuous automatic follows are coalesced and nonanimated")
+    @Test("discrete and continuous automatic follows share one smooth pinned motion")
     func discreteInsertionMotion() async throws {
         try await withTestWatchdog { @MainActor in
             let frames = ManualScrollFrameScheduler()
@@ -40,7 +43,9 @@ struct ChatScrollCoordinatorTests {
             frames.releaseNext()
             let discrete = try await coordinator.hostedNextCommand()
             #expect(discrete.origin == .automaticFollow)
-            #expect(discrete.animation == .disabled)
+            #expect(discrete.animation == .smooth(
+                duration: ChatScrollCoordinator.liveGrowthFollowDuration
+            ))
             coordinator.commandApplied(discrete)
 
             let streaming = ChatTranscriptGeometry(
@@ -50,7 +55,9 @@ struct ChatScrollCoordinatorTests {
             await frames.waitForRequest(count: 2)
             frames.releaseNext()
             let immediate = try await coordinator.hostedNextCommand()
-            #expect(immediate.animation == .disabled)
+            #expect(immediate.animation == .smooth(
+                duration: ChatScrollCoordinator.liveGrowthFollowDuration
+            ))
         }
     }
 
@@ -73,11 +80,13 @@ struct ChatScrollCoordinatorTests {
             await frames.waitForRequest(count: 2)
             frames.releaseNext()
             let command = try await coordinator.hostedNextCommand()
-            #expect(command.animation == .disabled)
+            #expect(command.animation == .smooth(
+                duration: ChatScrollCoordinator.liveGrowthFollowDuration
+            ))
         }
     }
 
-    @Test("installed same-row completion retains one nonanimated discrete follow")
+    @Test("installed same-row completion retains one smooth discrete follow")
     func installedSameRowRetainsDiscreteFollow() async throws {
         try await withTestWatchdog { @MainActor in
             let frames = ManualScrollFrameScheduler()
@@ -99,7 +108,9 @@ struct ChatScrollCoordinatorTests {
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
             let command = try await coordinator.hostedNextCommand()
-            #expect(command.animation == .disabled)
+            #expect(command.animation == .smooth(
+                duration: ChatScrollCoordinator.liveGrowthFollowDuration
+            ))
             #expect(coordinator.hostedDiscreteFollowRenderedIDs.isEmpty)
         }
     }
@@ -131,7 +142,7 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.command == nil)
     }
 
-    @Test("pinned projection topology change coalesces to one nonanimated tail settlement")
+    @Test("pinned projection topology change coalesces to one smooth tail settlement")
     func pinnedProjectionMutationSettlesOnce() async throws {
         try await withTestWatchdog { @MainActor in
             let frames = ManualScrollFrameScheduler()
@@ -156,7 +167,9 @@ struct ChatScrollCoordinatorTests {
             let command = try await coordinator.hostedNextCommand()
             #expect(command.origin == .automaticFollow)
             #expect(command.destination == .tail)
-            #expect(command.animation == .disabled)
+            #expect(command.animation == .smooth(
+                duration: ChatScrollCoordinator.liveGrowthFollowDuration
+            ))
             #expect(frames.requestCount == 1)
         }
     }
@@ -612,7 +625,9 @@ struct ChatScrollCoordinatorTests {
             await frames.waitForRequest(count: 1)
             frames.releaseNext()
             let command = try await coordinator.hostedNextCommand()
-            #expect(command.animation == .disabled)
+            #expect(command.animation == .smooth(
+                duration: ChatScrollCoordinator.liveGrowthFollowDuration
+            ))
         }
     }
 
@@ -2144,6 +2159,106 @@ struct ChatScrollCoordinatorTests {
         coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: geometry)
         if withUnread { coordinator.semanticResponseArrived() }
         return coordinator
+    }
+}
+
+@MainActor
+@Suite("Chat live growth motion")
+struct ChatLiveGrowthMotionTests {
+    private let bottom = ChatTranscriptGeometry(
+        offsetY: 600,
+        contentHeight: 1_000,
+        containerHeight: 400
+    )
+
+    @Test("pinned streamed growth publishes one short smooth tail motion")
+    func streamedGrowthIsSmooth() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            let first = ChatTranscriptGeometry(
+                offsetY: 600, contentHeight: 1_080, containerHeight: 400
+            )
+            let second = ChatTranscriptGeometry(
+                offsetY: 600, contentHeight: 1_160, containerHeight: 400
+            )
+            coordinator.geometryChanged(previous: bottom, current: first)
+            coordinator.geometryChanged(previous: first, current: second)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(command.destination == .tail)
+            #expect(command.animation == .smooth(
+                duration: ChatScrollCoordinator.liveGrowthFollowDuration
+            ))
+            #expect(frames.requestCount == 1)
+        }
+    }
+
+    @Test("new agent row shares the smooth growth motion")
+    func insertedRowIsSmooth() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.discreteContentInserted(renderedID: "new-agent-row")
+            coordinator.geometryChanged(
+                previous: bottom,
+                current: ChatTranscriptGeometry(
+                    offsetY: 600, contentHeight: 1_100, containerHeight: 400
+                )
+            )
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(command.animation == .smooth(
+                duration: ChatScrollCoordinator.liveGrowthFollowDuration
+            ))
+        }
+    }
+
+    @Test("physical overshoot correction remains nonanimated")
+    func overshootCorrectionIsDisabled() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.geometryChanged(previous: .zero, current: bottom)
+            if let release = coordinator.command { coordinator.commandApplied(release) }
+            let overshoot = ChatTranscriptGeometry(
+                offsetY: 600,
+                contentHeight: 900,
+                containerHeight: 400,
+                visibleTopY: 600,
+                visibleBottomY: 1_000
+            )
+            coordinator.geometryChanged(previous: bottom, current: overshoot)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(command.destination == .tail)
+            #expect(command.animation == .disabled)
+        }
+    }
+
+    @Test("detached reader receives no growth write")
+    func detachedGrowthIsInert() {
+        let frames = ManualScrollFrameScheduler()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+        let away = ChatTranscriptGeometry(
+            offsetY: 300, contentHeight: 1_000, containerHeight: 400
+        )
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        coordinator.geometryChanged(previous: bottom, current: away)
+        coordinator.scrollPhaseChanged(from: .interacting, to: .idle, finalGeometry: away)
+        #expect(coordinator.userScrolledAway)
+
+        coordinator.geometryChanged(
+            previous: away,
+            current: ChatTranscriptGeometry(
+                offsetY: 300, contentHeight: 1_120, containerHeight: 400
+            )
+        )
+        #expect(frames.requestCount == 0)
+        #expect(coordinator.command == nil)
     }
 }
 

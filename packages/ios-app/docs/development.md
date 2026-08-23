@@ -393,7 +393,7 @@ multi-page scrolling up to the 512-page safety cap. Live composer files retain e
 peak-memory calibration remains required.
 
 `ChatViewScrollHarnessTests` mount the actual `ChatView`, `LazyVStack`, composer
-inset, and native `UIScrollView` in a fixed hosted window. The multiline composer uses synchronous capped representable fitting, and active-turn admission grafts one immutable lifecycle row into the current complete installed projection before normal newest-source preparation; focused composer/store tests pin immediate collapse, lifecycle-only reuse, stale-worker rejection, and snapshot-before-response provisional queue identity without granting canonical settlement. Test-only authority
+inset, and native `UIScrollView` in a fixed hosted window. The multiline composer uses pure synchronous capped representable fitting plus post-layout TextKit overflow/caret reconciliation; focused tests pin trailing-newline caret visibility, manual-scroll-then-type direction, 9→8 collapse, and inset ownership. Active-turn admission grafts one immutable lifecycle row into the current complete installed projection before normal newest-source preparation; focused composer/store tests pin immediate collapse, lifecycle-only reuse, stale-worker rejection, and snapshot-before-response provisional queue identity without granting canonical settlement. Test-only authority
 admission bypasses network I/O without bypassing `AppModel`'s authoritative read
 gate. Raw geometry, visible semantic IDs, and row frames are reduced to one latest
 sample on each `CADisplayLink` tick; added evidence is aggregate command/frame/count
@@ -434,8 +434,7 @@ history back to the retained authoritative tail. Opening ownership is one mutual
 insertion, and pinned correction stay independent and are suppressed until it is idle. `ChatScrollCoordinatorTests` use watchdog-bounded
 barriers rather than sleeps or yields to prove callback-order equivalence, immediate
 catch-up dismissal for geometry-first manual return to the tail, pinned keyboard/composer
-following, one follow command per frame, nonanimated settlement for an admitted discrete
-insertion, native-geometry acknowledgement before a subsequent follow, immediate continuous-stream following,
+following, one short smooth pinned-tail command per frame for admitted discrete and continuous growth, disabled physical-overshoot correction, native-geometry acknowledgement before a subsequent follow,
 no writes for detached layout/stream/keyboard
 settlement, viewport geometry-first expansion detachment, frame-separated catch-up with unread admission
 through every interruption stage, Reduce Motion, exact reset/release command admission,
@@ -593,7 +592,7 @@ tool grouping retain their visual row identities. Agent text and thinking traces
 keeping full layout geometry stable; reconnecting to a long stream catches up instead of replaying the backlog, and
 completion reveals the full source without a flash. Thinking-line projection normalizes whitespace without adding or replacing terminal punctuation, so only punctuation supplied by the source is rendered. Thinking traces remain one-line natural height until they
 exceed four measured lines, then show only their latest four lines without scrolling; the oldest visible line fades
-at the top to signal earlier content. Tapping the overflow opens the full trace sheet, which continues updating during
+at the top to signal earlier content. Both the growing viewport and the capped tail offset use one short row-local growth animation, while Reduce Motion installs them directly. Tapping the overflow opens the full trace sheet, which continues updating during
 streaming. The sheet uses the shared Tron title/top-blur/toolbar
 chrome with no drag handle. The same rendered tool/group row stays after non-tool streaming
 across running-to-completed updates, retains at most one installed-identity-owned tail settlement while

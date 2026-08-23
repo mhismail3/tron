@@ -171,15 +171,9 @@ partial declaration
 
 The current hosted probes observe projection installs, entrance resolution, scroll behavior, and semantic remounts, but do not record per-frame chip title, variant, membership, transition token, or detail-sheet generation.
 
-### 8. Scroll-animation policy has drifted between production and tests
+### 8. Scroll-animation policy is explicit
 
-Production `ChatView` deliberately calls `discreteContentInserted(renderedID:)` without a smooth follow animation and documents that tail settlement is never animated. A presentation source guard and hosted scroll tests still expect a smooth tool-follow path.
-
-Chip animation and transcript scrolling must remain separate owners. The recommended policy is:
-
-- Keep transcript structural and follow-scroll updates animation-disabled.
-- Animate only the chip's local semantic visual changes.
-- Update stale guards, tests, and coordinator documentation to match that policy.
+`ChatView` calls `discreteContentInserted(renderedID:)` without choosing motion; `ChatScrollCoordinator` owns the default short smooth pinned-tail follow and coalesces it with streamed growth. Chip-local semantic motion and transcript scrolling remain separate owners: the chip animates only its own visual state, while the coordinator alone writes the viewport. Detached readers receive no automatic write, Reduce Motion executes the admitted command without spatial animation, and physical overshoot clamps remain animation-disabled. Source guards, hosted tests, and coordinator documentation assert that same policy.
 
 ### 9. Detail surfaces can briefly combine generations
 
@@ -427,7 +421,7 @@ Requirements:
 Adopt and test one policy:
 
 - Tool-row entrance may animate once when semantically novel and visible.
-- Tail settlement and transcript follow scrolling remain animation-disabled.
+- A semantically novel visible agent row shares one short, frame-coalesced smooth pinned-tail follow with streamed growth; detached readers receive no write, Reduce Motion executes without spatial animation, and physical overshoot correction remains animation-disabled.
 - Chip-internal transitions remain locally animated.
 - Chip updates never replay row entrance.
 - Rapid pending installation-tag replacement restarts or supersedes the exact-token failsafe correctly; a stale token cannot resolve a newer pending entrance.

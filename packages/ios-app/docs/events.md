@@ -140,9 +140,8 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   suppresses duplicate entrances, and cannot evict currently visible rows; a cancelled,
   unanimated failsafe reveals any row whose geometry admission never arrives. Installed-row
   updates, live-to-canonical settlement, thinking-height measurement, and tool status changes
-  inherit no stack-wide animation. The stable transcript transaction admits only the explicit
-  chip-local animation marker; Reduce Motion uses an opacity-only transition. Tool status text
-  updates inside its stable row, and automatic tail-follow commands remain
+  inherit no stack-wide animation. The stable transcript transaction admits only explicit entrance/tool-chip markers and continuous native-control transactions; thinking height/tail motion is row-local downstream of that boundary. Reduce Motion removes spatial transitions. Tool status text
+  updates inside its stable row, and short smooth pinned-tail commands remain
   owned until fresh native geometry acknowledges them, so a second keyboard/composer/tool growth
   sample cannot replace a pending scroll write. Native bottom distance is bounded for display only:
   a visible rect beyond the physical content edge is not tail settlement. If reconciliation,

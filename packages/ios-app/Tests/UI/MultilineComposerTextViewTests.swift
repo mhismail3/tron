@@ -133,7 +133,7 @@ struct MultilineComposerTextViewTests {
         #expect(!ComposerEditorRequestPolicy.appliesAutomatically(to: "existing"))
     }
 
-    @Test("intrinsic sizing grows to eight lines and collapses synchronously")
+    @Test("intrinsic sizing grows to eight lines and reconciles scrolling after final layout")
     func cappedGrowth() throws {
         var text = ""
         var focused = true
@@ -145,20 +145,21 @@ struct MultilineComposerTextViewTests {
         )
         let coordinator = control.makeCoordinator()
         let width: CGFloat = 240
-        let view = UITextView(frame: CGRect(x: 0, y: 0, width: width, height: 20))
-        view.textContainerInset = .zero
-        view.textContainer.lineFragmentPadding = 0
-        coordinator.updateFont(on: view)
+        let view = makeTextView(coordinator: coordinator, width: width)
 
         view.text = "one line"
         coordinator.textViewDidChange(view)
         let oneLineHeight = coordinator.resolvedHeight(of: view, width: width)
+        view.frame.size.height = oneLineHeight
+        coordinator.textViewDidLayout(view)
         #expect(!view.isScrollEnabled)
 
         view.text = (1...12).map { "line \($0)" }.joined(separator: "\n")
         view.selectedRange = NSRange(location: (view.text as NSString).length, length: 0)
         coordinator.textViewDidChange(view)
         let cappedHeight = coordinator.resolvedHeight(of: view, width: width)
+        view.frame.size.height = cappedHeight
+        coordinator.textViewDidLayout(view)
 
         let lineHeight = try #require(view.font).lineHeight
         #expect(view.isScrollEnabled)
@@ -166,16 +167,142 @@ struct MultilineComposerTextViewTests {
         #expect(abs(cappedHeight - ceil(lineHeight * 8)) < 1)
         #expect(text.hasSuffix("line 12"))
 
-        view.setContentOffset(CGPoint(x: 0, y: lineHeight * 2), animated: false)
         view.text = (1...8).map { "line \($0)" }.joined(separator: "\n")
         coordinator.textViewDidChange(view)
+        view.frame.size.height = coordinator.resolvedHeight(of: view, width: width)
+        coordinator.textViewDidLayout(view)
         #expect(!view.isScrollEnabled)
         #expect(abs(view.contentOffset.y) < 0.5)
 
         view.text = ""
         coordinator.textViewDidChange(view)
         let collapsedHeight = coordinator.resolvedHeight(of: view, width: width)
+        view.frame.size.height = collapsedHeight
+        coordinator.textViewDidLayout(view)
         #expect(!view.isScrollEnabled)
         #expect(abs(collapsedHeight - oneLineHeight) < 1)
+    }
+
+    @Test("overflow keeps the rendered trailing-line caret visible")
+    func overflowCaretVisibility() {
+        var text = ""
+        var focused = true
+        let control = MultilineComposerTextView(
+            text: Binding(get: { text }, set: { text = $0 }),
+            isFocused: Binding(get: { focused }, set: { focused = $0 }),
+            isEditable: true,
+            keyboardAppearance: .dark
+        )
+        let coordinator = control.makeCoordinator()
+        let width: CGFloat = 240
+        let view = makeTextView(coordinator: coordinator, width: width)
+        view.text = (1...12).map { "line \($0)" }.joined(separator: "\n") + "\n"
+        view.selectedRange = NSRange(location: (view.text as NSString).length, length: 0)
+        coordinator.textViewDidChange(view)
+        view.frame.size.height = coordinator.resolvedHeight(of: view, width: width)
+        coordinator.textViewDidLayout(view)
+
+        #expect(view.isScrollEnabled)
+        #expect(view.contentOffset.y > 0)
+        #expect(coordinator.hostedCaretIsVisible(in: view))
+    }
+
+    @Test("typing after manual internal scrolling moves only toward the caret")
+    func manualScrollThenType() {
+        var text = ""
+        var focused = true
+        let control = MultilineComposerTextView(
+            text: Binding(get: { text }, set: { text = $0 }),
+            isFocused: Binding(get: { focused }, set: { focused = $0 }),
+            isEditable: true,
+            keyboardAppearance: .dark
+        )
+        let coordinator = control.makeCoordinator()
+        let width: CGFloat = 240
+        let view = makeTextView(coordinator: coordinator, width: width)
+        view.text = (1...12).map { "line \($0)" }.joined(separator: "\n")
+        view.selectedRange = NSRange(location: (view.text as NSString).length, length: 0)
+        coordinator.textViewDidChange(view)
+        view.frame.size.height = coordinator.resolvedHeight(of: view, width: width)
+        coordinator.textViewDidLayout(view)
+
+        let manualOffset = max(0, view.contentOffset.y - 12)
+        view.setContentOffset(CGPoint(x: 0, y: manualOffset), animated: false)
+        view.text += " more"
+        view.selectedRange = NSRange(location: (view.text as NSString).length, length: 0)
+        coordinator.textViewDidChange(view)
+        coordinator.textViewDidLayout(view)
+
+        #expect(view.contentOffset.y >= manualOffset - 0.5)
+        #expect(coordinator.hostedCaretIsVisible(in: view))
+    }
+
+    @Test("layout callback reconciles overflow without recursive ownership")
+    func layoutCallbackReconcilesOverflow() {
+        var text = ""
+        var focused = true
+        let control = MultilineComposerTextView(
+            text: Binding(get: { text }, set: { text = $0 }),
+            isFocused: Binding(get: { focused }, set: { focused = $0 }),
+            isEditable: true,
+            keyboardAppearance: .dark
+        )
+        let coordinator = control.makeCoordinator()
+        let width: CGFloat = 240
+        let view = makeTextView(coordinator: coordinator, width: width)
+        view.text = (1...12).map { "line \($0)" }.joined(separator: "\n") + "\n"
+        view.selectedRange = NSRange(location: (view.text as NSString).length, length: 0)
+        coordinator.textViewDidChange(view)
+        view.frame.size.height = coordinator.resolvedHeight(of: view, width: width)
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+
+        #expect(view.isScrollEnabled)
+        #expect(coordinator.hostedCaretIsVisible(in: view))
+    }
+
+    @Test("composer measurement is side-effect free and owns no safe-area inset")
+    func measurementPurity() {
+        var text = ""
+        var focused = true
+        let control = MultilineComposerTextView(
+            text: Binding(get: { text }, set: { text = $0 }),
+            isFocused: Binding(get: { focused }, set: { focused = $0 }),
+            isEditable: true,
+            keyboardAppearance: .dark
+        )
+        let coordinator = control.makeCoordinator()
+        let view = makeTextView(coordinator: coordinator, width: 240)
+        view.text = (1...12).map { "line \($0)" }.joined(separator: "\n")
+        view.setContentOffset(CGPoint(x: 0, y: 17), animated: false)
+        let scrolling = view.isScrollEnabled
+        let offset = view.contentOffset
+
+        let first = coordinator.resolvedHeight(of: view, width: 240)
+        let second = coordinator.resolvedHeight(of: view, width: 240)
+        #expect(first == second)
+        #expect(view.isScrollEnabled == scrolling)
+        #expect(view.contentOffset == offset)
+        #expect(view.contentInsetAdjustmentBehavior == .never)
+        #expect(view.adjustedContentInset == .zero)
+    }
+
+    private func makeTextView(
+        coordinator: MultilineComposerTextView.Coordinator,
+        width: CGFloat
+    ) -> MultilineComposerTextView.LayoutAwareTextView {
+        let view = MultilineComposerTextView.LayoutAwareTextView(
+            frame: CGRect(x: 0, y: 0, width: width, height: 20)
+        )
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.contentInset = .zero
+        view.contentInsetAdjustmentBehavior = .never
+        view.isScrollEnabled = false
+        view.didLayout = { [weak coordinator] view in
+            coordinator?.textViewDidLayout(view)
+        }
+        coordinator.updateFont(on: view)
+        return view
     }
 }

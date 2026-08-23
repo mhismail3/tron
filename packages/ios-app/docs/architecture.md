@@ -241,9 +241,7 @@ that viewport so a detached reader is not displaced. Explicit earlier-page loads
 remain request-only, are scoped to the exact mount generation/cursor, and restore the
 former visible anchor with bounded late-layout correction so the viewport does not jump.
 A gesture that begins during that correction cancels every remaining position write
-and its final native geometry wins over the pre-load detached state. The UIKit composer coalesces
-focus reconciliation and caret scrolling onto one main-queue pass during keyboard/safe-area changes,
-preventing responder/layout feedback from starving the main actor.
+and its final native geometry wins over the pre-load detached state. The UIKit composer keeps focus reconciliation deferred but resolves internal overflow and caret visibility only from final post-layout TextKit geometry, preventing speculative SwiftUI measurement or keyboard/safe-area callbacks from changing the editor offset.
 Create and fork return navigation identity without mounting or selecting a transcript;
 only the destination route may establish live presentation authority.
 
@@ -570,8 +568,8 @@ rather than converting a presentation-only callback failure into an unavailable 
 while the binding remains owned through animation completion and two stable presented frames, preventing later
 lazy content-size correction from exposing empty space. A best-effort timeout releases after those two frames even if SwiftUI never supplies later geometry, so it cannot leave a display-link loop or permanent binding behind. An empty timeline takes an explicit no-transcript path,
 while any direct/native/accessibility interaction cancels the pending target permanently. Automatic streaming growth is
-latest-sample-wins behind one injected display-frame wait, emits at most one tail
-command per presented frame, and emits none inside the practical bottom boundary.
+latest-sample-wins behind one injected display-frame wait, emits at most one short smooth tail
+command per presented frame, and emits none inside the practical bottom boundary. Reduce Motion executes that same admitted command without spatial animation.
 Direct/native/accessibility interaction synchronously invalidates pending automatic
 commands. The performance tracker owns interval generations only. Upward user geometry is
 the only ordinary transition from pinned to detached; native ownership alone cannot
@@ -598,12 +596,11 @@ settlement; prior and newly arriving unread state remains admitted throughout st
 final, and settling phases. Interruption away from the tail restores detached/unread
 ownership, while successful physical settlement clears unread only at completion.
 Every later measured height increase coalesces into
-the next display-frame command until another upward gesture; a newly admitted tool chip may request one
-nonanimated tail-follow command, while subsequent growth waits for fresh native geometry to acknowledge
-that command instead of replacing its token. An ordinary installed projection
-change captures the current visible semantic locus before publication and either settles a pinned
-reader to the tail once without animation or advances an exact layout epoch after installation to
-restore a surviving detached semantic anchor within one point. Persistent idle native ownership does
+the next display-frame command until another upward gesture; a newly admitted tool chip and streamed Markdown growth share one short smooth pinned-tail follow, while subsequent growth waits for fresh native geometry to acknowledge
+that command instead of replacing its token. Physical past-bottom clamps remain nonanimated. An ordinary installed projection
+change captures the current visible semantic locus before publication and either settles growth for a pinned
+reader with one short smooth tail command or advances an exact layout epoch after installation to
+restore a surviving detached semantic anchor within one point. Physical overshoot correction remains nonanimated. Persistent idle native ownership does
 not disable preservation, but active interaction, pending native geometry, or user-driven settling does.
 After each point correction, both a newer semantic sample and a newer scroll-geometry revision are
 required in either callback order before another correction or binding release. Stale generations and
@@ -613,9 +610,7 @@ one frame-gated tail clamp; detached or directly owned viewports remain untouche
 Progress-only tool mutations cannot request a tail position. Keyboard and complete-composer layout keep
 a logically pinned reader at the latest tail, while a detached reader receives no position write
 and retains the same semantic reading position. These layout changes cannot change the durable
-pinned/detached mode. Async editor
-height measurements carry a latest-revision guard, so an older wrap measurement cannot overwrite
-a newer line count. Every stable row owns its horizontal inset instead of relying on
+pinned/detached mode. Editor height fitting is synchronous and side-effect free; internal scrolling and caret visibility reconcile only when the installed UIKit bounds match that latest fitting result, so speculative or stale wrap measurements cannot move the editor viewport. Every stable row owns its horizontal inset instead of relying on
 transient ScrollView content margins, so prompt insertion cannot expose a flush-left frame.
 Existing rows never participate in stack-wide insertion or scale animations. Thinking,
 Markdown, tool, and explicit custom/retry rows therefore remain stable above the composer while the user
@@ -1024,13 +1019,12 @@ row height. Only pending rows include the tag
 in their geometry observation, allowing an installed replacement to re-emit exact evidence without
 invalidating every realized row. Visible/pinned discrete rows fade with a small non-layout transform
 exactly once, realized offscreen rows become visible without replay, and direct interaction discards
-unresolved candidates. `ChatScrollCoordinator` alone may consume one coalesced nonanimated tail
+unresolved candidates. `ChatScrollCoordinator` alone may consume one coalesced short smooth pinned-tail
 settlement for an admitted discrete insertion. Its bounded rendered-ID entitlement is intersected only on
 actual installed transitions, so a surviving tool/group row retains the same one-shot settlement through
 completion while replacement removes it. Continuity-preserved assistant/tool rows do not manufacture a new
-entrance, and row entrance motion never combines with viewport animation.
-Continuous Markdown growth remains coalesced and nonanimated, while detached readers
-receive no writes and Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
+entrance. A newly admitted visible agent row may pair its one local reveal with the coordinator's one short smooth pinned-tail command; those remain separate owners and coalesce rather than issuing competing viewport writes.
+Continuous Markdown growth remains display-frame-coalesced and smoothly follows the pinned tail, while capped thinking traces animate both viewport height and tail offset locally inside their clipped row. Detached readers receive no writes and Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
 the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.
 
 Every tool chip owns a tappable, top-anchored detail sheet, including
@@ -1206,7 +1200,7 @@ regrouping cannot lose that visible semantic anchor. Exact detached-reader ordin
 page installs advance a layout/projection epoch, and the row geometry transform includes that epoch
 so an exact post-install sample is emitted even when its numeric frame is unchanged. Ordinary
 installs reuse the same bounded semantic correction contract for detached readers; pinned readers receive one
-coalesced nonanimated tail settlement. Settlement
+coalesced short smooth tail settlement for growth, while physical overshoot correction remains nonanimated. Settlement
 waits passively for that exact sample; after each disabled-animation correction the
 owner requires both a strictly newer sample of the same semantic frame and a newer scroll-geometry
 revision, accepts either callback order, permits at most one late correction, and succeeds only within
@@ -1217,7 +1211,7 @@ total content-height polling loop, unanchored success, or stale defer
 that can end a newer paging token. The
 multiline composer
 gives its capped UIKit text view sole ownership of caret visibility and internal
-scrolling. The composer itself is the transcript ScrollView's bottom safe-area inset. One direct geometry
+scrolling. Representable measurement is side-effect free; a post-`layoutSubviews` reducer enables overflow only against final capped bounds and minimally reveals the rendered caret rectangle after text, selection, font, or bounds changes. The nested editor disables automatic content-inset adjustment because the composer itself is the transcript ScrollView's sole bottom safe-area inset. One direct geometry
 observation of that complete owner signals viewport transitions; no height preference, field-specific
 hook, or synthetic transcript spacer mirrors its geometry.
 Diagnostics parses the bounded

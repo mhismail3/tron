@@ -996,10 +996,10 @@ struct ChatView: View {
                 )
                 #endif
                 if animated {
-                    // Newly realized rows may settle the pinned tail, but
-                    // that settlement is never animated. An animated tail
-                    // command competes with streaming geometry and can expose
-                    // blank lazy-stack space while the response grows.
+                    // Newly realized agent rows join the same short, frame-
+                    // coalesced smooth pinned-tail motion as streamed growth.
+                    // Detached readers remain inert and physical overshoot
+                    // correction is still forced nonanimated by the coordinator.
                     scrollCoordinator.discreteContentInserted(renderedID: id)
                 }
             }

@@ -347,8 +347,10 @@ private struct ThinkingBlock: View {
         .frame(height: traceHeight, alignment: .topLeading)
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .animation(
-            reduceMotion ? nil : .smooth(duration: 0.18),
-            value: traceHeight
+            reduceMotion ? nil : .smooth(
+                duration: ChatScrollCoordinator.liveGrowthFollowDuration
+            ),
+            value: CGSize(width: traceHeight, height: tailOffset)
         )
         .clipped()
         .mask(tailMask)
