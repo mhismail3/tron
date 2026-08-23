@@ -66,45 +66,45 @@ struct ToolCard: View {
     }
 
     var body: some View {
-        Button {
-            if let onOpenDetails {
-                onOpenDetails(detailTool.id)
-            } else {
-                detailDetent = .medium
-                detailPresentation = ToolDetailRoute(toolID: detailTool.id)
-            }
-        } label: {
-            ChatCompactPillSurface(tone: tone, material: .glass) {
-                ChatCompactPillLabel(
-                    icon: icon,
-                    title: displayTitle,
-                    detail: subtitle.lowercased(),
-                    tone: tone,
-                    showsProgress: isRunning,
-                    iconSize: ChatCompactPillLayoutPolicy.toolIconSize
-                ) {
-                    if let timing {
-                        ToolElapsedText(tool: timing, color: tone.secondaryColor)
-                    }
+        ChatCompactPillSurface(tone: tone, material: .glass, interactive: true) {
+            ChatCompactPillLabel(
+                icon: icon,
+                title: displayTitle,
+                detail: subtitle.lowercased(),
+                tone: tone,
+                showsProgress: isRunning,
+                iconSize: ChatCompactPillLayoutPolicy.toolIconSize
+            ) {
+                if let timing {
+                    ToolElapsedText(tool: timing, color: tone.secondaryColor)
                 }
             }
-            .accessibilityHidden(true)
         }
-        .buttonStyle(ChatToolChipPressStyle())
         .contentShape(RoundedRectangle(
             cornerRadius: ChatCompactPillLayoutPolicy.cornerRadius(for: tone),
             style: .continuous
         ))
         .fixedSize(horizontal: false, vertical: true)
         .contentTransition(.interpolate)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityValue(title)
+        .toolChipInteraction(
+            accessibilityLabel: accessibilityLabel,
+            accessibilityValue: title,
+            action: openDetails
+        )
         .toolDetailSheet(
             route: $detailPresentation,
             detent: $detailDetent,
             tool: detailPresentation?.resolve(in: [detailTool])
         )
+    }
+
+    private func openDetails() {
+        if let onOpenDetails {
+            onOpenDetails(detailTool.id)
+        } else {
+            detailDetent = .medium
+            detailPresentation = ToolDetailRoute(toolID: detailTool.id)
+        }
     }
 
     private var detailTool: ChatToolPresentation {
@@ -263,28 +263,28 @@ private struct ToolActivityChip: View {
 
     var body: some View {
         let visual = displayedState ?? targetState
-        Button(action: action) {
-            ChatCompactPillSurface(tone: visual.tone, material: visual.material) {
-                ChatCompactPillLabel(
-                    icon: visual.icon,
-                    title: visual.title,
-                    detail: visual.detail,
-                    tone: visual.tone,
-                    showsProgress: visual.showsProgress,
-                    iconSize: ChatCompactPillLayoutPolicy.toolIconSize
-                ) {
-                    ToolRunElapsedText(run: run, color: visual.tone.secondaryColor)
-                }
-                .contentTransition(reduceMotion ? .opacity : .interpolate)
+        ChatCompactPillSurface(tone: visual.tone, material: visual.material, interactive: true) {
+            ChatCompactPillLabel(
+                icon: visual.icon,
+                title: visual.title,
+                detail: visual.detail,
+                tone: visual.tone,
+                showsProgress: visual.showsProgress,
+                iconSize: ChatCompactPillLayoutPolicy.toolIconSize
+            ) {
+                ToolRunElapsedText(run: run, color: visual.tone.secondaryColor)
             }
+            .contentTransition(reduceMotion ? .opacity : .interpolate)
         }
-        .buttonStyle(ChatToolChipPressStyle())
         .contentShape(RoundedRectangle(
             cornerRadius: ChatCompactPillLayoutPolicy.cornerRadius(for: visual.tone),
             style: .continuous
         ))
-        .accessibilityLabel(accessibilityLabel(visual))
-        .accessibilityValue(visual.title)
+        .toolChipInteraction(
+            accessibilityLabel: accessibilityLabel(visual),
+            accessibilityValue: visual.title,
+            action: action
+        )
         .onAppear {
             let token = transitionState.retarget(targetState)
             displayedState = targetState
@@ -304,8 +304,8 @@ private struct ToolActivityChip: View {
         var transaction = Transaction(animation: animation)
         transaction.admitsChatToolChipAnimation = true
         // Admit the shallow state in the same MainActor turn as the latest
-        // projection. Touch feedback is independently owned by the shared
-        // tool-chip press style, so no deferred task interrupts its gesture.
+        // projection. Native interactive glass remains the sole touch owner;
+        // no deferred task may interrupt its press/drag transaction.
         withTransaction(transaction) { displayedState = target }
         recordSample(target, token: token)
     }
@@ -596,7 +596,38 @@ private struct ToolDetailSheetHost: ViewModifier {
     }
 }
 
+private struct ChatToolChipInteractionModifier: ViewModifier {
+    let accessibilityLabel: String
+    let accessibilityValue: String
+    let action: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            // Keep the interactive glass surface itself as the touch owner, as
+            // on the composer bar. Wrapping it in Button adds a second native
+            // press phase that zooms before the glass drag morph can settle.
+            .onTapGesture(perform: action)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityValue(accessibilityValue)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { action() }
+    }
+}
+
 private extension View {
+    func toolChipInteraction(
+        accessibilityLabel: String,
+        accessibilityValue: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        modifier(ChatToolChipInteractionModifier(
+            accessibilityLabel: accessibilityLabel,
+            accessibilityValue: accessibilityValue,
+            action: action
+        ))
+    }
+
     func toolDetailSheet(
         route: Binding<ToolDetailRoute?>,
         detent: Binding<PresentationDetent>,

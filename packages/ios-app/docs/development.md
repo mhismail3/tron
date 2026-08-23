@@ -601,7 +601,7 @@ pinned, uses one coordinated smooth viewport follow for a newly admitted tool ch
 preserves a surviving semantic anchor while detached, and emits no unowned automatic write for ordinary
 shrink. If settlement shortens content beneath a released pinned offset, verify exactly one physical-tail
 clamp; a detached or directly owned reader receives none. Verify a tool entrance has one correlated chip
-reveal and viewport command rather than competing writes. Legacy and consolidated tool chips use the same local spring press response without native interactive-glass zoom; Reduce Motion keeps opacity feedback while suppressing press scaling.
+reveal and viewport command rather than competing writes. The stable transcript boundary suppresses ambient projection animation but preserves continuous direct-manipulation transactions. Legacy and consolidated tool chips use native interactive Liquid Glass as their only touch-response owner and handle taps on that visible surface with explicit button accessibility semantics rather than a second `Button` press phase; verify initial contact, lateral drag, release, and morph remain fluid without an immediate stacked zoom or custom scale effect.
 Tool-detail checkpoints open read, edit, bash, and one unknown/extension call at the medium detent: verify the compact status/metadata chips,
 secondary-plus-accent path, faithful single-change diff glance, word-preserving wrapped bash commands in
 the smaller code size, high-signal generic summary, and larger live result are visible before

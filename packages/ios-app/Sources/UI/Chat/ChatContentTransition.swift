@@ -167,7 +167,11 @@ extension Transaction {
 private struct ChatStableTranscriptUpdateModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.transaction { transaction in
-            if !transaction.admitsChatToolChipAnimation {
+            // Projection replacements must not inherit ambient layout motion,
+            // but continuous direct manipulation belongs to the system control
+            // beneath this boundary. Clearing that transaction makes native
+            // interactive glass jump to its pressed scale before its drag morph.
+            if !transaction.admitsChatToolChipAnimation && !transaction.isContinuous {
                 transaction.animation = nil
             }
         }

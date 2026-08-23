@@ -124,7 +124,7 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   extension provenance never substitutes **Extension activity**. Structural chip targets
   exclude duration and payload churn, coalesce for one display frame, and use a monotonic
   latest-target token for local interruptible animation while transcript and scroll
-  transactions remain stable. Both legacy and consolidated tool chips disable native interactive-glass press zoom and share one Reduce Motion-aware spring press owner; opacity remains the nonspatial pressed-state cue. Multi-tool run chips show accumulated time as the sum of their
+  projection transactions remain stable while the transcript boundary preserves continuous system interaction transactions. Both legacy and consolidated tool chips use native interactive Liquid Glass as their sole press-and-drag owner. Their visible surface handles taps directly and exposes explicit button accessibility semantics; it is not wrapped in a second native `Button` press phase, preserving the system drag morph without an immediate stacked zoom or custom scale/opacity effect. Multi-tool run chips show accumulated time as the sum of their
   invocation durations. Detail summary and rows install atomically for one projection tag,
   and rows remain in reverse canonical invocation order rather than switching when optional
   timing metadata arrives. Known built-ins
