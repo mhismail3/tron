@@ -25,6 +25,19 @@ struct SessionShellProfileRouteOwner {
     }
 }
 
+struct SessionShellDeletionConfirmationOwner {
+    private var confirmedSession: SessionSummary?
+
+    mutating func confirm(_ session: SessionSummary) {
+        confirmedSession = session
+    }
+
+    mutating func consumeAfterDismissal() -> SessionSummary? {
+        defer { confirmedSession = nil }
+        return confirmedSession
+    }
+}
+
 struct SessionShellView: View {
     @Environment(AppModel.self) private var model
     @State private var showNewSession = false
@@ -34,6 +47,7 @@ struct SessionShellView: View {
     @State private var showingSearch = false
     @State private var presentedSession: AppModel.SessionNavigationRoute?
     @State private var sessionToDelete: SessionSummary?
+    @State private var deletionConfirmationOwner = SessionShellDeletionConfirmationOwner()
     @State private var sessionToRename: SessionSummary?
     @State private var renameName = ""
     @State private var workspaceDisclosure = SessionListWorkspaceDisclosure()
@@ -73,14 +87,14 @@ struct SessionShellView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.hidden)
         }
-        .sheet(item: $sessionToDelete) { session in
+        .sheet(item: $sessionToDelete, onDismiss: finishConfirmedSessionDeletion) { session in
             TronConfirmationSheet(
                 title: "Delete \(session.title)?",
                 message: "This removes the canonical session from the Mac and cannot be undone.",
                 confirmTitle: "Delete",
                 destructive: true,
                 icon: "trash",
-                onConfirm: { delete(session) }
+                onConfirm: { deletionConfirmationOwner.confirm(session) }
             )
         }
         .alert("Rename Session", isPresented: renameConfirmationPresented, presenting: sessionToRename) { session in
@@ -356,11 +370,11 @@ struct SessionShellView: View {
         }
     }
 
-    private func delete(_ session: SessionSummary) {
+    private func finishConfirmedSessionDeletion() {
+        guard let session = deletionConfirmationOwner.consumeAfterDismissal() else { return }
         Task {
             do { try await model.performOnOwningGateway(session) { try await model.deleteSession(session.id) } }
             catch { model.lastError = error.localizedDescription }
-            sessionToDelete = nil
         }
     }
 

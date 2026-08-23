@@ -229,6 +229,9 @@ struct PresentationStyleGuardTests {
         )
 
         #expect(source.contains(#"confirmTitle: "Delete""#))
+        #expect(source.contains(".sheet(item: $sessionToDelete, onDismiss: finishConfirmedSessionDeletion)"))
+        #expect(source.contains("onConfirm: { deletionConfirmationOwner.confirm(session) }"))
+        #expect(!source.contains("onConfirm: { delete(session) }"))
         #expect(source.contains(#"Button("Delete", systemImage: "trash") { sessionToDelete = session }"#))
         #expect(source.contains(#".accessibilityIdentifier("session-row-\(session.dashboardID)")"#))
         #expect(source.contains(".tint(Color.tronError)"))

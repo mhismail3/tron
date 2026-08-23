@@ -892,9 +892,10 @@ hit region and no decorative disclosure chevron. Dashboard session rows never
 retain a selected tint; their trailing swipe actions rename or request deletion of the exact
 swiped canonical session without changing navigation selection. The delete swipe
 uses a red tint but no destructive button role, so UIKit keeps the row mounted
-until the Tron confirmation sheet completes the canonical mutation. Cancelling
-can therefore close and reopen the flow without optimistic row removal or stale
-swipe state. Dashboard discovery and refresh never select or open a transcript and global Settings never
+through confirmation. A confirmed intent is consumed only by the sheet's
+post-dismissal callback; the canonical mutation and resulting List removal never
+race the modal transition. Cancelling consumes nothing and can therefore close
+and reopen the flow without optimistic row removal or stale swipe state. Dashboard discovery and refresh never select or open a transcript and global Settings never
 infer project scope. Catalog loads are latest-generation-owned, and an asynchronous import may
 navigate only while its exact dashboard intent is still current. Reconnect restores only the
 still-mounted presentation; it never uses a dashboard row as a subscription fallback. The mounted chat route supplies an immutable

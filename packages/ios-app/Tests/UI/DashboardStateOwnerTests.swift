@@ -20,6 +20,17 @@ struct DashboardStateOwnerTests {
         #expect(!admittedDuplicate)
     }
 
+    @Test("dashboard deletion starts only after a confirmed sheet finishes dismissing")
+    func deletionConfirmationDismissalOrdering() {
+        var owner = SessionShellDeletionConfirmationOwner()
+        #expect(owner.consumeAfterDismissal() == nil)
+
+        let session = summary(revision: 1)
+        owner.confirm(session)
+        #expect(owner.consumeAfterDismissal() == session)
+        #expect(owner.consumeAfterDismissal() == nil)
+    }
+
     @MainActor
     @Test("dashboard admits only one enabled profile per physical machine group")
     func sameMachineAdmission() {
