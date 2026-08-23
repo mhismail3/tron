@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import type { AuthType } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { GatewayConfig } from "../config.js";
@@ -333,10 +334,18 @@ export class GatewayService {
       }
       case "session.open": {
         const sessionId = string(params.sessionId, "sessionId", { max: 200 });
+        const startedAt = performance.now();
         const slot = await this.dependencies.sessions.acquire(sessionId);
+        const acquiredAt = performance.now();
         const syncToken = client.beginSynchronization(sessionId);
         const snapshot = slot.snapshot();
         client.establishSynchronization(sessionId, snapshot);
+        const completedAt = performance.now();
+        this.dependencies.logger.log(
+          completedAt - startedAt >= 1_000 ? "warning" : "info",
+          `Session open prepared in ${Math.max(0, Math.round(completedAt - startedAt))}ms (acquire ${Math.max(0, Math.round(acquiredAt - startedAt))}ms, snapshot ${Math.max(0, Math.round(completedAt - acquiredAt))}ms)`,
+          { event: "session.open.prepared", source: "sessions" },
+        );
         return safeJson({ session: snapshot, syncToken, subscriptionToken: syncToken });
       }
       case "session.sync": {

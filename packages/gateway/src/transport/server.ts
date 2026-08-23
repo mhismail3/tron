@@ -757,6 +757,8 @@ export class GatewayServer {
     }
     connection.inFlight.add(frame.id);
     this.options.logger.log("info", `RPC request ${frame.method}`, { event: "rpc.request", source: "transport" });
+    const rpcStartedAt = performance.now();
+    let rpcOutcome: "success" | "failure" = "failure";
     const requestId = frame.id;
     const synchronizationOwners: SynchronizationOwner[] = [];
     const synchronizationCompletions: SynchronizationCompletion[] = [];
@@ -995,6 +997,7 @@ export class GatewayServer {
       }
       const responseSentIntact = this.send(connection, { type: "response", id: frame.id, ok: true, result });
       responseAttempted = true;
+      if (responseSentIntact) rpcOutcome = "success";
       if (!responseSentIntact) {
         const ownerRequestIDs = new Set([
           requestId,
@@ -1120,6 +1123,12 @@ export class GatewayServer {
         }
       }
       connection.inFlight.delete(frame.id);
+      const durationMs = Math.max(0, Math.round(performance.now() - rpcStartedAt));
+      this.options.logger.log(
+        durationMs >= 1_000 ? "warning" : "info",
+        `RPC ${frame.method} completed in ${durationMs}ms (${rpcOutcome})`,
+        { event: "rpc.completed", source: "transport" },
+      );
     }
   }
 

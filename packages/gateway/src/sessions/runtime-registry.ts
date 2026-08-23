@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { open, opendir, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
+import { performance } from "node:perf_hooks";
 import { ModelRuntime, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { GatewayError } from "../errors.js";
 import { installKimiK3Policy } from "../providers/kimi-k3-policy.js";
@@ -23,6 +24,10 @@ const MAX_EXTENSION_TEMP_ENTRIES = 1_024;
 // Root enumeration is structurally bounded independently of the smaller
 // selected routing budget, so directory order cannot hide a newer candidate.
 const MAX_EXTENSION_ROOT_ENTRIES = 4_096;
+
+function isMissingFilesystemError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+}
 
 const DEFAULT_CATALOG_DISCOVERY_LIMITS = {
   maximumDirectories: 25_001,
@@ -63,12 +68,20 @@ interface CatalogAcquisitionResolution {
   entriesByID: ReadonlyMap<string, CatalogAcquisitionEntry>;
   ambiguousIDs: ReadonlySet<string>;
   structureDigest: string;
+  indexedStructuralGeneration?: number;
   fallbackIdentityFingerprint?: string;
   fallbackInvalidationGeneration?: number;
 }
 
 interface CatalogAcquisitionAdmission extends CatalogAcquisitionResolution {
   invalidationGeneration: number;
+}
+
+interface CatalogStructuralIndex {
+  allInfos: readonly CatalogSessionInfo[];
+  ambiguousDiskIDs: ReadonlySet<string>;
+  structureDigest: string;
+  structuralGeneration: number;
 }
 
 interface IdleEviction {
@@ -99,7 +112,11 @@ export class RuntimeRegistry {
   private revision = 0;
   private catalogFingerprint: string | undefined;
   private catalogAcquisitionInvalidationGeneration = 0;
+  private catalogStructuralGeneration = 0;
   private catalogAcquisitionAdmission: CatalogAcquisitionAdmission | undefined;
+  private catalogStructuralIndex: CatalogStructuralIndex | undefined;
+  private readonly pendingSlotStarts = new Map<string, Promise<RuntimeSlot>>();
+  private reservedSlotStarts = 0;
   private evictionTimer?: NodeJS.Timeout;
   private artifactDiscoveryTimer?: NodeJS.Timeout;
   private artifactDiscoveryInFlight = false;
@@ -122,6 +139,7 @@ export class RuntimeRegistry {
       sessionRekeyed?: (previousId: string, nextId: string) => void;
       sessionClosed?: (sessionId: string) => void;
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
+      stageTiming?: (stage: string, durationMs: number, outcome: "success" | "failure") => void;
     },
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
@@ -176,7 +194,11 @@ export class RuntimeRegistry {
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
       closed: (sessionId: string, slot: RuntimeSlot) => {
         const removed = this.slots.get(sessionId) === slot;
-        const removedLiveOnlySession = removed && slot.persistedSessionFile === undefined;
+        const persistedPath = slot.persistedSessionFile;
+        const removedLiveOnlySession = removed && persistedPath === undefined;
+        const persistedPathWasIndexed = persistedPath !== undefined
+          && this.catalogStructuralIndex?.allInfos.some((info) => info.id === sessionId
+            && resolve(info.path) === resolve(persistedPath)) === true;
         if (removed) this.slots.delete(sessionId);
         this.cancelIdleEviction(sessionId, slot);
         this.subscribers.delete(sessionId);
@@ -186,9 +208,14 @@ export class RuntimeRegistry {
           // Retire both halves of its revisioned row projection together.
           this.summaryRevisions.delete(sessionId);
           this.latestSummaries.delete(sessionId);
-          this.invalidateCatalogAcquisition();
+          this.invalidateCatalogAdmission();
           this.revision += 1;
           this.options.sessionListChanged();
+        } else if (removed && persistedPath !== undefined && !persistedPathWasIndexed) {
+          // The slot may have created its canonical file after the cached disk
+          // generation. Force the next catalog read to discover that file once
+          // runtime ownership is no longer available as the row projection.
+          this.invalidateCatalogAcquisition();
         }
         // Persisted closure publishes a final idle summary before this hook and
         // retains its revision continuity; membership did not change.
@@ -264,9 +291,87 @@ export class RuntimeRegistry {
     throw new GatewayError("busy", "Session catalog discovery exceeds its bounded capacity", true);
   }
 
-  private invalidateCatalogAcquisition(): void {
+  private invalidateCatalogAdmission(): void {
     this.catalogAcquisitionInvalidationGeneration += 1;
     this.catalogAcquisitionAdmission = undefined;
+  }
+
+  private invalidateCatalogAcquisition(): void {
+    this.invalidateCatalogAdmission();
+    this.catalogStructuralGeneration += 1;
+    this.catalogStructuralIndex = undefined;
+  }
+
+  private dynamicAmbiguousSessionIDs(index: CatalogStructuralIndex): Set<string> {
+    const ambiguous = new Set(index.ambiguousDiskIDs);
+    const persistedIDs = new Set(index.allInfos.map((session) => session.id));
+    for (const [id, slot] of this.slots) {
+      // A persisted slot is the runtime owner of its indexed canonical file,
+      // not a second claimant. Only live-only ownership colliding with any disk
+      // identity creates an additional ambiguity.
+      if (!slot.isDisposed && slot.persistedSessionFile === undefined && persistedIDs.has(id)) {
+        ambiguous.add(id);
+      }
+    }
+    return ambiguous;
+  }
+
+  private diskAmbiguousSessionIDs(infos: readonly CatalogSessionInfo[]): Set<string> {
+    const counts = new Map<string, number>();
+    for (const info of infos) counts.set(info.id, (counts.get(info.id) ?? 0) + 1);
+    return new Set([...counts].filter(([, count]) => count > 1).map(([id]) => id));
+  }
+
+  private async timedStage<T>(stage: string, operation: () => Promise<T>): Promise<T> {
+    const startedAt = performance.now();
+    try {
+      const result = await operation();
+      this.options.stageTiming?.(stage, Math.max(0, Math.round(performance.now() - startedAt)), "success");
+      return result;
+    } catch (error) {
+      this.options.stageTiming?.(stage, Math.max(0, Math.round(performance.now() - startedAt)), "failure");
+      throw error;
+    }
+  }
+
+  private async validatedStructuralIndex(): Promise<CatalogStructuralIndex | undefined> {
+    const index = this.catalogStructuralIndex;
+    if (!index || index.structuralGeneration !== this.catalogStructuralGeneration) return undefined;
+    const structuralGeneration = this.catalogStructuralGeneration;
+    const evidence = await this.catalogStructureEvidence();
+    if (this.catalogStructuralIndex === index
+        && structuralGeneration === this.catalogStructuralGeneration
+        && evidence.complete
+        && evidence.digest === index.structureDigest) return index;
+    if (this.catalogStructuralIndex === index) this.invalidateCatalogAcquisition();
+    return undefined;
+  }
+
+  private async removeIndexedCatalogFile(path: string): Promise<boolean> {
+    const index = this.catalogStructuralIndex;
+    if (!index || index.structuralGeneration !== this.catalogStructuralGeneration) return false;
+    const canonicalPath = resolve(path);
+    const remaining = index.allInfos.filter((info) => resolve(info.path) !== canonicalPath);
+    if (remaining.length === index.allInfos.length) return false;
+    const admittedGeneration = this.catalogStructuralGeneration;
+    const evidence = await this.catalogStructureEvidence();
+    if (this.catalogStructuralIndex !== index
+        || this.catalogStructuralGeneration !== admittedGeneration) return false;
+    const exact = evidence.complete && remaining.every((info) => {
+      const identity = evidence.identitiesByPath.get(resolve(info.path));
+      return identity?.id === info.id && resolve(identity.cwd || process.cwd()) === resolve(info.cwd);
+    });
+    if (!exact || evidence.identitiesByPath.size !== remaining.length) return false;
+    this.invalidateCatalogAdmission();
+    this.catalogStructuralGeneration += 1;
+    this.catalogStructuralIndex = {
+      allInfos: remaining,
+      ambiguousDiskIDs: this.diskAmbiguousSessionIDs(remaining),
+      structureDigest: evidence.digest,
+      structuralGeneration: this.catalogStructuralGeneration,
+    };
+    this.catalogFingerprint = this.catalogIdentityFingerprint(remaining);
+    return true;
   }
 
   private async catalogStructureEvidence(): Promise<CatalogStructureEvidence> {
@@ -276,11 +381,15 @@ export class RuntimeRegistry {
     const candidatePaths = new Set<string>();
     let entriesExamined = 0;
     let traversalBytes = Buffer.byteLength(pending[0]!);
+    let complete = true;
     while (pending.length > 0) {
       const candidate = pending.pop()!;
       let directory: string;
       try { directory = await realpath(candidate); }
-      catch { continue; }
+      catch (error) {
+        if (!isMissingFilesystemError(error)) complete = false;
+        continue;
+      }
       if (!seenDirectories.add(directory)) continue;
       traversalBytes += Buffer.byteLength(directory);
       if (seenDirectories.size > limits.maximumDirectories
@@ -313,6 +422,7 @@ export class RuntimeRegistry {
         }
       } catch (error) {
         if (error instanceof GatewayError) throw error;
+        if (!isMissingFilesystemError(error)) complete = false;
       }
     }
 
@@ -323,7 +433,6 @@ export class RuntimeRegistry {
       Math.floor(limits.maximumHeaderBytes / Math.max(1, paths.length)),
     );
     let retainedIdentityBytes = 0;
-    let complete = true;
     const reserveHeaderBytes = (count: number): boolean => {
       if (count > remainingHeaderBytes) return false;
       remainingHeaderBytes -= count;
@@ -447,7 +556,10 @@ export class RuntimeRegistry {
       const candidate = pending.pop()!;
       let directory: string;
       try { directory = await realpath(candidate); }
-      catch { continue; }
+      catch (error) {
+        if (isMissingFilesystemError(error)) continue;
+        throw new GatewayError("busy", "Session catalog directory could not be validated", true);
+      }
       if (!seen.add(directory)) continue;
       traversalBytes += Buffer.byteLength(directory);
       if (seen.size > limits.maximumDirectories
@@ -467,7 +579,8 @@ export class RuntimeRegistry {
         }
       } catch (error) {
         if (error instanceof GatewayError) throw error;
-        continue;
+        if (isMissingFilesystemError(error)) continue;
+        throw new GatewayError("busy", "Session catalog directory could not be enumerated", true);
       }
 
       // With an explicit directory the pinned SDK lists only that directory's
@@ -542,8 +655,22 @@ export class RuntimeRegistry {
     sessions: SessionSummary[];
     listRevision: number;
   }> {
-    let materialized = await this.scanCatalogMaterialization();
-    if (!materialized.stable) materialized = await this.scanCatalogMaterialization();
+    const cached = await this.validatedStructuralIndex();
+    if (cached) {
+      const ambiguousIDs = this.dynamicAmbiguousSessionIDs(cached);
+      const infos = cached.allInfos.filter((session) => !ambiguousIDs.has(session.id));
+      this.ambiguousSessionIds = ambiguousIDs;
+      return {
+        infos: [...infos],
+        sessions: await this.projectSessions(infos, "all", ambiguousIDs),
+        listRevision: this.revision,
+      };
+    }
+
+    let materialized = await this.timedStage("catalog.scan", () => this.scanCatalogMaterialization());
+    if (!materialized.stable) {
+      materialized = await this.timedStage("catalog.scan-retry", () => this.scanCatalogMaterialization());
+    }
     if (!materialized.stable) {
       await this.catalogAcquisitionMutex.run(() => { this.catalogAcquisitionAdmission = undefined; });
       throw new GatewayError("busy", "Session catalog changed during discovery", true);
@@ -553,59 +680,70 @@ export class RuntimeRegistry {
       materialized.after,
       materialized.invalidationGeneration,
     );
-    if (materialized.invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) {
+    if (materialized.invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration
+        || materialized.structuralGeneration !== this.catalogStructuralGeneration) {
       if (admitted) this.catalogAcquisitionAdmission = undefined;
       throw new GatewayError("busy", "Session catalog changed during publication", true);
     }
+    const index: CatalogStructuralIndex = {
+      allInfos: materialized.allInfos,
+      ambiguousDiskIDs: materialized.ambiguousDiskIDs,
+      structureDigest: materialized.after.digest,
+      structuralGeneration: materialized.structuralGeneration,
+    };
+    const indexIsExact = materialized.after.complete
+      && materialized.after.identitiesByPath.size === materialized.allInfos.length
+      && materialized.allInfos.every((info) => {
+        const identity = materialized.after.identitiesByPath.get(resolve(info.path));
+        return identity?.id === info.id && resolve(identity.cwd || process.cwd()) === resolve(info.cwd);
+      });
+    this.catalogStructuralIndex = indexIsExact ? index : undefined;
+    const ambiguousIDs = this.dynamicAmbiguousSessionIDs(index);
+    const infos = index.allInfos.filter((session) => !ambiguousIDs.has(session.id));
+    if (indexIsExact && admitted && this.catalogAcquisitionAdmission) {
+      this.catalogAcquisitionAdmission = {
+        ...this.catalogAcquisitionAdmission,
+        indexedStructuralGeneration: index.structuralGeneration,
+      };
+    }
     // No await may separate the final generation confirmation from publication
     // of catalog identity and its matching revision.
-    this.updateCatalogIdentity(materialized.allInfos, materialized.ambiguousIDs);
+    this.updateCatalogIdentity(materialized.allInfos, ambiguousIDs);
     return {
-      infos: materialized.infos,
-      sessions: materialized.sessions,
+      infos: [...infos],
+      sessions: await this.projectSessions(infos, "all", ambiguousIDs),
       listRevision: this.revision,
     };
   }
 
   private async scanCatalogMaterialization(): Promise<{
     allInfos: CatalogSessionInfo[];
-    infos: CatalogSessionInfo[];
-    sessions: SessionSummary[];
-    ambiguousIDs: Set<string>;
+    ambiguousDiskIDs: Set<string>;
     after: CatalogStructureEvidence;
     invalidationGeneration: number;
+    structuralGeneration: number;
     stable: boolean;
   }> {
     const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
+    const structuralGeneration = this.catalogStructuralGeneration;
     const before = await this.catalogStructureEvidence();
     const allInfos = await this.sessionInfos();
-    const counts = new Map<string, number>();
-    for (const session of allInfos) counts.set(session.id, (counts.get(session.id) ?? 0) + 1);
-    for (const [id, slot] of this.slots) {
-      if (!slot.isDisposed && slot.persistedSessionFile === undefined) {
-        counts.set(id, (counts.get(id) ?? 0) + 1);
-      }
-    }
-    const ambiguousIDs = new Set(
-      [...counts].filter(([, count]) => count > 1).map(([id]) => id),
-    );
-    const infos = allInfos.filter((session) => !ambiguousIDs.has(session.id));
-    const sessions = await this.projectSessions(infos, "all", ambiguousIDs);
+    const ambiguousDiskIDs = this.diskAmbiguousSessionIDs(allInfos);
     const after = await this.catalogStructureEvidence();
     return {
       allInfos,
-      infos,
-      sessions,
-      ambiguousIDs,
+      ambiguousDiskIDs,
       after,
       invalidationGeneration,
+      structuralGeneration,
       stable: invalidationGeneration === this.catalogAcquisitionInvalidationGeneration
+        && structuralGeneration === this.catalogStructuralGeneration
         && before.digest === after.digest,
     };
   }
 
-  private updateCatalogIdentity(infos: CatalogSessionInfo[], ambiguousIDs: Set<string>): void {
-    const fingerprint = JSON.stringify(infos
+  private catalogIdentityFingerprint(infos: readonly CatalogSessionInfo[]): string {
+    return JSON.stringify(infos
       // Structural membership and classification own listRevision. Mutable
       // row fields are delivered through revisioned session.summary events.
       .map((session) => [session.id, session.path, session.parentSessionPath, session.cwd, session.name])
@@ -613,6 +751,10 @@ export class RuntimeRegistry {
         const byId = String(left[0]).localeCompare(String(right[0]));
         return byId !== 0 ? byId : JSON.stringify(left).localeCompare(JSON.stringify(right));
       }));
+  }
+
+  private updateCatalogIdentity(infos: CatalogSessionInfo[], ambiguousIDs: Set<string>): void {
+    const fingerprint = this.catalogIdentityFingerprint(infos);
     if (this.catalogFingerprint === undefined) this.catalogFingerprint = fingerprint;
     else if (this.catalogFingerprint !== fingerprint) {
       this.catalogFingerprint = fingerprint;
@@ -730,6 +872,46 @@ export class RuntimeRegistry {
   }
 
   private async catalogAcquisition(): Promise<CatalogAcquisitionResolution> {
+    const candidateIndex = this.catalogStructuralIndex;
+    const cachedIndex = candidateIndex?.structuralGeneration === this.catalogStructuralGeneration
+      ? candidateIndex : undefined;
+    const cachedAdmission = this.catalogAcquisitionAdmission;
+    if (cachedAdmission?.invalidationGeneration === this.catalogAcquisitionInvalidationGeneration
+        && cachedIndex) {
+      const validated = await this.validatedStructuralIndex();
+      if (!validated) return this.catalogAcquisition();
+      return {
+        ...cachedAdmission,
+        indexedStructuralGeneration: cachedIndex.structuralGeneration,
+      };
+    }
+    if (cachedIndex) {
+      const indexed = await this.catalogAcquisitionMutex.run(async () => {
+        const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
+        const structuralGeneration = this.catalogStructuralGeneration;
+        const current = this.catalogAcquisitionAdmission;
+        if (current?.invalidationGeneration === invalidationGeneration) return current;
+        const ambiguousIDs = this.dynamicAmbiguousSessionIDs(cachedIndex);
+        const resolution = await this.buildCatalogAcquisitionFromSessions(
+          cachedIndex.allInfos.filter((session) => !ambiguousIDs.has(session.id)),
+          ambiguousIDs,
+          cachedIndex.structureDigest,
+        );
+        if (invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration
+            || structuralGeneration !== this.catalogStructuralGeneration) {
+          throw new GatewayError("busy", "Session catalog changed during acquisition", true);
+        }
+        const admission: CatalogAcquisitionAdmission = {
+          ...resolution,
+          indexedStructuralGeneration: structuralGeneration,
+          invalidationGeneration,
+        };
+        this.catalogAcquisitionAdmission = admission;
+        return admission;
+      });
+      return indexed;
+    }
+
     const lightweight = await this.catalogAcquisitionMutex.run(async () => {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const invalidationGeneration = this.catalogAcquisitionInvalidationGeneration;
@@ -841,8 +1023,10 @@ export class RuntimeRegistry {
       }];
     });
     const liveOnly: SessionSummary[] = [...this.slots].flatMap(([id, slot]) => {
-      if (slot.isDisposed || slot.persistedSessionFile !== undefined
-        || persistedIDs.has(id) || ambiguousIDs.has(id)) return [];
+      // A runtime may create its canonical file after the cached disk
+      // generation. Keep its exact-owned row visible until structural
+      // invalidation discovers the file; never create a catalog gap.
+      if (slot.isDisposed || persistedIDs.has(id) || ambiguousIDs.has(id)) return [];
       const latest = this.latestSummaries.get(id);
       const name = latest?.name;
       return [{
@@ -875,24 +1059,51 @@ export class RuntimeRegistry {
 
   async create(cwdInput: string): Promise<RuntimeSlot> {
     const finishAdmission = this.beginSlotAdmission();
+    let reserved = false;
+    let slot: RuntimeSlot | undefined;
     try {
-      const trust = await this.options.trust.requireResolved(cwdInput);
-      return await this.mutex.run(async () => {
+      const trust = await this.timedStage(
+        "session.create.trust",
+        () => this.options.trust.requireResolved(cwdInput),
+      );
+      await this.mutex.run(() => {
         this.assertSlotAdmissionOpen();
         if (this.trustReloadProjects.has(trust.cwd)) {
           throw new GatewayError("busy", "Project trust is being reconfigured", true);
         }
         this.requireLiveSlotCapacity();
-        const manager = SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd));
-        const id = manager.getSessionId();
-        const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false);
-        this.slots.set(id, slot);
-        this.invalidateCatalogAcquisition();
+        this.reservedSlotStarts += 1;
+        reserved = true;
+      });
+      const manager = SessionManager.create(trust.cwd, this.sessionDirectoryFor(trust.cwd));
+      slot = await this.timedStage(
+        "session.create.runtime",
+        () => RuntimeSlot.create(manager, this.dependencies(), this.hooks(), false),
+      );
+      await this.mutex.run(() => {
+        if (this.trustReloadProjects.has(trust.cwd)) {
+          throw new GatewayError("busy", "Session creation was retired before publication", true);
+        }
+        if (this.slots.has(manager.getSessionId())) {
+          throw new GatewayError("conflict", "Replacement session is already active");
+        }
+        this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
+        reserved = false;
+        this.slots.set(manager.getSessionId(), slot!);
+        this.invalidateCatalogAdmission();
         this.revision += 1;
         this.options.sessionListChanged();
-        return slot;
       });
+      return slot;
+    } catch (error) {
+      if (slot && this.slots.get(slot.id) !== slot) await slot.dispose().catch(() => {});
+      throw error;
     } finally {
+      if (reserved) {
+        await this.mutex.run(() => {
+          this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
+        });
+      }
       finishAdmission();
     }
   }
@@ -919,8 +1130,13 @@ export class RuntimeRegistry {
   }
 
   private async acquireMissing(sessionId: string): Promise<RuntimeSlot> {
+    const alreadyStarting = this.pendingSlotStarts.get(sessionId);
+    if (alreadyStarting) return alreadyStarting;
     const existing = this.slots.get(sessionId);
-    const acquisition = await this.catalogAcquisition();
+    const acquisition = await this.timedStage(
+      "session.open.catalog",
+      () => this.catalogAcquisition(),
+    );
     this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
     const entry = acquisition.entriesByID.get(sessionId);
     if (existing && !existing.isDisposed) {
@@ -934,8 +1150,8 @@ export class RuntimeRegistry {
     if (entry.structuralSubagent) {
       throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
     }
-    return this.mutex.run(async () => {
-      this.assertSlotAdmissionOpen();
+    const selectedAcquisitionGeneration = this.catalogAcquisitionInvalidationGeneration;
+    const selected = await this.mutex.run(() => {
       let raced = this.slots.get(sessionId);
       if (raced?.isDisposed) {
         if (this.slots.get(sessionId) === raced) this.slots.delete(sessionId);
@@ -944,24 +1160,39 @@ export class RuntimeRegistry {
       if (raced && !this.ambiguousSessionIds.has(sessionId)) {
         const eviction = this.idleEvictions.get(sessionId);
         if (eviction?.slot === raced && eviction.committed && eviction.completion) {
-          await eviction.completion;
-          return this.acquire(sessionId);
+          return { operation: eviction.completion.then(() => this.acquire(sessionId)) };
         }
         this.cancelIdleEviction(sessionId, raced);
         raced.touch();
-        return raced;
+        return { operation: Promise.resolve(raced) };
       }
-      if (raced) {
-        const current = await this.catalogAcquisition();
-        this.requireUnambiguousSessionId(sessionId, current.ambiguousIDs);
-        if (current.entriesByID.get(sessionId)?.structuralSubagent) {
-          throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
-        }
-        this.cancelIdleEviction(sessionId, raced);
-        raced.touch();
-        return raced;
-      }
+      if (raced) this.requireUnambiguousSessionId(sessionId, acquisition.ambiguousIDs);
+      const pending = this.pendingSlotStarts.get(sessionId);
+      if (pending) return { operation: pending };
+      this.assertSlotAdmissionOpen();
       this.requireLiveSlotCapacity();
+      this.reservedSlotStarts += 1;
+      const operation = this.startAcquiredSlot(
+        sessionId,
+        entry,
+        acquisition,
+        selectedAcquisitionGeneration,
+      );
+      this.pendingSlotStarts.set(sessionId, operation);
+      return { operation };
+    });
+    return selected.operation;
+  }
+
+  private async startAcquiredSlot(
+    sessionId: string,
+    entry: CatalogAcquisitionEntry,
+    acquisition: CatalogAcquisitionResolution,
+    selectedAcquisitionGeneration: number,
+  ): Promise<RuntimeSlot> {
+    let slot: RuntimeSlot | undefined;
+    let reservationReleased = false;
+    try {
       let canonicalPath: string;
       try { canonicalPath = await realpath(entry.path); }
       catch { throw new GatewayError("not_found", "Tron session was removed before it could be opened"); }
@@ -984,7 +1215,17 @@ export class RuntimeRegistry {
       if (manager.getSessionName()?.startsWith("subagent-") === true) {
         throw new GatewayError("conflict", "Subagent sessions are informational and remain owned by their originating runtime");
       }
-      if (acquisition.fallbackIdentityFingerprint !== undefined) {
+      if (acquisition.indexedStructuralGeneration !== undefined) {
+        const indexed = this.catalogStructuralIndex;
+        const validated = await this.catalogStructureEvidence();
+        if (acquisition.indexedStructuralGeneration !== this.catalogStructuralGeneration
+            || indexed?.structuralGeneration !== acquisition.indexedStructuralGeneration
+            || !validated.complete
+            || validated.digest !== indexed.structureDigest) {
+          if (this.catalogStructuralIndex === indexed) this.invalidateCatalogAcquisition();
+          throw new GatewayError("busy", "Session catalog changed while opening the session", true);
+        }
+      } else if (acquisition.fallbackIdentityFingerprint !== undefined) {
         const invalidationGeneration = acquisition.fallbackInvalidationGeneration;
         if (invalidationGeneration === undefined
           || invalidationGeneration !== this.catalogAcquisitionInvalidationGeneration) {
@@ -1001,10 +1242,49 @@ export class RuntimeRegistry {
           throw new GatewayError("busy", "Session catalog changed while opening the session", true);
         }
       }
-      const slot = await RuntimeSlot.create(manager, this.dependencies(), this.hooks(), this.interrupted.has(sessionId));
-      this.slots.set(sessionId, slot);
+      if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration) {
+        throw new GatewayError("busy", "Session catalog changed while opening the session", true);
+      }
+      slot = await this.timedStage(
+        "session.open.runtime",
+        () => RuntimeSlot.create(
+          manager,
+          this.dependencies(),
+          this.hooks(),
+          this.interrupted.has(sessionId),
+        ),
+      );
+      await this.mutex.run(() => {
+        if (selectedAcquisitionGeneration !== this.catalogAcquisitionInvalidationGeneration
+            || this.trustReloadProjects.has(entry.canonicalCwd)) {
+          throw new GatewayError("busy", "Session runtime start was retired before publication", true);
+        }
+        const ambiguous = this.catalogStructuralIndex
+          ? this.dynamicAmbiguousSessionIDs(this.catalogStructuralIndex)
+          : this.ambiguousSessionIds;
+        this.requireUnambiguousSessionId(sessionId, ambiguous);
+        const raced = this.slots.get(sessionId);
+        if (raced && raced !== slot && !raced.isDisposed) {
+          throw new GatewayError("conflict", "Replacement session is already active", true);
+        }
+        this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
+        reservationReleased = true;
+        this.slots.set(sessionId, slot!);
+      });
       return slot;
-    });
+    } catch (error) {
+      if (slot && this.slots.get(sessionId) !== slot) await slot.dispose().catch(() => {});
+      throw error;
+    } finally {
+      await this.mutex.run(() => {
+        if (this.pendingSlotStarts.get(sessionId) !== undefined) {
+          this.pendingSlotStarts.delete(sessionId);
+        }
+        if (!reservationReleased) {
+          this.reservedSlotStarts = Math.max(0, this.reservedSlotStarts - 1);
+        }
+      });
+    }
   }
 
   async importFromJsonl(path: string, cwdInput: string): Promise<RuntimeSlot> {
@@ -1122,8 +1402,12 @@ export class RuntimeRegistry {
       this.latestSummaries.delete(sessionId);
       this.interrupted.delete(sessionId);
       await this.markers.clear(sessionId);
-      if (info) await rm(info.path, { force: true });
-      this.invalidateCatalogAcquisition();
+      if (info) {
+        await rm(info.path, { force: true });
+        if (!(await this.removeIndexedCatalogFile(info.path))) this.invalidateCatalogAcquisition();
+      } else {
+        this.invalidateCatalogAdmission();
+      }
       this.revision += 1;
       this.options.sessionListChanged();
     });
@@ -1131,7 +1415,7 @@ export class RuntimeRegistry {
 
   private requireLiveSlotCapacity(): void {
     const maximum = this.options.maximumLiveRuntimes;
-    if (maximum !== undefined && this.slots.size >= maximum) {
+    if (maximum !== undefined && this.slots.size + this.reservedSlotStarts >= maximum) {
       throw new GatewayError("busy", "Gateway live runtime capacity is full; close or wait for an idle session", true);
     }
   }
@@ -1312,7 +1596,7 @@ export class RuntimeRegistry {
             this.interrupted.delete(id);
             this.summaryRevisions.delete(id);
             this.latestSummaries.delete(id);
-            this.invalidateCatalogAcquisition();
+            this.invalidateCatalogAdmission();
             this.revision += 1;
             this.options.sessionListChanged();
           }
@@ -1372,6 +1656,9 @@ export class RuntimeRegistry {
   }
 
   private async performDispose(): Promise<void> {
+    while (this.slotAdmissionsInFlight > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
     const entries = await this.mutex.run(() => [...this.slots.entries()]);
     const results = await Promise.allSettled(entries.map(([, slot]) => slot.shutdown()));
     const failures: unknown[] = [];

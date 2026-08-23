@@ -447,6 +447,88 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     expect(evidence).not.toHaveBeenCalled();
   });
 
+  it("keeps a warmed disk index across live-only create and delete", async () => {
+    const fixture = await coldFixture("warm-live-membership");
+    const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };
+    const materialize = vi.spyOn(internals, "sessionInfos");
+
+    await fixture.registry.catalog("user");
+    expect(materialize).toHaveBeenCalledTimes(1);
+    const live = await fixture.registry.create(fixture.cwd);
+    expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id)).toContain(live.id);
+    expect(materialize).toHaveBeenCalledTimes(1);
+    await fixture.registry.delete(live.id);
+    expect((await fixture.registry.catalog("user")).sessions.map((session) => session.id)).not.toContain(live.id);
+    expect(materialize).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not certify a cached index when traversal evidence is incomplete", async () => {
+    const fixture = await coldFixture("incomplete-index-evidence");
+    const internals = fixture.registry as unknown as {
+      sessionInfos: () => Promise<unknown[]>;
+      catalogStructureEvidence: () => Promise<{ digest: string; identitiesByPath: ReadonlyMap<string, unknown>; complete: boolean }>;
+    };
+    const materialize = vi.spyOn(internals, "sessionInfos");
+    await fixture.registry.catalog("all");
+    expect(materialize).toHaveBeenCalledTimes(1);
+    const evidence = await internals.catalogStructureEvidence();
+    const evidenceSpy = vi.spyOn(internals, "catalogStructureEvidence")
+      .mockResolvedValue({ ...evidence, complete: false });
+    try {
+      await fixture.registry.catalog("all");
+      expect(materialize).toHaveBeenCalledTimes(2);
+    } finally {
+      evidenceSpy.mockRestore();
+    }
+  });
+
+  it("deduplicates same-session starts and starts distinct sessions concurrently", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-concurrent-cold-starts-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    const sessionDirectory = join(agentDir, "sessions", "workspace");
+    await Promise.all([mkdir(sessionDirectory, { recursive: true }), mkdir(cwd, { recursive: true })]);
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    const firstManager = SessionManager.create(cwd, sessionDirectory);
+    firstManager.appendMessage(fauxAssistantMessage("first cold start"));
+    const secondManager = SessionManager.create(cwd, sessionDirectory);
+    secondManager.appendMessage(fauxAssistantMessage("second cold start"));
+    let entered = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const runtimeFactory = vi.fn(async () => {
+      entered += 1;
+      await gate;
+      return ModelRuntime.create({ modelsPath: null, refreshOnCreate: false });
+    });
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      maximumLiveRuntimes: 2,
+      modelRuntimeFactory: runtimeFactory,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    await registry.catalog("all");
+
+    const first = registry.acquire(firstManager.getSessionId());
+    const duplicate = registry.acquire(firstManager.getSessionId());
+    const second = registry.acquire(secondManager.getSessionId());
+    await waitUntil(() => entered === 2);
+    expect(runtimeFactory).toHaveBeenCalledTimes(2);
+    await expect(registry.create(cwd)).rejects.toMatchObject({ code: "busy", retryable: true });
+    expect(runtimeFactory).toHaveBeenCalledTimes(2);
+    release();
+    const [firstSlot, duplicateSlot, secondSlot] = await Promise.all([first, duplicate, second]);
+    expect(duplicateSlot).toBe(firstSlot);
+    expect(secondSlot.id).toBe(secondManager.getSessionId());
+  });
+
   it("uses only bounded header evidence when cold acquisition has no reusable admission", async () => {
     const fixture = await coldFixture("uncached");
     const internals = fixture.registry as unknown as { sessionInfos: () => Promise<unknown[]> };

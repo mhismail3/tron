@@ -86,6 +86,14 @@ const sessions = new RuntimeRegistry({
   sessionListChanged: () => transport?.notifySessionListChanged(),
   sessionRekeyed: (previousId, nextId) => transport?.rekeySession(previousId, nextId),
   sessionClosed: (sessionId) => transport?.revokeSessionTerminals(sessionId),
+  stageTiming: (stage, durationMs, outcome) => {
+    if (durationMs < 250 && outcome === "success") return;
+    logger.log(
+      durationMs >= 1_000 || outcome === "failure" ? "warning" : "info",
+      `Session stage ${stage} completed in ${durationMs}ms (${outcome})`,
+      { event: "session.stage", source: "sessions" },
+    );
+  },
 });
 await sessions.initialize();
 
