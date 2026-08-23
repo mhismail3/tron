@@ -392,8 +392,7 @@ multi-page scrolling up to the 512-page safety cap. Live composer files retain e
 25 MiB aggregate limit; frozen handoff strips them before queued/canonical settlement. Physical pixel and
 peak-memory calibration remains required.
 
-`ChatViewScrollHarnessTests` mount the actual `ChatView`, `LazyVStack`, composer
-inset, and native `UIScrollView` in a fixed hosted window. The multiline composer uses pure synchronous capped representable fitting plus post-layout TextKit overflow/caret reconciliation; focused tests pin trailing-newline caret visibility, manual-scroll-then-type direction, 9→8 collapse, and inset ownership. Active-turn admission grafts one immutable lifecycle row into the current complete installed projection before normal newest-source preparation; focused composer/store tests pin immediate collapse, lifecycle-only reuse, stale-worker rejection, and snapshot-before-response provisional queue identity without granting canonical settlement. Test-only authority
+`ChatViewScrollHarnessTests` mount the actual `ChatView`, `LazyVStack`, composer inset, and native `UIScrollView` in a fixed hosted window. The aggregate composer host stays mounted inside that one inset, measures natural content before its bottom-aligned clipped frame, and animates only structural identity changes; focused policy/style cases pin picker/result, attachment, skill, extension, submission, one-inset, no-independent-move, and Reduce Motion behavior. The multiline composer uses pure synchronous capped representable fitting plus post-layout TextKit overflow/caret reconciliation; focused tests pin trailing-newline caret visibility, manual-scroll-then-type direction, 9→8 collapse, and inset ownership. Active-turn admission captures composer viewport intent before grafting one immutable lifecycle row into the current complete installed projection; focused coordinator/composer/store tests pin pinned disabled coupling, detached zero-write preservation, retarget and direct-interaction cancellation, active-upload rejection/retry, immediate collapse, metadata-only reuse, stale-worker rejection, and snapshot-before-response provisional queue identity without granting canonical settlement. Test-only authority
 admission bypasses network I/O without bypassing `AppModel`'s authoritative read
 gate. Raw geometry, visible semantic IDs, and row frames are reduced to one latest
 sample on each `CADisplayLink` tick; added evidence is aggregate command/frame/count
@@ -433,8 +432,7 @@ history back to the retained authoritative tail. Opening ownership is one mutual
 `OpeningTailPhase` (`idle`, `positioning`, `positioned`, or `postReveal`); ordinary follow,
 insertion, and pinned correction stay independent and are suppressed until it is idle. `ChatScrollCoordinatorTests` use watchdog-bounded
 barriers rather than sleeps or yields to prove callback-order equivalence, immediate
-catch-up dismissal for geometry-first manual return to the tail, pinned keyboard/composer
-following, one short smooth pinned-tail command per frame for admitted discrete and continuous growth, disabled physical-overshoot correction, native-geometry acknowledgement before a subsequent follow,
+catch-up dismissal for geometry-first manual return to the tail, generation-owned keyboard/composer following with disabled pinned coupling, semantic-locus preservation and zero writes while detached, rapid structural retarget coalescing, direct-interaction cancellation, one short smooth pinned-tail command per frame for admitted discrete and continuous growth outside composer ownership, disabled physical-overshoot correction, native-geometry acknowledgement before a subsequent follow,
 no writes for detached layout/stream/keyboard
 settlement, viewport geometry-first expansion detachment, frame-separated catch-up with unread admission
 through every interruption stage, Reduce Motion, exact reset/release command admission,
@@ -621,12 +619,12 @@ readable-output duplicate or third fallback section.
 Verify live updates and true-only truncation metadata without moving the primary sheet's reading position. With
 a nonempty focused composer, open the native attachment menu, verify the keyboard remains visible, verify its
 option symbols are emerald while text retains native system styling, and activate camera, photos, files, Skills,
-and Commands on the first option tap. Verify `@` opens the cyan skill glass, query typing filters without caret
+and Commands on the first option tap. Record the command/skill panel frame by frame: its material must reveal upward on the same continuous height curve that reduces the transcript viewport, with no full-size flash, delayed chat jump, or second settle. Rapid open/filter/dismiss retargets must continue from the current presentation; a detached reader's visible message must not move to the tail. Verify `@` opens the cyan skill glass, query typing filters without caret
 jumps, selection removes only the active token and places one removable skill chip below photo/file chips, and
 a newer skill replaces it. Verify `/` at the leading command boundary opens the purple command glass, selection
 completes editable command text with a trailing space, and deleting either active trigger dismisses its picker.
-Under Reduce Motion both pickers fade without spatial movement; with VoiceOver, picker rows, info controls, and
-skill removal are separately reachable. The 40-point plus control and native menu appearance/order must remain
+Under Reduce Motion picker height installs without spatial motion; with VoiceOver, picker rows, info controls, and
+skill removal are separately reachable. Begin an attachment upload and verify Send disables; a stale send action must retain text and skill, then retry exactly once after upload completion. The 40-point plus control and native menu appearance/order must remain
 unchanged. Terminal checkpoints must exercise
 the native keyboard plus the floating shortcut and command-key surfaces rather
 than validating only PTY output.

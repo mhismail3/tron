@@ -861,6 +861,126 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.hostedDirectTailReturnArmed)
     }
 
+    @Test("composer transition supersedes a pending binding release")
+    func composerSupersedesPendingRelease() throws {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        let pendingRelease = try #require(coordinator.command)
+        #expect(pendingRelease.destination == .releaseBinding)
+
+        _ = try #require(coordinator.composerViewportTransitionWillBegin(from: nil))
+        let composerBinding = try #require(coordinator.command)
+        #expect(composerBinding.token != pendingRelease.token)
+        #expect(composerBinding.destination == .tail)
+        #expect(composerBinding.animation == .disabled)
+    }
+
+    @Test("composer transition supersedes smooth follow and releases it for geometry-first detachment")
+    func composerSupersedesSmoothFollow() async throws {
+        try await withTestWatchdog { @MainActor in
+            let frames = ManualScrollFrameScheduler()
+            let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+            coordinator.geometryChanged(previous: .zero, current: bottom)
+            if let release = coordinator.command { coordinator.commandApplied(release) }
+            coordinator.discreteContentInserted(renderedID: "new-row")
+            let reducedViewport = ChatTranscriptGeometry(
+                offsetY: 600, contentHeight: 1_000, containerHeight: 300
+            )
+            coordinator.viewportChanged(previous: bottom, current: reducedViewport)
+            await frames.waitForRequest(count: 1)
+            frames.releaseNext()
+            let smooth = try await coordinator.hostedNextCommand()
+            #expect(smooth.animation == .smooth(duration: ChatScrollCoordinator.liveGrowthFollowDuration))
+
+            _ = try #require(coordinator.composerViewportTransitionWillBegin(from: nil))
+            let composerBinding = try #require(coordinator.command)
+            #expect(composerBinding.token != smooth.token)
+            #expect(composerBinding.destination == .tail)
+            #expect(composerBinding.animation == .disabled)
+            coordinator.commandApplied(composerBinding)
+
+            coordinator.geometryChanged(previous: reducedViewport, current: away)
+            let active = try #require(coordinator.hostedComposerViewportGeneration)
+            coordinator.composerViewportTransitionDidSettle(active)
+            _ = try #require(coordinator.composerViewportTransitionWillBegin(from: nil))
+            #expect(coordinator.hostedComposerViewportWasDetached)
+            #expect(coordinator.command?.destination == .releaseBinding)
+            #expect(coordinator.command?.animation == .disabled)
+        }
+    }
+
+    @Test("composer structural retargets coalesce behind one persistent pinned-tail binding")
+    func composerStructuralRetargets() throws {
+        let frames = ManualScrollFrameScheduler()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        if let release = coordinator.command { coordinator.commandApplied(release) }
+
+        let first = try #require(coordinator.composerViewportTransitionWillBegin(from: nil))
+        let retarget = try #require(coordinator.composerViewportTransitionWillBegin(from: nil))
+        #expect(first == retarget)
+        #expect(coordinator.hostedComposerViewportGeneration == first)
+        let binding = try #require(coordinator.command)
+        #expect(binding.destination == .tail)
+        #expect(binding.animation == .disabled)
+        coordinator.commandApplied(binding)
+
+        let reducedViewport = ChatTranscriptGeometry(
+            offsetY: 600, contentHeight: 1_000, containerHeight: 300
+        )
+        coordinator.viewportChanged(previous: bottom, current: reducedViewport)
+        #expect(coordinator.command?.token == binding.token)
+        #expect(frames.requestCount == 0)
+        let reboundTail = ChatTranscriptGeometry(
+            offsetY: 700, contentHeight: 1_000, containerHeight: 300
+        )
+        coordinator.viewportChanged(previous: reducedViewport, current: reboundTail)
+        #expect(coordinator.command == nil)
+        coordinator.composerViewportTransitionDidSettle(first)
+        #expect(coordinator.hostedComposerViewportGeneration == nil)
+    }
+
+    @Test("geometry-first older movement cannot regain tail authority during composer mutation")
+    func geometryFirstComposerTransitionPreservesLocus() {
+        let frames = ManualScrollFrameScheduler()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        if let release = coordinator.command { coordinator.commandApplied(release) }
+
+        coordinator.geometryChanged(previous: bottom, current: away)
+        #expect(!coordinator.userScrolledAway)
+        let generation = coordinator.composerViewportTransitionWillBegin(from: nil)
+        #expect(generation != nil)
+        #expect(coordinator.hostedComposerViewportWasDetached)
+        #expect(coordinator.command == nil)
+        #expect(frames.requestCount == 0)
+    }
+
+    @Test("detached composer transitions preserve reader ownership and issue no tail command")
+    func detachedComposerStructuralTransition() {
+        let frames = ManualScrollFrameScheduler()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+        coordinator.geometryChanged(previous: .zero, current: bottom)
+        if let release = coordinator.command { coordinator.commandApplied(release) }
+        coordinator.scrollPhaseChanged(from: .idle, to: .interacting, finalGeometry: bottom)
+        coordinator.geometryChanged(previous: bottom, current: away)
+        #expect(coordinator.userScrolledAway)
+
+        let generation = coordinator.composerViewportTransitionWillBegin(from: nil)
+        #expect(generation != nil)
+        #expect(coordinator.hostedComposerViewportWasDetached)
+        let reducedViewport = ChatTranscriptGeometry(
+            offsetY: away.offsetY, contentHeight: away.contentHeight, containerHeight: 300
+        )
+        coordinator.viewportChanged(previous: away, current: reducedViewport)
+        #expect(coordinator.command == nil)
+        #expect(frames.requestCount == 0)
+
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        #expect(coordinator.hostedComposerViewportGeneration == nil)
+        #expect(coordinator.command == nil)
+    }
+
     @Test("upward interaction publishes catch-up immediately")
     func upwardInteractionPublishesCatchUpImmediately() {
         let coordinator = ChatScrollCoordinator()
@@ -964,6 +1084,11 @@ struct ChatScrollCoordinatorTests {
             if let release = coordinator.command { coordinator.commandApplied(release) }
 
             coordinator.composerViewportTransitionBegan()
+            let command = try await coordinator.hostedNextCommand()
+            #expect(command.destination == .tail)
+            #expect(command.origin == .automaticFollow)
+            #expect(command.animation == .disabled)
+            coordinator.commandApplied(command)
             let keyboard = ChatTranscriptGeometry(
                 offsetY: 600,
                 contentHeight: 1_000,
@@ -971,12 +1096,8 @@ struct ChatScrollCoordinatorTests {
                 bottomInset: 100
             )
             coordinator.viewportChanged(previous: bottom, current: keyboard)
-            await frames.waitForRequest(count: 1)
-            frames.releaseNext()
-
-            let command = try await coordinator.hostedNextCommand()
-            #expect(command.destination == .tail)
-            #expect(command.origin == .automaticFollow)
+            #expect(coordinator.command?.token == command.token)
+            #expect(frames.requestCount == 0)
             #expect(!coordinator.shouldShowCatchUpButton)
         }
     }

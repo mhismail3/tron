@@ -3,30 +3,6 @@ import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
 
-enum ChatComposerLayoutSignalPolicy {
-    static func shouldSignal(previous: CGFloat, current: CGFloat) -> Bool {
-        previous > 0 && current > 0 && abs(current - previous) > 0.5
-    }
-}
-
-struct ExtensionActivityPillComposerGeometry: Equatable, Sendable {
-    let ownerIDs: [String]
-    let height: CGFloat
-}
-
-enum ExtensionActivityPillComposerGeometryPolicy {
-    enum Disposition: Equatable { case noScrollWrites, noSmoothFollow }
-
-    static func disposition(isDetached: Bool) -> Disposition {
-        isDetached ? .noScrollWrites : .noSmoothFollow
-    }
-
-    static func changed(previous: ExtensionActivityPillComposerGeometry?, current: ExtensionActivityPillComposerGeometry) -> Bool {
-        guard let previous else { return false }
-        return previous.ownerIDs != current.ownerIDs || abs(previous.height - current.height) > 0.5
-    }
-}
-
 private struct ChatScrollGeometryObservation: Equatable {
     let geometry: ChatTranscriptGeometry
     let presentationEpoch: Int
@@ -106,8 +82,6 @@ struct ChatView: View {
     @State private var openPresentation: ChatOpenPresentationState
     @State private var openingTask: Task<Void, Never>?
     @State private var modelPresentationGeneration: Int?
-    @State private var composerLayoutHeight: CGFloat = 0
-    @State private var extensionPillGeometry: ExtensionActivityPillComposerGeometry?
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
     @State private var scrollCoordinator: ChatScrollCoordinator
     @State private var transcriptPresentation: ChatTranscriptPresentationStore
@@ -417,12 +391,15 @@ struct ChatView: View {
             ) {
                 clearSettledQueueMutationPresentationState()
             }
-            // Lifecycle-only grafts own one pinned-tail settlement but must not
-            // consume the mutation boundary reserved for a newer authoritative
-            // payload installation.
+            // Layout-equivalent authority updates install metadata without
+            // arming scroll settlement. Only an actual local lifecycle graft
+            // follows the tail; a changed bounded layout identity enters the
+            // ordinary projection mutation owner.
             if let previousTag, let installed,
                previousTag.matchesProjectionPayload(of: installed.tag) {
-                scrollCoordinator.installedLifecycleChanged(installed)
+                if previousTag.handoffIdentity != installed.tag.handoffIdentity {
+                    scrollCoordinator.installedLifecycleChanged(installed)
+                }
             } else {
                 scrollCoordinator.installedTranscriptChanged(installed)
             }
@@ -1223,6 +1200,31 @@ struct ChatView: View {
         return ComposerResourceEntry(command: command)
     }
 
+    private var composerStructuralIdentity: ChatComposerStructuralIdentity {
+        let extensionOwnerIDs: [String]
+        if let snapshot = selectedAuthoritativeSnapshot {
+            extensionOwnerIDs = ExtensionActivityPillPolicy.composerGroups(
+                ChatExtensionWidgetPolicy.liveGroups(
+                    snapshot.extensionPresentation,
+                    executions: snapshot.toolExecutions,
+                    activities: snapshot.extensionActivities ?? []
+                )
+            ).map(\.id)
+        } else {
+            extensionOwnerIDs = []
+        }
+        return ChatComposerStructuralIdentity(
+            extensionOwnerIDs: extensionOwnerIDs,
+            attachmentIDs: pendingAttachments.map(\.id),
+            selectedSkillID: selectedComposerSkill?.id,
+            pickerKind: composerResourcePicker?.kind,
+            pickerVisibleRows: composerResourcePicker == nil
+                ? 0
+                : min(composerResourceResults.count, 5),
+            submissionPending: submissionPending
+        )
+    }
+
     private var candidatePresentedInteraction: ExtensionInteraction? {
         ChatExtensionInteractionPolicy.presentedInteraction(
             selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? [],
@@ -1265,6 +1267,10 @@ struct ChatView: View {
 
     private var sending: Bool {
         presentationTarget.map(model.composerDrafts.isSending(target:)) ?? false
+    }
+
+    private var hasActiveComposerUploads: Bool {
+        presentationTarget.map(model.composerDrafts.hasActiveUploads(for:)) ?? false
     }
 
     /// Builds the complete handoff exactly once with the canonical snapshot.
@@ -1942,7 +1948,19 @@ struct ChatView: View {
     }
 
     private var composer: some View {
-        VStack(spacing: 10) {
+        ChatComposerStructuralHost(
+            identity: composerStructuralIdentity,
+            reduceMotion: reduceMotion,
+            transitionWillBegin: {
+                scrollCoordinator.composerViewportTransitionWillBegin(
+                    from: transcriptPresentation.installed
+                )
+            },
+            transitionDidSettle: { generation in
+                scrollCoordinator.composerViewportTransitionDidSettle(generation)
+            }
+        ) {
+            VStack(spacing: 10) {
             if let snapshot = selectedAuthoritativeSnapshot {
                 let groups = ExtensionActivityPillPolicy.composerGroups(
                     ChatExtensionWidgetPolicy.liveGroups(
@@ -1984,27 +2002,7 @@ struct ChatView: View {
                         .padding(.horizontal, 16)
                     }
                     .scrollClipDisabled()
-                    .onGeometryChange(for: CGFloat.self) { geometry in geometry.size.height } action: { height in
-                        let current = ExtensionActivityPillComposerGeometry(
-                            ownerIDs: groups.map(\.id), height: height
-                        )
-                        guard ExtensionActivityPillComposerGeometryPolicy.changed(
-                            previous: extensionPillGeometry, current: current
-                        ) else { return }
-                        extensionPillGeometry = current
-                        switch ExtensionActivityPillComposerGeometryPolicy.disposition(
-                            isDetached: scrollCoordinator.userScrolledAway
-                        ) {
-                        case .noScrollWrites:
-                            break
-                        case .noSmoothFollow:
-                            // The shared coordinator emits a disabled,
-                            // frame-admitted follow; the pill reason never
-                            // issues a smooth scroll or direct offset write.
-                            scrollCoordinator.composerViewportTransitionBegan()
-                        }
-                    }
-                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                    .transition(.opacity)
                     .accessibilityElement(children: .contain)
                 }
             }
@@ -2018,32 +2016,14 @@ struct ChatView: View {
                                     model.composerDrafts.removeAttachment(attachment.id, target: target)
                                 }
                             }
-                            .transition(
-                                reduceMotion
-                                    ? .opacity
-                                    : .asymmetric(
-                                        insertion: .move(edge: .bottom)
-                                            .combined(with: .scale(scale: 0.92, anchor: .bottom))
-                                            .combined(with: .opacity),
-                                        removal: .move(edge: .top)
-                                            .combined(with: .scale(scale: 0.94, anchor: .top))
-                                            .combined(with: .opacity)
-                                    )
-                            )
+                            .transition(.opacity)
                         }
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 2)
                 }
                 .scrollClipDisabled()
-                .transition(
-                    reduceMotion
-                        ? .opacity
-                        : .asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal: .move(edge: .top).combined(with: .opacity)
-                        )
-                )
+                .transition(.opacity)
                 .animation(
                     submissionPending
                         ? nil
@@ -2066,7 +2046,7 @@ struct ChatView: View {
                     .padding(.vertical, 2)
                 }
                 .scrollClipDisabled()
-                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                .transition(.opacity)
             }
 
             if let picker = composerResourcePicker {
@@ -2078,7 +2058,7 @@ struct ChatView: View {
                     onDismiss: dismissComposerResourcePicker
                 )
                 .padding(.horizontal, 16)
-                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                .transition(.opacity)
             }
 
             GlassEffectContainer(spacing: 8) {
@@ -2097,14 +2077,6 @@ struct ChatView: View {
             )
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
-        }
-        .onGeometryChange(for: CGFloat.self) { geometry in
-            geometry.size.height
-        } action: { height in
-            let previous = composerLayoutHeight
-            composerLayoutHeight = height
-            if ChatComposerLayoutSignalPolicy.shouldSignal(previous: previous, current: height) {
-                scrollCoordinator.composerViewportTransitionBegan()
             }
         }
         .background(alignment: .bottom) {
@@ -2162,7 +2134,7 @@ struct ChatView: View {
             if let composerTrailingMode {
                 ComposerTrailingButton(
                     mode: composerTrailingMode,
-                    isDisabled: sending || submissionPending || !isTranscriptReady,
+                    isDisabled: sending || submissionPending || hasActiveComposerUploads || !isTranscriptReady,
                     isSending: sending,
                     offersQueueChoices: selectedAuthoritativeSnapshot?.phase.isActive == true,
                     onSend: { behavior in send(behavior: behavior) },
@@ -2374,9 +2346,7 @@ struct ChatView: View {
                 guard !Task.isCancelled, attachmentActionsEnabled else { return }
                 let picker = ComposerResourcePickerSource.menu(kind)
                 composerResourceResults = composerResourceCatalog.entries(kind: kind, query: "")
-                withAnimation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.32, dampingFraction: 0.82)) {
-                    composerResourcePicker = picker
-                }
+                composerResourcePicker = picker
             }
             return
         }
@@ -2437,9 +2407,7 @@ struct ChatView: View {
             attachmentPresentationTask = nil
             if composerResourcePicker != .token(token) {
                 composerResourceResults = composerResourceCatalog.entries(kind: token.kind, query: token.query)
-                withAnimation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.32, dampingFraction: 0.82)) {
-                    composerResourcePicker = .token(token)
-                }
+                composerResourcePicker = .token(token)
             }
         } else if case .token = composerResourcePicker {
             dismissComposerResourcePicker()
@@ -2500,9 +2468,7 @@ struct ChatView: View {
     }
 
     private func dismissComposerResourcePicker() {
-        withAnimation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.32, dampingFraction: 0.82)) {
-            composerResourcePicker = nil
-        }
+        composerResourcePicker = nil
         composerResourceResults = []
     }
 
@@ -2642,6 +2608,13 @@ struct ChatView: View {
               source.tag.presentationGeneration == target.generation else { return }
         let behavior = explicitBehavior
             ?? ChatComposerPolicy.submissionBehavior(phase: selectedAuthoritativeSnapshot?.phase)
+        guard !hasActiveComposerUploads else {
+            model.presentComposerActionError(
+                "Wait for attachments to finish uploading before sending.",
+                target: target
+            )
+            return
+        }
         if let composerScope,
            let selected = model.composerDrafts.selectedSkill(for: composerScope) {
             guard supportsSkillPrompt, model.commandCatalogTarget == target else {
@@ -2660,6 +2633,13 @@ struct ChatView: View {
                 return
             }
         }
+        // Capture pinned/detached viewport intent before either the composer
+        // collapses or the outgoing lifecycle row changes transcript layout.
+        // The measured structural host coalesces its later height retarget into
+        // this same generation.
+        let composerViewportGeneration = scrollCoordinator.composerViewportTransitionWillBegin(
+            from: transcriptPresentation.installed
+        )
         do {
             // Admission, composer collapse, and the local lifecycle graft share
             // one transaction. The full newest authoritative capture is then
@@ -2723,6 +2703,9 @@ struct ChatView: View {
                 }
             }
         } catch {
+            if let composerViewportGeneration {
+                scrollCoordinator.composerViewportTransitionDidSettle(composerViewportGeneration)
+            }
             model.presentComposerActionError(error, target: target)
         }
     }

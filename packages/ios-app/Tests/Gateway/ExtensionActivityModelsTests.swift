@@ -122,15 +122,6 @@ struct ExtensionActivityModelsTests {
         ])
     }
 
-    @Test("pill composer geometry is typed for detached and pinned readers")
-    func composerGeometryDisposition() {
-        let old = ExtensionActivityPillComposerGeometry(ownerIDs: ["owner:a"], height: 32)
-        let next = ExtensionActivityPillComposerGeometry(ownerIDs: ["owner:a"], height: 48)
-        #expect(ExtensionActivityPillComposerGeometryPolicy.changed(previous: old, current: next))
-        #expect(ExtensionActivityPillComposerGeometryPolicy.disposition(isDetached: true) == .noScrollWrites)
-        #expect(ExtensionActivityPillComposerGeometryPolicy.disposition(isDetached: false) == .noSmoothFollow)
-    }
-
     @Test("history page omits malformed rows while admitting the page")
     func pageAdmission() throws {
         let valid = try JSONSerialization.jsonObject(with: JSONEncoder.gateway.encode(makeActivity()))

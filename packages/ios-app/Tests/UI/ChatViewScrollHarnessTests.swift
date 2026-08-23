@@ -6,12 +6,31 @@ import UIKit
 @MainActor
 @Suite("Hosted ChatView scroll harness", .serialized)
 struct ChatViewScrollHarnessTests {
-    @Test("complete composer measurement is the structural viewport signal")
-    func composerLayoutSignalPolicy() {
-        #expect(!ChatComposerLayoutSignalPolicy.shouldSignal(previous: 0, current: 60))
-        #expect(!ChatComposerLayoutSignalPolicy.shouldSignal(previous: 60, current: 60.5))
-        #expect(ChatComposerLayoutSignalPolicy.shouldSignal(previous: 60, current: 84))
-        #expect(ChatComposerLayoutSignalPolicy.shouldSignal(previous: 84, current: 60))
+    @Test("aggregate composer height animates structural identities but not multiline measurement")
+    func composerStructuralRetargetPolicy() {
+        let base = ChatComposerStructuralIdentity(
+            extensionOwnerIDs: [], attachmentIDs: [], selectedSkillID: nil,
+            pickerKind: nil, pickerVisibleRows: 0, submissionPending: false
+        )
+        let picker = ChatComposerStructuralIdentity(
+            extensionOwnerIDs: [], attachmentIDs: [], selectedSkillID: nil,
+            pickerKind: .command, pickerVisibleRows: 5, submissionPending: false
+        )
+        #expect(!ChatComposerStructuralTransitionPolicy.isStructuralRetarget(
+            previous: nil,
+            current: .init(identity: base, height: 60)
+        ))
+        let multilineRetarget = ChatComposerStructuralTransitionPolicy.isStructuralRetarget(
+            previous: .init(identity: base, height: 60),
+            current: .init(identity: base, height: 84)
+        )
+        #expect(multilineRetarget == false)
+        #expect(ChatComposerStructuralTransitionPolicy.isStructuralRetarget(
+            previous: .init(identity: base, height: 60),
+            current: .init(identity: picker, height: 320)
+        ))
+        #expect(ChatComposerStructuralTransitionPolicy.animation(reduceMotion: true) == nil)
+        #expect(ChatComposerStructuralTransitionPolicy.animation(reduceMotion: false) != nil)
     }
 
     @Test("hosted aggregate counters and retained row frames are bounded")

@@ -154,6 +154,10 @@ final class ChatScrollCoordinator {
     private var automaticTailCommandStartGeometryRevision: Int?
     private var automaticTailCommandStartOffsetY: CGFloat?
     private var pendingContinuousGrowthFollow = false
+    private var composerViewportSequence = 0
+    private var activeComposerViewportGeneration: Int?
+    private var composerViewportWasDetached = false
+    private var composerViewportAnchor: ChatSemanticAnchor?
     private var discreteFollowRenderedIDs: Set<String> = []
     private var discreteFollowRenderedIDOrder: [String] = []
     private var pendingUnattributedOlderMovement = false
@@ -193,6 +197,9 @@ final class ChatScrollCoordinator {
     private var nextHostedCommandWaiterID = 0
     private var nextHostedPrependSampleWaiterID = 0
     private(set) var hostedFollowDecisionRevision = 0
+    var hostedComposerViewportGeneration: Int? { activeComposerViewportGeneration }
+    var hostedComposerViewportWasDetached: Bool { composerViewportWasDetached }
+    var hostedComposerViewportAnchor: ChatSemanticAnchor? { composerViewportAnchor }
     #endif
 
     private var layoutMutationAnchor: ChatSemanticAnchor?
@@ -412,21 +419,71 @@ final class ChatScrollCoordinator {
         isNativeUserOwned = isPositionedByUser
     }
 
-    /// Arms pinned following for the next measured keyboard/composer viewport
-    /// change. It emits no immediate write, and detached readers are inert.
-    func composerViewportTransitionBegan() {
-        guard !userScrolledAway, catchUpPhase == .none, !isPrependingHistory,
-              !openingTailPhase.isActive else { return }
+    /// Captures viewport intent before aggregate composer geometry changes.
+    /// Rapid retargets share one generation: pinned readers keep a disabled
+    /// tail attachment while detached readers retain their semantic locus and
+    /// never receive a tail command.
+    @discardableResult
+    func composerViewportTransitionWillBegin(
+        from installed: InstalledChatTranscript?
+    ) -> Int? {
+        guard catchUpPhase == .none, !isPrependingHistory,
+              !openingTailPhase.isActive else { return nil }
+        if let activeComposerViewportGeneration { return activeComposerViewportGeneration }
+
+        composerViewportSequence &+= 1
+        let generation = composerViewportSequence
+        activeComposerViewportGeneration = generation
+        let preservesReaderLocus = userScrolledAway || pendingUnattributedOlderMovement
+        composerViewportWasDetached = preservesReaderLocus
+        composerViewportAnchor = preservesReaderLocus
+            ? installed.flatMap { semanticAnchor(in: $0.timeline) }
+            : nil
+        if preservesReaderLocus {
+            retireAutomaticTailBindingForComposerDetachment()
+            return generation
+        }
+
         let hasFreshNativeAuthority = isUserInteracting || pendingNativeUserGeometry
             || isUserDrivenSettling || directTailReturnArmed
-        if geometry.isAtCatchUpBoundary && !hasFreshNativeAuthority {
+        guard !hasFreshNativeAuthority else {
+            finishComposerViewportTransition()
+            return nil
+        }
+        if geometry.isAtCatchUpBoundary {
             // Persistent native binding ownership is not fresh navigation intent.
-            // A live gesture/callback sequence must retain every directional fact.
             isNativeUserOwned = false
         }
         pendingGrowthFollow = true
         pendingContinuousGrowthFollow = true
+        pendingGrowthFollowAnimation = .disabled
+        // Install one persistent bottom binding before the safe-area height
+        // begins changing. Supersede a pending release or older smooth follow;
+        // neither may execute inside the composer-owned transaction.
+        guard installComposerTailBinding() else {
+            finishComposerViewportTransition()
+            return nil
+        }
         scheduleTailFollow()
+        return generation
+    }
+
+    func composerViewportTransitionDidSettle(_ generation: Int) {
+        guard activeComposerViewportGeneration == generation else { return }
+        finishComposerViewportTransition()
+        // A projection installed during composer motion must not close its
+        // detached semantic-anchor transaction against pre-transition geometry.
+        // Settlement is the bounded final-layout barrier when UIKit coalesces an
+        // otherwise numerically identical native geometry callback.
+        geometryRevision &+= 1
+        evaluateLayoutMutationIfReady()
+        if pendingGrowthFollow { scheduleTailFollow() }
+        else { requestBindingReleaseIfSettled() }
+    }
+
+    /// HOSTED_TEST compatibility for existing driver probes.
+    func composerViewportTransitionBegan() {
+        _ = composerViewportTransitionWillBegin(from: nil)
     }
 
     func scrollPhaseChanged(from oldPhase: ScrollPhase, to newPhase: ScrollPhase, finalGeometry: ChatTranscriptGeometry?) {
@@ -503,7 +560,13 @@ final class ChatScrollCoordinator {
     /// scroll geometry reports identical numeric values. SwiftUI can coalesce
     /// that observation while the semantic row frames still advance.
     func installedLayoutEpochChanged() {
-        geometryRevision &+= 1
+        // The epoch is semantic-frame authority, not proof that UIKit has
+        // installed a simultaneous safe-area viewport change. During composer
+        // motion, wait for native geometry or the bounded transition settlement
+        // barrier before correcting a detached anchor.
+        if activeComposerViewportGeneration == nil {
+            geometryRevision &+= 1
+        }
         evaluateLayoutMutationIfReady()
         evaluatePrependMeasurementIfReady()
     }
@@ -768,8 +831,9 @@ final class ChatScrollCoordinator {
         if !layoutMutationPendingInstall,
            layoutMutationExpectedLayoutEpoch == nil,
            layoutMutationCorrectionCommandToken == nil {
-            layoutMutationWasDetached = userScrolledAway
-            layoutMutationAnchor = userScrolledAway ? semanticAnchor(in: installed.timeline) : nil
+            let preservesReaderLocus = userScrolledAway || pendingUnattributedOlderMovement
+            layoutMutationWasDetached = preservesReaderLocus
+            layoutMutationAnchor = preservesReaderLocus ? semanticAnchor(in: installed.timeline) : nil
             layoutMutationCorrectionCount = 0
         }
         // Geometry may settle before the frame-gated projection waiter resumes.
@@ -815,7 +879,7 @@ final class ChatScrollCoordinator {
         guard layoutMutationPendingInstall else { return }
         layoutMutationPendingInstall = false
         if layoutMutationWasDetached {
-            guard userScrolledAway, !isUserInteracting,
+            guard (userScrolledAway || pendingUnattributedOlderMovement), !isUserInteracting,
                   !pendingNativeUserGeometry, !isUserDrivenSettling,
                   let anchor = layoutMutationAnchor,
                   let renderedID = installed.timeline.renderedIDBySemanticID[anchor.semanticID] else {
@@ -1256,7 +1320,9 @@ final class ChatScrollCoordinator {
             self.pendingContinuousGrowthFollow = false
             self.pendingInstalledTailSettlement = false
             self.clearDiscreteFollowIDs()
-            let followAnimation = self.pendingGrowthFollowAnimation
+            let followAnimation = self.activeComposerViewportGeneration == nil
+                ? self.pendingGrowthFollowAnimation
+                : .disabled
             self.pendingGrowthFollowAnimation = .disabled
             if self.geometry.isPastBottomEdge
                 || self.geometry.distanceFromBottom > ChatTranscriptGeometry.catchUpDistance {
@@ -1279,7 +1345,8 @@ final class ChatScrollCoordinator {
     }
 
     private func requestBindingReleaseIfSettled() {
-        guard !bindingIsReleased, command == nil,
+        guard activeComposerViewportGeneration == nil,
+              !bindingIsReleased, command == nil,
               followFrameTask == nil, catchUpTask == nil,
               catchUpPhase == .none, !isPrependingHistory,
               !openingTailSettlementPending,
@@ -1333,6 +1400,7 @@ final class ChatScrollCoordinator {
     }
 
     private func cancelAutomaticTasks() {
+        finishComposerViewportTransition()
         followFrameTask?.cancel()
         followFrameTask = nil
         pendingGrowthFollow = false
@@ -1358,6 +1426,43 @@ final class ChatScrollCoordinator {
     private func clearDiscreteFollowIDs() {
         discreteFollowRenderedIDs.removeAll(keepingCapacity: true)
         discreteFollowRenderedIDOrder.removeAll(keepingCapacity: true)
+    }
+
+    private func finishComposerViewportTransition() {
+        activeComposerViewportGeneration = nil
+        composerViewportWasDetached = false
+        composerViewportAnchor = nil
+    }
+
+    private func installComposerTailBinding() -> Bool {
+        if let command {
+            let supersedableRelease = command.destination == .releaseBinding
+            let supersedableTail = command.origin == .automaticFollow
+                && command.destination == .tail
+            guard supersedableRelease || supersedableTail else { return false }
+            clearCommand()
+        }
+        publish(.tail, animation: .disabled, origin: .automaticFollow)
+        return true
+    }
+
+    private func retireAutomaticTailBindingForComposerDetachment() {
+        followFrameTask?.cancel()
+        followFrameTask = nil
+        pendingGrowthFollow = false
+        pendingContinuousGrowthFollow = false
+        pendingInstalledTailSettlement = false
+        pendingGrowthFollowAnimation = .disabled
+        clearDiscreteFollowIDs()
+
+        if command?.origin == .automaticFollow, command?.destination == .tail {
+            clearCommand()
+        }
+        guard command == nil, !bindingIsReleased else { return }
+        // Releasing the ScrollPosition binding changes no physical offset; it
+        // only prevents an older automatic tail owner from pulling the reader
+        // while the composer changes underneath a geometry-first gesture.
+        publish(.releaseBinding, animation: .disabled, origin: .binding)
     }
 
     private func retireLayoutMutationCorrectionCommand() {

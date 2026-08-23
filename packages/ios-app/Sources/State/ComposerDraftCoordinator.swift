@@ -918,6 +918,10 @@ final class ComposerDraftCoordinator {
         attachmentsByTarget[target] = attachments.isEmpty ? nil : attachments
     }
 
+    func hasActiveUploads(for target: SessionPresentationIdentity) -> Bool {
+        admits(target) && uploadAdmissions.contains { $0.target == target }
+    }
+
     func send(
         target: SessionPresentationIdentity,
         behavior: String?,
@@ -1086,6 +1090,14 @@ final class ComposerDraftCoordinator {
     ) throws -> SubmissionAdmission {
         guard let lease, admits(target), submissionByTarget[target] == nil else {
             throw CancellationError()
+        }
+        guard !uploadAdmissions.contains(where: { $0.target == target }) else {
+            throw GatewayFailure(
+                code: "upload_in_progress",
+                message: "Wait for attachments to finish uploading before sending.",
+                retryable: true,
+                details: nil
+            )
         }
         let scope = lease.scope
         let draft = drafts[scope] ?? Draft(text: "", revision: 0, lastAccess: sequence)

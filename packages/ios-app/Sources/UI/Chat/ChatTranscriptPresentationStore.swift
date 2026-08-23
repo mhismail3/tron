@@ -2,6 +2,39 @@ import Foundation
 import Observation
 
 struct ChatTranscriptProjectionTag: Hashable, Sendable {
+    /// Bounded layout facts only. Authority sequence/revision may advance for
+    /// model, context, or other metadata without requiring transcript work or
+    /// arming viewport settlement.
+    struct LayoutIdentity: Hashable, Sendable {
+        let transcriptStart: Int?
+        let transcriptTotal: Int?
+        let transcript: [TranscriptItem]
+        let streaming: TranscriptItem?
+        let phase: SessionPhase
+        let toolExecutions: [ToolExecutionState]
+        let queuedMessages: [SessionSnapshot.QueuedMessage]
+        let runtimeItems: [ChatTranscriptRenderItem]
+        let hiddenThinkingLabel: String?
+        let queueManagementCapability: Bool
+
+        init(
+            snapshot: SessionSnapshot,
+            hiddenThinkingLabel: String?,
+            queueManagementCapability: Bool
+        ) {
+            transcriptStart = snapshot.transcriptStart
+            transcriptTotal = snapshot.transcriptTotal
+            transcript = Array(snapshot.transcript.suffix(ChatTranscriptPageRequest.maximumItemCount))
+            streaming = snapshot.streaming
+            phase = snapshot.phase
+            toolExecutions = snapshot.toolExecutions
+            queuedMessages = snapshot.displayedQueuedMessages
+            runtimeItems = ChatTranscriptProjectionKernel.runtimeItems(in: snapshot)
+            self.hiddenThinkingLabel = hiddenThinkingLabel
+            self.queueManagementCapability = queueManagementCapability
+        }
+    }
+
     struct HandoffIdentity: Hashable, Sendable {
         struct Attachment: Hashable, Sendable {
             let id: String
@@ -101,6 +134,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     /// The exact Gateway capability fact captured by this immutable source.
     /// A missing Gateway defaults to false for callers and tests.
     let queueManagementCapability: Bool
+    let layoutIdentity: LayoutIdentity
     var handoffIdentity: HandoffIdentity
     let hiddenThinkingLabel: String?
     /// Foreground reconciliation installs the authoritative aggregate without
@@ -139,12 +173,18 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         firstTranscriptID = snapshot.transcript.first?.id
         lastTranscriptID = snapshot.transcript.last?.id
         self.queueManagementCapability = queueManagementCapability
+        let projectedHiddenThinkingLabel = (authoritySnapshot ?? snapshot)
+            .extensionPresentation.semanticState.hiddenThinkingLabel
+        layoutIdentity = LayoutIdentity(
+            snapshot: snapshot,
+            hiddenThinkingLabel: projectedHiddenThinkingLabel,
+            queueManagementCapability: queueManagementCapability
+        )
         self.handoffIdentity = handoffIdentity ?? HandoffIdentity(
             commit: handoff,
             queuePresentationIDByOperationID: queuePresentationIDByOperationID
         )
-        hiddenThinkingLabel = (authoritySnapshot ?? snapshot)
-            .extensionPresentation.semanticState.hiddenThinkingLabel
+        hiddenThinkingLabel = projectedHiddenThinkingLabel
         self.entranceSuppressionGeneration = entranceSuppressionGeneration
     }
 
@@ -155,11 +195,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     }
 
     func matchesProjectionPayload(of other: Self) -> Bool {
-        var lhs = self
-        var rhs = other
-        lhs.handoffIdentity = .none
-        rhs.handoffIdentity = .none
-        return lhs == rhs
+        matchesIdentity(of: other) && layoutIdentity == other.layoutIdentity
     }
 
     func replacingLifecycle(

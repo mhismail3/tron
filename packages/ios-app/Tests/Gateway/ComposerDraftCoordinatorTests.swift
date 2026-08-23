@@ -346,6 +346,44 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("send fails closed during an exact-target upload and retries without clearing the draft")
+    func activeUploadRejectsSend() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 10)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "retain this draft"
+            )
+            let uploading = Task {
+                try await harness.coordinator.upload(
+                    name: "pending.txt", mimeType: "text/plain", data: Data("pending".utf8),
+                    target: target
+                )
+            }
+            try await harness.waitForUploads(1)
+            #expect(harness.coordinator.hasActiveUploads(for: target))
+
+            do {
+                _ = try harness.coordinator.beginSubmission(target: target, behavior: nil)
+                Issue.record("send admitted while its attachment upload was active")
+            } catch let failure as GatewayFailure {
+                #expect(failure.code == "upload_in_progress")
+            }
+            #expect(harness.coordinator.text(for: scope) == "retain this draft")
+            #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
+            #expect(harness.sendCalls.isEmpty)
+
+            harness.completeUpload(index: 0, result: .success("pending-upload"))
+            try await valueOfOwnedTask(uploading)
+            #expect(!harness.coordinator.hasActiveUploads(for: target))
+            let submission = try harness.coordinator.beginSubmission(target: target, behavior: nil)
+            #expect(submission.outgoingText == "retain this draft")
+            #expect(submission.attachmentIDs == ["pending-upload"])
+            #expect(harness.coordinator.text(for: scope).isEmpty)
+        }
+    }
+
     @Test("confirmed send captures behavior and IDs while preserving newer draft and attachments")
     func confirmedSend() async throws {
         try await withTestWatchdog { @MainActor in

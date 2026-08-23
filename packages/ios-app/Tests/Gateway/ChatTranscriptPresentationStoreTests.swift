@@ -129,8 +129,8 @@ struct ChatTranscriptPresentationStoreTests {
         #expect(installed == installed)
     }
 
-    @Test("installed handoff remains visible until canonical replacement installs")
-    func installedHandoffRetainsUntilReplacement() async throws {
+    @Test("metadata-only authority settlement replaces lifecycle without projection churn")
+    func metadataOnlyAuthoritySettlementIsSynchronous() async throws {
         try await withTestWatchdog { @MainActor in
             let snapshot = try SessionScenarioBuilder(seed: 1_206).openingTail(targetEncodedBytes: 8_000)
             let target = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: 1)
@@ -153,12 +153,11 @@ struct ChatTranscriptPresentationStoreTests {
             canonical.revision += 1
             canonical.eventSequence += 1
             let canonicalTag = ChatTranscriptProjectionTag(snapshot: canonical, presentationGeneration: 7)
-            #expect(store.submit(snapshot: canonical, handoff: .none, tag: canonicalTag))
-            await barrier.waitForBuildCount(2)
-            #expect(store.installed?.handoff == handoff)
-            barrier.releaseBuild(at: 1)
-            _ = try await store.waitForInstall(of: canonicalTag)
-            #expect(store.installed?.handoff == ChatTranscriptHandoffCommit.none)
+            #expect(!store.submit(snapshot: canonical, handoff: .none, tag: canonicalTag))
+            let settled = try #require(store.installed)
+            #expect(settled.tag == canonicalTag)
+            #expect(settled.handoff == ChatTranscriptHandoffCommit.none)
+            #expect(barrier.buildCount == 1)
         }
     }
 
@@ -221,6 +220,9 @@ struct ChatTranscriptPresentationStoreTests {
             var newerSnapshot = baselineSnapshot
             newerSnapshot.revision += 1
             newerSnapshot.eventSequence += 1
+            // This case needs actual layout work in flight. Authority-only
+            // sequence changes now take the synchronous metadata path.
+            newerSnapshot.streaming = try streamingMessage(update: 99)
             let staleTag = ChatTranscriptProjectionTag(
                 snapshot: newerSnapshot, presentationGeneration: 7
             )
@@ -256,13 +258,14 @@ struct ChatTranscriptPresentationStoreTests {
                 tag: newestTag
             ))
             barrier.releaseBuild(at: 1)
-            await barrier.waitForBuildCount(3)
-            #expect(store.installed?.handoff == handoff)
-            #expect(store.installed?.timeline == baseline.timeline)
-            barrier.releaseBuild(at: 2)
+            // The completed layout is identical to the newest desired source,
+            // so it may install directly with the newer lifecycle instead of
+            // launching a redundant third projection.
             let newest = try await store.waitForInstall(of: newestTag)
+            #expect(barrier.buildCount == 2)
             #expect(newest.tag == newestTag)
             #expect(newest.handoff == handoff)
+            #expect(newest.timeline != baseline.timeline)
         }
     }
 

@@ -72,7 +72,7 @@ admits and reduces mounted-session topics:
   installation. Optional skill selection travels as bounded `session.prompt.skillName` metadata rather than
   editor text. The Gateway validates it against the exact live skill catalog, retains the original prompt in
   `pendingPrompt` and queue items, and removes Pi's canonical skill envelope during bounded transcript projection,
-  so no lifecycle frame exposes `/skill:` or private skill contents. `session.resourcesChanged` revokes command-catalog readiness and starts one generation-gated reload for the exact mounted subscription before retained skill state can reconcile. Its initial role-aware entrance is the only motion in that lifecycle; canonical settlement is direct and unanimated. Optimistic composer settlement consumes every
+  so no lifecycle frame exposes `/skill:` or private skill contents. `session.resourcesChanged` revokes command-catalog readiness and starts one generation-gated reload for the exact mounted subscription before retained skill state can reconcile. An active upload for the exact presentation closes send admission synchronously; stale UI actions retain the draft, attachments, and skill until upload completion. Its initial role-aware entrance is the only row motion in that lifecycle; composer collapse and the outgoing graft share one pre-mutation viewport generation, while canonical settlement is direct and unanimated. Optimistic composer settlement consumes every
   authoritative session-reducer publication directly rather than waiting for delayed transcript
   formatting. For queued steering/follow-up, the returned prompt operation ID is also the Gateway's
   stable queue-item ID, so a concurrent same-text item cannot settle the wrong optimistic admission. That exact
@@ -143,10 +143,9 @@ agree; settlement performs no decode, while ambiguity uses normal media loading.
   suppresses duplicate entrances, and cannot evict currently visible rows; a cancelled,
   unanimated failsafe reveals any row whose geometry admission never arrives. Installed-row
   updates, live-to-canonical settlement, thinking-height measurement, and tool status changes
-  inherit no stack-wide animation. The stable transcript transaction admits only explicit entrance/tool-chip markers and continuous native-control transactions; thinking height/tail motion is row-local downstream of that boundary. Reduce Motion removes spatial transitions. Tool status text
+  inherit no stack-wide animation. The stable transcript transaction admits only explicit entrance/tool-chip markers and continuous native-control transactions; thinking height/tail motion is row-local downstream of that boundary. Authority-only changes whose bounded transcript/stream/tool/queue/runtime layout identity is unchanged take a synchronous metadata path and cannot arm settlement. The sole composer inset exposes one bottom-aligned measured height; a generation captured before structural mutation keeps pinned tail coupling nonanimated, preserves a detached semantic locus with zero tail commands, coalesces retargets, and yields immediately to direct interaction. Reduce Motion removes spatial transitions. Tool status text
   updates inside its stable row, and short smooth pinned-tail commands remain
-  owned until fresh native geometry acknowledges them, so a second keyboard/composer/tool growth
-  sample cannot replace a pending scroll write. Native bottom distance is bounded for display only:
+  owned until fresh native geometry acknowledges them, so a second unrelated growth sample cannot replace a pending scroll write. Native bottom distance is bounded for display only:
   a visible rect beyond the physical content edge is not tail settlement. If reconciliation,
   compaction, or live row replacement shortens a pinned transcript beneath its released offset,
   the scroll owner issues one frame-gated physical-tail correction; a deliberately detached
