@@ -20,11 +20,14 @@ final class DashboardGatewayConnectionPool {
         let client: GatewayClient
         var connectionID: Int?
         var state: DashboardServerConnectionState
-        var sessions: [SessionSummary]
+        var catalog: SessionCatalogCoordinator
         var task: Task<Void, Never>?
         var refreshTask: Task<Void, Never>?
         var reconnectTask: Task<Void, Never>?
         var generation: Int
+        var refreshInvalidationGeneration: Int
+        var refreshRequestGeneration: Int
+        var refreshRetryAttempt: Int
     }
 
     weak var delegate: (any DashboardGatewayConnectionPoolDelegate)?
@@ -82,16 +85,6 @@ final class DashboardGatewayConnectionPool {
 
     func waitForRetirement() async {
         await retirementTask?.value
-    }
-
-    func refreshAll() async {
-        let work = entries.compactMap { entry -> (String, Int, Int)? in
-            guard let connectionID = entry.value.connectionID else { return nil }
-            return (entry.key, entry.value.generation, connectionID)
-        }
-        for item in work {
-            await refresh(profileID: item.0, generation: item.1, expectedConnectionID: item.2)
-        }
     }
 
     func state(for profileID: String) -> DashboardServerConnectionState? {
@@ -172,11 +165,14 @@ final class DashboardGatewayConnectionPool {
             client: client,
             connectionID: nil,
             state: .connecting,
-            sessions: [],
+            catalog: SessionCatalogCoordinator(),
             task: nil,
             refreshTask: nil,
             reconnectTask: nil,
-            generation: generation
+            generation: generation,
+            refreshInvalidationGeneration: 0,
+            refreshRequestGeneration: 0,
+            refreshRetryAttempt: 0
         )
         publish(profileID: profile.id)
         let task = Task { @MainActor [weak self] in
@@ -196,10 +192,10 @@ final class DashboardGatewayConnectionPool {
                 self.entries[profile.id]?.connectionID = connectionID
                 self.entries[profile.id]?.state = .connecting
                 self.publish(profileID: profile.id)
-                await self.refresh(
+                self.scheduleRefresh(
                     profileID: profile.id,
                     generation: generation,
-                    expectedConnectionID: connectionID
+                    delay: .zero
                 )
                 for await delivery in client.events {
                     guard !Task.isCancelled,
@@ -208,8 +204,11 @@ final class DashboardGatewayConnectionPool {
                 }
                 guard !Task.isCancelled,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
-                self.entries[profile.id]?.state = .reconnecting
-                self.publish(profileID: profile.id)
+                self.retireConnectionEpoch(
+                    profileID: profile.id,
+                    generation: generation,
+                    state: .reconnecting
+                )
                 self.scheduleReconnect(profileID: profile.id, generation: generation)
             } catch is CancellationError {
                 return
@@ -222,8 +221,11 @@ final class DashboardGatewayConnectionPool {
             } catch {
                 guard let self,
                       self.isCurrent(profileID: profile.id, client: client, generation: generation) else { return }
-                self.entries[profile.id]?.state = .reconnecting
-                self.publish(profileID: profile.id)
+                self.retireConnectionEpoch(
+                    profileID: profile.id,
+                    generation: generation,
+                    state: .reconnecting
+                )
                 self.scheduleReconnect(profileID: profile.id, generation: generation)
             }
         }
@@ -237,7 +239,7 @@ final class DashboardGatewayConnectionPool {
         entry.reconnectTask?.cancel()
         delegate?.dashboardPoolDidUpdate(
             profileID: profileID,
-            sessions: entry.sessions,
+            sessions: entry.catalog.sessions,
             state: .offline
         )
         if close { Task { await entry.client.close() } }
@@ -264,37 +266,23 @@ final class DashboardGatewayConnectionPool {
         case "session.summary":
             guard case .sessionSummary(let update) = event.preparation,
                   var current = entries[profileID] else { return }
-            if let index = current.sessions.firstIndex(where: { $0.id == update.sessionId }) {
-                let summary = current.sessions[index]
-                current.sessions[index] = SessionSummary(
-                    id: summary.id,
-                    name: update.name,
-                    cwd: summary.cwd,
-                    kind: summary.kind,
-                    parentSessionId: summary.parentSessionId,
-                    createdAt: summary.createdAt,
-                    updatedAt: update.updatedAt,
-                    messageCount: update.messageCount,
-                    firstMessage: update.firstMessage,
-                    phase: update.phase,
-                    summaryRevision: update.summaryRevision,
-                    gatewayProfileID: profileID,
-                    gatewayProfileLabel: current.profile.label
-                )
+            switch current.catalog.apply(update) {
+            case .stale:
+                return
+            case .unknownSession:
+                entries[profileID] = current
+                scheduleRefresh(profileID: profileID, generation: generation)
+            case .updated:
                 entries[profileID] = current
                 publish(profileID: profileID)
-            } else {
-                scheduleRefresh(profileID: profileID, generation: generation)
             }
         case "session.listChanged":
             scheduleRefresh(profileID: profileID, generation: generation)
         case "transport.disconnected":
-            entries[profileID]?.state = .reconnecting
-            publish(profileID: profileID)
+            retireConnectionEpoch(profileID: profileID, generation: generation, state: .reconnecting)
             scheduleReconnect(profileID: profileID, generation: generation)
         case "system.stopping":
-            entries[profileID]?.state = .restarting
-            publish(profileID: profileID)
+            retireConnectionEpoch(profileID: profileID, generation: generation, state: .restarting)
             scheduleReconnect(profileID: profileID, generation: generation, immediate: true)
         default:
             break
@@ -325,11 +313,7 @@ final class DashboardGatewayConnectionPool {
                           self.isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
                     self.entries[profileID]?.connectionID = connectionID
                     self.entries[profileID]?.reconnectTask = nil
-                    await self.refresh(
-                        profileID: profileID,
-                        generation: generation,
-                        expectedConnectionID: connectionID
-                    )
+                    self.scheduleRefresh(profileID: profileID, generation: generation, delay: .zero)
                     return
                 } catch is CancellationError {
                     return
@@ -347,96 +331,295 @@ final class DashboardGatewayConnectionPool {
         current == .zero ? .seconds(2) : min(current * 2, .seconds(15))
     }
 
+    private enum RefreshOutcome {
+        case published
+        case retained
+        case retryRead
+        case transportFailure
+    }
+
+    private struct RefreshLeaseResult {
+        let outcome: RefreshOutcome
+        let needsImmediateFollowUp: Bool
+    }
+
+    /// Structural events coalesce into one bounded per-profile lease. An
+    /// active traversal is never cancelled merely because a newer event arrives.
     private func scheduleRefresh(
         profileID: String,
         generation: Int,
         delay: Duration = .milliseconds(250)
     ) {
-        entries[profileID]?.refreshTask?.cancel()
-        let task = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: delay)
-            guard !Task.isCancelled, let self else { return }
-            guard let expectedConnectionID = self.entries[profileID]?.connectionID else { return }
-            await self.refresh(
-                profileID: profileID,
-                generation: generation,
-                expectedConnectionID: expectedConnectionID
-            )
-        }
-        entries[profileID]?.refreshTask = task
+        guard var entry = entries[profileID], entry.generation == generation else { return }
+        entry.refreshInvalidationGeneration &+= 1
+        entry.refreshRetryAttempt = 0
+        entries[profileID] = entry
+        startRefreshLease(profileID: profileID, generation: generation, delay: delay)
     }
 
-    private func refresh(
+    private func startRefreshLease(
         profileID: String,
         generation: Int,
-        expectedConnectionID: Int
-    ) async {
-        guard let entry = entries[profileID],
+        delay: Duration
+    ) {
+        guard var entry = entries[profileID],
               entry.generation == generation,
-              entry.connectionID == expectedConnectionID else { return }
+              let connectionID = entry.connectionID,
+              entry.refreshTask == nil else { return }
+        entry.refreshRequestGeneration &+= 1
+        let requestGeneration = entry.refreshRequestGeneration
+        let task = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard !Task.isCancelled, let self else { return }
+            let result = await self.runRefreshLease(
+                profileID: profileID,
+                generation: generation,
+                connectionID: connectionID,
+                requestGeneration: requestGeneration
+            )
+            guard var current = self.entries[profileID],
+                  current.generation == generation,
+                  current.connectionID == connectionID,
+                  current.refreshRequestGeneration == requestGeneration else { return }
+            current.refreshTask = nil
+            self.entries[profileID] = current
+            if result.needsImmediateFollowUp {
+                self.startRefreshLease(profileID: profileID, generation: generation, delay: .zero)
+            } else if result.outcome == .retryRead,
+                      current.refreshRetryAttempt < Self.maximumRefreshRetryAttempts {
+                current.refreshRetryAttempt += 1
+                self.entries[profileID] = current
+                self.startRefreshLease(
+                    profileID: profileID,
+                    generation: generation,
+                    delay: Self.refreshRetryDelay(attempt: current.refreshRetryAttempt)
+                )
+            }
+        }
+        entry.refreshTask = task
+        entries[profileID] = entry
+    }
+
+    private func runRefreshLease(
+        profileID: String,
+        generation: Int,
+        connectionID: Int,
+        requestGeneration: Int
+    ) async -> RefreshLeaseResult {
+        var outcome: RefreshOutcome = .retained
+        for traversal in 0..<2 {
+            guard let entry = entries[profileID] else {
+                return RefreshLeaseResult(outcome: .retained, needsImmediateFollowUp: false)
+            }
+            let observedInvalidation = entry.refreshInvalidationGeneration
+            outcome = await performCatalogTraversal(
+                profileID: profileID,
+                generation: generation,
+                connectionID: connectionID,
+                requestGeneration: requestGeneration
+            )
+            guard admitsRefresh(
+                profileID: profileID,
+                generation: generation,
+                connectionID: connectionID,
+                requestGeneration: requestGeneration
+            ) else {
+                return RefreshLeaseResult(outcome: .retained, needsImmediateFollowUp: false)
+            }
+            if outcome == .transportFailure || outcome == .retryRead {
+                return RefreshLeaseResult(outcome: outcome, needsImmediateFollowUp: false)
+            }
+            guard let current = entries[profileID],
+                  current.refreshInvalidationGeneration > observedInvalidation else {
+                return RefreshLeaseResult(outcome: outcome, needsImmediateFollowUp: false)
+            }
+            if traversal == 1 {
+                return RefreshLeaseResult(outcome: outcome, needsImmediateFollowUp: true)
+            }
+        }
+        return RefreshLeaseResult(outcome: outcome, needsImmediateFollowUp: false)
+    }
+
+    private func performCatalogTraversal(
+        profileID: String,
+        generation: Int,
+        connectionID: Int,
+        requestGeneration: Int
+    ) async -> RefreshOutcome {
         struct Params: Encodable { let cursor: String?; let limit: Int; let scope: String }
         struct Response: Decodable {
             let sessions: [SessionSummary]
             let nextCursor: String?
+            let listRevision: Int
         }
-        do {
-            var all: [SessionSummary] = []
-            var cursor: String?
-            var seenCursors = Set<String>()
-            var seenSessionIDs = Set<String>()
-            var pageCount = 0
-            repeat {
-                guard pageCount < 50 else {
-                    throw Self.invalidDashboardCatalog("The server returned too many dashboard pages.")
-                }
-                let response: Response = try await entry.client.request(
-                    "session.list",
-                    Params(cursor: cursor, limit: 500, scope: "user")
-                )
-                guard response.sessions.count <= 500,
-                      all.count <= 25_000 - response.sessions.count,
-                      response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
-                    throw Self.invalidDashboardCatalog("The server returned an invalid dashboard page.")
-                }
-                pageCount += 1
-                all.append(contentsOf: response.sessions.map {
-                    $0.withGatewaySource(id: profileID, label: entry.profile.label)
-                })
-                cursor = response.nextCursor
-                if let cursor, !seenCursors.insert(cursor).inserted {
-                    throw Self.invalidDashboardCatalog("The server returned a repeated dashboard cursor.")
-                }
-            } while cursor != nil
-            guard isCurrent(profileID: profileID, client: entry.client, generation: generation),
-                  entries[profileID]?.connectionID == expectedConnectionID else { return }
-            entries[profileID]?.sessions = all
-            entries[profileID]?.state = .connected
-            publish(profileID: profileID)
-        } catch is CancellationError {
-            return
-        } catch {
-            guard isCurrent(profileID: profileID, client: entry.client, generation: generation),
-                  entries[profileID]?.connectionID == expectedConnectionID else { return }
+        guard let seed = entries[profileID] else { return .retained }
+        let key = SessionCatalogLoadKey(
+            profileID: profileID,
+            lifecycleGeneration: generation,
+            connectionID: connectionID
+        )
+
+        for revisionAttempt in 0..<2 {
+            guard var current = entries[profileID] else { return .retained }
+            let admission = current.catalog.beginLoad(key: key)
+            entries[profileID] = current
+            var requestedContinuation = false
             do {
-                // A catalog/schema/application error arrived over a responsive
-                // socket and must not replace that transport. Probe the exact
-                // epoch, retain its bounded catalog, and retry only the read.
-                try await entry.client.ensureResponsive(maximumSilence: .zero)
-                let activeConnectionID = await entry.client.activeConnectionID()
-                guard isCurrent(profileID: profileID, client: entry.client, generation: generation),
-                      activeConnectionID == expectedConnectionID else { return }
-                entries[profileID]?.state = .connected
+                var all: [SessionSummary] = []
+                var cursor: String?
+                var seenCursors = Set<String>()
+                var seenSessionIDs = Set<String>()
+                var expectedRevision: Int?
+                var revisionChanged = false
+                var pageCount = 0
+                repeat {
+                    guard pageCount < 50 else {
+                        throw Self.invalidDashboardCatalog("The server returned too many dashboard pages.")
+                    }
+                    requestedContinuation = cursor != nil
+                    let response: Response = try await seed.client.request(
+                        "session.list",
+                        Params(cursor: cursor, limit: 500, scope: "user")
+                    )
+                    guard admitsRefresh(
+                        profileID: profileID,
+                        generation: generation,
+                        connectionID: connectionID,
+                        requestGeneration: requestGeneration
+                    ), let admitted = entries[profileID],
+                       admitted.catalog.admits(admission, key: key) else { return .retained }
+                    pageCount += 1
+                    if let expectedRevision, expectedRevision != response.listRevision {
+                        revisionChanged = true
+                        break
+                    }
+                    expectedRevision = response.listRevision
+                    guard response.sessions.count <= 500,
+                          all.count <= 25_000 - response.sessions.count,
+                          response.sessions.allSatisfy({ seenSessionIDs.insert($0.id).inserted }) else {
+                        throw Self.invalidDashboardCatalog("The server returned an invalid dashboard page.")
+                    }
+                    all.append(contentsOf: response.sessions.map {
+                        $0.withGatewaySource(id: profileID, label: seed.profile.label)
+                    })
+                    cursor = response.nextCursor
+                    if let cursor, !seenCursors.insert(cursor).inserted {
+                        throw Self.invalidDashboardCatalog("The server returned a repeated dashboard cursor.")
+                    }
+                } while cursor != nil
+
+                if revisionChanged {
+                    if revisionAttempt == 0 { continue }
+                    return .retryRead
+                }
+                guard var published = entries[profileID],
+                      published.catalog.publishAuthoritative(all, admission: admission) else { return .retained }
+                published.state = .connected
+                published.refreshRetryAttempt = 0
+                entries[profileID] = published
                 publish(profileID: profileID)
-                scheduleRefresh(profileID: profileID, generation: generation, delay: .seconds(2))
+                return .published
+            } catch is CancellationError {
+                return .retained
+            } catch let failure as GatewayFailure
+                where requestedContinuation && failure.code == "invalid_request" && revisionAttempt == 0 {
+                guard admitsRefresh(
+                    profileID: profileID,
+                    generation: generation,
+                    connectionID: connectionID,
+                    requestGeneration: requestGeneration
+                ) else { return .retained }
+                continue
             } catch {
-                guard isCurrent(profileID: profileID, client: entry.client, generation: generation) else { return }
-                await entry.client.closeIfCurrent(connectionID: expectedConnectionID)
-                entries[profileID]?.connectionID = nil
-                entries[profileID]?.state = .reconnecting
-                publish(profileID: profileID)
-                scheduleReconnect(profileID: profileID, generation: generation)
+                return await catalogFailureOutcome(
+                    seed: seed,
+                    profileID: profileID,
+                    generation: generation,
+                    connectionID: connectionID,
+                    requestGeneration: requestGeneration
+                )
             }
         }
+        return .retained
+    }
+
+    private func catalogFailureOutcome(
+        seed: Entry,
+        profileID: String,
+        generation: Int,
+        connectionID: Int,
+        requestGeneration: Int
+    ) async -> RefreshOutcome {
+        guard admitsRefresh(
+            profileID: profileID,
+            generation: generation,
+            connectionID: connectionID,
+            requestGeneration: requestGeneration
+        ) else { return .retained }
+        do {
+            // A schema/application error on a responsive socket retires only
+            // the read lease, not the transport or the last complete catalog.
+            try await seed.client.ensureResponsive(maximumSilence: .zero)
+            let activeConnectionID = await seed.client.activeConnectionID()
+            guard admitsRefresh(
+                profileID: profileID,
+                generation: generation,
+                connectionID: connectionID,
+                requestGeneration: requestGeneration
+            ), activeConnectionID == connectionID else { return .retained }
+            if entries[profileID]?.catalog.freshness == .live {
+                entries[profileID]?.state = .connected
+            } else {
+                // The socket is responsive, but no complete catalog for this
+                // epoch has published. Preserve any AppModel cache as stale.
+                entries[profileID]?.state = .stale
+            }
+            publish(profileID: profileID)
+            return .retryRead
+        } catch {
+            guard isCurrent(profileID: profileID, client: seed.client, generation: generation) else {
+                return .retained
+            }
+            await seed.client.closeIfCurrent(connectionID: connectionID)
+            retireConnectionEpoch(profileID: profileID, generation: generation, state: .reconnecting)
+            scheduleReconnect(profileID: profileID, generation: generation)
+            return .transportFailure
+        }
+    }
+
+    private func admitsRefresh(
+        profileID: String,
+        generation: Int,
+        connectionID: Int,
+        requestGeneration: Int
+    ) -> Bool {
+        guard let entry = entries[profileID] else { return false }
+        return entry.generation == generation
+            && entry.connectionID == connectionID
+            && entry.refreshRequestGeneration == requestGeneration
+    }
+
+    private func retireConnectionEpoch(
+        profileID: String,
+        generation: Int,
+        state: DashboardServerConnectionState
+    ) {
+        guard var entry = entries[profileID], entry.generation == generation else { return }
+        entry.refreshTask?.cancel()
+        entry.refreshTask = nil
+        entry.refreshRequestGeneration &+= 1
+        entry.refreshRetryAttempt = 0
+        entry.connectionID = nil
+        entry.state = state
+        entry.catalog.markDisconnected()
+        entries[profileID] = entry
+        publish(profileID: profileID)
+    }
+
+    private static let maximumRefreshRetryAttempts = 3
+
+    private static func refreshRetryDelay(attempt: Int) -> Duration {
+        .seconds(min(8, 1 << max(1, attempt)))
     }
 
     private static func invalidDashboardCatalog(_ message: String) -> GatewayFailure {
@@ -447,7 +630,7 @@ final class DashboardGatewayConnectionPool {
         guard let entry = entries[profileID] else { return }
         delegate?.dashboardPoolDidUpdate(
             profileID: profileID,
-            sessions: entry.sessions,
+            sessions: entry.catalog.sessions,
             state: entry.state
         )
     }

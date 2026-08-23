@@ -142,7 +142,6 @@ struct SessionShellView: View {
                 }
             }
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { await model.refreshDashboardSessions() }
             .navigationDestination(item: $presentedSession) { route in
                 ChatView(
                     sessionID: route.sessionID,

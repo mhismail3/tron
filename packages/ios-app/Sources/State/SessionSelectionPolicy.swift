@@ -1,8 +1,10 @@
 import Foundation
 
 /// Reconciles the explicitly mounted session with canonical discovery.
-/// An empty session is absent from `session.list` until its first user message,
-/// but dashboard discovery must never select a transcript implicitly.
+/// A newly created empty session is projected while its Gateway runtime slot
+/// remains live. Local admission still bridges the bounded interval before a
+/// list traversal publishes that canonical runtime-owned row. Dashboard
+/// discovery must never select a transcript implicitly.
 enum SessionSelectionPolicy {
     static func reconcile(
         selected: String?,

@@ -175,14 +175,23 @@ export class RuntimeRegistry {
       },
       settled: (sessionId: string) => { this.interrupted.delete(sessionId); },
       closed: (sessionId: string, slot: RuntimeSlot) => {
-        if (this.slots.get(sessionId) === slot) this.slots.delete(sessionId);
+        const removed = this.slots.get(sessionId) === slot;
+        const removedLiveOnlySession = removed && slot.persistedSessionFile === undefined;
+        if (removed) this.slots.delete(sessionId);
         this.cancelIdleEviction(sessionId, slot);
-        this.interrupted.delete(sessionId);
         this.subscribers.delete(sessionId);
-        this.latestSummaries.delete(sessionId);
-        this.invalidateCatalogAcquisition();
-        this.revision += 1;
-        this.options.sessionListChanged();
+        this.interrupted.delete(sessionId);
+        if (removedLiveOnlySession) {
+          // Empty runtime ownership is permanent only while the slot exists.
+          // Retire both halves of its revisioned row projection together.
+          this.summaryRevisions.delete(sessionId);
+          this.latestSummaries.delete(sessionId);
+          this.invalidateCatalogAcquisition();
+          this.revision += 1;
+          this.options.sessionListChanged();
+        }
+        // Persisted closure publishes a final idle summary before this hook and
+        // retains its revision continuity; membership did not change.
         this.options.sessionClosed?.(sessionId);
       },
       rekey: (previousId: string, nextId: string, slot: RuntimeSlot) => {
@@ -572,11 +581,16 @@ export class RuntimeRegistry {
     const allInfos = await this.sessionInfos();
     const counts = new Map<string, number>();
     for (const session of allInfos) counts.set(session.id, (counts.get(session.id) ?? 0) + 1);
+    for (const [id, slot] of this.slots) {
+      if (!slot.isDisposed && slot.persistedSessionFile === undefined) {
+        counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+    }
     const ambiguousIDs = new Set(
       [...counts].filter(([, count]) => count > 1).map(([id]) => id),
     );
     const infos = allInfos.filter((session) => !ambiguousIDs.has(session.id));
-    const sessions = await this.projectSessions(infos, "all");
+    const sessions = await this.projectSessions(infos, "all", ambiguousIDs);
     const after = await this.catalogStructureEvidence();
     return {
       allInfos,
@@ -637,15 +651,28 @@ export class RuntimeRegistry {
     ambiguousIDs: ReadonlySet<string>,
     structureDigest: string,
   ): Promise<CatalogAcquisitionResolution> {
+    // Lightweight header and SDK fallback discovery both omit runtime slots.
+    // Count live-only ownership here so an on-disk claimant cannot be opened
+    // after the full catalog correctly omitted the colliding ID.
+    const resolvedAmbiguousIDs = new Set(ambiguousIDs);
+    const canonicalIDs = new Set(sessions.map((session) => session.id));
+    for (const [id, slot] of this.slots) {
+      if (!slot.isDisposed && slot.persistedSessionFile === undefined && canonicalIDs.has(id)) {
+        resolvedAmbiguousIDs.add(id);
+      }
+    }
+    const unambiguousSessions = sessions.filter((session) => !resolvedAmbiguousIDs.has(session.id));
     const limits = this.catalogDiscoveryLimits();
-    if (sessions.length + ambiguousIDs.size > limits.maximumSessions) this.catalogCapacityExceeded();
-    const nestedOwners = this.nestedOwners(sessions);
+    if (unambiguousSessions.length + resolvedAmbiguousIDs.size > limits.maximumSessions) {
+      this.catalogCapacityExceeded();
+    }
+    const nestedOwners = this.nestedOwners(unambiguousSessions);
     const configuredDirectory = this.configuredSessionDirectory();
     const catalogDirectory = await realpath(this.catalogDirectory()).catch(() => resolve(this.catalogDirectory()));
     const userDirectoryDepth = configuredDirectory ? 0 : 1;
     const entriesByID = new Map<string, CatalogAcquisitionEntry>();
     let retainedBytes = 0;
-    for (const session of sessions) {
+    for (const session of unambiguousSessions) {
       const sessionPath = resolve(session.path);
       const directoryFromCatalog = relative(catalogDirectory, dirname(sessionPath));
       const directoryDepth = directoryFromCatalog === "" ? 0 : directoryFromCatalog.split(sep).length;
@@ -662,11 +689,11 @@ export class RuntimeRegistry {
       if (retainedBytes > limits.maximumAcquisitionBytes) this.catalogCapacityExceeded();
       entriesByID.set(entry.id, entry);
     }
-    for (const id of ambiguousIDs) {
+    for (const id of resolvedAmbiguousIDs) {
       retainedBytes += Buffer.byteLength(id);
       if (retainedBytes > limits.maximumAcquisitionBytes) this.catalogCapacityExceeded();
     }
-    return { entriesByID, ambiguousIDs, structureDigest };
+    return { entriesByID, ambiguousIDs: resolvedAmbiguousIDs, structureDigest };
   }
 
   private async buildCatalogAcquisition(
@@ -774,6 +801,7 @@ export class RuntimeRegistry {
   private async projectSessions(
     sessions: Awaited<ReturnType<RuntimeRegistry["sessionInfos"]>>,
     scope: "user" | "all",
+    ambiguousIDs: ReadonlySet<string> = new Set(),
   ): Promise<SessionSummary[]> {
     const pathToId = new Map(sessions.map((session) => [resolve(session.path), session.id]));
     const configuredDirectory = this.configuredSessionDirectory();
@@ -781,7 +809,8 @@ export class RuntimeRegistry {
     const userDirectoryDepth = configuredDirectory ? 0 : 1;
     const nestedOwners = this.nestedOwners(sessions);
 
-    return sessions.flatMap((session) => {
+    const persistedIDs = new Set(sessions.map((session) => session.id));
+    const persisted = sessions.flatMap((session) => {
       const sessionPath = resolve(session.path);
       const nestedOwnerId = nestedOwners.get(sessionPath);
       // Pi's default catalog groups user sessions one directory per cwd; an
@@ -810,7 +839,27 @@ export class RuntimeRegistry {
         phase: latest?.phase ?? (slot ? slot.catalogPhase : this.interrupted.has(session.id) ? "interrupted" : "idle"),
         summaryRevision: latest?.summaryRevision ?? 0,
       }];
-    }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    });
+    const liveOnly: SessionSummary[] = [...this.slots].flatMap(([id, slot]) => {
+      if (slot.isDisposed || slot.persistedSessionFile !== undefined
+        || persistedIDs.has(id) || ambiguousIDs.has(id)) return [];
+      const latest = this.latestSummaries.get(id);
+      const name = latest?.name;
+      return [{
+        id,
+        ...(name ? { name } : {}),
+        cwd: slot.cwd,
+        kind: "user",
+        createdAt: slot.catalogCreatedAt,
+        updatedAt: latest?.updatedAt ?? slot.catalogCreatedAt,
+        messageCount: latest?.messageCount ?? 0,
+        firstMessage: latest?.firstMessage ?? "",
+        phase: latest?.phase ?? slot.catalogPhase,
+        summaryRevision: latest?.summaryRevision ?? 0,
+      }];
+    });
+    return [...persisted, ...liveOnly]
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
   private async projectTrustReloading(cwdInput: string): Promise<boolean> {
@@ -1062,7 +1111,9 @@ export class RuntimeRegistry {
         throw new GatewayError("conflict", "Delete the originating user session instead of mutating its runtime-owned subagent session");
       }
       const info = catalog.infos.find((candidate) => candidate.id === sessionId);
-      if (!info) throw new GatewayError("not_found", "Tron session was removed before it could be deleted");
+      if (!info && (!slot || slot.persistedSessionFile !== undefined)) {
+        throw new GatewayError("not_found", "Tron session was removed before it could be deleted");
+      }
       this.cancelIdleEviction(sessionId, slot);
       if (slot) await slot.dispose();
       this.slots.delete(sessionId);
@@ -1071,7 +1122,7 @@ export class RuntimeRegistry {
       this.latestSummaries.delete(sessionId);
       this.interrupted.delete(sessionId);
       await this.markers.clear(sessionId);
-      await rm(info.path, { force: true });
+      if (info) await rm(info.path, { force: true });
       this.invalidateCatalogAcquisition();
       this.revision += 1;
       this.options.sessionListChanged();
@@ -1245,15 +1296,26 @@ export class RuntimeRegistry {
       try {
         const eviction = this.idleEvictions.get(id);
         if (eviction?.slot !== slot) continue;
+        let removedLiveOnlySession = false;
         const disposal = slot.disposeIf(() => {
           if (this.idleEvictions.get(id) !== eviction || !this.isIdleEvictionEligible(id, slot, cutoff)) return false;
           eviction.committed = true;
+          removedLiveOnlySession = slot.persistedSessionFile === undefined;
           return true;
         });
         eviction.completion = disposal;
         const disposed = await disposal;
         if (disposed && this.slots.get(id) === slot && this.idleEvictions.get(id) === eviction) {
           this.slots.delete(id);
+          if (removedLiveOnlySession) {
+            this.subscribers.delete(id);
+            this.interrupted.delete(id);
+            this.summaryRevisions.delete(id);
+            this.latestSummaries.delete(id);
+            this.invalidateCatalogAcquisition();
+            this.revision += 1;
+            this.options.sessionListChanged();
+          }
         }
       } catch {
         // A slot may have become busy after the eligibility check; retain it.

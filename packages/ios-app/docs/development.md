@@ -212,13 +212,14 @@ live full-snapshot matrix (authority, route identity, runtime, duplicate/stale/e
 cursor). Synchronizer coverage rejects a quarantined route/payload mismatch before baseline
 publication, while the AppModel suites prove snapshots/tokens remain provisional through
 acknowledgement, unmounted or synchronously revoked hints cannot create/advance state, and stale routes close their exact provisional token. The same suite proves a mounted route wins over divergent
-dashboard selection, dashboard refresh cannot open an inferred transcript, mounted reconnect restores
+dashboard selection, dashboard synchronization cannot open an inferred transcript, mounted reconnect restores
 the exact route, secondary reads cannot create hidden subscriptions, and create/fork return navigation
 identity without opening it implicitly. Create additionally returns before any dashboard catalog read;
-its route remains bound to the admitting gateway profile/lifecycle while `session.listChanged` owns
-projection convergence. `DashboardStateOwnerTests` prove typed latest-load and
-navigation admission, monotonic live-summary overlays, unknown-row discovery, safe cache/disconnect
-projection, and removal, while `GlobalNoticeStoreTests` enforce the eight-entry, 4 KiB-message, and 16 KiB-total
+its route remains bound to the admitting gateway profile/lifecycle while the Gateway-owned empty runtime
+row and `session.listChanged` own projection convergence. The row may disappear after idle retirement or
+Gateway restart when Pi never persisted content. `DashboardStateOwnerTests` prove typed latest-load and
+navigation admission, monotonic live-summary overlays, unknown-row discovery, bounded dirty coalescing,
+safe cache/disconnect projection, and removal, while `GlobalNoticeStoreTests` enforce the eight-entry, 4 KiB-message, and 16 KiB-total
 budgets plus keyed progress coalescing. `ComposerDraftCoordinatorTests` prove profile/session draft
 isolation and same-session-generation isolation for disposable attachment/editor/submission state;
 event tests prove departing routes are excluded from share admission. Compatible synchronization callers now share one outcome without timing polls;

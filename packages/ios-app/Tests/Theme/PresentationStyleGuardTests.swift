@@ -2068,7 +2068,8 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
             encoding: .utf8
         )
-        #expect(shell.contains(".refreshable { await model.refreshSessions() }"))
+        #expect(!shell.contains(".refreshable"))
+        #expect(!shell.contains("refreshDashboardSessions"))
     }
 
     @Test("the application installs the policy at its root")

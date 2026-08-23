@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { realpathSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, realpathSync, watch, type FSWatcher } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { copyFile, mkdtemp, open, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -138,6 +138,8 @@ export class RuntimeSlot {
   private lifecycle: ExtensionLifecycleCoordinator;
   private hasBoundSession = false;
   private readonly runtimeGeneration = randomUUID();
+  /** Stable runtime-only catalog identity for a new session before Pi creates JSONL. */
+  private readonly createdAt = new Date().toISOString();
   private revision = 0;
   private eventSequence = 0;
   private phase: SessionPhase;
@@ -342,8 +344,21 @@ export class RuntimeSlot {
     return this.lastTouchedAt;
   }
 
+  /** Immutable while this Gateway owns the runtime slot. Empty sessions are
+   * deliberately not persisted merely to retain this dashboard timestamp. */
+  get catalogCreatedAt(): string {
+    return this.createdAt;
+  }
+
   get sessionFile(): string | undefined {
     return this.runtime.session.sessionFile;
+  }
+
+  /** Pi may reserve a future JSONL path before writing its first canonical
+   * entry. Catalog membership treats only an existing file as persisted. */
+  get persistedSessionFile(): string | undefined {
+    const path = this.runtime.session.sessionFile;
+    return path && existsSync(path) ? path : undefined;
   }
 
   sessionEnvironment(): Record<string, string> {
@@ -556,6 +571,9 @@ export class RuntimeSlot {
       this.operation = undefined;
       this.pendingExtensionCommand = undefined;
       this.retry = undefined;
+      // Persisted catalog membership survives runtime closure. Publish its
+      // truthful idle row without inventing a structural list event.
+      this.publishSummary();
       this.emit("session.closed", { reason: "extension_shutdown", hostEpoch });
       this.hooks.closed?.(closedID, this);
     })).catch((error) => {
@@ -2103,6 +2121,10 @@ export class RuntimeSlot {
     this.flushPendingProgress();
     this.eventSequence += 1;
     this.hooks.broadcast(this.id, "session.snapshot", this.snapshot(this.eventSequence) as unknown as JsonValue);
+    this.publishSummary();
+  }
+
+  private publishSummary(): void {
     const summary = this.summary();
     if (!this.lastPublishedSummary
       || summary.sessionId !== this.lastPublishedSummary.sessionId

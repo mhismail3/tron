@@ -89,7 +89,7 @@ profile ownership and the dashboard aggregates by `(profileID, sessionID)`; equa
 separate runtimes therefore remain distinct. An ID-indexed monotonic
 live-summary overlay, cached/stale/live provenance, and exact profile/lifecycle/connection load admission
 remain scoped to each source. Equivalent
-foreground, reconnect, pull-to-refresh, unknown-summary, and structural-invalidations share one
+foreground, reconnect, unknown-summary, and structural invalidations share one
 catalog traversal; invalidation during a traversal sets one dirty bit and receives at most one immediate
 follow-up before handing newest truth to a new bounded lease. iOS requests user scope in 500-row pages,
 rejects more than 50 pages/25,000 identities, duplicate IDs, cursor cycles, and mixed revisions, and
@@ -100,8 +100,11 @@ and mounted transcript snapshots cannot overwrite those global row fields. The d
 sessions by workspace and renders the newest ten per workspace by default; explicit Show more/Show less
 pagination is a disposable UI projection with generation-checked staged animations, so catalog refreshes
 cannot expose stale rows or leave controls stuck. Successful session creation starts a shared background
-catalog reconciliation without delaying chat navigation, so the new authoritative row does not depend on
-pull-to-refresh. Cache/disconnect/authoritative installs and removals all
+catalog reconciliation without delaying chat navigation. The Gateway projects a newly created empty row
+while it owns that live runtime slot; if Pi has not persisted content, the disposable row may disappear
+after Gateway restart or idle slot retirement. Initial connection, structural and summary events,
+reconnect, creation, and deletion own dashboard convergence without a manual refresh surface.
+Cache/disconnect/authoritative installs and removals all
 enter that one disposable projection; hidden/local selection policy remains outside it and cannot mount a chat. Cached or stale non-idle rows present as resuming without rewriting
 the canonical phase; only a live Gateway-authoritative interrupted phase uses the amber warning.
 A focused-profile boundary synchronously invalidates lifecycle admission, chains behind any preceding

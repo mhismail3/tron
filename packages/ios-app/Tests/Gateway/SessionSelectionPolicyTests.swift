@@ -3,7 +3,7 @@ import Testing
 
 @Suite("Session selection reconciliation")
 struct SessionSelectionPolicyTests {
-    @Test("new empty sessions stay selected before Pi indexes their first message")
+    @Test("new empty sessions stay selected before the live catalog traversal publishes them")
     func retainsLocallyCreatedUnindexedSession() {
         let selected = SessionSelectionPolicy.reconcile(
             selected: "new-empty",

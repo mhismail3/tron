@@ -882,12 +882,6 @@ final class AppModel {
         _ = await (sessionLoad, providerLoad, settingLoad, deviceLoad)
     }
 
-    func refreshDashboardSessions() async {
-        async let selected = refreshSessions()
-        await dashboardConnections.refreshAll()
-        _ = await selected
-    }
-
     @discardableResult
     func refreshSessions() async -> SessionCatalogRefreshOutcome {
         guard let key = currentCatalogLoadKey() else { return .retained }
@@ -1819,6 +1813,7 @@ final class AppModel {
             composerDrafts.removeSession(profileID: profileID, sessionID: id)
         }
         sessionCatalog.remove(id)
+        installSelectedDashboardCatalog()
         scheduleCacheCheckpoint()
     }
 

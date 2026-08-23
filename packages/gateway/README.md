@@ -427,7 +427,13 @@ additively includes extension-owned children classified from nested canonical st
 durable `subagent-*` session metadata. Ordinary user forks remain user sessions. If more than
 one canonical file claims the same embedded session ID, the Gateway omits every ambiguous copy
 and rejects open/delete by that ID until the duplicate is repaired; traversal order never chooses
-canonical ownership. Before materialization, recursive discovery streams at most 50,001 directory entries,
+canonical ownership. A newly created session has no canonical Pi JSONL until Pi records its first
+content. While the Gateway owns that bounded live runtime slot, `session.list` projects one runtime-only
+empty user row with its stable slot-creation time, cwd, phase, and revisioned summary fields. That row is
+visible to every connected dashboard and remains directly openable/deletable, but it is not a second
+session store: idle slot retirement or Gateway restart removes it if Pi never persisted content. Once Pi
+creates JSONL, the canonical row replaces the runtime-only projection under the same ID without duplication.
+Before materialization, recursive discovery streams at most 50,001 directory entries,
 retains at most 25,001 canonical directories/8 MiB of traversal paths, and admits at most 25,000 session
 records/8 MiB of retained metadata; overflow fails retryably without publishing a partial catalog. The pinned
 SDK remains the canonical direct-directory JSONL scanner, while Gateway immediately discards its unused

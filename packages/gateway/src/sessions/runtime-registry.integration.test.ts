@@ -65,6 +65,143 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
     else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
   });
 
+  it("projects empty live sessions until deletion, persistence, eviction, or restart", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-live-empty-catalog-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    let listChanges = 0;
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 1,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => { listChanges += 1; },
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const initial = await registry.catalog("user");
+
+    const deletedSlot = await registry.create(cwd);
+    const afterCreate = await registry.catalog("user");
+    expect(afterCreate.listRevision).toBe(initial.listRevision + 1);
+    expect(listChanges).toBe(1);
+    expect(afterCreate.sessions).toEqual([expect.objectContaining({
+      id: deletedSlot.id,
+      cwd: deletedSlot.cwd,
+      kind: "user",
+      messageCount: 0,
+      firstMessage: "",
+      phase: "idle",
+    })]);
+    expect(afterCreate.sessions[0]?.createdAt).toBe(deletedSlot.catalogCreatedAt);
+    expect((await registry.catalog("user")).sessions[0]?.createdAt)
+      .toBe(afterCreate.sessions[0]?.createdAt);
+    expect(await registry.acquire(deletedSlot.id)).toBe(deletedSlot);
+
+    await registry.delete(deletedSlot.id);
+    expect((await registry.catalog("user")).sessions).toEqual([]);
+    expect(listChanges).toBe(2);
+
+    const persistedSlot = await registry.create(cwd);
+    const persistedManager = (persistedSlot as unknown as { sessionManager: SessionManager }).sessionManager;
+    persistedManager.appendMessage(fauxAssistantMessage("persisted catalog row"));
+    expect(persistedSlot.persistedSessionFile).toBeDefined();
+    const afterPersistence = await registry.catalog("user");
+    expect(afterPersistence.sessions.filter((session) => session.id === persistedSlot.id)).toHaveLength(1);
+    const ownership = registry as unknown as {
+      summaryRevisions: Map<string, number>;
+      latestSummaries: Map<string, SessionSummaryUpdate>;
+      evictIdle: () => Promise<void>;
+    };
+    expect(ownership.summaryRevisions.has(persistedSlot.id)).toBe(true);
+    expect(ownership.latestSummaries.has(persistedSlot.id)).toBe(true);
+    const persistedRevision = ownership.summaryRevisions.get(persistedSlot.id);
+    const persistedChanges = listChanges;
+    (persistedSlot as unknown as { lastTouchedAt: number }).lastTouchedAt = 0;
+    await ownership.evictIdle();
+    expect(listChanges).toBe(persistedChanges);
+    expect(ownership.summaryRevisions.get(persistedSlot.id)).toBe(persistedRevision);
+    expect(ownership.latestSummaries.has(persistedSlot.id)).toBe(true);
+    expect((await registry.catalog("user")).sessions.map((session) => session.id)).toContain(persistedSlot.id);
+
+    const evictedSlot = await registry.create(cwd);
+    const beforeEviction = await registry.catalog("user");
+    const changesBeforeEviction = listChanges;
+    expect(ownership.summaryRevisions.has(evictedSlot.id)).toBe(true);
+    expect(ownership.latestSummaries.has(evictedSlot.id)).toBe(true);
+    (evictedSlot as unknown as { lastTouchedAt: number }).lastTouchedAt = 0;
+    await ownership.evictIdle();
+    const afterEviction = await registry.catalog("user");
+    expect(afterEviction.sessions.map((session) => session.id)).not.toContain(evictedSlot.id);
+    expect(afterEviction.listRevision).toBeGreaterThan(beforeEviction.listRevision);
+    expect(listChanges).toBe(changesBeforeEviction + 1);
+    expect(ownership.summaryRevisions.has(evictedSlot.id)).toBe(false);
+    expect(ownership.latestSummaries.has(evictedSlot.id)).toBe(false);
+
+    const fresh = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "fresh-tron"),
+      idleRuntimeMs: 60_000,
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(fresh);
+    await fresh.initialize();
+    const freshIDs = (await fresh.catalog("user")).sessions.map((session) => session.id);
+    expect(freshIDs).toContain(persistedSlot.id);
+    expect(freshIDs).not.toContain(evictedSlot.id);
+  });
+
+  it("fails closed when a canonical file collides with a live-only slot", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-live-empty-collision-"));
+    const agentDir = join(root, "agent");
+    const cwd = join(root, "workspace");
+    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const registry = new RuntimeRegistry({
+      agentDir,
+      tronHome: join(root, "tron"),
+      idleRuntimeMs: 60_000,
+      modelRuntimeFactory: async () => ModelRuntime.create({ modelsPath: null, refreshOnCreate: false }),
+      trust: new TrustService(agentDir),
+      broadcast: () => {},
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => {},
+    });
+    registries.push(registry);
+    await registry.initialize();
+    const baseline = await registry.catalog("all");
+    const slot = await registry.create(cwd);
+    const beforeCollision = await registry.catalog("all");
+    expect(beforeCollision.listRevision).toBe(baseline.listRevision + 1);
+    expect(beforeCollision.sessions.map((session) => session.id)).toContain(slot.id);
+    expect(slot.persistedSessionFile).toBeUndefined();
+
+    const collisionDirectory = join(agentDir, "sessions", "collision");
+    await mkdir(collisionDirectory, { recursive: true });
+    const timestamp = new Date().toISOString();
+    await writeFile(join(collisionDirectory, "claim.jsonl"), [
+      JSON.stringify({ type: "session", version: 3, id: slot.id, timestamp, cwd }),
+      JSON.stringify({
+        type: "message",
+        id: randomUUID().slice(0, 8),
+        parentId: null,
+        timestamp,
+        message: { role: "user", content: "colliding canonical claimant", timestamp: Date.now() },
+      }),
+    ].join("\n") + "\n");
+
+    const afterCollision = await registry.catalog("all");
+    expect(afterCollision.sessions.map((session) => session.id)).not.toContain(slot.id);
+    expect(afterCollision.listRevision).toBeGreaterThan(beforeCollision.listRevision);
+    await expect(registry.acquire(slot.id)).rejects.toMatchObject({ code: "conflict" });
+  });
+
   it("keeps row-summary revisions separate and lists phase without transcript snapshots", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-catalog-summary-revision-"));
     const agentDir = join(root, "agent");
@@ -2737,24 +2874,56 @@ export default function (pi) {
     const trust = new TrustService(agentDir);
     await trust.set(closingCwd, true);
     const shutdownTopics: string[] = [];
+    let listChanges = 0;
     const registry = new RuntimeRegistry({
       agentDir, tronHome: join(root, "tron"), idleRuntimeMs: 60_000, trust,
-      broadcast: (_sessionID, topic) => shutdownTopics.push(topic), sessionSummaryChanged: () => {}, sessionListChanged: () => {},
+      broadcast: (_sessionID, topic) => shutdownTopics.push(topic),
+      sessionSummaryChanged: () => {},
+      sessionListChanged: () => { listChanges += 1; },
     });
     registries.push(registry);
     await registry.initialize();
     const closing = await registry.create(closingCwd);
     const other = await registry.create(otherCwd);
     const closingID = closing.id;
+    const ownership = registry as unknown as {
+      slots: Map<string, unknown>;
+      summaryRevisions: Map<string, number>;
+      latestSummaries: Map<string, SessionSummaryUpdate>;
+    };
+    expect(closing.persistedSessionFile).toBeUndefined();
+    expect(ownership.summaryRevisions.has(closingID)).toBe(true);
+    expect(ownership.latestSummaries.has(closingID)).toBe(true);
 
     await closing.prompt("/close-owning-session");
-    await waitUntil(() => !registry.activeSessionIds().includes(closingID));
+    await waitUntil(() => !ownership.slots.has(closingID));
     expect(() => other.context()).not.toThrow();
+    expect(ownership.summaryRevisions.has(closingID)).toBe(false);
+    expect(ownership.latestSummaries.has(closingID)).toBe(false);
     await expect(registry.acquire(closingID)).rejects.toMatchObject({ code: "not_found" });
     const shutdownStatusIndex = shutdownTopics.lastIndexOf("session.extensionPresentation");
     const closedIndex = shutdownTopics.lastIndexOf("session.closed");
     expect(shutdownStatusIndex).toBeGreaterThanOrEqual(0);
     expect(closedIndex).toBeGreaterThan(shutdownStatusIndex);
+
+    const persisted = await registry.create(closingCwd);
+    const persistedManager = (persisted as unknown as { sessionManager: SessionManager }).sessionManager;
+    persistedManager.appendMessage(fauxAssistantMessage("persisted before extension close"));
+    persisted.publishSnapshot();
+    expect(persisted.persistedSessionFile).toBeDefined();
+    const persistedID = persisted.id;
+    const revisionBeforeClose = ownership.summaryRevisions.get(persistedID)!;
+    const structuralChangesBeforeClose = listChanges;
+
+    await persisted.prompt("/close-owning-session");
+    await waitUntil(() => !ownership.slots.has(persistedID));
+    expect(listChanges).toBe(structuralChangesBeforeClose);
+    expect(ownership.summaryRevisions.get(persistedID)).toBeGreaterThanOrEqual(revisionBeforeClose);
+    expect(ownership.latestSummaries.get(persistedID)).toMatchObject({
+      sessionId: persistedID,
+      phase: "idle",
+      summaryRevision: ownership.summaryRevisions.get(persistedID),
+    });
   });
 
   it("isolates same-named providers registered by concurrent project extensions", async () => {

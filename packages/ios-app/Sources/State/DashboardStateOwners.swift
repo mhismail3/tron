@@ -328,7 +328,9 @@ struct SessionCatalogCoordinator: Equatable {
             messageCount: update.messageCount,
             firstMessage: update.firstMessage,
             phase: update.phase,
-            summaryRevision: update.summaryRevision
+            summaryRevision: update.summaryRevision,
+            gatewayProfileID: summary.gatewayProfileID,
+            gatewayProfileLabel: summary.gatewayProfileLabel
         )
     }
 }

@@ -924,6 +924,42 @@ struct AppModelPerformanceSignpostTests {
         }
     }
 
+    @Test("successful delete immediately removes the selected dashboard bucket")
+    func deletePublishesDashboardRemoval() async throws {
+        try await withTestWatchdog {
+            let harness = try await makeHarness()
+            let snapshot = try SessionScenarioBuilder(seed: 56).openingTail(targetEncodedBytes: 4_096)
+            let row = SessionSummary(
+                id: snapshot.sessionId, name: "Delete me", cwd: snapshot.cwd,
+                parentSessionId: nil, createdAt: "2026-01-01T00:00:00Z",
+                updatedAt: "2026-01-01T00:00:01Z", messageCount: 1,
+                firstMessage: "Delete me", phase: .idle, summaryRevision: 1
+            )
+            await MainActor.run {
+                harness.model.sessions = [row]
+                harness.model.installHostedSubscribedSnapshot(snapshot, token: "installed-token")
+            }
+            #expect(await MainActor.run { harness.model.visibleSessions.map(\.id) } == [snapshot.sessionId])
+
+            let deleting = Task { try await harness.model.deleteSession(snapshot.sessionId) }
+            defer { deleting.cancel() }
+            let close = try await request(in: harness.socket, frameIndex: 1)
+            await harness.socket.enqueue(successResponse(
+                id: close.id,
+                result: .object(["closed": .bool(true)])
+            ))
+            let mutation = try await request(in: harness.socket, frameIndex: 2)
+            #expect(mutation.method == "session.delete")
+            await harness.socket.enqueue(successResponse(
+                id: mutation.id,
+                result: .object(["deleted": .bool(true)])
+            ))
+            try await valueOfOwnedTask(deleting)
+            #expect(await MainActor.run { harness.model.visibleSessions }.isEmpty)
+            await harness.client.close()
+        }
+    }
+
     @Test("delete closes subscription before command and preserves projection on failure")
     func deleteFailureOrdering() async throws {
         try await withTestWatchdog {

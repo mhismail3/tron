@@ -120,10 +120,145 @@ struct DashboardStateOwnerTests {
                 "ok": .bool(true),
                 "result": .object(["protocolVersion": .number(3)]),
             ])))
-            try await Self.waitUntil { pool.state(for: remote.id) == .connected }
+            try await Self.waitUntil { pool.state(for: remote.id) == .stale }
 
             #expect(socketFactory.requests.count == 1)
             #expect(!(await socket.closed()))
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("secondary catalogs restart mixed revisions and coalesce live overlays")
+    func secondaryCatalogConvergence() async throws {
+        try await withTestWatchdog { @MainActor in
+            let selected = GatewayProfile(
+                id: "selected", label: "Selected", host: "selected.test", port: 9_847,
+                machineId: "selected-runtime", machineGroupID: "selected-machine", deviceId: "device"
+            )
+            let remote = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let socket = ScriptedGatewaySocket()
+            let recorder = DashboardPoolRecorder()
+            let pool = DashboardGatewayConnectionPool(clientFactory: {
+                GatewayClient(socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory)
+            })
+            pool.delegate = recorder
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":3,"minProtocolVersion":3,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8))
+            pool.reconcile(
+                profiles: [selected, remote],
+                selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+
+            try await socket.waitUntilSent(count: 2)
+            let first = try Self.requestFrame(await socket.sentFrames()[1])
+            await socket.enqueue(Self.catalogResponse(
+                id: first.id,
+                sessions: [summary(revision: 1)],
+                listRevision: 1,
+                nextCursor: "page-two"
+            ))
+            try await socket.waitUntilSent(count: 3)
+            let mixed = try Self.requestFrame(await socket.sentFrames()[2])
+            await socket.enqueue(Self.catalogResponse(
+                id: mixed.id,
+                sessions: [],
+                listRevision: 2
+            ))
+
+            // The mixed traversal restarts from nil. While that complete list
+            // is in flight, a newer row event and an event burst dirty exactly
+            // one shared follow-up lease.
+            try await socket.waitUntilSent(count: 4)
+            let restarted = try Self.requestFrame(await socket.sentFrames()[3])
+            await socket.enqueue(Self.summaryEvent(revision: 5, phase: .running))
+            for _ in 0..<3 { await socket.enqueue(Self.listChangedEvent()) }
+            await socket.enqueue(Self.catalogResponse(
+                id: restarted.id,
+                sessions: [summary(revision: 2)],
+                listRevision: 3
+            ))
+            try await Self.waitUntil {
+                recorder.updates.contains(where: {
+                    $0.sessions.first?.summaryRevision == 5 && $0.sessions.first?.phase == .running
+                })
+            }
+            let overlaid = try #require(recorder.updates.last(where: {
+                $0.sessions.first?.summaryRevision == 5
+            })?.sessions.first)
+            #expect(overlaid.gatewayProfileID == remote.id)
+            #expect(overlaid.gatewayProfileLabel == remote.label)
+
+            try await socket.waitUntilSent(count: 5)
+            try await Task.sleep(for: .milliseconds(20))
+            #expect((await socket.sentFrames()).count == 5)
+            let followUp = try Self.requestFrame(await socket.sentFrames()[4])
+            await socket.enqueue(Self.catalogResponse(
+                id: followUp.id,
+                sessions: [],
+                listRevision: 4
+            ))
+            try await Self.waitUntil { recorder.updates.last?.sessions.isEmpty == true }
+            #expect(recorder.updates.last?.state == .connected)
+
+            pool.retire()
+            await pool.waitForRetirement()
+        }
+    }
+
+    @MainActor
+    @Test("secondary reconnect rejects the retired socket epoch and loads fresh truth")
+    func secondaryReconnectAdmission() async throws {
+        try await withTestWatchdog { @MainActor in
+            let selected = GatewayProfile(
+                id: "selected", label: "Selected", host: "selected.test", port: 9_847,
+                machineId: "selected-runtime", machineGroupID: "selected-machine", deviceId: "device"
+            )
+            let remote = GatewayProfile(
+                id: "remote", label: "Remote", host: "remote.test", port: 9_847,
+                machineId: "remote-runtime", machineGroupID: "remote-machine", deviceId: "device"
+            )
+            let oldSocket = ScriptedGatewaySocket()
+            let replacement = ScriptedGatewaySocket()
+            let socketFactory = ScriptedGatewaySocketFactory(sockets: [oldSocket, replacement])
+            let recorder = DashboardPoolRecorder()
+            let pool = DashboardGatewayConnectionPool(clientFactory: {
+                GatewayClient(socketFactory: socketFactory.factory)
+            })
+            pool.delegate = recorder
+            let hello = Data(#"{"type":"hello","gatewayVersion":"1","piVersion":"1","protocolVersion":3,"minProtocolVersion":3,"machineId":"remote-runtime","machineGroupID":"remote-machine","machineName":"Remote","gatewayChannel":"stable","capabilities":[]}"#.utf8)
+            await oldSocket.enqueue(hello)
+            pool.reconcile(
+                profiles: [selected, remote], selectedProfileID: selected.id,
+                token: { $0.id == remote.id ? "token" : nil }
+            )
+            try await oldSocket.waitUntilSent(count: 2)
+            let initial = try Self.requestFrame(await oldSocket.sentFrames()[1])
+            await oldSocket.enqueue(Self.catalogResponse(
+                id: initial.id, sessions: [summary(revision: 1)], listRevision: 1
+            ))
+            try await Self.waitUntil { recorder.updates.last?.sessions.first?.summaryRevision == 1 }
+
+            await replacement.enqueue(hello)
+            await oldSocket.enqueue(Self.stoppingEvent())
+            // This old-epoch row event is delivered after retirement and must
+            // not overlay the replacement connection's catalog.
+            await oldSocket.enqueue(Self.summaryEvent(revision: 9, phase: .running))
+            try await replacement.waitUntilSent(count: 2)
+            let refreshed = try Self.requestFrame(await replacement.sentFrames()[1])
+            await replacement.enqueue(Self.catalogResponse(
+                id: refreshed.id, sessions: [summary(revision: 2)], listRevision: 2
+            ))
+            try await Self.waitUntil {
+                recorder.updates.last?.sessions.first?.summaryRevision == 2
+                    && recorder.updates.last?.state == .connected
+            }
+            #expect(!recorder.updates.contains(where: { $0.sessions.first?.summaryRevision == 9 }))
+
             pool.retire()
             await pool.waitForRetirement()
         }
@@ -191,6 +326,45 @@ struct DashboardStateOwnerTests {
             id: try #require(object["id"]?.stringValue),
             method: try #require(object["method"]?.stringValue)
         )
+    }
+
+    private static func catalogResponse(
+        id: String,
+        sessions: [SessionSummary],
+        listRevision: Int,
+        nextCursor: String? = nil
+    ) -> Data {
+        let encoded = try! JSONEncoder.gateway.encode(sessions)
+        let rawSessions = try! JSONSerialization.jsonObject(with: encoded)
+        var result: [String: Any] = ["sessions": rawSessions, "listRevision": listRevision]
+        if let nextCursor { result["nextCursor"] = nextCursor }
+        return try! JSONSerialization.data(withJSONObject: [
+            "type": "response", "id": id, "ok": true, "result": result,
+        ])
+    }
+
+    private static func summaryEvent(revision: Int, phase: SessionPhase) -> Data {
+        try! JSONSerialization.data(withJSONObject: [
+            "type": "event", "topic": "session.summary",
+            "payload": [
+                "sessionId": "session", "summaryRevision": revision,
+                "phase": phase.rawValue, "name": "Updated",
+                "updatedAt": "2026-01-01T00:00:05Z", "messageCount": revision,
+                "firstMessage": "Updated",
+            ],
+        ])
+    }
+
+    private static func listChangedEvent() -> Data {
+        try! JSONSerialization.data(withJSONObject: [
+            "type": "event", "topic": "session.listChanged", "payload": [:],
+        ])
+    }
+
+    private static func stoppingEvent() -> Data {
+        try! JSONSerialization.data(withJSONObject: [
+            "type": "event", "topic": "system.stopping", "payload": [:],
+        ])
     }
 
     @MainActor
@@ -266,6 +440,23 @@ struct DashboardStateOwnerTests {
         #expect(owner.sessions.first?.summaryRevision == 2)
         owner.invalidateLoads()
         #expect(!owner.admits(second))
+    }
+
+    @Test("catalog admissions reject stale profile and connection epochs")
+    func catalogEpochAdmission() {
+        var owner = SessionCatalogCoordinator()
+        let firstKey = SessionCatalogLoadKey(
+            profileID: "remote", lifecycleGeneration: 1, connectionID: 10
+        )
+        let replacementKey = SessionCatalogLoadKey(
+            profileID: "remote", lifecycleGeneration: 2, connectionID: 11
+        )
+        let first = owner.beginLoad(key: firstKey)
+        #expect(owner.admits(first, key: firstKey))
+        #expect(!owner.admits(first, key: replacementKey))
+        let replacement = owner.beginLoad(key: replacementKey)
+        #expect(!owner.admits(first, key: firstKey))
+        #expect(owner.admits(replacement, key: replacementKey))
     }
 
     @Test("newer live summaries survive an older authoritative catalog page")
@@ -443,5 +634,23 @@ struct DashboardStateOwnerTests {
             messageCount: revision,
             firstMessage: "Updated"
         )
+    }
+}
+
+@MainActor
+private final class DashboardPoolRecorder: DashboardGatewayConnectionPoolDelegate {
+    struct Update {
+        let sessions: [SessionSummary]
+        let state: DashboardServerConnectionState
+    }
+
+    private(set) var updates: [Update] = []
+
+    func dashboardPoolDidUpdate(
+        profileID: String,
+        sessions: [SessionSummary],
+        state: DashboardServerConnectionState
+    ) {
+        updates.append(Update(sessions: sessions, state: state))
     }
 }
