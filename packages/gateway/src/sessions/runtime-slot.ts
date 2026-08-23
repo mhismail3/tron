@@ -68,6 +68,7 @@ type QueueBehavior = QueuedMessageState["behavior"];
 
 type RuntimeQueuedMessage = QueuedMessageState & {
   runtimeText: string;
+  skillName?: string;
   attachmentEnvelope: string;
   images: ImageContent[];
   ordinal: number;
@@ -1885,6 +1886,7 @@ export class RuntimeSlot {
           behavior,
           text: admission?.text ?? runtimeText,
           attachmentCount: admission?.attachmentCount ?? 0,
+          ...(admission?.skillName === undefined ? {} : { skillName: admission.skillName }),
           ...(admission?.photoCount === undefined ? {} : { photoCount: admission.photoCount }),
           ...(admission?.fileAttachmentCount === undefined ? {} : { fileAttachmentCount: admission.fileAttachmentCount }),
           ...(admission?.attachments === undefined ? {} : { attachments: admission.attachments }),
@@ -1906,6 +1908,7 @@ export class RuntimeSlot {
         || item.behavior !== next.behavior
         || item.text !== next.text
         || item.runtimeText !== next.runtimeText
+        || item.skillName !== next.skillName
         || item.attachmentCount !== next.attachmentCount
         || item.photoCount !== next.photoCount
         || item.fileAttachmentCount !== next.fileAttachmentCount
@@ -1934,7 +1937,7 @@ export class RuntimeSlot {
     return [text.trim(), attachmentEnvelope].filter(Boolean).join("\n\n");
   }
 
-  private static validateQueue(items: Array<Pick<QueuedMessageState, "text" | "attachmentCount">>): void {
+  private static validateQueue(items: Array<Pick<QueuedMessageState, "text" | "attachmentCount"> & { skillName?: string }>): void {
     if (items.length > MAXIMUM_QUEUED_MESSAGES) {
       throw new GatewayError("invalid_request", `At most ${MAXIMUM_QUEUED_MESSAGES} messages may be queued`);
     }
@@ -1944,7 +1947,7 @@ export class RuntimeSlot {
       if (bytes > MAXIMUM_QUEUED_MESSAGE_BYTES) {
         throw new GatewayError("invalid_request", "A queued message is too large to manage safely");
       }
-      if (item.text.trim().length === 0 && item.attachmentCount === 0) {
+      if (item.text.trim().length === 0 && item.attachmentCount === 0 && item.skillName === undefined) {
         throw new GatewayError("invalid_request", "Queued messages cannot be empty");
       }
       totalBytes += bytes;
@@ -2144,6 +2147,7 @@ export class RuntimeSlot {
     behavior?: QueueBehavior,
     queueDisplay?: {
       text: string;
+      skillName?: string;
       attachmentEnvelope: string;
       attachmentCount: number;
       photoCount?: number;
@@ -2160,6 +2164,20 @@ export class RuntimeSlot {
           || queueDisplay.attachments.length !== queueDisplay.attachmentCount)) {
         throw new GatewayError("invalid_request", "Prompt attachment descriptors do not match the bounded attachment count");
       }
+      if (queueDisplay?.skillName !== undefined) {
+        const invocationName = `skill:${queueDisplay.skillName}`;
+        const commands = this.commands();
+        const skillMatches = commands.filter(
+          (command) => command.source === "skill" && command.name === invocationName,
+        );
+        const collidesWithExtension = commands.some(
+          (command) => command.source === "extension" && command.name === invocationName,
+        );
+        if (skillMatches.length !== 1 || collidesWithExtension
+            || (text !== `/${invocationName}` && !text.startsWith(`/${invocationName} `))) {
+          throw new GatewayError("conflict", "The selected skill is no longer unambiguous for this session");
+        }
+      }
       const extensionCommandName = text.startsWith("/") ? text.slice(1).split(/\s/u, 1)[0] : undefined;
       const isExactExtensionCommand = extensionCommandName !== undefined
         && session.extensionRunner.getCommand(extensionCommandName) !== undefined;
@@ -2175,12 +2193,17 @@ export class RuntimeSlot {
           ...(images.length > 0 ? { photoCount: images.length } : {}),
           ...(images.length > 0 ? { fileAttachmentCount: 0 } : {}),
         };
-        RuntimeSlot.validateQueue([...this.queuedMessages, { text: display.text, attachmentCount: display.attachmentCount }]);
+        RuntimeSlot.validateQueue([...this.queuedMessages, {
+          text: display.text,
+          attachmentCount: display.attachmentCount,
+          ...(display.skillName === undefined ? {} : { skillName: display.skillName }),
+        }]);
         this.pendingQueueAdmission = {
           // The returned operation identity is also the stable projected queue
           // identity, giving clients an exact settlement receipt.
           id: operationId, behavior: behavior!, text: display.text,
           attachmentCount: display.attachmentCount,
+          ...(display.skillName === undefined ? {} : { skillName: display.skillName }),
           ...(display.photoCount === undefined ? {} : { photoCount: display.photoCount }),
           ...(display.fileAttachmentCount === undefined
             ? {}
@@ -2387,22 +2410,35 @@ export class RuntimeSlot {
           throw new GatewayError("conflict", "The message queue changed. Review the latest queue and try again.", true);
         }
         const text = item.text.trim();
+        const visibleRuntimeText = RuntimeSlot.queueText(text, previous.attachmentEnvelope);
         return {
           ...previous,
           behavior: item.behavior,
           text,
           runtimeText: text === previous.text
             ? previous.runtimeText
-            : RuntimeSlot.queueText(text, previous.attachmentEnvelope),
+            : previous.skillName === undefined
+              ? visibleRuntimeText
+              : `/skill:${previous.skillName}${visibleRuntimeText ? ` ${visibleRuntimeText}` : ""}`,
           ordinal: this.nextQueueOrdinal++,
         };
       });
       RuntimeSlot.validateQueue(next);
 
+      const commands = this.commands();
       const extensionCommands = new Set(
-        this.commands().filter((command) => command.source === "extension").map((command) => command.name),
+        commands.filter((command) => command.source === "extension").map((command) => command.name),
       );
       for (const item of next) {
+        if (item.skillName !== undefined) {
+          const invocationName = `skill:${item.skillName}`;
+          const skillMatches = commands.filter(
+            (command) => command.source === "skill" && command.name === invocationName,
+          );
+          if (skillMatches.length !== 1 || extensionCommands.has(invocationName)) {
+            throw new GatewayError("conflict", "A queued skill is no longer unambiguous for this session", true);
+          }
+        }
         if (!item.runtimeText.startsWith("/")) continue;
         const command = item.runtimeText.slice(1).split(/\s/u, 1)[0] ?? "";
         if (extensionCommands.has(command)) {

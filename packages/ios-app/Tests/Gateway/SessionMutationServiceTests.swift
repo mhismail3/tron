@@ -54,7 +54,8 @@ struct SessionMutationServiceTests {
                     "hello",
                     sessionID: "session-a",
                     uploadIDs: ["upload-a"],
-                    behavior: "steer"
+                    behavior: "steer",
+                    skillName: "review"
                 )
             }
             let prompt = try await request(in: harness.socket, frameIndex: frameIndex)
@@ -64,6 +65,7 @@ struct SessionMutationServiceTests {
             #expect(prompt.params?["text"] == .string("hello"))
             #expect(prompt.params?["uploadIds"] == .array([.string("upload-a")]))
             #expect(prompt.params?["behavior"] == .string("steer"))
+            #expect(prompt.params?["skillName"] == .string("review"))
             try expectCommandID(prompt)
             await harness.socket.enqueue(successResponse(
                 id: prompt.id,

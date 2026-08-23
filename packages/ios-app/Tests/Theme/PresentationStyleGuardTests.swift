@@ -2156,6 +2156,46 @@ struct PresentationStyleGuardTests {
         #expect(!shell.contains("refreshDashboardSessions"))
     }
 
+    @Test("composer resource pickers retain native menu semantics and reduced-motion placement")
+    func composerResourcePickerPresentation() throws {
+        let chat = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+            encoding: .utf8
+        )
+        let picker = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerResourcePicker.swift"),
+            encoding: .utf8
+        )
+        let menu = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatAttachmentPresentation.swift"),
+            encoding: .utf8
+        )
+        let composerStart = try #require(chat.range(of: "private var composer: some View"))
+        let composerEnd = try #require(chat.range(
+            of: "private var composerInputBar: some View",
+            range: composerStart.upperBound..<chat.endIndex
+        ))
+        let composer = String(chat[composerStart.lowerBound..<composerEnd.lowerBound])
+        let attachments = try #require(composer.range(of: "if !pendingAttachments.isEmpty"))
+        let skill = try #require(composer.range(of: "if let selectedComposerSkill"))
+        let suggestions = try #require(composer.range(of: "if let picker = composerResourcePicker"))
+        let input = try #require(composer.range(of: "GlassEffectContainer(spacing: 8)"))
+        #expect(attachments.lowerBound < skill.lowerBound)
+        #expect(skill.lowerBound < suggestions.lowerBound)
+        #expect(suggestions.lowerBound < input.lowerBound)
+        #expect(chat.contains("reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity)"))
+        #expect(chat.contains("guard supportsSkillPrompt, let presentationTarget else { return false }"))
+        #expect(picker.contains("LazyVStack(spacing: 0)"))
+        #expect(picker.contains("CGFloat(min(entries.count, 5)) * 48"))
+        #expect(picker.contains(".regular.tint(accent.opacity(0.15))"))
+        #expect(picker.contains("Color.tronCyan.opacity(0.40)"))
+        #expect(picker.contains("Color.tronPurple"))
+        #expect(picker.contains("accessibilityLabel(\"Remove skill,"))
+        #expect(menu.contains("action(\"Skills\", systemImage: \"sparkles\", destination: .skills)"))
+        #expect(menu.contains("action(\"Commands\", systemImage: \"command\", destination: .commands)"))
+        #expect(menu.contains("button.accessibilityLabel = \"Add attachment\""))
+    }
+
     @Test("the application installs the policy at its root")
     func rootPolicy() throws {
         let app = packageRoot.appending(path: "Sources/App/TronMobileApp.swift")

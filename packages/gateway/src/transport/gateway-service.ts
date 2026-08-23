@@ -168,6 +168,7 @@ export class GatewayService {
         "extension-presentation.v1",
         EXTENSION_ACTIVITY_HISTORY_CAPABILITY,
         "queue-management.v1",
+        "skill-prompt.v1",
         "restart-drain.v1",
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
       ],
@@ -416,12 +417,30 @@ export class GatewayService {
           const slot = await this.openedSlot(client, params);
           const text = typeof params.text === "string" ? params.text.trim() : "";
           const uploadIds = params.uploadIds === undefined ? [] : arrayOfStrings(params.uploadIds, "uploadIds", 10);
-          if (!text && uploadIds.length === 0) throw new GatewayError("invalid_request", "Prompt text or attachments are required");
+          const skillName = optionalString(params.skillName, "skillName", 512);
+          if (!text && uploadIds.length === 0) {
+            throw new GatewayError("invalid_request", "Prompt text or attachments are required");
+          }
+          if (skillName !== undefined) {
+            const expected = `skill:${skillName}`;
+            const commands = slot.commands();
+            const matches = commands.filter((command) => command.source === "skill" && command.name === expected);
+            const collidesWithExtension = commands.some(
+              (command) => command.source === "extension" && command.name === expected,
+            );
+            if (matches.length !== 1 || collidesWithExtension) {
+              throw new GatewayError("conflict", "The selected skill is no longer unambiguous for this session");
+            }
+          }
           const attachments = await this.dependencies.uploads.materialize(uploadIds, slot.id);
-          const prompt = [text, attachments.envelope].filter(Boolean).join("\n\n");
+          const visiblePrompt = [text, attachments.envelope].filter(Boolean).join("\n\n");
+          const prompt = skillName === undefined
+            ? visiblePrompt
+            : `/skill:${skillName}${visiblePrompt ? ` ${visiblePrompt}` : ""}`;
           const behavior = params.behavior === undefined ? undefined : oneOf(params.behavior, "behavior", ["steer", "followUp"] as const);
           return safeJson(await slot.prompt(prompt, attachments.images, behavior, {
             text,
+            ...(skillName === undefined ? {} : { skillName }),
             attachmentEnvelope: attachments.envelope,
             attachmentCount: uploadIds.length,
             ...(attachments.photoCount > 0 ? { photoCount: attachments.photoCount } : {}),

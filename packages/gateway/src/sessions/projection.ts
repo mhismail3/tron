@@ -8,6 +8,9 @@ import { EXTENSION_ACTIVITY_RECEIPT_TYPE } from "./extension-activity-history.js
 import type { CommandInfo, ContentPart, ExtensionSurface, ExtensionToolOrigin, JsonValue, SessionSnapshot, SessionTreeNode, TranscriptItem } from "../protocol/types.js";
 
 const MAX_TEXT = 64_000;
+const MAX_SKILL_INVOCATION_BYTES = 4 * 1_048_576;
+const MAX_SKILL_NAME_BYTES = 512;
+const MAX_SKILL_PATH_BYTES = 8_192;
 const MAX_JSON_STRING = 100_000;
 const MAX_PROJECTED_JSON_BYTES = 96_000;
 const MAX_CONTENT_BYTES = 320_000;
@@ -30,6 +33,59 @@ export const STREAMING_PROGRESS_BYTES = 24_000;
 
 function boundedText(value: string): string {
   return value.length <= MAX_TEXT ? value : `${value.slice(0, MAX_TEXT)}\n… output truncated by gateway`;
+}
+
+export interface ProjectedSkillInvocation {
+  skillName: string;
+  text: string;
+}
+
+/**
+ * Recognizes only Pi's exact persisted skill envelope. Malformed, oversized,
+ * nested, or future shapes remain untouched rather than risking content loss.
+ */
+export function projectSkillInvocation(value: string): ProjectedSkillInvocation | undefined {
+  if (!value.startsWith("<skill name=\"") || Buffer.byteLength(value) > MAX_SKILL_INVOCATION_BYTES) return undefined;
+  const headerEnd = value.indexOf(">\n");
+  if (headerEnd < 0 || headerEnd > MAX_SKILL_NAME_BYTES + MAX_SKILL_PATH_BYTES + 64) return undefined;
+  const header = value.slice(0, headerEnd + 1);
+  const match = /^<skill name="([A-Za-z0-9][A-Za-z0-9._-]*)" location="([^"\r\n]+)">$/.exec(header);
+  if (!match) return undefined;
+  const [, skillName, location] = match;
+  if (!skillName || !location
+      || Buffer.byteLength(skillName) > MAX_SKILL_NAME_BYTES
+      || Buffer.byteLength(location) > MAX_SKILL_PATH_BYTES) return undefined;
+  const bodyStart = headerEnd + 2;
+  const referenceEnd = value.indexOf("\n\n", bodyStart);
+  if (referenceEnd < 0) return undefined;
+  const reference = value.slice(bodyStart, referenceEnd);
+  const referencePrefix = "References are relative to ";
+  if (!reference.startsWith(referencePrefix) || !reference.endsWith(".")) return undefined;
+  const baseDir = reference.slice(referencePrefix.length, -1);
+  if (!baseDir || /[\r\n]/u.test(baseDir) || Buffer.byteLength(baseDir) > MAX_SKILL_PATH_BYTES) return undefined;
+  const closing = "\n</skill>";
+  const closingIndex = value.lastIndexOf(closing);
+  if (closingIndex < referenceEnd + 2) return undefined;
+  const tail = value.slice(closingIndex + closing.length);
+  if (tail !== "" && !tail.startsWith("\n\n")) return undefined;
+  return { skillName, text: tail === "" ? "" : tail.slice(2) };
+}
+
+function projectedSkillText(value: string): string {
+  const invocation = projectSkillInvocation(value);
+  if (invocation) return invocation.text;
+  return value.startsWith("<skill name=\"")
+    ? "Skill invocation omitted from this bounded mobile projection"
+    : value;
+}
+
+function projectableUserContent(content: ProjectableContent): ProjectableContent {
+  if (typeof content === "string") return projectedSkillText(content);
+  const first = content[0];
+  if (first?.type !== "text") return content;
+  const text = projectedSkillText(first.text);
+  if (text === first.text) return content;
+  return [{ ...first, text }, ...content.slice(1)];
 }
 
 export function safeJson(value: unknown, depth = 0, seen = new WeakSet<object>()): JsonValue {
@@ -728,7 +784,7 @@ export function projectMessage(
     case "user":
       return {
         id, parentId, timestamp, kind: "message", role: "user", presentationId,
-        content: projectContent(message.content, blobs, presentationId, true),
+        content: projectContent(projectableUserContent(message.content), blobs, presentationId, true),
       };
     case "assistant":
       return {

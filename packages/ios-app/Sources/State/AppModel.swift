@@ -198,6 +198,7 @@ final class AppModel {
     private(set) var diagnosticsReadinessGeneration = 0
     private(set) var diagnosticsAreReady = false
     var commands: [CommandInfo] { sessionPresentation.commands }
+    var commandCatalogTarget: SessionPresentationIdentity? { sessionPresentation.commandCatalogTarget }
     var resources: JSONValue? { sessionPresentation.resources }
     /// Keeps the root setup sheet from reacting to the transient connection
     /// state used while the Connections sheet adds a secondary server.
@@ -331,8 +332,14 @@ final class AppModel {
                 )
             },
             attachmentFileAccess: composerAttachmentFileAccess,
-            send: { text, sessionID, uploadIDs, behavior in
-                try await sessionMutations.prompt(text, sessionID: sessionID, uploadIDs: uploadIDs, behavior: behavior)
+            send: { text, sessionID, uploadIDs, behavior, skillName in
+                try await sessionMutations.prompt(
+                    text,
+                    sessionID: sessionID,
+                    uploadIDs: uploadIDs,
+                    behavior: behavior,
+                    skillName: skillName
+                )
             },
             admitsLifecycleGeneration: { lifecycle.admits(.init(generation: $0, connectionID: nil)) }
         )

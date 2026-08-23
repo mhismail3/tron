@@ -126,6 +126,64 @@ describe("session transcript paging", () => {
     );
   });
 
+  it("validates a selected skill and keeps its transport prefix out of display text", async () => {
+    const prompt = vi.fn(async () => ({ operationId: "skill-operation" }));
+    const execute = vi.fn(async (
+      _identity: string,
+      _method: string,
+      _commandId: string,
+      operation: () => Promise<unknown>,
+    ) => operation());
+    const commands = vi.fn(() => [{ name: "skill:review", source: "skill" }]);
+    const service = new GatewayService({
+      sessions: {
+        isSubscribed: () => true,
+        acquire: async () => ({ id: "session", prompt, commands }),
+      },
+      uploads: {
+        materialize: async () => ({ envelope: "", images: [], photoCount: 0, fileAttachmentCount: 0, attachments: [] }),
+      },
+      receipts: { execute },
+    } as unknown as GatewayServiceDependencies);
+
+    await expect(service.invoke(client, "session.prompt", {
+      sessionId: "session",
+      text: "Inspect this change",
+      skillName: "review",
+      commandId: "00000000-0000-4000-8000-000000000003",
+    })).resolves.toEqual({ operationId: "skill-operation" });
+    expect(prompt).toHaveBeenCalledWith(
+      "/skill:review Inspect this change",
+      [],
+      undefined,
+      expect.objectContaining({ text: "Inspect this change" }),
+    );
+
+    await expect(service.invoke(client, "session.prompt", {
+      sessionId: "session",
+      text: "Inspect this change",
+      skillName: "retired",
+      commandId: "00000000-0000-4000-8000-000000000004",
+    })).rejects.toMatchObject({ code: "conflict", retryable: false });
+    await expect(service.invoke(client, "session.prompt", {
+      sessionId: "session",
+      text: "",
+      skillName: "review",
+      commandId: "00000000-0000-4000-8000-000000000005",
+    })).rejects.toMatchObject({ code: "invalid_request" });
+    commands.mockReturnValue([
+      { name: "skill:review", source: "skill" },
+      { name: "skill:review", source: "extension" },
+    ]);
+    await expect(service.invoke(client, "session.prompt", {
+      sessionId: "session",
+      text: "Inspect this change",
+      skillName: "review",
+      commandId: "00000000-0000-4000-8000-000000000006",
+    })).rejects.toMatchObject({ code: "conflict", retryable: false });
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects terminal control until this connection attaches", async () => {
     const write = vi.fn();
     const resize = vi.fn();

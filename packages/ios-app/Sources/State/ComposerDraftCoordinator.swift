@@ -160,7 +160,10 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let target: SessionPresentationIdentity
     let textRevision: Int
     let localNonce: UInt64?
+    /// User-visible text. Skill transport metadata is deliberately separate so
+    /// optimistic, queued, and canonical presentation never expose `/skill:`.
     let outgoingText: String
+    let skillName: String?
     let attachmentIDs: [String]
     let behavior: String?
     let baselineQueuedMessageIDs: Set<String>
@@ -169,6 +172,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         target: SessionPresentationIdentity,
         textRevision: Int,
         outgoingText: String,
+        skillName: String? = nil,
         attachmentIDs: [String],
         behavior: String?,
         baselineQueuedMessageIDs: Set<String> = [],
@@ -178,6 +182,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         self.textRevision = textRevision
         self.localNonce = localNonce
         self.outgoingText = outgoingText
+        self.skillName = skillName
         self.attachmentIDs = attachmentIDs
         self.behavior = behavior
         self.baselineQueuedMessageIDs = baselineQueuedMessageIDs
@@ -245,7 +250,8 @@ typealias ComposerSendOperation = @MainActor @Sendable (
     _ text: String,
     _ sessionID: String,
     _ uploadIDs: [String],
-    _ behavior: String?
+    _ behavior: String?,
+    _ skillName: String?
 ) async throws -> String
 
 enum ComposerDraftTextPolicy {
@@ -298,6 +304,9 @@ final class ComposerDraftCoordinator {
         let id: UInt64
         let snapshot: ComposerSubmissionSnapshot
         let submittedAttachments: [PendingAttachment]
+        let submittedSkill: CommandInfo?
+        let skillMutationRevision: Int
+        var canRestoreSubmittedSkill: Bool
         let baselineTranscriptIDs: Set<String>
         let lifecycleGeneration: Int
         var transportState: SubmissionTransportState
@@ -331,6 +340,8 @@ final class ComposerDraftCoordinator {
     @ObservationIgnored private let admitsLifecycleGeneration: @MainActor (Int) -> Bool
 
     private var drafts: [ComposerDraftScope: Draft] = [:]
+    private var selectedSkillByScope: [ComposerDraftScope: CommandInfo] = [:]
+    private var skillMutationRevisionByScope: [ComposerDraftScope: Int] = [:]
     private var preparedOpenBySession: [String: PreparedOpen] = [:]
     private var lease: PresentationLease?
     private var attachmentsByTarget: [SessionPresentationIdentity: [PendingAttachment]] = [:]
@@ -394,6 +405,46 @@ final class ComposerDraftCoordinator {
         draft.lastAccess = sequence
         drafts[scope] = draft
         evictInactiveDraftsIfNeeded()
+    }
+
+    func selectedSkill(for scope: ComposerDraftScope) -> CommandInfo? {
+        selectedSkillByScope[scope]
+    }
+
+    func selectSkill(_ command: CommandInfo, for scope: ComposerDraftScope) {
+        guard command.source == .skill,
+              command.name.hasPrefix("skill:"),
+              command.name.count > "skill:".count else { return }
+        selectedSkillByScope[scope] = command
+        skillMutationRevisionByScope[scope, default: 0] &+= 1
+        touch(scope, installing: nil)
+    }
+
+    func removeSelectedSkill(for scope: ComposerDraftScope) {
+        selectedSkillByScope[scope] = nil
+        skillMutationRevisionByScope[scope, default: 0] &+= 1
+    }
+
+    /// Catalog replacement is authoritative. A retired, changed, or
+    /// cross-source ambiguous skill can never remain staged or be resurrected
+    /// by a late definitive transport failure.
+    func reconcileSelectedSkill(for scope: ComposerDraftScope, commands: [CommandInfo]) {
+        if let selected = selectedSkillByScope[scope],
+           !Self.skillIsUnambiguous(selected, in: commands) {
+            selectedSkillByScope[scope] = nil
+            skillMutationRevisionByScope[scope, default: 0] &+= 1
+        }
+        guard let target = lease?.target,
+              var admission = submissionByTarget[target],
+              let submitted = admission.submittedSkill,
+              !Self.skillIsUnambiguous(submitted, in: commands) else { return }
+        admission.canRestoreSubmittedSkill = false
+        submissionByTarget[target] = admission
+    }
+
+    private static func skillIsUnambiguous(_ selected: CommandInfo, in commands: [CommandInfo]) -> Bool {
+        commands.filter { $0 == selected }.count == 1
+            && !commands.contains { $0.source == .extension && $0.name == selected.name }
     }
 
     func openMountedPresentation(
@@ -912,7 +963,8 @@ final class ComposerDraftCoordinator {
                 admission.snapshot.outgoingText,
                 submission.target.sessionID,
                 admission.snapshot.attachmentIDs,
-                admission.snapshot.behavior
+                admission.snapshot.behavior,
+                admission.snapshot.skillName
             )
         } catch {
             try require(admission)
@@ -968,12 +1020,16 @@ final class ComposerDraftCoordinator {
     func removeSession(profileID: String, sessionID: String) {
         let scope = ComposerDraftScope(profileID: profileID, sessionID: sessionID)
         drafts[scope] = nil
+        selectedSkillByScope[scope] = nil
+        skillMutationRevisionByScope[scope] = nil
         preparedOpenBySession[sessionID] = nil
         if lease?.scope == scope { revokePresentation() }
     }
 
     func removeProfile(_ profileID: String) {
         drafts = drafts.filter { $0.key.profileID != profileID }
+        selectedSkillByScope = selectedSkillByScope.filter { $0.key.profileID != profileID }
+        skillMutationRevisionByScope = skillMutationRevisionByScope.filter { $0.key.profileID != profileID }
         preparedOpenBySession = preparedOpenBySession.filter { $0.value.scope.profileID != profileID }
         if lease?.scope.profileID == profileID { revokePresentation() }
     }
@@ -1035,6 +1091,8 @@ final class ComposerDraftCoordinator {
         let draft = drafts[scope] ?? Draft(text: "", revision: 0, lastAccess: sequence)
         let outgoing = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachmentsByTarget[target] ?? []
+        let submittedSkill = selectedSkillByScope[scope]
+        let skillName = submittedSkill.map { String($0.name.dropFirst("skill:".count)) }
         let attachmentIDs = submittedAttachments.map(\.id)
         guard !outgoing.isEmpty || !attachmentIDs.isEmpty else { throw CancellationError() }
         sequence &+= 1
@@ -1042,6 +1100,7 @@ final class ComposerDraftCoordinator {
             target: target,
             textRevision: draft.revision,
             outgoingText: outgoing,
+            skillName: skillName,
             attachmentIDs: attachmentIDs,
             behavior: behavior,
             baselineQueuedMessageIDs: Set(queuedMessages.map(\.id)),
@@ -1051,6 +1110,9 @@ final class ComposerDraftCoordinator {
             id: sequence,
             snapshot: snapshot,
             submittedAttachments: submittedAttachments,
+            submittedSkill: submittedSkill,
+            skillMutationRevision: skillMutationRevisionByScope[scope, default: 0],
+            canRestoreSubmittedSkill: true,
             baselineTranscriptIDs: Set(canonicalTranscript.map(\.id)),
             lifecycleGeneration: lease.lifecycleGeneration,
             transportState: .sending,
@@ -1067,6 +1129,7 @@ final class ComposerDraftCoordinator {
         settledQueueHandoffs[target] = nil
         submissionByTarget[target] = admission
         setText("", for: scope)
+        selectedSkillByScope[scope] = nil
         return admission
     }
 
@@ -1101,6 +1164,11 @@ final class ComposerDraftCoordinator {
         let newerAttachments = (attachmentsByTarget[currentAdmission.snapshot.target] ?? [])
             .filter { !submittedIDs.contains($0.id) }
         attachmentsByTarget[currentAdmission.snapshot.target] = currentAdmission.submittedAttachments + newerAttachments
+        if currentAdmission.canRestoreSubmittedSkill,
+           skillMutationRevisionByScope[scope, default: 0] == currentAdmission.skillMutationRevision,
+           selectedSkillByScope[scope] == nil {
+            selectedSkillByScope[scope] = currentAdmission.submittedSkill
+        }
         submissionByTarget[currentAdmission.snapshot.target] = nil
     }
 
@@ -1305,6 +1373,8 @@ final class ComposerDraftCoordinator {
         }
         for (scope, _) in inactive.prefix(inactive.count - Self.maxInactiveDrafts) {
             drafts[scope] = nil
+            selectedSkillByScope[scope] = nil
+            skillMutationRevisionByScope[scope] = nil
         }
     }
 

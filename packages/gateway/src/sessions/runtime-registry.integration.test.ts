@@ -2106,7 +2106,12 @@ export default function (pi) {
     const root = await mkdtemp(join(tmpdir(), "tron-queue-management-"));
     const agentDir = join(root, "agent");
     const cwd = join(root, "workspace");
-    await Promise.all([mkdir(agentDir), mkdir(cwd)]);
+    const skillDir = join(agentDir, "skills", "review");
+    await Promise.all([mkdir(skillDir, { recursive: true }), mkdir(cwd)]);
+    await writeFile(
+      join(skillDir, "SKILL.md"),
+      "---\nname: review\ndescription: Review carefully\n---\nReview the requested change.\n",
+    );
 
     let releaseResponse!: () => void;
     const responseBarrier = new Promise<void>((resolve) => { releaseResponse = resolve; });
@@ -2174,25 +2179,41 @@ export default function (pi) {
       attachmentEnvelope: "",
       attachmentCount: 0,
     });
+    await slot.prompt("/skill:review queued skill", [], "steer", {
+      text: "queued skill",
+      skillName: "review",
+      attachmentEnvelope: "",
+      attachmentCount: 0,
+    });
     const queued = slot.snapshot();
-    expect(queued.queuedItems).toHaveLength(3);
-    expect(queued.queuedItems?.map((item) => item.behavior)).toEqual(["steer", "steer", "followUp"]);
-    expect(queued.queuedItems?.map((item) => item.text)).toEqual(["first steer", "first steer", "later follow-up"]);
-    expect(new Set(queued.queuedItems?.map((item) => item.id)).size).toBe(3);
+    expect(queued.queuedItems).toHaveLength(4);
+    expect(queued.queuedItems?.map((item) => item.behavior)).toEqual(["steer", "steer", "steer", "followUp"]);
+    expect(queued.queuedItems?.map((item) => item.text)).toEqual([
+      "first steer", "first steer", "queued skill", "later follow-up",
+    ]);
+    expect(new Set(queued.queuedItems?.map((item) => item.id)).size).toBe(4);
     expect(queued.queuedItems?.[0]?.attachments).toEqual([attachment]);
 
-    const [first, duplicate, followUp] = queued.queuedItems!;
+    const [first, duplicate, skill, followUp] = queued.queuedItems!;
     const replaced = await slot.replaceQueue(queued.queueRevision!, [
       { id: duplicate!.id, behavior: "steer", text: duplicate!.text },
       { id: followUp!.id, behavior: "steer", text: "edited and earlier" },
       { id: first!.id, behavior: "followUp", text: first!.text },
+      { id: skill!.id, behavior: "followUp", text: "edited skill" },
     ]);
     expect(replaced.items.map(({ id, behavior, text }) => ({ id, behavior, text }))).toEqual([
       { id: duplicate!.id, behavior: "steer", text: "first steer" },
       { id: followUp!.id, behavior: "steer", text: "edited and earlier" },
       { id: first!.id, behavior: "followUp", text: "first steer" },
+      { id: skill!.id, behavior: "followUp", text: "edited skill" },
     ]);
     expect(replaced.items[2]?.attachments).toEqual([attachment]);
+    const queuedRuntime = (slot as unknown as {
+      runtime: { session: { getFollowUpMessages(): readonly string[] } };
+    }).runtime.session.getFollowUpMessages();
+    expect(queuedRuntime.some(
+      (text) => text.startsWith('<skill name="review"') && text.endsWith("edited skill"),
+    )).toBe(true);
     await expect(slot.replaceQueue(queued.queueRevision!, [])).rejects.toMatchObject({ code: "conflict" });
 
     const removed = await slot.replaceQueue(replaced.queueRevision, [replaced.items[1]!]);

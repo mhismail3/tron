@@ -621,8 +621,14 @@ response-first, content-only string, distinct-fallback, request-only, and missin
 readable-output duplicate or third fallback section.
 Verify live updates and true-only truncation metadata without moving the primary sheet's reading position. With
 a nonempty focused composer, open the native attachment menu, verify the keyboard remains visible, verify its
-option symbols are emerald while text retains native system styling, and activate camera, photos, and files on
-the first option tap; the 40-point plus control and native menu appearance/order must remain unchanged. Terminal checkpoints must exercise
+option symbols are emerald while text retains native system styling, and activate camera, photos, files, Skills,
+and Commands on the first option tap. Verify `@` opens the cyan skill glass, query typing filters without caret
+jumps, selection removes only the active token and places one removable skill chip below photo/file chips, and
+a newer skill replaces it. Verify `/` at the leading command boundary opens the purple command glass, selection
+completes editable command text with a trailing space, and deleting either active trigger dismisses its picker.
+Under Reduce Motion both pickers fade without spatial movement; with VoiceOver, picker rows, info controls, and
+skill removal are separately reachable. The 40-point plus control and native menu appearance/order must remain
+unchanged. Terminal checkpoints must exercise
 the native keyboard plus the floating shortcut and command-key surfaces rather
 than validating only PTY output.
 

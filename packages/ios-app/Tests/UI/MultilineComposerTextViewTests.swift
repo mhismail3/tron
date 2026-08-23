@@ -34,6 +34,27 @@ struct MultilineComposerTextViewTests {
         ))
     }
 
+    @Test("external completion selection clamps in UTF-16 coordinates")
+    func completionSelectionClamps() {
+        var text = "👋 command"
+        var focused = false
+        var selection = NSRange(location: 999, length: 3)
+        let control = MultilineComposerTextView(
+            text: Binding(get: { text }, set: { text = $0 }),
+            isFocused: Binding(get: { focused }, set: { focused = $0 }),
+            selection: Binding(get: { selection }, set: { selection = $0 }),
+            isEditable: true,
+            keyboardAppearance: .dark
+        )
+        let coordinator = control.makeCoordinator()
+        #expect(coordinator.clampedSelection(selection, text: text) == NSRange(
+            location: (text as NSString).length,
+            length: 0
+        ))
+        selection = NSRange(location: 2, length: 4)
+        #expect(coordinator.clampedSelection(selection, text: text) == selection)
+    }
+
     @Test("active chats keep text entry available for steering")
     func activeChatComposerPolicy() {
         for phase in [SessionPhase.running, .compacting, .retrying] {

@@ -1014,6 +1014,65 @@ struct SessionPresentationStoreTests {
         }
     }
 
+    @Test("command catalog readiness belongs to the exact mounted subscription")
+    func commandCatalogReadiness() async throws {
+        try await withTestWatchdog {
+            let socket = ScriptedGatewaySocket()
+            let client = GatewayClient(
+                socketFactory: ScriptedGatewaySocketFactory(socket: socket).factory
+            )
+            let profile = GatewayProfile(
+                id: "gateway", label: "Mac", host: "gateway.test", port: 9_847,
+                machineId: "machine", deviceId: "device"
+            )
+            let connecting = Task { try await client.connect(profile: profile, token: "token") }
+            try await socket.waitUntilSent(count: 1)
+            await socket.enqueue(Data(#"{"type":"hello","gatewayVersion":"1.0.0","piVersion":"1.0.0","protocolVersion":3,"minProtocolVersion":3,"machineId":"machine","machineName":"Mac","gatewayChannel":"stable","capabilities":["sessions.v1","skill-prompt.v1"]}"#.utf8))
+            _ = try await connecting.value
+
+            let snapshot = try SessionScenarioBuilder(seed: 842).openingTail(targetEncodedBytes: 4_096)
+            let store = await MainActor.run {
+                let store = SessionPresentationStore(client: client, performanceSignposts: SystemPerformanceSignposts.shared)
+                store.installHostedSubscription(snapshot: snapshot, token: "catalog")
+                return store
+            }
+            let loading = Task { await store.loadCommands(sessionID: snapshot.sessionId) }
+            try await socket.waitUntilSent(count: 2)
+            let request = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[1])
+            let requestID = try #require(request.objectValue?["id"]?.stringValue)
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(requestID), "ok": .bool(true),
+                "result": .object(["commands": .array([.object([
+                    "name": .string("skill:review"), "description": .string("Review"),
+                    "argumentHint": .null, "source": .string("skill"), "sourcePath": .string("/skill/review"),
+                ])])]),
+            ])))
+            await loading.value
+            let mounted = await MainActor.run { store.mountedTarget }
+            #expect(await MainActor.run { store.commandCatalogTarget } == mounted)
+            #expect(await MainActor.run { store.commands.map(\.name) } == ["skill:review"])
+
+            await MainActor.run { store.retireConnection() }
+            #expect(await MainActor.run { store.commandCatalogTarget } == nil)
+            await MainActor.run { store.installHostedSubscription(snapshot: snapshot, token: "catalog-reconnect") }
+
+            let replacement = Task { await store.loadCommands(sessionID: snapshot.sessionId) }
+            try await socket.waitUntilSent(count: 3)
+            #expect(await MainActor.run { store.commandCatalogTarget } == nil)
+            let replacementRequest = try JSONDecoder.gateway.decode(JSONValue.self, from: await socket.sentFrames()[2])
+            let replacementID = try #require(replacementRequest.objectValue?["id"]?.stringValue)
+            await MainActor.run { store.replaceHostedSubscriptionToken("replacement") }
+            await socket.enqueue(try JSONEncoder.gateway.encode(JSONValue.object([
+                "type": .string("response"), "id": .string(replacementID), "ok": .bool(true),
+                "result": .object(["commands": .array([])]),
+            ])))
+            await replacement.value
+            #expect(await MainActor.run { store.commandCatalogTarget } == nil)
+            #expect(await MainActor.run { store.commands.map(\.name) } == ["skill:review"])
+            await client.close()
+        }
+    }
+
     @Test("newer same-subscription context load rejects an older completion")
     func newestSecondaryLoadWins() async throws {
         try await withTestWatchdog {

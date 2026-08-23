@@ -376,10 +376,19 @@ mutation generation before every mutating boundary; retirement after validation 
 The Save and Restart flow captures one lifecycle admission around both operations, so a confirmed
 save cannot restart a replacement profile and a late restart failure cannot surface into replacement-profile
 UI. Configuration screens discard cancellation while preserving current-operation errors. `ComposerDraftCoordinator`
-is the sole owner of composer text, staged attachments, upload admission, editor requests, and submission state.
-Text is keyed by explicit profile/session scope with monotonic revisions and a deterministic 24-inactive-draft
+is the sole owner of composer text, the single staged skill, staged attachments, upload admission, editor requests, and submission state.
+Text and skill selection are keyed by explicit profile/session scope with monotonic revisions and a deterministic 24-inactive-draft
 LRU; text is never truncated and survives route close/reopen until exact session/profile deletion or bounded
-eviction. The active lease is the immutable session/presentation generation plus lifecycle generation.
+eviction. The composer derives one immutable search index from the already bounded authoritative `session.commands`
+catalog; it never fetches or mirrors resources. Catalog readiness is owned by the exact mounted presentation token, is revoked while a reload is pending, and refreshes on `session.resourcesChanged`, so A→B→A navigation cannot retire a retained draft skill from another session's transient catalog. Skill discovery is exposed only when the connected Gateway advertises
+`skill-prompt.v1`, preventing a newer app from silently sending inert metadata to an older runtime. `@` token detection filters only `source == skill` entries and strips
+the transport-only `skill:` prefix, while leading `/` completion excludes skills and inserts editable native command
+text. The one staged skill is captured separately from user-visible text, replaced atomically by a newer selection,
+restored only after a definitive send rejection, and cleared if the authoritative catalog no longer contains the exact
+entry. Skill and leading slash-command choices are mutually exclusive, and a staged skill still requires prompt text or an attachment so every lifecycle has visible content. The Gateway receives its raw name as bounded prompt metadata and owns Pi invocation expansion, keeping optimistic,
+queued, edited-queue, and canonical text identical. The inline glass picker remains inside the sole composer safe-area owner, below
+attachments and the skill chip but immediately above the input row; UIKit continues to own responder, UTF-16 selection,
+and caret geometry. The active lease is the immutable session/presentation generation plus lifecycle generation.
 Attachments, previews, concurrent upload admissions, editor requests, and submission snapshots live only for
 that lease and are synchronously discarded on revocation, close, or profile retirement. Completed plus active
 uploads are admitted against one 10-item/25 MiB presentation budget before network work; each image chip uses

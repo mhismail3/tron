@@ -504,7 +504,15 @@ duplicate or malformed canonical entries and oversized retained strings; omitted
 are valid because the bounded outline is not a canonical mirror.
 `session.commands` preserves runtime sort order and rejects catalogs above 1,000 rows
 or 700 KiB, duplicate full `source:name` identities, empty names, or command metadata
-strings above 8 KiB before generic JSON projection can truncate the response.
+strings above 8 KiB before generic JSON projection can truncate the response. `session.prompt`
+may carry one optional, 512-byte-bounded `skillName` alongside nonempty text or attachments when hello advertises `skill-prompt.v1`. The Gateway admits it only when the live
+runtime catalog contains exactly one matching `source == skill` / `skill:<name>` command and no colliding extension command, then
+adds Pi's `/skill:<name>` prefix only at runtime admission while retaining the original prompt
+for pending and queue presentation. Queue ownership retains the private skill identity across text/behavior edits and revalidates it before rebuilding Pi's queue. Canonical mobile projection recognizes only Pi's exact,
+4 MiB-bounded persisted skill envelope, strips the private skill body/path, and projects its
+user arguments through the existing attachment extractor. Malformed or newer skill-looking
+envelopes become a generic omission rather than leaking private skill bodies/paths or being destructively guessed.
+Absence of `skillName` retains rolling-compatible prompt behavior.
 Summarizing tree navigation owns foreground branch-summary state only for the exact
 awaited call; success, extension cancellation, and provider failure all retire that
 state and publish the settled snapshot before the serialized mutation lane advances.

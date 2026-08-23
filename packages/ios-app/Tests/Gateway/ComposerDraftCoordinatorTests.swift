@@ -182,7 +182,7 @@ struct ComposerDraftCoordinatorTests {
                     return "document-id"
                 },
                 attachmentFileAccess: access.seam,
-                send: { _, _, _, _ in "unused-operation" },
+                send: { _, _, _, _, _ in "unused-operation" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let target = SessionPresentationIdentity(sessionID: "session", generation: 9)
@@ -220,7 +220,7 @@ struct ComposerDraftCoordinatorTests {
                 upload: { _, _, _ in Issue.record("unexpected data upload"); return "unused" },
                 fileUpload: { _, _, _, _ in "image-id" },
                 attachmentFileAccess: access.seam,
-                send: { _, _, _, _ in "unused-operation" },
+                send: { _, _, _, _, _ in "unused-operation" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let target = SessionPresentationIdentity(sessionID: "session", generation: 10)
@@ -248,7 +248,7 @@ struct ComposerDraftCoordinatorTests {
                 upload: { _, _, _ in Issue.record("unexpected data upload"); return "unused" },
                 fileUpload: { name, _, file, _ in try await gate.upload(name: name, file: file) },
                 attachmentFileAccess: access.seam,
-                send: { _, _, _, _ in "unused-operation" },
+                send: { _, _, _, _, _ in "unused-operation" },
                 admitsLifecycleGeneration: { $0 == 1 }
             )
             let target = SessionPresentationIdentity(sessionID: "session", generation: 11)
@@ -402,6 +402,62 @@ struct ComposerDraftCoordinatorTests {
             #expect(harness.coordinator.outgoingSubmission(for: target) == nil)
             #expect(harness.coordinator.submittedAttachments(for: target).isEmpty)
             #expect(harness.coordinator.pendingAttachments(for: target).map(\.id) == ["c"])
+        }
+    }
+
+    @Test("one staged skill replaces its predecessor and definitive send failure restores it")
+    func selectedSkillLifecycle() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "session", generation: 40)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile", target: target, lifecycleGeneration: 1,
+                initialText: "Inspect this"
+            )
+            let review = CommandInfo(
+                name: "skill:review", description: "Review", argumentHint: nil,
+                source: .skill, sourcePath: "/skills/review"
+            )
+            let repair = CommandInfo(
+                name: "skill:repair", description: "Repair", argumentHint: nil,
+                source: .skill, sourcePath: "/skills/repair"
+            )
+            harness.coordinator.selectSkill(review, for: scope)
+            harness.coordinator.selectSkill(repair, for: scope)
+            #expect(harness.coordinator.selectedSkill(for: scope) == repair)
+            harness.coordinator.removeSelectedSkill(for: scope)
+            #expect(harness.coordinator.selectedSkill(for: scope) == nil)
+            harness.coordinator.selectSkill(repair, for: scope)
+
+            let sending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(1)
+            #expect(harness.sendCalls[0].text == "Inspect this")
+            #expect(harness.sendCalls[0].skillName == "repair")
+            #expect(harness.coordinator.selectedSkill(for: scope) == nil)
+            harness.completeSend(index: 0, result: .failure(ComposerSyntheticError.current))
+            await #expect(throws: ComposerSyntheticError.self) { try await valueOfOwnedTask(sending) }
+            #expect(harness.coordinator.text(for: scope) == "Inspect this")
+            #expect(harness.coordinator.selectedSkill(for: scope) == repair)
+
+            harness.coordinator.reconcileSelectedSkill(for: scope, commands: [review])
+            #expect(harness.coordinator.selectedSkill(for: scope) == nil)
+
+            harness.coordinator.selectSkill(repair, for: scope)
+            let mutatedWhileSending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(2)
+            harness.coordinator.selectSkill(review, for: scope)
+            harness.coordinator.removeSelectedSkill(for: scope)
+            harness.completeSend(index: 1, result: .failure(ComposerSyntheticError.current))
+            await #expect(throws: ComposerSyntheticError.self) { try await valueOfOwnedTask(mutatedWhileSending) }
+            #expect(harness.coordinator.selectedSkill(for: scope) == nil)
+
+            harness.coordinator.selectSkill(repair, for: scope)
+            let retiredWhileSending = Task { try await harness.coordinator.send(target: target, behavior: nil) }
+            try await harness.waitForSends(3)
+            harness.coordinator.reconcileSelectedSkill(for: scope, commands: [review])
+            harness.completeSend(index: 2, result: .failure(ComposerSyntheticError.current))
+            await #expect(throws: ComposerSyntheticError.self) { try await valueOfOwnedTask(retiredWhileSending) }
+            #expect(harness.coordinator.selectedSkill(for: scope) == nil)
         }
     }
 
@@ -1465,6 +1521,15 @@ private struct ComposerSendCall: Equatable {
     let sessionID: String
     let uploadIDs: [String]
     let behavior: String?
+    let skillName: String?
+
+    init(text: String, sessionID: String, uploadIDs: [String], behavior: String?, skillName: String? = nil) {
+        self.text = text
+        self.sessionID = sessionID
+        self.uploadIDs = uploadIDs
+        self.behavior = behavior
+        self.skillName = skillName
+    }
 }
 
 private actor ComposerFileUploadGate {
@@ -1593,11 +1658,12 @@ private final class ComposerHarness {
             Issue.record("unexpected file upload")
             throw CancellationError()
         },
-        send: { [weak self] text, sessionID, uploadIDs, behavior in
+        send: { [weak self] text, sessionID, uploadIDs, behavior, skillName in
             guard let self else { throw CancellationError() }
             let index = self.sendCalls.count
             self.sendCalls.append(.init(
-                text: text, sessionID: sessionID, uploadIDs: uploadIDs, behavior: behavior
+                text: text, sessionID: sessionID, uploadIDs: uploadIDs, behavior: behavior,
+                skillName: skillName
             ))
             self.sendBarrierContinuation.yield(self.sendCalls.count)
             try await withCheckedThrowingContinuation { continuation in

@@ -15,6 +15,7 @@ import {
   STREAMING_PROGRESS_BYTES,
   projectJson,
   projectMessage,
+  projectSkillInvocation,
   mergeLiveToolOutput,
   MINIMUM_TRANSCRIPT_CONTINUITY_MESSAGES,
   projectToolOutput,
@@ -238,6 +239,55 @@ describe("transcript projection", () => {
       ],
     });
     expect(JSON.stringify(transcript[0])).not.toContain("/Users/private");
+  });
+
+  it("projects Pi skill envelopes as exact user arguments and preserves attachment extraction", () => {
+    const envelope = `<skill name="review" location="/private/skills/review/SKILL.md">\nReferences are relative to /private/skills/review.\n\nReview carefully.\n</skill>\n\nInspect this\n\n<attachment name="notes.txt" mime-type="text/plain" size="4" path="/private/upload/content.txt" />`;
+    expect(projectSkillInvocation(envelope)).toEqual({
+      skillName: "review",
+      text: `Inspect this\n\n<attachment name="notes.txt" mime-type="text/plain" size="4" path="/private/upload/content.txt" />`,
+    });
+    const item = projectMessage(
+      "skill-entry",
+      null,
+      "2026-01-01T00:00:00Z",
+      { role: "user", content: envelope, timestamp: 1 },
+      new BlobStore(),
+    );
+    expect(item).toMatchObject({
+      kind: "message",
+      role: "user",
+      content: [
+        { type: "text", text: "Inspect this" },
+        { type: "text", attachment: { name: "notes.txt", mimeType: "text/plain", size: 4 } },
+      ],
+    });
+    expect(JSON.stringify(item)).not.toContain("/private/");
+  });
+
+  it("uses the final Pi delimiter when skill Markdown contains an envelope-like close", () => {
+    const envelope = `<skill name="review" location="/private/skills/review/SKILL.md">\nReferences are relative to /private/skills/review.\n\nExplain this literal:\n</skill>\n\nwithout treating it as the envelope close\n</skill>\n\nInspect this`;
+    expect(projectSkillInvocation(envelope)).toEqual({ skillName: "review", text: "Inspect this" });
+  });
+
+  it("fails closed for malformed skill envelopes", () => {
+    const malformed = [
+      `<skill name="review" location="/private/skill">\nWrong reference\n\nbody\n</skill>\n\ntext`,
+      `<skill name="bad name" location="/private/skill">\nReferences are relative to /private.\n\nbody\n</skill>\n\ntext`,
+      `<skill name="review" location="/private/skill">\nReferences are relative to /private.\n\nbody\n</skill>trailing`,
+    ];
+    for (const value of malformed) expect(projectSkillInvocation(value)).toBeUndefined();
+    const item = projectMessage(
+      "malformed-skill",
+      null,
+      "2026-01-01T00:00:00Z",
+      { role: "user", content: malformed[0]!, timestamp: 1 },
+      new BlobStore(),
+    );
+    expect(item).toMatchObject({
+      content: [{ type: "text", text: "Skill invocation omitted from this bounded mobile projection" }],
+    });
+    expect(JSON.stringify(item)).not.toContain("/private/");
   });
 
   it("keeps malformed attachment-like text visible without projecting its private path", () => {

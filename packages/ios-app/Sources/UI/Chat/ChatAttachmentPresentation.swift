@@ -5,6 +5,10 @@ enum ChatAttachmentDestination: Hashable {
     case camera
     case photos
     case files
+    case skills
+    case commands
+
+    var isComposerResource: Bool { self == .skills || self == .commands }
 }
 
 enum ChatAttachmentImportPolicy {
@@ -15,6 +19,7 @@ enum ChatAttachmentImportPolicy {
 
 struct ComposerAttachmentMenuButton: UIViewRepresentable {
     let isEnabled: Bool
+    let showsSkills: Bool
     let onSelect: @MainActor (ChatAttachmentDestination) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -43,11 +48,16 @@ struct ComposerAttachmentMenuButton: UIViewRepresentable {
         }
 
         func makeMenu() -> UIMenu {
-            UIMenu(children: [
+            var children = [
                 action("Take Photo", systemImage: "camera", destination: .camera),
                 action("Select Photos", systemImage: "photo.on.rectangle", destination: .photos),
                 action("Attach Files", systemImage: "folder", destination: .files),
-            ])
+            ]
+            if parent.showsSkills {
+                children.append(action("Skills", systemImage: "sparkles", destination: .skills))
+            }
+            children.append(action("Commands", systemImage: "command", destination: .commands))
+            return UIMenu(children: children)
         }
 
         private func action(

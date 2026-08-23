@@ -1,3 +1,4 @@
+import Foundation
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -118,6 +119,10 @@ struct ChatView: View {
     // placeholder/scroll presentation; SwiftUI FocusState must not compete with
     // a UIViewRepresentable that has no `.focused` registration.
     @State private var composerFocused = false
+    @State private var composerSelection = NSRange(location: 0, length: 0)
+    @State private var composerResourceCatalog = ComposerResourceCatalog(commands: [])
+    @State private var composerResourcePicker: ComposerResourcePickerSource?
+    @State private var composerResourceResults: [ComposerResourceEntry] = []
     @State private var suppressedInteractionScope: ExtensionInteractionScope?
     @State private var canonicalSubmissionHandoffs = BoundedChatIdentityLedger()
 
@@ -307,11 +312,13 @@ struct ChatView: View {
         }
         .onChange(of: attachmentMenuState) { previous, current in
             if previous.sessionID != current.sessionID {
+                composerResourcePicker = nil
                 cancelAttachmentPresentation(includingActive: true)
                 photoImportTask?.cancel()
                 photoImportTask = nil
                 photoImportTarget = nil
             } else if !current.actionsEnabled {
+                composerResourcePicker = nil
                 cancelAttachmentPresentation(includingActive: false)
                 photoImportTask?.cancel()
                 photoImportTask = nil
@@ -343,6 +350,41 @@ struct ChatView: View {
                 }
             )
         }
+        .task(id: composerResourceCatalogIdentity) {
+            let identity = composerResourceCatalogIdentity
+            let ownsCatalog = identity.catalogTarget != nil
+                && identity.catalogTarget == identity.presentationTarget
+            let commands = ownsCatalog
+                ? identity.commands.filter { identity.supportsSkillPrompt || $0.source != .skill }
+                : []
+            let build = Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
+                let catalog = ComposerResourceCatalog(commands: commands)
+                try Task.checkCancellation()
+                return catalog
+            }
+            let catalog: ComposerResourceCatalog
+            do {
+                catalog = try await withTaskCancellationHandler {
+                    try await build.value
+                } onCancel: {
+                    build.cancel()
+                }
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            composerResourceCatalog = catalog
+            if ownsCatalog, let composerScope {
+                model.composerDrafts.reconcileSelectedSkill(for: composerScope, commands: commands)
+            }
+            if let picker = composerResourcePicker {
+                composerResourceResults = catalog.entries(kind: picker.kind, query: picker.query)
+            }
+            reconcileComposerResourcePicker()
+        }
+        .onChange(of: composerText) { _, _ in reconcileComposerResourcePicker() }
+        .onChange(of: composerSelection) { _, _ in reconcileComposerResourcePicker() }
         .task(id: sessionID) { await beginOpeningPresentation() }
         .onChange(of: pendingInteractionScopes, initial: true) { _, scopes in
             guard let suppressedInteractionScope,
@@ -1175,6 +1217,12 @@ struct ChatView: View {
         presentationTarget.map(model.composerDrafts.submittedAttachments(for:)) ?? []
     }
 
+    private var selectedComposerSkill: ComposerResourceEntry? {
+        guard let composerScope,
+              let command = model.composerDrafts.selectedSkill(for: composerScope) else { return nil }
+        return ComposerResourceEntry(command: command)
+    }
+
     private var candidatePresentedInteraction: ExtensionInteraction? {
         ChatExtensionInteractionPolicy.presentedInteraction(
             selectedAuthoritativeSnapshot?.extensionPresentation.pendingInteractions ?? [],
@@ -2004,6 +2052,35 @@ struct ChatView: View {
                 )
             }
 
+            if let selectedComposerSkill {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ComposerSkillChip(skill: selectedComposerSkill) {
+                            guard let composerScope else { return }
+                            withAnimation(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion)) {
+                                model.composerDrafts.removeSelectedSkill(for: composerScope)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 2)
+                }
+                .scrollClipDisabled()
+                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+            }
+
+            if let picker = composerResourcePicker {
+                ComposerResourcePicker(
+                    kind: picker.kind,
+                    query: picker.query,
+                    entries: composerResourceResults,
+                    onSelect: selectComposerResource,
+                    onDismiss: dismissComposerResourcePicker
+                )
+                .padding(.horizontal, 16)
+                .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+            }
+
             GlassEffectContainer(spacing: 8) {
                 HStack(alignment: .bottom, spacing: 8) {
                     composerInputBar
@@ -2069,6 +2146,7 @@ struct ChatView: View {
                         get: { composerFocused },
                         set: { composerFocused = $0 }
                     ),
+                    selection: $composerSelection,
                     isEditable: ChatComposerPolicy.isTextEditable(isTranscriptReady: isTranscriptReady),
                     keyboardAppearance: colorScheme == .dark ? .dark : .light
                 )
@@ -2137,6 +2215,7 @@ struct ChatView: View {
 
             ComposerAttachmentMenuButton(
                 isEnabled: attachmentActionsEnabled,
+                showsSkills: skillPickerAvailable,
                 onSelect: requestAttachmentPresentation
             )
             .frame(
@@ -2257,8 +2336,45 @@ struct ChatView: View {
 
     private var attachmentActionsEnabled: Bool { attachmentMenuState.actionsEnabled }
 
+    private var supportsSkillPrompt: Bool {
+        model.gatewayInfo?.capabilities.contains("skill-prompt.v1") == true
+    }
+
+    private var skillPickerAvailable: Bool {
+        guard supportsSkillPrompt, let presentationTarget else { return false }
+        return model.commandCatalogTarget == presentationTarget
+    }
+
+    private var composerResourceCatalogIdentity: ComposerResourceCatalogIdentity {
+        ComposerResourceCatalogIdentity(
+            commands: model.commands,
+            catalogTarget: model.commandCatalogTarget,
+            presentationTarget: presentationTarget,
+            supportsSkillPrompt: supportsSkillPrompt
+        )
+    }
+
     private func requestAttachmentPresentation(_ destination: ChatAttachmentDestination) {
         guard attachmentActionsEnabled else { return }
+        if destination.isComposerResource {
+            let kind: ComposerResourceEntry.Kind = destination == .skills ? .skill : .command
+            attachmentPresentationTask?.cancel()
+            queuedAttachmentDestination = nil
+            attachmentPresentationTask = Task { @MainActor in
+                // Let the native menu complete dismissal before inserting the
+                // inline child. The UITextView remains the responder owner.
+                do { try await Task.sleep(for: .milliseconds(100)) }
+                catch { return }
+                guard !Task.isCancelled, attachmentActionsEnabled else { return }
+                let picker = ComposerResourcePickerSource.menu(kind)
+                composerResourceResults = composerResourceCatalog.entries(kind: kind, query: "")
+                withAnimation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.32, dampingFraction: 0.82)) {
+                    composerResourcePicker = picker
+                }
+            }
+            return
+        }
+        dismissComposerResourcePicker()
         // End the responder lifetime before UIKit presents a picker. This also
         // invalidates queued becomeFirstResponder callbacks in the representable.
         composerFocused = false
@@ -2292,7 +2408,8 @@ struct ChatView: View {
     private func attachmentPresentationBinding(
         for destination: ChatAttachmentDestination
     ) -> Binding<Bool> {
-        Binding(
+        precondition(!destination.isComposerResource)
+        return Binding(
             get: { attachmentDestination == destination },
             set: { isPresented in
                 if isPresented {
@@ -2303,6 +2420,84 @@ struct ChatView: View {
                 }
             }
         )
+    }
+
+    private func reconcileComposerResourcePicker() {
+        if let token = ComposerSuggestionTriggerPolicy.activeToken(
+            in: composerText,
+            selection: composerSelection
+        ), token.kind != .skill || skillPickerAvailable {
+            attachmentPresentationTask?.cancel()
+            attachmentPresentationTask = nil
+            if composerResourcePicker != .token(token) {
+                composerResourceResults = composerResourceCatalog.entries(kind: token.kind, query: token.query)
+                withAnimation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.32, dampingFraction: 0.82)) {
+                    composerResourcePicker = .token(token)
+                }
+            }
+        } else if case .token = composerResourcePicker {
+            dismissComposerResourcePicker()
+        }
+    }
+
+    private func selectComposerResource(_ entry: ComposerResourceEntry) {
+        guard let composerScope else { return }
+        switch entry.kind {
+        case .skill:
+            var replacement = (text: composerText, selection: composerSelection)
+            if case .token(let token) = composerResourcePicker,
+               let tokenReplacement = ComposerSuggestionTriggerPolicy.replacing(
+                    text: replacement.text,
+                    range: token.replacementRange,
+                    with: ""
+               ) {
+                replacement = tokenReplacement
+            }
+            replacement = ComposerCommandCompletionPolicy.removingLeadingCommand(
+                text: replacement.text,
+                selection: replacement.selection,
+                commands: composerResourceCatalog.commands
+            )
+            applyComposerReplacement(replacement)
+            model.composerDrafts.selectSkill(entry.commandInfo, for: composerScope)
+        case .command:
+            let base: (text: String, selection: NSRange)
+            let replacementRange: NSRange
+            if case .token(let token) = composerResourcePicker {
+                base = (composerText, composerSelection)
+                replacementRange = token.replacementRange
+            } else {
+                // A command selected from the menu becomes the leading Pi
+                // command; replace an existing exact command while retaining
+                // its editable arguments.
+                base = ComposerCommandCompletionPolicy.removingLeadingCommand(
+                    text: composerText,
+                    selection: composerSelection,
+                    commands: composerResourceCatalog.commands
+                )
+                replacementRange = NSRange(location: 0, length: 0)
+            }
+            guard let replacement = ComposerSuggestionTriggerPolicy.replacing(
+                text: base.text,
+                range: replacementRange,
+                with: "/\(entry.invocationName) "
+            ) else { return }
+            model.composerDrafts.removeSelectedSkill(for: composerScope)
+            applyComposerReplacement(replacement)
+        }
+        dismissComposerResourcePicker()
+    }
+
+    private func applyComposerReplacement(_ replacement: (text: String, selection: NSRange)) {
+        composerSelection = replacement.selection
+        composerTextBinding.wrappedValue = replacement.text
+    }
+
+    private func dismissComposerResourcePicker() {
+        withAnimation(reduceMotion ? .easeOut(duration: 0.12) : .spring(response: 0.32, dampingFraction: 0.82)) {
+            composerResourcePicker = nil
+        }
+        composerResourceResults = []
     }
 
     @MainActor
@@ -2441,6 +2636,24 @@ struct ChatView: View {
               source.tag.presentationGeneration == target.generation else { return }
         let behavior = explicitBehavior
             ?? ChatComposerPolicy.submissionBehavior(phase: selectedAuthoritativeSnapshot?.phase)
+        if let composerScope,
+           let selected = model.composerDrafts.selectedSkill(for: composerScope) {
+            guard supportsSkillPrompt, model.commandCatalogTarget == target else {
+                model.presentComposerActionError(
+                    "Skills are still loading for this session.",
+                    target: target
+                )
+                return
+            }
+            guard model.commands.filter({ $0 == selected }).count == 1 else {
+                model.composerDrafts.removeSelectedSkill(for: composerScope)
+                model.presentComposerActionError(
+                    "That skill is no longer available for this session.",
+                    target: target
+                )
+                return
+            }
+        }
         do {
             // Admission, composer collapse, and the local lifecycle graft share
             // one transaction. The full newest authoritative capture is then
@@ -2456,6 +2669,7 @@ struct ChatView: View {
             ))
             if reduceMotion { transaction.disablesAnimations = true }
             let submission = try withTransaction(transaction) {
+                composerResourcePicker = nil
                 let submission = try model.beginComposerSubmission(
                     target: target,
                     behavior: behavior,

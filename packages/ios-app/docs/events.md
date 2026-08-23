@@ -69,7 +69,10 @@ admits and reduces mounted-session topics:
   during prompt preflight. iOS renders that exact prompt after runtime feedback and
   reconstructs it from every authoritative snapshot until the canonical user entry
   arrives; a mounted submission keeps one complete representation visible through pending and canonical
-  installation. Its initial role-aware entrance is the only motion in that lifecycle; canonical settlement is direct and unanimated. Optimistic composer settlement consumes every
+  installation. Optional skill selection travels as bounded `session.prompt.skillName` metadata rather than
+  editor text. The Gateway validates it against the exact live skill catalog, retains the original prompt in
+  `pendingPrompt` and queue items, and removes Pi's canonical skill envelope during bounded transcript projection,
+  so no lifecycle frame exposes `/skill:` or private skill contents. `session.resourcesChanged` revokes command-catalog readiness and starts one generation-gated reload for the exact mounted subscription before retained skill state can reconcile. Its initial role-aware entrance is the only motion in that lifecycle; canonical settlement is direct and unanimated. Optimistic composer settlement consumes every
   authoritative session-reducer publication directly rather than waiting for delayed transcript
   formatting. For queued steering/follow-up, the returned prompt operation ID is also the Gateway's
   stable queue-item ID, so a concurrent same-text item cannot settle the wrong optimistic admission. That exact

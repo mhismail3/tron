@@ -72,13 +72,15 @@ final class SessionMutationService {
         _ text: String,
         sessionID: String,
         uploadIDs: [String],
-        behavior: String?
+        behavior: String?,
+        skillName: String? = nil
     ) async throws -> String {
         struct Params: Codable {
             let sessionId: String
             let text: String
             let uploadIds: [String]
             let behavior: String?
+            let skillName: String?
             let commandId: String
         }
         struct Response: Codable { let operationId: String }
@@ -88,6 +90,7 @@ final class SessionMutationService {
             text: text,
             uploadIds: uploadIDs,
             behavior: behavior,
+            skillName: skillName,
             commandId: commandID
         )
         let response: Response = try await executor.perform(method: "session.prompt", commandID: commandID) {

@@ -134,6 +134,7 @@ final class SessionPresentationStore {
     private(set) var context: JSONValue?
     private(set) var sessionTree: [SessionTreeNode] = []
     private(set) var commands: [CommandInfo] = []
+    private(set) var commandCatalogTarget: SessionPresentationIdentity?
     private(set) var resources: JSONValue?
     private var structureRevision = 0
     private var contextRevision = 0
@@ -735,6 +736,8 @@ final class SessionPresentationStore {
         subscribedSessionID = nil
         subscriptionToken = nil
         subscriptionTarget = nil
+        commandLoadGeneration &+= 1
+        commandCatalogTarget = nil
         synchronization.reset()
         // Keep the last-good snapshot authoritative for the mounted chat, but
         // advance its presentation generation so the retained projection is
@@ -815,8 +818,12 @@ final class SessionPresentationStore {
         switch synchronization.admit(event) {
         case .deliver(let event):
             guard admitsSequencedEvent(event) else { return }
+            let previousResourceRevision = resourceRevision
             if let sessionID = reduce(event) {
                 _ = await synchronize(sessionID, operation: .sessionResync)
+            } else if resourceRevision != previousResourceRevision,
+                      let sessionID = event.sessionId {
+                Task { [weak self] in await self?.loadCommands(sessionID: sessionID) }
             }
         case .buffered:
             break
@@ -878,17 +885,22 @@ final class SessionPresentationStore {
     }
 
     func loadCommands(sessionID: String) async {
-        guard let token = installedSubscriptionToken(for: sessionID) else { return }
+        guard let token = installedSubscriptionToken(for: sessionID),
+              let requestedTarget = subscriptionTarget,
+              requestedTarget.sessionID == sessionID else { return }
         commandLoadGeneration &+= 1
         let generation = commandLoadGeneration
+        commandCatalogTarget = nil
         struct Params: Codable { let sessionId: String }
         struct Response: Decodable { let commands: [CommandInfo] }
         do {
             let response: Response = try await client.request("session.commands", Params(sessionId: sessionID))
             guard generation == commandLoadGeneration,
-                  ownsSubscription(sessionID: sessionID, requestedToken: token) else { return }
+                  ownsSubscription(sessionID: sessionID, requestedToken: token),
+                  subscriptionTarget == requestedTarget else { return }
             let admitted = try CommandCatalogPolicy.admit(response.commands)
             commands = admitted
+            commandCatalogTarget = requestedTarget
         } catch {
             guard !(error is CancellationError),
                   generation == commandLoadGeneration,
@@ -982,6 +994,7 @@ final class SessionPresentationStore {
         context = nil
         sessionTree = []
         commands = []
+        commandCatalogTarget = nil
         resources = nil
     }
 
@@ -1378,7 +1391,7 @@ final class SessionPresentationStore {
                 result = .discarded
                 return .failed(showCatchUpNotice: false)
             }
-            let replacedRuntime = prepareSecondaryProjectionForRuntimeInstallation(installed)
+            _ = prepareSecondaryProjectionForRuntimeInstallation(installed)
             mountedTranscriptWindow = if case .freshPresentation = mode {
                 nil
             } else {
@@ -1389,7 +1402,7 @@ final class SessionPresentationStore {
             pendingSubscriptionTokens[sessionID] = nil
             subscriptionTarget = installedTarget
             snapshot = installed
-            if replacedRuntime {
+            if commandCatalogTarget != installedTarget {
                 Task { [weak self] in await self?.loadCommands(sessionID: sessionID) }
             }
             advanceChatProjection(canonical: true)
@@ -1854,6 +1867,8 @@ final class SessionPresentationStore {
             if updatesSecondaryRevisions {
                 resourceRevision &+= 1
                 contextRevision &+= 1
+                commandLoadGeneration &+= 1
+                commandCatalogTarget = nil
             }
         default:
             if let envelope = admitEnvelope(event, snapshot: snapshot) { advance(&snapshot, envelope) }

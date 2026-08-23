@@ -7,6 +7,7 @@ import UIKit
 struct MultilineComposerTextView: UIViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
+    var selection: Binding<NSRange>? = nil
     let isEditable: Bool
     let keyboardAppearance: UIKeyboardAppearance
     var maximumLines = 8
@@ -62,7 +63,10 @@ struct MultilineComposerTextView: UIViewRepresentable {
         }
         if view.text != text {
             view.text = text
-            view.selectedRange = NSRange(location: (text as NSString).length, length: 0)
+            view.selectedRange = context.coordinator.clampedSelection(
+                selection?.wrappedValue ?? NSRange(location: (text as NSString).length, length: 0),
+                text: text
+            )
             context.coordinator.requestCaretReveal(on: view)
         } else if fontChanged {
             context.coordinator.requestCaretReveal(on: view)
@@ -134,6 +138,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
         func textViewDidBeginEditing(_ textView: UITextView) {
             hasMirroredFocus = true
             if !parent.isFocused { parent.isFocused = true }
+            publishSelection(from: textView)
             requestCaretReveal(on: textView)
         }
 
@@ -144,12 +149,27 @@ struct MultilineComposerTextView: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             if parent.text != textView.text { parent.text = textView.text }
+            publishSelection(from: textView)
             requestCaretReveal(on: textView)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard textView.isFirstResponder else { return }
+            publishSelection(from: textView)
             requestCaretReveal(on: textView)
+        }
+
+        func clampedSelection(_ selection: NSRange, text: String) -> NSRange {
+            let length = (text as NSString).length
+            let location = min(max(selection.location, 0), length)
+            let selectedLength = min(max(selection.length, 0), length - location)
+            return NSRange(location: location, length: selectedLength)
+        }
+
+        private func publishSelection(from textView: UITextView) {
+            guard let selection = parent.selection else { return }
+            let current = clampedSelection(textView.selectedRange, text: textView.text)
+            if selection.wrappedValue != current { selection.wrappedValue = current }
         }
 
         @discardableResult
