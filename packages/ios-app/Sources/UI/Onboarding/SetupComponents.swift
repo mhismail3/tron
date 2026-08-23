@@ -94,6 +94,7 @@ struct ModelPicker: View {
     let models: [ModelSummary]
     @State private var search = ""
     @State private var showingSearch = false
+    @State private var closingSearch = false
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -140,12 +141,7 @@ struct ModelPicker: View {
                         text: $search,
                         prompt: "Search models",
                         focusOnAppear: true,
-                        onClose: {
-                            withAnimation(.snappy(duration: 0.18)) {
-                                search = ""
-                                showingSearch = false
-                            }
-                        }
+                        onClose: closeSearch
                     )
                 } else {
                     Button {
@@ -157,7 +153,7 @@ struct ModelPicker: View {
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                             .padding(.horizontal, TronSpacing.inputHorizontal)
                             .contentShape(Capsule())
-                            .glassEffect(.clear.tint(Color.tronEmerald.opacity(0.10)).interactive(), in: .capsule)
+                            .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.16)).interactive(), in: .capsule)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Search models")
@@ -169,6 +165,22 @@ struct ModelPicker: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .tronScrollEdgeChrome()
+        .interactiveDismissDisabled(showingSearch)
+        .task(id: closingSearch) {
+            guard closingSearch else { return }
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            withAnimation(.snappy(duration: 0.18)) {
+                showingSearch = false
+                closingSearch = false
+            }
+        }
+    }
+
+    private func closeSearch() {
+        guard showingSearch, !closingSearch else { return }
+        search = ""
+        closingSearch = true
     }
 
     private var filtered: [ModelSummary] {

@@ -494,6 +494,7 @@ struct TronSearchBar: View {
     var accent: Color = .tronEmerald
     var focusOnAppear = false
     var onClose: (() -> Void)?
+    var onFocusChange: ((Bool) -> Void)?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -503,7 +504,11 @@ struct TronSearchBar: View {
                     .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
                     .foregroundStyle(accent)
                     .accessibilityHidden(true)
-                TextField("", text: $text, prompt: Text(prompt).foregroundStyle(accent.opacity(0.68)))
+                TextField(
+                    "",
+                    text: $text,
+                    prompt: Text(focused ? "" : prompt).foregroundStyle(accent.opacity(0.68))
+                )
                     .textFieldStyle(.plain)
                     .font(TronTypography.body)
                     .foregroundStyle(accent)
@@ -529,7 +534,7 @@ struct TronSearchBar: View {
             .padding(.leading, TronSpacing.inputHorizontal)
             .padding(.trailing, text.isEmpty ? TronSpacing.inputHorizontal : 0)
             .frame(minHeight: 44)
-            .glassEffect(.clear.tint(accent.opacity(0.10)).interactive(), in: .capsule)
+            .glassEffect(.regular.tint(accent.opacity(0.16)).interactive(), in: .capsule)
             .contentShape(Capsule())
             .onTapGesture { focused = true }
 
@@ -543,7 +548,7 @@ struct TronSearchBar: View {
                         .foregroundStyle(accent)
                         .frame(width: 44, height: 44)
                         .contentShape(Circle())
-                        .glassEffect(.clear.tint(accent.opacity(0.10)).interactive(), in: .circle)
+                        .glassEffect(.regular.tint(accent.opacity(0.14)).interactive(), in: .circle)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Close search")
@@ -553,6 +558,9 @@ struct TronSearchBar: View {
             guard focusOnAppear else { return }
             await Task.yield()
             focused = true
+        }
+        .onChange(of: focused) { _, isFocused in
+            onFocusChange?(isFocused)
         }
         .animation(.easeInOut(duration: 0.15), value: text.isEmpty)
     }

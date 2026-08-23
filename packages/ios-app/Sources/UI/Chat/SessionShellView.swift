@@ -138,34 +138,57 @@ struct SessionShellView: View {
     }
 
     private var dashboardScreen: some View {
-        ZStack(alignment: .bottomTrailing) {
-            sessionList
-            TronTopBlurOverlay(style: .dashboard)
-            dashboardBottomControls
+        ZStack(alignment: .bottom) {
+            ZStack(alignment: .bottomTrailing) {
+                sessionList
+                TronTopBlurOverlay(style: .dashboard)
+                dashboardBottomControls
+                    .accessibilityHidden(showingSearch)
+            }
+            .ignoresSafeArea(.keyboard, edges: .bottom)
+
+            if showingSearch {
+                dashboardSearchBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
-            .scrollContentBackground(.hidden)
-            .background(Color.tronBackground)
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { dashboardToolbar }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if showingSearch {
-                    TronSearchBar(text: $search, prompt: "Search sessions", focusOnAppear: true)
-                        .padding(.horizontal, TronSpacing.section)
-                        .padding(.vertical, 8)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .scrollContentBackground(.hidden)
+        .background(Color.tronBackground)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { dashboardToolbar }
+        .scrollDismissesKeyboard(.interactively)
+        .navigationDestination(item: $presentedSession) { route in
+            ChatView(
+                sessionID: route.sessionID,
+                initialEditorText: route.editorText,
+                initialModel: route.initialModel,
+                onForkCreated: present
+            )
+            .id(route.id)
+        }
+    }
+
+    private var dashboardSearchBar: some View {
+        TronSearchBar(
+            text: $search,
+            prompt: "Search sessions",
+            focusOnAppear: true,
+            onClose: dismissDashboardSearch,
+            onFocusChange: { focused in
+                if !focused { dismissDashboardSearch() }
+            }
+        )
+        .padding(.horizontal, TronSpacing.section)
+        .padding(.vertical, 8)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 16)
+                .onEnded { value in
+                    guard value.translation.height > 28,
+                          abs(value.translation.height) > abs(value.translation.width) else { return }
+                    dismissDashboardSearch()
                 }
-            }
-            .scrollDismissesKeyboard(.interactively)
-            .navigationDestination(item: $presentedSession) { route in
-                ChatView(
-                    sessionID: route.sessionID,
-                    initialEditorText: route.editorText,
-                    initialModel: route.initialModel,
-                    onForkCreated: present
-                )
-                .id(route.id)
-            }
+        )
     }
 
     private func present(_ route: AppModel.SessionNavigationRoute) {
@@ -179,7 +202,7 @@ struct SessionShellView: View {
 
     private var dashboardBottomControls: some View {
         HStack(alignment: .bottom) {
-            serverFilterControl
+            dashboardSearchControl
             Spacer(minLength: 12)
             newSessionButton
         }
@@ -187,15 +210,27 @@ struct SessionShellView: View {
         .padding(.bottom, 8)
     }
 
-    private var serverFilterControl: some View {
-        Button {
-            showingServerFilter = true
-        } label: {
-            Image(systemName: "line.3.horizontal.decrease")
+    private var dashboardSearchControl: some View {
+        Button(action: showDashboardSearch) {
+            Image(systemName: "magnifyingglass")
                 .font(TronTypography.sans(size: 22, weight: .semibold))
         }
         .buttonStyle(TronIconButtonStyle(size: 56))
-        .accessibilityLabel(serverFilter.accessibilityLabel)
+        .accessibilityLabel("Search sessions")
+    }
+
+    private func showDashboardSearch() {
+        withAnimation(.snappy(duration: 0.18)) {
+            showingSearch = true
+        }
+    }
+
+    private func dismissDashboardSearch() {
+        guard showingSearch || !search.isEmpty else { return }
+        withAnimation(.snappy(duration: 0.18)) {
+            search = ""
+            showingSearch = false
+        }
     }
 
     private var serverFilterSheet: some View {
@@ -335,15 +370,12 @@ struct SessionShellView: View {
         }
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
-                withAnimation(.snappy(duration: 0.18)) {
-                    showingSearch.toggle()
-                    if !showingSearch { search = "" }
-                }
+                showingServerFilter = true
             } label: {
-                Image(systemName: showingSearch ? "xmark" : "magnifyingglass")
+                Image(systemName: "line.3.horizontal.decrease")
                     .foregroundStyle(Color.tronEmerald)
             }
-            .accessibilityLabel(showingSearch ? "Close session search" : "Search sessions")
+            .accessibilityLabel(serverFilter.accessibilityLabel)
             Button("Settings", systemImage: "gearshape") { showSettings = true }
                 .tronToolbarAction(accent: .tronEmerald)
         }

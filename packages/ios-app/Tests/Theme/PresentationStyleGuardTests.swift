@@ -548,6 +548,14 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/NewSessionSheet.swift"),
             encoding: .utf8
         )
+        let presentation = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Theme/TronPresentation.swift"),
+            encoding: .utf8
+        )
+        let setup = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Onboarding/SetupComponents.swift"),
+            encoding: .utf8
+        )
         #expect(shell.contains("NewSessionSheet(onCreated: present)"))
         #expect(!shell.contains("struct NewSessionSheet: View"))
         #expect(newSession.contains("@State private var configurationOwner = NewSessionConfigurationOwner()"))
@@ -569,8 +577,20 @@ struct PresentationStyleGuardTests {
         #expect(!shell.contains("NavigationSplitView"))
         #expect(!shell.contains("List(selection:"))
         #expect(!shell.contains(".onChange(of: model.selectedSessionID)"))
-        #expect(shell.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
+        #expect(shell.contains("ZStack(alignment: .bottom)"))
+        #expect(shell.contains(".ignoresSafeArea(.keyboard, edges: .bottom)"))
+        #expect(shell.contains("private var dashboardSearchControl: some View"))
+        #expect(shell.contains("onClose: dismissDashboardSearch"))
+        #expect(shell.contains("onFocusChange: { focused in"))
+        #expect(shell.contains("DragGesture(minimumDistance: 16)"))
         #expect(shell.contains("focusOnAppear: true"))
+        #expect(presentation.contains("Text(focused ? \"\" : prompt)"))
+        #expect(presentation.contains(".glassEffect(.regular.tint(accent.opacity(0.16))"))
+        #expect(presentation.contains("onFocusChange?(isFocused)"))
+        #expect(setup.contains(".glassEffect(.regular.tint(Color.tronEmerald.opacity(0.16))"))
+        #expect(setup.contains(".interactiveDismissDisabled(showingSearch)"))
+        #expect(setup.contains("Task.sleep(for: .milliseconds(300))"))
+        #expect(setup.contains("onClose: closeSearch"))
         #expect(shell.contains("Button(\"Rename\", systemImage: \"pencil\")"))
         #expect(shell.contains("model.renameSession(session.id, name: name)"))
     }
