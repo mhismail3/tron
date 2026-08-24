@@ -110,12 +110,21 @@ struct ConnectionsSettingsView: View {
                     detail: "Private agent alerts for this iPhone.",
                     accent: .tronBlue
                 ) {
-                    TronValueRow(
-                        icon: pushStatus.icon,
-                        title: pushStatus.title,
-                        detail: pushStatus.detail,
-                        accent: .tronBlue
-                    )
+                    VStack(spacing: 0) {
+                        TronValueRow(
+                            icon: pushStatus.icon,
+                            title: pushStatus.title,
+                            detail: pushStatus.detail,
+                            accent: .tronBlue
+                        )
+                        TronSettingsDivider(accent: .tronBlue)
+                        TronValueRow(
+                            icon: "stethoscope",
+                            title: "Registration stage",
+                            detail: model.pushRegistrationDiagnostic.rawValue,
+                            accent: .tronBlue
+                        )
+                    }
                 }
 
                 TronSettingsGroup(

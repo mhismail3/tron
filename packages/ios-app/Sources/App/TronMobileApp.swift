@@ -30,6 +30,10 @@ struct TronMobileApp: App {
                 }
                 .onChange(of: pushNotifications.readiness) { _, readiness in
                     model.pushNotificationReadiness = readiness
+                    model.pushRegistrationDiagnostic = pushNotifications.diagnostic
+                }
+                .onChange(of: pushNotifications.diagnostic) { _, diagnostic in
+                    model.pushRegistrationDiagnostic = diagnostic
                 }
                 .onOpenURL { url in
                     if let invitation = PairingInvitationParser.parse(url) {
@@ -90,6 +94,7 @@ struct TronMobileApp: App {
             client: model.client
         )
         model.pushNotificationReadiness = pushNotifications.readiness
+        model.pushRegistrationDiagnostic = pushNotifications.diagnostic
     }
 
 }

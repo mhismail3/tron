@@ -171,6 +171,7 @@ final class AppModel {
     var trustRevision: Int { settingsTrust.trustRevision }
     var pairedDevices: [PairedDevice] = []
     var pushNotificationReadiness: PushReadiness = .unavailable
+    var pushRegistrationDiagnostic: PushRegistrationDiagnostic = .idle
     /// GatewayProfileStore owns transactional persistence; this revision makes
     /// profile metadata changes observable to SwiftUI without duplicating it.
     private(set) var profileRevision = 0

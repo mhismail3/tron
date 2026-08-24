@@ -1,4 +1,5 @@
 import CryptoKit
+import DeviceCheck
 import Foundation
 import Testing
 
@@ -169,6 +170,232 @@ struct PushNotificationCoordinatorTests {
         #expect(responseBounds.allSatisfy { $0 == 16 * 1024 })
     }
 
+    @MainActor
+    @Test("timeout retries with a fresh challenge and persisted-key assertion")
+    func timeoutThenAssertionSuccess() async throws {
+        let script = ScriptedPushTransport(installations: [.timeout, .status(201)])
+        let attest = PushAttestRecorder(assertionResults: [.success(Data("one".utf8)), .success(Data("two".utf8))])
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: "persisted-key", apnsToken: "01", grants: [:]
+        ))
+        let retries = PushRetryRecorder()
+        let coordinator = makeCoordinator(store: store, script: script, attest: attest, retries: retries)
+
+        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        try await waitForGrant(in: store)
+
+        #expect(await script.challengeCount == 2)
+        #expect(await script.submittedModes == ["assertion", "assertion"])
+        #expect(await script.submittedChallenges == ["challenge-1", "challenge-2"])
+        #expect(await attest.assertionKeys == ["persisted-key", "persisted-key"])
+        #expect(await retries.values == [.milliseconds(250)])
+        #expect(store.value?.appAttestKeyID == "persisted-key")
+    }
+
+    @MainActor
+    @Test("assertion 401 rotates only the key and permits one fresh attestation")
+    func assertion401ThenFreshAttestation() async throws {
+        let script = ScriptedPushTransport(installations: [.status(401), .status(201)])
+        let attest = PushAttestRecorder(generatedKeys: ["fresh-key"])
+        let originalGrant = PushGrant(
+            profileID: "other", installationID: "install_other", grantID: "grant_other",
+            grantSecret: String(repeating: "s", count: 32), tokenHash: "hash"
+        )
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: "invalid-key", apnsToken: "01", grants: ["other": originalGrant]
+        ))
+        let coordinator = makeCoordinator(store: store, script: script, attest: attest)
+
+        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        try await waitForGrant(in: store)
+
+        #expect(await script.submittedModes == ["assertion", "attestation"])
+        #expect(await attest.generatedCount == 1)
+        #expect(store.value?.appAttestKeyID == "fresh-key")
+        #expect(store.value?.grants["other"] == originalGrant)
+        #expect(store.value?.apnsToken == "01")
+    }
+
+    @MainActor
+    @Test("typed DCAppAttest invalid-key uses the same one-time recovery")
+    func typedLocalInvalidKeyRecovery() async throws {
+        let typedInvalidKey = NSError(
+            domain: DCError.errorDomain,
+            code: DCError.Code.invalidKey.rawValue
+        )
+        let script = ScriptedPushTransport(installations: [.status(201)])
+        let attest = PushAttestRecorder(
+            generatedKeys: ["replacement-key"],
+            assertionResults: [.failure(typedInvalidKey)]
+        )
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: "reinstalled-key", apnsToken: "01", grants: [:]
+        ))
+        let coordinator = makeCoordinator(store: store, script: script, attest: attest)
+
+        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        try await waitForGrant(in: store)
+
+        #expect(await script.submittedModes == ["attestation"])
+        #expect(await script.challengeCount == 2)
+        #expect(await attest.generatedCount == 1)
+        #expect(store.value?.appAttestKeyID == "replacement-key")
+    }
+
+    @MainActor
+    @Test("fresh attestation rejection is persisted and repeated reconcile does not churn")
+    func repeatedAttestation401Stops() async throws {
+        let script = ScriptedPushTransport(installations: [.status(401), .status(401)])
+        let attest = PushAttestRecorder(generatedKeys: ["fresh-key", "must-not-generate"])
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: "old-key", apnsToken: "01", grants: [:]
+        ))
+        let coordinator = makeCoordinator(store: store, script: script, attest: attest)
+
+        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        try await waitUntil { coordinator.diagnostic == .stoppedRejected }
+        #expect(await script.submittedModes == ["assertion", "attestation"])
+        #expect(await attest.generatedCount == 1)
+        #expect(store.value?.appAttestKeyID == "fresh-key")
+        #expect(store.value?.appAttestKeyRejected == true)
+
+        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(await script.submittedModes == ["assertion", "attestation"])
+        #expect(await attest.generatedCount == 1)
+    }
+
+    @MainActor
+    @Test("retryable failures use bounded backoff and stop at exhaustion")
+    func retryBoundsAndBackoff() async throws {
+        let script = ScriptedPushTransport(installations: [.status(503), .status(503), .status(503)])
+        let attest = PushAttestRecorder()
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: "key", apnsToken: "01", grants: [:]
+        ))
+        let retries = PushRetryRecorder()
+        let coordinator = makeCoordinator(store: store, script: script, attest: attest, retries: retries)
+
+        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        try await waitUntil { coordinator.diagnostic == .stoppedExhausted }
+
+        #expect(await script.challengeCount == 3)
+        #expect(await script.submittedModes == ["assertion", "assertion", "assertion"])
+        #expect(await retries.values == [.milliseconds(250), .milliseconds(750)])
+        #expect(store.value?.appAttestKeyID == "key")
+        #expect(store.value?.apnsToken == "01")
+    }
+
+    @MainActor
+    @Test("profile cancellation cannot commit a late proof")
+    func profileCancellation() async throws {
+        let started = PushCancellationProbe()
+        let transport = BoundedHTTPDataTransport { request, _ in
+            await started.markStarted()
+            try await Task.sleep(for: .seconds(30))
+            return (
+                Data(),
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            )
+        }
+        let original = PushCredentialDocument(appAttestKeyID: "key", apnsToken: "01", grants: [:])
+        let store = MemoryPushCredentialStore(initial: original)
+        let coordinator = PushNotificationCoordinator(
+            credentials: store,
+            notifications: allowedNotifications,
+            appAttest: PushAttestRecorder().client,
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!),
+            transport: transport
+        )
+        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        await started.waitUntilStarted()
+        await coordinator.reconcile(profile: nil, connected: false, client: GatewayClient())
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(coordinator.readiness == .unavailable)
+        #expect(coordinator.diagnostic == .idle)
+        #expect(store.value == original)
+    }
+
+    @MainActor
+    @Test("nonretryable rejection stops without backoff or key rotation")
+    func nonretryableStop() async throws {
+        let script = ScriptedPushTransport(installations: [.status(422)])
+        let attest = PushAttestRecorder()
+        let store = MemoryPushCredentialStore(initial: PushCredentialDocument(
+            appAttestKeyID: "key", apnsToken: "01", grants: [:]
+        ))
+        let retries = PushRetryRecorder()
+        let coordinator = makeCoordinator(store: store, script: script, attest: attest, retries: retries)
+
+        await coordinator.reconcile(profile: profile, connected: false, client: GatewayClient())
+        try await waitUntil { coordinator.diagnostic == .stoppedRejected }
+        #expect(await retries.values.isEmpty)
+        #expect(await script.submittedModes == ["assertion"])
+        #expect(store.value?.appAttestKeyID == "key")
+    }
+
+    @Test("diagnostics are fixed privacy-safe stage text")
+    func diagnosticPrivacy() {
+        let values = [
+            PushRegistrationDiagnostic.idle, .waitingForToken, .requestingChallenge,
+            .generatingKey, .generatingAttestation, .generatingAssertion, .submittingProof,
+            .retryBackoff, .transferringGrant, .complete, .stoppedRejected,
+            .stoppedInvalidKey, .stoppedInvalidResponse, .stoppedPersistence,
+            .stoppedExhausted, .stoppedUnavailable,
+        ].map(\.rawValue)
+        let forbidden = ["https://", "profile-1", "challenge-1", "key_1", "0123456789abcdef", "certificate", "bindingHash"]
+        #expect(values.allSatisfy { value in
+            forbidden.allSatisfy { !value.localizedCaseInsensitiveContains($0) }
+        })
+        #expect(values.allSatisfy { $0.utf8.count <= 32 })
+    }
+
+    @MainActor
+    private func makeCoordinator(
+        store: MemoryPushCredentialStore,
+        script: ScriptedPushTransport,
+        attest: PushAttestRecorder,
+        retries: PushRetryRecorder = PushRetryRecorder()
+    ) -> PushNotificationCoordinator {
+        let continuous = ContinuousClock()
+        return PushNotificationCoordinator(
+            credentials: store,
+            notifications: allowedNotifications,
+            appAttest: attest.client,
+            configuration: PushProductConfiguration(origin: URL(string: "https://push.example.test")!),
+            transport: BoundedHTTPDataTransport { request, maximumBytes in
+                try await script.handle(request, maximumBytes: maximumBytes)
+            },
+            clock: MonotonicClock(
+                now: { continuous.now },
+                sleep: { duration in await retries.append(duration) }
+            )
+        )
+    }
+
+    private var allowedNotifications: PushNotificationSystem {
+        PushNotificationSystem(
+            authorization: { .allowed },
+            requestAuthorization: { true },
+            registerForRemoteNotifications: {}
+        )
+    }
+
+    @MainActor
+    private func waitForGrant(in store: MemoryPushCredentialStore) async throws {
+        try await waitUntil { store.value?.grants[Self.profile.id] != nil }
+    }
+
+    @MainActor
+    private func waitUntil(_ predicate: () -> Bool) async throws {
+        for _ in 0..<200 {
+            if predicate() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("Timed out waiting for push registration state")
+    }
+
     private static let profile = GatewayProfile(
         id: "profile-1",
         label: "Mac",
@@ -192,9 +419,120 @@ struct PushNotificationCoordinatorTests {
 private final class MemoryPushCredentialStore: PushCredentialStoring, @unchecked Sendable {
     private let lock = NSLock()
     private var stored: PushCredentialDocument?
+    init(initial: PushCredentialDocument? = nil) { stored = initial }
     var value: PushCredentialDocument? { lock.withLock { stored } }
     func load() throws -> PushCredentialDocument? { value }
     func save(_ document: PushCredentialDocument) throws { lock.withLock { stored = document } }
+}
+
+private actor ScriptedPushTransport {
+    enum InstallationResult: Sendable {
+        case status(Int)
+        case timeout
+    }
+
+    private var installations: [InstallationResult]
+    private(set) var challengeCount = 0
+    private(set) var submittedModes: [String] = []
+    private(set) var submittedChallenges: [String] = []
+
+    init(installations: [InstallationResult]) { self.installations = installations }
+
+    func handle(_ request: URLRequest, maximumBytes: Int) throws -> (Data, HTTPURLResponse) {
+        #expect(maximumBytes == 16 * 1024)
+        if request.url?.path == "/v3/attestation/challenge" {
+            challengeCount += 1
+            let body = """
+            {"challengeId":"challenge-\(challengeCount)","challenge":"nonce-\(challengeCount)","expiresAt":"2026-08-24T06:00:00Z"}
+            """
+            return response(request, status: 200, body: body)
+        }
+        let body = try #require(request.httpBody)
+        let object = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        submittedModes.append(try #require(object["proof"] as? String))
+        submittedChallenges.append(try #require(object["challengeId"] as? String))
+        let next = installations.isEmpty ? .status(500) : installations.removeFirst()
+        switch next {
+        case .timeout:
+            throw URLError(.timedOut)
+        case .status(let status):
+            let responseBody = status == 201
+                ? #"{"version":1,"installationId":"installation_1","grantId":"grant_1","grantSecret":"0123456789abcdef0123456789abcdef","route":"beta"}"#
+                : #"{"error":"rejected"}"#
+            return response(request, status: status, body: responseBody)
+        }
+    }
+
+    private func response(
+        _ request: URLRequest,
+        status: Int,
+        body: String
+    ) -> (Data, HTTPURLResponse) {
+        (
+            Data(body.utf8),
+            HTTPURLResponse(
+                url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil
+            )!
+        )
+    }
+}
+
+private actor PushAttestRecorder {
+    private var generatedKeys: [String]
+    private var assertionResults: [Result<Data, NSError>]
+    private(set) var generatedCount = 0
+    private(set) var assertionKeys: [String] = []
+
+    init(
+        generatedKeys: [String] = ["generated-key"],
+        assertionResults: [Result<Data, NSError>] = []
+    ) {
+        self.generatedKeys = generatedKeys
+        self.assertionResults = assertionResults
+    }
+
+    nonisolated var client: PushAppAttestClient {
+        PushAppAttestClient(
+            isSupported: { true },
+            generateKey: { try await self.generate() },
+            attest: { _, _ in Data("attestation".utf8) },
+            assert: { key, _ in try await self.assertion(key: key) }
+        )
+    }
+
+    private func generate() throws -> String {
+        generatedCount += 1
+        guard !generatedKeys.isEmpty else { throw PushRegistrationError.unavailable }
+        return generatedKeys.removeFirst()
+    }
+
+    private func assertion(key: String) throws -> Data {
+        assertionKeys.append(key)
+        guard !assertionResults.isEmpty else { return Data("assertion".utf8) }
+        return try assertionResults.removeFirst().get()
+    }
+}
+
+private actor PushRetryRecorder {
+    private(set) var values: [Duration] = []
+    func append(_ duration: Duration) { values.append(duration) }
+}
+
+private actor PushCancellationProbe {
+    private var started = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func markStarted() {
+        started = true
+        let pending = waiters
+        waiters.removeAll()
+        pending.forEach { $0.resume() }
+    }
+
+    func waitUntilStarted() async {
+        if started { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
 }
 
 private actor PushRequestLog {

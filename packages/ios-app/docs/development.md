@@ -710,18 +710,26 @@ reject an empty origin. The Worker admits the signed application environment
 through App Attest: `com.tron.mobile.beta` development and `com.tron.mobile`
 development (`Tron Fast`/`ProdDebug`) use APNs sandbox, while
 `com.tron.mobile` production uses APNs production. iOS cannot select an
-arbitrary topic or environment. Challenge requests retain a short network
-deadline; the one-time, non-blocking App Attest installation uses a 60-second
-deadline so a cold mobile/Worker verification path does not become a false
-registration failure. Chat and Gateway connectivity never wait on it.
+arbitrary topic or environment. Challenge requests retain a short network deadline; the non-blocking App Attest
+installation uses a 60-second deadline so a cold mobile/Worker verification path
+does not become a false registration failure. A registration operation retries only
+ambiguous timeout or retryable 5xx twice, with bounded 250/750 ms backoff and a fresh
+challenge/proof each time. It preserves the APNs token, grants, and Keychain document;
+only an assertion 401 or the exact typed `DCError.Code.invalidKey` may rotate one key
+and admit one fresh attestation. Fresh-attestation rejection, nonretryable 4xx,
+malformed data, persistence failure, and exhaustion stop without churn. Chat and
+Gateway connectivity never wait on registration.
 
-`TronMobileBeta.entitlements` and `TronMobileProdDebug.entitlements` carry
-development APNs and App Attest environments; `TronMobileProd.entitlements`
-carries production values. Before shipping either
-identity, validate its provisioning profile contains both capabilities, pair a
-physical device, rotate its APNs token through reinstall/update, and verify revoke
-and offline retry behavior. Simulator tests use injected notification, App Attest,
-HTTP, and credential seams and are not proof of APNs delivery.
+`TronMobileBeta.entitlements` and `TronMobileProdDebug.entitlements` explicitly carry
+development APNs and App Attest environments; `TronMobileProd.entitlements` carries
+production values. The development App Attest environment defaults to sandbox when
+that entitlement is omitted, so omission from a development provisioning profile is
+not by itself an App Attest failure or a valid root-cause claim. Before shipping either
+identity, validate APNs provisioning and the complete signed entitlements, pair a
+physical device, rotate its APNs token through reinstall/update, and verify revoke,
+offline retry, and the privacy-safe Settings registration stage. Simulator tests use
+injected notification, App Attest, HTTP, credential, and backoff seams and are not
+proof of APNs delivery.
 
 Focused contract validation:
 

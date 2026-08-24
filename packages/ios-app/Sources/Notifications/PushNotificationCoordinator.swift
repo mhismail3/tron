@@ -31,6 +31,27 @@ enum PushReadiness: Equatable, Sendable {
     case pending
 }
 
+/// Fixed, privacy-safe registration stages for local troubleshooting. Values
+/// deliberately contain no service, device, profile, credential, or proof data.
+enum PushRegistrationDiagnostic: String, Equatable, Sendable {
+    case idle = "Idle"
+    case waitingForToken = "Waiting for APNs"
+    case requestingChallenge = "Requesting challenge"
+    case generatingKey = "Generating App Attest key"
+    case generatingAttestation = "Generating attestation"
+    case generatingAssertion = "Generating assertion"
+    case submittingProof = "Submitting proof"
+    case retryBackoff = "Retry backoff"
+    case transferringGrant = "Transferring grant"
+    case complete = "Complete"
+    case stoppedRejected = "Stopped: rejected"
+    case stoppedInvalidKey = "Stopped: invalid key"
+    case stoppedInvalidResponse = "Stopped: invalid response"
+    case stoppedPersistence = "Stopped: credential storage"
+    case stoppedExhausted = "Stopped: retry limit"
+    case stoppedUnavailable = "Stopped: unavailable"
+}
+
 struct PushGrant: Codable, Equatable, Sendable {
     let profileID: String
     let installationID: String
@@ -43,6 +64,9 @@ struct PushCredentialDocument: Codable, Equatable, Sendable {
     var appAttestKeyID: String?
     var apnsToken: String?
     var grants: [String: PushGrant]
+    /// A fresh attestation was definitively rejected. Keep its key for
+    /// diagnostics, but do not reinterpret it as an assertion key on reconcile.
+    var appAttestKeyRejected: Bool? = nil
 
     static let empty = PushCredentialDocument(appAttestKeyID: nil, apnsToken: nil, grants: [:])
 }
@@ -179,6 +203,9 @@ enum PushRegistrationError: Error {
     case invalidCredentialState
     case invalidResponse
     case rejected(Int)
+    case persistence
+    case invalidAppAttestKey
+    case retryExhausted
 }
 
 struct PushWorkerClient: Sendable {
@@ -335,6 +362,7 @@ final class PushNotificationCoordinator {
     private let appAttest: PushAppAttestClient
     private let worker: PushWorkerClient?
     private let uuid: @Sendable () -> UUID
+    private let clock: MonotonicClock
     private let credentialLoadFailed: Bool
     private var document: PushCredentialDocument
     private var context: Context?
@@ -342,6 +370,7 @@ final class PushNotificationCoordinator {
     private var registrationGeneration = 0
 
     private(set) var readiness: PushReadiness = .unavailable
+    private(set) var diagnostic: PushRegistrationDiagnostic = .idle
 
     convenience init() {
         self.init(
@@ -358,13 +387,15 @@ final class PushNotificationCoordinator {
         appAttest: PushAppAttestClient,
         configuration: PushProductConfiguration?,
         transport: BoundedHTTPDataTransport = .pushService,
-        uuid: @escaping @Sendable () -> UUID = UUID.init
+        uuid: @escaping @Sendable () -> UUID = UUID.init,
+        clock: MonotonicClock = .continuous
     ) {
         self.credentials = credentials
         self.notifications = notifications
         self.appAttest = appAttest
         self.worker = configuration.map { PushWorkerClient(configuration: $0, transport: transport) }
         self.uuid = uuid
+        self.clock = clock
         do {
             self.document = try credentials.load() ?? .empty
             self.credentialLoadFailed = false
@@ -383,6 +414,7 @@ final class PushNotificationCoordinator {
             registrationTask = nil
             context = nil
             readiness = .unavailable
+            diagnostic = .idle
             return
         }
         if context?.profile.id != profile.id {
@@ -393,6 +425,7 @@ final class PushNotificationCoordinator {
         context = Context(profile: profile, client: client)
         guard !credentialLoadFailed, worker != nil, appAttest.isSupported() else {
             readiness = .unavailable
+            diagnostic = .stoppedUnavailable
             return
         }
 
@@ -408,6 +441,7 @@ final class PushNotificationCoordinator {
         }
         guard status == .allowed else {
             readiness = .denied
+            diagnostic = .idle
             if connected { await removeRegistration(for: profile, client: client) }
             return
         }
@@ -418,6 +452,7 @@ final class PushNotificationCoordinator {
         notifications.registerForRemoteNotifications()
         guard document.apnsToken != nil else {
             if document.grants[profile.id] == nil { readiness = .registering }
+            diagnostic = .waitingForToken
             return
         }
         scheduleRegistration()
@@ -425,14 +460,27 @@ final class PushNotificationCoordinator {
 
     func receiveDeviceToken(_ token: Data) {
         guard !credentialLoadFailed, !token.isEmpty, token.count <= 256 else { return }
-        document.apnsToken = token.map { String(format: "%02x", $0) }.joined()
-        do { try credentials.save(document) }
-        catch { readiness = .pending; return }
+        let encoded = token.map { String(format: "%02x", $0) }.joined()
+        if document.apnsToken != encoded {
+            registrationGeneration &+= 1
+            registrationTask?.cancel()
+            registrationTask = nil
+        }
+        var updated = document
+        updated.apnsToken = encoded
+        do { try credentials.save(updated) }
+        catch {
+            readiness = .pending
+            diagnostic = .stoppedPersistence
+            return
+        }
+        document = updated
         scheduleRegistration()
     }
 
     func receiveRegistrationFailure() {
         readiness = .pending
+        diagnostic = .stoppedUnavailable
     }
 
     private func scheduleRegistration() {
@@ -445,76 +493,212 @@ final class PushNotificationCoordinator {
             defer {
                 if self.registrationGeneration == generation { self.registrationTask = nil }
             }
-            do { try await self.registerCurrent() }
+            do { try await self.registerCurrent(generation: generation) }
             catch is CancellationError { return }
-            catch PushRegistrationError.rejected(401) {
-                // App Attest keys can become invalid after restore/reinstall.
-                // Preserve grants, discard only the unusable attestation key,
-                // and let the next reconciliation establish a fresh identity.
-                self.document.appAttestKeyID = nil
-                try? self.credentials.save(self.document)
+            catch let error as PushRegistrationError {
                 self.readiness = .pending
+                self.diagnostic = Self.diagnostic(for: error)
+            } catch {
+                self.readiness = .pending
+                self.diagnostic = .stoppedUnavailable
             }
-            catch { self.readiness = .pending }
         }
     }
 
-    private func registerCurrent() async throws {
-        guard let context, let worker, let token = document.apnsToken else { throw PushRegistrationError.unavailable }
+    private enum ProofMode: String { case attestation, assertion }
+    private static let retryBackoffs: [Duration] = [.milliseconds(250), .milliseconds(750)]
+
+    /// One bounded operation owns all proof recovery. Every retry starts with a
+    /// fresh challenge and generates a fresh proof; neither value is replayed.
+    private func registerCurrent(generation: Int) async throws {
+        guard let admittedContext = context, let worker, let token = document.apnsToken else {
+            throw PushRegistrationError.unavailable
+        }
+        try validateRegistration(generation: generation, profileID: admittedContext.profile.id, token: token)
         let tokenHash = Self.hash("tron-apns-token-v1\0" + token)
-        if let grant = document.grants[context.profile.id], grant.tokenHash == tokenHash {
-            readiness = await transfer(grant, client: context.client) ? .ready : .pending
+        if let grant = document.grants[admittedContext.profile.id], grant.tokenHash == tokenHash {
+            diagnostic = .transferringGrant
+            readiness = await transfer(grant, client: admittedContext.client) ? .ready : .pending
+            diagnostic = readiness == .ready ? .complete : .stoppedUnavailable
             return
         }
 
-        let challenge = try await worker.challenge()
-        guard challenge.challengeId.utf8.count <= 160,
-              challenge.challenge.utf8.count <= 512,
-              !challenge.challengeId.isEmpty,
-              !challenge.challenge.isEmpty else { throw PushRegistrationError.invalidResponse }
-
-        var keyID = document.appAttestKeyID
-        var mode = "assertion"
-        if keyID == nil {
-            keyID = try await appAttest.generateKey()
-            document.appAttestKeyID = keyID
-            try credentials.save(document)
-            mode = "attestation"
+        if document.appAttestKeyID != nil, document.appAttestKeyRejected == true {
+            throw PushRegistrationError.rejected(401)
         }
-        guard let keyID, !keyID.isEmpty, keyID.utf8.count <= 512 else { throw PushRegistrationError.invalidCredentialState }
-        let bindingHash = Self.hash("tron-push-binding-v1\0\(context.profile.machineId)\0\(context.profile.deviceId)")
-        let payload = PushWorkerClient.RegistrationPayload(
-            version: 1,
-            challengeId: challenge.challengeId,
-            challenge: challenge.challenge,
-            keyId: keyID,
-            apnsToken: token,
-            route: .current,
-            bindingHash: bindingHash
-        )
-        let clientDataHash = Data(SHA256.hash(data: try PushWorkerClient.canonicalData(payload)))
-        let proof = mode == "attestation"
-            ? try await appAttest.attest(keyID, clientDataHash)
-            : try await appAttest.assert(keyID, clientDataHash)
-        let response = try await worker.register(payload: payload, mode: mode, proof: proof)
-        try Task.checkCancellation()
-        guard self.context?.profile.id == context.profile.id else { throw CancellationError() }
-        guard response.route == payload.route,
-              Self.isOpaqueID(response.installationId),
-              Self.isOpaqueID(response.grantId),
-              response.grantSecret.utf8.count >= 32,
-              response.grantSecret.utf8.count <= 512 else { throw PushRegistrationError.invalidResponse }
+        var mode: ProofMode = document.appAttestKeyID == nil ? .attestation : .assertion
+        var recoveredInvalidKey = false
+        var retryIndex = 0
 
-        let grant = PushGrant(
-            profileID: context.profile.id,
-            installationID: response.installationId,
-            grantID: response.grantId,
-            grantSecret: response.grantSecret,
-            tokenHash: tokenHash
-        )
-        document.grants[context.profile.id] = grant
-        try credentials.save(document)
-        readiness = await transfer(grant, client: context.client) ? .ready : .pending
+        while true {
+            try validateRegistration(generation: generation, profileID: admittedContext.profile.id, token: token)
+            do {
+                diagnostic = .requestingChallenge
+                let challenge = try await worker.challenge()
+                try validateRegistration(generation: generation, profileID: admittedContext.profile.id, token: token)
+                guard challenge.challengeId.utf8.count <= 160,
+                      challenge.challenge.utf8.count <= 512,
+                      !challenge.challengeId.isEmpty,
+                      !challenge.challenge.isEmpty else { throw PushRegistrationError.invalidResponse }
+
+                var keyID = document.appAttestKeyID
+                if keyID == nil {
+                    diagnostic = .generatingKey
+                    keyID = try await appAttest.generateKey()
+                    try validateRegistration(generation: generation, profileID: admittedContext.profile.id, token: token)
+                    try persistAppAttestKeyID(keyID, rejected: false)
+                    mode = .attestation
+                }
+                guard let keyID, !keyID.isEmpty, keyID.utf8.count <= 512 else {
+                    throw PushRegistrationError.invalidCredentialState
+                }
+                let bindingHash = Self.hash(
+                    "tron-push-binding-v1\0\(admittedContext.profile.machineId)\0\(admittedContext.profile.deviceId)"
+                )
+                let payload = PushWorkerClient.RegistrationPayload(
+                    version: 1,
+                    challengeId: challenge.challengeId,
+                    challenge: challenge.challenge,
+                    keyId: keyID,
+                    apnsToken: token,
+                    route: .current,
+                    bindingHash: bindingHash
+                )
+                let clientDataHash = Data(SHA256.hash(data: try PushWorkerClient.canonicalData(payload)))
+                let proof: Data
+                do {
+                    diagnostic = mode == .attestation ? .generatingAttestation : .generatingAssertion
+                    proof = mode == .attestation
+                        ? try await appAttest.attest(keyID, clientDataHash)
+                        : try await appAttest.assert(keyID, clientDataHash)
+                } catch {
+                    guard mode == .assertion, Self.isInvalidAppAttestKey(error), !recoveredInvalidKey else {
+                        if Self.isInvalidAppAttestKey(error) { throw PushRegistrationError.invalidAppAttestKey }
+                        throw error
+                    }
+                    try rotateInvalidKey()
+                    recoveredInvalidKey = true
+                    mode = .attestation
+                    continue
+                }
+                try validateRegistration(generation: generation, profileID: admittedContext.profile.id, token: token)
+                diagnostic = .submittingProof
+                do {
+                    let response = try await worker.register(payload: payload, mode: mode.rawValue, proof: proof)
+                    try validateRegistration(
+                        generation: generation,
+                        profileID: admittedContext.profile.id,
+                        token: token
+                    )
+                    guard response.route == payload.route,
+                          Self.isOpaqueID(response.installationId),
+                          Self.isOpaqueID(response.grantId),
+                          response.grantSecret.utf8.count >= 32,
+                          response.grantSecret.utf8.count <= 512 else {
+                        throw PushRegistrationError.invalidResponse
+                    }
+                    let grant = PushGrant(
+                        profileID: admittedContext.profile.id,
+                        installationID: response.installationId,
+                        grantID: response.grantId,
+                        grantSecret: response.grantSecret,
+                        tokenHash: tokenHash
+                    )
+                    var updated = document
+                    updated.grants[admittedContext.profile.id] = grant
+                    updated.appAttestKeyRejected = false
+                    do { try credentials.save(updated) }
+                    catch { throw PushRegistrationError.persistence }
+                    document = updated
+                    diagnostic = .transferringGrant
+                    readiness = await transfer(grant, client: admittedContext.client) ? .ready : .pending
+                    diagnostic = readiness == .ready ? .complete : .stoppedUnavailable
+                    return
+                } catch PushRegistrationError.rejected(401) {
+                    guard mode == .assertion, !recoveredInvalidKey else {
+                        if mode == .attestation { try markCurrentKeyRejected() }
+                        throw PushRegistrationError.rejected(401)
+                    }
+                    try rotateInvalidKey()
+                    recoveredInvalidKey = true
+                    mode = .attestation
+                    continue
+                } catch PushRegistrationError.persistence {
+                    // A local commit failure says nothing about key validity.
+                    throw PushRegistrationError.persistence
+                } catch {
+                    // An attestation request may have crossed the service boundary.
+                    // Its persisted key can only continue with a new assertion.
+                    if mode == .attestation, Self.isRetryable(error) {
+                        mode = .assertion
+                    } else if mode == .attestation {
+                        try markCurrentKeyRejected()
+                    }
+                    throw error
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard Self.isRetryable(error) else { throw error }
+                guard retryIndex < Self.retryBackoffs.count else {
+                    throw PushRegistrationError.retryExhausted
+                }
+                diagnostic = .retryBackoff
+                let delay = Self.retryBackoffs[retryIndex]
+                retryIndex &+= 1
+                try await clock.sleep(delay)
+                try validateRegistration(generation: generation, profileID: admittedContext.profile.id, token: token)
+            }
+        }
+    }
+
+    private func validateRegistration(generation: Int, profileID: String, token: String) throws {
+        try Task.checkCancellation()
+        guard registrationGeneration == generation,
+              context?.profile.id == profileID,
+              document.apnsToken == token else { throw CancellationError() }
+    }
+
+    private func rotateInvalidKey() throws {
+        try persistAppAttestKeyID(nil, rejected: false)
+    }
+
+    private func markCurrentKeyRejected() throws {
+        try persistAppAttestKeyID(document.appAttestKeyID, rejected: true)
+    }
+
+    private func persistAppAttestKeyID(_ keyID: String?, rejected: Bool) throws {
+        var updated = document
+        updated.appAttestKeyID = keyID
+        updated.appAttestKeyRejected = rejected
+        do { try credentials.save(updated) }
+        catch { throw PushRegistrationError.persistence }
+        document = updated
+    }
+
+    private static func isInvalidAppAttestKey(_ error: Error) -> Bool {
+        let value = error as NSError
+        return value.domain == DCError.errorDomain
+            && value.code == DCError.Code.invalidKey.rawValue
+    }
+
+    private static func isRetryable(_ error: Error) -> Bool {
+        if case PushRegistrationError.rejected(let status) = error {
+            return (500...599).contains(status)
+        }
+        let value = error as NSError
+        return value.domain == NSURLErrorDomain && value.code == URLError.timedOut.rawValue
+    }
+
+    private static func diagnostic(for error: PushRegistrationError) -> PushRegistrationDiagnostic {
+        switch error {
+        case .rejected: .stoppedRejected
+        case .invalidCredentialState, .invalidResponse, .invalidConfiguration: .stoppedInvalidResponse
+        case .persistence: .stoppedPersistence
+        case .invalidAppAttestKey: .stoppedInvalidKey
+        case .retryExhausted: .stoppedExhausted
+        case .unavailable: .stoppedUnavailable
+        }
     }
 
     private func transfer(_ grant: PushGrant, client: GatewayClient) async -> Bool {
