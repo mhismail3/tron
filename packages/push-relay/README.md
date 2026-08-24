@@ -136,7 +136,8 @@ cd packages/push-relay
 npm ci
 npm run check
 npm test
-npm run build       # Wrangler dry-run only; does not deploy
+npm run build           # production-config dry-run only; does not deploy
+npm run build:sandbox   # isolated sandbox-config dry-run only
 ```
 
 Tests run in the Workers Vitest pool and exercise the real SQLite Durable Object
@@ -144,13 +145,31 @@ boundary. Outbound APNs requests are intercepted locally.
 
 ## Manual deployment
 
-First inventory the existing `tron-push-relay` Worker and confirm its deployed
-migration tag, Durable Object binding, workers.dev/custom origin, and secret
-names. Do not print secret values. The migration lineage intentionally creates
-the historical `RelayLedger` SQLite class at `v1` and renames it to
-`PushRegistry` at `v2`, allowing the existing service resource to be repurposed.
-The v3 registry uses a new Durable Object instance name, so stale delivery
-receipts are not treated as registrations.
+Use only read-only inventory commands before any mutation. They expose IDs and
+secret names, never secret values; retain their output only in maintainer-owned
+release evidence:
+
+```bash
+npx wrangler whoami
+npx wrangler deployments status --name tron-push-relay --json
+npx wrangler deployments list --name tron-push-relay --json
+npx wrangler versions list --name tron-push-relay --json
+npx wrangler secret list --name tron-push-relay --format json
+```
+
+Confirm the deployed migration tag, Durable Object binding,
+workers.dev/custom origin, and secret names. Production and sandbox are fresh
+services whose only SQLite class is `PushRegistry` at `v1`. The retired Worker,
+its `RelayLedger` namespace, and `TRON_RELAY_SECRET` are not migration inputs and
+must not exist in the release account. Any other Durable Object class or
+migration state is a stop condition requiring deletion or Cloudflare review.
+
+The named `sandbox` environment is a distinct service,
+`tron-push-relay-sandbox`, with its own SQLite Durable Object namespace and
+secrets. A bare deploy never counts as sandbox validation. Configure the four
+secret names below independently for sandbox, then a maintainer may manually
+run `npx wrangler deploy --env sandbox`. No script in this package performs that
+mutation.
 
 Configure these Cloudflare secrets manually:
 
@@ -161,13 +180,11 @@ APNS_TEAM_ID
 APPLE_TEAM_ID
 ```
 
-Then, only after review and sandbox verification, a maintainer may run:
+After physical-device sandbox verification, an explicit production release
+review, and a rollback decision, a maintainer may manually run the production
+command `npx wrangler deploy --env=""`. It must not be invoked by an agent or CI.
 
-```bash
-npx wrangler deploy
-```
-
-There is intentionally no CI deployment, install-time deployment, shared Mac
+There is intentionally no deployment script, CI deployment, install-time deployment, shared Mac
 relay secret, or user-configurable relay origin. The signed Mac/iOS release must
 be built with the manually verified public Worker origin.
 

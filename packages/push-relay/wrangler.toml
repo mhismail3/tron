@@ -6,18 +6,28 @@ compatibility_date = "2026-07-24"
 name = "PUSH_REGISTRY"
 class_name = "PushRegistry"
 
-# Preserve the deployed Durable Object migration lineage. A new deployment
-# creates RelayLedger at v1 and immediately renames the class at v2; an
-# existing final-v2 relay applies only the rename.
+# Production is a fresh service. The retired RelayLedger namespace is not part
+# of this migration history and must never be recreated.
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["RelayLedger"]
+new_sqlite_classes = ["PushRegistry"]
 
-[[migrations]]
-tag = "v2"
-renamed_classes = [{ from = "RelayLedger", to = "PushRegistry" }]
+# Isolated physical-device validation target. Named-environment bindings and
+# migrations are intentionally independent from the historical production
+# service, so `--env sandbox` can never rename or write its Durable Object.
+[env.sandbox]
+name = "tron-push-relay-sandbox"
+workers_dev = true
 
-# Secrets are configured manually in Cloudflare:
+[[env.sandbox.durable_objects.bindings]]
+name = "PUSH_REGISTRY"
+class_name = "PushRegistry"
+
+[[env.sandbox.migrations]]
+tag = "v1"
+new_sqlite_classes = ["PushRegistry"]
+
+# Secrets are configured manually and independently on each service:
 # - APNS_KEY_P8
 # - APNS_KEY_ID
 # - APNS_TEAM_ID

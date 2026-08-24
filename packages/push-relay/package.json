@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "wrangler deploy --dry-run --outdir dist",
+    "build": "wrangler deploy --env=\"\" --dry-run --outdir dist",
+    "build:sandbox": "wrangler deploy --env sandbox --dry-run --outdir dist-sandbox",
     "check": "tsc --noEmit",
     "test": "vitest run",
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "dev": "wrangler dev"
   },
   "dependencies": {
     "@peculiar/x509": "1.14.3",
