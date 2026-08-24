@@ -280,7 +280,12 @@ struct PushWorkerClient: Sendable {
         acceptedStatus: Int,
         as type: Response.Type
     ) async throws -> Response {
-        var request = URLRequest(url: configuration.endpoint(path), timeoutInterval: 15)
+        // The one-time App Attest installation carries a certificate chain and
+        // crosses the Durable Object verification boundary. Keep ordinary
+        // challenge admission tight while allowing that non-blocking bootstrap
+        // to finish on a cold mobile/Worker path.
+        let timeout: TimeInterval = path == "/v3/installations" ? 60 : 15
+        var request = URLRequest(url: configuration.endpoint(path), timeoutInterval: timeout)
         request.httpMethod = "POST"
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")

@@ -156,6 +156,8 @@ struct PushNotificationCoordinatorTests {
         let requests = await requestLog.requests
         #expect(requests.map { $0.url?.path } == ["/v3/attestation/challenge", "/v3/installations"])
         #expect(requests[0].httpBody == nil)
+        #expect(requests[0].timeoutInterval == 15)
+        #expect(requests[1].timeoutInterval == 60)
         let registrationBody = try #require(requests[1].httpBody)
         let registration = try #require(JSONSerialization.jsonObject(with: registrationBody) as? [String: Any])
         #expect(registration["proof"] as? String == "attestation")

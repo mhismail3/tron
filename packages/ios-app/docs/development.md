@@ -710,7 +710,10 @@ reject an empty origin. The Worker admits the signed application environment
 through App Attest: `com.tron.mobile.beta` development and `com.tron.mobile`
 development (`Tron Fast`/`ProdDebug`) use APNs sandbox, while
 `com.tron.mobile` production uses APNs production. iOS cannot select an
-arbitrary topic or environment.
+arbitrary topic or environment. Challenge requests retain a short network
+deadline; the one-time, non-blocking App Attest installation uses a 60-second
+deadline so a cold mobile/Worker verification path does not become a false
+registration failure. Chat and Gateway connectivity never wait on it.
 
 `TronMobileBeta.entitlements` and `TronMobileProdDebug.entitlements` carry
 development APNs and App Attest environments; `TronMobileProd.entitlements`
