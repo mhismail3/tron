@@ -123,8 +123,11 @@ private struct TronTopBlurModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         // The concrete ScrollView/List consumes this value inside the
-        // NavigationStack. Its overlay therefore stays below toolbar chrome.
-        content.environment(\.tronTopBlurStyle, style)
+        // NavigationStack. The notice host remains in the content layer,
+        // never as app-drawn toolbar chrome, and acquires the active lease.
+        content
+            .environment(\.tronTopBlurStyle, style)
+            .overlay(alignment: .top) { InAppNoticeHost() }
     }
 }
 

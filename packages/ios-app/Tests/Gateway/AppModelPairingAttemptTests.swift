@@ -120,7 +120,7 @@ struct AppModelPairingAttemptTests {
             #expect(fixture.socketFactory.requests.isEmpty)
             #expect(fixture.model.connectionState == .unpaired)
             #expect(fixture.model.hasResolvedLaunchState)
-            #expect(fixture.model.lastError == "This gateway no longer has a Keychain token. Pair it again.")
+            #expect(fixture.model.visibleNotices.last?.title == "This gateway no longer has a Keychain token. Pair it again.")
         }
     }
 

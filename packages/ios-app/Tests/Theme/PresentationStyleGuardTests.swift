@@ -527,7 +527,8 @@ struct PresentationStyleGuardTests {
         #expect(!imagePreview.contains("tronTopBlur"))
         #expect(blur.contains(".allowsHitTesting(false)"))
         #expect(blur.contains(".accessibilityHidden(true)"))
-        #expect(blur.contains("content.environment(\\.tronTopBlurStyle, style)"))
+        #expect(blur.contains(".environment(\\.tronTopBlurStyle, style)"))
+        #expect(blur.contains(".overlay(alignment: .top) { InAppNoticeHost() }"))
         #expect(blur.contains("func tronTopBlurSurface()"))
         #expect(!blur.contains("TronNavigationTopBlurInstaller"))
         #expect(!chat.contains("Text(\"Tron is working\")"))
@@ -561,14 +562,14 @@ struct PresentationStyleGuardTests {
         #expect(sheet.contains("isInteractive: controller.isRunning(model: model)"))
         #expect(sheet.contains("Section(\"Open terminals\")"))
         #expect(sheet.contains("Section(\"Recent terminals\")"))
-        #expect(sheet.contains(".alert(\"Terminal action failed\""))
+        #expect(!sheet.contains(".alert(\"Terminal action failed\""))
         #expect(!sheet.contains("Task { await controller"))
         #expect(!sheet.contains("final class TerminalController"))
         #expect(!sheet.contains("UIViewRepresentable"))
         #expect(presentation.contains("final class TerminalController"))
         #expect(presentation.contains("private var lifecycleFlight: LifecycleFlight?"))
         #expect(presentation.contains("private var pendingLifecycleRequest: LifecycleRequest?"))
-        #expect(presentation.contains("var actionError: String?"))
+        #expect(presentation.contains("model.presentError(error, scope: noticeScope)"))
         #expect(presentation.contains("func start(sessionID: String, model: AppModel)"))
         #expect(!presentation.contains("import SwiftTerm"))
         #expect(!presentation.contains("UIViewRepresentable"))
@@ -665,8 +666,8 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Onboarding/SetupComponents.swift"),
             encoding: .utf8
         )
-        let globalSheets = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Components/GlobalSheets.swift"),
+        let providerAuthPresenter = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Components/ProviderAuthPresenter.swift"),
             encoding: .utf8
         )
         let appearance = try String(
@@ -754,9 +755,9 @@ struct PresentationStyleGuardTests {
         #expect(!settings.contains("Import Legacy Sessions"))
         #expect(providerSettings.contains(".providerAuthPresenter()"))
         #expect(providerSettings.contains("currently visible provider"))
-        #expect(globalSheets.contains("@State private var presentedOperationID: String?"))
-        #expect(globalSheets.contains("cancelAuth(operationID: closingOperationID)"))
-        #expect(!globalSheets.contains("Task { await model.cancelAuth() }"))
+        #expect(providerAuthPresenter.contains("@State private var presentedOperationID: String?"))
+        #expect(providerAuthPresenter.contains("cancelAuth(operationID: closingOperationID)"))
+        #expect(!providerAuthPresenter.contains("Task { await model.cancelAuth() }"))
         #expect(providers.contains("Button(\"Log Out\", systemImage: \"rectangle.portrait.and.arrow.right\", role: .destructive)"))
         #expect(providers.contains("Image(systemName: \"ellipsis\")"))
         #expect(providers.contains("size: TronTypography.sizeBody, weight: .bold"))
@@ -977,7 +978,8 @@ struct PresentationStyleGuardTests {
         #expect(context.contains("SessionExportPresentationPolicy.showsProgress"))
         #expect(context.contains(".disabled(!SessionExportPresentationPolicy.canStart"))
         #expect(context.contains("format == \"jsonl\" ? \"JSONL Export\" : \"HTML Export\""))
-        #expect(context.contains("exportError = error.localizedDescription"))
+        #expect(context.contains("model.presentError(error, scope: noticeScope)"))
+        #expect(!context.contains("exportError"))
         #expect(!context.contains("title: exporting"))
         #expect(context.contains("await model.discardExportArtifact(exportedURL)"))
         for action in ["renameSession", "compact", "setModel", "setThinking", "reloadResources"] {

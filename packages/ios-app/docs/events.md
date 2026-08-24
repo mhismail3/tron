@@ -29,7 +29,7 @@ admits and reduces mounted-session topics:
   has exact page/item/identity/cursor bounds and publishes atomically. Mixed page revisions
   and expired continuation leases restart once from a nil cursor and then retain the previous catalog silently; this expected
   optimistic invalidation no longer creates the intrusive “Sessions changed while loading the
-  dashboard” popup or another routine synchronization alert;
+  dashboard” in-app notification or another routine synchronization notice;
 - session snapshot/change topics enter the store's composed synchronization quarantine and
   update only the currently subscribed mounted or synchronizing authority. Baseline plus the
   contiguous suffix reduce before snapshot/token publication in one MainActor turn. Full snapshots
@@ -236,7 +236,7 @@ interactive surfaces remain deferred. Actionable responses carry the interaction
 strips all interactions, surfaces, focus/lease, capabilities/diagnostics, and ephemeral semantic state. Native
 composer synchronization is scoped to the exact mounted presentation, suppresses its operation-ID echo,
 and never retries a stale base revision as an unconditional overwrite. The run
-continues on the Mac and the app catches up without presenting transport errors as modal alerts.
+continues on the Mac and the app catches up without presenting transport errors as modal alerts; recoverable failures use scoped in-app notifications instead.
 Interaction sheets, working state (ambient bottom
 activity for the ordinary default and explicit rows for custom/retry detail), editor updates, typed generic
 notices, and durable extension transcript entries remain active. The canonical session name remains the

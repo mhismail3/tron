@@ -201,7 +201,7 @@ struct TrustSettingsView: View {
             return
         } catch {
             guard target == self.target else { return }
-            model.lastError = error.localizedDescription
+            model.presentError(error)
         }
     }
 
@@ -214,7 +214,7 @@ struct TrustSettingsView: View {
                 inspection = value
             } catch {
                 guard target == self.target else { return }
-                model.lastError = error.localizedDescription
+                model.presentError(error)
             }
         }
     }

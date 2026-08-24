@@ -224,7 +224,7 @@ struct AppModelEventTests {
         )
         try await Task.sleep(for: .milliseconds(250))
         #expect(model.composerDrafts.text(for: secondScope) == "local")
-        #expect(model.lastError == nil)
+        #expect(model.visibleNotices.isEmpty)
     }
 
     @Test("prepared snapshots install while malformed inner DTOs keep reducer semantics")
@@ -545,7 +545,7 @@ struct AppModelEventTests {
         ])))
 
         #expect(model.selectedSnapshot?.eventSequence == 89)
-        #expect(model.latestNotice == "Caught up")
+        #expect(model.visibleNotices.last?.title == "Caught up")
     }
 
     @Test("configured default model is preferred over catalog order")
@@ -578,7 +578,7 @@ struct AppModelEventTests {
         #expect(model.providerInvalidationGeneration == 1)
         #expect(model.packageInvalidationGeneration == 1)
         #expect(model.customModelInvalidationGeneration == 1)
-        #expect(model.lastError == nil)
+        #expect(model.visibleNotices.isEmpty)
     }
 
     @Test("receipt replay admission rejects cancellation after confirmed missing")

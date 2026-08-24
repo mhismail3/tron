@@ -430,7 +430,7 @@ struct NewSessionSheet: View {
             guard workspace == cwd,
                   selectedServerID == profileID,
                   model.profiles.selected?.id == profileID else { return false }
-            model.lastError = error.localizedDescription
+            model.presentError(error)
             return false
         }
     }
@@ -444,7 +444,7 @@ struct NewSessionSheet: View {
             trustInspection = inspection
         } catch {
             guard workspace == cwd else { return }
-            model.lastError = error.localizedDescription
+            model.presentError(error)
         }
     }
 
@@ -491,7 +491,7 @@ struct NewSessionSheet: View {
         do {
             let route = try await model.createSession(cwd: cwd, sourceControl: sourceControl)
             guard model.ownsNavigationRoute(route) else {
-                model.lastError = "The new session was created, but this navigation request is no longer current."
+                model.presentError("The new session was created, but this navigation request is no longer current.")
                 dismiss()
                 return
             }
@@ -500,7 +500,7 @@ struct NewSessionSheet: View {
         } catch is CancellationError {
             return
         } catch {
-            model.lastError = error.localizedDescription
+            model.presentError(error)
         }
     }
 

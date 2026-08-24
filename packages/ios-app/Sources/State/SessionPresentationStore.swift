@@ -92,8 +92,14 @@ protocol SessionPresentationStoreDelegate: AnyObject {
         _ snapshot: SessionSnapshot,
         target: SessionPresentationIdentity
     )
-    func sessionPresentationStorePostNotice(_ message: String, replacing key: GlobalNoticeKey?)
-    func sessionPresentationStoreRemoveNotice(_ key: GlobalNoticeKey)
+    func sessionPresentationStorePostNotice(
+        _ message: String,
+        replacing key: InAppNoticeKey?,
+        role: InAppNoticeCenter.Role,
+        scope: InAppNoticeScope?
+    )
+    func sessionPresentationStoreRemoveNotice(_ key: InAppNoticeKey, scope: InAppNoticeScope?)
+    func sessionPresentationStoreRetireNoticeScope(_ scope: InAppNoticeScope)
     func sessionPresentationStoreSurface(_ error: Error)
     func sessionPresentationStoreCheckpointCache()
 }
@@ -104,6 +110,37 @@ final class SessionPresentationStore {
     private let client: GatewayClient
     private let performanceSignposts: any PerformanceSignposting
     weak var delegate: (any SessionPresentationStoreDelegate)?
+
+    private func noticeScope(for target: SessionPresentationIdentity?) -> InAppNoticeScope? {
+        target.map { .session(id: $0.sessionID, generation: $0.generation) }
+    }
+
+    // During an opening transition, notices belong to the pending presentation
+    // rather than the still-mounted target. This prevents new errors from
+    // being retired by a stale close of the previous presentation.
+    private var noticeScope: InAppNoticeScope? {
+        noticeScope(for: pendingTarget ?? target)
+    }
+
+    private func retireNoticeScopes(_ targets: [SessionPresentationIdentity?]) {
+        var scopes = Set<InAppNoticeScope>()
+        for target in targets {
+            if let scope = noticeScope(for: target) { scopes.insert(scope) }
+        }
+        for scope in scopes { delegate?.sessionPresentationStoreRetireNoticeScope(scope) }
+    }
+
+    private func mount(_ requested: SessionPresentationIdentity) {
+        let previousTarget = target
+        let previousPendingTarget = pendingTarget
+        target = requested
+        pendingTarget = nil
+        if revokedTarget == requested { revokedTarget = nil }
+        retireNoticeScopes([
+            previousTarget,
+            previousPendingTarget == requested ? nil : previousPendingTarget
+        ])
+    }
 
     private(set) var target: SessionPresentationIdentity?
     private var pendingTarget: SessionPresentationIdentity?
@@ -244,7 +281,7 @@ final class SessionPresentationStore {
     }
 
     func open(_ sessionID: String) async throws -> Int {
-        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
         let interval = performanceSignposts.begin(.sessionOpen)
         var result = PerformanceResult.failure
         defer {
@@ -272,6 +309,10 @@ final class SessionPresentationStore {
         defer {
             if !didOpen {
                 deferredEffectsByTarget[requested] = nil
+                // Failed intake owns no presentation UI. Retire its exact
+                // notice scope before dropping the pending target so a
+                // catch-up/error capsule cannot leak into a later route.
+                retireNoticeScopes([requested])
                 // A failed fresh open must not leave the dashboard believing
                 // this exact route is still selected. The live subscription
                 // owner is closed by the synchronization failure path.
@@ -312,9 +353,7 @@ final class SessionPresentationStore {
             }
             subscriptionTarget = requested
         }
-        target = requested
-        pendingTarget = nil
-        if revokedTarget == requested { revokedTarget = nil }
+        mount(requested)
         isAuthoritative = true
         // Composer presentation authority must mount before deferred editor
         // effects publish for this exact fresh presentation.
@@ -333,10 +372,13 @@ final class SessionPresentationStore {
         guard target == requested,
               pendingTarget == nil || pendingTarget == requested else { return }
         // Only the exact mounted/pending owner may release its revocation. A
-        // stale close during replacement must leave old intake revoked.
+        // stale close during replacement must leave the newer pending scope
+        // untouched.
+        let oldTarget = target
+        let oldPendingTarget = pendingTarget
         if revokedTarget == requested { revokedTarget = nil }
         deferredEffectsByTarget[requested] = nil
-        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+        retireNoticeScopes([oldTarget, oldPendingTarget])
         target = nil
         if pendingTarget == requested { pendingTarget = nil }
         isAuthoritative = false
@@ -745,11 +787,14 @@ final class SessionPresentationStore {
         if mountedTarget != nil, snapshot != nil {
             advanceChatProjection(canonical: false)
         }
-        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
     }
 
     func clearProfile() {
         nextPresentationGeneration &+= 1
+        let oldTarget = target
+        let oldPendingTarget = pendingTarget
+        retireNoticeScopes([oldTarget, oldPendingTarget])
         target = nil
         pendingTarget = nil
         snapshot = nil
@@ -768,6 +813,9 @@ final class SessionPresentationStore {
 
     func remove(sessionID: String) {
         guard selectedSessionID == sessionID else { return }
+        let oldTarget = target
+        let oldPendingTarget = pendingTarget
+        retireNoticeScopes([oldTarget, oldPendingTarget])
         target = nil
         pendingTarget = nil
         snapshot = nil
@@ -811,7 +859,7 @@ final class SessionPresentationStore {
             }
             advanceChatProjection(canonical: true)
             isAuthoritative = mountedTarget?.sessionID == authoritative.sessionId
-            delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+            delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
             delegate?.sessionPresentationStoreCheckpointCache()
             return
         }
@@ -1154,7 +1202,7 @@ final class SessionPresentationStore {
             ) {
             case .success:
                 synchronization.complete(lease, outcome: true)
-                delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+                delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
                 delegate?.sessionPresentationStoreCheckpointCache()
                 return true
             case .retry:
@@ -1169,7 +1217,7 @@ final class SessionPresentationStore {
                         connectionGeneration: synchronizationConnectionGeneration
                     )
                     synchronization.complete(lease, outcome: false)
-                    if ownsNotice { delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp) }
+                    if ownsNotice { delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope) }
                     return false
                 }
                 synchronization.restartBuffer(for: lease)
@@ -1188,12 +1236,17 @@ final class SessionPresentationStore {
                     // not replace its truthful native state with a global capsule
                     // while the connection owner is being recycled.
                     if snapshot != nil { advanceChatProjection(canonical: false) }
-                    delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+                    delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
                 case .presentation:
                     if showCatchUpNotice {
-                        delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
+                        delegate?.sessionPresentationStorePostNotice(
+                            Self.sessionCatchUpNotice,
+                            replacing: .sessionCatchUp,
+                            role: .info,
+                            scope: noticeScope
+                        )
                     } else {
-                        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+                        delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
                     }
                 }
                 return false
@@ -1210,9 +1263,14 @@ final class SessionPresentationStore {
             switch lease.intent {
             case .reconnect:
                 if snapshot != nil { advanceChatProjection(canonical: false) }
-                delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp)
+                delegate?.sessionPresentationStoreRemoveNotice(.sessionCatchUp, scope: noticeScope)
             case .presentation:
-                delegate?.sessionPresentationStorePostNotice(Self.sessionCatchUpNotice, replacing: .sessionCatchUp)
+                delegate?.sessionPresentationStorePostNotice(
+                    Self.sessionCatchUpNotice,
+                    replacing: .sessionCatchUp,
+                    role: .info,
+                    scope: noticeScope
+                )
             }
         }
         return false
@@ -1896,8 +1954,17 @@ final class SessionPresentationStore {
                     operationID: operationID
                 )
             case .notice(let message, let type):
-                let presented = type == "info" ? message : "\(type == "warning" ? "Warning" : "Error"): \(message)"
-                delegate?.sessionPresentationStorePostNotice(presented, replacing: nil)
+                let role: InAppNoticeCenter.Role = switch type {
+                case "warning": .warning
+                case "error": .error
+                default: .info
+                }
+                delegate?.sessionPresentationStorePostNotice(
+                    message,
+                    replacing: nil,
+                    role: role,
+                    scope: noticeScope
+                )
             case .failure(let failure):
                 delegate?.sessionPresentationStoreSurface(failure)
             }
@@ -2011,6 +2078,27 @@ final class SessionPresentationStore {
     static let sessionCatchUpNotice = "Live session view is catching up; the run continues on your Mac."
 
     #if HOSTED_TEST
+    func installHostedPresentationTargets(
+        target: SessionPresentationIdentity?,
+        pending: SessionPresentationIdentity?
+    ) {
+        self.target = target
+        pendingTarget = pending
+    }
+
+    func emitHostedNoticeForTesting() {
+        delegate?.sessionPresentationStorePostNotice(
+            "hosted",
+            replacing: nil,
+            role: .info,
+            scope: noticeScope
+        )
+    }
+
+    func mountHostedPresentationForTesting(_ target: SessionPresentationIdentity) {
+        mount(target)
+    }
+
     func installHostedSecondaryProjection(
         context: JSONValue?,
         tree: [SessionTreeNode],

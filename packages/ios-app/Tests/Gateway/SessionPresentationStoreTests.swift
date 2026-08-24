@@ -7,6 +7,77 @@ import Testing
 @MainActor
 @Suite("Session presentation ownership")
 struct SessionPresentationStoreTests {
+    @Test("pending presentation owns notices before first open mounts")
+    func pendingPresentationOwnsNoticeScope() {
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        let probe = NoticeScopeProbe(); store.delegate = probe
+        let pending = SessionPresentationIdentity(sessionID: "pending", generation: 1)
+        store.installHostedPresentationTargets(target: nil, pending: pending)
+        store.emitHostedNoticeForTesting()
+        #expect(probe.postedScopes == [.session(id: "pending", generation: 1)])
+        #expect(probe.postedRoles == [.info])
+    }
+
+    @Test("successful replacement retires the previous exact scope")
+    func replacementRetiresPreviousScope() {
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        let probe = NoticeScopeProbe(); store.delegate = probe
+        let old = SessionPresentationIdentity(sessionID: "replace", generation: 1)
+        let next = SessionPresentationIdentity(sessionID: "replace", generation: 2)
+        store.installHostedPresentationTargets(target: old, pending: next)
+        store.mountHostedPresentationForTesting(next)
+        #expect(probe.retiredScopes == [.session(id: "replace", generation: 1)])
+    }
+
+    @Test("stale close does not retire a newer pending scope")
+    func staleCloseDoesNotRetireNewerPendingScope() async {
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        let probe = NoticeScopeProbe(); store.delegate = probe
+        let mounted = SessionPresentationIdentity(sessionID: "old", generation: 1)
+        let pending = SessionPresentationIdentity(sessionID: "new", generation: 2)
+        store.installHostedPresentationTargets(target: mounted, pending: pending)
+        await store.close(mounted)
+        #expect(probe.retiredScopes.isEmpty)
+    }
+
+    @Test("close retires exact mounted and pending scopes")
+    func closeRetiresExactMountedAndPendingScopes() async {
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        let probe = NoticeScopeProbe(); store.delegate = probe
+        let mounted = SessionPresentationIdentity(sessionID: "same", generation: 1)
+        store.installHostedPresentationTargets(target: mounted, pending: mounted)
+        await store.close(mounted)
+        #expect(probe.retiredScopes == [.session(id: "same", generation: 1)])
+    }
+
+    @Test("clearProfile retires mounted and pending notice ownership")
+    func clearProfileRetiresNoticeOwnership() {
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        let probe = NoticeScopeProbe(); store.delegate = probe
+        store.installHostedPresentationTargets(
+            target: SessionPresentationIdentity(sessionID: "clear", generation: 3),
+            pending: SessionPresentationIdentity(sessionID: "clear", generation: 4)
+        )
+        store.clearProfile()
+        #expect(Set(probe.retiredScopes) == Set([
+            .session(id: "clear", generation: 3), .session(id: "clear", generation: 4)
+        ]))
+    }
+
+    @Test("remove retires mounted and pending notice ownership")
+    func removeRetiresNoticeOwnership() {
+        let store = SessionPresentationStore(client: GatewayClient(), performanceSignposts: SystemPerformanceSignposts.shared)
+        let probe = NoticeScopeProbe(); store.delegate = probe
+        store.installHostedPresentationTargets(
+            target: SessionPresentationIdentity(sessionID: "remove", generation: 5),
+            pending: SessionPresentationIdentity(sessionID: "remove", generation: 6)
+        )
+        store.remove(sessionID: "remove")
+        #expect(Set(probe.retiredScopes) == Set([
+            .session(id: "remove", generation: 5), .session(id: "remove", generation: 6)
+        ]))
+    }
+
     @Test("AppModel authoritative snapshot façade remains observable")
     func observationForwarding() throws {
         let model = AppModel()
@@ -1528,8 +1599,8 @@ struct SessionPresentationStoreTests {
                 #expect(failure.message.contains("session"))
             }
             #expect((await socket.sentFrames()).count == 7)
-            #expect(model.lastError?.contains("session.open") == true)
-            #expect(model.lastErrorHasLocalDiagnostic)
+            #expect(model.visibleNotices.last?.title.contains("session.open") == true)
+            #expect(model.visibleNotices.last?.actions.contains(where: { $0.id == "view-logs" }) == true)
             await client.close()
         }
     }
@@ -2129,6 +2200,38 @@ struct SessionPresentationStoreTests {
 }
 
 @MainActor
+private final class NoticeScopeProbe: SessionPresentationStoreDelegate {
+    var postedScopes: [InAppNoticeScope] = []
+    var postedRoles: [InAppNoticeCenter.Role] = []
+    var retiredScopes: [InAppNoticeScope] = []
+
+    func sessionPresentationStoreDidRequestCatalogRefresh() {}
+    func sessionPresentationStoreDidPublishEditorRequest(
+        target: SessionPresentationIdentity,
+        action: SessionEditorAction,
+        text: String,
+        fullText: String,
+        revision: Int,
+        operationID: String?
+    ) {}
+    func sessionPresentationStoreDidOpen(_ target: SessionPresentationIdentity) {}
+    func sessionPresentationStoreDidPublishSnapshot(_ snapshot: SessionSnapshot, target: SessionPresentationIdentity) {}
+    func sessionPresentationStorePostNotice(
+        _ message: String,
+        replacing key: InAppNoticeKey?,
+        role: InAppNoticeCenter.Role,
+        scope: InAppNoticeScope?
+    ) {
+        if let scope { postedScopes.append(scope) }
+        postedRoles.append(role)
+    }
+    func sessionPresentationStoreRemoveNotice(_ key: InAppNoticeKey, scope: InAppNoticeScope?) {}
+    func sessionPresentationStoreRetireNoticeScope(_ scope: InAppNoticeScope) { retiredScopes.append(scope) }
+    func sessionPresentationStoreSurface(_ error: Error) {}
+    func sessionPresentationStoreCheckpointCache() {}
+}
+
+@MainActor
 private final class SecondaryErrorProbe: SessionPresentationStoreDelegate {
     var errors: [String] = []
 
@@ -2146,8 +2249,14 @@ private final class SecondaryErrorProbe: SessionPresentationStoreDelegate {
         _ snapshot: SessionSnapshot,
         target: SessionPresentationIdentity
     ) {}
-    func sessionPresentationStorePostNotice(_ message: String, replacing key: GlobalNoticeKey?) {}
-    func sessionPresentationStoreRemoveNotice(_ key: GlobalNoticeKey) {}
+    func sessionPresentationStorePostNotice(
+        _ message: String,
+        replacing key: InAppNoticeKey?,
+        role: InAppNoticeCenter.Role,
+        scope: InAppNoticeScope?
+    ) {}
+    func sessionPresentationStoreRemoveNotice(_ key: InAppNoticeKey, scope: InAppNoticeScope?) {}
+    func sessionPresentationStoreRetireNoticeScope(_ scope: InAppNoticeScope) {}
     func sessionPresentationStoreSurface(_ error: Error) { errors.append(error.localizedDescription) }
     func sessionPresentationStoreCheckpointCache() {}
 }

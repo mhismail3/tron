@@ -683,11 +683,11 @@ struct AppModelTerminalLifecycleTests {
                     details: nil
                 )
             ))
-            try await eventually { controller.actionError == "Termination denied" }
+            try await eventually { harness.model.visibleNotices.last?.title == "Termination denied" }
             #expect(controller.terminal?.id == existing.id)
             #expect(controller.connectionPhase == .connected)
-            controller.clearActionError()
-            #expect(controller.actionError == nil)
+            #expect(harness.model.visibleNotices.last?.title == "Termination denied")
+            harness.model.noticeCenter.dismissAll()
             controller.stop(model: harness.model)
         }
     }
@@ -722,7 +722,7 @@ struct AppModelTerminalLifecycleTests {
 
             try await eventually { !controller.isRunning(model: harness.model) }
             #expect(controller.connectionPhase == .unavailable)
-            #expect(controller.actionError == nil)
+            #expect(harness.model.visibleNotices.isEmpty)
 
             let requestCount = await harness.socket.sentFrames().count
             let input = Array("ignored".utf8)

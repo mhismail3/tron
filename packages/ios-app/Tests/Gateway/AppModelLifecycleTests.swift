@@ -222,7 +222,7 @@ struct AppModelLifecycleTests {
             }
 
             #expect(fixture.model.legacyImportedCount == 0)
-            #expect(fixture.model.latestNotice == nil)
+            #expect(fixture.model.visibleNotices.isEmpty)
             #expect(fixture.socketFactory.requests.count == 1)
         }
     }
@@ -246,7 +246,7 @@ struct AppModelLifecycleTests {
 
             #expect(!fixture.model.legacyImportAvailable)
             #expect(fixture.model.legacyImportedCount == 0)
-            #expect(fixture.model.lastError == nil)
+            #expect(fixture.model.visibleNotices.isEmpty)
         }
     }
 
@@ -308,7 +308,7 @@ struct AppModelLifecycleTests {
     func settingsRestartSurfacesFailure() async throws {
         try await withFixture(socketCount: 1) { fixture in
             await fixture.model.requestGatewayRestart()
-            #expect(fixture.model.lastError == "This Gateway is not supervised for remote restart. Install or relaunch the managed Tron Mac app, then retry; direct foreground Gateway processes must be restarted from their supervisor.")
+            #expect(fixture.model.visibleNotices.last?.title == "This Gateway is not supervised for remote restart. Install or relaunch the managed Tron Mac app, then retry; direct foreground Gateway processes must be restarted from their supervisor.")
         }
     }
 

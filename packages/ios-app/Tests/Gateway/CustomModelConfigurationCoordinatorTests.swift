@@ -287,16 +287,16 @@ struct CustomModelConfigurationCoordinatorTests {
     @Test("configuration presentation ignores cancellation but retains current errors")
     func configurationErrorPresentation() {
         let model = AppModel()
-        model.lastError = "existing"
+        model.presentError("existing")
         model.presentConfigurationActionError(CancellationError())
-        #expect(model.lastError == "existing")
+        #expect(model.visibleNotices.last?.title == "existing")
         model.presentConfigurationActionError(GatewayFailure(
             code: "synthetic",
             message: "current failure",
             retryable: false,
             details: nil
         ))
-        #expect(model.lastError == "current failure")
+        #expect(model.visibleNotices.last?.title == "current failure")
     }
 
     @Test("draft save admission clears only the exact submitted revision")

@@ -121,7 +121,7 @@ private struct AuthPromptContent: View {
             defer { submitting = false }
             do { try await model.answerAuth(response) }
             catch is CancellationError { }
-            catch { model.lastError = error.localizedDescription }
+            catch { model.presentError(error) }
         }
     }
 }

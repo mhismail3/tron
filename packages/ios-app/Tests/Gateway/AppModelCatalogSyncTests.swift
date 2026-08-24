@@ -14,8 +14,8 @@ struct AppModelCatalogSyncTests {
             #expect(harness.model.sessions.first?.phase == .running)
             #expect(harness.model.dashboardActivity(for: "known") == .active)
             #expect(await harness.socket.sentFrames().count == 1)
-            #expect(harness.model.latestNotice == nil)
-            #expect(harness.model.lastError == nil)
+            #expect(harness.model.visibleNotices.isEmpty)
+            #expect(harness.model.visibleNotices.isEmpty)
         }
     }
 
@@ -37,8 +37,8 @@ struct AppModelCatalogSyncTests {
 
             #expect(harness.model.sessions.first?.phase == .running)
             #expect(harness.model.sessions.first?.summaryRevision == 2)
-            #expect(harness.model.latestNotice == nil)
-            #expect(harness.model.lastError == nil)
+            #expect(harness.model.visibleNotices.isEmpty)
+            #expect(harness.model.visibleNotices.isEmpty)
         }
     }
 
@@ -74,8 +74,8 @@ struct AppModelCatalogSyncTests {
             #expect(await secondCaller.value == .published)
             #expect(harness.model.sessions.map(\.id) == ["second"])
             #expect(await harness.socket.sentFrames().count == 3)
-            #expect(harness.model.latestNotice == nil)
-            #expect(harness.model.lastError == nil)
+            #expect(harness.model.visibleNotices.isEmpty)
+            #expect(harness.model.visibleNotices.isEmpty)
         }
     }
 
@@ -108,8 +108,8 @@ struct AppModelCatalogSyncTests {
 
             #expect(await loading.value == .published)
             #expect(harness.model.sessions.map(\.id) == ["authoritative"])
-            #expect(harness.model.latestNotice == nil)
-            #expect(harness.model.lastError == nil)
+            #expect(harness.model.visibleNotices.isEmpty)
+            #expect(harness.model.visibleNotices.isEmpty)
         }
     }
 
@@ -137,8 +137,8 @@ struct AppModelCatalogSyncTests {
 
             #expect(await loading.value == .published)
             #expect(harness.model.sessions.map(\.id) == ["authoritative"])
-            #expect(harness.model.latestNotice == nil)
-            #expect(harness.model.lastError == nil)
+            #expect(harness.model.visibleNotices.isEmpty)
+            #expect(harness.model.visibleNotices.isEmpty)
         }
     }
 
@@ -165,8 +165,8 @@ struct AppModelCatalogSyncTests {
             ))
             #expect(await duplicateLoad.value == .retained)
             #expect(harness.model.sessions.map(\.id) == ["retained"])
-            #expect(harness.model.latestNotice == nil)
-            #expect(harness.model.lastError == nil)
+            #expect(harness.model.visibleNotices.isEmpty)
+            #expect(harness.model.visibleNotices.isEmpty)
         }
     }
 
@@ -183,8 +183,8 @@ struct AppModelCatalogSyncTests {
             await harness.socket.enqueue(errorResponse(id: disconnected.id, code: "disconnected"))
             #expect(await disconnectedLoad.value == .retained)
             #expect(await harness.client.activeConnectionID() != nil)
-            #expect(harness.model.latestNotice == nil)
-            #expect(harness.model.lastError == nil)
+            #expect(harness.model.visibleNotices.isEmpty)
+            #expect(harness.model.visibleNotices.isEmpty)
         }
     }
 
@@ -242,8 +242,8 @@ struct AppModelCatalogSyncTests {
 
         #expect(model.connectionState == .connected)
         #expect(factory.requests.count == 1)
-        #expect(model.latestNotice == nil)
-        #expect(model.lastError == nil)
+        #expect(model.visibleNotices.isEmpty)
+        #expect(model.visibleNotices.isEmpty)
         await model.teardown()
         await client.close()
     }

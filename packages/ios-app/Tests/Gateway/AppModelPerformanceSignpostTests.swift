@@ -707,7 +707,7 @@ struct AppModelPerformanceSignpostTests {
             })
 
             await MainActor.run {
-                harness.model.lastError = nil
+                harness.model.noticeCenter.dismissAll()
                 harness.model.presentComposerActionError(
                     GatewayFailure(
                         code: "current",
@@ -718,9 +718,9 @@ struct AppModelPerformanceSignpostTests {
                     target: target
                 )
             }
-            #expect(await MainActor.run { harness.model.lastError } == "current composer failure")
+            #expect(await MainActor.run { harness.model.visibleNotices.last?.title } == "current composer failure")
             await MainActor.run {
-                harness.model.lastError = nil
+                harness.model.noticeCenter.dismissAll()
                 harness.model.revokePresentationIntake(target)
                 harness.model.presentComposerActionError(
                     GatewayFailure(
@@ -732,7 +732,7 @@ struct AppModelPerformanceSignpostTests {
                     target: target
                 )
             }
-            #expect(await MainActor.run { harness.model.lastError } == nil)
+            #expect(await MainActor.run { harness.model.visibleNotices.isEmpty })
             await harness.client.close()
         }
     }

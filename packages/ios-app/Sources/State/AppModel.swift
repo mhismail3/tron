@@ -136,7 +136,6 @@ final class AppModel {
     let composerDrafts: ComposerDraftCoordinator
     let gatewayDiagnostics: GatewayDiagnosticsService
     private var iosClientDiagnostics = IOSClientDiagnosticBuffer()
-    private var lastErrorDiagnosticMessage: String?
     let chatMedia: ChatMediaLoader
     private let chatMediaMemoryPressureObserver: ChatMediaMemoryPressureObserver
 
@@ -174,14 +173,9 @@ final class AppModel {
     var defaultWorkspace: String?
     var authPrompt: AuthPromptState? { providerAuth.prompt }
     var authEvent: AuthEventState? { providerAuth.event }
-    private var noticeStore = GlobalNoticeStore()
-    private var sessionCatchUpNoticeTask: Task<Void, Never>?
-    var latestNotice: String? { noticeStore.latest }
-    var lastError: String?
-    var lastErrorHasLocalDiagnostic: Bool {
-        lastError != nil && lastError == lastErrorDiagnosticMessage
-    }
-    var onboardingError: String?
+    let noticeCenter: InAppNoticeCenter
+    private(set) var logsPresentationRequested = false
+    var visibleNotices: [InAppNoticeCenter.Notice] { noticeCenter.visibleNotices }
     var context: JSONValue? { sessionPresentation.context }
     var sessionTree: [SessionTreeNode] { sessionPresentation.sessionTree }
     var loadingEarlierTranscript: Bool { sessionPresentation.loadingEarlierTranscript }
@@ -264,6 +258,7 @@ final class AppModel {
         let resolvedProfileTokenLookup = profileTokenLookup ?? { profile in
             profiles.token(for: profile)
         }
+        let noticeCenter = InAppNoticeCenter(clock: clock)
         let lifecycle = GatewayLifecycleCoordinator(
             client: client,
             profiles: profiles,
@@ -371,6 +366,7 @@ final class AppModel {
             )
         }
         self.lifecycle = lifecycle
+        self.noticeCenter = noticeCenter
         self.mutationExecutor = mutationExecutor
         self.sessionMutations = sessionMutations
         self.sessionImports = SessionImportCoordinator(
@@ -572,12 +568,12 @@ final class AppModel {
 
     func presentComposerActionError(_ error: Error, target: SessionPresentationTarget) {
         guard composerDrafts.admits(target), !(error is CancellationError) else { return }
-        lastError = error.localizedDescription
+        presentError(error)
     }
 
     func presentComposerActionError(_ message: String, target: SessionPresentationTarget) {
         guard composerDrafts.admits(target) else { return }
-        lastError = message
+        presentError(message)
     }
 
     var mountedPresentationTarget: SessionPresentationTarget? {
@@ -678,35 +674,77 @@ final class AppModel {
         return session.phase == .interrupted ? .interrupted : .idle
     }
 
-    func postNotice(_ message: String, replacing key: GlobalNoticeKey? = nil) {
-        if key == .sessionCatchUp {
-            sessionCatchUpNoticeTask?.cancel()
-            noticeStore.post(message, replacing: key)
-            sessionCatchUpNoticeTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(12))
-                guard !Task.isCancelled else { return }
-                self?.noticeStore.remove(.sessionCatchUp)
-                self?.sessionCatchUpNoticeTask = nil
-            }
-        } else {
-            noticeStore.post(message, replacing: key)
+    func postNotice(
+        _ message: String,
+        replacing key: InAppNoticeKey? = nil,
+        role: InAppNoticeCenter.Role = .info,
+        lifetime: InAppNoticeCenter.Lifetime = .standard,
+        scope: InAppNoticeScope = .app,
+        priority: InAppNoticeCenter.Priority = .normal
+    ) {
+        let replacement = key.map { InAppNoticeReplacement(key: $0, scope: scope) }
+        noticeCenter.post(.init(
+            id: uuidSource.next(), replacement: replacement, scope: scope,
+            role: role, priority: priority, title: message, lifetime: lifetime
+        ))
+    }
+
+    func removeNotice(_ key: InAppNoticeKey, scope: InAppNoticeScope? = nil) {
+        for notice in noticeCenter.notices where notice.replacement?.key == key && (scope == nil || notice.scope == scope) {
+            noticeCenter.dismiss(notice.id)
         }
     }
 
-    func removeNotice(_ key: GlobalNoticeKey) {
-        if key == .sessionCatchUp { sessionCatchUpNoticeTask?.cancel(); sessionCatchUpNoticeTask = nil }
-        noticeStore.remove(key)
+    func presentError(
+        _ message: String,
+        viewLogs: Bool = false,
+        scope: InAppNoticeScope = .app,
+        replacing key: InAppNoticeKey? = nil
+    ) {
+        let action: InAppNoticeCenter.Action? = viewLogs
+            ? .init(id: "view-logs", title: "View Logs", role: .normal)
+            : nil
+        let lifetime: InAppNoticeCenter.Lifetime = viewLogs ? .persistent : .automatic(.seconds(8))
+        let id = uuidSource.next()
+        noticeCenter.post(
+            .init(
+                id: id,
+                replacement: key.map { InAppNoticeReplacement(key: $0, scope: scope) },
+                scope: scope,
+                role: .error,
+                priority: .high,
+                title: message,
+                lifetime: lifetime,
+                actions: action.map { [$0] } ?? []
+            ),
+            handlers: viewLogs ? ["view-logs": { [weak self] in
+                self?.logsPresentationRequested = true
+            }] : [:]
+        )
     }
 
-    func dismissNotices() {
-        sessionCatchUpNoticeTask?.cancel()
-        sessionCatchUpNoticeTask = nil
-        noticeStore.removeAll()
+    func presentError(
+        _ error: Error,
+        scope: InAppNoticeScope = .app,
+        replacing key: InAppNoticeKey? = nil
+    ) {
+        let diagnostic = (error as? GatewayFailure)?.code == "invalid_response"
+        presentError(
+            error.localizedDescription,
+            viewLogs: diagnostic,
+            scope: scope,
+            replacing: key
+        )
+        if let failure = error as? GatewayFailure, diagnostic {
+            iosClientDiagnostics.record(failure, profileID: profiles.selected?.id, profileLabel: profiles.selected?.label)
+        }
     }
+
+    func consumeLogsPresentationRequest() { logsPresentationRequested = false }
 
     func presentConfigurationActionError(_ error: Error) {
         guard !(error is CancellationError) else { return }
-        lastError = error.localizedDescription
+        presentError(error)
     }
 
     func start() async {
@@ -714,9 +752,14 @@ final class AppModel {
         reconcileDashboardConnections()
     }
 
+    func becameInactive() {
+        noticeCenter.setBackgrounded(true)
+    }
+
     @discardableResult
     func becameActive() -> Task<Void, Never>? {
         sceneAllowsCatalogRefresh = true
+        noticeCenter.setBackgrounded(false)
         let task = lifecycle.becameActive()
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -729,6 +772,7 @@ final class AppModel {
 
     func enteredBackground() {
         sceneAllowsCatalogRefresh = false
+        noticeCenter.setBackgrounded(true)
         diagnosticsAreReady = false
         dashboardConnections.retire()
         // The canonical session may still be running on the Gateway, but this
@@ -798,8 +842,7 @@ final class AppModel {
         customModelConfiguration.clearProfile()
         cancelAllExtensionEditorSynchronization()
         composerDrafts.retireProfilePresentation()
-        lastError = nil
-        onboardingError = nil
+        noticeCenter.dismissAll()
     }
 
     func switchGateway(_ profile: GatewayProfile) async {
@@ -818,14 +861,14 @@ final class AppModel {
             profileRevision &+= 1
             reconcileDashboardConnections()
         } catch {
-            lastError = error.localizedDescription
+            presentError(error)
         }
     }
 
     func disableGateway(_ profile: GatewayProfile) async {
         if profiles.selected?.id == profile.id {
             guard let replacement = profiles.profiles.first(where: { $0.id != profile.id && $0.isEnabled }) else {
-                lastError = "Keep at least one server enabled before disabling this server."
+                presentError("Keep at least one server enabled before disabling this server.")
                 return
             }
             await switchGateway(replacement)
@@ -845,7 +888,7 @@ final class AppModel {
             profileRevision &+= 1
             reconcileDashboardConnections()
         } catch {
-            lastError = error.localizedDescription
+            presentError(error)
         }
     }
 
@@ -1267,7 +1310,7 @@ final class AppModel {
             // admitted. Enter restarting when the Gateway emits
             // system.stopping, so an accepted update cannot make iOS look
             // offline while the old process is still serving sessions.
-            postNotice("Gateway update accepted. Tron will reconnect automatically.", replacing: .gatewayRestart)
+            postNotice("Gateway update accepted. Tron will reconnect automatically.", replacing: .gatewayRestart, role: .progress, lifetime: .persistent, priority: .low)
             return commandID
         } catch {
             guard admitsLifecycle(admission) else { return nil }
@@ -1299,7 +1342,7 @@ final class AppModel {
             }
             try acknowledgement.require(commandID: commandID)
             try requireLifecycle(admission)
-            postNotice("Gateway rollback accepted. Tron will reconnect automatically.", replacing: .gatewayRestart)
+            postNotice("Gateway rollback accepted. Tron will reconnect automatically.", replacing: .gatewayRestart, role: .progress, lifetime: .persistent, priority: .low)
             return commandID
         } catch {
             guard admitsLifecycle(admission) else { return nil }
@@ -2072,10 +2115,13 @@ final class AppModel {
         if response.scheduled {
             postNotice(
                 "Gateway restart scheduled after \(response.activeSessionIds.count) active agent run\(response.activeSessionIds.count == 1 ? "" : "s") finishes.",
-                replacing: .gatewayRestart
+                replacing: .gatewayRestart,
+                role: .progress,
+                lifetime: .persistent,
+                priority: .low
             )
         } else {
-            postNotice("Gateway is restarting. Tron will reconnect automatically.", replacing: .gatewayRestart)
+            postNotice("Gateway is restarting. Tron will reconnect automatically.", replacing: .gatewayRestart, role: .progress, lifetime: .persistent, priority: .low)
         }
     }
 
@@ -2331,7 +2377,10 @@ final class AppModel {
         case "packages.progress", "packages.completed":
             postNotice(
                 event.topic == "packages.completed" ? "Package operation completed" : "Updating agent package…",
-                replacing: .packageProgress
+                replacing: .packageProgress,
+                role: event.topic == "packages.completed" ? .success : .progress,
+                lifetime: event.topic == "packages.completed" ? .standard : .persistent,
+                priority: event.topic == "packages.completed" ? .normal : .low
             )
         case "terminal.output", "terminal.exit":
             guard let connectionID = gatewayConnectionID,
@@ -2391,7 +2440,7 @@ final class AppModel {
         } catch {
             // Group identity is a presentation-side safety hint. Keep the
             // authenticated runtime usable if metadata repair is unavailable.
-            lastError = error.localizedDescription
+            presentError(error)
         }
     }
 
@@ -2436,9 +2485,7 @@ final class AppModel {
     }
 
     private func clearLiveConnectionProjection() {
-        sessionCatchUpNoticeTask?.cancel()
-        sessionCatchUpNoticeTask = nil
-        noticeStore.removeAll()
+        noticeCenter.dismissAll()
         sessionCatalog.markDisconnected()
         if let profile = profiles.selected {
             let retained = sessionCatalog.sessions.map {
@@ -2471,8 +2518,6 @@ final class AppModel {
         }
     }
 
-    static let sessionCatchUpNotice = "Live session view is catching up; the run continues on your Mac."
-
     static func shouldSurface(_ error: Error) -> Bool {
         if error is CancellationError || error is GatewayPossiblySentError { return false }
         if let failure = error as? GatewayFailure {
@@ -2496,17 +2541,7 @@ final class AppModel {
 
     private func surface(_ error: Error) {
         guard Self.shouldSurface(error) else { return }
-        if let failure = error as? GatewayFailure, failure.code == "invalid_response" {
-            iosClientDiagnostics.record(
-                failure,
-                profileID: profiles.selected?.id,
-                profileLabel: profiles.selected?.label
-            )
-            lastErrorDiagnosticMessage = failure.localizedDescription
-        } else {
-            lastErrorDiagnosticMessage = nil
-        }
-        lastError = error.localizedDescription
+        presentError(error)
     }
 
     private func loadCache(
@@ -2641,12 +2676,37 @@ extension AppModel: SessionPresentationStoreDelegate {
         )
     }
 
-    func sessionPresentationStorePostNotice(_ message: String, replacing key: GlobalNoticeKey?) {
-        postNotice(message, replacing: key)
+    func sessionPresentationStorePostNotice(
+        _ message: String,
+        replacing key: InAppNoticeKey?,
+        role: InAppNoticeCenter.Role,
+        scope: InAppNoticeScope?
+    ) {
+        let lifetime: InAppNoticeCenter.Lifetime = if key == .sessionCatchUp {
+            .automatic(.seconds(12))
+        } else if role == .error {
+            .automatic(.seconds(8))
+        } else if role == .warning {
+            .automatic(.seconds(6))
+        } else {
+            .standard
+        }
+        postNotice(
+            message,
+            replacing: key,
+            role: role,
+            lifetime: lifetime,
+            scope: scope ?? .app,
+            priority: role == .error ? .high : .normal
+        )
     }
 
-    func sessionPresentationStoreRemoveNotice(_ key: GlobalNoticeKey) {
-        removeNotice(key)
+    func sessionPresentationStoreRemoveNotice(_ key: InAppNoticeKey, scope: InAppNoticeScope?) {
+        removeNotice(key, scope: scope)
+    }
+
+    func sessionPresentationStoreRetireNoticeScope(_ scope: InAppNoticeScope) {
+        noticeCenter.retire(scope: scope)
     }
 
     func sessionPresentationStoreSurface(_ error: Error) {
@@ -2670,7 +2730,7 @@ extension AppModel: ProviderAuthCoordinatorDelegate {
     }
 
     func providerAuthCoordinatorSetCompletionError(_ message: String?) {
-        lastError = message
+        if let message { presentError(message) }
     }
 }
 
@@ -2714,6 +2774,7 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
             return
         }
         reconcileDashboardConnections()
+        removeNotice(.gatewayRestart)
         diagnosticsReadinessGeneration &+= 1
         diagnosticsAreReady = true
     }

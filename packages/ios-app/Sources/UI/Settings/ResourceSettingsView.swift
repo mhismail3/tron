@@ -406,7 +406,7 @@ struct ResourceSettingsView: View {
                 draft = resultingDraft
             }
         }
-        catch { model.lastError = error.localizedDescription }
+        catch { model.presentError(error) }
     }
 
     private func lines(_ value: String) -> [String] {

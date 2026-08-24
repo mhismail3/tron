@@ -47,6 +47,21 @@ struct OnboardingView: View {
     @State private var host = ""
     @State private var port = "9847"
     @State private var code = ""
+    @State private var noticeScopeID = UUID()
+
+    private var noticeScope: InAppNoticeScope { .presentation(noticeScopeID) }
+
+    private func surfaceOnboardingError(_ message: String) {
+        model.presentError(message, scope: noticeScope, replacing: .onboardingError)
+    }
+
+    private func surfaceOnboardingError(_ error: Error) {
+        model.presentError(error, scope: noticeScope, replacing: .onboardingError)
+    }
+
+    private func clearOnboardingError() {
+        model.removeNotice(.onboardingError, scope: noticeScope)
+    }
 
     private var providers: [ProviderSummary] {
         model.providerCatalog(for: .global)?.providers ?? []
@@ -121,21 +136,13 @@ struct OnboardingView: View {
         .tronScreenBackground()
         .tronTopBlur(.sheet)
         .tint(.tronEmerald)
-        .gatewayGlobalSheets()
         .providerAuthPresenter()
-        .alert("Tron", isPresented: Binding(
-            get: { model.onboardingError != nil || model.lastError != nil },
-            set: { if !$0 { model.onboardingError = nil; model.lastError = nil } }
-        )) {
-            Button("OK") { model.onboardingError = nil; model.lastError = nil }
-        } message: {
-            Text(model.onboardingError ?? model.lastError ?? "")
-        }
+        .onDisappear { model.noticeCenter.retire(scope: noticeScope) }
         .sheet(isPresented: $showScanner) {
             NavigationStack {
                 QRCodeScanner { value in
                     guard let url = URL(string: value), let invitation = PairingInvitationParser.parse(url) else {
-                        model.onboardingError = "That QR code is not a Tron Gateway invitation."
+                        surfaceOnboardingError("That QR code is not a Tron Gateway invitation.")
                         return
                     }
                     showScanner = false
@@ -155,6 +162,7 @@ struct OnboardingView: View {
                     }
                 }
             }
+            .inAppNoticeHost()
         }
         .sheet(isPresented: $showWorkspace) {
             WorkspaceBrowser { path in
@@ -354,9 +362,6 @@ struct OnboardingView: View {
     private var modelPage: some View {
         OnboardingPage(subtitle: "Choose the provider-qualified model Tron should start with.") {
             ModelPicker(selection: $selectedModel, models: models.filter(\.available)).frame(minHeight: 260)
-            if let error = model.onboardingError {
-                Text(error).font(TronTypography.bodySM).foregroundStyle(Color.tronError).fixedSize(horizontal: false, vertical: true)
-            }
             TronPrimaryActionButton(
                 title: finishing ? "Saving…" : "Finish setup",
                 systemImage: "checkmark",
@@ -440,7 +445,7 @@ struct OnboardingView: View {
         let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let canonical = PairingInvitationParser.canonicalHost(host),
               let value = Int(port), (1...65_535).contains(value), (8...32).contains(trimmedCode.count) else {
-            model.onboardingError = "Enter a valid host, port, and one-time code."
+            surfaceOnboardingError("Enter a valid host, port, and one-time code.")
             return
         }
         Task { await pair(PairingInvitation(host: canonical, port: value, code: trimmedCode, machineId: nil, label: nil)) }
@@ -450,6 +455,7 @@ struct OnboardingView: View {
         defer { pairing = false }
         do {
             try await model.pair(invitation, selectingProfile: mode == .setup)
+            clearOnboardingError()
             if mode == .addServer {
                 onComplete()
                 return
@@ -461,7 +467,7 @@ struct OnboardingView: View {
         } catch is CancellationError {
             return
         } catch {
-            model.onboardingError = error.localizedDescription
+            surfaceOnboardingError(error)
         }
     }
     private func inspectTrust() async {
@@ -477,7 +483,7 @@ struct OnboardingView: View {
             return
         } catch {
             guard selectedWorkspace == target.cwd else { return }
-            model.onboardingError = error.localizedDescription
+            surfaceOnboardingError(error)
         }
     }
     private func setTrust(_ decision: Bool) async {
@@ -489,7 +495,7 @@ struct OnboardingView: View {
             trustInspection = value
         } catch {
             guard selectedWorkspace == target.cwd else { return }
-            model.onboardingError = error.localizedDescription
+            surfaceOnboardingError(error)
         }
     }
     private func finish() async {
@@ -497,14 +503,14 @@ struct OnboardingView: View {
         finishing = true
         defer { finishing = false }
         do {
-            model.onboardingError = nil
+            clearOnboardingError()
             try await model.updateSettings(
                 .object(["defaultModel": .object(["provider": .string(selectedModel.provider), "id": .string(selectedModel.id)])]),
                 target: .global
             )
             model.setupComplete = true
             onComplete()
-        } catch { model.onboardingError = error.localizedDescription }
+        } catch { surfaceOnboardingError(error) }
     }
     @ViewBuilder private func pairingField(_ title: String, text: Binding<String>, numberPad: Bool = false) -> some View {
         TextField(text: text, prompt: Text(title).foregroundStyle(Color.tronTextSecondary)) { Text(title) }

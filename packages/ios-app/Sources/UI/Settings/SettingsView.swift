@@ -130,7 +130,6 @@ struct SettingsView: View {
         }
         .tronTopBlur(.sheet)
         .presentationDragIndicator(.hidden)
-        .gatewayGlobalSheets()
         .task {
             await model.refreshAll(
                 settingsTarget: projectCWD.map(SettingsTarget.project(cwd:)) ?? .global,

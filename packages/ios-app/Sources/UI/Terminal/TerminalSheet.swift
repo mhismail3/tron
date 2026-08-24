@@ -77,14 +77,6 @@ struct TerminalSheet: View {
         } message: {
             Text("The shell and its running process group will stop. Closing the sheet alone only detaches.")
         }
-        .alert("Terminal action failed", isPresented: Binding(
-            get: { controller.actionError != nil },
-            set: { if !$0 { controller.clearActionError() } }
-        )) {
-            Button("OK") { controller.clearActionError() }
-        } message: {
-            Text(controller.actionError ?? "The terminal command could not be completed.")
-        }
         .tronTopBlur(.sheet)
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)

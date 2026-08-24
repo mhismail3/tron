@@ -437,7 +437,7 @@ struct SessionTreeSheet: View {
         guard let node = labelNode else { return }
         Task {
             do { try await model.setLabel(sessionID: sessionID, entryID: node.id, label: label) }
-            catch { model.lastError = error.localizedDescription }
+            catch { model.presentError(error) }
         }
         labelNode = nil
     }
@@ -446,7 +446,7 @@ struct SessionTreeSheet: View {
         guard let node = labelNode else { return }
         Task {
             do { try await model.setLabel(sessionID: sessionID, entryID: node.id, label: nil) }
-            catch { model.lastError = error.localizedDescription }
+            catch { model.presentError(error) }
         }
         labelNode = nil
     }
@@ -636,7 +636,7 @@ private struct HistoryEntryDetailsSheet: View {
                 try await model.setLabel(sessionID: sessionID, entryID: node.id, label: value)
                 dismiss()
             } catch {
-                model.lastError = error.localizedDescription
+                model.presentError(error)
             }
         }
     }
@@ -752,7 +752,7 @@ private struct NavigationSheet: View {
                 )
                 dismiss()
                 onNavigated()
-            } catch { model.lastError = error.localizedDescription }
+            } catch { model.presentError(error) }
         }
     }
 }
@@ -838,7 +838,7 @@ struct ForkConfirmationSheet: View {
                 )
                 dismiss()
                 onCreated(route)
-            } catch { model.lastError = error.localizedDescription }
+            } catch { model.presentError(error) }
         }
     }
 }

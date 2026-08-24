@@ -89,7 +89,7 @@ struct SessionShellView: View {
                 .disabled(renameName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button("Cancel", role: .cancel) { sessionToRename = nil }
         }
-        .gatewayGlobalSheets()
+        .inAppNoticeHost()
         .onChange(of: model.profiles.selected?.id, initial: true) { _, profileID in
             var route = presentedSession
             profileRouteOwner.reconcile(
@@ -383,7 +383,7 @@ struct SessionShellView: View {
         guard !name.isEmpty else { return }
         Task {
             do { try await model.performOnOwningGateway(session) { try await model.renameSession(session.id, name: name) } }
-            catch { model.lastError = error.localizedDescription }
+            catch { model.presentError(error) }
             sessionToRename = nil
         }
     }
@@ -391,7 +391,7 @@ struct SessionShellView: View {
     private func delete(_ session: SessionSummary) {
         Task {
             do { try await model.performOnOwningGateway(session) { try await model.deleteSession(session.id) } }
-            catch { model.lastError = error.localizedDescription }
+            catch { model.presentError(error) }
             sessionToDelete = nil
         }
     }
@@ -525,7 +525,7 @@ struct SessionShellView: View {
                 } catch is CancellationError {
                     return
                 } catch {
-                    model.lastError = error.localizedDescription
+                    model.presentError(error)
                 }
             }
         } label: {

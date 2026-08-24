@@ -366,7 +366,7 @@ struct AppModelReconnectTests {
             await teardown.value
 
             #expect(fixture.model.connectionState == .unpaired)
-            #expect(fixture.model.lastError == nil)
+            #expect(fixture.model.visibleNotices.isEmpty)
             #expect(fixture.socketFactory.requests.count == 2)
             #expect(await active.closeTransitionCount() == 1)
         }

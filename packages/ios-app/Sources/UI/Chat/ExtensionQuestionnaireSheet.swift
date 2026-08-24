@@ -242,7 +242,7 @@ struct ExtensionQuestionnaireSheet: View {
             } catch {
                 submitting = false
                 errorMessage = error.localizedDescription
-                model.lastError = error.localizedDescription
+                model.presentError(error)
             }
         }
     }

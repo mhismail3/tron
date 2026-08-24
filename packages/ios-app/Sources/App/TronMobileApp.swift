@@ -22,7 +22,7 @@ struct TronMobileApp: App {
                         Task {
                             do { try await model.pair(invitation) }
                             catch is CancellationError { return }
-                            catch { model.lastError = error.localizedDescription }
+                            catch { model.presentError(error) }
                         }
                     } else if url.host == "share",
                               let shared = pendingShares.load()?.buildSharePrompt(),
@@ -34,7 +34,7 @@ struct TronMobileApp: App {
                             } catch is CancellationError {
                                 return
                             } catch {
-                                model.lastError = error.localizedDescription
+                                model.presentError(error)
                             }
                         }
                     }
@@ -43,6 +43,8 @@ struct TronMobileApp: App {
                     if phase == .active {
                         Task { await RetiredNotificationBadge.clear() }
                         model.becameActive()
+                    } else if phase == .inactive {
+                        model.becameInactive()
                     } else if phase == .background {
                         model.enteredBackground()
                     }
@@ -56,7 +58,6 @@ private struct RootView: View {
     @Environment(AppModel.self) private var model
     @State private var onboardingDetent: PresentationDetent = .medium
     @State private var showOnboarding = false
-    @State private var showLogs = false
 
     var body: some View {
         SessionShellView()
@@ -73,30 +74,6 @@ private struct RootView: View {
         .onAppear { syncOnboardingPresentation() }
         .onChange(of: model.connectionState) { _, _ in syncOnboardingPresentation() }
         .onChange(of: model.hasResolvedLaunchState) { _, _ in syncOnboardingPresentation() }
-        .alert("Tron", isPresented: Binding(
-            get: { !showOnboarding && model.lastError != nil },
-            set: { if !$0 { model.lastError = nil } }
-        )) {
-            if model.lastErrorHasLocalDiagnostic {
-                Button("View Logs") {
-                    model.lastError = nil
-                    showLogs = true
-                }
-            }
-            Button("OK") { model.lastError = nil }
-        } message: {
-            Text(model.lastError ?? "")
-        }
-        .sheet(isPresented: $showLogs) {
-            NavigationStack {
-                GatewayLogsSettingsView()
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { showLogs = false }
-                        }
-                    }
-            }
-        }
     }
 
     private func syncOnboardingPresentation() {

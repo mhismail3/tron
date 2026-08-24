@@ -189,10 +189,19 @@ struct SessionContextSheet: View {
     @State private var compacting = false
     @State private var exportedURL: URL?
     @State private var exportingFormat: String?
-    @State private var exportError: String?
     @State private var exportTask: Task<Void, Never>?
     @State private var gitPresentation: SessionGitPresentation = .loading
     @State private var gitLoadGeneration = 0
+    @State private var capturedNoticeScope: InAppNoticeScope?
+    @State private var fallbackNoticeScope = InAppNoticeScope.presentation(UUID())
+
+    private var noticeScope: InAppNoticeScope {
+        if let capturedNoticeScope { return capturedNoticeScope }
+        if let target = model.presentationTarget(for: sessionID) {
+            return .session(id: target.sessionID, generation: target.generation)
+        }
+        return fallbackNoticeScope
+    }
 
     var body: some View {
         NavigationStack {
@@ -268,19 +277,18 @@ struct SessionContextSheet: View {
                 }
                 Button("Cancel", role: .cancel) {}
             }
-            .alert("Export Failed", isPresented: Binding(
-                get: { exportError != nil },
-                set: { if !$0 { exportError = nil } }
-            )) {
-                Button("OK") { exportError = nil }
-            } message: {
-                Text(exportError ?? "The session could not be exported.")
-            }
         }
         .tronTopBlur(.sheet)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tint(Color.tronEmerald)
+        .onAppear {
+            if capturedNoticeScope == nil {
+                capturedNoticeScope = model.presentationTarget(for: sessionID).map {
+                    .session(id: $0.sessionID, generation: $0.generation)
+                } ?? fallbackNoticeScope
+            }
+        }
         .onDisappear {
             exportTask?.cancel()
             exportTask = nil
@@ -288,6 +296,7 @@ struct SessionContextSheet: View {
                 self.exportedURL = nil
                 Task { await model.discardExportArtifact(exportedURL) }
             }
+            model.noticeCenter.retire(scope: noticeScope)
         }
     }
 
@@ -740,13 +749,12 @@ struct SessionContextSheet: View {
 
     private func surfaceActionError(_ error: Error) {
         guard !(error is CancellationError) else { return }
-        model.lastError = error.localizedDescription
+        model.presentError(error, scope: noticeScope)
     }
 
     private func prepareExport(_ format: String) {
         guard SessionExportPresentationPolicy.canStart(activeFormat: exportingFormat) else { return }
         exportingFormat = format
-        exportError = nil
         exportTask = Task {
             defer {
                 exportingFormat = nil
@@ -767,7 +775,7 @@ struct SessionContextSheet: View {
             } catch is CancellationError {
                 return
             } catch {
-                exportError = error.localizedDescription
+                model.presentError(error, scope: noticeScope)
             }
         }
     }

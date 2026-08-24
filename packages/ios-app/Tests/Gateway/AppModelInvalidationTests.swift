@@ -369,7 +369,7 @@ struct AppModelInvalidationTests {
         #expect(model.customModels(for: .global) == .object(["providers": .object([:])]))
         #expect(model.providerCatalog(for: .global)?.providers.isEmpty == true)
         #expect(model.providerCatalog(for: .global)?.models.isEmpty == true)
-        #expect(model.lastError == nil)
+        #expect(model.visibleNotices.isEmpty)
     }
 
     private var profile: GatewayProfile {

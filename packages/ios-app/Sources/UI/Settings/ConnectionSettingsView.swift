@@ -200,7 +200,7 @@ struct ConnectionsSettingsView: View {
         } catch is CancellationError {
             return
         } catch {
-            model.lastError = error.localizedDescription
+            model.presentError(error)
         }
     }
 }
@@ -828,7 +828,7 @@ struct ImportSettingsView: View {
                     Task {
                         defer { importing = false }
                         do { try await model.importLegacySessions(port: port) }
-                        catch { model.lastError = error.localizedDescription }
+                        catch { model.presentError(error) }
                     }
                 }
                 .buttonStyle(TronActionButtonStyle(role: .primary))
@@ -859,7 +859,7 @@ struct ImportSettingsView: View {
     private func handleSessionImport(_ result: Result<[URL], Error>) {
         guard case .success(let urls) = result, let url = urls.first else { return }
         guard let cwd = model.defaultWorkspace else {
-            model.lastError = "Choose a workspace by creating a session before importing."
+            model.presentError("Choose a workspace by creating a session before importing.")
             return
         }
         Task {
@@ -870,7 +870,7 @@ struct ImportSettingsView: View {
             } catch is CancellationError {
                 return
             } catch {
-                model.lastError = error.localizedDescription
+                model.presentError(error)
             }
         }
     }

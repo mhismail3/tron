@@ -248,7 +248,7 @@ struct ExtensionInteractionSheet: View {
             } catch {
                 submitting = false
                 submissionError = error.localizedDescription
-                model.lastError = error.localizedDescription
+                model.presentError(error)
             }
         }
     }

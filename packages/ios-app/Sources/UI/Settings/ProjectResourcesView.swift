@@ -384,7 +384,7 @@ struct ProjectResourcesView: View {
             defer { reloading = false }
             do { try await model.reloadResources(sessionID: sessionID) }
             catch is CancellationError { return }
-            catch { model.lastError = error.localizedDescription }
+            catch { model.presentError(error) }
         }
     }
 

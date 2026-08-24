@@ -370,6 +370,6 @@ struct RuntimeBehaviorSettingsView: View {
                 expectedRevision: savingRevision
             )
         }
-        catch { model.lastError = error.localizedDescription }
+        catch { model.presentError(error) }
     }
 }

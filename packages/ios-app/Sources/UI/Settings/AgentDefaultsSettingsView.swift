@@ -249,7 +249,7 @@ struct AgentDefaultsSettingsView: View {
                 expectedRevision: savingRevision
             )
         } catch {
-            model.lastError = error.localizedDescription
+            model.presentError(error)
         }
     }
 }

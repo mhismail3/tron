@@ -5,7 +5,6 @@ import SwiftUI
 final class TerminalController {
     var terminal: TerminalSummary?
     var error: String?
-    var actionError: String?
     var connectionPhase: TerminalConnectionPhase = .connecting
     var history: [TerminalSummary] = []
     private enum LifecycleOperation {
@@ -43,6 +42,11 @@ final class TerminalController {
     private var lifecycleFlight: LifecycleFlight?
     private var pendingLifecycleRequest: LifecycleRequest?
 
+    private var noticeScope: InAppNoticeScope {
+        guard let presentation else { return .app }
+        return .session(id: presentation.sessionID, generation: presentation.generation)
+    }
+
     func isRunning(model: AppModel) -> Bool {
         guard let terminal else { return false }
         return terminal.exitedAt == nil && !model.terminalHasExited(terminal.id)
@@ -55,14 +59,12 @@ final class TerminalController {
         guard let intent = beginIntent(model: model) else { return }
         connectionPhase = .connecting
         error = nil
-        actionError = nil
         scheduleLifecycle(.start, intent: intent, model: model)
     }
 
     func show(_ selected: TerminalSummary, model: AppModel) {
         guard let intent = beginIntent(model: model) else { return }
         error = nil
-        actionError = nil
         connectionPhase = .connecting
         terminal = nil
         scheduleLifecycle(.show(selected), intent: intent, model: model)
@@ -71,7 +73,6 @@ final class TerminalController {
     func openLive(model: AppModel) {
         guard let intent = beginIntent(model: model) else { return }
         error = nil
-        actionError = nil
         connectionPhase = .connecting
         terminal = nil
         scheduleLifecycle(.openLive, intent: intent, model: model)
@@ -83,6 +84,8 @@ final class TerminalController {
         intent = nil
         terminal = nil
         guard let presentation else { return }
+        let scope = InAppNoticeScope.session(id: presentation.sessionID, generation: presentation.generation)
+        model.noticeCenter.retire(scope: scope)
         self.presentation = nil
         model.closeTerminalPresentation(presentation)
     }
@@ -94,12 +97,11 @@ final class TerminalController {
               let intent,
               model.ownsTerminalIntent(intent) else { return }
         let data = String(decoding: bytes, as: UTF8.self)
-        actionError = nil
         Task {
             do { try await model.writeTerminal(id, data: data, intent: intent) }
             catch {
                 guard owns(intent, model: model) else { return }
-                self.actionError = error.localizedDescription
+                model.presentError(error, scope: noticeScope)
                 self.connectionPhase = .reconnecting
             }
         }
@@ -111,7 +113,6 @@ final class TerminalController {
               !model.terminalHasExited(id),
               let intent,
               model.ownsTerminalIntent(intent) else { return }
-        actionError = nil
         Task {
             do {
                 try await model.resizeTerminal(
@@ -124,7 +125,7 @@ final class TerminalController {
                 return
             } catch {
                 guard owns(intent, model: model) else { return }
-                self.actionError = error.localizedDescription
+                model.presentError(error, scope: noticeScope)
                 self.connectionPhase = .reconnecting
             }
         }
@@ -134,7 +135,6 @@ final class TerminalController {
         guard let id = terminal?.id,
               let intent,
               model.ownsTerminalIntent(intent) else { return }
-        actionError = nil
         Task {
             do {
                 try await model.terminateTerminal(id, intent: intent)
@@ -142,13 +142,9 @@ final class TerminalController {
                 connectionPhase = .unavailable
             } catch {
                 guard owns(intent, model: model) else { return }
-                self.actionError = error.localizedDescription
+                model.presentError(error, scope: noticeScope)
             }
         }
-    }
-
-    func clearActionError() {
-        actionError = nil
     }
 
     private func scheduleLifecycle(

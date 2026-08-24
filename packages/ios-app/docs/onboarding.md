@@ -40,9 +40,7 @@ accepted from QR query items.
 If setup is interrupted after pairing, the Keychain-backed profile remains and
 the setup sheet resumes at workspace selection. Losing or revoking the device
 token requires a fresh one-time invitation from the Tron menu bar on the Mac.
-Pairing validation errors belong to the sheet so presenting an alert never
-tears down first-run state. Cancellation caused by supersession or teardown is
-silent; transport, status, and decoding failures remain visible there.
+Pairing validation errors belong to the sheet and use contextual inline or scoped in-app notification feedback so presentation never tears down first-run state. Cancellation caused by supersession or teardown is silent; transport, status, and decoding failures remain visible there without a blocking single-OK alert.
 
 Every onboarding page uses the same app-wide presentation primitives as chat
 and settings: selected-family semantic typography, emerald glass action and
@@ -55,5 +53,4 @@ not be layered inside that system chrome. The nine-step indicator retains 6-poin
 dots, a 16-point active segment, 6-point spacing, and 10-by-6-point capsule
 insets. Provider-driven content may
 be generic, but it may not fall back to stock SwiftUI fonts, bordered buttons,
-or field styles. Alerts, QR camera chrome, and external pickers remain
-system-owned.
+or field styles. Destructive confirmations, QR camera chrome, and external pickers remain system-owned; routine pairing feedback uses the shared notification host.
