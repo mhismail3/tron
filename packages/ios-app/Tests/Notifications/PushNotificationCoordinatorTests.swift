@@ -1,5 +1,8 @@
+import CryptoKit
 import Foundation
 import Testing
+
+private final class PushFixtureBundleMarker {}
 @testable import TronMobile
 
 @Suite("Push notification registration")
@@ -11,21 +14,60 @@ struct PushNotificationCoordinatorTests {
         #expect(PushProductConfiguration.admit(URL(string: "https://user@push.example.test")!) == nil)
         #expect(PushProductConfiguration.admit(URL(string: "https://push.example.test/base")!) == nil)
         #expect(PushProductConfiguration.admit(URL(string: "https://push.example.test?next=evil")!) == nil)
+        #expect(PushProductConfiguration.admit(URL(string: "https://localhost")!) == nil)
+        #expect(PushProductConfiguration.admit(URL(string: "https://127.0.0.1")!) == nil)
+        #expect(PushProductConfiguration.admit(URL(string: "https://[::1]")!) == nil)
+        #expect(PushProductConfiguration.admit(URL(string: "https://relay.local")!) == nil)
+        #expect(PushProductConfiguration.admit(URL(string: "https://-bad.example")!) == nil)
+        #expect(PushProductConfiguration.admit(URL(string: "https://bad-.example")!) == nil)
+        #expect(PushProductConfiguration.admit(URL(string: "https://bad..example")!) == nil)
     }
 
-    @Test("registration payload has stable bounded canonical bytes")
+    @Test("registration payload matches the shared cross-runtime canonical fixture")
     func canonicalRegistration() throws {
+        let bundle = Bundle(for: PushFixtureBundleMarker.self)
+        let url = try #require(
+            bundle.url(forResource: "push-v3", withExtension: "json")
+                ?? bundle.url(forResource: "push-v3", withExtension: "json", subdirectory: "protocol-fixtures")
+        )
+        let root = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let registration = try #require(root["registration"] as? [String: Any])
+        let fields = try #require(registration["fields"] as? [String: Any])
+        let version = try #require(fields["version"] as? Int)
+        let challengeID = try #require(fields["challengeId"] as? String)
+        let challenge = try #require(fields["challenge"] as? String)
+        let keyID = try #require(fields["keyId"] as? String)
+        let token = try #require(fields["apnsToken"] as? String)
+        let routeValue = try #require(fields["route"] as? String)
+        let route = try #require(PushRoute(rawValue: routeValue))
+        let bindingHash = try #require(fields["bindingHash"] as? String)
         let payload = PushWorkerClient.RegistrationPayload(
-            version: 1,
-            challengeId: "challenge-id",
-            challenge: "challenge",
-            keyId: "key-id",
-            apnsToken: "0102ff",
-            environment: .sandbox,
-            bindingHash: "binding"
+            version: version, challengeId: challengeID, challenge: challenge,
+            keyId: keyID, apnsToken: token, route: route, bindingHash: bindingHash
         )
         let data = try PushWorkerClient.canonicalData(payload)
-        #expect(String(decoding: data, as: UTF8.self) == #"{"apnsToken":"0102ff","bindingHash":"binding","challenge":"challenge","challengeId":"challenge-id","environment":"sandbox","keyId":"key-id","version":1}"#)
+        #expect(String(decoding: data, as: UTF8.self) == registration["canonicalUTF8"] as? String)
+        #expect(SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() == registration["clientDataHashHex"] as? String)
+    }
+
+    @Test("Gateway readiness result matches the shared cross-runtime fixture")
+    func gatewayReadinessFixture() throws {
+        let bundle = Bundle(for: PushFixtureBundleMarker.self)
+        let url = try #require(
+            bundle.url(forResource: "push-v3", withExtension: "json")
+                ?? bundle.url(forResource: "push-v3", withExtension: "json", subdirectory: "protocol-fixtures")
+        )
+        let root = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let gateway = try #require(root["gatewayUpsert"] as? [String: Any])
+        let expected = try #require(gateway["expectedStatus"] as? [String: Any])
+        let data = try JSONSerialization.data(withJSONObject: expected, options: [.sortedKeys])
+        let status = try JSONDecoder().decode(PushRegistrationStatus.self, from: data)
+        #expect(status.available)
+        #expect(status.registered)
+        #expect(status.deviceRegistered)
+        #expect(status.enabledDeviceCount == 1)
+        #expect(status.pendingCount == 0)
+        #expect(status.notifyWhenAskPresented)
     }
 
     @Test("tap admission ignores arbitrary routing data")
@@ -68,11 +110,11 @@ struct PushNotificationCoordinatorTests {
             if path == "/v3/attestation/challenge" {
                 body = #"{"challengeId":"challenge-id","challenge":"server-nonce","expiresAt":"2026-08-24T06:00:00Z"}"#
             } else {
-                body = #"{"installationId":"installation_1","grantId":"grant_1","grantSecret":"0123456789abcdef0123456789abcdef"}"#
+                body = #"{"version":1,"installationId":"installation_1","grantId":"grant_1","grantSecret":"0123456789abcdef0123456789abcdef","route":"beta"}"#
             }
             return (
                 Data(body.utf8),
-                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+                HTTPURLResponse(url: request.url!, statusCode: path == "/v3/installations" ? 201 : 200, httpVersion: nil, headerFields: nil)!
             )
         }
         let notifications = PushNotificationSystem(
@@ -110,10 +152,16 @@ struct PushNotificationCoordinatorTests {
         }
         let grant = try #require(store.value?.grants[Self.profile.id])
         #expect(grant.installationID == "installation_1")
-        #expect(grant.environment == .sandbox)
         #expect(store.value?.apnsToken == "0102ff")
         let requests = await requestLog.requests
         #expect(requests.map { $0.url?.path } == ["/v3/attestation/challenge", "/v3/installations"])
+        #expect(requests[0].httpBody == nil)
+        let registrationBody = try #require(requests[1].httpBody)
+        let registration = try #require(JSONSerialization.jsonObject(with: registrationBody) as? [String: Any])
+        #expect(registration["proof"] as? String == "attestation")
+        #expect(registration["route"] as? String == "beta")
+        #expect(registration["attestationObject"] as? String != nil)
+        #expect(registration["payload"] == nil)
         #expect(requests.allSatisfy { $0.url?.host == "push.example.test" })
         let responseBounds = await requestLog.maximumBytes
         #expect(responseBounds.allSatisfy { $0 == 16 * 1024 })

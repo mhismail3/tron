@@ -701,15 +701,18 @@ added backdrop.
 ## Push notification release configuration
 
 The checked-in build contains no push credential and no user-configurable relay.
-Official Beta and production builds set the public `TRON_PUSH_SERVICE_ORIGIN` in
-maintainer-owned `Configuration/Local.xcconfig`; `Info.plist` embeds that exact
-HTTPS origin. The source default is empty, so development builds fail closed and
-show push as unavailable. The Worker admits the application environment through
+Official Beta and production builds read the public `TRON_PUSH_SERVICE_ORIGIN`
+from the repository-canonical maintainer input `config/PushService.xcconfig`;
+`Info.plist` and the bundled Mac Gateway embed the same exact HTTPS origin. The
+source value is empty until infrastructure inventory is complete, so development
+builds fail closed and show push as unavailable. Archive and Mac payload packaging
+reject an empty origin. The Worker admits the application environment through
 App Attest and maps Beta to APNs sandbox and production to APNs production; iOS
 cannot select an arbitrary topic or environment.
 
-`TronMobileBeta.entitlements` carries development APNs and App Attest environments;
-`TronMobileProd.entitlements` carries production values. Before shipping either
+`TronMobileBeta.entitlements` and `TronMobileProdDebug.entitlements` carry
+development APNs and App Attest environments; `TronMobileProd.entitlements`
+carries production values. Before shipping either
 identity, validate its provisioning profile contains both capabilities, pair a
 physical device, rotate its APNs token through reinstall/update, and verify revoke
 and offline retry behavior. Simulator tests use injected notification, App Attest,

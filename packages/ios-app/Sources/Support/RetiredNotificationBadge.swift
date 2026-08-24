@@ -1,10 +1,10 @@
 import UserNotifications
 
-/// Clears badge state left behind by Tron's retired APNs implementation.
+/// Clears badge state left behind by Tron's retired inbox implementation.
 ///
-/// Current Tron builds do not register for notifications or derive a badge from
-/// session state. SpringBoard can nevertheless retain the previous badge for the
-/// production bundle identifier across an app replacement or reinstall.
+/// Current builds support narrow alert notifications but deliberately carry no
+/// badge or unread-state contract. SpringBoard can nevertheless retain an older
+/// badge under the unchanged production bundle identifier.
 enum RetiredNotificationBadge {
     @MainActor
     static func clear(

@@ -1,0 +1,5 @@
+// Canonical maintainer-owned public Tron Push origin.
+// Set exactly one public HTTPS origin before official archive/package builds.
+// xcconfig escapes `//` as `/$()/`, for example:
+// TRON_PUSH_SERVICE_ORIGIN = https:/$()/push.example.com
+TRON_PUSH_SERVICE_ORIGIN =

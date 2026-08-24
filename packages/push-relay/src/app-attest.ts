@@ -1,5 +1,5 @@
 import { decode } from "cbor-x";
-import { BasicConstraintsExtension, X509Certificate, cryptoProvider } from "@peculiar/x509";
+import { BasicConstraintsExtension, KeyUsageFlags, KeyUsagesExtension, X509Certificate, cryptoProvider } from "@peculiar/x509";
 import { APPLE_APP_ATTESTATION_ROOT_PEM } from "./apple-app-attestation-root";
 import type { AttestationEnvironment } from "./contracts";
 import {
@@ -12,6 +12,7 @@ import {
 } from "./crypto";
 
 const APP_ATTEST_NONCE_OID = "1.2.840.113635.100.8.2";
+const ALLOWED_CRITICAL_EXTENSIONS = new Set([APP_ATTEST_NONCE_OID, "2.5.29.15", "2.5.29.19"]);
 const DEVELOPMENT_AAGUID = utf8("appattestdevelop");
 const PRODUCTION_AAGUID = concatBytes(utf8("appattest"), new Uint8Array(7));
 
@@ -28,36 +29,64 @@ interface DecodedAuthenticatorData {
   credentialPublicKey?: Uint8Array;
 }
 
-export async function verifyAttestation(input: {
+export interface AttestationVerificationInput {
   attestationObject: string;
   keyId: string;
   clientDataHash: Uint8Array;
   appId: string;
   environment: AttestationEnvironment;
   now?: Date;
-}): Promise<VerifiedAttestation> {
+}
+
+export async function verifyAttestation(input: AttestationVerificationInput): Promise<VerifiedAttestation> {
+  return verifyAttestationAgainstTrustedRoot(input, APPLE_APP_ATTESTATION_ROOT_PEM);
+}
+
+/** Test seam for executing the complete certificate/nonce/AAGUID path with a
+ * generated pinned root. Production registration always calls verifyAttestation. */
+export async function verifyAttestationAgainstTrustedRoot(
+  input: AttestationVerificationInput,
+  trustedRootPem: string,
+): Promise<VerifiedAttestation> {
   cryptoProvider.set(crypto);
   const object = cborObject(decode(decodeBase64Url(input.attestationObject)));
   if (object.fmt !== "apple-appattest") throw new Error("invalid_attestation_format");
   const authData = bytes(object.authData);
   const statement = cborObject(object.attStmt);
   const chainValues = Array.isArray(statement.x5c) ? statement.x5c.map(bytes) : [];
+  const receipt = bytes(statement.receipt);
+  if (receipt.byteLength < 1 || receipt.byteLength > 8 * 1024) throw new Error("invalid_attestation_receipt");
   if (chainValues.length < 2 || chainValues.length > 3) throw new Error("invalid_attestation_chain");
 
   const certificates = chainValues.map((value) => new X509Certificate(ownedBuffer(value)));
-  const root = new X509Certificate(APPLE_APP_ATTESTATION_ROOT_PEM);
+  const root = new X509Certificate(trustedRootPem);
   const now = input.now ?? new Date();
   for (const certificate of [...certificates, root]) {
     if (now < certificate.notBefore || now > certificate.notAfter) throw new Error("expired_attestation_certificate");
+    if (certificate.extensions.some((candidate) => candidate.critical && !ALLOWED_CRITICAL_EXTENSIONS.has(candidate.type))) {
+      throw new Error("unsupported_critical_extension");
+    }
   }
   const leafConstraints = certificates[0].getExtension(BasicConstraintsExtension);
-  if (leafConstraints?.ca === true) throw new Error("invalid_attestation_leaf");
+  const leafUsage = certificates[0].getExtension(KeyUsagesExtension);
+  if (leafConstraints?.ca === true || !leafUsage || (leafUsage.usages & KeyUsageFlags.digitalSignature) === 0) {
+    throw new Error("invalid_attestation_leaf");
+  }
   for (let index = 0; index < certificates.length - 1; index += 1) {
     const issuerConstraints = certificates[index + 1].getExtension(BasicConstraintsExtension);
-    if (!issuerConstraints?.ca) throw new Error("invalid_attestation_issuer");
+    const issuerUsage = certificates[index + 1].getExtension(KeyUsagesExtension);
+    const subordinateIntermediates = index;
+    if (!issuerConstraints?.ca || (issuerConstraints.pathLength !== undefined && issuerConstraints.pathLength < subordinateIntermediates)
+      || !issuerUsage || (issuerUsage.usages & KeyUsageFlags.keyCertSign) === 0) throw new Error("invalid_attestation_issuer");
     if (!(await certificates[index].verify({ publicKey: certificates[index + 1].publicKey }, crypto))) {
       throw new Error("invalid_attestation_chain");
     }
+  }
+  const rootConstraints = root.getExtension(BasicConstraintsExtension);
+  const rootUsage = root.getExtension(KeyUsagesExtension);
+  if (!rootConstraints?.ca || (rootConstraints.pathLength !== undefined && rootConstraints.pathLength < certificates.length - 1)
+    || !rootUsage || (rootUsage.usages & KeyUsageFlags.keyCertSign) === 0) {
+    throw new Error("invalid_attestation_root");
   }
   const last = certificates.at(-1)!;
   const lastIsRoot = constantTimeEqual(new Uint8Array(last.rawData), new Uint8Array(root.rawData));
@@ -69,7 +98,7 @@ export async function verifyAttestation(input: {
   const extension = leaf.extensions.find((candidate) => candidate.type === APP_ATTEST_NONCE_OID);
   if (!extension) throw new Error("missing_attestation_nonce");
   const expectedNonce = await sha256(concatBytes(authData, input.clientDataHash));
-  const certificateNonce = findNonce(new Uint8Array(extension.value));
+  const certificateNonce = appleNonce(new Uint8Array(extension.value));
   if (!certificateNonce || !constantTimeEqual(certificateNonce, expectedNonce)) {
     throw new Error("invalid_attestation_nonce");
   }
@@ -134,50 +163,45 @@ function decodeAuthenticatorData(value: Uint8Array, requireAttestation: boolean)
   const counter = new DataView(value.buffer, value.byteOffset + 33, 4).getUint32(0, false);
   const result: DecodedAuthenticatorData = { rpIdHash: value.slice(0, 32), counter };
   if (!requireAttestation) {
-    if (value.byteLength !== 37 || (flags & 0x40) !== 0) throw new Error("invalid_assertion_authenticator_data");
+    if (value.byteLength !== 37 || flags !== 0) throw new Error("invalid_assertion_authenticator_data");
     return result;
   }
-  if ((flags & 0x40) === 0 || (flags & 0x80) !== 0 || value.byteLength < 55) throw new Error("missing_attested_credential_data");
+  if (flags !== 0x40 || value.byteLength < 55) throw new Error("missing_attested_credential_data");
   const credentialLength = new DataView(value.buffer, value.byteOffset + 53, 2).getUint16(0, false);
   const coseOffset = 55 + credentialLength;
   if (credentialLength < 1 || coseOffset >= value.byteLength) throw new Error("invalid_credential_id");
   result.aaguid = value.slice(37, 53);
   result.credentialId = value.slice(55, coseOffset);
   const coseValue = decode(value.slice(coseOffset));
-  const cose = coseValue instanceof Map ? coseValue : undefined;
-  const x = cose ? bytes(cose.get(-2)) : undefined;
-  const y = cose ? bytes(cose.get(-3)) : undefined;
-  if (!x || !y || x.byteLength !== 32 || y.byteLength !== 32) throw new Error("invalid_credential_public_key");
+  const coseMap = coseValue instanceof Map ? coseValue : undefined;
+  const coseObject = !coseMap && typeof coseValue === "object" && coseValue !== null && !Array.isArray(coseValue)
+    ? coseValue as Record<string, unknown> : undefined;
+  const keys = coseMap ? [...coseMap.keys()].map(String) : Object.keys(coseObject ?? {});
+  const get = (key: number): unknown => coseMap?.get(key) ?? coseObject?.[String(key)];
+  if (keys.length !== 5 || new Set(keys).size !== 5
+    || !["1", "3", "-1", "-2", "-3"].every((key) => keys.includes(key))
+    || get(1) !== 2 || get(3) !== -7 || get(-1) !== 1) {
+    throw new Error("invalid_credential_public_key_parameters");
+  }
+  const x = bytes(get(-2));
+  const y = bytes(get(-3));
+  if (x.byteLength !== 32 || y.byteLength !== 32) throw new Error("invalid_credential_public_key");
   result.credentialPublicKey = concatBytes(new Uint8Array([4]), x, y);
   return result;
 }
 
-function findNonce(der: Uint8Array): Uint8Array | undefined {
-  function visit(start: number, end: number): Uint8Array | undefined {
-    let offset = start;
-    while (offset < end) {
-      const tag = der[offset++];
-      if (offset >= end) return undefined;
-      const firstLength = der[offset++];
-      let length = firstLength;
-      if ((firstLength & 0x80) !== 0) {
-        const count = firstLength & 0x7f;
-        if (count < 1 || count > 3 || offset + count > end) return undefined;
-        length = 0;
-        for (let index = 0; index < count; index += 1) length = (length << 8) | der[offset++];
-      }
-      const contentEnd = offset + length;
-      if (contentEnd > end) return undefined;
-      if (tag === 0x04 && length === 32) return der.slice(offset, contentEnd);
-      if ((tag & 0x20) !== 0 || (tag & 0xc0) === 0x80) {
-        const nested = visit(offset, contentEnd);
-        if (nested) return nested;
-      }
-      offset = contentEnd;
-    }
-    return undefined;
-  }
-  return visit(0, der.byteLength);
+function appleNonce(der: Uint8Array): Uint8Array | undefined {
+  // Apple specifies SEQUENCE { [1] EXPLICIT OCTET STRING (SIZE(32)) }.
+  // Accept no alternative nesting, duplicate OCTET STRING, or trailing bytes.
+  let offset = 0;
+  if (der[offset++] !== 0x30) return undefined;
+  const sequence = readLength(der, offset); offset = sequence.offset;
+  if (offset + sequence.length !== der.byteLength || der[offset++] !== 0xa1) return undefined;
+  const context = readLength(der, offset); offset = context.offset;
+  if (offset + context.length !== der.byteLength || der[offset++] !== 0x04) return undefined;
+  const octets = readLength(der, offset); offset = octets.offset;
+  if (octets.length !== 32 || offset + 32 !== der.byteLength) return undefined;
+  return der.slice(offset, offset + 32);
 }
 
 function derEcdsaToRaw(der: Uint8Array): Uint8Array {

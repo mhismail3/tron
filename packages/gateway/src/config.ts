@@ -2,7 +2,8 @@ import { homedir, hostname, networkInterfaces } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { isIP } from "node:net";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import lockfile from "proper-lockfile";
 import { atomicWriteJson, readJson, updateJsonLocked } from "./util/json.js";
 import { GatewayError } from "./errors.js";
@@ -249,6 +250,29 @@ async function loadMachineGroupID(environment: NodeJS.ProcessEnv): Promise<strin
   }
 }
 
+async function loadProductPushOrigin(): Promise<string | undefined> {
+  const candidates = [
+    // Signed Mac payload: app/dist/config.js + app/PushService.xcconfig.
+    join(dirname(fileURLToPath(import.meta.url)), "..", "PushService.xcconfig"),
+    // Source/development checkout. Empty means safely unavailable.
+    fileURLToPath(new URL("../../../config/PushService.xcconfig", import.meta.url)),
+  ];
+  for (const path of candidates) {
+    let contents: string;
+    try { contents = await readFile(path, "utf8"); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw new GatewayError("conflict", "Tron Push product configuration could not be read");
+    }
+    const lines = contents.split(/\r?\n/u).filter((line) => !line.trimStart().startsWith("//"));
+    const assignments = lines.map((line) => /^\s*TRON_PUSH_SERVICE_ORIGIN\s*=\s*(.*?)\s*$/u.exec(line)).filter((match) => match !== null);
+    if (assignments.length !== 1) throw new GatewayError("conflict", "Tron Push product configuration must contain one origin assignment");
+    const raw = assignments[0]![1]!.replace("/$()/", "//").trim();
+    return raw || undefined;
+  }
+  return undefined;
+}
+
 export async function loadConfig(
   args = process.argv.slice(2),
   environment: NodeJS.ProcessEnv = process.env,
@@ -257,6 +281,7 @@ export async function loadConfig(
   const machineGroupID = await loadMachineGroupID(environment);
   const configPath = join(tronHome, "gateway", "gateway.json");
   const next = await loadOrCreateStoredGatewayConfig(configPath);
+  const pushServiceOrigin = await loadProductPushOrigin();
 
   const explicitAgentDir = environment.PI_CODING_AGENT_DIR;
   const agentDirName = environment.TRON_AGENT_DIR_NAME?.trim();
@@ -282,8 +307,6 @@ export async function loadConfig(
     maxLiveRuntimes: 16,
     maxOutboundBytes: 8 * 1_048_576,
     maxSynchronizationBytes: 2 * 1_048_576,
-    ...(environment.TRON_PUSH_SERVICE_ORIGIN?.trim()
-      ? { pushServiceOrigin: environment.TRON_PUSH_SERVICE_ORIGIN.trim() }
-      : {}),
+    ...(pushServiceOrigin ? { pushServiceOrigin } : {}),
   };
 }

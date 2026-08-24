@@ -32,6 +32,9 @@ second product users must configure or operate.
   settings, credentials, compaction, retries, and canonical session JSONL.
 - **The Mac app** installs and supervises the always-running gateway and emits
   short-lived one-time pairing invitations.
+- **Tron Push** is an optional product-operated, App Attest-gated APNs transport;
+  the bundled `notify` tool and typed Ask policy enqueue through the Gateway
+  without exposing device routing or transport credentials to the model.
 
 Tron does not mirror sessions into SQLite and does not reconstruct state from an
 event journal. Local iOS snapshots are bounded, disposable offline presentation
@@ -64,11 +67,14 @@ snapshot/event sequence instead of becoming a competing JSONL writer.
 packages/gateway/   TypeScript gateway and protocol tests
 packages/ios-app/   native SwiftUI iPhone app and share extension
 packages/mac-app/   macOS installer, menu bar, pairing, and gateway packaging
+packages/push-relay/ closed Cloudflare/APNs transport
 scripts/tron        contributor entry point
 ```
 
-The retired custom Rust backend, worker platform, browser operator, APNs relay,
-and Engine/Activity client domains are intentionally absent.
+The retired custom Rust backend, agent worker platform, browser operator,
+notification inbox/delivery subsystem, and Engine/Activity client domains remain
+absent. The current push relay is only a closed installation registry,
+idempotency boundary, and APNs adapter.
 
 ## Requirements
 

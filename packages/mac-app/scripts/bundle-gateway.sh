@@ -8,6 +8,7 @@
 #   bundle-gateway.sh --skip-download  reuse already staged Node runtimes
 #   bundle-gateway.sh --clean          remove only generated payloads
 #   bundle-gateway.sh --verify-only    verify existing payload without mutation
+#   bundle-gateway.sh --allow-unconfigured-push  local development payload only
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -39,6 +40,7 @@ skip_install=0
 skip_download=0
 clean=0
 verify_only=0
+allow_unconfigured_push=0
 
 while (($#)); do
     case "$1" in
@@ -46,6 +48,7 @@ while (($#)); do
         --skip-download) skip_download=1 ;;
         --clean) clean=1 ;;
         --verify-only) verify_only=1 ;;
+        --allow-unconfigured-push) allow_unconfigured_push=1 ;;
         --help|-h) grep '^# ' "$0" | sed 's/^# //'; exit 0 ;;
         *) echo "unknown argument: $1" >&2; exit 64 ;;
     esac
@@ -106,6 +109,8 @@ fi
 required=(
     "$GATEWAY_DIR/package.json"
     "$GATEWAY_DIR/package-lock.json"
+    "$REPO_ROOT/config/PushService.xcconfig"
+    "$REPO_ROOT/scripts/validate-push-service-config.sh"
     "$REPO_ROOT/scripts/gateway-payload-deploy.mjs"
     "$SCRIPT_DIR/tron-gateway-launcher.c"
     "$SCRIPT_DIR/verify-gateway-payload.sh"
@@ -116,8 +121,18 @@ for path in "${required[@]}"; do
     [[ -f "$path" ]] || { echo "missing required source: $path" >&2; exit 3; }
 done
 
+if ((allow_unconfigured_push)); then
+    push_origin="$("$REPO_ROOT/scripts/validate-push-service-config.sh" --allow-empty "$REPO_ROOT/config/PushService.xcconfig")"
+else
+    push_origin="$("$REPO_ROOT/scripts/validate-push-service-config.sh" "$REPO_ROOT/config/PushService.xcconfig")"
+fi
+
 if ((verify_only)); then
     "$SCRIPT_DIR/verify-gateway-payload.sh" "$PAYLOAD_DIR" "$HELPER_DIR/MacOS/tron"
+    cmp -s "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/PushService.xcconfig" || {
+        echo "staged Gateway PushService.xcconfig does not match canonical product configuration" >&2
+        exit 3
+    }
     exit 0
 fi
 
@@ -250,6 +265,7 @@ chmod -R u+w "$PAYLOAD_DIR" 2>/dev/null || true
 rm -rf "$APP_DIR/dist" "$APP_DIR/node_modules"
 cp -R "$GATEWAY_DIR/dist" "$APP_DIR/dist"
 cp "$GATEWAY_DIR/package.json" "$GATEWAY_DIR/package-lock.json" "$APP_DIR/"
+cp "$REPO_ROOT/config/PushService.xcconfig" "$APP_DIR/"
 cp "$GATEWAY_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/"
 cp "$REPO_ROOT/scripts/gateway-payload-deploy.mjs" "$APP_DIR/scripts/"
 # npm prune in the source tree would damage developer dependencies. Install an
@@ -269,7 +285,7 @@ done
 rm -rf "$(dirname "$launcher_temp")"
 
 for required_payload in \
-    "$APP_DIR/dist/index.js" "$APP_DIR/package.json" "$APP_DIR/package-lock.json" \
+    "$APP_DIR/dist/index.js" "$APP_DIR/package.json" "$APP_DIR/package-lock.json" "$APP_DIR/PushService.xcconfig" \
     "$APP_DIR/scripts/ensure-node-pty-helper.mjs" "$APP_DIR/scripts/gateway-payload-deploy.mjs" \
     "$APP_DIR/node_modules" "$RUNTIME_DIR/node-arm64" "$RUNTIME_DIR/node-x64"; do
     [[ -e "$required_payload" ]] || { echo "missing required staged payload: $required_payload" >&2; exit 3; }

@@ -55,6 +55,15 @@ targets:
       - path: Sources/Resources/Fonts
         type: folder
         buildPhase: resources
+    preBuildScripts:
+      - name: Validate product push configuration
+        basedOnDependencyAnalysis: false
+        script: |
+          if [[ "${ACTION:-}" == "install" ]]; then
+            "$SRCROOT/../../scripts/validate-push-service-config.sh" "$SRCROOT/../../config/PushService.xcconfig" >/dev/null
+          else
+            "$SRCROOT/../../scripts/validate-push-service-config.sh" --allow-empty "$SRCROOT/../../config/PushService.xcconfig" >/dev/null
+          fi
     dependencies:
       - target: TronShareExtension
         embed:
@@ -75,11 +84,11 @@ targets:
         Beta:
           CODE_SIGN_ENTITLEMENTS: TronMobileBeta.entitlements
         ProdDebug:
-          CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
+          CODE_SIGN_ENTITLEMENTS: TronMobileProdDebug.entitlements
         Prod:
           CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
         DeviceTest:
-          CODE_SIGN_ENTITLEMENTS: TronMobileProd.entitlements
+          CODE_SIGN_ENTITLEMENTS: TronMobileProdDebug.entitlements
         Test:
           PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.testhost
           CODE_SIGN_ENTITLEMENTS: ""

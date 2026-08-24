@@ -6,13 +6,16 @@ import Security
 import UIKit
 import UserNotifications
 
-enum PushApplicationEnvironment: String, Codable, Sendable {
-    case sandbox
+enum PushRoute: String, Codable, Sendable {
+    case beta
+    case productionSandbox = "production-sandbox"
     case production
 
     static var current: Self {
         #if BETA
-        .sandbox
+        .beta
+        #elseif DEBUG
+        .productionSandbox
         #else
         .production
         #endif
@@ -33,7 +36,6 @@ struct PushGrant: Codable, Equatable, Sendable {
     let installationID: String
     let grantID: String
     let grantSecret: String
-    let environment: PushApplicationEnvironment
     let tokenHash: String
 }
 
@@ -144,12 +146,26 @@ struct PushProductConfiguration: Equatable, Sendable {
     }
 
     static func admit(_ url: URL) -> PushProductConfiguration? {
-        guard url.scheme == "https", url.host != nil,
+        guard url.scheme == "https", let host = url.host?.lowercased(),
               url.user == nil, url.password == nil,
-              url.query == nil, url.fragment == nil,
-              url.port == nil,
-              url.path.isEmpty || url.path == "/" else { return nil }
+              url.query == nil, url.fragment == nil, url.port == nil,
+              url.path.isEmpty || url.path == "/",
+              host.utf8.count <= 253, host.contains("."), host != "localhost",
+              !host.hasSuffix(".localhost"), !host.hasSuffix(".local"), !host.hasSuffix(".internal"),
+              !host.contains(":"), !host.split(separator: ".", omittingEmptySubsequences: false).allSatisfy({ $0.allSatisfy(\.isNumber) }) else { return nil }
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard labels.count >= 2, labels.allSatisfy(Self.isPublicDNSLabel) else { return nil }
         return PushProductConfiguration(origin: url)
+    }
+
+    private static func isPublicDNSLabel(_ label: Substring) -> Bool {
+        let bytes = Array(label.utf8)
+        guard !bytes.isEmpty, bytes.count <= 63 else { return false }
+        func alphanumeric(_ byte: UInt8) -> Bool {
+            (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte)
+        }
+        return alphanumeric(bytes[0]) && alphanumeric(bytes[bytes.count - 1])
+            && bytes.allSatisfy { alphanumeric($0) || $0 == 45 }
     }
 
     func endpoint(_ path: String) -> URL {
@@ -178,21 +194,46 @@ struct PushWorkerClient: Sendable {
         let challenge: String
         let keyId: String
         let apnsToken: String
-        let environment: PushApplicationEnvironment
+        let route: PushRoute
         let bindingHash: String
     }
 
-    struct RegistrationEnvelope: Encodable, Sendable {
+    private struct RegistrationRequest: Encodable, Sendable {
         let version: Int
-        let mode: String
-        let payload: RegistrationPayload
         let proof: String
+        let challengeId: String
+        let challenge: String
+        let keyId: String
+        let apnsToken: String
+        let route: PushRoute
+        let bindingHash: String
+        let attestationObject: String?
+        let assertionObject: String?
+
+        enum CodingKeys: String, CodingKey {
+            case version, proof, challengeId, challenge, keyId, apnsToken, route, bindingHash, attestationObject, assertionObject
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(version, forKey: .version)
+            try container.encode(proof, forKey: .proof)
+            try container.encode(challengeId, forKey: .challengeId)
+            try container.encode(challenge, forKey: .challenge)
+            try container.encode(keyId, forKey: .keyId)
+            try container.encode(apnsToken, forKey: .apnsToken)
+            try container.encode(route, forKey: .route)
+            try container.encode(bindingHash, forKey: .bindingHash)
+            if let attestationObject { try container.encode(attestationObject, forKey: .attestationObject) }
+            if let assertionObject { try container.encode(assertionObject, forKey: .assertionObject) }
+        }
     }
 
     struct RegistrationResponse: Decodable, Sendable {
         let installationId: String
         let grantId: String
         let grantSecret: String
+        let route: PushRoute
     }
 
     private let configuration: PushProductConfiguration
@@ -204,8 +245,7 @@ struct PushWorkerClient: Sendable {
     }
 
     func challenge() async throws -> Challenge {
-        struct RequestBody: Encodable { let version = 1 }
-        return try await post(path: "/v3/attestation/challenge", body: RequestBody(), as: Challenge.self)
+        try await post(path: "/v3/attestation/challenge", body: Optional<Data>.none, acceptedStatus: 200, as: Challenge.self)
     }
 
     func register(
@@ -214,11 +254,16 @@ struct PushWorkerClient: Sendable {
         proof: Data
     ) async throws -> RegistrationResponse {
         guard mode == "attestation" || mode == "assertion" else { throw PushRegistrationError.invalidResponse }
-        return try await post(
-            path: "/v3/installations",
-            body: RegistrationEnvelope(version: 1, mode: mode, payload: payload, proof: proof.base64URLEncodedString()),
-            as: RegistrationResponse.self
+        let encodedProof = proof.base64URLEncodedString()
+        let request = RegistrationRequest(
+            version: 1, proof: mode,
+            challengeId: payload.challengeId, challenge: payload.challenge,
+            keyId: payload.keyId, apnsToken: payload.apnsToken,
+            route: payload.route, bindingHash: payload.bindingHash,
+            attestationObject: mode == "attestation" ? encodedProof : nil,
+            assertionObject: mode == "assertion" ? encodedProof : nil
         )
+        return try await post(path: "/v3/installations", body: request, acceptedStatus: 201, as: RegistrationResponse.self)
     }
 
     static func canonicalData(_ payload: RegistrationPayload) throws -> Data {
@@ -231,20 +276,22 @@ struct PushWorkerClient: Sendable {
 
     private func post<Body: Encodable, Response: Decodable>(
         path: String,
-        body: Body,
+        body: Body?,
+        acceptedStatus: Int,
         as type: Response.Type
     ) async throws -> Response {
         var request = URLRequest(url: configuration.endpoint(path), timeoutInterval: 15)
         request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        request.httpBody = try encoder.encode(body)
-        guard let bodySize = request.httpBody?.count, bodySize <= 16 * 1024 else { throw PushRegistrationError.invalidResponse }
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            request.httpBody = try encoder.encode(body)
+            guard let bodySize = request.httpBody?.count, bodySize <= 16 * 1024 else { throw PushRegistrationError.invalidResponse }
+        }
         let (data, response) = try await transport.data(for: request, maximumBytes: 16 * 1024)
-        guard response.url?.scheme == configuration.origin.scheme,
-              response.url?.host == configuration.origin.host,
-              response.statusCode == 200 else {
+        guard response.url == request.url,
+              response.statusCode == acceptedStatus else {
             throw PushRegistrationError.rejected(response.statusCode)
         }
         return try JSONDecoder().decode(type, from: data)
@@ -255,12 +302,20 @@ private struct PushRegistrationTransfer: Encodable, Sendable {
     let commandId: String
     let installationId: String
     let grantId: String
-    let grantSecret: String
-    let environment: PushApplicationEnvironment
+    let secret: String
+    let previewsEnabled: Bool
 }
 
 private struct PushRegistrationRemoval: Encodable, Sendable { let commandId: String }
-private struct PushRegistrationAcknowledgement: Decodable, Sendable { let accepted: Bool }
+struct PushRegistrationStatus: Decodable, Sendable {
+    let available: Bool
+    let registered: Bool
+    let deviceRegistered: Bool
+    let enabledDeviceCount: Int
+    let pendingCount: Int
+    let notifyWhenAskPresented: Bool
+}
+private struct PushRegistrationRemovalResult: Decodable, Sendable { let removed: Bool }
 
 @MainActor
 @Observable
@@ -353,11 +408,11 @@ final class PushNotificationCoordinator {
         }
 
         if let grant = document.grants[profile.id], connected {
-            await transfer(grant, client: client)
+            readiness = await transfer(grant, client: client) ? .ready : .pending
         }
         notifications.registerForRemoteNotifications()
         guard document.apnsToken != nil else {
-            readiness = document.grants[profile.id] == nil ? .registering : .ready
+            if document.grants[profile.id] == nil { readiness = .registering }
             return
         }
         scheduleRegistration()
@@ -387,6 +442,14 @@ final class PushNotificationCoordinator {
             }
             do { try await self.registerCurrent() }
             catch is CancellationError { return }
+            catch PushRegistrationError.rejected(401) {
+                // App Attest keys can become invalid after restore/reinstall.
+                // Preserve grants, discard only the unusable attestation key,
+                // and let the next reconciliation establish a fresh identity.
+                self.document.appAttestKeyID = nil
+                try? self.credentials.save(self.document)
+                self.readiness = .pending
+            }
             catch { self.readiness = .pending }
         }
     }
@@ -395,8 +458,7 @@ final class PushNotificationCoordinator {
         guard let context, let worker, let token = document.apnsToken else { throw PushRegistrationError.unavailable }
         let tokenHash = Self.hash("tron-apns-token-v1\0" + token)
         if let grant = document.grants[context.profile.id], grant.tokenHash == tokenHash {
-            await transfer(grant, client: context.client)
-            readiness = .ready
+            readiness = await transfer(grant, client: context.client) ? .ready : .pending
             return
         }
 
@@ -422,7 +484,7 @@ final class PushNotificationCoordinator {
             challenge: challenge.challenge,
             keyId: keyID,
             apnsToken: token,
-            environment: .current,
+            route: .current,
             bindingHash: bindingHash
         )
         let clientDataHash = Data(SHA256.hash(data: try PushWorkerClient.canonicalData(payload)))
@@ -432,7 +494,8 @@ final class PushNotificationCoordinator {
         let response = try await worker.register(payload: payload, mode: mode, proof: proof)
         try Task.checkCancellation()
         guard self.context?.profile.id == context.profile.id else { throw CancellationError() }
-        guard Self.isOpaqueID(response.installationId),
+        guard response.route == payload.route,
+              Self.isOpaqueID(response.installationId),
               Self.isOpaqueID(response.grantId),
               response.grantSecret.utf8.count >= 32,
               response.grantSecret.utf8.count <= 512 else { throw PushRegistrationError.invalidResponse }
@@ -442,43 +505,44 @@ final class PushNotificationCoordinator {
             installationID: response.installationId,
             grantID: response.grantId,
             grantSecret: response.grantSecret,
-            environment: .current,
             tokenHash: tokenHash
         )
         document.grants[context.profile.id] = grant
         try credentials.save(document)
-        await transfer(grant, client: context.client)
-        readiness = .ready
+        readiness = await transfer(grant, client: context.client) ? .ready : .pending
     }
 
-    private func transfer(_ grant: PushGrant, client: GatewayClient) async {
+    private func transfer(_ grant: PushGrant, client: GatewayClient) async -> Bool {
         do {
-            let acknowledgement: PushRegistrationAcknowledgement = try await client.request(
+            let status: PushRegistrationStatus = try await client.request(
                 "push.registration.upsert",
                 PushRegistrationTransfer(
                     commandId: uuid().uuidString,
                     installationId: grant.installationID,
                     grantId: grant.grantID,
-                    grantSecret: grant.grantSecret,
-                    environment: grant.environment
+                    secret: grant.grantSecret,
+                    previewsEnabled: false
                 ),
                 timeout: .seconds(8)
             )
-            readiness = acknowledgement.accepted ? .ready : .pending
+            return status.available && status.registered && status.deviceRegistered && status.enabledDeviceCount > 0
         } catch {
-            readiness = .pending
+            return false
         }
     }
 
     private func removeRegistration(for profile: GatewayProfile, client: GatewayClient) async {
         guard document.grants[profile.id] != nil else { return }
         do {
-            let acknowledgement: PushRegistrationAcknowledgement = try await client.request(
+            let result: PushRegistrationRemovalResult = try await client.request(
                 "push.registration.remove",
                 PushRegistrationRemoval(commandId: uuid().uuidString),
                 timeout: .seconds(8)
             )
-            if acknowledgement.accepted { readiness = .denied }
+            _ = result.removed // false is an idempotent already-absent acknowledgement.
+            document.grants.removeValue(forKey: profile.id)
+            try credentials.save(document)
+            readiness = .denied
         } catch {
             // Permission denial remains authoritative locally. The next connected
             // reconciliation retries removal without blocking chat or pairing.
@@ -486,7 +550,7 @@ final class PushNotificationCoordinator {
     }
 
     private static func hash(_ value: String) -> String {
-        Data(SHA256.hash(data: Data(value.utf8))).base64URLEncodedString()
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func isOpaqueID(_ value: String) -> Bool {

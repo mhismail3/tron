@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -8,7 +8,7 @@ import type { PushRelayClient, RelayNotificationOutcome } from "./relay-client.j
 
 const grant = {
   deviceId: "device_abcdefgh", installationId: "install_abcdefgh", grantId: "grant_abcdefgh",
-  secret: Buffer.alloc(32, 9).toString("base64url"), environment: "sandbox" as const,
+  secret: Buffer.alloc(32, 9).toString("base64url") as const,
   previewsEnabled: false,
 };
 
@@ -71,8 +71,29 @@ describe("NotificationGrantStore and NotificationService", () => {
     await expect(service.removeDevice(grant.deviceId)).resolves.toBe(true);
     expect((await service.status(grant.deviceId)).deviceRegistered).toBe(false);
     await service.drain();
-    expect(relay.revoked).toEqual([grant.grantId]);
+    await vi.waitFor(() => expect(relay.revoked).toEqual([grant.grantId]));
     expect((await store.snapshot()).revocations).toEqual([]);
+  });
+
+  it("retains a failed revocation indefinitely with bounded retry state", async () => {
+    let clock = Date.parse("2026-01-01T00:00:00.000Z");
+    const root = await mkdtemp(join(tmpdir(), "tron-notifications-revoke-"));
+    const store = new NotificationGrantStore(root);
+    await store.initialize();
+    const relay = {
+      available: true,
+      async send() { return "accepted_by_apns" as const; },
+      async revoke() { return "retryable" as const; },
+    } as unknown as PushRelayClient;
+    const service = new NotificationService(store, relay, () => clock);
+    await service.upsertGrant(grant);
+    await service.removeDevice(grant.deviceId);
+    await vi.waitFor(async () => expect((await store.snapshot()).revocations[0]?.attempts).toBeGreaterThan(0));
+    clock += 365 * 24 * 60 * 60_000;
+    await service.drain();
+    const tombstone = (await store.snapshot()).revocations[0];
+    expect(tombstone?.grantId).toBe(grant.grantId);
+    expect(tombstone?.attempts).toBeLessThanOrEqual(32);
   });
 
   it("rotates grants by retaining and draining a revocation tombstone for the previous capability", async () => {
@@ -113,6 +134,49 @@ describe("NotificationGrantStore and NotificationService", () => {
     await service.askPresented("session-one", "ask-one");
     expect(relay.sent).toEqual([]);
     expect((await service.status(grant.deviceId)).notifyWhenAskPresented).toBe(false);
+  });
+
+  it("reserves revocation capacity for every active grant at saturation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-notifications-reserve-"));
+    const store = new NotificationGrantStore(root);
+    await store.initialize();
+    const now = new Date().toISOString();
+    await store.update((document) => {
+      document.revocations = Array.from({ length: 191 }, (_, index) => ({
+        grantId: `oldgrant_${index.toString().padStart(4, "0")}`,
+        secret: Buffer.alloc(32, index % 255).toString("base64url"),
+        requestId: `oldrequest_${index.toString().padStart(4, "0")}`,
+        createdAt: now,
+        attempts: 0,
+        nextAttemptAt: now,
+      }));
+      return document;
+    });
+    const relay = { available: false } as PushRelayClient;
+    const service = new NotificationService(store, relay);
+    await service.upsertGrant(grant);
+    await expect(service.upsertGrant({
+      ...grant,
+      deviceId: "device_ijklmnop",
+      installationId: "install_ijklmnop",
+      grantId: "grant_ijklmnop",
+      secret: Buffer.alloc(32, 7).toString("base64url"),
+    })).rejects.toMatchObject({ code: "busy" });
+    await expect(service.removeDevice(grant.deviceId)).resolves.toBe(true);
+    const snapshot = await store.snapshot();
+    expect(snapshot.grants).toEqual([]);
+    expect(snapshot.revocations).toHaveLength(192);
+  });
+
+  it("rejects permissive and symlinked credential parents before writing secrets", async () => {
+    const permissiveRoot = await mkdtemp(join(tmpdir(), "tron-notifications-parent-"));
+    await mkdir(join(permissiveRoot, "gateway"), { mode: 0o755 });
+    await expect(new NotificationGrantStore(permissiveRoot).initialize()).rejects.toMatchObject({ code: "conflict" });
+
+    const symlinkRoot = await mkdtemp(join(tmpdir(), "tron-notifications-symlink-"));
+    const target = await mkdtemp(join(tmpdir(), "tron-notifications-target-"));
+    await symlink(target, join(symlinkRoot, "gateway"));
+    await expect(new NotificationGrantStore(symlinkRoot).initialize()).rejects.toMatchObject({ code: "conflict" });
   });
 
   it("fails closed for permissive or malformed owner state", async () => {

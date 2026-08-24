@@ -251,15 +251,14 @@ export class GatewayService {
       case "push.registration.upsert":
         return this.mutation(client, method, params, async () => {
           if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
-          const allowed = new Set(["commandId", "installationId", "grantId", "secret", "environment", "previewsEnabled", "notifyWhenAskPresented"]);
+          const allowed = new Set(["commandId", "installationId", "grantId", "secret", "previewsEnabled", "notifyWhenAskPresented"]);
           if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
           return safeJson(await this.requireNotifications().upsertGrant({
             deviceId: client.identity,
             installationId: string(params.installationId, "installationId", { min: 8, max: 160 }),
             grantId: string(params.grantId, "grantId", { min: 8, max: 160 }),
             secret: string(params.secret, "secret", { min: 43, max: 171 }),
-            environment: oneOf(params.environment, "environment", ["sandbox", "production"] as const),
-            previewsEnabled: boolean(params.previewsEnabled, "previewsEnabled"),
+            previewsEnabled: params.previewsEnabled === undefined ? false : boolean(params.previewsEnabled, "previewsEnabled"),
             ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
           }));
         });

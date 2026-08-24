@@ -48,6 +48,15 @@ describe("gateway configuration", () => {
     expect(second.agentDir).toBe(join(homedir(), ".pi", "agent-dev"));
   });
 
+  it("does not admit a runtime or user push-origin override", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tron-config-push-"));
+    const config = await loadConfig([], {
+      TRON_DATA_DIR: root,
+      TRON_PUSH_SERVICE_ORIGIN: "https://attacker.example.test",
+    });
+    expect(config.pushServiceOrigin).toBeUndefined();
+  });
+
   it("persists one bounded identity and reloads it without rekeying", async () => {
     const root = await mkdtemp(join(tmpdir(), "tron-config-"));
     const environment = {

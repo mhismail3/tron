@@ -55,7 +55,14 @@ prepare_helper_tree() {
     done
 }
 
-if "$VERIFY" --verify-only; then
+run_bundle() {
+    if [[ "${CONFIGURATION:-}" != "Release" ]]; then
+        "$VERIFY" "$@" --allow-unconfigured-push
+    else
+        "$VERIFY" "$@"
+    fi
+}
+if run_bundle --verify-only; then
     echo "Mac Gateway payload is ready (embedded Gateway, production dependencies, and Node runtimes)"
     exit 0
 fi
@@ -66,6 +73,6 @@ safe_remove_tree "$PAYLOAD_DIR"
 safe_remove_tree "$HELPER_CONTENTS/MacOS"
 safe_remove_tree "$HELPER_CONTENTS/Resources/AppIcon.icns"
 mkdir -p "$RESOURCES_DIR" "$HELPER_CONTENTS/MacOS" "$HELPER_CONTENTS/Resources"
-"$VERIFY"
-"$VERIFY" --verify-only
+run_bundle
+run_bundle --verify-only
 printf 'Mac Gateway payload is ready after rebuild (verified immutable publication)\n'

@@ -12,8 +12,8 @@ For an explicit preflight or to refresh an existing payload:
 
 ```bash
 packages/mac-app/scripts/ensure-gateway-bundle.sh
-# Force a fresh staging pass:
-packages/mac-app/scripts/bundle-gateway.sh
+# Force a fresh local staging pass while product push is unconfigured:
+packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push
 ```
 
 Staging resolves the exact Node version in the repository's `.node-version`
@@ -25,6 +25,13 @@ absolute executable, but it must print the pinned version; there is no ambient
 npm override. Failure happens before build or payload mutation. These variables
 affect staging only; the completed app uses its embedded Node runtimes and does
 not consult this toolchain.
+
+`config/PushService.xcconfig` is the one maintainer-owned public Push service
+origin consumed by both iOS and this bundled Gateway. Development may stage an
+unconfigured payload with `--allow-unconfigured-push`; push then remains
+unavailable. Direct official staging and Mac Release builds fail closed while
+the origin is empty. This is release configuration, never end-user setup, and
+contains no credential.
 
 The script:
 
@@ -80,10 +87,10 @@ Useful iteration options:
 
 ```bash
 # Reuse gateway node_modules/dist, but refresh runtime payloads
-packages/mac-app/scripts/bundle-gateway.sh --skip-install
+packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push --skip-install
 
 # Reuse already staged exact Node runtimes too
-packages/mac-app/scripts/bundle-gateway.sh --skip-install --skip-download
+packages/mac-app/scripts/bundle-gateway.sh --allow-unconfigured-push --skip-install --skip-download
 
 # Remove generated payloads only
 packages/mac-app/scripts/bundle-gateway.sh --clean

@@ -3,20 +3,19 @@ import { GatewayError } from "../errors.js";
 import {
   MAXIMUM_PENDING_INTENTS,
   MAXIMUM_PUSH_GRANTS,
+  MAXIMUM_REVOCATIONS,
   NotificationGrantStore,
   notificationHash,
   isEndpointSecret,
   type NotificationDocument,
   type NotificationKind,
   type NotificationReceipt,
-  type PushEnvironment,
   type PushGrant,
 } from "./grant-store.js";
 import { PushRelayClient, type RelayNotificationOutcome } from "./relay-client.js";
 
 const INTENT_TTL_MS = 15 * 60_000;
 const RECEIPT_TTL_MS = 24 * 60 * 60_000;
-const REVOCATION_TTL_MS = 7 * 24 * 60 * 60_000;
 const MAXIMUM_DAILY_INTENTS = 60;
 const MAXIMUM_SESSION_HOURLY_INTENTS = 12;
 const MAXIMUM_TARGET_DAILY_INTENTS = 40;
@@ -48,7 +47,8 @@ function prune(document: NotificationDocument, now: number): NotificationDocumen
   for (const receipt of document.receipts) if (expired.has(receipt.dedupeKey) && receipt.result === "queued") receipt.result = "expired";
   document.receipts = document.receipts.filter((receipt) => Date.parse(receipt.expiresAt) > now).slice(-512);
   document.pending = document.pending.filter((intent) => Date.parse(intent.expiresAt) > now).slice(-MAXIMUM_PENDING_INTENTS);
-  document.revocations = document.revocations.filter((item) => Date.parse(item.expiresAt) > now).slice(-128);
+  // Revocation authority must be retained until the relay acknowledges it.
+  document.revocations = document.revocations.slice(-MAXIMUM_REVOCATIONS);
   return document;
 }
 function receiptFor(input: {
@@ -77,7 +77,7 @@ export class NotificationService {
   dispose(): void { if (this.timer) clearInterval(this.timer); this.timer = undefined; }
 
   async upsertGrant(input: {
-    deviceId: string; installationId: string; grantId: string; secret: string; environment: PushEnvironment; previewsEnabled: boolean; notifyWhenAskPresented?: boolean;
+    deviceId: string; installationId: string; grantId: string; secret: string; previewsEnabled: boolean; notifyWhenAskPresented?: boolean;
   }): Promise<NotificationStatus> {
     if (![input.deviceId, input.installationId, input.grantId].every(isID) || !isEndpointSecret(input.secret)) {
       throw new GatewayError("invalid_request", "Push registration credentials are malformed");
@@ -89,14 +89,22 @@ export class NotificationService {
       const anotherDevice = document.grants.find((grant) => grant.grantId === input.grantId && grant.deviceId !== input.deviceId);
       if (anotherDevice) throw new GatewayError("conflict", "Push grant is already bound to another device");
       const previous = document.grants.find((grant) => grant.deviceId === input.deviceId);
-      if (previous && previous.grantId !== input.grantId) {
+      if (previous && previous.grantId === input.grantId
+        && (previous.installationId !== input.installationId || previous.secret !== input.secret)) {
+        throw new GatewayError("conflict", "Push grant identity changed without an endpoint rotation");
+      }
+      const addsGrant = previous === undefined;
+      const addsRevocation = previous !== undefined && previous.grantId !== input.grantId;
+      if (document.grants.length + document.revocations.length + (addsGrant || addsRevocation ? 1 : 0) > MAXIMUM_REVOCATIONS) {
+        throw new GatewayError("busy", "Push revocation capacity must drain before registering this endpoint", true);
+      }
+      if (addsRevocation) {
         rotated = true;
-        if (document.revocations.length >= 128) throw new GatewayError("busy", "Push revocation capacity must drain before rotating this registration", true);
         document.revocations.push({
           grantId: previous.grantId,
           secret: previous.secret,
           requestId: notificationHash(`revoke\0${previous.grantId}`),
-          createdAt: iso(now), expiresAt: iso(now + REVOCATION_TTL_MS), attempts: 0, nextAttemptAt: iso(now),
+          createdAt: iso(now), attempts: 0, nextAttemptAt: iso(now),
         });
       }
       const next: PushGrant = {
@@ -104,7 +112,6 @@ export class NotificationService {
         installationId: input.installationId,
         grantId: input.grantId,
         secret: input.secret,
-        environment: input.environment,
         previewsEnabled: input.previewsEnabled,
         active: true,
         createdAt: previous?.createdAt ?? iso(now),
@@ -135,7 +142,7 @@ export class NotificationService {
           grantId: grant.grantId,
           secret: grant.secret,
           requestId: notificationHash(`revoke\0${grant.grantId}`),
-          createdAt: iso(now), expiresAt: iso(now + REVOCATION_TTL_MS), attempts: 0, nextAttemptAt: iso(now),
+          createdAt: iso(now), attempts: 0, nextAttemptAt: iso(now),
         });
       }
       return document;
@@ -213,7 +220,6 @@ export class NotificationService {
     if (this.draining || !this.relay.available) return;
     this.draining = true;
     try {
-      await this.drainRevocations();
       const now = this.now();
       const document = await this.store.snapshot();
       const work = document.pending.flatMap((intent) => intent.targets
@@ -229,17 +235,21 @@ export class NotificationService {
           try {
             outcome = await this.relay.send({
               grantId: item.grant.grantId, secret: item.grant.secret, requestId: item.target.requestId,
-              kind: item.intent.kind, message: item.target.message, environment: item.grant.environment, expiresAt: item.intent.expiresAt,
+              message: item.target.message, expiresAt: item.intent.expiresAt,
             });
           } catch { outcome = "retryable"; }
-          await this.recordOutcome(item.intent.id, item.target.grantId, outcome);
+          await this.recordOutcome(item.intent.id, item.target.grantId, outcome === "rate_limited" ? "retryable" : outcome);
         }
       });
       await Promise.all(workers);
+      // Remote revocation is lower priority than live notifications and bounded
+      // to one attempt per drain so an unavailable relay cannot wedge delivery.
+      await this.drainRevocations();
     } finally { this.draining = false; }
   }
 
   private async recordOutcome(intentId: string, grantId: string, outcome: RelayNotificationOutcome): Promise<void> {
+    if (outcome === "rate_limited") outcome = "retryable";
     const now = this.now();
     await this.store.update((document) => {
       prune(document, now);
@@ -272,14 +282,17 @@ export class NotificationService {
   private async drainRevocations(): Promise<void> {
     const now = this.now();
     const document = await this.store.snapshot();
-    for (const item of document.revocations.filter((candidate) => Date.parse(candidate.nextAttemptAt) <= now).slice(0, 8)) {
+    for (const item of document.revocations.filter((candidate) => Date.parse(candidate.nextAttemptAt) <= now).slice(0, 1)) {
       let revoked = false;
       try { revoked = await this.relay.revoke(item.grantId, item.secret, item.requestId) === "revoked"; } catch { /* retained */ }
       await this.store.update((current) => {
         const candidate = current.revocations.find((entry) => entry.grantId === item.grantId);
         if (!candidate) return current;
         if (revoked) current.revocations = current.revocations.filter((entry) => entry.grantId !== item.grantId);
-        else { candidate.attempts += 1; candidate.nextAttemptAt = iso(this.now() + Math.min(60 * 60_000, 5_000 * 2 ** Math.min(candidate.attempts, 9))); }
+        else {
+          candidate.attempts = Math.min(32, candidate.attempts + 1);
+          candidate.nextAttemptAt = iso(this.now() + Math.min(60 * 60_000, 5_000 * 2 ** Math.min(candidate.attempts, 9)));
+        }
         return prune(current, this.now());
       });
     }

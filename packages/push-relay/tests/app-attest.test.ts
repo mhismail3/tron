@@ -1,9 +1,10 @@
 import { X509Certificate } from "@peculiar/x509";
 import { encode } from "cbor-x";
 import { describe, expect, test } from "vitest";
-import { verifyAssertion, verifyAttestation } from "../src/app-attest";
+import syntheticAttestation from "./app-attest-synthetic.json";
+import { verifyAssertion, verifyAttestation, verifyAttestationAgainstTrustedRoot } from "../src/app-attest";
 import { APPLE_APP_ATTESTATION_ROOT_PEM } from "../src/apple-app-attestation-root";
-import { base64Url, concatBytes, ownedBuffer, sha256, utf8 } from "../src/crypto";
+import { base64Url, concatBytes, decodeBase64Url, ownedBuffer, sha256, utf8 } from "../src/crypto";
 
 async function assertionFixture(appId: string, counter: number, clientDataHash: Uint8Array) {
   const keys = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
@@ -43,6 +44,31 @@ describe("Apple App Attest verification", () => {
     const root = new X509Certificate(APPLE_APP_ATTESTATION_ROOT_PEM);
     expect(root.subject).toContain("Apple App Attestation Root CA");
     expect(root.notAfter.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  test("executes the complete pinned-chain, nonce, AAGUID, credential, and counter path", async () => {
+    const fixture = syntheticAttestation;
+    const attestationObject = base64Url(encode({
+      fmt: "apple-appattest",
+      authData: decodeBase64Url(fixture.authData),
+      attStmt: {
+        x5c: [decodeBase64Url(fixture.leafCertificate), decodeBase64Url(fixture.intermediateCertificate)],
+        receipt: new Uint8Array([1]),
+      },
+    }));
+    const input = {
+      attestationObject,
+      keyId: fixture.keyId,
+      clientDataHash: decodeBase64Url(fixture.clientDataHash),
+      appId: fixture.appId,
+      environment: fixture.environment as "development",
+      now: new Date("2026-08-25T00:00:00.000Z"),
+    };
+    await expect(verifyAttestationAgainstTrustedRoot(input, fixture.rootPem)).resolves.toMatchObject({ counter: 0 });
+    await expect(verifyAttestationAgainstTrustedRoot({
+      ...input,
+      clientDataHash: await sha256(utf8("tampered client data")),
+    }, fixture.rootPem)).rejects.toThrow("invalid_attestation_nonce");
   });
 
   test("verifies a signed assertion and enforces the monotonic counter and relying party", async () => {

@@ -1,8 +1,13 @@
+import { readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { GatewayService, type ClientContext } from "../transport/gateway-service.js";
+
+const pushFixture = JSON.parse(readFileSync(new URL("../../../protocol-fixtures/push-v3.json", import.meta.url), "utf8")) as {
+  gatewayUpsert: { request: Record<string, unknown>; expectedStatus: Record<string, unknown> };
+};
 
 const client = (isLocal = false): ClientContext => ({
   id: "connection", identity: isLocal ? "local-wrapper" : "device_abcdefgh", isLocal,
@@ -14,9 +19,9 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "tron-push-rpc-"));
   const calls: any[] = [];
   const notifications = {
-    async upsertGrant(input: unknown) { calls.push(["upsert", input]); return { registered: true }; },
+    async upsertGrant(input: unknown) { calls.push(["upsert", input]); return structuredClone(pushFixture.gatewayUpsert.expectedStatus); },
     async removeDevice(id: string) { calls.push(["remove", id]); return true; },
-    async status(id?: string) { calls.push(["status", id]); return { registered: true }; },
+    async status(id?: string) { calls.push(["status", id]); return structuredClone(pushFixture.gatewayUpsert.expectedStatus); },
   };
   const devices = { revoke: vi.fn(async () => true) };
   const service = new GatewayService({
@@ -30,15 +35,26 @@ async function fixture() {
 describe("Gateway push registration RPC", () => {
   it("binds an exact registration to the authenticated mobile device", async () => {
     const { service, calls } = await fixture();
-    await service.invoke(client(), "push.registration.upsert", {
-      commandId: "command-1", installationId: "install_abcdefgh", grantId: "grant_abcdefgh",
-      secret: Buffer.alloc(32, 1).toString("base64url"), environment: "sandbox", previewsEnabled: false,
+    const result = await service.invoke(client(), "push.registration.upsert", pushFixture.gatewayUpsert.request);
+    expect(result).toEqual(pushFixture.gatewayUpsert.expectedStatus);
+    expect(Object.keys(result as object).sort()).toEqual(Object.keys(pushFixture.gatewayUpsert.expectedStatus).sort());
+    expect(calls[0][1]).toMatchObject({
+      deviceId: "device_abcdefgh",
+      grantId: pushFixture.gatewayUpsert.request.grantId,
+      previewsEnabled: false,
     });
-    expect(calls[0][1]).toMatchObject({ deviceId: "device_abcdefgh", grantId: "grant_abcdefgh", previewsEnabled: false });
     await expect(service.invoke(client(), "push.registration.upsert", {
       commandId: "command-2", deviceId: "forged-device", installationId: "install_abcdefgh", grantId: "grant_abcdefgh",
-      secret: Buffer.alloc(32, 1).toString("base64url"), environment: "sandbox", previewsEnabled: false,
+      secret: Buffer.alloc(32, 1).toString("base64url"), previewsEnabled: false,
     })).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("defaults lock-screen previews off when the iOS DTO omits the optional preference", async () => {
+    const { service, calls } = await fixture();
+    const request = { ...pushFixture.gatewayUpsert.request };
+    delete request.previewsEnabled;
+    await service.invoke(client(), "push.registration.upsert", request);
+    expect(calls[0][1]).toMatchObject({ previewsEnabled: false });
   });
 
   it("denies local-wrapper registration and scopes status/removal to the remote identity", async () => {

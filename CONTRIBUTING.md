@@ -10,11 +10,15 @@ source contracts, but not as a second user-facing product.
 - `packages/gateway` — strict TypeScript gateway, protocol, supervision, tests
 - `packages/ios-app` — SwiftUI iPhone app and share extension
 - `packages/mac-app` — macOS installer/menu bar and gateway packaging
+- `packages/push-relay` — closed product-operated App Attest/APNs transport
 - `scripts/tron` — contributor command entry point
 
-The custom Rust backend, Engine/Activity protocol, workers, event SQLite mirror,
-browser operator, and notification relay were retired. Do not reintroduce their
-terminology or architecture through compatibility wrappers.
+The custom Rust backend, Engine/Activity protocol, agent workers, event SQLite
+mirror, browser operator, and legacy notification delivery subsystem were
+retired. Do not reintroduce their terminology or architecture through
+compatibility wrappers. The current Cloudflare push relay is only a closed
+installation registry, idempotency boundary, and APNs transport; it owns no
+agent execution, session state, inbox, badge, or reminder policy.
 
 ## Change requirements
 

@@ -96,13 +96,14 @@ export function canonicalRegistration(fields: {
   route: string;
   bindingHash: string;
 }): Uint8Array {
+  // Lexicographic keys match Swift JSONEncoder.sortedKeys byte-for-byte.
   return utf8(JSON.stringify({
-    version: fields.version,
-    challengeId: fields.challengeId,
-    challenge: fields.challenge,
-    keyId: fields.keyId,
     apnsToken: fields.apnsToken,
-    route: fields.route,
     bindingHash: fields.bindingHash,
+    challenge: fields.challenge,
+    challengeId: fields.challengeId,
+    keyId: fields.keyId,
+    route: fields.route,
+    version: fields.version,
   }));
 }

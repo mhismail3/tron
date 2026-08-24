@@ -42,7 +42,7 @@ its SHA-256 digest as `clientDataHash` to `attestKey` or
 `generateAssertion`:
 
 ```json
-{"version":1,"challengeId":"...","challenge":"...","keyId":"...","apnsToken":"...","route":"beta","bindingHash":"64 lowercase hex"}
+{"apnsToken":"...","bindingHash":"64 lowercase hex","challenge":"...","challengeId":"...","keyId":"...","route":"beta","version":1}
 ```
 
 The request adds either:
@@ -81,7 +81,7 @@ The Gateway sends these headers:
 - `x-tron-grant-id`
 - `x-tron-timestamp` — ten-digit Unix seconds, within five minutes
 - `x-tron-request-id`
-- `x-tron-signature` — lowercase/uppercase hexadecimal HMAC-SHA256
+- `x-tron-signature` — lowercase hexadecimal HMAC-SHA256
 
 The canonical signed string is:
 
@@ -106,9 +106,8 @@ The exact bounded body is:
 ```
 
 Grant revocation signs an empty body with method `DELETE` and exact path
-`/v3/grants/{grantId}`. It is idempotent. Disabled grants retain only the secret
-needed to authenticate repeated revocation; lifecycle pruning can be added once
-product retention is fixed.
+`/v3/grants/{grantId}`. It is idempotent. Disabled grants retain only the secret needed to authenticate idempotent
+revocation and are pruned after the fixed 30-day disabled retention window.
 
 ## Delivery semantics
 
@@ -118,9 +117,12 @@ while APNs outcome is unknown replays `ambiguous`; it does not blindly resend.
 Explicitly retryable outcomes may be attempted again with the same request ID.
 A request-ID reuse with a different grant or body fails permanently.
 
-Each grant admits at most 30 new requests per hour and 200 per UTC day. Retries
-of an admitted request do not consume another quota unit. APNs invalid-token
-responses disable the installation and all of its grants.
+Each grant admits at most 30 new requests per hour and 200 per UTC day; each
+installation admits at most 50 per hour and 300 per day across its grants. One
+installation may own at most eight grants, and global installation/grant tables
+are transactionally bounded. Retries of an admitted request do not consume
+another quota unit. APNs invalid-token responses disable the installation and
+all of its grants.
 
 `accepted_by_apns` means only that APNs accepted the provider request. It is not
 proof of presentation or human receipt.

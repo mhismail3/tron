@@ -3,7 +3,7 @@ import Testing
 
 @MainActor
 struct RetiredNotificationBadgeTests {
-    @Test("retired notification badge is reset without restoring push registration")
+    @Test("retired inbox badge is reset without introducing unread state")
     func clearsBadge() async {
         var requestedCounts: [Int] = []
 

@@ -12,7 +12,7 @@ export async function verifyGrantSignature(input: {
   provided: string;
   nowSeconds?: number;
 }): Promise<boolean> {
-  if (!/^\d{10}$/.test(input.timestamp) || !/^[0-9a-f]{64}$/i.test(input.provided)) return false;
+  if (!/^\d{10}$/.test(input.timestamp) || !/^[0-9a-f]{64}$/.test(input.provided)) return false;
   const timestamp = Number(input.timestamp);
   const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
   if (!Number.isSafeInteger(timestamp) || Math.abs(now - timestamp) > CLOCK_SKEW_SECONDS) return false;

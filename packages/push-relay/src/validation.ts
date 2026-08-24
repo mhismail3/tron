@@ -10,7 +10,7 @@ import { utf8 } from "./crypto";
 const OPAQUE_ID = /^[A-Za-z0-9_-]{16,128}$/;
 const KEY_ID = /^[A-Za-z0-9_-]{32,128}$/;
 const HASH = /^[0-9a-f]{64}$/;
-const APNS_TOKEN = /^(?:[0-9a-f]{2}){1,200}$/;
+const APNS_TOKEN = /^(?:[0-9a-f]{2}){1,256}$/;
 const BASE64URL = /^[A-Za-z0-9_-]{16,16384}$/;
 
 export function validateRegistration(value: unknown):

@@ -29,9 +29,15 @@ const CHALLENGE_TTL_SECONDS = 5 * 60;
 const MAX_ACTIVE_CHALLENGES = 4096;
 const MAX_CHALLENGES_PER_MINUTE = 300;
 const MAX_CHALLENGE_ATTEMPTS = 3;
+const MAX_INSTALLATIONS = 50_000;
+const MAX_GRANTS = 100_000;
+const MAX_GRANTS_PER_INSTALLATION = 8;
 const HOURLY_LIMIT = 30;
 const DAILY_LIMIT = 200;
+const INSTALLATION_HOURLY_LIMIT = 50;
+const INSTALLATION_DAILY_LIMIT = 300;
 const RECEIPT_RETENTION_SECONDS = 7 * 24 * 60 * 60;
+const DISABLED_RETENTION_SECONDS = 30 * 24 * 60 * 60;
 
 interface ChallengeRow extends Record<string, SqlStorageValue> {
   challenge_hash: string;
@@ -84,6 +90,14 @@ export class PushRegistry {
           key TEXT PRIMARY KEY,
           window_start INTEGER NOT NULL,
           count INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS installation_limits (
+          installation_id TEXT PRIMARY KEY,
+          hourly_window INTEGER NOT NULL,
+          hourly_count INTEGER NOT NULL,
+          daily_window INTEGER NOT NULL,
+          daily_count INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS relay_requests (
           request_id TEXT PRIMARY KEY,
@@ -183,8 +197,17 @@ export class PushRegistry {
 
         let installation = this.installationByKey(registration.keyId);
         const now = epochSeconds();
+        const tokenOwner = this.state.storage.sql.exec<StoredInstallation>(
+          "SELECT * FROM installations WHERE route = ? AND token_hash = ? AND key_id <> ?", registration.route, tokenHash, registration.keyId,
+        ).toArray()[0];
+        if (tokenOwner) {
+          this.state.storage.sql.exec("UPDATE installations SET enabled = 0, updated_at = ? WHERE installation_id = ?", now, tokenOwner.installation_id);
+          this.state.storage.sql.exec("UPDATE grants SET enabled = 0, updated_at = ? WHERE installation_id = ?", now, tokenOwner.installation_id);
+        }
         if (registration.proof === "attestation") {
           if (installation) throw new Error("key_already_attested");
+          const installationCount = this.state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM installations").one().count;
+          if (Number(installationCount) >= MAX_INSTALLATIONS) throw new Error("installation_capacity");
           const installationId = randomOpaqueId();
           this.state.storage.sql.exec(
             `INSERT INTO installations
@@ -207,6 +230,13 @@ export class PushRegistry {
         if (!installation) throw new Error("installation_write_failed");
         let grant = this.grantByBinding(installation.installation_id, registration.bindingHash);
         if (!grant) {
+          const grantCount = this.state.storage.sql.exec<{ count: number }>("SELECT COUNT(*) AS count FROM grants").one().count;
+          const installationGrantCount = this.state.storage.sql.exec<{ count: number }>(
+            "SELECT COUNT(*) AS count FROM grants WHERE installation_id = ?", installation.installation_id,
+          ).one().count;
+          if (Number(grantCount) >= MAX_GRANTS || Number(installationGrantCount) >= MAX_GRANTS_PER_INSTALLATION) {
+            throw new Error("grant_capacity");
+          }
           const grantId = randomOpaqueId();
           const secret = randomOpaqueId(32);
           const hour = hourWindow(now);
@@ -232,7 +262,10 @@ export class PushRegistry {
         };
       });
       return json(result, 201);
-    } catch {
+    } catch (error) {
+      if ((error as Error).message === "installation_capacity" || (error as Error).message === "grant_capacity") {
+        return json({ error: "temporarily_unavailable" }, 503);
+      }
       return json({ error: "registration_conflict" }, 409);
     }
   }
@@ -258,7 +291,7 @@ export class PushRegistry {
     if (!installation || installation.enabled !== 1) return json({ error: "installation_unavailable" }, 410);
 
     const bodyHash = await sha256Hex(body);
-    const admission = await this.beginDispatch(requestId, grant, bodyHash);
+    const admission = await this.beginDispatch(requestId, grant, installation.installation_id, bodyHash);
     if (admission.response) return json(admission.response);
     if (!admission.admitted) return json({ status: "rate_limited", reason: "rate_limited", retryAfterSeconds: admission.retryAfterSeconds } satisfies RelayResult);
 
@@ -294,7 +327,10 @@ export class PushRegistry {
     }
     const grant = this.grant(grantId);
     const body = new Uint8Array();
-    if (!grant || !(await verifyGrantSignature({
+    // Opaque missing grants are an idempotent terminal revoke, including after
+    // bounded disabled-record pruning.
+    if (!grant) return json({ error: "not_found" }, 404);
+    if (!(await verifyGrantSignature({
       secret: grant.secret, method: "DELETE", path, timestamp, requestId, body, provided: signature,
     }))) return json({ error: "invalid_signature" }, 401);
     this.state.storage.sql.exec("UPDATE grants SET enabled = 0, updated_at = ? WHERE grant_id = ?", epochSeconds(), grantId);
@@ -318,17 +354,19 @@ export class PushRegistry {
   }
 
   private async admitChallenge(registration: InstallationRegistration): Promise<ChallengeRow | undefined> {
-    const row = this.challenge(registration.challengeId);
-    const now = epochSeconds();
-    if (!row || row.consumed_at !== null || row.expires_at < now || row.attempt_count >= MAX_CHALLENGE_ATTEMPTS) return undefined;
     const expected = await sha256(utf8(registration.challenge));
-    const actual = decodeHex(row.challenge_hash);
-    if (!constantTimeEqual(expected, actual)) return undefined;
-    this.state.storage.sql.exec("UPDATE challenges SET attempt_count = attempt_count + 1 WHERE challenge_id = ?", registration.challengeId);
-    return row;
+    return this.state.storage.transaction(async () => {
+      const row = this.challenge(registration.challengeId);
+      const now = epochSeconds();
+      if (!row || row.consumed_at !== null || row.expires_at < now || row.attempt_count >= MAX_CHALLENGE_ATTEMPTS) return undefined;
+      // Reserve an attempt before expensive certificate/assertion verification.
+      this.state.storage.sql.exec("UPDATE challenges SET attempt_count = attempt_count + 1 WHERE challenge_id = ?", registration.challengeId);
+      const actual = decodeHex(row.challenge_hash);
+      return constantTimeEqual(expected, actual) ? row : undefined;
+    });
   }
 
-  private async beginDispatch(requestId: string, grant: StoredGrant, bodyHash: string): Promise<{
+  private async beginDispatch(requestId: string, grant: StoredGrant, installationId: string, bodyHash: string): Promise<{
     response?: RelayResult; admitted: boolean; retryAfterSeconds?: number;
   }> {
     return this.state.storage.transaction(async () => {
@@ -355,8 +393,15 @@ export class PushRegistry {
       const day = dayWindow(now);
       const hourlyCount = Number(grant.hourly_window) === hour ? Number(grant.hourly_count) : 0;
       const dailyCount = Number(grant.daily_window) === day ? Number(grant.daily_count) : 0;
-      if (hourlyCount >= HOURLY_LIMIT || dailyCount >= DAILY_LIMIT) {
-        const retryAfterSeconds = hourlyCount >= HOURLY_LIMIT ? Math.max(1, hour + 3600 - now) : Math.max(1, day + 86400 - now);
+      const installationLimit = this.state.storage.sql.exec<{
+        hourly_window: number; hourly_count: number; daily_window: number; daily_count: number;
+      }>("SELECT hourly_window, hourly_count, daily_window, daily_count FROM installation_limits WHERE installation_id = ?", installationId).toArray()[0];
+      const installationHourly = installationLimit && Number(installationLimit.hourly_window) === hour ? Number(installationLimit.hourly_count) : 0;
+      const installationDaily = installationLimit && Number(installationLimit.daily_window) === day ? Number(installationLimit.daily_count) : 0;
+      if (hourlyCount >= HOURLY_LIMIT || dailyCount >= DAILY_LIMIT
+        || installationHourly >= INSTALLATION_HOURLY_LIMIT || installationDaily >= INSTALLATION_DAILY_LIMIT) {
+        const hourlyLimited = hourlyCount >= HOURLY_LIMIT || installationHourly >= INSTALLATION_HOURLY_LIMIT;
+        const retryAfterSeconds = hourlyLimited ? Math.max(1, hour + 3600 - now) : Math.max(1, day + 86400 - now);
         const result: RelayResult = { status: "rate_limited", reason: "rate_limited", retryAfterSeconds };
         this.state.storage.sql.exec(
           "INSERT INTO relay_requests (request_id, grant_id, body_hash, state, response_json, quota_charged, updated_at) VALUES (?, ?, ?, 'terminal', ?, 0, ?)",
@@ -367,6 +412,14 @@ export class PushRegistry {
       this.state.storage.sql.exec(
         "UPDATE grants SET hourly_window = ?, hourly_count = ?, daily_window = ?, daily_count = ?, updated_at = ? WHERE grant_id = ?",
         hour, hourlyCount + 1, day, dailyCount + 1, now, grant.grant_id,
+      );
+      this.state.storage.sql.exec(
+        `INSERT INTO installation_limits (installation_id, hourly_window, hourly_count, daily_window, daily_count, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(installation_id) DO UPDATE SET hourly_window = excluded.hourly_window,
+         hourly_count = excluded.hourly_count, daily_window = excluded.daily_window,
+         daily_count = excluded.daily_count, updated_at = excluded.updated_at`,
+        installationId, hour, installationHourly + 1, day, installationDaily + 1, now,
       );
       this.state.storage.sql.exec(
         "INSERT INTO relay_requests (request_id, grant_id, body_hash, state, response_json, quota_charged, updated_at) VALUES (?, ?, ?, 'in_progress', NULL, 1, ?)",
@@ -406,6 +459,12 @@ export class PushRegistry {
   private prune(now: number): void {
     this.state.storage.sql.exec("DELETE FROM challenges WHERE expires_at < ? OR consumed_at IS NOT NULL", now - 60);
     this.state.storage.sql.exec("DELETE FROM relay_requests WHERE updated_at < ?", now - RECEIPT_RETENTION_SECONDS);
+    this.state.storage.sql.exec("DELETE FROM grants WHERE enabled = 0 AND updated_at < ?", now - DISABLED_RETENTION_SECONDS);
+    this.state.storage.sql.exec(
+      "DELETE FROM installations WHERE enabled = 0 AND updated_at < ? AND NOT EXISTS (SELECT 1 FROM grants WHERE grants.installation_id = installations.installation_id)",
+      now - DISABLED_RETENTION_SECONDS,
+    );
+    this.state.storage.sql.exec("DELETE FROM installation_limits WHERE updated_at < ?", now - DISABLED_RETENTION_SECONDS);
   }
 }
 

@@ -1,21 +1,26 @@
 import { createHash, createHmac } from "node:crypto";
+import { isIP } from "node:net";
 import { GatewayError } from "../errors.js";
-import type { NotificationKind, PushEnvironment } from "./grant-store.js";
 
-export type RelayNotificationOutcome = "accepted_by_apns" | "retryable" | "invalid_token" | "permanent_failure" | "ambiguous";
+export type RelayNotificationOutcome = "accepted_by_apns" | "retryable" | "invalid_token" | "permanent_failure" | "ambiguous" | "rate_limited";
 export interface RelayFetchResponse { status: number; headers: Headers; body: ReadableStream<Uint8Array> | null; }
 export type RelayFetch = (input: string, init: RequestInit) => Promise<RelayFetchResponse>;
 
 const RESPONSE_MAX_BYTES = 16 * 1_024;
 const REQUEST_MAX_BYTES = 2 * 1_024;
-const TIMEOUT_MS = 6_000;
+// APNs owns a bounded 15-second provider request; the caller must not abort first.
+const TIMEOUT_MS = 20_000;
+const PUBLIC_HOST_LABEL = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
-function fixedOrigin(raw: string | undefined): URL | undefined {
+export function fixedPushOrigin(raw: string | undefined): URL | undefined {
   if (raw === undefined || raw.trim() === "") return undefined;
   let value: URL;
   try { value = new URL(raw); } catch { throw new GatewayError("invalid_request", "Tron Push service origin is invalid"); }
-  if (value.protocol !== "https:" || value.username || value.password || value.pathname !== "/" || value.search || value.hash) {
-    throw new GatewayError("invalid_request", "Tron Push service origin must be an exact HTTPS origin");
+  const hostname = value.hostname.toLowerCase();
+  if (value.protocol !== "https:" || value.username || value.password || value.pathname !== "/" || value.search || value.hash
+    || value.port || isIP(hostname) !== 0 || hostname === "localhost" || hostname.endsWith(".localhost")
+    || hostname.endsWith(".local") || hostname.endsWith(".internal") || !PUBLIC_HOST_LABEL.test(hostname)) {
+    throw new GatewayError("invalid_request", "Tron Push service origin must be an exact public HTTPS origin");
   }
   return value;
 }
@@ -37,19 +42,23 @@ async function boundedBody(response: RelayFetchResponse): Promise<string> {
   return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)), length).toString("utf8");
 }
 
-function canonicalSignature(secret: string, method: "POST" | "DELETE", path: string, timestamp: string, requestId: string, body: string): string {
-  const digest = createHash("sha256").update(body).digest("base64url");
-  return createHmac("sha256", Buffer.from(secret, "base64url"))
+export function relaySignature(secret: string, method: "POST" | "DELETE", path: string, timestamp: string, requestId: string, body: string): string {
+  const digest = createHash("sha256").update(body).digest("hex");
+  return createHmac("sha256", secret)
     .update(`${method}\n${path}\n${timestamp}\n${requestId}\n${digest}`)
-    .digest("base64url");
+    .digest("hex");
 }
 
 function exactResult(value: unknown): RelayNotificationOutcome | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const object = value as Record<string, unknown>;
-  if (Object.keys(object).length !== 1 || typeof object.outcome !== "string") return undefined;
-  return ["accepted_by_apns", "retryable", "invalid_token", "permanent_failure", "ambiguous"].includes(object.outcome)
-    ? object.outcome as RelayNotificationOutcome : undefined;
+  const allowed = new Set(["status", "apnsId", "reason", "retryAfterSeconds"]);
+  if (Object.keys(object).some((key) => !allowed.has(key)) || typeof object.status !== "string") return undefined;
+  if (object.apnsId !== undefined && typeof object.apnsId !== "string") return undefined;
+  if (object.reason !== undefined && typeof object.reason !== "string") return undefined;
+  if (object.retryAfterSeconds !== undefined && (!Number.isSafeInteger(object.retryAfterSeconds) || (object.retryAfterSeconds as number) < 1)) return undefined;
+  return ["accepted_by_apns", "retryable", "invalid_token", "permanent_failure", "ambiguous", "rate_limited"].includes(object.status)
+    ? object.status as RelayNotificationOutcome : undefined;
 }
 
 export class PushRelayClient {
@@ -58,7 +67,7 @@ export class PushRelayClient {
     origin: string | undefined,
     private readonly fetcher: RelayFetch = fetch as unknown as RelayFetch,
     private readonly now: () => number = Date.now,
-  ) { this.origin = fixedOrigin(origin); }
+  ) { this.origin = fixedPushOrigin(origin); }
 
   get available(): boolean { return this.origin !== undefined; }
 
@@ -66,14 +75,12 @@ export class PushRelayClient {
     grantId: string;
     secret: string;
     requestId: string;
-    kind: NotificationKind;
     message: string;
-    environment: PushEnvironment;
     expiresAt: string;
   }): Promise<RelayNotificationOutcome> {
     if (!this.origin) return "retryable";
     const path = "/v3/notifications";
-    const body = JSON.stringify({ version: 1, kind: input.kind, message: input.message, environment: input.environment, expiresAt: input.expiresAt });
+    const body = JSON.stringify({ version: 1, kind: "agent_alert", requestId: input.requestId, message: input.message, expiresAt: input.expiresAt });
     if (Buffer.byteLength(body) > REQUEST_MAX_BYTES) throw new GatewayError("invalid_request", "Notification request exceeds its bounded payload");
     const response = await this.request("POST", path, input.grantId, input.secret, input.requestId, body);
     const text = await boundedBody(response);
@@ -88,8 +95,14 @@ export class PushRelayClient {
     if (!this.origin) return "retryable";
     const path = `/v3/grants/${encodeURIComponent(grantId)}`;
     const response = await this.request("DELETE", path, grantId, secret, requestId, "");
-    await boundedBody(response);
-    if (response.status === 204 || response.status === 404) return "revoked";
+    const text = await boundedBody(response);
+    if (response.status === 404) return "revoked";
+    if (response.status === 200) {
+      try {
+        const value = JSON.parse(text) as Record<string, unknown>;
+        if (Object.keys(value).length === 2 && value.version === 1 && value.revoked === true) return "revoked";
+      } catch { /* retry below */ }
+    }
     return "retryable";
   }
 
@@ -108,7 +121,7 @@ export class PushRelayClient {
           "x-tron-grant-id": grantId,
           "x-tron-request-id": requestId,
           "x-tron-timestamp": timestamp,
-          "x-tron-signature": canonicalSignature(secret, method, path, timestamp, requestId, body),
+          "x-tron-signature": relaySignature(secret, method, path, timestamp, requestId, body),
         },
         ...(body ? { body } : {}),
       });

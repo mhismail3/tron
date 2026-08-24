@@ -83,7 +83,7 @@ describe("v3 Worker boundary", () => {
     expect((await SELF.fetch("https://push.test/v3/notifications", { method: "GET" })).status).toBe(405);
     expect((await SELF.fetch("https://push.test/v3/notifications?target=x", { method: "POST" })).status).toBe(404);
     expect((await SELF.fetch("https://push.test/v3/notifications", { method: "POST", body: "{}" })).status).toBe(415);
-    const stream = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(9000)); controller.close(); } });
+    const stream = new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(17_000)); controller.close(); } });
     const response = await SELF.fetch("https://push.test/v3/notifications", { method: "POST", body: stream });
     expect(response.status).toBe(413);
   });
@@ -124,6 +124,22 @@ describe("v3 Worker boundary", () => {
       grant: durableState.storage.sql.exec<{ enabled: number }>("SELECT enabled FROM grants WHERE grant_id = ?", testGrant.grantId).one().enabled,
     }));
     expect(state).toEqual({ installation: 0, grant: 0 });
+  });
+
+  test("enforces installation-wide quota across grants before contacting APNs", async () => {
+    await initializeAndSeed();
+    await runInDurableObject(stub(), async (_instance: PushRegistry, state) => {
+      const now = Math.floor(Date.now() / 1000);
+      state.storage.sql.exec(
+        "INSERT INTO installation_limits (installation_id, hourly_window, hourly_count, daily_window, daily_count, updated_at) VALUES (?, ?, 50, ?, 50, ?)",
+        testGrant.installationId, Math.floor(now / 3600) * 3600, Math.floor(now / 86400) * 86400, now,
+      );
+    });
+    const providerFetch = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", providerFetch);
+    const response = await SELF.fetch("https://push.test/v3/notifications", await signedNotification({ requestId: "installation-quota-0001" }));
+    expect(await response.json()).toMatchObject({ status: "rate_limited" });
+    expect(providerFetch).not.toHaveBeenCalled();
   });
 
   test("enforces quota before contacting APNs and makes revocation idempotent", async () => {

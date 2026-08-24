@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "registration": {
+    "fields": {
+      "apnsToken": "001122aabbccddeeff",
+      "bindingHash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "challenge": "Y2hhbGxlbmdlLWJ5dGVz",
+      "challengeId": "challenge_fixture_01",
+      "keyId": "a2V5LWlkLWZpeHR1cmUtMDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5",
+      "route": "beta",
+      "version": 1
+    },
+    "canonicalUTF8": "{\"apnsToken\":\"001122aabbccddeeff\",\"bindingHash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"challenge\":\"Y2hhbGxlbmdlLWJ5dGVz\",\"challengeId\":\"challenge_fixture_01\",\"keyId\":\"a2V5LWlkLWZpeHR1cmUtMDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTIzNDU2Nzg5\",\"route\":\"beta\",\"version\":1}",
+    "clientDataHashHex": "f05bd9d4b692353e41f7b90280709db1c434cd0d072f5d63537b8084a1c4e21e"
+  },
+  "notification": {
+    "secret": "fixture-endpoint-secret-0123456789abcdef",
+    "timestamp": "1893452645",
+    "requestId": "request_fixture_0123456789",
+    "path": "/v3/notifications",
+    "bodyUTF8": "{\"version\":1,\"kind\":\"agent_alert\",\"requestId\":\"request_fixture_0123456789\",\"message\":\"Tron needs your input.\",\"expiresAt\":\"2030-01-02T03:04:05.000Z\"}",
+    "bodyHashHex": "19f064bdd9598f2506a8f2e8fb9d2f1dfd12bc5382e38a27ee8f42ed618cd5e4",
+    "signatureHex": "a4b39b713582226a2039d3b6caf6a7bca552914c9d35825b9cda908e74230742"
+  },
+  "gatewayUpsert": {
+    "request": {
+      "commandId": "command_fixture_01",
+      "installationId": "installation_fixture_01",
+      "grantId": "grant_fixture_012345",
+      "secret": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+      "previewsEnabled": false
+    },
+    "expectedStatus": {
+      "available": true,
+      "registered": true,
+      "deviceRegistered": true,
+      "enabledDeviceCount": 1,
+      "pendingCount": 0,
+      "notifyWhenAskPresented": true
+    }
+  }
+}

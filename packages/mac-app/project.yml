@@ -64,6 +64,11 @@ targets:
         basedOnDependencyAnalysis: false
         script: |
           set -euo pipefail
+          if [[ "${CONFIGURATION:-}" == "Release" ]]; then
+            "$SRCROOT/../../scripts/validate-push-service-config.sh" "$SRCROOT/../../config/PushService.xcconfig" >/dev/null
+          else
+            "$SRCROOT/../../scripts/validate-push-service-config.sh" --allow-empty "$SRCROOT/../../config/PushService.xcconfig" >/dev/null
+          fi
           "$SRCROOT/scripts/ensure-gateway-bundle.sh"
     postBuildScripts:
       - name: Copy Bundled Login Item

@@ -25,6 +25,7 @@ describe("endpoint-scoped request authentication", () => {
     const input = { secret: "secret", method: "DELETE" as const, path: "/v3/grants/grant-identifier-00001", timestamp: "2000000000", requestId: "request-identifier-0001", body, provided, nowSeconds: 2_000_000_000 };
     await expect(verifyGrantSignature({ ...input, nowSeconds: 2_000_301 })).resolves.toBe(false);
     await expect(verifyGrantSignature({ ...input, provided: "xyz" })).resolves.toBe(false);
+    await expect(verifyGrantSignature({ ...input, provided: provided.toUpperCase() })).resolves.toBe(false);
     await expect(verifyGrantSignature({ ...input, secret: "other" })).resolves.toBe(false);
   });
 });
