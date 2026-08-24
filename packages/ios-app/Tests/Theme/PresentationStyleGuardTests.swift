@@ -463,6 +463,9 @@ struct PresentationStyleGuardTests {
         #expect(composer.contains("ChatContentTransitionPolicy.attachmentTransition("))
         #expect(composer.contains("ChatContentTransitionPolicy.composerSurfaceTransition("))
         #expect(structural.contains("transaction.disablesAnimations = true"))
+        #expect(structural.contains("installedPanelPresented != panelPresented"))
+        #expect(structural.contains("resourcePanelDuration: TimeInterval = 0.24"))
+        #expect(!structural.contains(".clipped()"))
         #expect(!composer.contains("safeAreaInset"))
     }
 
@@ -509,9 +512,10 @@ struct PresentationStyleGuardTests {
             encoding: .utf8
         )
 
-        #expect(blur.contains("case .chat: 188"))
+        #expect(blur.contains("case .chat: 176"))
         #expect(blur.contains("case .dashboard: 176"))
         #expect(blur.contains("case .sheet: 124"))
+        #expect(blur.contains("case .toolDetail: 112"))
         #expect(blur.contains("case .logs: 184"))
         #expect(blur.contains("@Environment(\\.colorScheme) private var colorScheme"))
         #expect(blur.contains("Color.black.opacity(0.46)"))
@@ -559,10 +563,10 @@ struct PresentationStyleGuardTests {
 
         for (url, source) in uiSources {
             let detentCount = source.matches(#"\.presentationDetents\(\[\.medium, \.large\]"#)
-            let blurCount = source.matches(#"\.tronTopBlur\(\.sheet\)"#)
+            let blurCount = source.matches(#"\.tronTopBlur\(\.(sheet|toolDetail)\)"#)
             #expect(
                 blurCount >= detentCount,
-                "\(url.lastPathComponent) has \(detentCount) medium/large sheets but only \(blurCount) sheet blurs"
+                "\(url.lastPathComponent) has \(detentCount) medium/large sheets but only \(blurCount) top blurs"
             )
         }
     }
@@ -1538,6 +1542,9 @@ struct PresentationStyleGuardTests {
         #expect(navigationChrome.contains(".navigationBarTitleDisplayMode(.inline)"))
         #expect(transcript.matches(#"\.tronToolDetailNavigationChrome\(\)"#) == 3)
         #expect(detailSheets.matches(#"\.tronToolDetailNavigationChrome\(\)"#) == 3)
+        #expect(transcript.matches(#"\.tronTopBlur\(\.toolDetail\)"#) == 3)
+        #expect(changesSheet.contains(".tronTopBlur(.toolDetail)"))
+        #expect(technicalSheet.contains(".tronTopBlur(.toolDetail)"))
         #expect(sheet.contains("title: \"Technical details\""))
         #expect(sheet.contains("ToolTechnicalDetailsSheet"))
         #expect(sheet.contains("ToolChipFlowLayout"))
@@ -1547,10 +1554,12 @@ struct PresentationStyleGuardTests {
             sheet.components(separatedBy: "struct ToolChipFlowLayout: Layout {").dropFirst().first?
                 .components(separatedBy: "private struct ToolActivityChip: View {").first
         )
+        #expect(chipLayout.contains("enum ToolChipFlowLayoutPolicy"))
+        #expect(chipLayout.contains("struct Cache"))
         #expect(chipLayout.contains("let ideal = subview.sizeThatFits(.unspecified)"))
-        #expect(chipLayout.contains("guard ideal.width > availableWidth else { return ideal }"))
         #expect(chipLayout.contains("sizeThatFits(ProposedViewSize(width: availableWidth, height: nil))"))
-        #expect(chipLayout.contains("min(availableWidth, constrained.width)"))
+        #expect(chipLayout.contains("proposal: ProposedViewSize(width: frame.width, height: frame.height)"))
+        #expect(chipLayout.contains("height: frames.map(\\.maxY).max() ?? 0"))
         #expect(!chipLayout.contains(".fixedSize(horizontal: true"))
         #expect(chipLayout.matches(#"\.lineLimit\(2\)"#) >= 3)
         #expect(sheet.contains(".accessibilityLabel(item.accessibilityLabel)"))
@@ -1767,6 +1776,8 @@ struct PresentationStyleGuardTests {
         #expect(!motion.contains("layoutTransaction.join"))
         #expect(!motion.contains("withAnimation(animation"))
         #expect(motion.contains("transaction.disablesAnimations = true"))
+        #expect(motion.contains("withAnimation(.easeInOut("))
+        #expect(motion.contains("installedPanelPresented != panelPresented"))
         #expect(!chat.contains("composerViewportTransition"))
         #expect(!chat.contains(".onChange(of: composerTextHeight)"))
         #expect(!chat.contains(".onChange(of: pendingAttachments.map"))
@@ -2238,9 +2249,16 @@ struct PresentationStyleGuardTests {
         #expect(chat.occurrences(of: ".safeAreaInset(edge: .bottom, spacing: 0)") == 1)
         #expect(!composer.contains(".move(edge: .bottom)"))
         #expect(composer.contains("ChatComposerStructuralHost("))
+        #expect(composer.contains("resourcePanelPresented: resourcePicker != nil"))
+        #expect(composer.contains("reduceMotion: reduceMotion"))
         #expect(chat.contains("guard supportsSkillPrompt, let presentationTarget else { return false }"))
         #expect(picker.contains("LazyVStack(spacing: 0)"))
-        #expect(picker.contains("CGFloat(min(entries.count, 5)) * 48"))
+        #expect(picker.contains("keyboardVisible ? keyboardVisibleRows : regularVisibleRows"))
+        #expect(picker.contains("static let panelEditorLines = 4"))
+        #expect(composer.contains("maximumLines: ComposerResourcePanelPolicy.editorLines("))
+        #expect(composer.contains("keyboardVisible: keyboardVisible"))
+        #expect(chat.contains(".onGeometryChange(for: CGFloat.self)"))
+        #expect(!chat.contains("availableChatHeight"))
         #expect(picker.contains(".regular.tint(accent.opacity(0.15))"))
         #expect(picker.contains("Color.tronCyan.opacity(0.40)"))
         #expect(picker.contains("Color.tronPurple"))

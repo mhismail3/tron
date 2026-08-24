@@ -46,7 +46,11 @@ struct ChatComposerView: View {
     let onComposerHeight: (CGFloat) -> Void
 
     var body: some View {
-        ChatComposerStructuralHost(onHeightChange: onComposerHeight) {
+        ChatComposerStructuralHost(
+            resourcePanelPresented: resourcePicker != nil,
+            reduceMotion: reduceMotion,
+            onHeightChange: onComposerHeight
+        ) {
             VStack(spacing: 10) {
                 extensionPills
                 attachmentStrip
@@ -175,6 +179,7 @@ struct ChatComposerView: View {
                 kind: resourcePicker.kind,
                 query: resourcePicker.query,
                 entries: resourceResults,
+                keyboardVisible: keyboardVisible,
                 onSelect: onSelectResource,
                 onDismiss: onDismissResourcePicker
             )
@@ -204,7 +209,11 @@ struct ChatComposerView: View {
                     selection: $selection,
                     responder: responder,
                     isEditable: isEditable,
-                    keyboardAppearance: keyboardAppearance
+                    keyboardAppearance: keyboardAppearance,
+                    maximumLines: ComposerResourcePanelPolicy.editorLines(
+                        panelPresented: resourcePicker != nil,
+                        keyboardVisible: keyboardVisible
+                    )
                 )
                 .padding(.horizontal, 2)
                 .padding(.vertical, 10)

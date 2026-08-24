@@ -4,6 +4,36 @@ import Testing
 
 @Suite("Tool detail semantic presentation")
 struct ToolDetailPresentationTests {
+    @Test("tool chips wrap with measured row heights and never overlap")
+    func chipFlowRows() {
+        let frames = ToolChipFlowLayoutPolicy.frames(
+            for: [
+                CGSize(width: 100, height: 30),
+                CGSize(width: 180, height: 42),
+                CGSize(width: 120, height: 28),
+            ],
+            availableWidth: 260,
+            spacing: 7
+        )
+        #expect(frames == [
+            CGRect(x: 0, y: 0, width: 100, height: 30),
+            CGRect(x: 0, y: 37, width: 180, height: 42),
+            CGRect(x: 0, y: 86, width: 120, height: 28),
+        ])
+        for index in frames.indices {
+            for later in frames.indices where later > index {
+                #expect(!frames[index].intersects(frames[later]))
+            }
+        }
+
+        let sanitized = ToolChipFlowLayoutPolicy.frames(
+            for: [CGSize(width: CGFloat.infinity, height: CGFloat.nan)],
+            availableWidth: 240,
+            spacing: 7
+        )
+        #expect(sanitized == [CGRect(x: 0, y: 0, width: 240, height: 1)])
+    }
+
     @Test("technical payload overview uses bounded top-level summaries")
     func technicalPayloadSummary() {
         #expect(ToolTechnicalPayloadSummary.summary(for: .object(["path": .string("a")])) == "1 top-level field")

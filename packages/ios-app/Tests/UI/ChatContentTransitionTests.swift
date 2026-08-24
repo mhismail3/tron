@@ -91,7 +91,7 @@ struct ChatContentTransitionTests {
         #expect(centered.offsetX == 0)
     }
 
-    @Test("composer child surfaces retain scoped motion without structural height animation")
+    @Test("only explicit resource panel changes receive bounded structural motion")
     func composerChildMotion() {
         #expect(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: false)
             != ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true))
@@ -104,6 +104,30 @@ struct ChatContentTransitionTests {
         #expect(!ChatComposerStructuralTransitionPolicy.admitsHeightChange(
             current: 44,
             measured: 44.2
+        ))
+        #expect(ChatComposerStructuralTransitionPolicy.animatesResourcePanelHeight(
+            current: 44,
+            installedPanelPresented: false,
+            panelPresented: true,
+            reduceMotion: false
+        ))
+        #expect(!ChatComposerStructuralTransitionPolicy.animatesResourcePanelHeight(
+            current: 44,
+            installedPanelPresented: true,
+            panelPresented: true,
+            reduceMotion: false
+        ))
+        #expect(!ChatComposerStructuralTransitionPolicy.animatesResourcePanelHeight(
+            current: nil,
+            installedPanelPresented: false,
+            panelPresented: true,
+            reduceMotion: false
+        ))
+        #expect(!ChatComposerStructuralTransitionPolicy.animatesResourcePanelHeight(
+            current: 44,
+            installedPanelPresented: false,
+            panelPresented: true,
+            reduceMotion: true
         ))
     }
 

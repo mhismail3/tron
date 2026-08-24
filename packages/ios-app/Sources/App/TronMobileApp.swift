@@ -4,6 +4,7 @@ import SwiftUI
 struct TronMobileApp: App {
     @State private var model = AppModel()
     @State private var appearance = AppearanceSettings.shared
+    @State private var backgroundCheckpoints = AppBackgroundCheckpointCoordinator()
     @Environment(\.scenePhase) private var scenePhase
     private let pendingShares = UserDefaultsPendingShareStore()
 
@@ -46,7 +47,7 @@ struct TronMobileApp: App {
                     } else if phase == .inactive {
                         model.becameInactive()
                     } else if phase == .background {
-                        model.enteredBackground()
+                        backgroundCheckpoints.retain(model.enteredBackground())
                     }
                 }
         }

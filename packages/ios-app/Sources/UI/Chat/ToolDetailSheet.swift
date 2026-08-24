@@ -219,66 +219,115 @@ struct ToolDetailSheet: View {
     }
 }
 
+enum ToolChipFlowLayoutPolicy {
+    static func frames(
+        for sizes: [CGSize],
+        availableWidth: CGFloat,
+        spacing: CGFloat
+    ) -> [CGRect] {
+        let width = availableWidth.isFinite ? max(1, availableWidth) : 1
+        let gap = spacing.isFinite ? max(0, spacing) : 0
+        var frames: [CGRect] = []
+        frames.reserveCapacity(sizes.count)
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        for measured in sizes {
+            let size = CGSize(
+                width: measured.width.isFinite ? min(width, max(1, measured.width)) : width,
+                height: measured.height.isFinite ? max(1, measured.height) : 1
+            )
+            if x > 0, x + size.width > width {
+                x = 0
+                y += rowHeight + gap
+                rowHeight = 0
+            }
+            frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
+            x += size.width + gap
+            rowHeight = max(rowHeight, size.height)
+        }
+        return frames
+    }
+}
+
 struct ToolChipFlowLayout: Layout {
+    struct Cache {
+        var availableWidth: CGFloat = 0
+        var sizes: [CGSize] = []
+    }
+
     let spacing: CGFloat
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func updateCache(_ cache: inout Cache, subviews: Subviews) {
+        cache = Cache()
+    }
 
     func sizeThatFits(
         proposal: ProposedViewSize,
         subviews: Subviews,
-        cache: inout ()
+        cache: inout Cache
     ) -> CGSize {
         let availableWidth = max(1, proposal.width ?? 320)
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var rowHeight: CGFloat = 0
-        var measuredWidth: CGFloat = 0
-        for subview in subviews {
-            let size = constrainedSize(of: subview, availableWidth: availableWidth)
-            if x > 0, x + size.width > availableWidth {
-                x = 0
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            measuredWidth = max(measuredWidth, x + size.width)
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
-        }
-        return CGSize(width: min(availableWidth, measuredWidth), height: y + rowHeight)
+        measure(subviews, availableWidth: availableWidth, cache: &cache)
+        let frames = ToolChipFlowLayoutPolicy.frames(
+            for: cache.sizes,
+            availableWidth: availableWidth,
+            spacing: spacing
+        )
+        return CGSize(
+            width: min(availableWidth, frames.map(\.maxX).max() ?? 0),
+            height: frames.map(\.maxY).max() ?? 0
+        )
     }
 
     func placeSubviews(
         in bounds: CGRect,
         proposal: ProposedViewSize,
         subviews: Subviews,
-        cache: inout ()
+        cache: inout Cache
     ) {
         let availableWidth = max(1, bounds.width)
-        var x = bounds.minX
-        var y = bounds.minY
-        var rowHeight: CGFloat = 0
-        for subview in subviews {
-            let size = constrainedSize(of: subview, availableWidth: availableWidth)
-            if x > bounds.minX, x + size.width > bounds.maxX {
-                x = bounds.minX
-                y += rowHeight + spacing
-                rowHeight = 0
-            }
-            subview.place(
-                at: CGPoint(x: x, y: y),
-                anchor: .topLeading,
-                proposal: ProposedViewSize(width: size.width, height: nil)
-            )
-            x += size.width + spacing
-            rowHeight = max(rowHeight, size.height)
+        if abs(cache.availableWidth - availableWidth) > 0.5
+            || cache.sizes.count != subviews.count {
+            measure(subviews, availableWidth: availableWidth, cache: &cache)
         }
+        let frames = ToolChipFlowLayoutPolicy.frames(
+            for: cache.sizes,
+            availableWidth: availableWidth,
+            spacing: spacing
+        )
+        for (subview, frame) in zip(subviews, frames) {
+            subview.place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: frame.width, height: frame.height)
+            )
+        }
+    }
+
+    private func measure(
+        _ subviews: Subviews,
+        availableWidth: CGFloat,
+        cache: inout Cache
+    ) {
+        cache.availableWidth = availableWidth
+        cache.sizes = subviews.map { constrainedSize(of: $0, availableWidth: availableWidth) }
     }
 
     private func constrainedSize(of subview: LayoutSubview, availableWidth: CGFloat) -> CGSize {
         let ideal = subview.sizeThatFits(.unspecified)
-        guard ideal.width > availableWidth else { return ideal }
-
+        if ideal.width.isFinite, ideal.height.isFinite,
+           ideal.width > 0, ideal.height > 0,
+           ideal.width <= availableWidth {
+            return ideal
+        }
         let constrained = subview.sizeThatFits(ProposedViewSize(width: availableWidth, height: nil))
-        return CGSize(width: min(availableWidth, constrained.width), height: constrained.height)
+        return CGSize(
+            width: constrained.width.isFinite ? min(availableWidth, max(1, constrained.width)) : availableWidth,
+            height: constrained.height.isFinite ? max(1, constrained.height) : 1
+        )
     }
 }
 

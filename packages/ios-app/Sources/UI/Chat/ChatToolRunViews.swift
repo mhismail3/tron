@@ -210,7 +210,7 @@ struct ToolRunView: View {
                                 }
                             }
                         }
-                        .tronTopBlur(.sheet)
+                        .tronTopBlur(.toolDetail)
                         .presentationDetents([.medium, .large], selection: $detailDetent)
                         .presentationDragIndicator(.hidden)
                         .tronPresentation()
@@ -378,7 +378,7 @@ private struct ToolRunDetailSheet: View {
                 }
             }
         }
-        .tronTopBlur(.sheet)
+        .tronTopBlur(.toolDetail)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
         .tronPresentation()
@@ -587,7 +587,7 @@ private struct ToolDetailSheetHost: ViewModifier {
                         }
                     }
                 }
-                .tronTopBlur(.sheet)
+                .tronTopBlur(.toolDetail)
                 .presentationDetents([.medium, .large], selection: $detent)
                 .presentationDragIndicator(.hidden)
                 .tronPresentation()

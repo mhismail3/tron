@@ -10,13 +10,15 @@ enum TronTopBlurStyle {
     case chat
     case dashboard
     case sheet
+    case toolDetail
     case logs
 
     var height: CGFloat {
         switch self {
-        case .chat: 188
+        case .chat: 176
         case .dashboard: 176
         case .sheet: 124
+        case .toolDetail: 112
         case .logs: 184
         }
     }
@@ -25,7 +27,7 @@ enum TronTopBlurStyle {
         switch self {
         case .chat: 24
         case .dashboard: 22
-        case .sheet, .logs: 20
+        case .sheet, .toolDetail, .logs: 20
         }
     }
 }

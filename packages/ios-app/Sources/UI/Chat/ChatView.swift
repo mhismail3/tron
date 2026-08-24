@@ -834,7 +834,9 @@ struct ChatView: View {
                     return .none
                 }
                 let attachments = model.composerDrafts.submittedAttachments(for: target)
-                    .filter { submission.attachmentIDs.contains($0.id) }
+                    .filter { attachment in
+                        attachment.gatewayUploadID.map(submission.attachmentIDs.contains) == true
+                    }
                     .prefix(ComposerAttachmentPolicy.maximumCount)
                     .map { $0.frozenForHandoff() }
                 return .outgoing(
@@ -2062,7 +2064,9 @@ struct ChatView: View {
                     queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? []
                 )
                 let submittedAttachments = model.composerDrafts.submittedAttachments(for: target)
-                    .filter { submission.attachmentIDs.contains($0.id) }
+                    .filter { attachment in
+                        attachment.gatewayUploadID.map(submission.attachmentIDs.contains) == true
+                    }
                     .prefix(ComposerAttachmentPolicy.maximumCount)
                     .map { $0.frozenForHandoff() }
                 let morphGeneration = layoutTransaction.join(.morphFlight)

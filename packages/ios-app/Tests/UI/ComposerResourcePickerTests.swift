@@ -5,6 +5,26 @@ import UIKit
 
 @Suite("Composer resource picker")
 struct ComposerResourcePickerTests {
+    @Test("keyboard-constrained panels yield space to the existing composer")
+    func keyboardConstrainedPanel() {
+        #expect(ComposerResourcePanelPolicy.visibleRows(entryCount: 12, keyboardVisible: false) == 5)
+        #expect(ComposerResourcePanelPolicy.visibleRows(entryCount: 12, keyboardVisible: true) == 3)
+        #expect(ComposerResourcePanelPolicy.visibleRows(entryCount: 2, keyboardVisible: true) == 2)
+        #expect(ComposerResourcePanelPolicy.visibleRows(entryCount: -1, keyboardVisible: true) == 0)
+        #expect(ComposerResourcePanelPolicy.editorLines(
+            panelPresented: true,
+            keyboardVisible: true
+        ) == 4)
+        #expect(ComposerResourcePanelPolicy.editorLines(
+            panelPresented: false,
+            keyboardVisible: true
+        ) == 8)
+        #expect(ComposerResourcePanelPolicy.editorLines(
+            panelPresented: true,
+            keyboardVisible: false
+        ) == 8)
+    }
+
     @Test("mention and command triggers respect boundaries, caret, and inline code")
     func triggerBoundaries() {
         #expect(token("@", caret: 1)?.kind == .skill)

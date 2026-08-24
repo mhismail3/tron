@@ -227,6 +227,21 @@ enum ComposerCommandCompletionPolicy {
     }
 }
 
+enum ComposerResourcePanelPolicy {
+    static let regularVisibleRows = 5
+    static let keyboardVisibleRows = 3
+    static let regularEditorLines = 8
+    static let panelEditorLines = 4
+
+    static func visibleRows(entryCount: Int, keyboardVisible: Bool) -> Int {
+        min(max(0, entryCount), keyboardVisible ? keyboardVisibleRows : regularVisibleRows)
+    }
+
+    static func editorLines(panelPresented: Bool, keyboardVisible: Bool) -> Int {
+        panelPresented && keyboardVisible ? panelEditorLines : regularEditorLines
+    }
+}
+
 enum ComposerResourcePickerSource: Equatable {
     case menu(ComposerResourceEntry.Kind)
     case token(ComposerSuggestionToken)
@@ -248,6 +263,7 @@ struct ComposerResourcePicker: View {
     let kind: ComposerResourceEntry.Kind
     let query: String
     let entries: [ComposerResourceEntry]
+    let keyboardVisible: Bool
     let onSelect: (ComposerResourceEntry) -> Void
     let onDismiss: () -> Void
 
@@ -306,7 +322,12 @@ struct ComposerResourcePicker: View {
                         }
                     }
                 }
-                .frame(maxHeight: CGFloat(min(entries.count, 5)) * 48)
+                .frame(
+                    maxHeight: CGFloat(ComposerResourcePanelPolicy.visibleRows(
+                        entryCount: entries.count,
+                        keyboardVisible: keyboardVisible
+                    )) * 48
+                )
             }
         }
         .padding(.bottom, 6)
