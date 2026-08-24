@@ -2,8 +2,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { basename, extname } from "node:path";
 import type { Extension, LoadExtensionsResult, RegisteredCommand, RegisteredTool, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { adaptedToolDefinition } from "./extension-adapters.js";
+import { adaptedToolDefinition, type ExtensionAdapterHooks } from "./extension-adapters.js";
 import type { ExtensionOwner } from "../protocol/types.js";
+import { GatewayError } from "../errors.js";
 
 /** The owner is intentionally opaque to extension code and is only readable by
  * the gateway presentation projection. AsyncLocalStorage preserves it across
@@ -34,7 +35,14 @@ function owned<T extends (...args: any[]) => any>(fn: T, owner: ExtensionOwner):
 /** Wrap every callback registered by one loaded extension. The result is safe
  * to apply on every resource reload because each load result is wrapped once
  * and all maps/functions are retained as public Pi objects. */
-export function attributeExtensions(base: LoadExtensionsResult): LoadExtensionsResult {
+export function attributeExtensions(base: LoadExtensionsResult, hooks: ExtensionAdapterHooks = {}): LoadExtensionsResult {
+  const notifyOwners = base.extensions.filter((extension) => extension.tools.has("notify"));
+  if (notifyOwners.some((extension) => extension.path !== "<inline:tron-notify>")) {
+    throw new GatewayError("conflict", "The notify tool name is reserved by Tron");
+  }
+  if (notifyOwners.filter((extension) => extension.path === "<inline:tron-notify>").length > 1) {
+    throw new GatewayError("conflict", "The first-party notify tool was registered more than once");
+  }
   for (const extension of base.extensions) {
     const owner = extensionOwnerFor(extension);
     for (const [event, handlers] of extension.handlers) {
@@ -46,7 +54,7 @@ export function attributeExtensions(base: LoadExtensionsResult): LoadExtensionsR
         ...registered,
         definition: {
           ...definition,
-          execute: owned(adaptedToolDefinition(extension, name, definition).execute, owner),
+          execute: owned(adaptedToolDefinition(extension, name, definition, hooks).execute, owner),
           ...(definition.prepareArguments ? { prepareArguments: owned(definition.prepareArguments, owner) } : {}),
           ...(definition.renderCall ? { renderCall: owned(definition.renderCall, owner) } : {}),
           ...(definition.renderResult ? { renderResult: owned(definition.renderResult, owner) } : {}),

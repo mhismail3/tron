@@ -26,6 +26,7 @@ import type { CommandReceiptStore } from "./command-receipts.js";
 import { fitSessionSnapshot, safeJson } from "../sessions/projection.js";
 import { ModelCatalogPager } from "./model-pagination.js";
 import { SessionListPaginationStore } from "./session-list-pagination.js";
+import type { NotificationService } from "../notifications/notification-service.js";
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const PROVIDER_CATALOG_MAX_ITEMS = 1_000;
@@ -62,7 +63,7 @@ function parseSessionSourceControl(value: unknown): SessionSourceControlRequest 
 }
 
 const restartDrainMethods = new Set([
-  "system.info", "system.logs", "command.status", "gateway.update.config.status", "gateway.update.config", "gateway.update.status", "gateway.update", "gateway.rollback", "gateway.restart",
+  "system.info", "system.logs", "command.status", "push.registration.status", "gateway.update.config.status", "gateway.update.config", "gateway.update.status", "gateway.update", "gateway.rollback", "gateway.restart",
   "session.list", "session.open", "session.sync", "session.close", "session.transcript",
   "session.abort", "session.clearQueue", "session.queue.replace", "session.extensionActivity.list", "session.extensionActivity.get", "extension.respond", "extension.editor.update", "extension.toolsExpanded",
   "terminal.list", "terminal.attach", "terminal.detach", "terminal.terminate",
@@ -104,6 +105,7 @@ export interface GatewayServiceDependencies {
   deviceRevoked: (deviceId: string) => void;
   sessionDeleted: (sessionId: string) => void;
   broadcast: (topic: string, payload: JsonValue) => void;
+  notifications?: NotificationService;
 }
 
 export class GatewayService {
@@ -171,6 +173,7 @@ export class GatewayService {
         "skill-prompt.v1",
         "restart-drain.v1",
         ...(this.updateService.isUsable ? ["gateway-update.v1"] : []),
+        ...(this.dependencies.notifications ? ["push-notifications.v1"] : []),
       ],
     };
   }
@@ -233,9 +236,38 @@ export class GatewayService {
       case "device.revoke":
         return this.mutation(client, method, params, async () => {
           const deviceId = string(params.deviceId, "deviceId", { max: 100 });
+          // Disable local push authority before the bearer disappears. Remote
+          // revocation is retained as a bounded tombstone if Tron Push is down.
+          await this.dependencies.notifications?.removeDevice(deviceId);
           const revoked = await this.dependencies.devices.revoke(deviceId);
           if (revoked) this.dependencies.deviceRevoked(deviceId);
           return { revoked };
+        });
+      case "push.registration.status": {
+        if (Object.keys(params).length > 0) throw new GatewayError("invalid_request", "Push registration status accepts no parameters");
+        const notifications = this.requireNotifications();
+        return safeJson(await notifications.status(client.isLocal ? undefined : client.identity));
+      }
+      case "push.registration.upsert":
+        return this.mutation(client, method, params, async () => {
+          if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can register push delivery");
+          const allowed = new Set(["commandId", "installationId", "grantId", "secret", "environment", "previewsEnabled", "notifyWhenAskPresented"]);
+          if (Object.keys(params).some((key) => !allowed.has(key))) throw new GatewayError("invalid_request", "Push registration contains unknown fields");
+          return safeJson(await this.requireNotifications().upsertGrant({
+            deviceId: client.identity,
+            installationId: string(params.installationId, "installationId", { min: 8, max: 160 }),
+            grantId: string(params.grantId, "grantId", { min: 8, max: 160 }),
+            secret: string(params.secret, "secret", { min: 43, max: 171 }),
+            environment: oneOf(params.environment, "environment", ["sandbox", "production"] as const),
+            previewsEnabled: boolean(params.previewsEnabled, "previewsEnabled"),
+            ...(params.notifyWhenAskPresented === undefined ? {} : { notifyWhenAskPresented: boolean(params.notifyWhenAskPresented, "notifyWhenAskPresented") }),
+          }));
+        });
+      case "push.registration.remove":
+        return this.mutation(client, method, params, async () => {
+          if (client.isLocal) throw new GatewayError("auth_required", "Only an authenticated mobile device can remove its push registration");
+          if (Object.keys(params).some((key) => key !== "commandId")) throw new GatewayError("invalid_request", "Push registration removal accepts no parameters beyond commandId");
+          return { removed: await this.requireNotifications().removeDevice(client.identity) };
         });
       case "gateway.restart":
         if (process.env.TRON_GATEWAY_SUPERVISED !== "1") {
@@ -779,6 +811,11 @@ export class GatewayService {
 
   private async slot(params: Record<string, unknown>) {
     return this.dependencies.sessions.acquire(string(params.sessionId, "sessionId", { max: 200 }));
+  }
+
+  private requireNotifications(): NotificationService {
+    if (!this.dependencies.notifications) throw new GatewayError("unsupported", "Push notifications are unavailable in this Gateway build");
+    return this.dependencies.notifications;
   }
 
   private async mutation(

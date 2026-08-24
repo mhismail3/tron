@@ -25,6 +25,8 @@ export interface GatewayConfig {
   readonly maxLiveRuntimes: number;
   readonly maxOutboundBytes: number;
   readonly maxSynchronizationBytes: number;
+  /** Maintainer-owned product endpoint. It is never accepted from mobile or tool input. */
+  readonly pushServiceOrigin?: string;
 }
 
 const GATEWAY_CONFIG_MAX_BYTES = 16 * 1_024;
@@ -280,5 +282,8 @@ export async function loadConfig(
     maxLiveRuntimes: 16,
     maxOutboundBytes: 8 * 1_048_576,
     maxSynchronizationBytes: 2 * 1_048_576,
+    ...(environment.TRON_PUSH_SERVICE_ORIGIN?.trim()
+      ? { pushServiceOrigin: environment.TRON_PUSH_SERVICE_ORIGIN.trim() }
+      : {}),
   };
 }

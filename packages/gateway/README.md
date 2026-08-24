@@ -15,8 +15,8 @@ Gateway owns only mobile infrastructure:
 - detached run supervision, bounded idempotency receipts, and crash markers;
 - authoritative transcript snapshots projected from canonical JSONL;
 - filesystem/Git browsing, bounded uploads, and bounded PTY replay;
-- settings, credentials, packages, trust, custom-model administration, and
-  generic extension UI forwarding. Extension activity history revisions are
+- settings, credentials, packages, trust, custom-model administration, generic
+  extension UI forwarding, and bounded push-notification admission. Extension activity history revisions are
   derived from the globally sorted canonical receipt sequence; filters and
   duplicate-content collapse select page content but never change cursor
   identity. Component placement metadata is committed only with registry
@@ -67,6 +67,7 @@ never persisted by Gateway.
   marker mutex lanes are retained only while queued or executing callers use them
 - Uploads: transient and bounded; unclaimed staging expires, while prompt attachments remain session-owned until canonical deletion
 - Tool invocation groups: at finalized assistant `message_end`, Gateway publishes the complete contiguous declaration group before any corresponding tool start, with runtime-only `groupId`, `groupIndex`, `groupCount`, and `groupFinalized` metadata. Group IDs derive from the stable assistant presentation ID plus first projected content ordinal, survive live/canonical/result reconciliation, remain bounded until agent settlement, and are never written to Pi JSONL or interpreted as proof of parallel execution.
+- Push grants and short-lived intents: `gateway/notifications.json`, an exact 1 MiB owner-only document. It stores endpoint-scoped grants, at most 64 active devices, 256 pending intents, 512 bounded receipts, and 128 revocation tombstones. It never stores raw APNs tokens. Secrets and message content are excluded from RPC projections, logs, and Pi session JSONL.
 
 Legacy `~/.tron/auth.json` is not gateway auth and is never overwritten. It is
 read only by the explicit legacy importer. That importer rejects duplicate or
@@ -76,6 +77,16 @@ to the next session so a retry safely skips partial success. Known append or
 index-write failures remove the new canonical file; cleanup failure is surfaced
 with the original failure, while process termination in the narrow interval
 before the index rename remains outside that cleanup.
+
+## Push notifications
+
+The first-party inline Pi extension reserves `notify({message})`. It receives only a narrow enqueue closure: the model cannot choose a device, APNs token, environment, topic, relay origin, request ID, priority, badge, or payload dictionary. Admission is persisted before dispatch, deduplicated by canonical session/tool-call identity, expires after fifteen minutes, and returns `queued`, `suppressed`, `rate_limited`, or `unavailable`; APNs acceptance is never described as user delivery. Preview-disabled grants receive fixed generic lock-screen text.
+
+The exact `@pi9/ask` package adapter emits a detached callback only when its first structured questionnaire is admitted. The typed global `notifyWhenAskPresented` boolean defaults on, is persisted with notification state, and produces one fixed generic intent per Ask tool-call ID. Relay failure never delays or fails Ask. This is intentionally not a generic policy engine.
+
+Authenticated mobile RPCs are `push.registration.upsert`, `push.registration.remove`, and `push.registration.status`. Upsert derives `deviceId` from the connection and accepts only an opaque installation ID, endpoint-scoped grant ID/secret, fixed environment, and preview/policy booleans. `device.revoke` disables local push authority before removing the paired bearer and retains a bounded remote-revocation tombstone. The public relay origin is maintainer-owned `TRON_PUSH_SERVICE_ORIGIN`; it must be an exact HTTPS origin and is never accepted from tools or RPC. Missing configuration leaves notification delivery unavailable without affecting Gateway readiness.
+
+Outbound relay requests use one fixed `/v3/notifications` route, no redirects, a six-second deadline, a 2 KiB request and 16 KiB response boundary, and an HMAC over method, path, timestamp, stable request ID, and body hash. Restart recovery retries only transient outcomes with the same request ID; ambiguous outcomes are not blindly replayed. Quotas apply across the installation, canonical session, and target grant.
 
 ## Transport
 

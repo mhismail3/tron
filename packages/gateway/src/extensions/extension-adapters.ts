@@ -21,9 +21,14 @@ type NormalizedAsk = {
 type AskUI = ExtensionUIContext & { [TRON_QUESTIONNAIRE_REQUEST]?: QuestionnaireRequest };
 type DialogOptions = { signal?: AbortSignal };
 
+export interface ExtensionAdapterHooks {
+  /** Exact @pi9/ask admission seam. Failures are deliberately detached from Ask. */
+  askPresented?: (input: { toolCallId: string }) => void | Promise<void>;
+}
+
 interface ExtensionToolAdapter {
   matches(extension: Extension, name: string, definition: ToolDefinition): boolean;
-  adapt(extension: Extension, name: string, definition: ToolDefinition): ToolDefinition;
+  adapt(extension: Extension, name: string, definition: ToolDefinition, hooks: ExtensionAdapterHooks): ToolDefinition;
 }
 
 /** Explicit adapter registry. New package contracts must add a separate entry. */
@@ -34,12 +39,12 @@ const EXTENSION_TOOL_ADAPTERS: readonly ExtensionToolAdapter[] = [
   },
 ];
 
-export function adaptedToolDefinition(extension: Extension, name: string, definition: ToolDefinition): ToolDefinition {
+export function adaptedToolDefinition(extension: Extension, name: string, definition: ToolDefinition, hooks: ExtensionAdapterHooks = {}): ToolDefinition {
   const adapter = EXTENSION_TOOL_ADAPTERS.find((candidate) => candidate.matches(extension, name, definition));
-  return adapter ? adapter.adapt(extension, name, definition) : definition;
+  return adapter ? adapter.adapt(extension, name, definition, hooks) : definition;
 }
 
-function adaptPi9Ask(_extension: Extension, _name: string, definition: ToolDefinition): ToolDefinition {
+function adaptPi9Ask(_extension: Extension, _name: string, definition: ToolDefinition, hooks: ExtensionAdapterHooks): ToolDefinition {
   const original = definition.execute;
   return {
     ...definition,
@@ -48,7 +53,15 @@ function adaptPi9Ask(_extension: Extension, _name: string, definition: ToolDefin
       const params = normalizeAsk(args[1]);
       const request = ctx?.ui?.[TRON_QUESTIONNAIRE_REQUEST];
       if (!request || !params) return original(...args);
-      const ui = new AskUIProxy(ctx.ui!, params, args[2] as AbortSignal | undefined, request);
+      const ui = new AskUIProxy(
+        ctx.ui!,
+        params,
+        args[2] as AbortSignal | undefined,
+        request,
+        typeof args[0] === "string" && hooks.askPresented
+          ? () => hooks.askPresented!({ toolCallId: args[0] as string })
+          : undefined,
+      );
       const adaptedContext = { ...ctx, ui: ui.proxy } as unknown as Parameters<ToolDefinition["execute"]>[4];
       const adaptedArgs = [...args] as Parameters<ToolDefinition["execute"]>;
       adaptedArgs[4] = adaptedContext;
@@ -124,6 +137,7 @@ class AskUIProxy {
     private readonly params: NormalizedAsk,
     private readonly signal: AbortSignal | undefined,
     private readonly request: QuestionnaireRequest,
+    private readonly presented?: () => void | Promise<void>,
   ) {
     this.proxy = new Proxy(base, {
       get: (target, property, receiver) => {
@@ -151,6 +165,9 @@ class AskUIProxy {
   private async beginStructured(method: "select" | "input", title: string, options: string[] | undefined, placeholder: string | undefined, optionsArg?: DialogOptions): Promise<string | undefined> {
     const signal = optionsArg?.signal ?? this.signal;
     if (signal?.aborted) return undefined;
+    // Notification admission is persisted independently and must never delay or
+    // fail the questionnaire that caused it.
+    if (this.presented) queueMicrotask(() => void Promise.resolve(this.presented!()).catch(() => undefined));
     const value = await this.request({
       title,
       method,

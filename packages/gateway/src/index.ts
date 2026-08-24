@@ -20,6 +20,9 @@ import { CommandReceiptStore } from "./transport/command-receipts.js";
 import { GatewayService } from "./transport/gateway-service.js";
 import { GatewayServer } from "./transport/server.js";
 import { installKimiK3Policy } from "./providers/kimi-k3-policy.js";
+import { NotificationGrantStore } from "./notifications/grant-store.js";
+import { PushRelayClient } from "./notifications/relay-client.js";
+import { NotificationService } from "./notifications/notification-service.js";
 
 const config = await loadConfig();
 const configuredSessionDir = SettingsManager.create(process.cwd(), config.agentDir, { projectTrusted: false }).getSessionDir();
@@ -40,6 +43,11 @@ process.env.PI_SKIP_VERSION_CHECK ??= "1";
 const logger = new GatewayLogger(join(config.tronHome, "logs", "gateway.jsonl"));
 const devices = new DeviceStore(config.tronHome, config.machineId);
 await devices.initialize();
+const notifications = new NotificationService(
+  new NotificationGrantStore(config.tronHome),
+  new PushRelayClient(config.pushServiceOrigin),
+);
+await notifications.initialize();
 
 const modelRuntime = installKimiK3Policy(await ModelRuntime.create({
   authPath: join(config.agentDir, "auth.json"),
@@ -86,6 +94,7 @@ const sessions = new RuntimeRegistry({
   sessionListChanged: () => transport?.notifySessionListChanged(),
   sessionRekeyed: (previousId, nextId) => transport?.rekeySession(previousId, nextId),
   sessionClosed: (sessionId) => transport?.revokeSessionTerminals(sessionId),
+  notifications,
   stageTiming: (stage, durationMs, outcome) => {
     if (durationMs < 250 && outcome === "success") return;
     logger.log(
@@ -119,6 +128,7 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
   try {
     await transport.close();
     terminal.dispose();
+    notifications.dispose();
     await sessions.dispose();
     await releaseRuntimeLock();
     clearTimeout(forced);
@@ -179,6 +189,7 @@ const service = new GatewayService({
   deviceRevoked: (deviceId) => transport?.disconnectDevice(deviceId),
   sessionDeleted: (sessionId) => transport?.revokeSessionTerminals(sessionId),
   broadcast: (topic, payload) => transport?.broadcast(topic, payload),
+  notifications,
 });
 transport = new GatewayServer({
   host: config.host,

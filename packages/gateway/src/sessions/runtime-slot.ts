@@ -61,6 +61,8 @@ import { EXTENSION_LIFECYCLE_ARTIFACT_VERSION, admitExtensionLifecycleArtifact, 
 import { EXTENSION_ACTIVITY_RECEIPT_TYPE, extensionActivityHistoryRevision, extensionActivityReceipts, extensionReceiptActivity, listExtensionActivityHistory, makeExtensionActivityReceipt } from "./extension-activity-history.js";
 import { ExtensionActivityRecency, type ActivityExpiryFrame, type ActivityVisibility } from "./extension-activity-recency.js";
 import type { ExtensionActivityHistoryPage } from "./extension-activity-history.js";
+import type { NotificationService } from "../notifications/notification-service.js";
+import { createTronNotifyExtension } from "../notifications/tron-notify-extension.js";
 
 export type SessionBroadcast = (sessionId: string, topic: string, payload: JsonValue) => void;
 
@@ -123,6 +125,7 @@ export interface RuntimeSlotDependencies {
   blobs: BlobStore;
   markers: RunMarkerStore;
   extensionActivityRecency: ExtensionActivityRecency;
+  notifications?: NotificationService;
 }
 
 /**
@@ -391,11 +394,25 @@ export class RuntimeSlot {
         // runtime creation would leave project code loaded after trust changes.
         resolveProjectTrust: async () => (await this.dependencies.trust.inspect(trust.cwd)).effectiveDecision === true,
       };
+      const notifications = this.dependencies.notifications;
       const services = await createAgentSessionServices({
         cwd: trust.cwd,
         agentDir: this.dependencies.agentDir,
         modelRuntime,
-        resourceLoaderOptions: { extensionsOverride: attributeExtensions },
+        resourceLoaderOptions: {
+          ...(notifications ? {
+            extensionFactories: [{
+              name: "tron-notify",
+              factory: createTronNotifyExtension({
+                sessionId: () => this.id,
+                enqueue: (input) => notifications.enqueue(input),
+              }),
+            }],
+          } : {}),
+          extensionsOverride: (base) => attributeExtensions(base, {
+            ...(notifications ? { askPresented: ({ toolCallId }) => notifications.askPresented(this.id, toolCallId) } : {}),
+          }),
+        },
         resourceLoaderReloadOptions: this.resourceReloadOptions,
       });
       const created = await createAgentSessionFromServices({

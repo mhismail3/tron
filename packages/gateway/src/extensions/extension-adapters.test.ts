@@ -62,6 +62,19 @@ describe("explicit @pi9/ask extension adapter", () => {
     expect(calls[0]).toContain('"allowMultiple":false');
   });
 
+  it("emits one exact non-blocking presentation callback with the canonical tool call id", async () => {
+    const presented: string[] = [];
+    const original = definition(async (_id: string, _params: unknown, _signal: unknown, _update: unknown, ctx: any) =>
+      ctx.ui.select("Question", ["1. One"]));
+    const adapted = adaptedToolDefinition(extension(), "ask", original, {
+      askPresented: async ({ toolCallId }) => { presented.push(toolCallId); throw new Error("push unavailable"); },
+    });
+    await expect(adapted.execute("ask-call-1", { question: "Question", options: [{ label: "One" }] }, undefined, undefined,
+      { ui: ui("1. One") } as any)).resolves.toBe("1. One");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(presented).toEqual(["ask-call-1"]);
+  });
+
   it("passes a legacy primitive answer through without scripting", async () => {
     const original = definition(async (_id: string, _params: unknown, _signal: unknown, _update: unknown, ctx: any) => ({
       selected: await ctx.ui.select("Question", ["1. One"]),

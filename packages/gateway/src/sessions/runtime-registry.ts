@@ -14,6 +14,7 @@ import { RunMarkerStore } from "./run-markers.js";
 import { RuntimeSlot, type SessionBroadcast } from "./runtime-slot.js";
 import { ExtensionActivityRecency } from "./extension-activity-recency.js";
 import { admitExtensionLifecycleArtifact } from "./extension-run-projection.js";
+import type { NotificationService } from "../notifications/notification-service.js";
 
 const MAX_EXTENSION_ARTIFACT_BYTES = 256 * 1_024;
 // MaximumLiveRuntimes is 16 and each slot retains at most 64 owned activity
@@ -140,6 +141,7 @@ export class RuntimeRegistry {
       sessionClosed?: (sessionId: string) => void;
       catalogDiscoveryLimits?: Partial<typeof DEFAULT_CATALOG_DISCOVERY_LIMITS>;
       stageTiming?: (stage: string, durationMs: number, outcome: "success" | "failure") => void;
+      notifications?: NotificationService;
     },
   ) {
     this.blobs = new BlobStore(undefined, Date.now, join(options.tronHome, "gateway", "blobs"));
@@ -265,6 +267,7 @@ export class RuntimeRegistry {
       blobs: this.blobs,
       markers: this.markers,
       extensionActivityRecency: this.extensionActivityRecency,
+      ...(this.options.notifications ? { notifications: this.options.notifications } : {}),
     };
   }
 

@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { attributeExtensions, currentExtensionOwner } from "./owner-attribution.js";
 
 describe("extension owner attribution", () => {
+  it("rejects project tools that collide with Tron's reserved notify capability", () => {
+    const extension = {
+      path: "/project/notify.ts", resolvedPath: "/project/notify.ts",
+      sourceInfo: { path: "/project/notify.ts", source: "project", scope: "project", origin: "top-level" },
+      handlers: new Map(), tools: new Map([["notify", { definition: { execute: async () => ({ content: [] }) } }]]),
+      commands: new Map(), shortcuts: new Map(), messageRenderers: new Map(), entryRenderers: new Map(),
+    };
+    expect(() => attributeExtensions({ extensions: [extension as any], errors: [], runtime: {} as any })).toThrow(/reserved/);
+  });
+
   it("keeps handler and deferred tool callbacks inside the loaded owner", async () => {
     const seen: Array<unknown> = [];
     const handler = async () => {
