@@ -1,50 +1,187 @@
 import SwiftUI
 
-/// The composer is one permanently mounted inset owner. Its children may use
-/// local opacity/scale/offset feedback, but its structural height is installed in one
-/// nonanimated transaction. Animating the safe-area inset forces the native
-/// transcript viewport through a layout on every animation frame, which can
-/// redraw already-visible rows and expose them beneath navigation chrome.
-enum ChatComposerStructuralTransitionPolicy {
-    static let heightEpsilon: CGFloat = 0.5
+/// The composer remains one bottom inset owner. Fixed surfaces, especially the
+/// input bar, are measured first; the resource picker receives only the finite
+/// height left by the keyboard-reduced container.
+struct ChatComposerLayoutAllocation: Equatable, Sendable {
+    let flexibleHeight: CGFloat
+    let totalHeight: CGFloat
+}
 
-    static func admitsHeightChange(current: CGFloat?, measured: CGFloat) -> Bool {
-        measured.isFinite
-            && measured > 0
-            && current.map { abs($0 - measured) > heightEpsilon } != false
+enum ChatComposerLayoutPolicy {
+    static func allocation(
+        maximumHeight: CGFloat?,
+        fixedHeight: CGFloat,
+        desiredFlexibleHeight: CGFloat,
+        fixedSurfaceCount: Int,
+        spacing: CGFloat
+    ) -> ChatComposerLayoutAllocation {
+        let safeFixedHeight = fixedHeight.isFinite ? max(0, fixedHeight) : 0
+        let safeDesiredHeight = desiredFlexibleHeight.isFinite
+            ? max(0, desiredFlexibleHeight)
+            : 0
+        let safeSpacing = spacing.isFinite ? max(0, spacing) : 0
+        let safeFixedCount = max(0, fixedSurfaceCount)
+        let flexibleSpacing = safeDesiredHeight > 0 && safeFixedCount > 0 ? safeSpacing : 0
+        let fixedSpacing = safeSpacing * CGFloat(max(0, safeFixedCount - 1))
+        let unconstrainedTotal = safeFixedHeight + fixedSpacing
+            + flexibleSpacing + safeDesiredHeight
+        guard let maximumHeight,
+              maximumHeight.isFinite,
+              maximumHeight >= 0 else {
+            return ChatComposerLayoutAllocation(
+                flexibleHeight: safeDesiredHeight,
+                totalHeight: unconstrainedTotal
+            )
+        }
+        let flexibleHeight = min(
+            safeDesiredHeight,
+            max(0, maximumHeight - safeFixedHeight - fixedSpacing - flexibleSpacing)
+        )
+        let actualFlexibleSpacing = flexibleHeight > 0 ? flexibleSpacing : 0
+        return ChatComposerLayoutAllocation(
+            flexibleHeight: flexibleHeight,
+            totalHeight: min(
+                maximumHeight,
+                safeFixedHeight + fixedSpacing + actualFlexibleSpacing + flexibleHeight
+            )
+        )
+    }
+}
+
+private enum ChatComposerLayoutRole: Equatable {
+    case fixed
+    case flexible
+}
+
+private struct ChatComposerLayoutRoleKey: LayoutValueKey {
+    static let defaultValue = ChatComposerLayoutRole.fixed
+}
+
+extension View {
+    func chatFlexibleComposerSurface() -> some View {
+        layoutValue(key: ChatComposerLayoutRoleKey.self, value: .flexible)
+    }
+}
+
+struct ChatComposerLayout: Layout {
+    let maximumHeight: CGFloat?
+    let spacing: CGFloat
+
+    private struct Measurement {
+        let sizes: [CGSize]
+        let allocation: ChatComposerLayoutAllocation
+        let width: CGFloat
+    }
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let measurement = measure(proposal: proposal, subviews: subviews)
+        return CGSize(width: measurement.width, height: measurement.allocation.totalHeight)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        let measurement = measure(
+            proposal: ProposedViewSize(width: bounds.width, height: bounds.height),
+            subviews: subviews
+        )
+        let placedSizes = subviews.enumerated().map { index, subview in
+            var size = measurement.sizes[index]
+            if subview[ChatComposerLayoutRoleKey.self] == .flexible {
+                size.height = measurement.allocation.flexibleHeight
+            }
+            return size
+        }
+        let visibleCount = placedSizes.count { $0.height > 0 }
+        let placedHeight = placedSizes.reduce(CGFloat.zero) { partial, size in
+            partial + max(0, size.height)
+        } + spacing * CGFloat(max(0, visibleCount - 1))
+
+        // Bottom placement keeps the input bar installed above the keyboard.
+        // Under an unexpectedly tiny proposal, fixed pills may extend upward
+        // rather than pushing the input below or clipping it at the host edge.
+        var y = bounds.maxY - placedHeight
+        var placedVisibleSurface = false
+        for (index, subview) in subviews.enumerated() {
+            let size = placedSizes[index]
+            guard size.height > 0 else { continue }
+            if placedVisibleSurface { y += spacing }
+            subview.place(
+                at: CGPoint(x: bounds.midX, y: y),
+                anchor: .top,
+                proposal: ProposedViewSize(width: bounds.width, height: size.height)
+            )
+            y += size.height
+            placedVisibleSurface = true
+        }
+    }
+
+    private func measure(proposal: ProposedViewSize, subviews: Subviews) -> Measurement {
+        let width = proposal.width.flatMap { $0.isFinite ? max(0, $0) : nil }
+        var sizes: [CGSize] = []
+        sizes.reserveCapacity(subviews.count)
+        var fixedHeight: CGFloat = 0
+        var fixedSurfaceCount = 0
+        var desiredFlexibleHeight: CGFloat = 0
+        var measuredWidth: CGFloat = width ?? 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(ProposedViewSize(width: width, height: nil))
+            sizes.append(size)
+            measuredWidth = max(measuredWidth, size.width)
+            if subview[ChatComposerLayoutRoleKey.self] == .flexible {
+                desiredFlexibleHeight = max(desiredFlexibleHeight, size.height)
+            } else if size.height > 0 {
+                fixedHeight += size.height
+                fixedSurfaceCount += 1
+            }
+        }
+        let proposedMaximum = proposal.height.flatMap { $0.isFinite ? max(0, $0) : nil }
+        let finiteMaximum: CGFloat? = switch (maximumHeight, proposedMaximum) {
+        case let (configured?, proposed?): min(max(0, configured), proposed)
+        case let (configured?, nil): configured.isFinite ? max(0, configured) : nil
+        case let (nil, proposed?): proposed
+        case (nil, nil): nil
+        }
+        return Measurement(
+            sizes: sizes,
+            allocation: ChatComposerLayoutPolicy.allocation(
+                maximumHeight: finiteMaximum,
+                fixedHeight: fixedHeight,
+                desiredFlexibleHeight: desiredFlexibleHeight,
+                fixedSurfaceCount: fixedSurfaceCount,
+                spacing: spacing
+            ),
+            width: measuredWidth
+        )
     }
 }
 
 struct ChatComposerStructuralHost<Content: View>: View {
+    let maximumHeight: CGFloat?
     let onHeightChange: ((CGFloat) -> Void)?
     @ViewBuilder let content: () -> Content
 
-    @State private var presentedHeight: CGFloat?
-
     init(
+        maximumHeight: CGFloat? = nil,
         onHeightChange: ((CGFloat) -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
+        self.maximumHeight = maximumHeight
         self.onHeightChange = onHeightChange
         self.content = content
     }
 
     var body: some View {
         content()
-            .fixedSize(horizontal: false, vertical: true)
-            .onGeometryChange(for: CGFloat.self) { geometry in
-                geometry.size.height
-            } action: { height in
-                guard ChatComposerStructuralTransitionPolicy.admitsHeightChange(
-                    current: presentedHeight,
-                    measured: height
-                ) else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { presentedHeight = height }
-            }
-            .frame(height: presentedHeight, alignment: .bottom)
-            .clipped()
+            .frame(maxHeight: maximumHeight, alignment: .bottom)
             .onGeometryChange(for: CGFloat.self) { geometry in
                 geometry.size.height
             } action: { height in
@@ -182,30 +319,23 @@ enum ChatContentTransitionPolicy {
         }
     }
 
-    static func attachmentAnimation(reduceMotion: Bool) -> Animation {
+    static func attachmentAnimation(reduceMotion: Bool) -> Animation? {
         reduceMotion
-            ? .easeOut(duration: 0.12)
+            ? nil
             : .spring(response: 0.34, dampingFraction: 0.86, blendDuration: 0.06)
     }
 
-    static func composerSurfaceAnimation(reduceMotion: Bool) -> Animation {
-        reduceMotion
-            ? .easeOut(duration: 0.12)
-            : .spring(response: 0.36, dampingFraction: 0.86, blendDuration: 0.06)
+    static func composerSurfaceAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeInOut(duration: 0.24)
     }
 
     static func composerSurfaceTransition(reduceMotion: Bool) -> AnyTransition {
-        guard !reduceMotion else { return .opacity }
-        return .asymmetric(
-            insertion: .move(edge: .bottom)
-                .combined(with: .scale(scale: 0.97, anchor: .bottom))
-                .combined(with: .opacity),
-            removal: .move(edge: .top).combined(with: .opacity)
-        )
+        guard !reduceMotion else { return .identity }
+        return .move(edge: .bottom).combined(with: .opacity)
     }
 
     static func attachmentTransition(reduceMotion: Bool) -> AnyTransition {
-        guard !reduceMotion else { return .opacity }
+        guard !reduceMotion else { return .identity }
         return .asymmetric(
             insertion: .move(edge: .bottom)
                 .combined(with: .scale(scale: 0.92, anchor: .bottom))

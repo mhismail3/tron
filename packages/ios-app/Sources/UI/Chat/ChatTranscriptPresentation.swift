@@ -946,8 +946,8 @@ enum ChatCanonicalMediaPreviewPolicy {
         }
 
         for pending in attachments where !pending.mimeType.hasPrefix("image/") {
-            guard pending.previewData != nil else { continue }
-            let blobID = "upload:\(pending.id)"
+            guard pending.previewData != nil,
+                  let blobID = pending.transportBlobID else { continue }
             let matches = content.filter {
                 $0.attachment?.mimeType == pending.mimeType && $0.blobId == blobID
             }
@@ -1628,7 +1628,8 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
 
     static func runtime(in snapshot: SessionSnapshot) -> [ChatNotificationPresentation] {
         var values: [ChatNotificationPresentation] = []
-        if snapshot.compactionQueued == true {
+        let canonicalCompactionInstalled = currentCanonicalCompactionIsInstalled(in: snapshot)
+        if snapshot.compactionQueued == true, !canonicalCompactionInstalled {
             values.append(ChatNotificationPresentation(
                 id: "runtime-compaction-queued",
                 semanticID: nil,
@@ -1640,11 +1641,16 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
                 material: .flat
             ))
         }
+        // The Gateway can publish the canonical compaction entry one commit
+        // before phase and queued metadata settle. Exact tail ordinals prove
+        // the current entry even when bounded configuration metadata follows
+        // it; inexact windows deliberately retain runtime chrome.
         if let working = ChatRuntimeWorkingPresentation(
             phase: snapshot.phase,
             working: snapshot.extensionPresentation.semanticState.working,
             retry: snapshot.retry
-        ), !working.usesAmbientBottomIndicator {
+        ), !working.usesAmbientBottomIndicator,
+           !canonicalCompactionInstalled {
             let exactNextOrdinal: Int? = {
                 guard snapshot.phase == .compacting,
                       let start = snapshot.transcriptStart,
@@ -1671,6 +1677,30 @@ struct ChatNotificationPresentation: Hashable, Identifiable, Sendable {
         // as transcript rows. This keeps transient extension chrome out of
         // canonical conversation scrolling.
         return values
+    }
+
+    private static func currentCanonicalCompactionIsInstalled(
+        in snapshot: SessionSnapshot
+    ) -> Bool {
+        guard snapshot.phase == .compacting || snapshot.compactionQueued == true,
+              let start = snapshot.transcriptStart,
+              let total = snapshot.transcriptTotal,
+              start >= 0, total >= start,
+              total - start == snapshot.transcript.count,
+              Set(snapshot.transcript.map(\.id)).count == snapshot.transcript.count else {
+            return false
+        }
+        for item in snapshot.transcript.reversed() {
+            switch item.kind {
+            case .modelChange, .thinkingChange, .label:
+                continue
+            case .compaction:
+                return true
+            case .message, .bash, .branchSummary, .customMessage, .customEntry:
+                return false
+            }
+        }
+        return false
     }
 }
 

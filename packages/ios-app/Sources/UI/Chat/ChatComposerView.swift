@@ -13,6 +13,7 @@ struct ChatComposerView: View {
     let showsCatchUp: Bool
     let showsAmbientWorkingBlur: Bool
     let keyboardVisible: Bool
+    let maximumHeight: CGFloat?
     @Binding var text: String
     @Binding var isFocused: Bool
     @Binding var selection: NSRange
@@ -46,8 +47,11 @@ struct ChatComposerView: View {
     let onComposerHeight: (CGFloat) -> Void
 
     var body: some View {
-        ChatComposerStructuralHost(onHeightChange: onComposerHeight) {
-            VStack(spacing: 10) {
+        ChatComposerStructuralHost(
+            maximumHeight: maximumHeight,
+            onHeightChange: onComposerHeight
+        ) {
+            ChatComposerLayout(maximumHeight: maximumHeight, spacing: 10) {
                 extensionPills
                 attachmentStrip
                 selectedSkillStrip
@@ -60,16 +64,20 @@ struct ChatComposerView: View {
                 }
                 .animation(
                     reduceMotion
-                        ? .easeOut(duration: 0.12)
+                        ? nil
                         : .spring(response: 0.32, dampingFraction: 0.82),
                     value: showsCatchUp
                 )
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
-            // Structural height remains atomic in ChatComposerStructuralHost.
-            // These value-scoped transactions animate only newly inserted or
-            // removed child surfaces inside the already-installed space.
+            // Each child transition and the single safe-area inset use the
+            // same value-scoped transaction, so the transcript is pushed in
+            // step with the surface instead of jumping ahead of it.
+            .animation(
+                ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion),
+                value: composerExtensionGroups.map(\.id)
+            )
             .animation(
                 ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion),
                 value: pendingAttachments.map(\.id)
@@ -94,17 +102,21 @@ struct ChatComposerView: View {
         }
     }
 
+    private var composerExtensionGroups: [ExtensionWidgetGroup] {
+        guard let snapshot else { return [] }
+        return ExtensionActivityPillPolicy.composerGroups(
+            ChatExtensionWidgetPolicy.liveGroups(
+                snapshot.extensionPresentation,
+                executions: snapshot.toolExecutions,
+                activities: snapshot.extensionActivities ?? []
+            )
+        )
+    }
+
     @ViewBuilder
     private var extensionPills: some View {
-        if let snapshot {
-            let groups = ExtensionActivityPillPolicy.composerGroups(
-                ChatExtensionWidgetPolicy.liveGroups(
-                    snapshot.extensionPresentation,
-                    executions: snapshot.toolExecutions,
-                    activities: snapshot.extensionActivities ?? []
-                )
-            )
-            if !groups.isEmpty {
+        let groups = composerExtensionGroups
+        if !groups.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(groups) { group in
@@ -120,9 +132,8 @@ struct ChatComposerView: View {
                     .padding(.horizontal, 16)
                 }
                 .scrollClipDisabled()
-                .transition(.opacity)
+                .transition(reduceMotion ? .identity : .opacity)
                 .accessibilityElement(children: .contain)
-            }
         }
     }
 
@@ -182,6 +193,7 @@ struct ChatComposerView: View {
             .transition(ChatContentTransitionPolicy.composerSurfaceTransition(
                 reduceMotion: reduceMotion
             ))
+            .chatFlexibleComposerSurface()
         }
     }
 
@@ -232,7 +244,7 @@ struct ChatComposerView: View {
         }
         .animation(
             reduceMotion
-                ? .easeOut(duration: 0.12)
+                ? nil
                 : .spring(response: 0.32, dampingFraction: 0.82),
             value: trailingMode
         )

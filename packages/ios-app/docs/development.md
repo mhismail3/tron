@@ -186,8 +186,8 @@ after a confirmed-missing receipt, and cancellation before replay wire emission.
 tests retain cross-owner create/fork/delete, prompt-attachment, queue, navigation-editor, and tree-reload
 ordering coverage. `SessionImportCoordinatorTests` own exact lifecycle/profile admission across
 file access, upload, and mutation; security-scope balancing; and import-result independence from a
-later catalog refresh. `ComposerDraftCoordinatorTests` own bounded profile/session text retention,
-exact presentation mounting/revocation, deterministic inactive-draft LRU, one-time route seeding,
+later catalog refresh. `ComposerDraftStoreTests` own version/bounds/corruption cleanup, separate exact-byte payloads, SHA-256 profile/session paths, profile deletion, and the 24-draft disk LRU. `ComposerDraftAppLifecycleTests` owns the background checkpoint boundary. `ComposerDraftCoordinatorTests` own bounded profile/session text and attachment retention across coordinator restart,
+exact presentation mounting/revocation/remount re-upload, deterministic inactive-draft LRU, one-time route seeding,
 independent barrier-controlled out-of-order uploads with exact byte/name/MIME capture, cancellation cleanup,
 editor policy/use/keep disposition, confirmed/failure/uncertain submission semantics, A → B → A rejection,
 and nested façade observation. `SessionShellProfileRouteOwnerTests` prove that selected-profile round trips
@@ -201,7 +201,9 @@ xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fas
   -configuration Test -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   -only-testing:TronMobileTests/SessionMutationServiceTests \
   -only-testing:TronMobileTests/SessionImportCoordinatorTests \
+  -only-testing:TronMobileTests/ComposerDraftStoreTests \
   -only-testing:TronMobileTests/ComposerDraftCoordinatorTests \
+  -only-testing:TronMobileTests/ComposerDraftAppLifecycleTests \
   -only-testing:TronMobileTests/SessionShellProfileRouteOwnerTests \
   -only-testing:TronMobileTests/MultilineComposerTextViewTests
 ```
@@ -475,8 +477,11 @@ until exact opening/catch-up/semantic settlement and are released on the next fr
 unqualified ScrollPosition reset may run across a send or keyboard transaction. A send
 retires a still-applied app target before its first layout mutation. Ready/pinned underflow
 uses bottom alignment, while opening and anchored presentation retain top alignment.
-Composer height remains animation-disabled, while attachment chips and skill/resource
-panels own local fade/slide transitions. Spatial prompt morphs are clipped and admitted
+The sole composer inset uses a finite keyboard-reduced height: fixed input/accessory
+surfaces remain bottom-reserved while the resource list alone absorbs constrained height
+and scrolls internally. Picker opening and closing coordinate the bounded inset height with
+one fade/slide transition; Reduce Motion is opacity-only, and no composer mutation issues a
+scroll command. Spatial prompt morphs are clipped and admitted
 only for compact measured prompts; long prompts use the bounded outgoing-row entrance.
 A mounted retained snapshot remains readable during reconnect, but command
 admission requires the exact live subscription; queue command confirmations trigger

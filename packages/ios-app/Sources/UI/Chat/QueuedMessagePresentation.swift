@@ -258,23 +258,25 @@ enum QueuedMessageAttachmentPresentation {
         // order differs between optimistic and canonical states.
         let photos = attachments.filter { $0.mimeType.hasPrefix("image/") }
         let files = attachments.filter { !$0.mimeType.hasPrefix("image/") }
-        return photos.enumerated().map { index, attachment in
-            QueuedMessageAttachmentChip(
+        return photos.enumerated().compactMap { index, attachment in
+            guard let blobID = attachment.transportBlobID else { return nil }
+            return QueuedMessageAttachmentChip(
                 id: "photo-\(index)",
                 kind: .photo,
                 attachment: .init(
-                    id: "upload:\(attachment.id)",
+                    id: blobID,
                     name: attachment.name,
                     mimeType: attachment.mimeType,
                     size: attachment.size
                 )
             )
-        } + files.enumerated().map { index, attachment in
-            QueuedMessageAttachmentChip(
+        } + files.enumerated().compactMap { index, attachment in
+            guard let blobID = attachment.transportBlobID else { return nil }
+            return QueuedMessageAttachmentChip(
                 id: "file-\(index)",
                 kind: .file,
                 attachment: .init(
-                    id: "upload:\(attachment.id)",
+                    id: blobID,
                     name: attachment.name,
                     mimeType: attachment.mimeType,
                     size: attachment.size

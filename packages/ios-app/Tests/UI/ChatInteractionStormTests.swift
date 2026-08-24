@@ -16,16 +16,17 @@ struct ChatInteractionStormTests {
         #expect(transaction.generation?.joined.count == 5)
     }
 
-    @Test("composer height installs atomically outside the motion generation")
+    @Test("bounded composer layout stays outside the scroll motion generation")
     func composerHeightIsNotAMotionParticipant() {
-        #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
-            current: 44,
-            measured: 88
-        ))
-        #expect(!ChatComposerStructuralTransitionPolicy.admitsHeightChange(
-            current: 44,
-            measured: 44.2
-        ))
+        let allocation = ChatComposerLayoutPolicy.allocation(
+            maximumHeight: 280,
+            fixedHeight: 180,
+            desiredFlexibleHeight: 200,
+            fixedSurfaceCount: 2,
+            spacing: 10
+        )
+        #expect(allocation.flexibleHeight == 80)
+        #expect(allocation.totalHeight == 280)
 
         let transaction = ChatLayoutTransaction()
         let generation = transaction.join(.submission)

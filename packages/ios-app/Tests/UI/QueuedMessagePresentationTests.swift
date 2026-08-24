@@ -359,6 +359,23 @@ struct QueuedMessagePresentationTests {
         #expect(chips.compactMap(\.attachment?.id) == ["upload:photo", "upload:file", "upload:file-2"])
     }
 
+    @Test("transport chips use Gateway upload identity while preserving local chip identity")
+    func divergentAttachmentIdentity() throws {
+        let attachment = PendingAttachment(
+            id: "local-chip",
+            gatewayUploadID: "gateway-upload",
+            name: "notes.txt",
+            mimeType: "text/plain",
+            size: 4,
+            previewData: nil
+        )
+        #expect(attachment.id == "local-chip")
+        #expect(attachment.transportBlobID == "upload:gateway-upload")
+        let chip = try #require(QueuedMessageAttachmentPresentation.chips(for: [attachment]).first)
+        #expect(chip.attachment?.id == "upload:gateway-upload")
+        #expect(QueuedMessageAttachmentPresentation.chips(for: [attachment.requiringUpload()]).isEmpty)
+    }
+
     @Test("queued card geometry keeps compact balanced header spacing")
     func compactCardGeometry() {
         #expect(QueuedMessageCardLayout.contentSpacing == 6)

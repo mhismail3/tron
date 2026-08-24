@@ -33,6 +33,8 @@ struct ChatMorphFlightTests {
         #expect(registry.stage(lifecycle: lifecycle, generation: 7, suppress: false))
         let flight = try #require(registry.flight)
         #expect(flight.elements.count == 2)
+        #expect(flight.elements.last?.id.element == .attachment("upload"))
+        #expect(flight.elements.last?.attachment?.transportBlobID == "upload:gateway-upload")
         #expect(!flight.isReady)
 
         for element in flight.elements {
@@ -158,6 +160,7 @@ struct ChatMorphFlightTests {
     private var attachment: PendingAttachment {
         PendingAttachment(
             id: "upload",
+            gatewayUploadID: "gateway-upload",
             name: "file.txt",
             mimeType: "text/plain",
             size: 8,
@@ -177,7 +180,7 @@ struct ChatMorphFlightTests {
                 target: target,
                 textRevision: 1,
                 outgoingText: text,
-                attachmentIDs: attachments.map(\.id),
+                attachmentIDs: attachments.compactMap(\.gatewayUploadID),
                 behavior: nil,
                 localNonce: nonce
             ),

@@ -416,13 +416,15 @@ struct ChatMorphFlightLayer: View {
                         mimeType: attachment.mimeType
                     )
                     .opacity(1 - progress)
-                    TranscriptFileChip(
-                        name: attachment.name,
-                        mimeType: attachment.mimeType,
-                        size: attachment.size,
-                        blobID: "upload:\(attachment.id)"
-                    )
-                    .opacity(progress)
+                    if let blobID = attachment.transportBlobID {
+                        TranscriptFileChip(
+                            name: attachment.name,
+                            mimeType: attachment.mimeType,
+                            size: attachment.size,
+                            blobID: blobID
+                        )
+                        .opacity(progress)
+                    }
                 }
             }
         }
