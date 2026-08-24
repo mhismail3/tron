@@ -13,16 +13,18 @@ const base = {
 
 describe("projectExtensionRunActivity", () => {
   it("normalizes artifact status and timestamps identically for discovery and watcher callers", () => {
-    const raw = { state: "complete", startedAt: 1_700_000_000_000, lastUpdate: 1_700_000_001_000, endedAt: 1_700_000_002_000, durationMs: 2_000 };
+    // pi-subagents records logical completion before the final persistence
+    // update, so lastUpdate legitimately follows endedAt.
+    const raw = { state: "complete", startedAt: 1_700_000_000_000, endedAt: 1_700_000_001_000, lastUpdate: 1_700_000_002_000, durationMs: 1_000 };
     const options = { now: "2026-01-01T00:00:00.000Z", fallbackStartedAt: "2025-12-31T23:59:00.000Z", fallbackUpdatedAt: "2025-12-31T23:59:30.000Z" };
     expect(normalizeExtensionArtifact(raw, options)).toEqual({
       lifecycleState: "completed",
       status: "completed",
       terminal: true,
       startedAt: new Date(1_700_000_000_000).toISOString(),
-      updatedAt: new Date(1_700_000_001_000).toISOString(),
-      completedAt: new Date(1_700_000_002_000).toISOString(),
-      durationMs: 2_000,
+      updatedAt: new Date(1_700_000_002_000).toISOString(),
+      completedAt: new Date(1_700_000_001_000).toISOString(),
+      durationMs: 1_000,
     });
     expect(normalizeExtensionArtifact({ state: "running" }, options)).toEqual({
       lifecycleState: "running",
@@ -34,8 +36,15 @@ describe("projectExtensionRunActivity", () => {
     expect(normalizeExtensionArtifact({ state: "future" }, options)).toBeUndefined();
     expect(normalizeExtensionArtifact({ state: "completed", startedAt: 1_700_000_001_000, lastUpdate: 1_700_000_002_000 }, options)).toBeUndefined();
     expect(normalizeExtensionArtifact({ state: "running", startedAt: 1_700_000_002_000, lastUpdate: 1_700_000_001_000 }, options)).toBeUndefined();
-    expect(normalizeExtensionArtifact({ state: "completed", startedAt: 1_700_000_002_000, lastUpdate: 1_700_000_003_000, completedAt: 1_700_000_004_000 }, options)?.completedAt)
-      .toBe(new Date(1_700_000_004_000).toISOString());
+    expect(normalizeExtensionArtifact({ state: "completed", startedAt: 1_700_000_002_000, completedAt: 1_700_000_003_000, lastUpdate: 1_700_000_004_000 }, options)?.completedAt)
+      .toBe(new Date(1_700_000_003_000).toISOString());
+    expect(normalizeExtensionArtifact({ state: "failed", startedAt: 1_700_000_002_000, endedAt: 1_700_000_003_000, lastUpdate: 1_700_000_004_000 }, options)).toMatchObject({
+      lifecycleState: "failed",
+      status: "failed",
+      terminal: true,
+      updatedAt: new Date(1_700_000_004_000).toISOString(),
+      completedAt: new Date(1_700_000_003_000).toISOString(),
+    });
     const divergent = { state: "running", startedAt: 1_767_226_800_000, lastUpdate: 1_767_230_400_000 };
     const authoritative = { ...options, fallbackStartedAt: "2026-01-01T00:00:00.000Z", useArtifactStartedAt: false };
     const discovery = normalizeExtensionArtifact(divergent, authoritative);
@@ -54,7 +63,8 @@ describe("projectExtensionRunActivity", () => {
     };
     expect(admitExtensionLifecycleArtifact(valid)).toEqual(valid);
     expect(admitExtensionLifecycleArtifact({ ...valid, lastUpdate: 99 })).toBeUndefined();
-    expect(admitExtensionLifecycleArtifact({ ...valid, endedAt: 199 })).toBeUndefined();
+    expect(admitExtensionLifecycleArtifact({ ...valid, endedAt: 199 })).toBeDefined();
+    expect(admitExtensionLifecycleArtifact({ ...valid, endedAt: 99 })).toBeUndefined();
     expect(admitExtensionLifecycleArtifact({ ...valid, endedAt: undefined, completedAt: undefined })).toBeUndefined();
     expect(admitExtensionLifecycleArtifact({ ...valid, state: "running", endedAt: 50 })).toBeUndefined();
   });

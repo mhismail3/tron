@@ -689,7 +689,11 @@ lifecycle; RuntimeSlot remains the authority for exact session/tool ownership.
 Per-slot watchers are therefore permitted only after that exact ownership has
 already been proven, and never perform global scans. Pure artifact state and timestamp
 normalization is shared by discovery and watcher refresh, while their admission,
-ownership, receipt, and fail-closed policies remain slot-owned. Shared recency scheduling
+ownership, receipt, and fail-closed policies remain slot-owned. A producer's logical
+`endedAt` may precede the final persistence `lastUpdate`; both must follow `startedAt`,
+but persistence after completion is valid terminal evidence. Administrative drain
+also refreshes exact-owned artifacts directly on a bounded interval, so terminal work
+does not depend on watcher delivery or ambient scan scheduling. Shared recency scheduling
 removes only the disposable ambient projection at its wall-clock deadline,
 while canonical history remains available. Detached nonterminal work protects
 its session lane from idle eviction and administrative drain.

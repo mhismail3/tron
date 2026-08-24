@@ -133,9 +133,7 @@ export function admitExtensionLifecycleArtifact(
   const startedMilliseconds = startedAt as number;
   const updatedMilliseconds = lastUpdate as number;
   if (updatedMilliseconds < startedMilliseconds) return undefined;
-  if (terminalAt !== undefined) {
-    if ((terminalAt as number) < startedMilliseconds || (terminalAt as number) < updatedMilliseconds) return undefined;
-  }
+  if (terminalAt !== undefined && (terminalAt as number) < startedMilliseconds) return undefined;
   if (terminalLifecycleStates.has(state) && terminalAt === undefined) return undefined;
   return artifact;
 }
@@ -202,8 +200,7 @@ export function normalizeExtensionArtifact(
       || updatedMilliseconds < startedMilliseconds
       || (endedMilliseconds !== undefined
         && (!Number.isFinite(endedMilliseconds)
-          || endedMilliseconds < startedMilliseconds
-          || endedMilliseconds < updatedMilliseconds))) return undefined;
+          || endedMilliseconds < startedMilliseconds))) return undefined;
   const durationMs = number(value.durationMs);
   return {
     lifecycleState,

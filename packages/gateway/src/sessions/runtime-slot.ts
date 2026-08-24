@@ -78,6 +78,13 @@ type RuntimeQueuedMessage = QueuedMessageState & {
 
 type PendingQueueAdmission = Omit<RuntimeQueuedMessage, "runtimeText" | "ordinal">;
 
+type CanonicalExtensionRunFact = {
+  toolCallId?: string;
+  asyncDir?: string;
+  terminal: boolean;
+  ambiguous: boolean;
+};
+
 type PendingManualCompaction = {
   instructions?: string;
   resolve: () => void;
@@ -1185,7 +1192,20 @@ export class RuntimeSlot {
     return this.refreshSubagentActivityFromArtifact(asyncDir);
   }
 
-  private async refreshSubagentActivityFromArtifact(asyncDir: string): Promise<void> {
+  /** Administrative drain gets a direct, bounded reconciliation lane for
+   * exact-owned artifacts instead of depending on watcher delivery or ambient
+   * discovery scheduling. Genuine nonterminal work remains a blocker. */
+  async reconcileOwnedExtensionArtifactsForDrain(): Promise<void> {
+    const canonicalFacts = this.canonicalExtensionRunFacts();
+    for (const asyncDir of this.ownedExtensionArtifactDirectories()) {
+      await this.refreshSubagentActivityFromArtifact(asyncDir, canonicalFacts);
+    }
+  }
+
+  private async refreshSubagentActivityFromArtifact(
+    asyncDir: string,
+    canonicalFacts?: ReadonlyMap<string, CanonicalExtensionRunFact>,
+  ): Promise<void> {
     try {
       const realAsyncDir = this.canonicalExtensionArtifactDirectory(asyncDir);
       if (!realAsyncDir) return;
@@ -1204,7 +1224,7 @@ export class RuntimeSlot {
         if (!declaredAsyncDir || declaredAsyncDir !== realAsyncDir) return;
       }
       const ownership = this.extensionRunOwnership.get(runId);
-      const canonical = this.canonicalExtensionRunFacts().get(runId);
+      const canonical = (canonicalFacts ?? this.canonicalExtensionRunFacts()).get(runId);
       const historicalArtifact = raw.lifecycleArtifactVersion !== EXTENSION_LIFECYCLE_ARTIFACT_VERSION;
       if (historicalArtifact && !ownership?.asyncDir && !canonical?.asyncDir) return;
       // A duplicated runId in canonical JSONL has no safe artifact owner.
@@ -1367,8 +1387,8 @@ export class RuntimeSlot {
 
   /** Canonical JSONL facts are the only reacquisition evidence for an
    * artifact-created activity. Runtime maps are intentionally disposable. */
-  private canonicalExtensionRunFacts(): Map<string, { toolCallId?: string; asyncDir?: string; terminal: boolean; ambiguous: boolean }> {
-    const facts = new Map<string, { toolCallId?: string; asyncDir?: string; terminal: boolean; ambiguous: boolean }>();
+  private canonicalExtensionRunFacts(): Map<string, CanonicalExtensionRunFact> {
+    const facts = new Map<string, CanonicalExtensionRunFact>();
     for (const entry of this.runtime.session.sessionManager.getEntries()) {
       if (entry.type !== "message") continue;
       const message = entry.message as unknown as Record<string, unknown>;

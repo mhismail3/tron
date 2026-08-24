@@ -1291,26 +1291,41 @@ describe.sequential("RuntimeRegistry with the pinned agent runtime", () => {
       },
     });
     internal.extensionRunOwnership.set(runId, { toolCallId, asyncDir, terminal: false });
+    const registryInternal = fixture.registry as unknown as { artifactDiscoveryTimer?: NodeJS.Timeout };
+    if (registryInternal.artifactDiscoveryTimer) clearInterval(registryInternal.artifactDiscoveryTimer);
+    registryInternal.artifactDiscoveryTimer = undefined;
     await writeFile(join(asyncDir, "status.json"), JSON.stringify({
-      // Deployed sessions may outlive the producer version that launched them.
-      // Exact runtime ownership must still reconcile their terminal evidence.
       runId,
-      state: "complete",
+      state: "running",
       startedAt: Date.parse(startedAt),
       lastUpdate: Date.now(),
-      endedAt: Date.now(),
     }));
 
+    const reconciled = vi.spyOn(slot, "reconcileOwnedExtensionArtifactsForDrain");
     expect(slot.isDrainBusy).toBe(true);
     let drainSettled = false;
     const drain = fixture.registry.waitUntilIdle().then(() => { drainSettled = true; });
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await vi.waitFor(() => expect(reconciled).toHaveBeenCalledTimes(1));
+    await reconciled.mock.results[0]?.value;
+    (slot as unknown as { stopExtensionActivityWatcher: (id: string) => void })
+      .stopExtensionActivityWatcher(toolCallId);
     expect(drainSettled).toBe(false);
 
-    await (fixture.registry as unknown as { discoverExtensionArtifacts: () => Promise<void> })
-      .discoverExtensionArtifacts();
+    const endedAt = Date.now();
+    await writeFile(join(asyncDir, "status.json"), JSON.stringify({
+      // Deployed sessions may outlive the producer version that launched them.
+      // pi-subagents persists after recording completion, so lastUpdate normally
+      // follows endedAt. A later direct drain pass must reconcile this evidence
+      // without watcher delivery or ambient discovery.
+      runId,
+      state: "complete",
+      startedAt: Date.parse(startedAt),
+      endedAt,
+      lastUpdate: endedAt + 1,
+    }));
+
     await drain;
-    expect(drainSettled).toBe(true);
+    expect(reconciled.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(slot.isDrainBusy).toBe(false);
     expect(slot.snapshot().extensionActivities).toMatchObject([{
       toolCallId,

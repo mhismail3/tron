@@ -1637,7 +1637,17 @@ export class RuntimeRegistry {
       () => { preparationSettled = true; },
       (error) => { preparationError = error; preparationSettled = true; },
     );
+    let lastArtifactReconciliation = Number.NEGATIVE_INFINITY;
     while (!preparationSettled || slots.some((slot) => slot.isDrainBusy)) {
+      const now = performance.now();
+      if (preparationSettled && preparationError === undefined
+        && now - lastArtifactReconciliation >= 750) {
+        lastArtifactReconciliation = now;
+        await Promise.all(slots
+          .filter((slot) => slot.isDrainBusy)
+          .map((slot) => slot.reconcileOwnedExtensionArtifactsForDrain()));
+        continue;
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (preparationError !== undefined) throw preparationError;
