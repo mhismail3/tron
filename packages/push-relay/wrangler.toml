@@ -1,0 +1,24 @@
+name = "tron-push-relay"
+main = "src/index.ts"
+compatibility_date = "2026-07-24"
+
+[[durable_objects.bindings]]
+name = "PUSH_REGISTRY"
+class_name = "PushRegistry"
+
+# Preserve the deployed Durable Object migration lineage. A new deployment
+# creates RelayLedger at v1 and immediately renames the class at v2; an
+# existing final-v2 relay applies only the rename.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayLedger"]
+
+[[migrations]]
+tag = "v2"
+renamed_classes = [{ from = "RelayLedger", to = "PushRegistry" }]
+
+# Secrets are configured manually in Cloudflare:
+# - APNS_KEY_P8
+# - APNS_KEY_ID
+# - APNS_TEAM_ID
+# - APPLE_TEAM_ID
