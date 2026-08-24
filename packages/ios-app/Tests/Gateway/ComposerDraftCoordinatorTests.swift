@@ -1464,7 +1464,7 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
-    @Test("retired send completion publishes and restores nothing")
+    @Test("definitive failure after presentation retirement restores the scoped draft")
     func retiredSend() async throws {
         try await withTestWatchdog { @MainActor in
             let harness = ComposerHarness()
@@ -1477,8 +1477,10 @@ struct ComposerDraftCoordinatorTests {
             try await harness.waitForSends(1)
             harness.coordinator.retireProfilePresentation()
             harness.completeSend(index: 0, result: .failure(ComposerSyntheticError.current))
-            await #expect(throws: CancellationError.self) { try await valueOfOwnedTask(sending) }
-            #expect(harness.coordinator.text(for: scope).isEmpty)
+            await #expect(throws: ComposerSyntheticError.self) {
+                try await valueOfOwnedTask(sending)
+            }
+            #expect(harness.coordinator.text(for: scope) == "outgoing")
         }
     }
 
@@ -1564,7 +1566,7 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
-    @Test("presentation revocation retires lifecycle and stale transport")
+    @Test("presentation revocation retires accepted lifecycle without replay")
     func lifecycleRevocation() async throws {
         try await withTestWatchdog { @MainActor in
             let harness = ComposerHarness()
@@ -1581,10 +1583,44 @@ struct ComposerDraftCoordinatorTests {
             harness.coordinator.revoke(target)
             #expect(harness.coordinator.submissionLifecycle(for: target) == .idle)
             harness.completeSend(index: 0, result: .success(()))
-            await #expect(throws: CancellationError.self) {
+            try await valueOfOwnedTask(transport)
+            #expect(harness.coordinator.submissionLifecycle(for: target) == .idle)
+        }
+    }
+
+    @Test("definitive failure after revocation restores draft and attachments on reopen")
+    func revokedDefinitiveFailureRestoresOnReopen() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let oldTarget = SessionPresentationIdentity(sessionID: "revoked-failure", generation: 80)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile",
+                target: oldTarget,
+                lifecycleGeneration: 1,
+                initialText: "recover me"
+            )
+            harness.coordinator.installHostedAttachment(
+                .init(id: "upload", name: "file.txt", mimeType: "text/plain", size: 4, previewData: nil),
+                target: oldTarget
+            )
+            let submission = try harness.coordinator.beginSubmission(target: oldTarget, behavior: nil)
+            let transport = Task { try await harness.coordinator.transmitSubmission(submission) }
+            try await harness.waitForSends(1)
+            harness.coordinator.revoke(oldTarget)
+            harness.completeSend(index: 0, result: .failure(ComposerSyntheticError.current))
+            await #expect(throws: ComposerSyntheticError.self) {
                 try await valueOfOwnedTask(transport)
             }
-            #expect(harness.coordinator.submissionLifecycle(for: target) == .idle)
+            #expect(harness.coordinator.text(for: scope) == "recover me")
+
+            let newTarget = SessionPresentationIdentity(sessionID: oldTarget.sessionID, generation: 81)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile",
+                target: newTarget,
+                lifecycleGeneration: 1
+            )
+            #expect(harness.coordinator.pendingAttachments(for: newTarget).map(\.id) == ["upload"])
+            #expect(harness.coordinator.outgoingSubmission(for: newTarget) == nil)
         }
     }
 

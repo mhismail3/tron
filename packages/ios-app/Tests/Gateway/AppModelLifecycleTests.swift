@@ -414,7 +414,7 @@ private final class SuspendedLifecycleRetirement: GatewayLifecycleProjectionDele
     ) async {}
     func lifecycleInvalidateSessionConnectionOwnership() {}
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async {}
-    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async {}
+    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool { true }
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async {}
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws {}
     func lifecycleSurface(_ error: Error) {}

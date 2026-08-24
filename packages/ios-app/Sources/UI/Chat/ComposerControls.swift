@@ -479,6 +479,8 @@ struct ComposerTrailingButtonPressStyle: ButtonStyle {
 }
 
 struct ComposerTrailingButton: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let mode: ComposerTrailingMode
     let isDisabled: Bool
     let isSending: Bool
@@ -506,15 +508,19 @@ struct ComposerTrailingButton: View {
                             ))
                             .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
                             .opacity(isSending ? 0 : 1)
-                            .scaleEffect(isSending ? 0.72 : 1)
+                            .scaleEffect(isSending && !reduceMotion ? 0.72 : 1)
                         if isSending {
                             ProgressView()
                                 .controlSize(.small)
                                 .tint(Color.tronEmerald)
-                                .transition(.scale(scale: 0.72).combined(with: .opacity))
+                                .transition(
+                                    reduceMotion
+                                        ? .opacity
+                                        : .scale(scale: 0.72).combined(with: .opacity)
+                                )
                         }
                     }
-                    .animation(.smooth(duration: 0.18), value: isSending)
+                    .animation(reduceMotion ? nil : .smooth(duration: 0.18), value: isSending)
                 }
             }
             .frame(
@@ -525,9 +531,9 @@ struct ComposerTrailingButton: View {
         }
         .buttonStyle(ComposerTrailingButtonPressStyle())
         .disabled(isDisabled && mode == .send)
-        .contentTransition(.symbolEffect(.replace))
-        .animation(.easeInOut(duration: 0.2), value: mode)
-        .animation(.easeInOut(duration: 0.2), value: isDisabled)
+        .contentTransition(reduceMotion ? .opacity : .symbolEffect(.replace))
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: mode)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isDisabled)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(accessibilityHint)
         .contextMenu {

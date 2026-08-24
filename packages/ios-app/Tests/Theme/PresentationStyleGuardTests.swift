@@ -442,6 +442,30 @@ struct PresentationStyleGuardTests {
         #expect(reveal.contains("initialViewportHeight"))
     }
 
+    @Test("chat motion stays local to compact morphs and composer child surfaces")
+    func chatScopedMotionOwnership() throws {
+        let morph = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatMorphFlightLayer.swift"),
+            encoding: .utf8
+        )
+        let composer = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatComposerView.swift"),
+            encoding: .utf8
+        )
+        let structural = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatContentTransition.swift"),
+            encoding: .utf8
+        )
+        #expect(morph.contains("maximumPromptBytes = 240"))
+        #expect(morph.contains("maximumPromptHeight: CGFloat = 112"))
+        #expect(morph.contains(".clipShape(RoundedRectangle("))
+        #expect(morph.contains("func failOpen(lifecycleID:"))
+        #expect(composer.contains("ChatContentTransitionPolicy.attachmentTransition("))
+        #expect(composer.contains("ChatContentTransitionPolicy.composerSurfaceTransition("))
+        #expect(structural.contains("transaction.disablesAnimations = true"))
+        #expect(!composer.contains("safeAreaInset"))
+    }
+
     @Test("light chat chrome masks moving transcript rows beneath the toolbar")
     func lightChatChromeMask() throws {
         let blur = try String(
@@ -1712,7 +1736,8 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains("scrollCoordinator.isPrependingHistory"))
         #expect(earlierMessagesChip.contains(".disabled(isLoadingEarlierMessages)"))
         #expect(chat.contains(".onChange(of: scrollCoordinator.layoutEpoch)"))
-        #expect(chat.contains("outgoingSubmissionPresentation != nil"))
+        #expect(chat.contains("transcriptHandoffCommit(snapshot:"))
+        #expect(chat.contains("outgoingSubmission(for: target)"))
         #expect(chat.contains("canonicalSubmissionHandoffs"))
         #expect(chat.contains("submittedAttachments(for: target)"))
         #expect(chat.contains("canonicalSubmissionIDs("))
@@ -1793,7 +1818,7 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains("seedCanonicalMediaPreviews(from: receipt, in: snapshot)"))
         #expect(chat.contains("seedPreparedThumbnail(prepared, for: identity)"))
         #expect(chat.contains("excludedOperationIDs: sessionPresentation.locallyMutatedQueueOperationIDs"))
-        #expect(chat.contains("receipt.operationID.map({ sessionPresentation.locallyMutatedQueueOperationIDs.contains($0) }) != true"))
+        #expect(chat.contains("pendingReceipt.operationID.map({ sessionPresentation.locallyMutatedQueueOperationIDs.contains($0) }) != true"))
         #expect(chat.contains("invalidateSettledQueueHandoff("))
         #expect(chat.contains("guard let mutationToken = sessionPresentation.queueMutationResolution.begin()"))
         #expect(chat.contains("sessionPresentation.queueMutationResolution.wait(for: token)"))
@@ -2104,14 +2129,19 @@ struct PresentationStyleGuardTests {
         #expect(transcriptView.contains("presentationPhase == .positioning || presentationPhase == .ready"))
         #expect(transcriptView.contains("current.hasViewportChange(from: prior)"))
         #expect(chat.contains("scrollCoordinator.viewportChanged"))
-        #expect(chat.contains(".defaultScrollAnchor(.top, for: .alignment)"))
-        #expect(!chat.contains(".defaultScrollAnchor(.bottom, for: .alignment)"))
+        #expect(chat.contains("isReady && scrollCoordinator.viewportMode == .pinned ? .bottom : .top"))
+        #expect(chat.contains("for: .alignment"))
         #expect(chat.contains("for: .sizeChanges"))
         #expect(chat.contains("scrollCoordinator.viewportMode.sizeChangeAnchorIsBottom"))
         #expect(!scrollCoordinator.contains("releaseBinding"))
         #expect(!chat.contains("releaseSettledScrollBindingIfNeeded"))
+        #expect(scrollCoordinator.contains("requestAppliedTargetRelease"))
+        #expect(scrollCoordinator.contains("frameScheduler.nextFrame()"))
+        #expect(scrollCoordinator.contains("appliedTargetCommandToken == token"))
+        #expect(scrollCoordinator.contains("targetReleaseToken != token"))
+        #expect(chat.contains("retireAppliedTargetForSubmission()"))
         #expect(chat.contains("transcriptScrollPosition = ScrollPosition(idType: String.self)"))
-        #expect(chat.contains("transcriptScrollPosition.isPositionedByUser"))
+        #expect(chat.contains("scrollPosition.isPositionedByUser"))
         #expect(!chat.contains("composerHeight"))
         #expect(!chat.contains("ComposerHeightPreferenceKey"))
         #expect(!chat.contains("scheduleTailFollow"))
@@ -2133,6 +2163,11 @@ struct PresentationStyleGuardTests {
         #expect(composerOwner.contains("isActive: showsAmbientWorkingBlur"))
         #expect(composerOwner.contains(".offset(y: ChatBottomActivityBlurLayout.translation("))
         #expect(composerOwner.contains("keyboardVisible: keyboardVisible"))
+        #expect(composerOwner.contains("ChatContentTransitionPolicy.attachmentTransition("))
+        #expect(composerOwner.contains("ChatContentTransitionPolicy.composerSurfaceTransition("))
+        #expect(composerOwner.contains("value: pendingAttachments.map(\\.id)"))
+        #expect(composerOwner.contains("value: selectedSkill?.id"))
+        #expect(composerOwner.contains("value: resourcePicker?.kind"))
         #expect(!composerStage.contains(".accessibilityHidden(!isTranscriptReady)"))
         #expect(!composerStage.contains(".allowsHitTesting(isTranscriptReady)"))
         #expect(chat.contains("isEditable: ChatComposerPolicy.isTextEditable(isTranscriptReady: isTranscriptReady)"))

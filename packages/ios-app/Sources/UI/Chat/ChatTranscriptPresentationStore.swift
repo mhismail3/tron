@@ -385,15 +385,41 @@ struct InstalledChatTranscript: Hashable, Sendable {
         ChatDisplayedTranscriptItems(timeline: timeline.items, runtime: runtimeItems)
     }
     var hasUniqueDisplayedIDs: Bool {
-        timeline.isInternallyConsistent
-            && toolDescriptorByID != nil
-            && runtimeIDSet.count == runtimeItems.count
-            && runtimeIDSet.allSatisfy { !timeline.containsID($0) }
-            && queuedMessages.count <= SessionSnapshot.maximumQueuedMessages
-            && queueIDSet.count == queuedMessages.count
-            && Set(queuePresentationIDByOperationID.keys).isSubset(of: queueIDSet)
-            && Set(queuePresentationIDByOperationID.values).count
-                == queuePresentationIDByOperationID.count
+        guard timeline.isInternallyConsistent,
+              toolDescriptorByID != nil,
+              runtimeIDSet.count == runtimeItems.count,
+              runtimeIDSet.allSatisfy({ !timeline.containsID($0) }),
+              queuedMessages.count <= SessionSnapshot.maximumQueuedMessages,
+              queueIDSet.count == queuedMessages.count,
+              Set(queuePresentationIDByOperationID.keys).isSubset(of: queueIDSet),
+              Set(queuePresentationIDByOperationID.values).count
+                  == queuePresentationIDByOperationID.count else { return false }
+
+        // Validate the namespace SwiftUI actually receives, not just the
+        // canonical timeline. Presentation-only lifecycle, queue, paging, and
+        // tail-marker IDs must never collide with canonical/runtime IDs.
+        var physicalIDs = Set<String>()
+        func admit(_ id: String) -> Bool {
+            guard !id.isEmpty else { return false }
+            return physicalIDs.insert(id).inserted
+        }
+        guard displayedItems.allSatisfy({ admit($0.id) }) else { return false }
+        switch handoff {
+        case .none:
+            break
+        case .pending(let pending):
+            guard admit("pending-prompt-\(pending.id)") else { return false }
+        case .outgoing(let outgoing, _):
+            guard admit(outgoing.id) else { return false }
+        }
+        for message in queuedMessages {
+            guard admit(queuePresentationIDByOperationID[message.id]
+                ?? "queued-message-\(message.id)") else { return false }
+        }
+        if (sourceWindow.originalStart ?? 0) > 0 {
+            guard admit("earlier-messages") else { return false }
+        }
+        return admit("transcript-bottom")
     }
     func containsDisplayedID(_ id: String) -> Bool {
         timeline.containsID(id) || runtimeIDSet.contains(id)
@@ -869,6 +895,7 @@ final class ChatTranscriptPresentationStore {
     @ObservationIgnored private var workerID: UInt64 = 0
     @ObservationIgnored private var readyToInstall: InstalledChatTranscript?
     @ObservationIgnored private var consumedEntranceSuppressionGeneration: Int?
+    @ObservationIgnored private var entranceSuppressedInstallationTag: ChatTranscriptProjectionTag?
     @ObservationIgnored private var consumedLifecycleEntranceIDs: Set<String> = []
     @ObservationIgnored private var installFrameTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
@@ -1117,6 +1144,10 @@ final class ChatTranscriptPresentationStore {
         return .none
     }
 
+    func suppressesEntrances(for tag: ChatTranscriptProjectionTag) -> Bool {
+        entranceSuppressedInstallationTag == tag
+    }
+
     /// Row geometry is the admission evidence. The exact displayed installation
     /// captured by that row must still own both its identity and pending state;
     /// a newer desired source is deliberately not part of this decision.
@@ -1173,6 +1204,7 @@ final class ChatTranscriptPresentationStore {
         buildingTag = nil
         readyToInstall = nil
         consumedEntranceSuppressionGeneration = nil
+        entranceSuppressedInstallationTag = nil
         consumedLifecycleEntranceIDs.removeAll(keepingCapacity: false)
         installFrameTask?.cancel()
         installFrameTask = nil
@@ -1288,6 +1320,7 @@ final class ChatTranscriptPresentationStore {
         let inserted = suppressEntrances
             ? []
             : ChatTranscriptTransitionPolicy.discreteInsertedIDs(previous: installed, next: output)
+        entranceSuppressedInstallationTag = suppressEntrances ? output.tag : nil
         if suppressEntrances {
             consumedEntranceSuppressionGeneration = output.tag.entranceSuppressionGeneration
             clearEntranceBookkeeping(keepingCapacity: true)

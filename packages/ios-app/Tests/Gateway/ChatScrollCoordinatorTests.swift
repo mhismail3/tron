@@ -15,9 +15,56 @@ struct ChatScrollCoordinatorTests {
         offsetY: 0, contentHeight: 1_000, containerHeight: 400
     )
 
+    @Test("stale command application cannot authorize a target release")
+    func staleCommandCannotApply() throws {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: .zero, current: farAway)
+        coordinator.requestCatchUp(reduceMotion: true)
+        let first = try #require(coordinator.command)
+        #expect(coordinator.commandApplied(first))
+        coordinator.requestCatchUp(reduceMotion: true)
+        let second = try #require(coordinator.command)
+        #expect(!coordinator.commandApplied(first))
+        #expect(coordinator.command?.token == second.token)
+    }
+
+    @Test("application target survives until exact catch-up geometry settles")
+    func targetReleaseIsSettlementOwned() async throws {
+        let frames = ManualViewportFrameScheduler()
+        let coordinator = ChatScrollCoordinator(frameScheduler: frames.scheduler)
+        coordinator.geometryChanged(previous: .zero, current: farAway)
+        coordinator.requestCatchUp(reduceMotion: true)
+        let command = try #require(coordinator.command)
+        #expect(coordinator.commandApplied(command))
+        #expect(!coordinator.consumeTargetRelease())
+
+        coordinator.geometryChanged(previous: farAway, current: bottom)
+        await frames.waitForRequest(count: 1)
+        #expect(coordinator.targetReleaseGeneration == 0)
+        frames.releaseNext()
+        await Task.yield()
+
+        #expect(coordinator.targetReleaseGeneration == 1)
+        #expect(coordinator.consumeTargetRelease())
+        #expect(!coordinator.consumeTargetRelease())
+    }
+
+    @Test("submission retires only the applied app target before layout mutation")
+    func submissionRetiresAppliedTarget() throws {
+        let coordinator = ChatScrollCoordinator()
+        coordinator.geometryChanged(previous: .zero, current: farAway)
+        coordinator.requestCatchUp(reduceMotion: true)
+        let command = try #require(coordinator.command)
+        #expect(coordinator.commandApplied(command))
+        #expect(coordinator.retireAppliedTargetForSubmission())
+        #expect(!coordinator.retireAppliedTargetForSubmission())
+        #expect(coordinator.targetReleaseGeneration == 0)
+        #expect(!coordinator.consumeTargetRelease())
+    }
+
     // MARK: Group B replacements — deleted command-arbitration mechanisms
 
-    @Test("native pinning replaces follow coalescing with zero app writes")
+    @Test("discrete pinned growth coalesces to one nonanimated tail lease")
     func pinnedNativeEdgeEliminatesFollowCommandStream() throws {
         let coordinator = ChatScrollCoordinator()
         coordinator.geometryChanged(previous: .zero, current: bottom)
@@ -32,7 +79,10 @@ struct ChatScrollCoordinatorTests {
             coordinator.installedLifecycleChanged(try installedToolTranscript(
                 ids: ["tool"], statuses: [.running], timelineGeneration: index
             ))
-            #expect(coordinator.command == nil)
+            #expect(coordinator.command?.origin == .pinnedGrowth)
+            #expect(coordinator.command?.destination == .tail)
+            #expect(coordinator.command?.animation == .disabled)
+            #expect(coordinator.command?.token == 1)
         }
         #expect(coordinator.viewportMode == .pinned)
     }
@@ -155,7 +205,7 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.command == nil)
     }
 
-    @Test("sticky modes need no offset command")
+    @Test("sticky pinned mode uses one tail lease while anchored mode remains inert")
     func stickyModeHasNoOffsetCommandDestination() {
         let coordinator = ChatScrollCoordinator()
         coordinator.submitted()
@@ -167,7 +217,8 @@ struct ChatScrollCoordinatorTests {
             )
         )
         #expect(coordinator.viewportMode == .pinned)
-        #expect(coordinator.command == nil)
+        #expect(coordinator.command?.origin == .pinnedGrowth)
+        #expect(coordinator.command?.destination == .tail)
 
         coordinator.scrollPositionChanged(isPositionedByUser: true)
         coordinator.submitted()
@@ -175,13 +226,14 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.command == nil)
     }
 
-    @Test("composer layout mutations never own a scroll command")
+    @Test("submission corrects only a pinned reader and leaves anchored layout inert")
     func composerMutationsDoNotOwnScrollCommands() {
         let coordinator = ChatScrollCoordinator()
         coordinator.submitted()
         coordinator.geometryChanged(previous: bottom, current: away)
         #expect(coordinator.viewportMode == .pinned)
-        #expect(coordinator.command == nil)
+        #expect(coordinator.command?.origin == .pinnedGrowth)
+        #expect(coordinator.command?.destination == .tail)
 
         coordinator.scrollPositionChanged(isPositionedByUser: true)
         coordinator.submitted()
@@ -909,7 +961,7 @@ struct ChatScrollCoordinatorTests {
         #expect(ChatScrollCoordinator.liveGrowthAnimationDuration == 0.16)
     }
 
-    @Test("new agent row shares native pinned growth without a second write")
+    @Test("new agent row receives one nonanimated pinned-tail correction")
     func insertedRowIsSmooth() {
         let coordinator = ChatScrollCoordinator()
         coordinator.discreteContentInserted(renderedID: "new-agent-row")
@@ -918,7 +970,9 @@ struct ChatScrollCoordinatorTests {
             current: ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_100, containerHeight: 400)
         )
         #expect(coordinator.viewportMode == .pinned)
-        #expect(coordinator.command == nil)
+        #expect(coordinator.command?.origin == .pinnedGrowth)
+        #expect(coordinator.command?.destination == .tail)
+        #expect(coordinator.command?.animation == .disabled)
     }
 
     @Test("physical overshoot is clamped by native pinning without an animated app command")

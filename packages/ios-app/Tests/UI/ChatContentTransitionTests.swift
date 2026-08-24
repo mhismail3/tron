@@ -91,6 +91,22 @@ struct ChatContentTransitionTests {
         #expect(centered.offsetX == 0)
     }
 
+    @Test("composer child surfaces retain scoped motion without structural height animation")
+    func composerChildMotion() {
+        #expect(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: false)
+            != ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true))
+        #expect(ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: false)
+            != ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: true))
+        #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: 44,
+            measured: 88
+        ))
+        #expect(!ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: 44,
+            measured: 44.2
+        ))
+    }
+
     @Test("Reduce Motion removes every spatial entrance component")
     func reduceMotion() {
         let kinds: [ChatContentEntranceKind] = [

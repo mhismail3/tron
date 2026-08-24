@@ -830,17 +830,31 @@ final class SessionPresentationStore {
 
     func admit(_ event: GatewayEvent) async {
         if event.topic == "session.rebaseline" {
-            guard case .sessionRebaseline(let rebaseline) = event.preparation,
-                  event.sessionId == rebaseline.snapshot.sessionId,
+            guard case .sessionRebaseline(let rebaseline) = event.preparation else {
+                if let sessionID = event.sessionId,
+                   mountedTarget?.sessionID == sessionID,
+                   hasInstalledSubscription(for: sessionID) {
+                    _ = await synchronize(sessionID, operation: .sessionResync)
+                }
+                return
+            }
+            guard event.sessionId == rebaseline.snapshot.sessionId,
                   ownsExactRebaselineOwner(
                     sessionID: rebaseline.snapshot.sessionId,
                     subscriptionToken: rebaseline.subscriptionToken
                   ) else { return }
             let authoritative = rebaseline.snapshot
-            // Rebaseline frames are authoritative only within their runtime
-            // generation. A delayed recovery from the same generation must not
-            // regress or duplicate a newer cursor.
-            guard admitsRebaseline(authoritative, strictlyNewer: true) else { return }
+            switch SessionRebaselineAdmission.evaluate(current: snapshot, incoming: authoritative) {
+            case .ignore:
+                return
+            case .resynchronize:
+                if hasInstalledSubscription(for: authoritative.sessionId) {
+                    _ = await synchronize(authoritative.sessionId, operation: .sessionResync)
+                }
+                return
+            case .install:
+                break
+            }
             if !hasInstalledSubscription(for: authoritative.sessionId) {
                 if let pending = pendingRebaselines[authoritative.sessionId],
                    !isNewer(authoritative, than: pending.snapshot) { return }
@@ -980,14 +994,6 @@ final class SessionPresentationStore {
             return self.subscriptionToken == subscriptionToken
         }
         return pendingSubscriptionTokens[sessionID] == subscriptionToken
-    }
-
-    private func admitsRebaseline(_ incoming: SessionSnapshot, strictlyNewer: Bool) -> Bool {
-        guard let current = snapshot, current.sessionId == incoming.sessionId else { return true }
-        guard current.runtimeGeneration == incoming.runtimeGeneration else { return true }
-        return strictlyNewer
-            ? incoming.eventSequence > current.eventSequence
-            : incoming.eventSequence >= current.eventSequence
     }
 
     private func isNewer(_ incoming: SessionSnapshot, than current: SessionSnapshot) -> Bool {
@@ -1317,6 +1323,14 @@ final class SessionPresentationStore {
                     details: nil
                 )
             }
+            guard SessionSnapshotQueueAdmissionPolicy.admit(response.session) else {
+                throw GatewayFailure(
+                    code: "invalid_response",
+                    message: "The Gateway returned an invalid queued-message projection.",
+                    retryable: false,
+                    details: nil
+                )
+            }
             provisionalToken = response.subscriptionToken
             pendingSubscriptionTokens[sessionID] = response.subscriptionToken
             guard ownsSynchronizationAttempt(
@@ -1356,6 +1370,14 @@ final class SessionPresentationStore {
                 authoritativeResponse = pendingRebaseline.snapshot
             } else {
                 authoritativeResponse = response.session
+            }
+            guard SessionSnapshotQueueAdmissionPolicy.admit(authoritativeResponse) else {
+                throw GatewayFailure(
+                    code: "invalid_response",
+                    message: "The Gateway returned an invalid queued-message projection.",
+                    retryable: false,
+                    details: nil
+                )
             }
             // Resume from the bounded authoritative tail before any optional
             // history work. Paging inside this barrier extends the replay race
@@ -1413,6 +1435,7 @@ final class SessionPresentationStore {
             }
             let replayTailSequence = replay.last?.sessionCursor?.eventSequence ?? cursor.eventSequence
             guard !replayRequiresResynchronization,
+                  SessionSnapshotQueueAdmissionPolicy.admit(installed),
                   installed.eventSequence == replayTailSequence else {
                 if case .freshPresentation = mode { synchronization.requireFreshInstall(sessionID: sessionID) }
                 await closeProvisionalSubscription(
@@ -1787,7 +1810,9 @@ final class SessionPresentationStore {
         case "session.listChanged":
             effects.append(.catalogRefresh)
         case "session.snapshot":
-            guard case .sessionSnapshot(let incoming) = event.preparation else { break }
+            guard case .sessionSnapshot(let incoming) = event.preparation else {
+                return resyncIfNeeded(event, snapshot: snapshot)
+            }
             switch SessionSnapshotEventAdmission.evaluate(
                 eventSessionID: event.sessionId,
                 hasLiveAuthority: true,
@@ -2069,9 +2094,14 @@ final class SessionPresentationStore {
         case .reconnect:
             guard let current,
                   current.sessionId == authoritative.sessionId,
-                  current.runtimeGeneration == authoritative.runtimeGeneration,
-                  authoritative.eventSequence < current.eventSequence else { return authoritative }
-            return current
+                  current.runtimeGeneration == authoritative.runtimeGeneration else { return authoritative }
+            guard authoritative.eventSequence >= current.eventSequence else { return current }
+            return installingExtensionActivities(
+                authoritative,
+                preserving: current.extensionActivities ?? [],
+                previousLiveRevision: current.liveActivityRevision,
+                previousActivityAsOf: current.extensionActivityAsOf
+            )
         }
     }
 

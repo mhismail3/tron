@@ -319,12 +319,14 @@ final class ComposerDraftCoordinator {
     private enum SubmissionTransportState: Equatable {
         case sending
         case accepted
+        case rejected
     }
 
     private struct SubmissionAdmission: Equatable {
         let id: UInt64
         let snapshot: ComposerSubmissionSnapshot
         let submittedAttachments: [PendingAttachment]
+        let scope: ComposerDraftScope
         let submittedSkill: CommandInfo?
         let skillMutationRevision: Int
         var canRestoreSubmittedSkill: Bool
@@ -533,6 +535,7 @@ final class ComposerDraftCoordinator {
             target: target,
             lifecycleGeneration: prepared.lifecycleGeneration
         )
+        restoreRejectedSubmissionIfNeeded(scope: prepared.scope, target: target)
         touch(prepared.scope, installing: nil)
         return true
     }
@@ -1025,7 +1028,10 @@ final class ComposerDraftCoordinator {
                 admission.snapshot.skillName
             )
         } catch {
-            try require(admission)
+            // A route may disappear after admission. The exact submission
+            // remains owned here until transport reaches a terminal outcome;
+            // stale completions still require the same target/id below.
+            try requireOutcome(admission)
             if Self.isPossiblySent(error) {
                 markTransportAccepted(admission)
             } else {
@@ -1033,7 +1039,7 @@ final class ComposerDraftCoordinator {
             }
             throw error
         }
-        try require(admission)
+        try requireOutcome(admission)
         markOperationAccepted(operationID, admission: admission)
         markTransportAccepted(admission)
     }
@@ -1081,6 +1087,7 @@ final class ComposerDraftCoordinator {
         selectedSkillByScope[scope] = nil
         skillMutationRevisionByScope[scope] = nil
         preparedOpenBySession[sessionID] = nil
+        submissionByTarget = submissionByTarget.filter { $0.value.scope != scope }
         if lease?.scope == scope { revokePresentation() }
     }
 
@@ -1089,6 +1096,7 @@ final class ComposerDraftCoordinator {
         selectedSkillByScope = selectedSkillByScope.filter { $0.key.profileID != profileID }
         skillMutationRevisionByScope = skillMutationRevisionByScope.filter { $0.key.profileID != profileID }
         preparedOpenBySession = preparedOpenBySession.filter { $0.value.scope.profileID != profileID }
+        submissionByTarget = submissionByTarget.filter { $0.value.scope.profileID != profileID }
         if lease?.scope.profileID == profileID { revokePresentation() }
     }
 
@@ -1154,6 +1162,14 @@ final class ComposerDraftCoordinator {
             )
         }
         let scope = lease.scope
+        guard !submissionByTarget.values.contains(where: { $0.scope == scope }) else {
+            throw GatewayFailure(
+                code: "submission_in_progress",
+                message: "The previous message is still reconciling. Wait for it to settle before sending again.",
+                retryable: true,
+                details: nil
+            )
+        }
         let draft = drafts[scope] ?? Draft(text: "", revision: 0, lastAccess: sequence)
         let outgoing = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let submittedAttachments = attachmentsByTarget[target] ?? []
@@ -1176,6 +1192,7 @@ final class ComposerDraftCoordinator {
             id: sequence,
             snapshot: snapshot,
             submittedAttachments: submittedAttachments,
+            scope: scope,
             submittedSkill: submittedSkill,
             skillMutationRevision: skillMutationRevisionByScope[scope, default: 0],
             canRestoreSubmittedSkill: true,
@@ -1207,10 +1224,16 @@ final class ComposerDraftCoordinator {
         }
     }
 
+    private func requireOutcome(_ admission: SubmissionAdmission) throws {
+        guard submissionByTarget[admission.snapshot.target]?.id == admission.id else {
+            throw CancellationError()
+        }
+    }
+
     private func restoreSubmission(_ admission: SubmissionAdmission) {
         guard let currentAdmission = submissionByTarget[admission.snapshot.target],
-              currentAdmission.id == admission.id,
-              let scope = lease?.scope else { return }
+              currentAdmission.id == admission.id else { return }
+        let scope = currentAdmission.scope
         // A canonical event wins even if a late transport failure races it. A
         // definitive rejection without canonical evidence is the only path
         // that restores the draft and submitted attachments.
@@ -1227,15 +1250,37 @@ final class ComposerDraftCoordinator {
             for: scope
         )
         let submittedIDs = Set(currentAdmission.snapshot.attachmentIDs)
-        let newerAttachments = (attachmentsByTarget[currentAdmission.snapshot.target] ?? [])
-            .filter { !submittedIDs.contains($0.id) }
-        attachmentsByTarget[currentAdmission.snapshot.target] = currentAdmission.submittedAttachments + newerAttachments
+        if let restoredTarget = lease?.scope == scope ? lease?.target : nil {
+            let newerAttachments = attachmentsByTarget[restoredTarget] ?? []
+            attachmentsByTarget[restoredTarget] = currentAdmission.submittedAttachments
+                + newerAttachments.filter { !submittedIDs.contains($0.id) }
+        }
         if currentAdmission.canRestoreSubmittedSkill,
            skillMutationRevisionByScope[scope, default: 0] == currentAdmission.skillMutationRevision,
            selectedSkillByScope[scope] == nil {
             selectedSkillByScope[scope] = currentAdmission.submittedSkill
         }
-        submissionByTarget[currentAdmission.snapshot.target] = nil
+        if lease?.scope == scope {
+            submissionByTarget[currentAdmission.snapshot.target] = nil
+        } else {
+            var rejected = currentAdmission
+            rejected.transportState = .rejected
+            submissionByTarget[currentAdmission.snapshot.target] = rejected
+        }
+    }
+
+    private func restoreRejectedSubmissionIfNeeded(
+        scope: ComposerDraftScope,
+        target: SessionPresentationIdentity
+    ) {
+        guard let rejected = submissionByTarget.values.first(where: {
+            $0.scope == scope && $0.transportState == .rejected
+        }) else { return }
+        let submittedIDs = Set(rejected.snapshot.attachmentIDs)
+        let newerAttachments = attachmentsByTarget[target] ?? []
+        attachmentsByTarget[target] = rejected.submittedAttachments
+            + newerAttachments.filter { !submittedIDs.contains($0.id) }
+        submissionByTarget[rejected.snapshot.target] = nil
     }
 
     private func markOperationAccepted(_ operationID: String, admission: SubmissionAdmission) {
@@ -1262,7 +1307,7 @@ final class ComposerDraftCoordinator {
         let retainedIDs = Set(retained.map(\.id))
         let captured = admission.submittedAttachments.filter { !retainedIDs.contains($0.id) }
         attachmentsByTarget[admission.snapshot.target] = captured + retained
-        if accepted.canonicalObserved {
+        if accepted.canonicalObserved || lease?.target != admission.snapshot.target {
             finishSubmission(accepted)
         } else {
             submissionByTarget[admission.snapshot.target] = accepted
@@ -1272,6 +1317,13 @@ final class ComposerDraftCoordinator {
     private func finishSubmission(_ admission: SubmissionAdmission) {
         let target = admission.snapshot.target
         guard let current = submissionByTarget[target], current.id == admission.id else { return }
+        guard lease?.target == target else {
+            let submitted = Set(current.snapshot.attachmentIDs)
+            attachmentsByTarget[target]?.removeAll { submitted.contains($0.id) }
+            if attachmentsByTarget[target]?.isEmpty == true { attachmentsByTarget[target] = nil }
+            submissionByTarget[target] = nil
+            return
+        }
         if let canonicalHandoffID = current.canonicalHandoffID {
             canonicalHandoffReceipts[target] = CanonicalSubmissionHandoffReceipt(
                 canonicalID: canonicalHandoffID,
@@ -1416,7 +1468,10 @@ final class ComposerDraftCoordinator {
         guard let lease else { return }
         attachmentsByTarget[lease.target] = nil
         editorRequestByTarget[lease.target] = nil
-        submissionByTarget[lease.target] = nil
+        // Keep an unresolved exact submission admission alive after route
+        // revocation so a definite transport rejection can restore its scoped
+        // draft. Accepted/possibly-sent outcomes are retired when no mounted
+        // presentation remains; they are never replayed.
         canonicalHandoffReceipts[lease.target] = nil
         settledQueueAliases[lease.target] = nil
         settledQueueHandoffs[lease.target] = nil

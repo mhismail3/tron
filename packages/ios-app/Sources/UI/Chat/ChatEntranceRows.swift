@@ -115,6 +115,7 @@ struct ChatTranscriptEntranceRow<Content: View>: View {
 struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
     let reduceMotion: Bool
     let animatesEntrance: Bool
+    let morphOwnership: ChatMorphFrameRegistry.EntranceOwnership
     let kind: ChatContentEntranceKind
     let onEntranceConsumed: () -> Void
     @ViewBuilder let content: Content
@@ -123,23 +124,36 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
     init(
         reduceMotion: Bool,
         animatesEntrance: Bool = true,
+        morphOwnership: ChatMorphFrameRegistry.EntranceOwnership = .ordinary,
         kind: ChatContentEntranceKind = .userPrompt,
         onEntranceConsumed: @escaping () -> Void = {},
         @ViewBuilder content: () -> Content
     ) {
         self.reduceMotion = reduceMotion
         self.animatesEntrance = animatesEntrance
+        self.morphOwnership = morphOwnership
         self.kind = kind
         self.onEntranceConsumed = onEntranceConsumed
         self.content = content()
-        _revealed = State(initialValue: !animatesEntrance)
+        switch morphOwnership {
+        case .ordinary:
+            _revealed = State(initialValue: !animatesEntrance)
+        case .flight:
+            // The row stays in layout for destination measurement while the
+            // overlay owns visibility.
+            _revealed = State(initialValue: false)
+        case .completed:
+            _revealed = State(initialValue: true)
+        }
     }
 
     var body: some View {
-        let hidden = ChatContentTransitionPolicy.hiddenTransform(
-            for: kind,
-            reduceMotion: reduceMotion
-        )
+        let hidden = morphOwnership == .flight
+            ? ChatContentEntranceTransform.identity
+            : ChatContentTransitionPolicy.hiddenTransform(
+                for: kind,
+                reduceMotion: reduceMotion
+            )
         content
             .opacity(revealed ? 1 : 0)
             .scaleEffect(
@@ -152,20 +166,45 @@ struct ChatOutgoingSubmissionEntranceRow<Content: View>: View {
             )
             .onAppear {
                 onEntranceConsumed()
-                guard animatesEntrance, !revealed else { return }
-                var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
-                    for: kind,
-                    reduceMotion: reduceMotion
-                ))
-                transaction.admitsChatEntranceAnimation = true
-                withTransaction(transaction) { revealed = true }
+                guard morphOwnership == .ordinary else { return }
+                revealOrdinaryEntranceIfNeeded()
+            }
+            .onChange(of: morphOwnership) { previous, current in
+                switch current {
+                case .flight:
+                    break
+                case .completed:
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { revealed = true }
+                case .ordinary:
+                    // A staged flight that failed before completion falls back
+                    // to the same bounded row entrance as a non-morphed send.
+                    if previous == .flight { revealOrdinaryEntranceIfNeeded() }
+                }
             }
             .onChange(of: animatesEntrance) { _, enabled in
-                guard !enabled else { return }
+                guard !enabled, morphOwnership == .ordinary else { return }
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) { revealed = true }
             }
+    }
+
+    private func revealOrdinaryEntranceIfNeeded() {
+        guard !revealed else { return }
+        guard animatesEntrance else {
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { revealed = true }
+            return
+        }
+        var transaction = Transaction(animation: ChatContentTransitionPolicy.revealAnimation(
+            for: kind,
+            reduceMotion: reduceMotion
+        ))
+        transaction.admitsChatEntranceAnimation = true
+        withTransaction(transaction) { revealed = true }
     }
 }
 

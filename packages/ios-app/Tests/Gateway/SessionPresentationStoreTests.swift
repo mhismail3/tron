@@ -382,6 +382,22 @@ struct SessionPresentationStoreTests {
             authoritative: incoming,
             mode: .reconnect
         ) == current)
+
+        current.liveActivityRevision = 4
+        current.extensionActivityAsOf = "current"
+        incoming = current
+        incoming.eventSequence += 1
+        incoming.liveActivityRevision = nil
+        incoming.extensionActivityAsOf = "stale"
+        let preserved = SessionPresentationStore.installingSnapshot(
+            current: current,
+            authoritative: incoming,
+            mode: .reconnect
+        )
+        #expect(preserved.eventSequence == incoming.eventSequence)
+        #expect(preserved.liveActivityRevision == 4)
+        #expect(preserved.extensionActivityAsOf == "current")
+
         #expect(SessionPresentationStore.installingSnapshot(
             current: current,
             authoritative: incoming,
@@ -1399,7 +1415,11 @@ struct SessionPresentationStoreTests {
             _ = try await opening.value
             #expect(store.snapshot?.phase == .running)
             #expect(store.snapshot?.transcript.map(\.id) == baseline.transcript.map(\.id))
-            #expect(await socket.sentFrames().count == 3)
+            let methods = try await socket.sentFrames().dropFirst().compactMap { frame -> String? in
+                let value = try JSONDecoder.gateway.decode(JSONValue.self, from: frame)
+                return value.objectValue?["method"]?.stringValue
+            }
+            #expect(!methods.contains("session.transcript"))
             await client.close()
         }
     }

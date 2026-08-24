@@ -17,7 +17,7 @@ protocol GatewayLifecycleProjectionDelegate: AnyObject, Sendable {
     ) async
     func lifecycleInvalidateSessionConnectionOwnership()
     func lifecycleRefreshAll(admission: GatewayLifecycleCoordinator.Admission) async
-    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async
+    func lifecycleRestoreMountedPresentation(admission: GatewayLifecycleCoordinator.Admission) async -> Bool
     func lifecycleReattachTerminals(admission: GatewayLifecycleCoordinator.Admission) async
     func lifecycleReconcileForeground(admission: GatewayLifecycleCoordinator.Admission) async throws
     func lifecycleRetireProjection(final: Bool) async
@@ -644,10 +644,13 @@ final class GatewayLifecycleCoordinator {
             delegate?.lifecycleInvalidateSessionConnectionOwnership()
             if awaitProjection {
                 async let refresh: Void = delegate?.lifecycleRefreshAll(admission: connectedAdmission) ?? ()
-                async let restore: Void = delegate?.lifecycleRestoreMountedPresentation(admission: connectedAdmission) ?? ()
+                async let restore = delegate?.lifecycleRestoreMountedPresentation(admission: connectedAdmission) ?? true
                 async let terminals: Void = delegate?.lifecycleReattachTerminals(admission: connectedAdmission) ?? ()
-                _ = await (refresh, restore, terminals)
+                let (_, restored, _) = await (refresh, restore, terminals)
                 try require(connectedAdmission)
+                if !restored {
+                    projectionFailureGeneration = admission.generation
+                }
                 if projectionFailureGeneration == admission.generation {
                     projectionFailureGeneration = nil
                     connectionState = .offline("Gateway projection refresh failed")
@@ -660,10 +663,13 @@ final class GatewayLifecycleCoordinator {
                 let projectionTask = Task { @MainActor [weak self] in
                     guard let self else { return }
                     async let refresh: Void = self.delegate?.lifecycleRefreshAll(admission: connectedAdmission) ?? ()
-                    async let restore: Void = self.delegate?.lifecycleRestoreMountedPresentation(admission: connectedAdmission) ?? ()
+                    async let restore = self.delegate?.lifecycleRestoreMountedPresentation(admission: connectedAdmission) ?? true
                     async let terminals: Void = self.delegate?.lifecycleReattachTerminals(admission: connectedAdmission) ?? ()
-                    _ = await (refresh, restore, terminals)
+                    let (_, restored, _) = await (refresh, restore, terminals)
                     guard !Task.isCancelled, self.admits(connectedAdmission) else { return }
+                    if !restored {
+                        self.projectionFailureGeneration = admission.generation
+                    }
                     if self.projectionFailureGeneration == admission.generation {
                         self.projectionFailureGeneration = nil
                         self.connectionState = .offline("Gateway projection refresh failed")
@@ -805,7 +811,15 @@ final class GatewayLifecycleCoordinator {
                         self.connectionState = self.restartRequested ? .restarting : .connected
                         self.delegate?.lifecycleInvalidateSessionConnectionOwnership()
                         async let refresh: Void = self.delegate?.lifecycleRefreshAll(admission: admission) ?? ()
-                        await self.delegate?.lifecycleRestoreMountedPresentation(admission: admission)
+                        let restored = await self.delegate?.lifecycleRestoreMountedPresentation(admission: admission) ?? true
+                        guard restored else {
+                            throw GatewayFailure(
+                                code: "projection_unavailable",
+                                message: "The mounted conversation could not be restored after reconnect.",
+                                retryable: true,
+                                details: nil
+                            )
+                        }
                         await self.delegate?.lifecycleReattachTerminals(admission: admission)
                         _ = await refresh
                         try self.requireReconnect(

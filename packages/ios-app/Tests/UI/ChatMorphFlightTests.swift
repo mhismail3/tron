@@ -49,6 +49,65 @@ struct ChatMorphFlightTests {
         #expect(ready.elements.allSatisfy { registry.hidesDestination($0.id) })
     }
 
+    @Test("compact prompts morph while long prompts use the bounded row entrance")
+    func compactPromptAdmission() {
+        #expect(ChatMorphAdmissionPolicy.admitsPrompt(
+            text: "A compact prompt",
+            sourceFrame: promptFrame,
+            reduceMotion: false
+        ))
+        #expect(!ChatMorphAdmissionPolicy.admitsPrompt(
+            text: String(repeating: "long ", count: 80),
+            sourceFrame: promptFrame,
+            reduceMotion: false
+        ))
+        #expect(!ChatMorphAdmissionPolicy.admitsPrompt(
+            text: "Tall prompt",
+            sourceFrame: CGRect(x: 20, y: 400, width: 300, height: 180),
+            reduceMotion: false
+        ))
+        #expect(!ChatMorphAdmissionPolicy.admitsPrompt(
+            text: "Reduced motion",
+            sourceFrame: promptFrame,
+            reduceMotion: true
+        ))
+    }
+
+    @Test("attachment-only submissions remain eligible for measured morphs")
+    func attachmentOnlyAdmission() {
+        let registry = ChatMorphFrameRegistry()
+        registry.recordDraftAttachment(id: "upload", frame: chipFrame)
+        #expect(registry.stage(
+            lifecycle: lifecycle(nonce: 15, attachment: attachment, text: ""),
+            generation: 4,
+            suppress: false
+        ))
+    }
+
+    @Test("failed and completed flights resolve row entrance ownership exactly once")
+    func entranceOwnershipResolution() throws {
+        let lifecycle = lifecycle(nonce: 16, attachment: nil)
+        let lifecycleID = try #require(lifecycle.id)
+
+        let failed = ChatMorphFrameRegistry()
+        failed.recordDraftPrompt(frame: promptFrame)
+        #expect(failed.stage(lifecycle: lifecycle, generation: 5, suppress: false))
+        #expect(failed.entranceOwnership(for: lifecycleID) == .flight)
+        #expect(failed.failOpen(lifecycleID: lifecycleID) == 5)
+        #expect(failed.entranceOwnership(for: lifecycleID) == .ordinary)
+
+        let completed = ChatMorphFrameRegistry()
+        completed.recordDraftPrompt(frame: promptFrame)
+        #expect(completed.stage(lifecycle: lifecycle, generation: 6, suppress: false))
+        let id = try #require(completed.flight?.elements.first?.id)
+        completed.recordDestination(id: id, frame: CGRect(x: 40, y: 100, width: 250, height: 52))
+        #expect(completed.beginAnimation(lifecycleID: lifecycleID) != nil)
+        #expect(completed.completeAnimation(lifecycleID: lifecycleID) == 6)
+        #expect(completed.entranceOwnership(for: lifecycleID) == .completed)
+        #expect(completed.reconcile(installedLifecycleID: nil) == nil)
+        #expect(completed.entranceOwnership(for: lifecycleID) == .ordinary)
+    }
+
     @Test("missing measurements and suppression fail open")
     func failOpenAdmission() {
         let lifecycle = lifecycle(nonce: 12, attachment: attachment)
@@ -108,7 +167,8 @@ struct ChatMorphFlightTests {
 
     private func lifecycle(
         nonce: UInt64,
-        attachment: PendingAttachment?
+        attachment: PendingAttachment?,
+        text: String = "Hello"
     ) -> ChatSubmissionLifecycle {
         let attachments = attachment.map { [$0] } ?? []
         return ChatSubmissionLifecycle(
@@ -116,7 +176,7 @@ struct ChatMorphFlightTests {
             submission: ComposerSubmissionSnapshot(
                 target: target,
                 textRevision: 1,
-                outgoingText: "Hello",
+                outgoingText: text,
                 attachmentIDs: attachments.map(\.id),
                 behavior: nil,
                 localNonce: nonce

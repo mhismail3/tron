@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The composer is one permanently mounted inset owner. Its children may use
-/// local opacity/scale feedback, but its structural height is installed in one
+/// local opacity/scale/offset feedback, but its structural height is installed in one
 /// nonanimated transaction. Animating the safe-area inset forces the native
 /// transcript viewport through a layout on every animation frame, which can
 /// redraw already-visible rows and expose them beneath navigation chrome.
@@ -186,6 +186,34 @@ enum ChatContentTransitionPolicy {
         reduceMotion
             ? .easeOut(duration: 0.12)
             : .spring(response: 0.34, dampingFraction: 0.86, blendDuration: 0.06)
+    }
+
+    static func composerSurfaceAnimation(reduceMotion: Bool) -> Animation {
+        reduceMotion
+            ? .easeOut(duration: 0.12)
+            : .spring(response: 0.36, dampingFraction: 0.86, blendDuration: 0.06)
+    }
+
+    static func composerSurfaceTransition(reduceMotion: Bool) -> AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .move(edge: .bottom)
+                .combined(with: .scale(scale: 0.97, anchor: .bottom))
+                .combined(with: .opacity),
+            removal: .move(edge: .top).combined(with: .opacity)
+        )
+    }
+
+    static func attachmentTransition(reduceMotion: Bool) -> AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .move(edge: .bottom)
+                .combined(with: .scale(scale: 0.92, anchor: .bottom))
+                .combined(with: .opacity),
+            removal: .move(edge: .top)
+                .combined(with: .scale(scale: 0.94, anchor: .top))
+                .combined(with: .opacity)
+        )
     }
 }
 

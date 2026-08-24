@@ -2,6 +2,31 @@ import Observation
 import SwiftUI
 import UIKit
 
+enum ChatMorphAdmissionPolicy {
+    /// Spatial morphs are intentionally reserved for compact composer content.
+    /// A multiline prompt can be much taller than its source frame during the
+    /// handoff; letting it paint through an interpolated frame produces an
+    /// oversized overlay over the keyboard. Long prompts use the bounded row
+    /// entrance instead.
+    static let maximumPromptBytes = 240
+    static let maximumPromptHeight: CGFloat = 112
+
+    static func admitsPrompt(
+        text: String,
+        sourceFrame: CGRect,
+        reduceMotion: Bool
+    ) -> Bool {
+        !reduceMotion
+            && !text.isEmpty
+            && text.utf8.count <= maximumPromptBytes
+            && sourceFrame.height > 0
+            && sourceFrame.height <= maximumPromptHeight
+            && sourceFrame.width > 0
+            && sourceFrame.width.isFinite
+            && sourceFrame.height.isFinite
+    }
+}
+
 struct ChatMorphID: Hashable, Sendable, Identifiable {
     enum Element: Hashable, Sendable {
         case prompt
@@ -23,6 +48,7 @@ struct ChatMorphID: Hashable, Sendable, Identifiable {
 @Observable
 final class ChatMorphFrameRegistry {
     enum FlightPhase: Equatable, Sendable { case waitingForDestination, animating }
+    enum EntranceOwnership: Equatable, Sendable { case ordinary, flight, completed }
 
     struct Element: Identifiable, Equatable, Sendable {
         let id: ChatMorphID
@@ -47,6 +73,7 @@ final class ChatMorphFrameRegistry {
 
     private(set) var flight: Flight?
     private(set) var readinessRevision = 0
+    private var completedLifecycleID: String?
     private var abandonedGeneration: Int?
     private var draftPromptFrame: CGRect?
     private var draftAttachmentFrames: [String: CGRect] = [:]
@@ -81,10 +108,16 @@ final class ChatMorphFrameRegistry {
               let lifecycleID = lifecycle.id,
               lifecycle.phase != .idle,
               flight == nil else { return false }
+        if completedLifecycleID != lifecycleID { completedLifecycleID = nil }
 
         var elements: [Element] = []
         if !submission.outgoingText.isEmpty {
-            guard let sourceFrame = draftPromptFrame, Self.valid(sourceFrame) else { return false }
+            guard let sourceFrame = draftPromptFrame,
+                  ChatMorphAdmissionPolicy.admitsPrompt(
+                      text: submission.outgoingText,
+                      sourceFrame: sourceFrame,
+                      reduceMotion: suppress
+                  ) else { return false }
             elements.append(Element(
                 id: ChatMorphID(lifecycleID: lifecycleID, element: .prompt),
                 sourceFrame: sourceFrame,
@@ -131,6 +164,16 @@ final class ChatMorphFrameRegistry {
             readinessRevision &+= 1
             return
         }
+        // Endpoints are immutable once motion starts. Keyboard or viewport
+        // relayout during a flight abandons spatial motion rather than bending
+        // its path or revealing at a different endpoint.
+        if flight.phase == .animating {
+            guard flight.destinationFrames[id] != frame else { return }
+            abandonedGeneration = flight.generation
+            self.flight = nil
+            readinessRevision &+= 1
+            return
+        }
         guard flight.destinationFrames[id] != frame else { return }
         flight.destinationFrames[id] = frame
         self.flight = flight
@@ -148,14 +191,33 @@ final class ChatMorphFrameRegistry {
     }
 
     func hidesDestination(_ id: ChatMorphID) -> Bool {
-        guard let flight, flight.phase == .animating else { return false }
-        return flight.destinationFrames[id] != nil
+        flight?.elements.contains(where: { $0.id == id }) == true
+    }
+
+    /// The outgoing row remains mounted for destination measurement. This
+    /// value gives that row one deterministic visual owner: an admitted flight,
+    /// the completed flight, or its ordinary fallback entrance.
+    func entranceOwnership(for lifecycleID: String) -> EntranceOwnership {
+        if flight?.lifecycleID == lifecycleID { return .flight }
+        if completedLifecycleID == lifecycleID { return .completed }
+        return .ordinary
     }
 
     @discardableResult
-    func complete(lifecycleID: String) -> Int? {
+    func completeAnimation(lifecycleID: String) -> Int? {
+        guard let flight, flight.lifecycleID == lifecycleID,
+              flight.phase == .animating else { return nil }
+        completedLifecycleID = lifecycleID
+        self.flight = nil
+        readinessRevision &+= 1
+        return flight.generation
+    }
+
+    @discardableResult
+    func failOpen(lifecycleID: String) -> Int? {
         guard let flight, flight.lifecycleID == lifecycleID else { return nil }
         self.flight = nil
+        readinessRevision &+= 1
         return flight.generation
     }
 
@@ -163,7 +225,9 @@ final class ChatMorphFrameRegistry {
     func abandon() -> Int? {
         let generation = flight?.generation
         flight = nil
+        completedLifecycleID = nil
         abandonedGeneration = nil
+        readinessRevision &+= 1
         return generation
     }
 
@@ -175,8 +239,13 @@ final class ChatMorphFrameRegistry {
 
     @discardableResult
     func reconcile(installedLifecycleID: String?) -> Int? {
+        if let completedLifecycleID, completedLifecycleID != installedLifecycleID {
+            self.completedLifecycleID = nil
+            readinessRevision &+= 1
+        }
         guard let flight, flight.lifecycleID != installedLifecycleID else { return nil }
         self.flight = nil
+        readinessRevision &+= 1
         return flight.generation
     }
 
@@ -268,6 +337,15 @@ struct ChatMorphFlightLayer: View {
                                         progress
                                     )
                                 )
+                                // The interpolated frame is the hard visual
+                                // boundary. This prevents a long or late
+                                // measured text layout from escaping over the
+                                // composer and keyboard.
+                                .clipShape(RoundedRectangle(
+                                    cornerRadius: element.text == nil ? 14 : 22,
+                                    style: .continuous
+                                ))
+                                .clipped()
                                 .position(
                                     x: interpolate(
                                         element.sourceFrame.midX,
@@ -372,13 +450,13 @@ struct ChatMorphFlightLayer: View {
     }
 
     private func finish(_ flight: ChatMorphFrameRegistry.Flight) {
-        guard let generation = registry.complete(lifecycleID: flight.lifecycleID) else { return }
+        guard let generation = registry.completeAnimation(lifecycleID: flight.lifecycleID) else { return }
         layoutTransaction.settle(generation, source: .morphFlight)
         progress = 0
     }
 
     private func failOpen(lifecycleID: String) {
-        guard let generation = registry.complete(lifecycleID: lifecycleID) else { return }
+        guard let generation = registry.failOpen(lifecycleID: lifecycleID) else { return }
         layoutTransaction.settle(generation, source: .morphFlight)
         progress = 0
     }

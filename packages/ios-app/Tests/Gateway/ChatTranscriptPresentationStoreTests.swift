@@ -347,6 +347,36 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
+    @Test("presentation-only queue and tail IDs cannot collide with canonical rows")
+    func physicalRowNamespaceRejectsQueueTailCollision() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_215)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.queueRevision = 4
+            snapshot.queuedItems = [
+                .init(id: "collision", behavior: .steer, text: "collision", attachmentCount: 0)
+            ]
+            snapshot.queued = .init(steering: ["collision"], followUp: [])
+            let aliases = ["collision": "transcript-bottom"]
+            let tag = ChatTranscriptProjectionTag(
+                snapshot: snapshot,
+                presentationGeneration: 7,
+                queueManagementCapability: true,
+                queuePresentationIDByOperationID: aliases
+            )
+            let store = ChatTranscriptPresentationStore()
+            store.submit(
+                snapshot: snapshot,
+                handoff: .none,
+                queuePresentationIDByOperationID: aliases,
+                tag: tag
+            )
+            await #expect(throws: ChatTranscriptPresentationStoreError.invalidProjection) {
+                try await store.waitForInstall(of: tag)
+            }
+        }
+    }
+
     @Test("oversized authoritative queues fail closed before installation")
     func oversizedQueueRejectsProjection() async throws {
         try await withTestWatchdog { @MainActor in
@@ -527,8 +557,25 @@ struct ChatTranscriptPresentationStoreTests {
             store.submit(snapshot: baseline, tag: foregroundTag)
             let installed = try await store.waitForInstall(of: foregroundTag)
             #expect(installed.timeline.items.count > 0)
+            #expect(store.suppressesEntrances(for: foregroundTag))
             #expect(store.pendingEntranceIDs.isEmpty)
             #expect(store.admittedEntranceIDs.isEmpty)
+
+            let liveItem = SessionScenarioBuilder(seed: 1_216)
+                .historyPage(count: 1, longRowBytes: 16)[0]
+            baseline.transcript.append(liveItem)
+            baseline.transcriptTotal = baseline.transcript.count
+            baseline.revision += 1
+            baseline.eventSequence += 1
+            let liveTag = ChatTranscriptProjectionTag(
+                snapshot: baseline,
+                presentationGeneration: 7,
+                entranceSuppressionGeneration: 1
+            )
+            store.submit(snapshot: baseline, tag: liveTag)
+            _ = try await store.waitForInstall(of: liveTag)
+            #expect(!store.suppressesEntrances(for: liveTag))
+            #expect(store.pendingEntranceIDs.contains(liveItem.id))
         }
     }
 
@@ -1008,7 +1055,8 @@ struct ChatTranscriptPresentationStoreTests {
         try await withTestWatchdog { @MainActor in
             var snapshot = try SessionScenarioBuilder(seed: 1_212)
                 .openingTail(targetEncodedBytes: 8_000)
-            snapshot.phase = .idle
+            snapshot.phase = .running
+            snapshot.streaming = try streamingMessage(update: 0)
             snapshot.extensionPresentation.semanticState.hiddenThinkingLabel = "Reasoning"
             let store = ChatTranscriptPresentationStore()
             var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 12)

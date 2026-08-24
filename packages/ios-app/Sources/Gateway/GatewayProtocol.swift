@@ -187,12 +187,14 @@ struct GatewayEvent: Decodable, Sendable, Equatable {
             return (try? adapter.decode(SessionSummaryUpdate.self)).map(GatewayEventPreparation.sessionSummary) ?? .none
         case "session.snapshot":
             guard let snapshot = try? adapter.decode(SessionSnapshot.self),
+                  SessionSnapshotQueueAdmissionPolicy.admit(snapshot),
                   ExtensionPresentationPolicy.admit(snapshot.extensionPresentation),
                   ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(snapshot) else { return .none }
             return .sessionSnapshot(snapshot)
         case "session.rebaseline":
             guard let payload = try? adapter.decode(RebaselinePayload.self),
                   !payload.subscriptionToken.isEmpty,
+                  SessionSnapshotQueueAdmissionPolicy.admit(payload.snapshot),
                   ExtensionPresentationPolicy.admit(payload.snapshot.extensionPresentation),
                   ExtensionActivityAdmissionPolicy.admitsSnapshotFacts(payload.snapshot) else { return .none }
             return .sessionRebaseline(PreparedSessionRebaseline(snapshot: payload.snapshot, subscriptionToken: payload.subscriptionToken))

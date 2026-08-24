@@ -294,7 +294,10 @@ before completing all waiters. Retry and fresh-install invalidation stay in the 
 three-attempt loop replaces recursive resynchronization. A synchronization-quarantine overflow uses the
 ownership-scoped `session.rebaseline` event, whose fitted snapshot is installed as a fresh authoritative baseline
 without another open handshake; stale/revoked owners ignore it and no fitted baseline retains the
-`transport.resyncRequired` fallback. Outside that explicit install, a full `session.snapshot` hint requires the
+`transport.resyncRequired` fallback. Same-runtime rebaselines must also preserve the monotonic live-activity
+revision. Malformed owned snapshot/rebaseline frames and authoritative queue projections with more than 32,
+empty, or duplicate identities fail closed into this same bounded synchronization path rather than advancing
+a partial cursor or leaving the installed transcript stale. Outside that explicit install, a full `session.snapshot` hint requires the
 current subscription plus either mounted authority or its active synchronization lease, the same runtime generation, and exactly
 the next event sequence. Equal/lower cursors are discarded without merge, summary write,
 or cache save; gaps, runtime replacement, and missing baselines converge through another
@@ -498,7 +501,21 @@ serialized/coalesced off-main and observable installs are limited to a display-f
 its existing semantic-alias and layout-epoch transaction. This adopts the useful
 pre-Gateway principles of a non-render-path measurement/projection owner and coalesced
 stream updates without reviving the retired Engine, local event reconstruction, or scroll
-proxy architecture. Tool calls, progress, and results join by `toolCallId`; collapsed rows retain structured
+proxy architecture. Explicit scroll commands keep their exact target until their opening, catch-up,
+semantic-restore, prepend, or pinned-growth settlement evidence arrives, then release only that token on the next presented frame; submission retires a still-applied app target
+before changing layout. Native bottom size-change anchoring owns continuous streaming, keyboard, and
+composer growth. A newly inserted prompt/activity row receives one exact nonanimated tail lease so a
+physically pinned reader remains at the latest content even when lazy-row and safe-area updates arrive
+in an order native anchoring cannot retain; anchored readers receive no automatic follow. Compact
+measured prompts may use one clipped composer-to-row morph; long prompts fail over to the row-local
+fade/slide entrance, and attachment/skill/resource surfaces animate only inside the composer's
+atomically installed height. A mounted
+reconnect is live only after its exact authoritative subscription is restored; retained snapshots stay
+readable during retry but never authorize prompt, upload, abort, or queue mutations. Foreground entrance
+suppression advances only after the mounted aggregate succeeds, so a failed reconciliation cannot consume
+visual continuity for a later live row. Queue mutation responses are confirmations only: the existing
+mounted synchronization path must observe the newer queue revision before local mutation presentation
+state retires. Tool calls, progress, and results join by `toolCallId`; collapsed rows retain structured
 request/response values without eagerly formatting JSON strings. Opening a detail sheet derives a
 bounded semantic presentation only for that selected tool: exact lowercase built-ins foreground their file,
 command, query, diff, and readable result, while arbitrary extension tools may foreground only the first

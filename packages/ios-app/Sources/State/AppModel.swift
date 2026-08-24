@@ -560,6 +560,16 @@ final class AppModel {
         sessionPresentation.owns(target)
     }
 
+    /// Live commands require the exact mounted subscription and authoritative
+    /// snapshot, not merely a retained transcript or presentation lease.
+    func admitsLiveSessionCommands(_ target: SessionPresentationTarget) -> Bool {
+        connectionState == .connected
+            && !isReconcilingForeground
+            && ownsPresentation(target)
+            && sessionPresentation.hasInstalledSubscription(for: target.sessionID)
+            && authoritativeSnapshot(for: target.sessionID)?.sessionId == target.sessionID
+    }
+
     func revokePresentationIntake(_ target: SessionPresentationTarget) {
         cancelExtensionEditorSynchronization(for: target)
         composerDrafts.revoke(target)
@@ -909,8 +919,8 @@ final class AppModel {
         await lifecycle.teardown()
     }
 
-    func restoreMountedPresentationAfterReconnect() async {
-        _ = await sessionPresentation.reconnectMountedPresentation()
+    func restoreMountedPresentationAfterReconnect() async -> Bool {
+        await sessionPresentation.reconnectMountedPresentation()
     }
 
     func refreshAll(
@@ -1668,7 +1678,7 @@ final class AppModel {
         _ text: String,
         target: SessionPresentationTarget
     ) async throws {
-        guard ownsPresentation(target) else { throw CancellationError() }
+        guard admitsLiveSessionCommands(target) else { throw CancellationError() }
         _ = try await sessionMutations.prompt(
             text,
             sessionID: target.sessionID,
@@ -1683,7 +1693,8 @@ final class AppModel {
         canonicalTranscript: [TranscriptItem] = [],
         queuedMessages: [SessionSnapshot.QueuedMessage] = []
     ) throws -> ComposerSubmissionSnapshot {
-        try composerDrafts.beginSubmission(
+        guard admitsLiveSessionCommands(target) else { throw CancellationError() }
+        return try composerDrafts.beginSubmission(
             target: target,
             behavior: behavior,
             canonicalTranscript: canonicalTranscript,
@@ -1711,14 +1722,18 @@ final class AppModel {
     }
 
     func abort(sessionID: String, kind: String = "agent") async {
+        guard let target = presentationTarget(for: sessionID),
+              admitsLiveSessionCommands(target) else { return }
         do { try await sessionMutations.abort(sessionID: sessionID, kind: kind) }
         catch { surface(error) }
     }
 
     func clearQueue(sessionID: String) async throws -> SessionSnapshot.QueuedMessages {
+        guard let target = presentationTarget(for: sessionID),
+              admitsLiveSessionCommands(target) else { throw CancellationError() }
         // The confirmed response proves command completion, not the sequenced
         // queue projection. Gateway snapshot/event authority clears the rows.
-        try await sessionMutations.clearQueue(sessionID: sessionID)
+        return try await sessionMutations.clearQueue(sessionID: sessionID)
     }
 
     func replaceQueue(
@@ -1726,6 +1741,8 @@ final class AppModel {
         expectedRevision: Int,
         items: [SessionSnapshot.QueuedMessage]
     ) async throws {
+        guard let target = presentationTarget(for: sessionID),
+              admitsLiveSessionCommands(target) else { throw CancellationError() }
         try await sessionMutations.replaceQueue(
             sessionID: sessionID,
             expectedRevision: expectedRevision,
@@ -1913,6 +1930,7 @@ final class AppModel {
         data: Data,
         target: SessionPresentationTarget
     ) async throws {
+        guard admitsLiveSessionCommands(target) else { throw CancellationError() }
         try await composerDrafts.upload(
             name: name,
             mimeType: mimeType,
@@ -1925,6 +1943,7 @@ final class AppModel {
         _ url: URL,
         target: SessionPresentationTarget
     ) async throws {
+        guard admitsLiveSessionCommands(target) else { throw CancellationError() }
         try await composerDrafts.uploadFile(url, target: target)
     }
 
@@ -2781,9 +2800,17 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
 
     func lifecycleRestoreMountedPresentation(
         admission: GatewayLifecycleCoordinator.Admission
-    ) async {
-        guard admitsLifecycle(admission) else { return }
-        await restoreMountedPresentationAfterReconnect()
+    ) async -> Bool {
+        guard admitsLifecycle(admission) else { return true }
+        let mountedTarget = sessionPresentation.mountedTarget
+        let restored = await restoreMountedPresentationAfterReconnect()
+        guard admitsLifecycle(admission), sessionPresentation.mountedTarget == mountedTarget else {
+            // A route replacement owns the newer presentation; its late
+            // reconnect result must not poison the lifecycle generation.
+            return true
+        }
+        if let mountedTarget, !sessionPresentation.owns(mountedTarget) { return true }
+        return restored
     }
 
     func lifecycleReattachTerminals(
@@ -2795,13 +2822,28 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
     func lifecycleReconcileForeground(
         admission: GatewayLifecycleCoordinator.Admission
     ) async throws {
-        foregroundReconciliationGeneration &+= 1
         isReconcilingForeground = true
         defer { isReconcilingForeground = false }
         try await client.ensureResponsive()
         try requireLifecycle(admission)
         async let catalog = refreshSessions()
-        await sessionPresentation.reconnectMountedPresentation()
+        let mountedTarget = sessionPresentation.mountedTarget
+        let mountedRestored = await sessionPresentation.reconnectMountedPresentation()
+        try requireLifecycle(admission)
+        guard sessionPresentation.mountedTarget == mountedTarget else {
+            // The mounted route changed while this foreground pass was away;
+            // the newer presentation owns reconciliation.
+            return
+        }
+        if let mountedTarget, !sessionPresentation.owns(mountedTarget) { return }
+        guard mountedRestored else {
+            throw GatewayFailure(
+                code: "projection_unavailable",
+                message: "The mounted conversation could not be reconciled after returning to the foreground.",
+                retryable: true,
+                details: nil
+            )
+        }
         await terminal.reattach(admission: admission)
         let outcome = await catalog
         if outcome == .transportFailure {
@@ -2814,6 +2856,10 @@ extension AppModel: GatewayLifecycleProjectionDelegate {
         }
         reconcileDashboardConnections()
         try requireLifecycle(admission)
+        // Advance only after the mounted aggregate and catalog both succeeded.
+        // While reconciliation is in flight, the retained projection carries no
+        // new suppression token and therefore cannot consume this generation.
+        foregroundReconciliationGeneration &+= 1
         diagnosticsReadinessGeneration &+= 1
         diagnosticsAreReady = true
     }

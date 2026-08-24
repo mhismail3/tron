@@ -636,7 +636,13 @@ struct ChatView: View {
     }
 
     private var transcriptProjectionCapture: ChatTranscriptProjectionCapture? {
-        guard let snapshot = model.transcriptSnapshot(for: sessionID),
+        // Foreground synchronization is one aggregate admission. Keep the last
+        // complete projection visible until that aggregate succeeds or fails;
+        // otherwise an intermediate unsuppressed snapshot can animate backlog.
+        let freezesMountedAggregate = model.isReconcilingForeground
+            && sessionPresentation.open.phase == .ready
+        guard !freezesMountedAggregate,
+              let snapshot = model.transcriptSnapshot(for: sessionID),
               let generation = sessionPresentation.modelPresentationGeneration,
               let projection = model.chatProjectionGenerations(
                 for: sessionID,
@@ -657,7 +663,11 @@ struct ChatView: View {
             presentationGeneration: generation,
             canonicalGeneration: projection.canonical,
             timelineGeneration: projection.timeline,
-            entranceSuppressionGeneration: model.foregroundReconciliationGeneration == 0
+            // Do not let the retained projection consume the foreground token
+            // while reconciliation is still in flight. AppModel advances this
+            // generation only after the mounted aggregate succeeds.
+            entranceSuppressionGeneration: model.isReconcilingForeground
+                || model.foregroundReconciliationGeneration == 0
                 ? nil
                 : model.foregroundReconciliationGeneration,
             queueManagementCapability: queueManagementCapabilityForProjection,
@@ -799,6 +809,11 @@ struct ChatView: View {
 
     private var hasActiveComposerUploads: Bool {
         presentationTarget.map(model.composerDrafts.hasActiveUploads(for:)) ?? false
+    }
+
+    private var admitsLiveSessionCommands: Bool {
+        guard let target = presentationTarget else { return false }
+        return model.admitsLiveSessionCommands(target)
     }
 
     /// Builds the complete handoff exactly once with the canonical snapshot.
@@ -1329,23 +1344,15 @@ struct ChatView: View {
         }
         #if HOSTED_TEST
         hostedProbe?.recordScrollCommand(
-            isAutomatic: false,
+            isAutomatic: command.origin == .pinnedGrowth,
             isSmooth: command.animation != .disabled
         )
         #endif
-        scrollCoordinator.commandApplied(command)
-        // A command target is one-shot. Leaving an edge/ID target installed
-        // competes with the native size-change anchor whenever the keyboard or
-        // composer changes the viewport.
-        if case .openingTail = command.destination {
-            // Opening keeps its exact marker until physical settlement proves
-            // the presented viewport. tailSettlementGeneration releases it.
-        } else {
-            DispatchQueue.main.async {
-                guard scrollCoordinator.command == nil else { return }
-                releaseScrollPositionTarget()
-            }
-        }
+        // The coordinator keeps this exact token installed through its native
+        // opening/catch-up/semantic settlement, then publishes a leased release.
+        // Clearing the binding in this same update could cancel the
+        // scrollTo before SwiftUI applies it.
+        _ = scrollCoordinator.commandApplied(command)
     }
 
     @MainActor
@@ -1525,6 +1532,7 @@ struct ChatView: View {
             submissionPending: submissionPending,
             hasActiveUploads: hasActiveComposerUploads,
             isTranscriptReady: isTranscriptReady,
+            isCommandReady: admitsLiveSessionCommands,
             attachmentMenuState: attachmentMenuState,
             attachmentActionsEnabled: attachmentActionsEnabled,
             skillPickerAvailable: skillPickerAvailable,
@@ -1665,7 +1673,9 @@ struct ChatView: View {
         )
     }
 
-    private var attachmentActionsEnabled: Bool { attachmentMenuState.actionsEnabled }
+    private var attachmentActionsEnabled: Bool {
+        attachmentMenuState.actionsEnabled && admitsLiveSessionCommands
+    }
 
     private var supportsSkillPrompt: Bool {
         model.gatewayInfo?.capabilities.contains("skill-prompt.v1") == true
@@ -1868,6 +1878,26 @@ struct ChatView: View {
     }
 
     @MainActor
+    private func convergeQueueMutation(
+        expectedRevision: Int,
+        target: SessionPresentationIdentity,
+        presentationGeneration: Int
+    ) async -> Bool {
+        guard transcriptPresentation.installed?.queueRevision.map({ $0 > expectedRevision }) != true else {
+            return true
+        }
+        guard await model.restoreMountedPresentationAfterReconnect(),
+              presentationTarget == target,
+              sessionPresentation.modelPresentationGeneration == presentationGeneration else {
+            return false
+        }
+        guard let installed = try? await installCurrentTranscriptProjection(
+            presentationGeneration: presentationGeneration
+        ) else { return false }
+        return installed.queueRevision.map { $0 > expectedRevision } == true
+    }
+
+    @MainActor
     private func mutateQueue(
         affectedID: String,
         mutation: (inout [SessionSnapshot.QueuedMessage]) throws -> Void
@@ -1922,16 +1952,21 @@ struct ChatView: View {
             sessionPresentation.queueMutationCommandIsPending = false
             resolveDeferredQueueMutationProjection()
             _ = sessionPresentation.queueMutationResolution.resolve(mutationToken, as: .commandCompleted)
-            if ChatQueueMutationProjectionPolicy.shouldRetirePresentationState(
-                commandIsPending: sessionPresentation.queueMutationCommandIsPending,
-                expectedRevision: sessionPresentation.pendingQueueMutationRevision,
-                installedRevision: transcriptPresentation.installed?.queueRevision
-            ) {
-                clearSettledQueueMutationPresentationState()
+            let converged = await convergeQueueMutation(
+                expectedRevision: commit.expectedRevision,
+                target: target,
+                presentationGeneration: presentationGeneration
+            )
+            // A confirmed response is not canonical. The bounded mounted
+            // resynchronization above either installs the newer queue revision
+            // or retires the local mutation so controls cannot remain disabled.
+            clearSettledQueueMutationPresentationState()
+            if !converged {
+                model.presentComposerActionError(
+                    "The queue changed remotely. Please try again.",
+                    target: target
+                )
             }
-            // Response-before-snapshot keeps controls inert and lineage excluded
-            // until the exact newer sequenced queue frame installs. If that
-            // frame raced ahead, the outcome-known check above clears now.
         } catch {
             guard sessionPresentation.queueMutationResolution.isActive(mutationToken),
                   sessionPresentation.modelPresentationGeneration == presentationGeneration,
@@ -1953,8 +1988,9 @@ struct ChatView: View {
     private func send(behavior explicitBehavior: String? = nil) {
         guard sessionPresentation.openingTask == nil,
               sessionPresentation.open.phase == .ready,
+              scrollCoordinator.command == nil,
               let target = presentationTarget,
-              model.ownsPresentation(target),
+              model.admitsLiveSessionCommands(target),
               let installed = transcriptPresentation.installed,
               installed.tag.presentationGeneration == target.generation,
               let source = transcriptProjectionCapture,
@@ -1985,6 +2021,13 @@ struct ChatView: View {
                 )
                 return
             }
+        }
+        // A command may have applied on the preceding frame while its exact
+        // release callback is still queued. Retire only that app-owned lease
+        // before submission changes composer/transcript size; anchored user
+        // positions are never cleared here.
+        if scrollCoordinator.retireAppliedTargetForSubmission() {
+            releaseScrollPositionTarget()
         }
         scrollCoordinator.submitted()
         // Submission and morph motion share one clock. Composer height is not a

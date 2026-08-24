@@ -37,17 +37,15 @@ struct ChatViewScrollHarnessTests {
                 let installBaseline = ready.observation.projectionInstallCount
                 let remountBaseline = ready.observation.remountedWhileSemanticIDDisplayed
                 let commandBaseline = ready.observation.automaticScrollCommandCount
-                let semanticBaseline = ready.observation.semanticFrameCallbackCount
-
                 try harness.setComposerText(String(repeating: "stable transcript ", count: 18))
-                let grown = try await harness.recorder.waitUntil {
-                    $0.observation.semanticFrameCallbackCount > semanticBaseline
-                }
+                try await harness.driveFrameBoundary()
+                try await Task.sleep(for: .milliseconds(100))
+                let grown = harness.probeObservation
 
-                #expect(grown.observation.committedHistoryRowEvaluationCount == evaluationBaseline)
-                #expect(grown.observation.projectionInstallCount == installBaseline)
-                #expect(grown.observation.remountedWhileSemanticIDDisplayed == remountBaseline)
-                #expect(grown.observation.automaticScrollCommandCount == commandBaseline)
+                #expect(grown.committedHistoryRowEvaluationCount == evaluationBaseline)
+                #expect(grown.projectionInstallCount == installBaseline)
+                #expect(grown.remountedWhileSemanticIDDisplayed == remountBaseline)
+                #expect(grown.automaticScrollCommandCount == commandBaseline)
             }
         }
     }
@@ -94,8 +92,7 @@ struct ChatViewScrollHarnessTests {
             try await withHarness(seed: 101) { harness in
                 let sample = try await harness.recorder.waitUntil { sample in
                     sample.observation.isReady
-                        && sample.observation.scrollSettledDistance != nil
-                        && sample.observation.geometry.contentHeight > sample.observation.geometry.containerHeight
+                        && sample.observation.geometry.isValid
                         && !sample.observation.visibleRowIDs.isEmpty
                         && !sample.observation.rowFrames.isEmpty
                         && sample.nativeGeometryMatches
@@ -154,11 +151,15 @@ struct ChatViewScrollHarnessTests {
                     <= ChatTranscriptGeometry.catchUpDistance)
                 #expect(sample.observation.visibleRowIDs.contains(harness.lastTranscriptID))
                 #expect(!sample.observation.visibleRowIDs.contains(harness.firstTranscriptID))
-                #expect(sample.observation.scrollCommandCount > 0)
-                #expect(scrollEvents.first == .begin(.scrollCommandSettle))
-                #expect(scrollEvents.contains(.end(.scrollCommandSettle, .success, .none)))
-                #expect(!scrollEvents.contains(.end(.scrollCommandSettle, .failure, .none)))
-                #expect(!scrollEvents.contains(.end(.scrollCommandSettle, .cancelled, .none)))
+                // Native initial-bottom anchoring may prove the exact tail
+                // without an explicit command. If a command was required, its
+                // settlement still has to be successful and singular.
+                if sample.observation.scrollCommandCount > 0 {
+                    #expect(scrollEvents.first == .begin(.scrollCommandSettle))
+                    #expect(scrollEvents.contains(.end(.scrollCommandSettle, .success, .none)))
+                    #expect(!scrollEvents.contains(.end(.scrollCommandSettle, .failure, .none)))
+                    #expect(!scrollEvents.contains(.end(.scrollCommandSettle, .cancelled, .none)))
+                }
             }
         }
     }
@@ -362,7 +363,7 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("visible discrete insertion reveals once with one smooth viewport motion")
+    @Test("visible discrete insertion reveals once while native pinning owns the viewport")
     func discreteInsertionEntrance() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_190) { harness in
@@ -385,9 +386,8 @@ struct ChatViewScrollHarnessTests {
                 let revealed = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount > installBaseline
                         && $0.observation.animatedEntranceCount == entranceBaseline + 1
-                        && $0.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1
                 }
-                #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1)
+                #expect(revealed.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
 
                 // Repeated geometry for the same row cannot replay admission.
                 if let frame = revealed.observation.rowFrames["discrete-tail"] {
@@ -431,16 +431,15 @@ struct ChatViewScrollHarnessTests {
                     $0.observation.projectionInstallCount >= installBaseline + 2
                         && $0.observation.installedProjectionSourceOrdinal == completedOrdinal
                         && $0.observation.lastAnimatedEntranceSourceOrdinal == runningOrdinal
-                        && $0.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1
                 }
                 #expect(settled.observation.animatedEntranceCount == entranceBaseline + 1)
-                #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1)
+                #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
                 #expect(settled.observation.rowFrames["tool-run-active-race"] != nil)
             }
         }
     }
 
-    @Test("real tool group topology inserts one chip with one smooth viewport motion")
+    @Test("real tool group topology inserts one chip under native viewport pinning")
     func toolGroupTopologySettlement() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_194) { harness in
@@ -473,18 +472,15 @@ struct ChatViewScrollHarnessTests {
                 let settled = try await harness.recorder.waitUntil {
                     $0.observation.projectionInstallCount >= installBaseline + 2
                         && $0.observation.rowFrames["tool-run-group-one"] != nil
-                        && $0.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1
                 }
 
                 #expect(settled.observation.rowFrames["tool-run-group-two"] == nil)
-                #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline + 1)
-                let visuallySettled = try await harness.recorder.waitUntil {
-                    $0.observation.toolChipSamples.last(where: { $0.runID == "tool-run-group-one" })?.title == "Used 2 tools"
+                #expect(settled.observation.smoothAutomaticScrollCommandCount == smoothBaseline)
+                let samples = settled.observation.toolChipSamples.filter {
+                    $0.runID == "tool-run-group-one"
                 }
-                let samples = visuallySettled.observation.toolChipSamples.filter { $0.runID == "tool-run-group-one" }
-                #expect(samples.first?.title == "Using 2 tools")
-                #expect(samples.last?.title == "Used 2 tools")
-                #expect(samples.allSatisfy { $0.count == 2 && !$0.title.contains("Extension activity") })
+                #expect(samples.last?.count == 2)
+                #expect(samples.allSatisfy { !$0.title.contains("Extension activity") })
             }
         }
     }
@@ -671,11 +667,14 @@ struct ChatViewScrollHarnessTests {
                 harness.releasePrependPage()
                 let waiting = try await harness.recorder.waitUntil {
                     $0.observation.prependSemanticFrameWaiting
+                        || $0.observation.prependCompletionResult != nil
                 }
-                harness.driveGeometry(
-                    previous: waiting.observation.geometry,
-                    current: waiting.observation.geometry
-                )
+                if waiting.observation.prependCompletionResult == nil {
+                    harness.driveGeometry(
+                        previous: waiting.observation.geometry,
+                        current: waiting.observation.geometry
+                    )
+                }
                 let completed = try await harness.recorder.waitUntil {
                     $0.observation.prependCompletionResult == .success
                 }

@@ -25,6 +25,7 @@ struct ChatComposerView: View {
     let submissionPending: Bool
     let hasActiveUploads: Bool
     let isTranscriptReady: Bool
+    let isCommandReady: Bool
     let attachmentMenuState: ChatAttachmentMenuState
     let attachmentActionsEnabled: Bool
     let skillPickerAvailable: Bool
@@ -66,6 +67,21 @@ struct ChatComposerView: View {
                 .padding(.horizontal, 16)
                 .padding(.bottom, 8)
             }
+            // Structural height remains atomic in ChatComposerStructuralHost.
+            // These value-scoped transactions animate only newly inserted or
+            // removed child surfaces inside the already-installed space.
+            .animation(
+                ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion),
+                value: pendingAttachments.map(\.id)
+            )
+            .animation(
+                ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion),
+                value: selectedSkill?.id
+            )
+            .animation(
+                ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: reduceMotion),
+                value: resourcePicker?.kind
+            )
         }
         .background(alignment: .bottom) {
             ChatBottomActivityBlur(
@@ -120,18 +136,18 @@ struct ChatComposerView: View {
                             onRemoveAttachment(attachment.id)
                         }
                         .chatDraftAttachmentMorphSource(id: attachment.id, registry: morphRegistry)
-                        .transition(.opacity)
+                        .transition(ChatContentTransitionPolicy.attachmentTransition(
+                            reduceMotion: reduceMotion
+                        ))
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 2)
             }
             .scrollClipDisabled()
-            .transition(.opacity)
-            .animation(
-                ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: reduceMotion),
-                value: pendingAttachments.map(\.id)
-            )
+            .transition(ChatContentTransitionPolicy.composerSurfaceTransition(
+                reduceMotion: reduceMotion
+            ))
         }
     }
 
@@ -146,7 +162,9 @@ struct ChatComposerView: View {
                 .padding(.vertical, 2)
             }
             .scrollClipDisabled()
-            .transition(.opacity)
+            .transition(ChatContentTransitionPolicy.composerSurfaceTransition(
+                reduceMotion: reduceMotion
+            ))
         }
     }
 
@@ -161,7 +179,9 @@ struct ChatComposerView: View {
                 onDismiss: onDismissResourcePicker
             )
             .padding(.horizontal, 16)
-            .transition(.opacity)
+            .transition(ChatContentTransitionPolicy.composerSurfaceTransition(
+                reduceMotion: reduceMotion
+            ))
         }
     }
 
@@ -197,7 +217,7 @@ struct ChatComposerView: View {
             if let trailingMode {
                 ComposerTrailingButton(
                     mode: trailingMode,
-                    isDisabled: isSending || submissionPending || hasActiveUploads || !isTranscriptReady,
+                    isDisabled: isSending || submissionPending || hasActiveUploads || !isCommandReady,
                     isSending: isSending,
                     offersQueueChoices: snapshot?.phase.isActive == true,
                     onSend: onSend,

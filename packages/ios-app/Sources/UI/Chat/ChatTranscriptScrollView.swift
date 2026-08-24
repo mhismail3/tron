@@ -84,7 +84,10 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
             .allowsHitTesting(isReady)
         }
         .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .defaultScrollAnchor(.top, for: .alignment)
+        .defaultScrollAnchor(
+            isReady && scrollCoordinator.viewportMode == .pinned ? .bottom : .top,
+            for: .alignment
+        )
         .defaultScrollAnchor(
             scrollCoordinator.viewportMode.sizeChangeAnchorIsBottom ? .bottom : .top,
             for: .sizeChanges
@@ -137,8 +140,11 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         }
         .onChange(of: scrollCoordinator.commandRevision) { _, _ in onExecuteCommand() }
         .onChange(of: scrollCoordinator.viewportMode) { _, mode in onApplyViewportMode(mode) }
-        .onChange(of: scrollCoordinator.tailSettlementGeneration) { _, _ in
+        .onChange(of: scrollCoordinator.targetReleaseGeneration) { _, _ in
+            guard scrollCoordinator.consumeTargetRelease() else { return }
             onReleaseCommandTarget()
+        }
+        .onChange(of: scrollCoordinator.tailSettlementGeneration) { _, _ in
             onApplyViewportMode(.pinned)
         }
         .onChange(of: scrollCoordinator.layoutEpoch) { _, _ in
@@ -160,6 +166,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
 
     @ViewBuilder
     private func lifecycleRow(_ installed: InstalledChatTranscript) -> some View {
+        let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
         switch installed.handoff {
         case .none:
             EmptyView()
@@ -170,7 +177,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                     ChatQueuedMessageEntranceRow(
                         animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
                             isReady: isReady,
-                            entranceSuppressed: installed.tag.entranceSuppressionGeneration != nil,
+                            entranceSuppressed: entranceSuppressed,
                             hasIdentityAlias: false
                         ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
                         reduceMotion: reduceMotion,
@@ -181,7 +188,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 } else {
                     ChatOutgoingSubmissionEntranceRow(
                         reduceMotion: reduceMotion,
-                        animatesEntrance: installed.tag.entranceSuppressionGeneration == nil
+                        animatesEntrance: !entranceSuppressed
                             && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
                         kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: pending.promptBehavior),
                         onEntranceConsumed: {
@@ -193,13 +200,15 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         case .outgoing(let outgoing, let attachments):
             stableRow(id: outgoing.id, installedTag: installed.tag, entranceState: .none) {
                 if outgoing.promptBehavior.isQueuedKind {
-                    ChatQueuedMessageEntranceRow(
+                    ChatOutgoingSubmissionEntranceRow(
+                        reduceMotion: reduceMotion,
                         animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
                             isReady: isReady,
-                            entranceSuppressed: installed.tag.entranceSuppressionGeneration != nil,
+                            entranceSuppressed: entranceSuppressed,
                             hasIdentityAlias: false
                         ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: outgoing.id),
-                        reduceMotion: reduceMotion,
+                        morphOwnership: morphRegistry.entranceOwnership(for: outgoing.id),
+                        kind: .queuedPrompt,
                         onEntranceConsumed: {
                             transcriptPresentation.consumeLifecycleEntrance(id: outgoing.id)
                         }
@@ -215,8 +224,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                         reduceMotion: reduceMotion,
                         animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateUserEntrance(
                             isReady: isReady,
-                            entranceSuppressed: installed.tag.entranceSuppressionGeneration != nil
+                            entranceSuppressed: entranceSuppressed
                         ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: outgoing.id),
+                        morphOwnership: morphRegistry.entranceOwnership(for: outgoing.id),
                         kind: ChatPromptLifecycleTransitionPolicy.entranceKind(for: outgoing.promptBehavior),
                         onEntranceConsumed: {
                             transcriptPresentation.consumeLifecycleEntrance(id: outgoing.id)
@@ -235,6 +245,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
 
     @ViewBuilder
     private func queuedRows(_ installed: InstalledChatTranscript) -> some View {
+        let entranceSuppressed = transcriptPresentation.suppressesEntrances(for: installed.tag)
         let messages = installed.queuedMessages
         let availability = QueuedMessageManagementPolicy.availability(
             queueManagementCapability: installed.tag.queueManagementCapability,
@@ -259,7 +270,7 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
                 ChatQueuedMessageEntranceRow(
                     animatesEntrance: ChatPromptLifecycleTransitionPolicy.shouldAnimateQueueEntrance(
                         isReady: isReady,
-                        entranceSuppressed: installed.tag.entranceSuppressionGeneration != nil,
+                        entranceSuppressed: entranceSuppressed,
                         hasIdentityAlias: aliasID != nil || suppressed
                     ) && !transcriptPresentation.lifecycleEntranceIsConsumed(id: renderedID),
                     reduceMotion: reduceMotion,

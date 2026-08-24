@@ -143,7 +143,6 @@ struct PendingAttachmentChip: View {
         previewBase
             .overlay(alignment: .topTrailing) { removeButton }
             .sheet(isPresented: $showPreview) { previewSheet }
-            .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .bottom)))
     }
 
     @ViewBuilder

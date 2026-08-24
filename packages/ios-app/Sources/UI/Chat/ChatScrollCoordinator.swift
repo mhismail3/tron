@@ -11,6 +11,7 @@ struct ChatScrollCommand: Equatable, Sendable {
         case catchUp
         case layout
         case prepend
+        case pinnedGrowth
     }
 
     enum Destination: Equatable, Sendable {
@@ -43,9 +44,11 @@ struct ChatPrependPage: Equatable, Sendable {
     let installedLayout: ChatInstalledLayoutEpoch
 }
 
-/// Owns explicit viewport intent plus opening, catch-up, semantic restore, and
-/// prepend commands. Ordinary pinned growth is a native ScrollPosition layout
-/// property and never enters this command channel.
+/// Owns explicit viewport intent plus opening, catch-up, semantic restore,
+/// prepend, and one-shot pinned-tail correction commands. Continuous size
+/// changes remain native-owned; discrete inserted rows get an exact nonanimated
+/// tail lease because native size anchoring is not reliable across every lazy
+/// row/composer update order.
 @Observable
 @MainActor
 final class ChatScrollCoordinator {
@@ -161,6 +164,10 @@ final class ChatScrollCoordinator {
     private var openingTailFinalWaiters: [OpeningTailFinalWaiter] = []
     private var nextOpeningTailFinalWaiterID = 0
     private var openingTailFrameTaskGeneration = 0
+    private var appliedTargetCommandToken: Int?
+    private var appliedTargetOrigin: ChatScrollCommand.Origin?
+    private var targetReleaseToken: Int?
+    private(set) var targetReleaseGeneration = 0
     private var catchUpPhase: CatchUpPhase = .none
     private var catchUpCommandToken: Int?
     private var catchUpUnreadBeforeJump = false
@@ -173,6 +180,7 @@ final class ChatScrollCoordinator {
     @ObservationIgnored private var prependTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private var openingTailFrameTask: Task<Void, Never>?
     @ObservationIgnored private var openingTailTimeoutTask: Task<Void, Never>?
+    @ObservationIgnored private var targetReleaseTask: Task<Void, Never>?
 
     #if HOSTED_TEST
     private struct HostedCommandWaiter {
@@ -288,6 +296,7 @@ final class ChatScrollCoordinator {
 
     func scrollPositionChanged(isPositionedByUser: Bool) {
         guard isPositionedByUser else { return }
+        retireAppliedTargetWithoutCallback()
         viewportMode.reduce(.userTookOver)
         isAtBottom = false
         abandonAutomaticTransactionsForDirectInteraction()
@@ -302,6 +311,7 @@ final class ChatScrollCoordinator {
         let wasDirect = Self.isDirectUserPhase(oldPhase) || isUserInteracting
         isUserInteracting = Self.isDirectUserPhase(newPhase)
         if isUserInteracting {
+            retireAppliedTargetWithoutCallback()
             viewportMode.reduce(.userTookOver)
             isAtBottom = false
             abandonAutomaticTransactionsForDirectInteraction()
@@ -328,6 +338,20 @@ final class ChatScrollCoordinator {
     }
 
     private func admitGeometry(_ current: ChatTranscriptGeometry) {
+        // SwiftUI may deliver the same native geometry more than once in one
+        // display frame while an observed anchor role settles. Re-publishing an
+        // identical fact feeds that callback back into layout and can create an
+        // OnScrollGeometryChange cycle without adding any evidence.
+        if current == geometry {
+            // Owned semantic restore/prepend transactions may require a fresh
+            // sample revision even when the native values are unchanged. Do
+            // not assign the observed geometry again.
+            geometryRevision &+= 1
+            evaluateLayoutRestoreIfReady()
+            evaluatePrependIfReady()
+            evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
+            return
+        }
         geometry = current
         geometryRevision &+= 1
         evaluateLayoutRestoreIfReady()
@@ -385,6 +409,28 @@ final class ChatScrollCoordinator {
             targetRenderedID: targetRenderedID,
             continuation: nil
         )
+    }
+
+    /// Consumes only the exact target lease whose command has crossed a native
+    /// display frame (or whose opening settlement has physical proof). A newer
+    /// command or direct user takeover retires the old lease first.
+    func consumeTargetRelease() -> Bool {
+        guard let token = targetReleaseToken,
+              token == appliedTargetCommandToken,
+              command == nil else { return false }
+        targetReleaseToken = nil
+        appliedTargetCommandToken = nil
+        appliedTargetOrigin = nil
+        return true
+    }
+
+    /// Submission may begin between command application and its frame-owned
+    /// release callback. Retire only that known application target before any
+    /// composer/transcript size mutation; user-owned positions remain intact.
+    func retireAppliedTargetForSubmission() -> Bool {
+        guard appliedTargetCommandToken != nil else { return false }
+        retireAppliedTargetWithoutCallback()
+        return true
     }
 
     func openingRevealCompleted() {
@@ -477,12 +523,14 @@ final class ChatScrollCoordinator {
     }
 
     func discreteContentInserted(renderedID: String) {
-        // Native edge pinning owns growth. This callback remains the entrance
-        // admission seam but emits no viewport command.
+        guard canAutomaticallyFollow, command == nil else { return }
+        publish(.tail, animation: .disabled, origin: .pinnedGrowth)
     }
 
     func submitted() {
         viewportMode.reduce(.submitted)
+        guard canAutomaticallyFollow, command == nil else { return }
+        publish(.tail, animation: .disabled, origin: .pinnedGrowth)
     }
 
     func semanticResponseArrived() {
@@ -559,10 +607,18 @@ final class ChatScrollCoordinator {
         return true
     }
 
-    func commandApplied(_ applied: ChatScrollCommand) {
-        guard command?.token == applied.token, applied.presentation == presentation else { return }
+    /// Applies exactly one currently-owned command. Its ScrollPosition target
+    /// remains installed until the owning opening/catch-up/semantic transaction
+    /// observes settlement, then a token-owned release callback removes it
+    /// before ordinary native size-change anchoring resumes.
+    @discardableResult
+    func commandApplied(_ applied: ChatScrollCommand) -> Bool {
+        guard command?.token == applied.token, applied.presentation == presentation else { return false }
         command = nil
         commandRevision &+= 1
+        targetReleaseToken = nil
+        appliedTargetCommandToken = applied.token
+        appliedTargetOrigin = applied.origin
 
         if openingTailPhase.context?.commandToken == applied.token { scheduleOpeningTailFrame() }
         if catchUpCommandToken == applied.token {
@@ -603,6 +659,10 @@ final class ChatScrollCoordinator {
         }
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
+        if applied.origin == .pinnedGrowth {
+            requestTargetRelease(applied.token)
+        }
+        return true
     }
 
     func cancel() {
@@ -824,11 +884,13 @@ final class ChatScrollCoordinator {
 
     private func finishOpeningTailSettlement() {
         let token = openingTailToken
+        let commandToken = appliedTargetCommandToken
         openingTailTimeoutTask?.cancel()
         openingTailTimeoutTask = nil
         openingTailFrameTaskGeneration &+= 1
         openingTailFrameTask?.cancel()
         openingTailFrameTask = nil
+        requestTargetRelease(commandToken)
         openingTailPhase = .idle
         openingTailContinuation?.resume(returning: true)
         openingTailContinuation = nil
@@ -858,6 +920,7 @@ final class ChatScrollCoordinator {
         openingTailFrameTask = nil
         if let commandToken = openingTailPhase.context?.commandToken,
            command?.token == commandToken { clearCommand() }
+        retireAppliedTargetWithoutCallback()
         openingTailPhase = .idle
         openingTailContinuation?.resume(returning: positioningSucceeded)
         openingTailContinuation = nil
@@ -900,6 +963,7 @@ final class ChatScrollCoordinator {
     }
 
     private func finishCatchUpPinned() {
+        requestAppliedTargetRelease(origin: .catchUp)
         catchUpTask?.cancel()
         catchUpTask = nil
         catchUpPhase = .none
@@ -916,6 +980,7 @@ final class ChatScrollCoordinator {
         let wasActive = catchUpPhase != .none
         catchUpPhase = .none
         if let token, command?.token == token { clearCommand() }
+        requestAppliedTargetRelease(origin: .catchUp)
         if restoringAnchored, wasActive {
             viewportMode.reduce(.userTookOver)
             isAtBottom = false
@@ -943,6 +1008,7 @@ final class ChatScrollCoordinator {
         if let token = layoutRestore?.correctionCommandToken, command?.token == token {
             clearCommand()
         }
+        requestAppliedTargetRelease(origin: .layout)
         layoutRestore = nil
     }
 
@@ -952,6 +1018,7 @@ final class ChatScrollCoordinator {
         prependTimeoutTask?.cancel()
         prependTimeoutTask = nil
         if let token = context.correctionCommandToken, command?.token == token { clearCommand() }
+        requestAppliedTargetRelease(origin: .prepend)
         prepend = nil
         viewportMode.reduce(.prependEnded)
         #if HOSTED_TEST
@@ -961,6 +1028,7 @@ final class ChatScrollCoordinator {
     }
 
     private func cancelAllOwnedWork(result: PerformanceResult) {
+        retireAppliedTargetWithoutCallback()
         clearOpeningTailSettlement()
         cancelLayoutRestore()
         cancelCatchUp(restoringAnchored: false)
@@ -975,12 +1043,49 @@ final class ChatScrollCoordinator {
         #endif
     }
 
+    private func requestTargetRelease(_ token: Int?) {
+        guard let token,
+              command == nil,
+              appliedTargetCommandToken == token,
+              targetReleaseToken != token else { return }
+        targetReleaseTask?.cancel()
+        targetReleaseToken = token
+        let admittedPresentation = presentation
+        targetReleaseTask = Task { [weak self, frameScheduler] in
+            do { try await frameScheduler.nextFrame(); try Task.checkCancellation() }
+            catch { return }
+            guard let self,
+                  self.presentation == admittedPresentation,
+                  self.command == nil,
+                  self.appliedTargetCommandToken == token,
+                  self.targetReleaseToken == token else { return }
+            self.targetReleaseTask = nil
+            self.targetReleaseGeneration &+= 1
+        }
+    }
+
+    private func requestAppliedTargetRelease(origin: ChatScrollCommand.Origin) {
+        guard appliedTargetOrigin == origin else { return }
+        requestTargetRelease(appliedTargetCommandToken)
+    }
+
+    private func retireAppliedTargetWithoutCallback() {
+        targetReleaseTask?.cancel()
+        targetReleaseTask = nil
+        targetReleaseToken = nil
+        appliedTargetCommandToken = nil
+        appliedTargetOrigin = nil
+    }
+
     private func publish(
         _ destination: ChatScrollCommand.Destination,
         animation: ChatScrollAnimation,
         origin: ChatScrollCommand.Origin
     ) {
         guard command == nil else { return }
+        targetReleaseTask?.cancel()
+        targetReleaseTask = nil
+        targetReleaseToken = nil
         sequence &+= 1
         command = ChatScrollCommand(
             token: sequence,
