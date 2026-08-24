@@ -224,6 +224,28 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
+    @Test("displaced retained pinned view physically resumes at the latest tail")
+    func displacedRetainedResume() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 1_207) { harness in
+                _ = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                        && $0.observation.visibleRowIDs.contains(harness.lastTranscriptID)
+                }
+                try harness.displaceNativeTranscriptFromTail(by: 180)
+                #expect(try harness.nativeTranscriptDistanceFromTail() > 100)
+
+                harness.drivePinnedPositionReapplication()
+                for _ in 0..<20 where try harness.nativeTranscriptDistanceFromTail() > 2 {
+                    try await harness.driveFrameBoundary()
+                    await Task.yield()
+                }
+                #expect(try harness.nativeTranscriptDistanceFromTail() <= 2)
+                #expect(harness.probeObservation.scrollCommandCount == 0)
+            }
+        }
+    }
+
     @Test("actual ChatView emits no growth offset writes while pinned or detached")
     func drivenCoordinatorExecutor() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
@@ -924,6 +946,10 @@ final class ChatViewScrollHarness {
 
     func drivePrepend() -> Bool { probe.drivePrepend() }
 
+    func drivePinnedPositionReapplication() {
+        probe.drivePinnedPositionReapplication()
+    }
+
     func releasePrependPage() { probe.releasePrependPage() }
 
     func drivePresentationInvalidation() { probe.drivePresentationInvalidation() }
@@ -950,6 +976,39 @@ final class ChatViewScrollHarness {
                 && abs(scrollView.contentSize.height - geometry.contentHeight) <= 2
                 && abs(scrollView.bounds.origin.y - geometry.offsetY) <= 2
         }
+    }
+
+    func displaceNativeTranscriptFromTail(by distance: CGFloat) throws {
+        let scrollView = try nativeTranscriptScrollView()
+        let maximum = max(
+            -scrollView.adjustedContentInset.top,
+            scrollView.contentSize.height - scrollView.bounds.height
+                + scrollView.adjustedContentInset.bottom
+        )
+        scrollView.setContentOffset(
+            CGPoint(x: scrollView.contentOffset.x, y: max(0, maximum - distance)),
+            animated: false
+        )
+        scrollView.layoutIfNeeded()
+    }
+
+    func nativeTranscriptDistanceFromTail() throws -> CGFloat {
+        let scrollView = try nativeTranscriptScrollView()
+        let maximum = max(
+            -scrollView.adjustedContentInset.top,
+            scrollView.contentSize.height - scrollView.bounds.height
+                + scrollView.adjustedContentInset.bottom
+        )
+        return max(0, maximum - scrollView.contentOffset.y)
+    }
+
+    private func nativeTranscriptScrollView() throws -> UIScrollView {
+        guard let value = Self.scrollViews(in: hostingController.view)
+            .filter({ !($0 is UITextView) && $0.contentSize.height > $0.bounds.height })
+            .max(by: { $0.contentSize.height < $1.contentSize.height }) else {
+            throw HarnessError.missingTranscript
+        }
+        return value
     }
 
     func resize(height: CGFloat) {

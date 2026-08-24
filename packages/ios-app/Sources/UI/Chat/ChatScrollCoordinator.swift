@@ -11,7 +11,6 @@ struct ChatScrollCommand: Equatable, Sendable {
         case catchUp
         case layout
         case prepend
-        case pinnedGrowth
     }
 
     enum Destination: Equatable, Sendable {
@@ -44,11 +43,9 @@ struct ChatPrependPage: Equatable, Sendable {
     let installedLayout: ChatInstalledLayoutEpoch
 }
 
-/// Owns explicit viewport intent plus opening, catch-up, semantic restore,
-/// prepend, and one-shot pinned-tail correction commands. Continuous size
-/// changes remain native-owned; discrete inserted rows get an exact nonanimated
-/// tail lease because native size anchoring is not reliable across every lazy
-/// row/composer update order.
+/// Owns explicit viewport intent plus opening, catch-up, semantic restore, and
+/// prepend commands. Ordinary pinned growth is physically owned by one
+/// persistent bottom ScrollPosition and never creates a command stream.
 @Observable
 @MainActor
 final class ChatScrollCoordinator {
@@ -147,6 +144,7 @@ final class ChatScrollCoordinator {
     private(set) var commandRevision = 0
     private(set) var layoutEpoch = 0
     private(set) var tailSettlementGeneration = 0
+    private(set) var pinnedPositionRevision = 0
     private(set) var maximumPrependSemanticExcursion: CGFloat = 0
 
     private let frameScheduler: DisplayFrameScheduler
@@ -218,6 +216,10 @@ final class ChatScrollCoordinator {
         viewportMode == .pinned && !isUserInteracting && prepend == nil
             && catchUpPhase == .none && !openingTailPhase.isActive
     }
+    var canInstallPersistentBottomPosition: Bool {
+        canAutomaticallyFollow && command == nil
+            && appliedTargetCommandToken == nil && targetReleaseToken == nil
+    }
 
     private var openingTailSettlementPending: Bool { openingTailPhase.isActive }
     private var openingTailToken: Int? { openingTailPhase.context?.token }
@@ -232,6 +234,7 @@ final class ChatScrollCoordinator {
         viewportMode.reduce(.presentationReset(retainingViewport: retainingVisibleViewport))
         retainedViewportReconciliationPending = retainingVisibleViewport
         clearCommand()
+        if viewportMode == .pinned { pinnedPositionRevision &+= 1 }
         guard !retainingVisibleViewport else { return }
         isAtBottom = true
         hasUnreadContent = false
@@ -512,8 +515,8 @@ final class ChatScrollCoordinator {
     }
 
     func installedLifecycleChanged(_ installed: InstalledChatTranscript) {
-        // Native edge pinning owns growth. Pinned lifecycle growth is absorbed
-        // by the held bottom edge; anchored readers receive no command.
+        // The persistent bottom position owns growth. Pinned lifecycle growth
+        // is absorbed by that held edge; anchored readers receive no command.
     }
 
     func installedTranscriptChanged(_ installed: InstalledChatTranscript?) {
@@ -535,14 +538,17 @@ final class ChatScrollCoordinator {
     }
 
     func discreteContentInserted(renderedID: String) {
-        guard canAutomaticallyFollow, command == nil else { return }
-        publish(.tail, animation: .disabled, origin: .pinnedGrowth)
+        // The installed persistent bottom position absorbs discrete row growth.
+        // This callback intentionally owns no physical write.
     }
 
     func submitted() {
         viewportMode.reduce(.submitted)
-        guard canAutomaticallyFollow, command == nil else { return }
-        publish(.tail, animation: .disabled, origin: .pinnedGrowth)
+    }
+
+    func requestPinnedPositionReapplication() {
+        guard viewportMode == .pinned else { return }
+        pinnedPositionRevision &+= 1
     }
 
     func semanticResponseArrived() {
@@ -671,9 +677,6 @@ final class ChatScrollCoordinator {
         }
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
-        if applied.origin == .pinnedGrowth {
-            requestTargetRelease(applied.token)
-        }
         return true
     }
 

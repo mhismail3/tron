@@ -200,7 +200,11 @@ owned through animation completion and two unchanged display frames; best-effort
 cancels that arm. The composer
 remains visible throughout opening, while sending stays disabled until readiness. Opening tail
 positioning and post-reveal settlement are owned by the coordinator's mutually exclusive opening
-phase; ordinary follow and correction events do not compete until that phase is idle.
+phase; ordinary follow and correction events do not compete until that phase is idle. Once stronger
+opening, catch-up, semantic, prepend, or discrete command ownership releases, pinned mode installs one
+persistent bottom `ScrollPosition`; streaming/content/inset contraction is then native-owned with no
+recurring command. Presentation reset and retained foreground resume reapply that physical position
+even when the logical enum is unchanged, while direct user ownership and anchored mode remain unpositioned.
 Session subscription ownership is token-scoped end to end. The open response remains
 provisional until sync acknowledgement and exact route-intent revalidation; both sync and subscription
 credentials must be nonempty, printable UTF-8 tokens no larger than 200 bytes. Baseline plus its

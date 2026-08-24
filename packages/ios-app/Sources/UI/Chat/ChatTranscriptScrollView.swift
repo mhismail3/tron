@@ -147,6 +147,9 @@ struct ChatTranscriptScrollView<Earlier: View, Opening: View>: View {
         .onChange(of: scrollCoordinator.tailSettlementGeneration) { _, _ in
             onApplyViewportMode(.pinned)
         }
+        .onChange(of: scrollCoordinator.pinnedPositionRevision) { _, _ in
+            onApplyViewportMode(.pinned)
+        }
         .onChange(of: scrollCoordinator.layoutEpoch) { _, _ in
             scrollCoordinator.installedLayoutEpochChanged()
         }

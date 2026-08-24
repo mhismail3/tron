@@ -268,8 +268,13 @@ struct ChatView: View {
                 // background suspension. Transient inactivity from a system
                 // picker must not cancel the selection it is about to deliver.
                 sessionPresentation.suspendForBackground()
-            } else if phase == .active, sessionPresentation.needsOpeningResume {
-                Task { await beginOpeningPresentation() }
+            } else if phase == .active {
+                // SwiftUI can retain a displaced native offset across scene
+                // suspension even though logical pinning did not change.
+                scrollCoordinator.requestPinnedPositionReapplication()
+                if sessionPresentation.needsOpeningResume {
+                    Task { await beginOpeningPresentation() }
+                }
             }
         }
         .onChange(of: model.foregroundReconciliationGeneration) { _, _ in
@@ -1226,6 +1231,9 @@ struct ChatView: View {
                 }
                 return true
             },
+            reapplyPinnedPosition: {
+                scrollCoordinator.requestPinnedPositionReapplication()
+            },
             invalidatePresentation: {
                 scrollCoordinator.resetForPresentation()
             },
@@ -1346,7 +1354,7 @@ struct ChatView: View {
         }
         #if HOSTED_TEST
         hostedProbe?.recordScrollCommand(
-            isAutomatic: command.origin == .pinnedGrowth,
+            isAutomatic: false,
             isSmooth: command.animation != .disabled
         )
         #endif
@@ -1362,20 +1370,27 @@ struct ChatView: View {
         var transaction = Transaction()
         transaction.disablesAnimations = true
         withTransaction(transaction) {
-            transcriptScrollPosition = ScrollPosition(idType: String.self)
+            transcriptScrollPosition = scrollCoordinator.canInstallPersistentBottomPosition
+                ? ScrollPosition(idType: String.self, edge: .bottom)
+                : ScrollPosition(idType: String.self)
         }
     }
 
     @MainActor
     private func applyViewportMode(_ mode: ChatViewportMode) {
-        switch mode {
-        case .pinned:
-            // Native `.defaultScrollAnchor(..., for: .sizeChanges)` owns
-            // continuous bottom retention. Do not install a competing
-            // persistent ScrollPosition edge target.
-            break
-        case .anchored:
-            transcriptScrollPosition = ScrollPosition(idType: String.self)
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            switch mode {
+            case .pinned:
+                guard scrollCoordinator.canInstallPersistentBottomPosition else { return }
+                // One quiescent edge position is the sole physical effect of
+                // logical pinning. Native size changes then follow streaming,
+                // discrete rows, keyboard, and composer contraction.
+                transcriptScrollPosition = ScrollPosition(idType: String.self, edge: .bottom)
+            case .anchored:
+                transcriptScrollPosition = ScrollPosition(idType: String.self)
+            }
         }
     }
 

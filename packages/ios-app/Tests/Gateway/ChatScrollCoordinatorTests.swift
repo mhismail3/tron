@@ -64,10 +64,11 @@ struct ChatScrollCoordinatorTests {
 
     // MARK: Group B replacements — deleted command-arbitration mechanisms
 
-    @Test("discrete pinned growth coalesces to one nonanimated tail lease")
+    @Test("persistent pinned position absorbs discrete and streaming growth without commands")
     func pinnedNativeEdgeEliminatesFollowCommandStream() throws {
         let coordinator = ChatScrollCoordinator()
         coordinator.geometryChanged(previous: .zero, current: bottom)
+        #expect(coordinator.canInstallPersistentBottomPosition)
         for index in 1...4 {
             let growth = ChatTranscriptGeometry(
                 offsetY: 600,
@@ -79,10 +80,8 @@ struct ChatScrollCoordinatorTests {
             coordinator.installedLifecycleChanged(try installedToolTranscript(
                 ids: ["tool"], statuses: [.running], timelineGeneration: index
             ))
-            #expect(coordinator.command?.origin == .pinnedGrowth)
-            #expect(coordinator.command?.destination == .tail)
-            #expect(coordinator.command?.animation == .disabled)
-            #expect(coordinator.command?.token == 1)
+            #expect(coordinator.command == nil)
+            #expect(coordinator.canInstallPersistentBottomPosition)
         }
         #expect(coordinator.viewportMode == .pinned)
     }
@@ -205,7 +204,7 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.command == nil)
     }
 
-    @Test("sticky pinned mode uses one tail lease while anchored mode remains inert")
+    @Test("sticky pinned mode stays physically eligible while anchored mode remains inert")
     func stickyModeHasNoOffsetCommandDestination() {
         let coordinator = ChatScrollCoordinator()
         coordinator.submitted()
@@ -217,23 +216,24 @@ struct ChatScrollCoordinatorTests {
             )
         )
         #expect(coordinator.viewportMode == .pinned)
-        #expect(coordinator.command?.origin == .pinnedGrowth)
-        #expect(coordinator.command?.destination == .tail)
+        #expect(coordinator.command == nil)
+        #expect(coordinator.canInstallPersistentBottomPosition)
 
         coordinator.scrollPositionChanged(isPositionedByUser: true)
         coordinator.submitted()
         #expect(coordinator.viewportMode == .anchored)
         #expect(coordinator.command == nil)
+        #expect(!coordinator.canInstallPersistentBottomPosition)
     }
 
-    @Test("submission corrects only a pinned reader and leaves anchored layout inert")
+    @Test("submission and composer contraction use persistent pinning and leave readers inert")
     func composerMutationsDoNotOwnScrollCommands() {
         let coordinator = ChatScrollCoordinator()
         coordinator.submitted()
         coordinator.geometryChanged(previous: bottom, current: away)
         #expect(coordinator.viewportMode == .pinned)
-        #expect(coordinator.command?.origin == .pinnedGrowth)
-        #expect(coordinator.command?.destination == .tail)
+        #expect(coordinator.command == nil)
+        #expect(coordinator.canInstallPersistentBottomPosition)
 
         coordinator.scrollPositionChanged(isPositionedByUser: true)
         coordinator.submitted()
@@ -245,6 +245,7 @@ struct ChatScrollCoordinatorTests {
         )
         #expect(coordinator.viewportMode == .anchored)
         #expect(coordinator.command == nil)
+        #expect(!coordinator.canInstallPersistentBottomPosition)
     }
 
     // MARK: Group A — preserved user-visible outcomes
@@ -488,6 +489,38 @@ struct ChatScrollCoordinatorTests {
         coordinator.resetForPresentation(2)
         #expect(coordinator.command == nil)
         #expect(coordinator.viewportMode == .pinned)
+    }
+
+    @Test("retained pinned resume republishes physical ownership even when mode is unchanged")
+    func retainedPinnedResumeReappliesPosition() {
+        let coordinator = ChatScrollCoordinator()
+        let initial = coordinator.pinnedPositionRevision
+        coordinator.resetForPresentation(2, retainingVisibleViewport: true)
+        #expect(coordinator.viewportMode == .pinned)
+        #expect(coordinator.pinnedPositionRevision == initial + 1)
+        #expect(coordinator.canInstallPersistentBottomPosition)
+
+        coordinator.requestPinnedPositionReapplication()
+        #expect(coordinator.pinnedPositionRevision == initial + 2)
+
+        coordinator.scrollPositionChanged(isPositionedByUser: true)
+        let anchoredRevision = coordinator.pinnedPositionRevision
+        coordinator.requestPinnedPositionReapplication()
+        #expect(coordinator.pinnedPositionRevision == anchoredRevision)
+        #expect(!coordinator.canInstallPersistentBottomPosition)
+    }
+
+    @Test("catch-up lease stays stronger than persistent pin until physical settlement")
+    func catchUpOrderingBeforePersistentPin() throws {
+        let coordinator = detachedCoordinator(at: away)
+        coordinator.requestCatchUp(reduceMotion: true)
+        let command = try #require(coordinator.command)
+        #expect(!coordinator.canInstallPersistentBottomPosition)
+        #expect(coordinator.commandApplied(command))
+        #expect(!coordinator.canInstallPersistentBottomPosition)
+        coordinator.geometryChanged(previous: away, current: bottom)
+        #expect(coordinator.viewportMode == .pinned)
+        #expect(!coordinator.canInstallPersistentBottomPosition)
     }
 
     @Test("same-session presentation handoff reconciles physical tail without moving a reader")
@@ -972,7 +1005,7 @@ struct ChatScrollCoordinatorTests {
         #expect(ChatScrollCoordinator.liveGrowthAnimationDuration == 0.16)
     }
 
-    @Test("new agent row receives one nonanimated pinned-tail correction")
+    @Test("new agent row remains on the persistent pinned position without a command")
     func insertedRowIsSmooth() {
         let coordinator = ChatScrollCoordinator()
         coordinator.discreteContentInserted(renderedID: "new-agent-row")
@@ -981,9 +1014,8 @@ struct ChatScrollCoordinatorTests {
             current: ChatTranscriptGeometry(offsetY: 600, contentHeight: 1_100, containerHeight: 400)
         )
         #expect(coordinator.viewportMode == .pinned)
-        #expect(coordinator.command?.origin == .pinnedGrowth)
-        #expect(coordinator.command?.destination == .tail)
-        #expect(coordinator.command?.animation == .disabled)
+        #expect(coordinator.command == nil)
+        #expect(coordinator.canInstallPersistentBottomPosition)
     }
 
     @Test("physical overshoot is clamped by native pinning without an animated app command")
