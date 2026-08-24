@@ -706,9 +706,11 @@ from the repository-canonical maintainer input `config/PushService.xcconfig`;
 `Info.plist` and the bundled Mac Gateway embed the same exact HTTPS origin. The
 source value is empty until infrastructure inventory is complete, so development
 builds fail closed and show push as unavailable. Archive and Mac payload packaging
-reject an empty origin. The Worker admits the application environment through
-App Attest and maps Beta to APNs sandbox and production to APNs production; iOS
-cannot select an arbitrary topic or environment.
+reject an empty origin. The Worker admits the signed application environment
+through App Attest: `com.tron.mobile.beta` development and `com.tron.mobile`
+development (`Tron Fast`/`ProdDebug`) use APNs sandbox, while
+`com.tron.mobile` production uses APNs production. iOS cannot select an
+arbitrary topic or environment.
 
 `TronMobileBeta.entitlements` and `TronMobileProdDebug.entitlements` carry
 development APNs and App Attest environments; `TronMobileProd.entitlements`
