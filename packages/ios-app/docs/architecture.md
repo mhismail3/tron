@@ -243,7 +243,12 @@ former visible anchor with bounded late-layout correction so the viewport does n
 A gesture that begins during that correction cancels every remaining position write
 and its final native geometry wins over the pre-load detached state. The UIKit composer keeps focus reconciliation deferred but resolves internal overflow and caret visibility only from final post-layout TextKit geometry, preventing speculative SwiftUI measurement or keyboard/safe-area callbacks from changing the editor offset.
 Create and fork return navigation identity without mounting or selecting a transcript;
-only the destination route may establish live presentation authority.
+only the destination route may establish live presentation authority. An admitted composer
+transport intentionally survives route disappearance: its target is retained by the
+composer admission owner, and revocation makes any late error target-gated and silent rather
+than allowing a retired view to surface stale UI state. Backgrounding cancels only disposable
+opening, paging, picker, and route work; foreground resumes a non-ready retained presentation
+through the same generation checks.
 
 Gateway restart uses a supervised drain contract. The request freezes new mutations,
 waits for accepted agent runs to settle in canonical JSONL, then replaces the Gateway
@@ -386,7 +391,7 @@ the transport-only `skill:` prefix, while leading `/` completion excludes skills
 text. The one staged skill is captured separately from user-visible text, replaced atomically by a newer selection,
 restored only after a definitive send rejection, and cleared if the authoritative catalog no longer contains the exact
 entry. Skill and leading slash-command choices are mutually exclusive, and a staged skill still requires prompt text or an attachment so every lifecycle has visible content. The Gateway receives its raw name as bounded prompt metadata and owns Pi invocation expansion, keeping optimistic,
-queued, edited-queue, and canonical text identical. The inline glass picker remains inside the sole composer safe-area owner, below attachments and the skill chip but immediately above the input row. One permanently mounted, bottom-aligned measured host exposes aggregate composer height on a single retargetable spring, clipping accessories upward while the safe-area viewport follows the same curve; picker, attachment, skill, extension-pill, and submission-collapse identities never run competing move transitions. Multiline measurement remains direct, Reduce Motion removes the spatial height animation, and UIKit continues to own the one responder, UTF-16 selection, and caret geometry. The active lease is the immutable session/presentation generation plus lifecycle generation.
+queued, edited-queue, and canonical text identical. The inline glass picker remains inside the sole composer safe-area owner, below attachments and the skill chip but immediately above the input row. One permanently mounted, bottom-aligned measured host installs each aggregate structural height in one animation-disabled transaction. Picker, attachment, skill, and extension content may retain shallow row-local feedback, but they never animate the safe-area inset through intermediate heights or relay out the installed transcript on every animation frame. Multiline measurement remains direct, UIKit owns keyboard motion plus the one responder, and UTF-16 selection and caret geometry stay native. The active lease is the immutable session/presentation generation plus lifecycle generation.
 Attachments, previews, concurrent upload admissions, editor requests, and submission snapshots live only for
 that lease and are synchronously discarded on revocation, close, or profile retirement. Completed plus active
 uploads are admitted against one 10-item/25 MiB presentation budget before network work; each image chip uses
@@ -482,10 +487,14 @@ phase, unique membership, classification/order/start topology, stable run identi
 before-streaming placement. It patches immutable tool descriptors only; canonical result changes,
 membership/order/phase ambiguity, duplicate calls, or placement flips reuse fragments and globally
 assemble. Status, editor, widget, and other unrelated sequenced events do not manufacture projection
-work. `ChatView.body` never constructs the timeline: typing,
-focus, geometry, toolbar, and sheet invalidations reuse the installed immutable value, while
-streaming revisions are serialized/coalesced off-main and observable installs are limited to a
-display-frame boundary. Exact-tag waiters let prepend retain
+work. `ChatView.body` never constructs the timeline. `ChatView` is the composition and lifecycle root;
+`ChatTranscriptScrollView` is the one physical transcript/semantic-geometry owner; native geometry is admitted directly to the scroll coordinator and is never mirrored into root view state,
+`ChatComposerView` renders value inputs and emits intents through the root's sole safe-area inset,
+and `ChatRoutes` contains modal routing without mirrored authority. `ChatSessionPresentation`
+groups disposable opening, import, queue-deferral, and entrance-ledger state while canonical facts
+remain in `AppModel` and `ChatTranscriptPresentationStore`. Typing, focus, geometry, toolbar, and
+sheet invalidations reuse the installed immutable value, while streaming revisions are
+serialized/coalesced off-main and observable installs are limited to a display-frame boundary. Exact-tag waiters let prepend retain
 its existing semantic-alias and layout-epoch transaction. This adopts the useful
 pre-Gateway principles of a non-render-path measurement/projection owner and coalesced
 stream updates without reviving the retired Engine, local event reconstruction, or scroll
@@ -542,81 +551,37 @@ admitted safe links. Status/service-only activity uses one conservative fallback
 editor, tool, message, and entry surfaces remain deferred. Unknown or ambiguous provenance fails open to
 separate opaque groups, and the UI never inspects package names or extension-owned keys. Offline cache strips all surfaces,
 interactions, lease/focus, capabilities/diagnostics, and ephemeral semantic values.
-Native safe-area layout therefore pushes the transcript exactly once and reverses naturally when
-the keyboard or composer contracts. One geometry observation of the complete composer—not
-field-specific focus, text-height, attachment, or widget hooks—arms the scroll owner for the next
-measured viewport transition; it never issues an independent jump. Fresh native geometry, direct-return,
-and user-settling authority survives composer measurement until its final callback is consumed.
-Interactive transcripts use bottom initial positioning but top alignment
-for undersized or lazily materializing content, preventing keyboard frames from repeatedly
-re-anchoring a partial stack. Once a bottom command or manual catch-up settles inside the
-practical tail boundary, its persistent `ScrollPosition` target is cleared without moving the viewport so later safe-area
-changes cannot replay stale edge ownership. Viewport resize owns mixed resize/streaming frames:
-a pinned reader receives only a bottom-edge command, while a detached reader receives no app
-position write. Native ownership arriving after geometry consumes preserved directional evidence
-instead of losing an upward gesture. Direct interactive scrolling always wins. `ChatScrollCoordinator` is the sole owner of
-raw geometry and semantic-row frame intake; pinned/detached and unread
-state; presentation and command generations; display-frame follow and catch-up tasks;
-and the exact ordinary-layout and paging semantic-anchor transactions. It publishes one exact-token typed
-command for `ChatView` to execute and acknowledge; presentation reset and settled
-binding release are command destinations rather than direct view policy. Opening owns final tail settlement through one mutually exclusive `OpeningTailPhase` (`idle`,
-`positioning`, `positioned`, or `postReveal`) with the exact physical marker after installed transcript and queue rows. Auxiliary/runtime rows cannot admit
-it, transient boundary geometry cannot clear it, and native visible geometry beyond an overflowing content edge
-is treated as overshoot rather than a settled bottom. If the marker is unrealized, one frame-gated exact-ID command
-forces lazy realization; command submission remains owned until current-layout marker and correlated native
-geometry prove physical settlement. The native geometry observation identity includes the opening epoch and
-phase, forcing a current geometry replay when the state advances to positioning even if every numeric field is
-unchanged; opening-time samples still never admit ordinary follow or detachment policy. At most one bounded
-second exact-ID submission is allowed when SwiftUI consumes the first against provisional lazy layout; later writes require new
-layout evidence. Exact-ID realization does not require a native geometry sample. If physical proof still disappears,
-a 750-millisecond deadline retains the bounded exact-ID binding and reveals the authoritative transcript best-effort
-rather than converting a presentation-only callback failure into an unavailable conversation. Undersized content remains top aligned. The opening surface then fades away
-while the binding remains owned through animation completion and two stable presented frames, preventing later
-lazy content-size correction from exposing empty space. A best-effort timeout releases after those two frames even if SwiftUI never supplies later geometry, so it cannot leave a display-link loop or permanent binding behind. An empty timeline takes an explicit no-transcript path,
-while any direct/native/accessibility interaction cancels the pending target permanently. Automatic streaming growth is
-latest-sample-wins behind one injected display-frame wait, emits at most one short smooth tail
-command per presented frame, and emits none inside the practical bottom boundary. Reduce Motion executes that same admitted command without spatial animation.
-Direct/native/accessibility interaction synchronously invalidates pending automatic
-commands. The performance tracker owns interval generations only. Upward user geometry is
-the only ordinary transition from pinned to detached; native ownership alone cannot
-detach a reader when streamed growth moves the physical bottom. A gesture commits
-detachment only after its settled geometry has moved toward older content, so bottom-edge
-rubber-banding cannot flash the catch-up control. Viewport expansion or later
-unattributed tail geometry cannot release detachment; only an admitted direct/native/
-accessibility return or a catch-up command that physically settles at the boundary may do so.
-If final bottom geometry arrives before native ownership, that exact callback pair admits the
-manual return immediately, clears unread state, and removes the catch-up control without a tap.
-A mixed viewport/scroll callback does the same only when direct interaction and measured movement
-toward the tail are both present; keyboard resize alone cannot release detachment. Bottom
-distance subtracts SwiftUI's atomically derived native `visibleRect.maxY` from the physical
-content edge (`contentSize.height + contentInsets.bottom`), rather than reconstructing a visible
-edge from offset/container values that may belong to different lazy-layout or keyboard frames.
-While detached, a fixed action-sized circular
-glass down-arrow morphs from the composer's trailing edge; multiline editor height can never
-resize it. Reaching the practical tail boundary (with a small inset-rounding tolerance) or
-tapping that control starts an owned catch-up transaction. Long-distance catch-up
-jumps without animation to a small reveal distance, waits for the next actual display
-frame, and smoothly animates only the final approach; Reduce Motion uses one
-disabled-animation tail command. Catch-up remains explicit state through physical
-settlement; prior and newly arriving unread state remains admitted throughout staged,
-final, and settling phases. Interruption away from the tail restores detached/unread
-ownership, while successful physical settlement clears unread only at completion.
-Every later measured height increase coalesces into
-the next display-frame command until another upward gesture; a newly admitted tool chip and streamed Markdown growth share one short smooth pinned-tail follow, while subsequent growth waits for fresh native geometry to acknowledge
-that command instead of replacing its token. Physical past-bottom clamps remain nonanimated. An ordinary installed projection
-change captures the current visible semantic locus before publication and either settles growth for a pinned
-reader with one short smooth tail command or advances an exact layout epoch after installation to
-restore a surviving detached semantic anchor within one point. Physical overshoot correction remains nonanimated. Persistent idle native ownership does
-not disable preservation, but active interaction, pending native geometry, or user-driven settling does.
-After each point correction, both a newer semantic sample and a newer scroll-geometry revision are
-required in either callback order before another correction or binding release. Stale generations and
-direct interaction cannot correct. An ordinary shrink whose native viewport remains within the physical
-content edge is inert. A structural shrink that leaves a released pinned offset beyond that edge receives
-one frame-gated tail clamp; detached or directly owned viewports remain untouched.
-Progress-only tool mutations cannot request a tail position. Keyboard and complete-composer layout keep
-a logically pinned reader at the latest tail, while a detached reader receives no position write
-and retains the same semantic reading position. These layout changes cannot change the durable
-pinned/detached mode. Editor height fitting is synchronous and side-effect free; internal scrolling and caret visibility reconcile only when the installed UIKit bounds match that latest fitting result, so speculative or stale wrap measurements cannot move the editor viewport. Every stable row owns its horizontal inset instead of relying on
+Native safe-area layout pushes the transcript exactly once and reverses naturally when
+the keyboard or composer contracts. `ChatViewportMode` has only two states: `.pinned` holds
+the persistent `ScrollPosition` at the bottom edge and uses a bottom size-change anchor, while
+`.anchored` uses a top size-change anchor without issuing app offset writes. Transcript growth,
+keyboard frames, and composer measurements are not mode inputs. Consequently pinned content
+and inset growth require zero app offset writes, and detached growth cannot pull the reader.
+Short and empty transcripts retain top alignment.
+
+Mode changes come only from explicit intent: native/direct/accessibility takeover anchors;
+a physically observed direct return, catch-up, or opening pins; submission and prepend preserve
+the current mode; a fresh presentation reset pins while a retained same-session reset preserves
+reader authority. `ChatScrollCoordinator` owns the reducer, raw geometry and semantic frames,
+unread state, and four bounded command purposes only: exact opening-tail realization, catch-up,
+semantic-anchor correction, and prepend correction. Automatic growth follow, tail-correction arbitration, and callback-order compatibility flags no longer exist.
+
+Opening still keeps the opaque surface until the exact physical marker after transcript and
+queue rows is positioned. It permits bounded exact-ID realization and a 750-millisecond
+best-effort deadline, then keeps settlement through the reveal's stable frames before restoring
+the native bottom edge. Direct interaction abandons opening immediately. Catch-up retains its
+staged long-distance approach and unread ownership until physical settlement; interruption
+restores anchored/unread state. An installed projection captured while anchored advances an
+exact layout epoch and restores a surviving semantic anchor within one point, with at most two
+corrections and a one-second deadline when layout evidence never arrives. Prepend uses the same
+fresh semantic-and-geometry proof and bounded correction, while anchorless history still loads
+through one session-owned, cancellation-aware canonical task. Starting that explicit page intent
+supersedes a pending semantic-restore command; active catch-up or opening retains stronger ownership
+and rejects paging. Direct interaction
+cancels either correction transaction. Progress-only tool changes and ordinary streaming never
+request a position. Keyboard and complete-composer layout therefore keep a pinned reader at the
+latest tail and leave an anchored reader at the same semantic locus without changing durable
+mode. Editor height fitting is synchronous and side-effect free; internal scrolling and caret visibility reconcile only when the installed UIKit bounds match that latest fitting result, so speculative or stale wrap measurements cannot move the editor viewport. Every stable row owns its horizontal inset instead of relying on
 transient ScrollView content margins, so prompt insertion cannot expose a flush-left frame.
 Existing rows never participate in stack-wide insertion or scale animations. Thinking,
 Markdown, tool, and explicit custom/retry rows therefore remain stable above the composer while the user
@@ -991,7 +956,23 @@ still-live predecessor, so the complete rewritten row/key set is checked for uni
 constructed. A collision retains the authoritative next timeline unchanged rather than trapping in dictionary
 construction. Submission handoffs carry a bounded one-shot canonical receipt across the synchronous reconciliation
 boundary; the matching canonical row consumes it once and installs directly visible without replaying an entrance.
-Queue-card replacements use the stricter one-removed/one-new-candidate policy and fail closed for repeated or causally
+The composer derives one value-only submission lifecycle from those existing admission facts; it does not add a
+session store or infer authority. A bounded global-frame registry may stage one composer-to-outgoing prompt flight
+for that lifecycle ID. The flight joins the active layout clock, keeps destination rows visible until every endpoint
+is measured, and fails open on missing geometry, Reduce Motion, direct interaction, canonical replacement,
+backgrounding, presentation retirement, or foreground reconciliation. The registry is disposable on relaunch and
+canonical transcript/queue state always renders without it, so reopening an active or passive session cannot replay
+an old flight or delay current rows. Each complete installed transcript exposes one `ChatCommittedLedger` followed by
+one `ChatLiveRegion`. The ledger contains only the frozen canonical prefix and retains its local monotonic revision
+across streaming, handoff, queue, compatible reconnect, and foreground-reconciliation installs when those canonical
+rows are equal. Canonical append, prepend, or replacement advances that revision once; a cold owner deterministically
+rebuilds the same rows at revision one from the authoritative snapshot. The live region carries streaming/runtime,
+handoff, and queue facts in the same atomic commit, never as a mirror or second store. Separate `ForEach` regions and
+row-scoped text preparation keep a full streaming turn from re-evaluating settled history. Hidden thinking labels are
+attached only to preparation slices that render thinking, and tool rows compare a payload-only revision instead of an
+ambient installation tag. Foreground active and passive sessions therefore converge through the same complete commit:
+live work may be replaced, entrance suppression is consumed once, and neither history revision nor morph entitlement
+can replay. Queue-card replacements use the stricter one-removed/one-new-candidate policy and fail closed for repeated or causally
 ambiguous prompts; no Gateway operation link is inferred. Canonical
 compaction/branch/configuration entries, embedded assistant failures, and exact admitted custom/retry
 working detail share one semantic notification projection and capsule primitive. Ordinary default running
@@ -1208,7 +1189,7 @@ coalesced short smooth tail settlement for growth, while physical overshoot corr
 waits passively for that exact sample; after each disabled-animation correction the
 owner requires both a strictly newer sample of the same semantic frame and a newer scroll-geometry
 revision, accepts either callback order, permits at most one late correction, and succeeds only within
-one point. A corrected detached or prepend transaction then releases its programmatic point binding
+one point. A corrected detached or prepend transaction then completes its bounded programmatic point correction
 without moving the viewport. Prepend admission refuses active catch-up, opening-tail ownership, and any
 outstanding non-prepend command rather than overwriting position authority. There is no next-frame assumption,
 total content-height polling loop, unanchored success, or stale defer

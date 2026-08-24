@@ -15,6 +15,18 @@ struct PresentationStyleGuardTests {
         swiftSources(at: packageRoot.appending(path: "Sources/UI"))
     }
 
+    private func chatCompositionSources() throws -> String {
+        try [
+            "Sources/UI/Chat/ChatView.swift",
+            "Sources/UI/Chat/ChatTranscriptScrollView.swift",
+            "Sources/UI/Chat/ChatComposerView.swift",
+            "Sources/UI/Chat/ChatRoutes.swift",
+            "Sources/State/ChatSessionPresentation.swift",
+        ].map { path in
+            try String(contentsOf: packageRoot.appending(path: path), encoding: .utf8)
+        }.joined(separator: "\n")
+    }
+
     private func swiftSources(at root: URL) -> [(URL, String)] {
         let enumerator = FileManager.default.enumerator(
             at: root,
@@ -396,10 +408,7 @@ struct PresentationStyleGuardTests {
 
     @Test("chat restores historical settings and context control ownership")
     func chatControlOwnership() throws {
-        let chat = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
-            encoding: .utf8
-        )
+        let chat = try chatCompositionSources()
         let controls = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
             encoding: .utf8
@@ -417,10 +426,7 @@ struct PresentationStyleGuardTests {
 
     @Test("chat structural updates do not inherit opening animation")
     func chatStructuralAnimationBoundary() throws {
-        let chat = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
-            encoding: .utf8
-        )
+        let chat = try chatCompositionSources()
         let toolRuns = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatToolRunViews.swift"),
             encoding: .utf8
@@ -429,11 +435,22 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/StreamingTextReveal.swift"),
             encoding: .utf8
         )
-        #expect(chat.components(separatedBy: ".animation(transcriptRevealAnimation, value: isTranscriptReady)").count == 1)
+        #expect(chat.contains("withAnimation(\n            transcriptRevealAnimation,"))
         #expect(chat.contains("scrollCoordinator.discreteContentInserted(renderedID: id)"))
         #expect(!chat.contains("followAnimation: entranceKind == .leadingActivity"))
         #expect(toolRuns.contains(".contentTransition(reduceMotion ? .opacity : .interpolate)"))
         #expect(reveal.contains("initialViewportHeight"))
+    }
+
+    @Test("light chat chrome masks moving transcript rows beneath the toolbar")
+    func lightChatChromeMask() throws {
+        let blur = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTopVariableBlur.swift"),
+            encoding: .utf8
+        )
+        #expect(blur.contains("Color.tronBackground.opacity(0.98)"))
+        #expect(blur.contains("Color.tronBackground.opacity(0.94)"))
+        #expect(blur.contains("Color.clear"))
     }
 
     @Test("top blur uses distinct chat, dashboard, and sheet proportions")
@@ -442,10 +459,7 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTopVariableBlur.swift"),
             encoding: .utf8
         )
-        let chat = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
-            encoding: .utf8
-        )
+        let chat = try chatCompositionSources()
         let shell = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/SessionShellView.swift"),
             encoding: .utf8
@@ -476,7 +490,8 @@ struct PresentationStyleGuardTests {
         #expect(blur.contains("case .sheet: 124"))
         #expect(blur.contains("case .logs: 184"))
         #expect(blur.contains("@Environment(\\.colorScheme) private var colorScheme"))
-        #expect(blur.matches(#"Color\.black\.opacity\(0\.46\)"#) >= 2)
+        #expect(blur.contains("Color.black.opacity(0.46)"))
+        #expect(blur.contains("Color.tronBackground.opacity(0.98)"))
         #expect(chat.contains("TronTopBlurOverlay(style: .chat)"))
         #expect(shell.contains("TronTopBlurOverlay(style: .dashboard)"))
         #expect(blur.contains("struct ChatBottomActivityBlur: View"))
@@ -501,10 +516,9 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains(".background(alignment: .bottom)"))
         #expect(chat.contains("ChatBottomActivityBlur("))
         #expect(chat.contains("isActive: showsAmbientWorkingBlur"))
-        #expect(chat.contains("keyboardVisible: composerFocused"))
+        #expect(chat.contains("keyboardVisible: keyboardVisible"))
         #expect(chat.contains(".offset(y: ChatBottomActivityBlurLayout.translation("))
-        #expect(chat.contains("keyboardVisible: composerFocused"))
-        #expect(chat.contains("value: composerFocused"))
+        #expect(chat.contains("value: keyboardVisible"))
         #expect(chat.contains(".ignoresSafeArea(edges: .bottom)"))
         #expect(app.contains(".tronTopBlur(.sheet)"))
         #expect(settings.matches(#"\.tronTopBlur\(\.sheet\)"#) >= 2)
@@ -1201,7 +1215,10 @@ struct PresentationStyleGuardTests {
 
         let chat = try #require(productionSources.first { $0.0.lastPathComponent == "ChatView.swift" }?.1)
         #expect(!chat.contains("snapshot.extensionPresentation.semanticState.widgets.filter"))
-        #expect(chat.occurrences(of: "ChatExtensionWidgetPolicy.mergedItems") == 2)
+        let liveGroupProjectionCount = productionSources.reduce(0) { count, source in
+            count + source.1.occurrences(of: "ChatExtensionWidgetPolicy.liveGroups")
+        }
+        #expect(liveGroupProjectionCount == 2)
     }
 
     @Test("composer owns capped UIKit scrolling and attachment photos keep stable previews")
@@ -1210,10 +1227,7 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
             encoding: .utf8
         )
-        let chat = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
-            encoding: .utf8
-        )
+        let chat = try chatCompositionSources()
         let attachmentPresentation = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatAttachmentPresentation.swift"),
             encoding: .utf8
@@ -1277,6 +1291,10 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("@State private var showCamera"))
         #expect(!chat.contains("@State private var showPhotos"))
         #expect(!chat.contains("@State private var showFiles"))
+        #expect(chat.contains(".onChange(of: sessionPresentation.photos)"))
+        #expect(chat.contains("await importPhotos(values, target: target)"))
+        #expect(chat.contains("if phase == .background"))
+        #expect(!chat.contains("if phase != .active"))
         let pendingStrip = (chat.components(separatedBy: "if !pendingAttachments.isEmpty").dropFirst().first ?? "")
             .components(separatedBy: "GlassEffectContainer(spacing: 8)").first ?? ""
         #expect(pendingStrip.contains("ScrollView(.horizontal, showsIndicators: false)"))
@@ -1593,10 +1611,7 @@ struct PresentationStyleGuardTests {
 
     @Test("chat transcript controls preserve compact history pills and a glass catch-up control")
     func compactTranscriptPillPresentation() throws {
-        let chat = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
-            encoding: .utf8
-        )
+        let chat = try chatCompositionSources()
         let transcript = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/TranscriptRow.swift"),
             encoding: .utf8
@@ -1629,14 +1644,14 @@ struct PresentationStyleGuardTests {
         #expect(catchUpButton.contains("in: .circle"))
         #expect(catchUpButton.contains(".glassEffectTransition(.matchedGeometry)"))
         #expect(catchUpButton.contains(".accessibilityLabel(\"Catch up\")"))
-        #expect(catchUpButton.contains("catchUpToTail()"))
+        #expect(catchUpButton.contains("Button(action: onCatchUp)"))
         #expect(!catchUpButton.contains(".chatTranscriptPill()"))
         #expect(scrollCoordinator.contains(".smooth(duration: 0.30)"))
         #expect(chat.contains("case .smooth(let duration)"))
         #expect(chat.contains("withAnimation(.smooth(duration: duration)"))
         #expect(chat.contains("GlassEffectContainer(spacing: 8)"))
-        #expect(chat.contains("if scrollCoordinator.shouldShowCatchUpButton"))
-        #expect(scrollCoordinator.contains("var shouldShowCatchUpButton: Bool { userScrolledAway }"))
+        #expect(chat.contains("if showsCatchUp { catchUpButton }"))
+        #expect(scrollCoordinator.contains("var shouldShowCatchUpButton: Bool { viewportMode == .anchored }"))
         #expect(chat.contains("physicalOpeningTailID(for: installed)"))
         #expect(chat.contains("scrollCoordinator.positionOpeningTail("))
         #expect(chat.contains("targetRenderedID: targetRenderedID"))
@@ -1703,10 +1718,7 @@ struct PresentationStyleGuardTests {
 
     @Test("send-to-chat motion stays role-aware, authoritative, and accessible")
     func sendToChatMotion() throws {
-        let chat = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
-            encoding: .utf8
-        )
+        let chat = try chatCompositionSources()
         let entranceRows = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatEntranceRows.swift"),
             encoding: .utf8
@@ -1719,14 +1731,16 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
             encoding: .utf8
         )
-        #expect(chat.contains("kind: entranceKind"))
+        #expect(chat.contains("entranceKind: kind"))
         #expect(chat.contains("ChatQueuedMessageEntranceRow"))
         #expect(!chat.contains("struct ChatTranscriptEntranceRow"))
         #expect(entranceRows.contains("struct ChatTranscriptEntranceRow"))
         #expect(entranceRows.contains("struct ChatTranscriptRenderRow"))
         #expect(chat.contains("ChatComposerStructuralHost("))
-        #expect(chat.contains("composerViewportTransitionWillBegin("))
-        #expect(chat.contains("composerViewportTransitionDidSettle("))
+        #expect(!motion.contains("layoutTransaction.join"))
+        #expect(!motion.contains("withAnimation(animation"))
+        #expect(motion.contains("transaction.disablesAnimations = true"))
+        #expect(!chat.contains("composerViewportTransition"))
         #expect(!chat.contains(".onChange(of: composerTextHeight)"))
         #expect(!chat.contains(".onChange(of: pendingAttachments.map"))
         #expect(motion.contains("case userPrompt"))
@@ -1736,7 +1750,7 @@ struct PresentationStyleGuardTests {
         #expect(composer.contains("isSending ? \"Sending message\" : \"Send message\""))
         #expect(motion.contains(".frame(height: presentedHeight, alignment: .bottom)"))
         #expect(motion.contains(".fixedSize(horizontal: false, vertical: true)"))
-        #expect(motion.contains("reduceMotion\n            ? nil"))
+        #expect(!motion.contains("settlementDelay"))
         #expect(!motion.contains("DispatchQueue"))
         let streamingReveal = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/StreamingTextReveal.swift"),
@@ -1748,10 +1762,7 @@ struct PresentationStyleGuardTests {
 
     @Test("canonical prompt settlement is direct and has no replacement motion")
     func canonicalPromptSettlementHasNoReplacementMotion() throws {
-        let chat = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
-            encoding: .utf8
-        )
+        let chat = try chatCompositionSources()
         let entranceRows = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatEntranceRows.swift"),
             encoding: .utf8
@@ -1775,17 +1786,17 @@ struct PresentationStyleGuardTests {
         #expect(!outgoingRows.contains("ChatPromptLifecycleCrossfadeRow"))
         #expect(!outgoingRows.contains("ChatPromptLifecycleTransitionSourceCard"))
         #expect(!motion.contains("replacementAnimation"))
-        #expect(chat.contains("if canonicalSubmissionHandoffs.contains(item.id)"))
-        #expect(chat.contains("settlement is a direct visible replacement."))
+        #expect(chat.contains("if canonicalSubmissionIDs.contains(item.id)"))
+        #expect(chat.contains("canonicalSubmissionIDs: sessionPresentation.canonicalSubmissionHandoffs.ids"))
         #expect(chat.contains("seedCanonicalMediaPreviews(from: receipt, in: snapshot)"))
         #expect(chat.contains("seedPreparedThumbnail(prepared, for: identity)"))
-        #expect(chat.contains("excludedOperationIDs: locallyMutatedQueueOperationIDs"))
-        #expect(chat.contains("receipt.operationID.map({ locallyMutatedQueueOperationIDs.contains($0) }) != true"))
+        #expect(chat.contains("excludedOperationIDs: sessionPresentation.locallyMutatedQueueOperationIDs"))
+        #expect(chat.contains("receipt.operationID.map({ sessionPresentation.locallyMutatedQueueOperationIDs.contains($0) }) != true"))
         #expect(chat.contains("invalidateSettledQueueHandoff("))
-        #expect(chat.contains("guard let mutationToken = queueMutationResolution.begin()"))
-        #expect(chat.contains("queueMutationResolution.wait(for: token)"))
+        #expect(chat.contains("guard let mutationToken = sessionPresentation.queueMutationResolution.begin()"))
+        #expect(chat.contains("sessionPresentation.queueMutationResolution.wait(for: token)"))
         #expect(chat.contains("guard resolution == .commandCompleted else { throw CancellationError() }"))
-        #expect(chat.contains("modelPresentationGeneration == presentationGeneration"))
+        #expect(chat.contains("sessionPresentation.modelPresentationGeneration == presentationGeneration"))
         #expect(chat.contains("presentationTarget == target"))
         #expect(chat.occurrences(of: "retireQueueMutationPresentationState()") >= 2)
         let deferredInstall = try #require(
@@ -1805,10 +1816,7 @@ struct PresentationStyleGuardTests {
 
     @Test("queued messages remain visible and individually manageable in chat")
     func queuedMessagePresentation() throws {
-        let chat = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
-            encoding: .utf8
-        )
+        let chat = try chatCompositionSources()
         let queue = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/QueuedMessagePresentation.swift"),
             encoding: .utf8
@@ -1817,7 +1825,7 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerControls.swift"),
             encoding: .utf8
         )
-        #expect(chat.contains("queuedMessageRows(installed)"))
+        #expect(chat.contains("queuedRows(installed)"))
         #expect(chat.contains("let messages = installed.queuedMessages"))
         #expect(chat.contains("QueuedMessageManagementPolicy.availability("))
         #expect(chat.contains("model.replaceQueue("))
@@ -1826,13 +1834,10 @@ struct PresentationStyleGuardTests {
         #expect(!queue.contains("ViewThatFits(in: .horizontal)"))
         #expect(queue.contains("card.fixedSize(horizontal: false, vertical: true)"))
         #expect(queue.contains(".frame(maxWidth: UserPromptTextLayoutPolicy.maximumWidth, alignment: .trailing)"))
-        #expect(queue.contains("Button(action: onEdit)"))
-        #expect(queue.contains(".glassEffect("))
-        #expect(queue.contains(".interactive()"))
-        #expect(queue.contains(".contentShape(shape)"))
-        #expect(queue.contains(".padding(.top, QueuedMessageCardLayout.contentSpacing)"))
+        #expect(queue.contains("ChatPromptCard("))
+        #expect(queue.contains("onActivate: isManageable && !isMutating ? onEdit : nil"))
+        #expect(queue.contains("detail: \"\\(deliveryDetail) · \\(position) of \\(total)\""))
         #expect(queue.contains("ToolChipFlowLayout(spacing: 4)"))
-        #expect(queue.contains("QueuedMessageCardLayout.arrowContainerSize"))
         #expect(!queue.contains("Label(line.text"))
         #expect(!queue.contains("queueActionButton"))
         #expect(!queue.contains("label: \"Edit queued message\""))
@@ -1845,18 +1850,15 @@ struct PresentationStyleGuardTests {
         #expect(!queue.contains("Remove from Queue"))
         #expect(queue.contains("Clear entire queue"))
         #expect(queue.contains("Attachments stay with this queued message."))
-        #expect(queue.contains("multilineTextAlignment(.trailing)"))
-        #expect(queue.contains("Text(\"\\(deliveryDetail) · \\(position) of \\(total)\")"))
+        #expect(queue.contains("attachmentContent:"))
+        #expect(queue.contains("statusContent:"))
         #expect(composer.contains("Steer after current turn"))
         #expect(composer.contains("Follow up after current work"))
     }
 
     @Test("chat navigation remains emerald with soft scroll edges")
     func emeraldNavigationAndScrollEdges() throws {
-        let chat = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
-            encoding: .utf8
-        )
+        let chat = try chatCompositionSources()
         let presentation = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Theme/TronPresentation.swift"),
             encoding: .utf8
@@ -1950,8 +1952,13 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatToolRunViews.swift"),
             encoding: .utf8
         )
-        let chat = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
+        let chat = try chatCompositionSources()
+        let composerView = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatComposerView.swift"),
+            encoding: .utf8
+        )
+        let transcriptView = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatTranscriptScrollView.swift"),
             encoding: .utf8
         )
         let composerControls = try String(
@@ -1996,7 +2003,7 @@ struct PresentationStyleGuardTests {
         #expect(notification.contains("pill.frame(minWidth: 44, minHeight: 44)"))
         #expect(notification.contains(".frame(maxWidth: .infinity, minHeight: 44, alignment: .center)"))
         #expect(chat.contains("LazyVStack(alignment: .leading, spacing: 8)"))
-        #expect(chat.contains("canonicalSubmissionHandoffs.contains(item.id)"))
+        #expect(chat.contains("canonicalSubmissionIDs.contains(item.id)"))
         for label in [toolCardLabel, toolRunLabel] {
             #expect(label.contains("ChatCompactPillSurface"))
             #expect(!label.contains("minHeight"))
@@ -2055,11 +2062,11 @@ struct PresentationStyleGuardTests {
         #expect(chat.contains(".safeAreaInset(edge: .bottom, spacing: 0)"))
         #expect(!chat.contains("composer.fixedSize(horizontal: false, vertical: true)"))
         #expect(!chat.contains("applyViewportAdjustment"))
-        let inputBar = (chat.components(separatedBy: "private var composerInputBar").dropFirst().first ?? "")
+        let inputBar = (composerView.components(separatedBy: "private var inputBar").dropFirst().first ?? "")
             .components(separatedBy: "private var attachmentButton").first ?? ""
         #expect(inputBar.contains("attachmentButton"))
         #expect(!inputBar.contains(".overlay(alignment: .bottomLeading)"))
-        let attachmentButton = (chat.components(separatedBy: "private var attachmentButton").dropFirst().first ?? "")
+        let attachmentButton = (composerView.components(separatedBy: "private var attachmentButton").dropFirst().first ?? "")
             .components(separatedBy: "private var catchUpButton").first ?? ""
         #expect(attachmentButton.contains("Image(systemName: \"plus\")"))
         #expect(attachmentButton.contains("size: ComposerControlMetrics.symbolSize"))
@@ -2068,11 +2075,11 @@ struct PresentationStyleGuardTests {
         #expect(attachmentButton.contains(".allowsHitTesting(false)"))
         #expect(attachmentButton.contains("ComposerAttachmentMenuButton("))
         #expect(!attachmentButton.contains("onTouchDown"))
-        #expect(attachmentButton.contains("onSelect: requestAttachmentPresentation"))
+        #expect(attachmentButton.contains("onSelect: onSelectAttachmentDestination"))
         #expect(!attachmentButton.contains("Menu {"))
         #expect(!chat.contains(".contentMargins(.horizontal, 16, for: .scrollContent)"))
-        let stableRow = (chat.components(separatedBy: "private func stableTranscriptRow").dropFirst().first ?? "")
-            .components(separatedBy: "private var selectedAuthoritativeSnapshot").first ?? ""
+        let stableRow = (transcriptView.components(separatedBy: "private func stableRow").dropFirst().first ?? "")
+            .components(separatedBy: "private var tailMarker").first ?? ""
         #expect(stableRow.contains(".padding(.horizontal, 16)"))
         #expect(stableRow.contains("entranceState == .pending ? installedTag : nil"))
         #expect(stableRow.contains("ChatEntranceGeometryAdmissionPolicy.admits"))
@@ -2080,24 +2087,26 @@ struct PresentationStyleGuardTests {
         #expect(!stableRow.contains("transcriptProjectionSource"))
         #expect(chat.contains("scrollCoordinator.installedTranscriptChanged(installed)"))
         #expect(!chat.contains("discreteContentSuperseded"))
-        #expect(scrollCoordinator.contains("discreteFollowRenderedIDs"))
-        #expect(scrollCoordinator.contains("installed.containsDisplayedID"))
+        #expect(!scrollCoordinator.contains("discreteFollowRenderedIDs"))
+        #expect(scrollCoordinator.contains("Native edge pinning owns growth"))
         #expect(!projectionKernel.contains("specialBeforeStreaming"))
         #expect(!projectionKernel.contains("unanchoredBeforeStreaming"))
         #expect(projectionKernel.contains("appendFragment(streamingFragment, tools: streamingTools, streaming: true)"))
         #expect(projectionKernel.contains("appendTools(unanchoredLive)"))
         #expect(chat.contains("scrollCoordinator.geometryChanged"))
         #expect(chat.contains("ChatScrollGeometryObservation"))
-        #expect(chat.contains("presentationEpoch: openPresentation.epoch"))
-        #expect(chat.contains("phase: openPresentation.phase"))
-        #expect(chat.contains("observation.presentationEpoch == openPresentation.epoch"))
-        #expect(chat.contains("observation.phase == openPresentation.phase"))
-        #expect(chat.contains("geometry.hasViewportChange(from: previousGeometry)"))
+        #expect(chat.contains("presentationEpoch: sessionPresentation.open.epoch"))
+        #expect(chat.contains("presentationPhase: sessionPresentation.open.phase"))
+        #expect(transcriptView.contains("observation.presentationEpoch == presentationEpoch"))
+        #expect(!transcriptView.contains("observation.phase"))
+        #expect(transcriptView.contains("presentationPhase == .positioning || presentationPhase == .ready"))
+        #expect(transcriptView.contains("current.hasViewportChange(from: prior)"))
         #expect(chat.contains("scrollCoordinator.viewportChanged"))
         #expect(chat.contains(".defaultScrollAnchor(.top, for: .alignment)"))
         #expect(!chat.contains(".defaultScrollAnchor(.bottom, for: .alignment)"))
-        #expect(!chat.contains(".defaultScrollAnchor(.bottom, for: .sizeChanges)"))
-        #expect(scrollCoordinator.contains("publish(.releaseBinding"))
+        #expect(chat.contains("for: .sizeChanges"))
+        #expect(chat.contains("scrollCoordinator.viewportMode.sizeChangeAnchorIsBottom"))
+        #expect(!scrollCoordinator.contains("releaseBinding"))
         #expect(!chat.contains("releaseSettledScrollBindingIfNeeded"))
         #expect(chat.contains("transcriptScrollPosition = ScrollPosition(idType: String.self)"))
         #expect(chat.contains("transcriptScrollPosition.isPositionedByUser"))
@@ -2106,21 +2115,22 @@ struct PresentationStyleGuardTests {
         #expect(!chat.contains("scheduleTailFollow"))
         #expect(!chat.contains("tailFollowTask"))
         #expect(!chat.contains(".transition(reduceMotion ? .opacity : .opacity.combined(with: .scale"))
-        #expect(chat.contains("ScrollPosition(idType: String.self, edge: .bottom)"))
+        #expect(chat.occurrences(of: "ScrollPosition(idType: String.self, edge: .bottom)") == 1)
+        #expect(chat.contains("releaseScrollPositionTarget()"))
+        #expect(chat.contains("transcriptScrollPosition.scrollTo(edge: .bottom)"))
         #expect(chat.contains("model.authoritativeSnapshot(for: sessionID)"))
         #expect(!chat.contains("ScrollViewReader"))
         #expect(!chat.contains("proxy.scrollTo"))
         let composerStage = (chat.components(separatedBy: ".safeAreaInset(edge: .bottom, spacing: 0)").dropFirst().first ?? "")
             .components(separatedBy: ".overlay(alignment: .top) { topBlur }").first ?? ""
-        let composerOwner = (chat.components(separatedBy: "private var composer: some View").dropFirst().first ?? "")
-            .components(separatedBy: "private var composerInputBar").first ?? ""
+        let composerOwner = composerView
         #expect(!composerStage.contains("ChatBottomActivityBlur"))
         #expect(composerOwner.contains(".background(alignment: .bottom)"))
         #expect(!composerOwner.contains(".overlay(alignment: .bottom)"))
         #expect(composerOwner.contains("ChatBottomActivityBlur("))
         #expect(composerOwner.contains("isActive: showsAmbientWorkingBlur"))
         #expect(composerOwner.contains(".offset(y: ChatBottomActivityBlurLayout.translation("))
-        #expect(composerOwner.contains("keyboardVisible: composerFocused"))
+        #expect(composerOwner.contains("keyboardVisible: keyboardVisible"))
         #expect(!composerStage.contains(".accessibilityHidden(!isTranscriptReady)"))
         #expect(!composerStage.contains(".allowsHitTesting(isTranscriptReady)"))
         #expect(chat.contains("isEditable: ChatComposerPolicy.isTextEditable(isTranscriptReady: isTranscriptReady)"))
@@ -2168,10 +2178,7 @@ struct PresentationStyleGuardTests {
 
     @Test("composer resource pickers retain native menu semantics and reduced-motion placement")
     func composerResourcePickerPresentation() throws {
-        let chat = try String(
-            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatView.swift"),
-            encoding: .utf8
-        )
+        let chat = try chatCompositionSources()
         let picker = try String(
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ComposerResourcePicker.swift"),
             encoding: .utf8
@@ -2180,15 +2187,13 @@ struct PresentationStyleGuardTests {
             contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatAttachmentPresentation.swift"),
             encoding: .utf8
         )
-        let composerStart = try #require(chat.range(of: "private var composer: some View"))
-        let composerEnd = try #require(chat.range(
-            of: "private var composerInputBar: some View",
-            range: composerStart.upperBound..<chat.endIndex
-        ))
-        let composer = String(chat[composerStart.lowerBound..<composerEnd.lowerBound])
-        let attachments = try #require(composer.range(of: "if !pendingAttachments.isEmpty"))
-        let skill = try #require(composer.range(of: "if let selectedComposerSkill"))
-        let suggestions = try #require(composer.range(of: "if let picker = composerResourcePicker"))
+        let composer = try String(
+            contentsOf: packageRoot.appending(path: "Sources/UI/Chat/ChatComposerView.swift"),
+            encoding: .utf8
+        )
+        let attachments = try #require(composer.range(of: "                attachmentStrip"))
+        let skill = try #require(composer.range(of: "                selectedSkillStrip"))
+        let suggestions = try #require(composer.range(of: "                resourcePickerView"))
         let input = try #require(composer.range(of: "GlassEffectContainer(spacing: 8)"))
         #expect(attachments.lowerBound < skill.lowerBound)
         #expect(skill.lowerBound < suggestions.lowerBound)

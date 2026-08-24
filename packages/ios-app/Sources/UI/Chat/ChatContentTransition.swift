@@ -1,112 +1,56 @@
 import SwiftUI
 
-/// Presentation-only motion roles for content entering an already-installed chat.
-/// These values never create transcript continuity or participate in canonical
-/// identity; the authoritative transcript and queue remain the only row owners.
-struct ChatComposerStructuralIdentity: Hashable, Sendable {
-    let extensionOwnerIDs: [String]
-    let attachmentIDs: [String]
-    let selectedSkillID: String?
-    let pickerKind: ComposerResourceEntry.Kind?
-    let pickerVisibleRows: Int
-    let submissionPending: Bool
-}
-
-struct ChatComposerStructuralMeasurement: Equatable {
-    let identity: ChatComposerStructuralIdentity
-    let height: CGFloat
-}
-
+/// The composer is one permanently mounted inset owner. Its children may use
+/// local opacity/scale feedback, but its structural height is installed in one
+/// nonanimated transaction. Animating the safe-area inset forces the native
+/// transcript viewport through a layout on every animation frame, which can
+/// redraw already-visible rows and expose them beneath navigation chrome.
 enum ChatComposerStructuralTransitionPolicy {
     static let heightEpsilon: CGFloat = 0.5
-    static let settlementDelay: Duration = .milliseconds(380)
 
-    static func isStructuralRetarget(
-        previous: ChatComposerStructuralMeasurement?,
-        current: ChatComposerStructuralMeasurement
-    ) -> Bool {
-        guard let previous else { return false }
-        return previous.identity != current.identity
-    }
-
-    static func animation(reduceMotion: Bool) -> Animation? {
-        reduceMotion
-            ? nil
-            : .smooth(duration: 0.34)
+    static func admitsHeightChange(current: CGFloat?, measured: CGFloat) -> Bool {
+        measured.isFinite
+            && measured > 0
+            && current.map { abs($0 - measured) > heightEpsilon } != false
     }
 }
 
-/// Permanently mounted aggregate composer viewport. Its inner content keeps its
-/// natural size for measurement while this bottom-aligned frame exposes the new
-/// height continuously, so the sole safe-area inset and the accessory content
-/// share one geometry curve. A retargeted spring starts from the current
-/// presentation value; ordinary multiline measurements update directly.
 struct ChatComposerStructuralHost<Content: View>: View {
-    let identity: ChatComposerStructuralIdentity
-    let reduceMotion: Bool
-    let transitionWillBegin: () -> Int?
-    let transitionDidSettle: (Int) -> Void
+    let onHeightChange: ((CGFloat) -> Void)?
     @ViewBuilder let content: () -> Content
 
     @State private var presentedHeight: CGFloat?
-    @State private var previousMeasurement: ChatComposerStructuralMeasurement?
-    @State private var settlementTask: Task<Void, Never>?
+
+    init(
+        onHeightChange: ((CGFloat) -> Void)? = nil,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.onHeightChange = onHeightChange
+        self.content = content
+    }
 
     var body: some View {
         content()
             .fixedSize(horizontal: false, vertical: true)
-            .onGeometryChange(for: ChatComposerStructuralMeasurement.self) { geometry in
-                ChatComposerStructuralMeasurement(identity: identity, height: geometry.size.height)
-            } action: { measurement in
-                admit(measurement)
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                geometry.size.height
+            } action: { height in
+                guard ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+                    current: presentedHeight,
+                    measured: height
+                ) else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { presentedHeight = height }
             }
             .frame(height: presentedHeight, alignment: .bottom)
             .clipped()
-            .onDisappear {
-                settlementTask?.cancel()
-                settlementTask = nil
+            .onGeometryChange(for: CGFloat.self) { geometry in
+                geometry.size.height
+            } action: { height in
+                guard height.isFinite, height >= 0 else { return }
+                onHeightChange?(height)
             }
-    }
-
-    private func admit(_ measurement: ChatComposerStructuralMeasurement) {
-        guard measurement.height.isFinite, measurement.height > 0 else { return }
-        guard let previousMeasurement else {
-            self.previousMeasurement = measurement
-            presentedHeight = measurement.height
-            return
-        }
-        let retargets = ChatComposerStructuralTransitionPolicy.isStructuralRetarget(
-            previous: previousMeasurement,
-            current: measurement
-        )
-        self.previousMeasurement = measurement
-        guard retargets else {
-            if abs((presentedHeight ?? measurement.height) - measurement.height)
-                > ChatComposerStructuralTransitionPolicy.heightEpsilon {
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) { presentedHeight = measurement.height }
-            }
-            return
-        }
-
-        let generation = transitionWillBegin()
-        withAnimation(ChatComposerStructuralTransitionPolicy.animation(reduceMotion: reduceMotion)) {
-            presentedHeight = measurement.height
-        }
-        settlementTask?.cancel()
-        guard let generation else { return }
-        if reduceMotion {
-            transitionDidSettle(generation)
-            return
-        }
-        settlementTask = Task { @MainActor in
-            do { try await Task.sleep(for: ChatComposerStructuralTransitionPolicy.settlementDelay) }
-            catch { return }
-            guard !Task.isCancelled else { return }
-            transitionDidSettle(generation)
-            settlementTask = nil
-        }
     }
 }
 

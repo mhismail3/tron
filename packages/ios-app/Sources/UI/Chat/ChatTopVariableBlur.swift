@@ -40,19 +40,25 @@ struct TronTopBlurOverlay: View {
             // Dark mode uses a dark material plus black tint so it stays soft
             // without the regular UIBlurEffect's gray lift.
             ChatTopVariableBlur(maxBlurRadius: style.radius, darkMode: colorScheme == .dark)
-            if colorScheme == .dark {
-                LinearGradient(
-                    colors: [
+            LinearGradient(
+                colors: colorScheme == .dark
+                    ? [
                         Color.black.opacity(0.46),
                         Color.black.opacity(0.40),
                         Color.black.opacity(0.24),
                         Color.black.opacity(0.08),
                         Color.clear,
+                    ]
+                    : [
+                        Color.tronBackground.opacity(0.98),
+                        Color.tronBackground.opacity(0.94),
+                        Color.tronBackground.opacity(0.72),
+                        Color.tronBackground.opacity(0.28),
+                        Color.clear,
                     ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
+                startPoint: .top,
+                endPoint: .bottom
+            )
         }
         .frame(maxWidth: .infinity)
         .frame(height: style.height)

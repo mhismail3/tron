@@ -1,5 +1,28 @@
+import Observation
 import SwiftUI
 import UIKit
+
+@MainActor
+@Observable
+final class ChatComposerResponder {
+    @ObservationIgnored private weak var textView: UITextView?
+
+    var window: UIWindow? { textView?.window }
+
+    func attach(_ textView: UITextView) {
+        self.textView = textView
+    }
+
+    func detach(_ textView: UITextView) {
+        guard self.textView === textView else { return }
+        self.textView = nil
+    }
+
+    @discardableResult
+    func resignFirstResponder() -> Bool {
+        textView?.resignFirstResponder() ?? false
+    }
+}
 
 /// UIKit owns selection and the capped editor's internal scroll position. A
 /// vertical SwiftUI TextField can repeatedly relayout at its line cap and lose
@@ -8,6 +31,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
     var selection: Binding<NSRange>? = nil
+    var responder: ChatComposerResponder? = nil
     let isEditable: Bool
     let keyboardAppearance: UIKeyboardAppearance
     var maximumLines = 8
@@ -49,11 +73,14 @@ struct MultilineComposerTextView: UIViewRepresentable {
         view.accessibilityLabel = "Message input"
         context.coordinator.updateFont(on: view)
         context.coordinator.requestCaretReveal(on: view)
+        responder?.attach(view)
         return view
     }
 
     func updateUIView(_ view: LayoutAwareTextView, context: Context) {
+        context.coordinator.parent.responder?.detach(view)
         context.coordinator.parent = self
+        responder?.attach(view)
         let fontChanged = context.coordinator.updateFont(on: view)
         view.isEditable = isEditable
         view.isSelectable = isEditable
@@ -72,6 +99,13 @@ struct MultilineComposerTextView: UIViewRepresentable {
             context.coordinator.requestCaretReveal(on: view)
         }
         context.coordinator.reconcileFocus(on: view)
+    }
+
+    static func dismantleUIView(_ view: LayoutAwareTextView, coordinator: Coordinator) {
+        view.resignFirstResponder()
+        coordinator.parent.responder?.detach(view)
+        view.didLayout = nil
+        view.delegate = nil
     }
 
     /// SwiftUI may call representable measurement speculatively. Keep this
@@ -417,7 +451,7 @@ enum ChatComposerPolicy {
     }
 
     static func preservesFocus(submissionBehavior: String?) -> Bool {
-        submissionBehavior != nil
+        false
     }
 
     static func restoredDraft(outgoing: String, currentDraft: String) -> String {

@@ -1,0 +1,89 @@
+import Testing
+@testable import TronMobile
+
+@MainActor
+@Suite("Chat session presentation ownership")
+struct ChatSessionPresentationTests {
+    @Test("cold reopen creates clean disposable state and no replay ledger")
+    func coldReopen() {
+        let retired = ChatSessionPresentation(sessionID: "session-a")
+        retired.showContext = true
+        retired.showSettings = true
+        retired.showExtensionDetails = true
+        retired.extensionDetailsGroupID = "extension-a"
+        retired.modelPresentationGeneration = 7
+        retired.canonicalSubmissionHandoffs.formUnion(["prompt-a"])
+        retired.queueMutationCommandIsPending = true
+        retired.locallyMutatedQueueOperationIDs = ["operation-a"]
+
+        let reopened = ChatSessionPresentation(sessionID: "session-a")
+
+        #expect(reopened.open.phase == .opening)
+        #expect(reopened.modelPresentationGeneration == nil)
+        #expect(reopened.canonicalSubmissionHandoffs.ids.isEmpty)
+        #expect(!reopened.queueMutationCommandIsPending)
+        #expect(reopened.locallyMutatedQueueOperationIDs.isEmpty)
+        #expect(!reopened.showContext)
+        #expect(!reopened.showSettings)
+        #expect(!reopened.showExtensionDetails)
+        #expect(reopened.extensionDetailsGroupID == nil)
+    }
+
+    @Test("suspension abandons picker and import targets without changing presentation authority")
+    func suspension() {
+        let owner = ChatSessionPresentation(sessionID: "session-a")
+        owner.modelPresentationGeneration = 9
+        let epoch = owner.open.begin(retainingVisiblePresentation: true)
+        owner.attachmentDestination = .files
+        owner.queuedAttachmentDestination = .camera
+        owner.photoImportTarget = SessionPresentationIdentity(sessionID: "session-a", generation: 9)
+
+        owner.suspendForBackground()
+
+        #expect(owner.attachmentDestination == nil)
+        #expect(owner.queuedAttachmentDestination == nil)
+        #expect(owner.photoImportTarget == nil)
+        #expect(owner.modelPresentationGeneration == 9)
+        #expect(owner.open.epoch == epoch)
+        #expect(owner.open.phase == .ready)
+        #expect(!owner.needsOpeningResume)
+    }
+
+    @Test("foreground resumes an interrupted opening but not a passive ready session")
+    func foregroundResumePolicy() {
+        let inProgress = ChatSessionPresentation(sessionID: "session-a")
+        _ = inProgress.open.begin()
+        inProgress.suspendForBackground()
+        #expect(inProgress.open.phase == .opening)
+        #expect(inProgress.needsOpeningResume)
+
+        let passive = ChatSessionPresentation(sessionID: "session-b")
+        _ = passive.open.begin(retainingVisiblePresentation: true)
+        passive.suspendForBackground()
+        #expect(passive.open.phase == .ready)
+        #expect(!passive.needsOpeningResume)
+    }
+
+    @Test("background suspension cancels an unanchored page task")
+    func unanchoredPageCancellation() async throws {
+        let clock = ManualClock()
+        let owner = ChatSessionPresentation(sessionID: "session-a")
+        owner.startUnanchoredPrepend {
+            try? await clock.clock.sleep(.seconds(30))
+        }
+        try await clock.waitUntilSleeping(count: 1)
+
+        owner.suspendForBackground()
+        await Task.yield()
+
+        #expect(clock.activeSleeperCount() == 0)
+    }
+
+    @Test("canonical handoff ledger is bounded")
+    func boundedHandoffs() {
+        var ledger = BoundedChatIdentityLedger()
+        let count = ChatTranscriptPageRequest.maximumItemCount + 20
+        ledger.formUnion(Set((0..<count).map { "prompt-\($0)" }))
+        #expect(ledger.ids.count == ChatTranscriptPageRequest.maximumItemCount)
+    }
+}

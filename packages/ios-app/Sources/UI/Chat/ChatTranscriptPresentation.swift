@@ -1869,8 +1869,9 @@ struct ChatTranscriptItems: RandomAccessCollection, Hashable, Sendable {
         self.live = live
     }
 
-    /// Compatibility access for the few cold-path callers that need an Array.
-    /// Render and validation paths use the collection directly.
+    /// Materializes the canonical spine with sparse replacements for hashing,
+    /// projection comparison, and the bounded ledger; render paths use the
+    /// collection directly.
     var canonical: [ChatTranscriptRenderItem] {
         guard !canonicalOverrides.isEmpty else { return canonicalBase }
         var result = canonicalBase
@@ -2127,21 +2128,23 @@ struct ChatTranscriptTimeline: Hashable, Sendable {
     func appendingLive(_ live: ChatTranscriptTimeline) -> ChatTranscriptTimeline {
         precondition(live.items.canonicalCount == 0)
         let canonicalIDSet = canonicalRenderedIDSet
-        // A reconnect can briefly project the just-persisted assistant both as
-        // canonical history and as the retained live handoff. Canonical wins;
-        // never publish two SwiftUI rows with the same presentation identity.
-        let admitsLive = canonicalIDSet.isDisjoint(with: live.liveRenderedIDSet)
-        let admittedLiveItems = admitsLive ? live.items.live : []
-        let admittedLiveIDs = admitsLive ? live.renderedIDs.live : []
-        let liveIDSet = admitsLive ? live.liveRenderedIDSet : []
+        // Canonical rows win collisions individually. A single reconnect
+        // collision must not discard unrelated live activity rows.
+        let admittedLiveItems = live.items.live.filter { !canonicalIDSet.contains($0.id) }
+        let admittedLiveIDs = live.renderedIDs.live.filter { !canonicalIDSet.contains($0) }
+        let liveIDSet = Set(admittedLiveItems.map(\.id))
         let ids = renderedIDs.replacingLive(admittedLiveIDs)
         let preferred = ChatSemanticIndex(
             canonical: preferredSemanticIDByRenderedID.canonical,
-            live: admitsLive ? live.preferredSemanticIDByRenderedID.live : [:]
+            live: live.preferredSemanticIDByRenderedID.live.filter {
+                liveIDSet.contains($0.key)
+            }
         )
         let reverse = ChatSemanticIndex(
             canonical: renderedIDBySemanticID.canonical,
-            live: admitsLive ? live.renderedIDBySemanticID.live : [:]
+            live: live.renderedIDBySemanticID.live.filter {
+                liveIDSet.contains($0.value)
+            }
         )
         return ChatTranscriptTimeline(
             items: items.replacingLive(admittedLiveItems),
@@ -2254,12 +2257,8 @@ enum ChatTranscriptPresentation {
         ).timeline
     }
 
-    /// The compatibility wrapper delegates suffix construction to the sole
-    /// output-producing kernel.
-    static func isolatedStreamingTimeline(_ item: TranscriptItem) -> ChatTranscriptTimeline? {
-        ChatTranscriptProjectionKernel.isolatedStreamingTimeline(item)
-    }
-
+    /// Attachment extraction remains a pure presentation helper; the projection
+    /// kernel owns streaming suffix assembly.
     static func attachmentParts(in item: TranscriptItem) -> [ContentPart] {
         (item.content ?? []).filter { $0.type == .image || $0.attachment != nil }
     }

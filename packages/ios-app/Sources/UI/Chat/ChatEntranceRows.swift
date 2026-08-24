@@ -226,27 +226,29 @@ struct ChatQueuedMessageEntranceRow<Content: View>: View {
 struct ChatTranscriptRenderRow: View, Equatable {
     let item: ChatTranscriptRenderItem
     let preparedText: ChatTextPreparationSnapshot
-    let hiddenThinkingLabel: String?
     let installationTag: ChatTranscriptProjectionTag
-    let resolveToolDetails: ([String], ChatTranscriptProjectionTag) -> [ChatToolPresentation]?
+    let toolPayloadRevision: ChatToolPayloadRevision
+    let resolveToolDetails: ([String]) -> [ChatToolPresentation]?
+    let recordEvaluation: () -> Void
     let recordToolChip: (ToolChipInstrumentationSample) -> Void
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.item == rhs.item,
               lhs.preparedText.revision == rhs.preparedText.revision,
-              lhs.hiddenThinkingLabel == rhs.hiddenThinkingLabel else { return false }
+              lhs.preparedText.hiddenThinkingLabel
+                == rhs.preparedText.hiddenThinkingLabel else { return false }
         guard case .toolRun = lhs.item else { return true }
-        return lhs.installationTag == rhs.installationTag
+        return lhs.toolPayloadRevision == rhs.toolPayloadRevision
     }
 
     @ViewBuilder var body: some View {
+        let _ = recordEvaluation()
         switch item {
         case .transcript(let transcript):
             TranscriptRow(
                 item: transcript,
                 rendersToolCalls: false,
-                preparedText: preparedText,
-                hiddenThinkingLabel: hiddenThinkingLabel
+                preparedText: preparedText
             )
         case .message(let message):
             TranscriptRow(
@@ -255,14 +257,13 @@ struct ChatTranscriptRenderRow: View, Equatable {
                 rendersToolCalls: false,
                 projectedMessageParts: message.parts,
                 preparedText: preparedText,
-                showsMessageFooter: message.showsFooter,
-                hiddenThinkingLabel: hiddenThinkingLabel
+                showsMessageFooter: message.showsFooter
             )
         case .toolRun(let run):
             ToolRunView(
                 run: run,
                 installationTag: installationTag,
-                resolveDetails: resolveToolDetails,
+                resolveDetails: { callIDs, _ in resolveToolDetails(callIDs) },
                 recordChip: recordToolChip
             )
             .frame(maxWidth: .infinity, alignment: .leading)

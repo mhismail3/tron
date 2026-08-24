@@ -34,7 +34,8 @@ struct ChatTranscriptPresentationStoreTests {
             textRevision: 1,
             outgoingText: "first",
             attachmentIDs: ["attachment"],
-            behavior: "steer"
+            behavior: "steer",
+            localNonce: 1
         )
         let attachment = PendingAttachment(
             id: "attachment",
@@ -63,7 +64,8 @@ struct ChatTranscriptPresentationStoreTests {
                     textRevision: 2,
                     outgoingText: "second",
                     attachmentIDs: ["attachment"],
-                    behavior: "steer"
+                    behavior: "steer",
+                    localNonce: 2
                 ),
                 transportActive: true
             ),
@@ -93,7 +95,8 @@ struct ChatTranscriptPresentationStoreTests {
         let snapshot = try SessionScenarioBuilder(seed: 1_207).openingTail(targetEncodedBytes: 8_000)
         let target = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: 1)
         let submission = ComposerSubmissionSnapshot(
-            target: target, textRevision: 1, outgoingText: "photo", attachmentIDs: ["attachment"], behavior: nil
+            target: target, textRevision: 1, outgoingText: "photo", attachmentIDs: ["attachment"],
+            behavior: nil, localNonce: 1
         )
         let preview = Data([1, 2, 3])
         let first = PendingAttachment(
@@ -135,7 +138,8 @@ struct ChatTranscriptPresentationStoreTests {
             let snapshot = try SessionScenarioBuilder(seed: 1_206).openingTail(targetEncodedBytes: 8_000)
             let target = SessionPresentationIdentity(sessionID: snapshot.sessionId, generation: 1)
             let submission = ComposerSubmissionSnapshot(
-                target: target, textRevision: 1, outgoingText: "pending", attachmentIDs: [], behavior: nil
+                target: target, textRevision: 1, outgoingText: "pending", attachmentIDs: [],
+                behavior: nil, localNonce: 1
             )
             let handoff = ChatTranscriptHandoffCommit.outgoing(
                 presentation: ChatOutgoingSubmissionPresentation(snapshot: submission, transportActive: true),
@@ -181,7 +185,8 @@ struct ChatTranscriptPresentationStoreTests {
                 textRevision: 1,
                 outgoingText: "steer now",
                 attachmentIDs: [],
-                behavior: "steer"
+                behavior: "steer",
+                localNonce: 1
             )
             let handoff = ChatTranscriptHandoffCommit.outgoing(
                 presentation: .init(snapshot: submission, transportActive: true),
@@ -234,7 +239,8 @@ struct ChatTranscriptPresentationStoreTests {
                 textRevision: 1,
                 outgoingText: "race-safe",
                 attachmentIDs: [],
-                behavior: "steer"
+                behavior: "steer",
+                localNonce: 1
             )
             let handoff = ChatTranscriptHandoffCommit.outgoing(
                 presentation: .init(snapshot: submission, transportActive: true),
@@ -994,6 +1000,66 @@ struct ChatTranscriptPresentationStoreTests {
             #expect(installed.timeline.items.canonical.count == cold.items.count - 1)
             #expect(installed.timeline.items.live.count == 1)
             #expect(signposts.events().filter { $0 == .begin(.chatProjection) }.count == 31)
+        }
+    }
+
+    @Test("hidden thinking label changes rebuild row preparation in the same scope")
+    func hiddenThinkingLabelUpdatesRebuildPreparation() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_212)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.phase = .idle
+            snapshot.extensionPresentation.semanticState.hiddenThinkingLabel = "Reasoning"
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 12)
+            store.submit(snapshot: snapshot, tag: tag)
+            _ = try await store.waitForInstall(of: tag)
+
+            snapshot.extensionPresentation.semanticState.hiddenThinkingLabel = "Thoughts"
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 12)
+            store.submit(snapshot: snapshot, tag: tag)
+            let updated = try await store.waitForInstall(of: tag)
+            #expect(updated.preparedTextByRenderedID.values.contains { $0.hiddenThinkingLabel == "Thoughts" })
+        }
+    }
+
+    @Test("cached projection mode changes rebuild running-tool normalization in the same scope")
+    func cachedProjectionModeRebuildsRunningTools() async throws {
+        try await withTestWatchdog { @MainActor in
+            var snapshot = try SessionScenarioBuilder(seed: 1_216)
+                .openingTail(targetEncodedBytes: 8_000)
+            snapshot.phase = .idle
+            snapshot.transcript = [try decodeTranscriptFixture(
+                TranscriptItem.self,
+                from: Data("""
+                {"id":"assistant-tool","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"call","ordinal":0,"type":"toolCall","toolCallId":"runtime-tool","name":"read","arguments":{}}]}
+                """.utf8)
+            )]
+            snapshot.transcriptStart = 0
+            snapshot.transcriptTotal = 1
+            snapshot.toolExecutions = [storeRuntimeTool(output: "working", progressSequence: 1)]
+            snapshot.isCachedProjection = false
+            let store = ChatTranscriptPresentationStore()
+            var tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 13)
+            store.submit(snapshot: snapshot, tag: tag)
+            let active = try await store.waitForInstall(of: tag)
+            let interrupted = try #require(active.timeline.items.compactMap { item -> ChatToolDescriptor? in
+                guard case .toolRun(let run) = item else { return nil }
+                return run.tools.first
+            }.first)
+            #expect(interrupted.subtitle == "Interrupted")
+
+            snapshot.isCachedProjection = true
+            snapshot.eventSequence += 1
+            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 13)
+            store.submit(snapshot: snapshot, tag: tag)
+            let cached = try await store.waitForInstall(of: tag)
+            let preserved = try #require(cached.timeline.items.compactMap { item -> ChatToolDescriptor? in
+                guard case .toolRun(let run) = item else { return nil }
+                return run.tools.first
+            }.first)
+            #expect(preserved.subtitle == "Running")
         }
     }
 

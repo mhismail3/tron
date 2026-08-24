@@ -426,16 +426,6 @@ final class AppModel {
         sessionPresentation.transcriptSnapshot(for: sessionID)
     }
 
-    func visibleTranscript(for sessionID: String) -> [TranscriptItem] {
-        guard sessionPresentation.authoritativeSnapshot(for: sessionID) != nil else { return [] }
-        return sessionPresentation.visibleTranscript
-    }
-
-    func visibleTranscriptCoverage(for sessionID: String) -> MountedTranscriptCoverage? {
-        guard sessionPresentation.authoritativeSnapshot(for: sessionID) != nil else { return nil }
-        return sessionPresentation.mountedTranscriptCoverage
-    }
-
     func chatMediaIdentity(blobID: String) -> ChatMediaIdentity? {
         guard let admission = lifecycle.generationAdmission,
               let profileID = lifecycle.selectedProfileID else { return nil }

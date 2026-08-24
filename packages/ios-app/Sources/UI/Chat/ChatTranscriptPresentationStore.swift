@@ -15,6 +15,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
         let queuedMessages: [SessionSnapshot.QueuedMessage]
         let runtimeItems: [ChatTranscriptRenderItem]
         let hiddenThinkingLabel: String?
+        let isCachedProjection: Bool
         let queueManagementCapability: Bool
 
         init(
@@ -31,6 +32,7 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
             queuedMessages = snapshot.displayedQueuedMessages
             runtimeItems = ChatTranscriptProjectionKernel.runtimeItems(in: snapshot)
             self.hiddenThinkingLabel = hiddenThinkingLabel
+            isCachedProjection = snapshot.isCachedProjection == true
             self.queueManagementCapability = queueManagementCapability
         }
     }
@@ -270,10 +272,11 @@ struct InstalledChatTranscript: Hashable, Sendable {
 
     let tag: ChatTranscriptProjectionTag
     let handoff: ChatTranscriptHandoffCommit
-    let hiddenThinkingLabel: String?
     let timeline: ChatTranscriptTimeline
     let toolPayloads: ChatToolPayloadIndex
     let runtimeItems: [ChatTranscriptRenderItem]
+    let committedLedger: ChatCommittedLedger
+    let liveRegion: ChatLiveRegion
     let preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
     let queuedMessages: [SessionSnapshot.QueuedMessage]
     let queuePresentationIDByOperationID: [String: String]
@@ -287,7 +290,6 @@ struct InstalledChatTranscript: Hashable, Sendable {
     init(
         tag: ChatTranscriptProjectionTag,
         handoff: ChatTranscriptHandoffCommit = .none,
-        hiddenThinkingLabel: String? = nil,
         timeline: ChatTranscriptTimeline,
         toolPayloads: ChatToolPayloadIndex = .init(),
         runtimeItems: [ChatTranscriptRenderItem],
@@ -296,14 +298,26 @@ struct InstalledChatTranscript: Hashable, Sendable {
         queuePresentationIDByOperationID: [String: String] = [:],
         queueRevision: Int? = nil,
         supportsQueueManagement: Bool = false,
-        sourceWindow: SourceWindow
+        sourceWindow: SourceWindow,
+        committedLedgerRevision: UInt64 = 1
     ) {
         self.tag = tag
-        self.handoff = handoff.frozenForHandoff()
-        self.hiddenThinkingLabel = hiddenThinkingLabel ?? tag.hiddenThinkingLabel
+        let frozenHandoff = handoff.frozenForHandoff()
+        self.handoff = frozenHandoff
         self.timeline = timeline
         self.toolPayloads = toolPayloads
         self.runtimeItems = runtimeItems
+        committedLedger = ChatCommittedLedger(
+            items: timeline.items.canonical,
+            revision: committedLedgerRevision
+        )
+        liveRegion = ChatLiveRegion(
+            timelineItems: timeline.items.live,
+            runtimeItems: runtimeItems,
+            handoff: frozenHandoff,
+            queuedMessages: queuedMessages,
+            queuePresentationIDByOperationID: queuePresentationIDByOperationID
+        )
         self.preparedTextByRenderedID = preparedTextByRenderedID
         self.queuedMessages = queuedMessages
         self.queuePresentationIDByOperationID = queuePresentationIDByOperationID
@@ -331,7 +345,6 @@ struct InstalledChatTranscript: Hashable, Sendable {
         Self(
             tag: tag,
             handoff: handoff,
-            hiddenThinkingLabel: hiddenThinkingLabel,
             timeline: timeline,
             toolPayloads: toolPayloads,
             runtimeItems: runtimeItems,
@@ -340,7 +353,31 @@ struct InstalledChatTranscript: Hashable, Sendable {
             queuePresentationIDByOperationID: queuePresentationIDByOperationID,
             queueRevision: queueRevision,
             supportsQueueManagement: supportsQueueManagement,
-            sourceWindow: sourceWindow
+            sourceWindow: sourceWindow,
+            committedLedgerRevision: committedLedger.revision
+        )
+    }
+
+    func reconcilingProjectionLineage(previous: InstalledChatTranscript?) -> Self {
+        let compatiblePrevious = previous?.tag.sessionID == tag.sessionID ? previous : nil
+        let ledger = ChatCommittedLedger.reconcile(
+            items: committedLedger.items,
+            previous: compatiblePrevious?.committedLedger
+        )
+        guard ledger.revision != committedLedger.revision else { return self }
+        return Self(
+            tag: tag,
+            handoff: handoff,
+            timeline: timeline,
+            toolPayloads: toolPayloads,
+            runtimeItems: runtimeItems,
+            preparedTextByRenderedID: preparedTextByRenderedID,
+            queuedMessages: queuedMessages,
+            queuePresentationIDByOperationID: queuePresentationIDByOperationID,
+            queueRevision: queueRevision,
+            supportsQueueManagement: supportsQueueManagement,
+            sourceWindow: sourceWindow,
+            committedLedgerRevision: ledger.revision
         )
     }
 
@@ -366,8 +403,20 @@ struct InstalledChatTranscript: Hashable, Sendable {
         callIDs: [String],
         installationTag: ChatTranscriptProjectionTag
     ) -> [ChatToolPresentation]? {
-        guard installationTag == tag,
-              !callIDs.isEmpty,
+        guard installationTag == tag else { return nil }
+        return resolveToolDetails(callIDs: callIDs)
+    }
+
+    func toolPayloadRevision(for item: ChatTranscriptRenderItem) -> ChatToolPayloadRevision {
+        guard case .toolRun(let run) = item else { return .empty }
+        return ChatToolPayloadRevision(
+            callIDs: run.tools.map(\.id),
+            payloads: toolPayloads
+        )
+    }
+
+    func resolveToolDetails(callIDs: [String]) -> [ChatToolPresentation]? {
+        guard !callIDs.isEmpty,
               Set(callIDs).count == callIDs.count,
               let toolDescriptorByID else { return nil }
         var resolved: [ChatToolPresentation] = []
@@ -394,18 +443,21 @@ struct InstalledChatTranscript: Hashable, Sendable {
         InstalledChatTranscript(
             tag: tag,
             handoff: handoff,
-            hiddenThinkingLabel: hiddenThinkingLabel,
             timeline: timeline,
             toolPayloads: toolPayloads,
             runtimeItems: runtimeItems,
-            preparedTextByRenderedID: Dictionary(
-                uniqueKeysWithValues: timeline.ids.map { ($0, ChatTextPreparationSnapshot.empty) }
-            ),
+            preparedTextByRenderedID: Dictionary(uniqueKeysWithValues: timeline.items.map { item in
+                let emptyPreparation = ChatTextPreparationSnapshot.empty
+                    .withHiddenThinkingLabel(tag.hiddenThinkingLabel)
+                    .slice(for: item)
+                return (item.id, emptyPreparation)
+            }),
             queuedMessages: queuedMessages,
             queuePresentationIDByOperationID: queuePresentationIDByOperationID,
             queueRevision: queueRevision,
             supportsQueueManagement: supportsQueueManagement,
-            sourceWindow: sourceWindow
+            sourceWindow: sourceWindow,
+            committedLedgerRevision: committedLedger.revision
         )
     }
 
@@ -541,7 +593,6 @@ typealias ChatTranscriptProjectionWorkGate = @Sendable (ChatTranscriptProjection
 
 private struct BuiltChatTranscript: Sendable {
     let handoff: ChatTranscriptHandoffCommit
-    let hiddenThinkingLabel: String?
     let timeline: ChatTranscriptTimeline
     let toolPayloads: ChatToolPayloadIndex
     let preparedTextByRenderedID: [String: ChatTextPreparationSnapshot]
@@ -586,12 +637,16 @@ private actor ChatTranscriptProjectionWorker {
         let phase: SessionPhase
         let streaming: TranscriptItem?
         let toolExecutions: [ToolExecutionState]
+        let hiddenThinkingLabel: String?
+        let isCachedProjection: Bool
 
         init(tag: ChatTranscriptProjectionTag, snapshot: SessionSnapshot) {
             canonical = CanonicalKey(tag: tag)
             phase = snapshot.phase
             streaming = snapshot.streaming
             toolExecutions = snapshot.toolExecutions
+            hiddenThinkingLabel = tag.hiddenThinkingLabel
+            isCachedProjection = snapshot.isCachedProjection == true
         }
     }
 
@@ -656,13 +711,19 @@ private actor ChatTranscriptProjectionWorker {
         textPreparationScope = nil
         await textPreparationCache.removeAll()
         if let basis {
+            let emptyPreparation = ChatTextPreparationSnapshot.empty.withHiddenThinkingLabel(
+                basis.preparedText.hiddenThinkingLabel
+            )
+            let slices = Dictionary(uniqueKeysWithValues: basis.candidate.timeline.items.map {
+                ($0.id, emptyPreparation.slice(for: $0))
+            })
             self.basis = Basis(
                 scope: basis.scope,
                 projectionKey: basis.projectionKey,
                 canonicalKey: basis.canonicalKey,
                 candidate: basis.candidate,
-                preparedText: .empty,
-                preparedTextByRenderedID: [:]
+                preparedText: emptyPreparation,
+                preparedTextByRenderedID: slices
             )
         }
     }
@@ -692,7 +753,6 @@ private actor ChatTranscriptProjectionWorker {
         if let basis, basis.scope == scope, basis.projectionKey == projectionKey {
             return BuiltChatTranscript(
                 handoff: handoff,
-                hiddenThinkingLabel: tag.hiddenThinkingLabel,
                 timeline: basis.candidate.timeline,
                 toolPayloads: basis.candidate.toolPayloads,
                 preparedTextByRenderedID: basis.preparedTextByRenderedID,
@@ -709,7 +769,8 @@ private actor ChatTranscriptProjectionWorker {
             candidate = ChatTranscriptProjectionKernel.incremental(
                 snapshot: snapshot,
                 previous: basis.candidate,
-                canonicalSourceUnchanged: basis.canonicalKey == canonicalKey,
+                canonicalSourceUnchanged: basis.canonicalKey == canonicalKey
+                    && basis.projectionKey.isCachedProjection == projectionKey.isCachedProjection,
                 performanceSignposts: performanceSignposts,
                 workRecorder: workRecorder
             )
@@ -729,7 +790,7 @@ private actor ChatTranscriptProjectionWorker {
         guard !Task.isCancelled else { return nil }
         let preparedText: ChatTextPreparationSnapshot
         if admittedTextPreparationGeneration == textPreparationGeneration {
-            preparedText = prepared
+            preparedText = prepared.withHiddenThinkingLabel(tag.hiddenThinkingLabel)
         } else {
             preparedText = .empty
             await textPreparationCache.removeAll()
@@ -753,7 +814,6 @@ private actor ChatTranscriptProjectionWorker {
         }
         return BuiltChatTranscript(
             handoff: handoff,
-            hiddenThinkingLabel: tag.hiddenThinkingLabel,
             timeline: candidate.timeline,
             toolPayloads: candidate.toolPayloads,
             preparedTextByRenderedID: slices,
@@ -893,8 +953,8 @@ final class ChatTranscriptPresentationStore {
                 queuePresentationIDByOperationID: queuePresentationIDByOperationID
             )
             guard replacement.hasUniqueDisplayedIDs else { return false }
-            install(replacement)
-            resumeWaiters(with: replacement)
+            let installedReplacement = install(replacement)
+            resumeWaiters(with: installedReplacement)
             failWaiters(except: tag, error: .superseded)
             #if HOSTED_TEST
             failHostedCompletionWaiters(except: tag, error: .superseded)
@@ -956,8 +1016,8 @@ final class ChatTranscriptPresentationStore {
         )
         guard replacement.hasUniqueDisplayedIDs else { return false }
         desiredTag = tag
-        install(replacement)
-        resumeWaiters(with: replacement)
+        let installedReplacement = install(replacement)
+        resumeWaiters(with: installedReplacement)
         failWaiters(except: tag, error: .superseded)
         #if HOSTED_TEST
         failHostedCompletionWaiters(except: tag, error: .superseded)
@@ -1146,7 +1206,6 @@ final class ChatTranscriptPresentationStore {
                 let output = InstalledChatTranscript(
                     tag: next.tag,
                     handoff: built.handoff,
-                    hiddenThinkingLabel: built.hiddenThinkingLabel,
                     timeline: built.timeline,
                     toolPayloads: built.toolPayloads,
                     runtimeItems: runtimeItems,
@@ -1190,8 +1249,8 @@ final class ChatTranscriptPresentationStore {
         resumeHostedCompletionWaiters(for: output.tag)
         #endif
         guard installationFrameScheduler != nil else {
-            install(output)
-            resumeWaiters(with: output)
+            let installedOutput = install(output)
+            resumeWaiters(with: installedOutput)
             return
         }
         readyToInstall = output
@@ -1216,11 +1275,13 @@ final class ChatTranscriptPresentationStore {
         readyToInstall = nil
         installFrameTask = nil
         guard let output, desiredTag == output.tag else { return }
-        install(output)
-        resumeWaiters(with: output)
+        let installedOutput = install(output)
+        resumeWaiters(with: installedOutput)
     }
 
-    private func install(_ output: InstalledChatTranscript) {
+    @discardableResult
+    private func install(_ candidate: InstalledChatTranscript) -> InstalledChatTranscript {
+        let output = candidate.reconcilingProjectionLineage(previous: installed)
         let suppressEntrances = output.tag.entranceSuppressionGeneration.map { generation in
             generation > (consumedEntranceSuppressionGeneration ?? -1)
         } ?? false
@@ -1236,6 +1297,7 @@ final class ChatTranscriptPresentationStore {
         appendPendingEntrances(inserted, output: output)
         recordDisplayedSemanticIDs(from: output)
         installed = output
+        return output
     }
 
     private func synchronizeEntranceBookkeeping(with output: InstalledChatTranscript) {

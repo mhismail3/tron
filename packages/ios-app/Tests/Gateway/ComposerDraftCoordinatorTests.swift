@@ -1509,6 +1509,85 @@ struct ComposerDraftCoordinatorTests {
         }
     }
 
+    @Test("derived submission lifecycle stages, transports, and canonically reconciles")
+    func derivedSubmissionLifecycle() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "lifecycle", generation: 70)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile",
+                target: target,
+                lifecycleGeneration: 1,
+                initialText: "hello"
+            )
+            let submission = try harness.coordinator.beginSubmission(target: target, behavior: nil)
+            #expect(harness.coordinator.submissionLifecycle(for: target).phase == .staged)
+            #expect(harness.coordinator.submissionLifecycle(for: target).id == submission.presentationID)
+
+            let transport = Task { try await harness.coordinator.transmitSubmission(submission) }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .success(()))
+            try await valueOfOwnedTask(transport)
+            #expect(harness.coordinator.submissionLifecycle(for: target).phase == .transported)
+
+            harness.coordinator.reconcileSubmission(
+                target: target,
+                canonicalTranscript: [canonicalUser(id: "canonical", text: "hello")]
+            )
+            #expect(harness.coordinator.submissionLifecycle(for: target).phase == .canonical("canonical"))
+            #expect(harness.coordinator.consumeCanonicalSubmissionHandoff(target: target) != nil)
+            #expect(harness.coordinator.submissionLifecycle(for: target) == .idle)
+        }
+    }
+
+    @Test("identical sends have distinct lifecycle identities")
+    func identicalSubmissionIdentity() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "identity", generation: 71)
+            let scope = harness.coordinator.installHostedPresentation(
+                profileID: "profile",
+                target: target,
+                lifecycleGeneration: 1,
+                initialText: "same"
+            )
+            let first = try harness.coordinator.beginSubmission(target: target, behavior: nil)
+            let failed = Task { try await harness.coordinator.transmitSubmission(first) }
+            try await harness.waitForSends(1)
+            harness.completeSend(index: 0, result: .failure(ComposerSyntheticError.current))
+            await #expect(throws: ComposerSyntheticError.self) {
+                try await valueOfOwnedTask(failed)
+            }
+            harness.coordinator.setText("same", for: scope)
+            let second = try harness.coordinator.beginSubmission(target: target, behavior: nil)
+            #expect(first.presentationID != second.presentationID)
+        }
+    }
+
+    @Test("presentation revocation retires lifecycle and stale transport")
+    func lifecycleRevocation() async throws {
+        try await withTestWatchdog { @MainActor in
+            let harness = ComposerHarness()
+            let target = SessionPresentationIdentity(sessionID: "revoked", generation: 72)
+            _ = harness.coordinator.installHostedPresentation(
+                profileID: "profile",
+                target: target,
+                lifecycleGeneration: 1,
+                initialText: "message"
+            )
+            let submission = try harness.coordinator.beginSubmission(target: target, behavior: nil)
+            let transport = Task { try await harness.coordinator.transmitSubmission(submission) }
+            try await harness.waitForSends(1)
+            harness.coordinator.revoke(target)
+            #expect(harness.coordinator.submissionLifecycle(for: target) == .idle)
+            harness.completeSend(index: 0, result: .success(()))
+            await #expect(throws: CancellationError.self) {
+                try await valueOfOwnedTask(transport)
+            }
+            #expect(harness.coordinator.submissionLifecycle(for: target) == .idle)
+        }
+    }
+
     @Test("AppModel composer façade observes nested owner changes")
     func nestedObservation() {
         let model = AppModel()
@@ -1524,6 +1603,45 @@ struct ComposerDraftCoordinatorTests {
         model.composerDrafts.setText("after", for: scope)
         #expect(changed.withLock { $0 })
         #expect(model.composerDrafts.text(for: scope) == "after")
+    }
+
+    private func canonicalUser(id: String, text: String) -> TranscriptItem {
+        .message(MessageTranscriptItem(
+            id: id,
+            parentId: nil,
+            timestamp: "2026-01-01T00:00:00Z",
+            kind: .message,
+            role: .user,
+            presentationId: id,
+            content: [ContentPart(
+                id: "text",
+                ordinal: 0,
+                thinkingRunOrdinal: nil,
+                type: .text,
+                text: text,
+                attachment: nil,
+                redacted: nil,
+                mimeType: nil,
+                blobId: nil,
+                toolCallId: nil,
+                name: nil,
+                arguments: nil
+            )],
+            provider: nil,
+            modelId: nil,
+            stopReason: nil,
+            errorMessage: nil,
+            toolCallId: nil,
+            toolName: nil,
+            isError: nil,
+            details: nil,
+            usage: nil,
+            startedAt: nil,
+            completedAt: nil,
+            durationMs: nil,
+            lastProgressAt: nil,
+            progressSequence: nil
+        ))
     }
 
     private func request(

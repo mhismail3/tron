@@ -101,15 +101,20 @@ struct CanonicalSubmissionHandoffReceipt: Equatable, Sendable {
     let attachments: [PendingAttachment]
     /// Present only when this receipt descends from a Gateway queue operation.
     let operationID: String?
+    /// Presentation identity retained only until this one canonical replacement
+    /// is installed. It never substitutes for the canonical transcript ID.
+    let submission: ComposerSubmissionSnapshot?
 
     init(
         canonicalID: String,
         attachments: [PendingAttachment],
-        operationID: String? = nil
+        operationID: String? = nil,
+        submission: ComposerSubmissionSnapshot? = nil
     ) {
         self.canonicalID = canonicalID
         self.attachments = attachments
         self.operationID = operationID
+        self.submission = submission
     }
 }
 
@@ -159,7 +164,7 @@ enum ComposerAttachmentPolicy {
 struct ComposerSubmissionSnapshot: Equatable, Sendable {
     let target: SessionPresentationIdentity
     let textRevision: Int
-    let localNonce: UInt64?
+    let localNonce: UInt64
     /// User-visible text. Skill transport metadata is deliberately separate so
     /// optimistic, queued, and canonical presentation never expose `/skill:`.
     let outgoingText: String
@@ -176,7 +181,7 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
         attachmentIDs: [String],
         behavior: String?,
         baselineQueuedMessageIDs: Set<String> = [],
-        localNonce: UInt64? = nil
+        localNonce: UInt64
     ) {
         self.target = target
         self.textRevision = textRevision
@@ -189,12 +194,28 @@ struct ComposerSubmissionSnapshot: Equatable, Sendable {
     }
 
     /// Stable only for the owning presentation and admitted submission. This
-    /// is a presentation identity, never a transcript/event ID. Test fixtures
-    /// may omit the nonce and retain the historical deterministic identity.
+    /// is a presentation identity, never a transcript/event ID.
     var presentationID: String {
-        let suffix = localNonce.map(String.init) ?? String(textRevision)
-        return "outgoing-submission:\(target.sessionID):\(target.generation):\(suffix)"
+        "outgoing-submission:\(target.sessionID):\(target.generation):\(localNonce)"
     }
+}
+
+struct ChatSubmissionLifecycle: Equatable, Sendable {
+    enum Phase: Equatable, Sendable {
+        case idle
+        case staged
+        case committed
+        case transported
+        case canonical(String)
+    }
+
+    let phase: Phase
+    let submission: ComposerSubmissionSnapshot?
+    let attachments: [PendingAttachment]
+
+    static let idle = Self(phase: .idle, submission: nil, attachments: [])
+
+    var id: String? { submission?.presentationID }
 }
 
 typealias ComposerUploadOperation = @MainActor @Sendable (
@@ -614,6 +635,39 @@ final class ComposerDraftCoordinator {
 
     func hasPendingSubmission(target: SessionPresentationIdentity) -> Bool {
         outgoingSubmission(for: target) != nil
+    }
+
+    /// One derived presentation read over the existing admission facts. Views
+    /// use this value instead of racing transport, queue, and canonical queries.
+    /// Canonical identity remains authoritative and is exposed only after the
+    /// exact reconciliation receipt has been created.
+    func submissionLifecycle(for target: SessionPresentationIdentity) -> ChatSubmissionLifecycle {
+        guard admits(target) else { return .idle }
+        if let admission = submissionByTarget[target] {
+            let phase: ChatSubmissionLifecycle.Phase
+            if let canonicalID = admission.canonicalHandoffID {
+                phase = .canonical(canonicalID)
+            } else if admission.transportState == .accepted {
+                phase = .transported
+            } else if admission.operationID != nil {
+                phase = .committed
+            } else {
+                phase = .staged
+            }
+            return ChatSubmissionLifecycle(
+                phase: phase,
+                submission: admission.snapshot,
+                attachments: admission.submittedAttachments.map { $0.frozenForHandoff() }
+            )
+        }
+        if let receipt = canonicalHandoffReceipts[target], let submission = receipt.submission {
+            return ChatSubmissionLifecycle(
+                phase: .canonical(receipt.canonicalID),
+                submission: submission,
+                attachments: receipt.attachments
+            )
+        }
+        return .idle
     }
 
     /// Returns the optimistic identity only for the exact accepted operation or
@@ -1222,7 +1276,8 @@ final class ComposerDraftCoordinator {
             canonicalHandoffReceipts[target] = CanonicalSubmissionHandoffReceipt(
                 canonicalID: canonicalHandoffID,
                 attachments: current.submittedAttachments.map { $0.frozenForHandoff() },
-                operationID: current.snapshot.behavior == nil ? nil : current.operationID
+                operationID: current.snapshot.behavior == nil ? nil : current.operationID,
+                submission: current.snapshot
             )
         }
         if !current.transcriptObserved,
@@ -1271,7 +1326,8 @@ final class ComposerDraftCoordinator {
                 canonicalHandoffReceipts[target] = CanonicalSubmissionHandoffReceipt(
                     canonicalID: matches[0].id,
                     attachments: handoff.submittedAttachments,
-                    operationID: handoff.operationID
+                    operationID: handoff.operationID,
+                    submission: handoff.snapshot
                 )
                 settledQueueHandoffs[target] = nil
             }

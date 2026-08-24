@@ -6,31 +6,50 @@ import UIKit
 @MainActor
 @Suite("Hosted ChatView scroll harness", .serialized)
 struct ChatViewScrollHarnessTests {
-    @Test("aggregate composer height animates structural identities but not multiline measurement")
-    func composerStructuralRetargetPolicy() {
-        let base = ChatComposerStructuralIdentity(
-            extensionOwnerIDs: [], attachmentIDs: [], selectedSkillID: nil,
-            pickerKind: nil, pickerVisibleRows: 0, submissionPending: false
-        )
-        let picker = ChatComposerStructuralIdentity(
-            extensionOwnerIDs: [], attachmentIDs: [], selectedSkillID: nil,
-            pickerKind: .command, pickerVisibleRows: 5, submissionPending: false
-        )
-        #expect(!ChatComposerStructuralTransitionPolicy.isStructuralRetarget(
-            previous: nil,
-            current: .init(identity: base, height: 60)
+    @Test("composer height changes are atomic and coalesced")
+    func composerLayoutGenerationPolicy() {
+        #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: nil,
+            measured: 44
         ))
-        let multilineRetarget = ChatComposerStructuralTransitionPolicy.isStructuralRetarget(
-            previous: .init(identity: base, height: 60),
-            current: .init(identity: base, height: 84)
-        )
-        #expect(multilineRetarget == false)
-        #expect(ChatComposerStructuralTransitionPolicy.isStructuralRetarget(
-            previous: .init(identity: base, height: 60),
-            current: .init(identity: picker, height: 320)
+        #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: 44,
+            measured: 88
         ))
-        #expect(ChatComposerStructuralTransitionPolicy.animation(reduceMotion: true) == nil)
-        #expect(ChatComposerStructuralTransitionPolicy.animation(reduceMotion: false) != nil)
+        #expect(!ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: 44,
+            measured: 44.2
+        ))
+        #expect(!ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: 44,
+            measured: .infinity
+        ))
+    }
+
+    @Test("multiline composer growth does not reevaluate installed history")
+    func multilineComposerGrowthKeepsHistoryStable() async throws {
+        try await withTestWatchdog(timeout: .seconds(10)) {
+            try await withHarness(seed: 101) { harness in
+                let ready = try await harness.recorder.waitUntil {
+                    $0.observation.readyFrameCompletionCount == 1
+                }
+                let evaluationBaseline = ready.observation.committedHistoryRowEvaluationCount
+                let installBaseline = ready.observation.projectionInstallCount
+                let remountBaseline = ready.observation.remountedWhileSemanticIDDisplayed
+                let commandBaseline = ready.observation.automaticScrollCommandCount
+                let semanticBaseline = ready.observation.semanticFrameCallbackCount
+
+                try harness.setComposerText(String(repeating: "stable transcript ", count: 18))
+                let grown = try await harness.recorder.waitUntil {
+                    $0.observation.semanticFrameCallbackCount > semanticBaseline
+                }
+
+                #expect(grown.observation.committedHistoryRowEvaluationCount == evaluationBaseline)
+                #expect(grown.observation.projectionInstallCount == installBaseline)
+                #expect(grown.observation.remountedWhileSemanticIDDisplayed == remountBaseline)
+                #expect(grown.observation.automaticScrollCommandCount == commandBaseline)
+            }
+        }
     }
 
     @Test("hosted aggregate counters and retained row frames are bounded")
@@ -204,7 +223,7 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("actual ChatView executor emits one automatic command per frame and none while detached")
+    @Test("actual ChatView emits no growth offset writes while pinned or detached")
     func drivenCoordinatorExecutor() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 107) { harness in
@@ -226,9 +245,7 @@ struct ChatViewScrollHarnessTests {
                 harness.driveGeometry(previous: bottom, current: firstGrowth)
                 harness.driveGeometry(previous: firstGrowth, current: secondGrowth)
                 try await harness.driveFrameBoundary()
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.automaticScrollCommandCount == baseline + 1
-                }
+                #expect(harness.probeObservation.automaticScrollCommandCount == baseline)
 
                 harness.drivePhase(from: .idle, to: .interacting, geometry: bottom)
                 harness.driveNativeOwnership(true)
@@ -241,7 +258,6 @@ struct ChatViewScrollHarnessTests {
                 #expect(harness.probeObservation.isDetached)
                 #expect(harness.probeObservation.hasUnread)
                 let commandsBeforeDetachedGrowth = harness.probeObservation.scrollCommandCount
-                harness.driveComposerViewportTransition()
                 harness.driveGeometry(
                     previous: away,
                     current: ChatTranscriptGeometry(
@@ -321,8 +337,8 @@ struct ChatViewScrollHarnessTests {
         }
     }
 
-    @Test("actual ChatView executor corrects a pinned viewport beyond shortened content once")
-    func pinnedOvershootCorrectsOnce() async throws {
+    @Test("actual ChatView keeps pinned overshoot native without app writes")
+    func pinnedOvershootNeedsNoAppWrite() async throws {
         try await withTestWatchdog(timeout: .seconds(10)) {
             try await withHarness(seed: 1_194) { harness in
                 _ = try await harness.recorder.waitUntil {
@@ -340,10 +356,8 @@ struct ChatViewScrollHarnessTests {
                 #expect(overshoot.isPastBottomEdge)
                 harness.driveGeometry(previous: bottom, current: overshoot)
                 try await harness.driveFrameBoundary()
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.automaticScrollCommandCount == baseline + 1
-                }
-                #expect(harness.probeObservation.automaticScrollCommandCount == baseline + 1)
+                try await Task.sleep(for: .milliseconds(100))
+                #expect(harness.probeObservation.automaticScrollCommandCount == baseline)
             }
         }
     }
@@ -541,6 +555,8 @@ struct ChatViewScrollHarnessTests {
                     harness.probeObservation.installedProjectionSourceOrdinal
                 )
                 let initialProjectionInstalls = harness.probeObservation.projectionInstallCount
+                let committedEvaluationBaseline =
+                    harness.probeObservation.committedHistoryRowEvaluationCount
                 for offset in 1...30 {
                     newest.revision += 1
                     newest.eventSequence = initialSequence + offset
@@ -548,7 +564,6 @@ struct ChatViewScrollHarnessTests {
                     harness.replaceAuthoritativeSnapshot(newest)
                 }
 
-                harness.driveComposerViewportTransition()
                 harness.driveGeometry(
                     previous: away,
                     current: ChatTranscriptGeometry(
@@ -567,6 +582,10 @@ struct ChatViewScrollHarnessTests {
                 #expect(
                     newestInstall.observation.projectionInstallCount
                         <= initialProjectionInstalls + 2
+                )
+                #expect(
+                    newestInstall.observation.committedHistoryRowEvaluationCount
+                        == committedEvaluationBaseline
                 )
             }
         }
@@ -614,7 +633,6 @@ struct ChatViewScrollHarnessTests {
                 #expect(!harness.probeObservation.hasUnread)
 
                 let automaticBeforeKeyboard = harness.probeObservation.automaticScrollCommandCount
-                harness.driveComposerViewportTransition()
                 let keyboard = ChatTranscriptGeometry(
                     offsetY: 700,
                     contentHeight: 1_000,
@@ -623,9 +641,10 @@ struct ChatViewScrollHarnessTests {
                 )
                 harness.driveGeometry(previous: mixedBottom, current: keyboard, viewport: true)
                 try await harness.driveFrameBoundary()
-                _ = try await harness.recorder.waitUntil {
-                    $0.observation.automaticScrollCommandCount == automaticBeforeKeyboard + 1
-                }
+                #expect(
+                    harness.probeObservation.automaticScrollCommandCount
+                        == automaticBeforeKeyboard
+                )
                 #expect(!harness.probeObservation.isDetached)
             }
         }
@@ -900,10 +919,6 @@ final class ChatViewScrollHarness {
         probe.driveSemanticResponse()
     }
 
-    func driveComposerViewportTransition() {
-        probe.driveComposerViewportTransition()
-    }
-
     func driveCatchUp(reduceMotion: Bool) {
         probe.driveCatchUp(reduceMotion: reduceMotion)
     }
@@ -945,6 +960,15 @@ final class ChatViewScrollHarness {
         hostingController.view.layoutIfNeeded()
     }
 
+    func setComposerText(_ text: String) throws {
+        guard let textView = Self.textViews(in: hostingController.view).first else {
+            throw HarnessError.missingComposer
+        }
+        textView.text = text
+        textView.delegate?.textViewDidChange?(textView)
+        hostingController.view.setNeedsLayout()
+    }
+
     func cleanup() {
         probe.cancelPresentation()
         recorder.stop()
@@ -962,6 +986,11 @@ final class ChatViewScrollHarness {
     private static func scrollViews(in view: UIView) -> [UIScrollView] {
         let current = (view as? UIScrollView).map { [$0] } ?? []
         return current + view.subviews.flatMap(scrollViews)
+    }
+
+    private static func textViews(in view: UIView) -> [UITextView] {
+        let current = (view as? UITextView).map { [$0] } ?? []
+        return current + view.subviews.flatMap(textViews)
     }
 }
 
@@ -1064,4 +1093,5 @@ enum HarnessError: Error {
     case invalidAuthorityBoundary
     case missingTranscript
     case missingWindowScene
+    case missingComposer
 }

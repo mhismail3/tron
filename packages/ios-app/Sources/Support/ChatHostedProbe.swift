@@ -20,8 +20,17 @@ struct ExtensionActivityPillExpirySample: Sendable, Equatable {
     let remainingMs: Int?
 }
 
+struct ChatHostedGeometryTraceSample: Sendable, Equatable {
+    let frame: Int
+    let offsetY: CGFloat
+    let bottomInset: CGFloat
+    let composerHeight: CGFloat
+    let rowFrames: [String: CGRect]
+}
+
 struct ChatHostedObservation: Sendable {
     let revision: Int
+    let geometryTrace: [ChatHostedGeometryTraceSample]
     let extensionPillStates: [ExtensionActivityPillHostedSample]
     let extensionRoutes: [String]
     let extensionPillExpiries: [ExtensionActivityPillExpirySample]
@@ -41,6 +50,7 @@ struct ChatHostedObservation: Sendable {
     let projectionSubmitCount: Int
     let projectionWorkAdmissionCount: Int
     let projectionInstallCount: Int
+    let committedHistoryRowEvaluationCount: Int
     let remountedWhileSemanticIDDisplayed: Int
     let toolChipSamples: [ToolChipInstrumentationSample]
     let installedProjectionRowCount: Int
@@ -54,11 +64,30 @@ struct ChatHostedObservation: Sendable {
     let prependCompletionResult: PerformanceResult?
     let readyFrameCompletionCount: Int
     let isReady: Bool
+
+    var composerHeight: CGFloat { geometryTrace.last?.composerHeight ?? 0 }
+
+    var hasMonotonicOffsetY: Bool {
+        guard geometryTrace.count > 2 else { return true }
+        let deltas = zip(geometryTrace, geometryTrace.dropFirst()).map {
+            $1.offsetY - $0.offsetY
+        }.filter { abs($0) > 1 }
+        guard let first = deltas.first else { return true }
+        return deltas.allSatisfy { $0.sign == first.sign }
+    }
+}
+
+enum ChatHostedScrollCallbackMode: Sendable {
+    case synthetic
+    case native
 }
 
 @MainActor
 final class ChatHostedProbe {
+    let scrollCallbackMode: ChatHostedScrollCallbackMode
     private var geometry = ChatTranscriptGeometry.zero
+    private var composerHeight: CGFloat = 0
+    private var geometryTrace: [ChatHostedGeometryTraceSample] = []
     private var extensionPillStates: [String: ExtensionActivityPillHostedSample] = [:]
     private var extensionRoutes: [String] = []
     private var extensionPillExpiries: [String: ExtensionActivityPillExpirySample] = [:]
@@ -77,6 +106,7 @@ final class ChatHostedProbe {
     private var projectionSubmitCount = 0
     private var projectionWorkAdmissionCount = 0
     private var projectionInstallCount = 0
+    private var committedHistoryRowEvaluationCount = 0
     private var remountedWhileSemanticIDDisplayed = 0
     private var toolChipSamples: [ToolChipInstrumentationSample] = []
     private var renderedIDBySemanticID: [String: String] = [:]
@@ -94,7 +124,6 @@ final class ChatHostedProbe {
     private var phaseControl: ((ScrollPhase, ScrollPhase, ChatTranscriptGeometry?) -> Void)?
     private var nativeControl: ((Bool) -> Void)?
     private var catchUpControl: ((Bool) -> Void)?
-    private var composerViewportControl: (() -> Void)?
     private var semanticResponseControl: (() -> Void)?
     private var frameControl: (() async throws -> Void)?
     private var stateControl: (() -> ChatHostedScrollState)?
@@ -107,6 +136,14 @@ final class ChatHostedProbe {
     private(set) var revision = 0
     private(set) var usesDrivenScrollAuthority = false
 
+    init(scrollCallbackMode: ChatHostedScrollCallbackMode = .synthetic) {
+        self.scrollCallbackMode = scrollCallbackMode
+    }
+
+    var admitsNativeScrollCallbacks: Bool {
+        scrollCallbackMode == .native || !usesDrivenScrollAuthority
+    }
+
     var observation: ChatHostedObservation {
         let visibleRowIDs = rowFrames
             .filter { $0.value.maxY > 0 && $0.value.minY < geometry.containerHeight }
@@ -117,6 +154,7 @@ final class ChatHostedProbe {
             .map(\.key)
         return ChatHostedObservation(
             revision: revision,
+            geometryTrace: geometryTrace,
             extensionPillStates: extensionPillStates.values.sorted { $0.ownerID < $1.ownerID },
             extensionRoutes: extensionRoutes,
             extensionPillExpiries: extensionPillExpiries.values.sorted { $0.ownerID < $1.ownerID },
@@ -136,6 +174,7 @@ final class ChatHostedProbe {
             projectionSubmitCount: projectionSubmitCount,
             projectionWorkAdmissionCount: projectionWorkAdmissionCount,
             projectionInstallCount: projectionInstallCount,
+            committedHistoryRowEvaluationCount: committedHistoryRowEvaluationCount,
             remountedWhileSemanticIDDisplayed: remountedWhileSemanticIDDisplayed,
             toolChipSamples: toolChipSamples,
             installedProjectionRowCount: installedProjectionRowCount,
@@ -177,7 +216,35 @@ final class ChatHostedProbe {
     func updateGeometry(_ value: ChatTranscriptGeometry) {
         geometryCallbackCount &+= 1
         geometry = value
+        recordGeometryTrace()
         revision &+= 1
+    }
+
+    func recordComposerHeight(_ value: CGFloat) {
+        guard value.isFinite, value >= 0 else { return }
+        composerHeight = value
+        recordGeometryTrace()
+        revision &+= 1
+    }
+
+    private func recordGeometryTrace() {
+        if let previous = geometryTrace.last,
+           previous.offsetY == geometry.offsetY,
+           previous.bottomInset == geometry.bottomInset,
+           previous.composerHeight == composerHeight,
+           previous.rowFrames == rowFrames {
+            return
+        }
+        geometryTrace.append(ChatHostedGeometryTraceSample(
+            frame: geometryTrace.last.map { $0.frame + 1 } ?? 0,
+            offsetY: geometry.offsetY,
+            bottomInset: geometry.bottomInset,
+            composerHeight: composerHeight,
+            rowFrames: rowFrames
+        ))
+        if geometryTrace.count > 240 {
+            geometryTrace.removeFirst(geometryTrace.count - 240)
+        }
     }
 
     func updateRowFrame(id: String, frame: CGRect) {
@@ -192,6 +259,7 @@ final class ChatHostedProbe {
             for removedID in removed { rowFrames[removedID] = nil }
         }
         refreshControlledState()
+        recordGeometryTrace()
         revision &+= 1
     }
 
@@ -239,6 +307,11 @@ final class ChatHostedProbe {
         revision &+= 1
     }
 
+    func recordCommittedHistoryRowEvaluation() {
+        committedHistoryRowEvaluationCount &+= 1
+        revision &+= 1
+    }
+
     func recordProjectionInstall(
         rowCount: Int,
         sourceOrdinal: Int,
@@ -275,7 +348,6 @@ final class ChatHostedProbe {
         phase: @escaping (ScrollPhase, ScrollPhase, ChatTranscriptGeometry?) -> Void,
         native: @escaping (Bool) -> Void,
         catchUp: @escaping (Bool) -> Void,
-        composerViewport: @escaping () -> Void,
         semanticResponse: @escaping () -> Void,
         frame: @escaping () async throws -> Void,
         state: @escaping () -> ChatHostedScrollState,
@@ -287,7 +359,6 @@ final class ChatHostedProbe {
         phaseControl = phase
         nativeControl = native
         catchUpControl = catchUp
-        composerViewportControl = composerViewport
         semanticResponseControl = semanticResponse
         frameControl = frame
         stateControl = state
@@ -321,13 +392,6 @@ final class ChatHostedProbe {
         usesDrivenScrollAuthority = true
         controlEventCount &+= 1
         nativeControl?(owned)
-        refreshControlledState()
-        revision &+= 1
-    }
-
-    func driveComposerViewportTransition() {
-        controlEventCount &+= 1
-        composerViewportControl?()
         refreshControlledState()
         revision &+= 1
     }

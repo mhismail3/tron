@@ -8,19 +8,15 @@ enum ChatScrollAnimation: Equatable, Sendable {
 struct ChatScrollCommand: Equatable, Sendable {
     enum Origin: Equatable, Sendable {
         case presentation
-        case automaticFollow
         case catchUp
         case layout
         case prepend
-        case binding
     }
 
     enum Destination: Equatable, Sendable {
-        case resetToBottom
         case tail
         case openingTail(String)
         case offsetY(CGFloat)
-        case releaseBinding
     }
 
     let token: Int
@@ -47,14 +43,14 @@ struct ChatPrependPage: Equatable, Sendable {
     let installedLayout: ChatInstalledLayoutEpoch
 }
 
-/// Sole owner of transcript geometry/semantic-frame intake and every
-/// app-generated scroll command. The view only executes and acknowledges typed
-/// commands; direct/native/accessibility interaction always wins.
+/// Owns explicit viewport intent plus opening, catch-up, semantic restore, and
+/// prepend commands. Ordinary pinned growth is a native ScrollPosition layout
+/// property and never enters this command channel.
 @Observable
 @MainActor
 final class ChatScrollCoordinator {
     static let defaultOpeningTailTimeout: Duration = .milliseconds(750)
-    static let liveGrowthFollowDuration = 0.16
+    static let liveGrowthAnimationDuration = 0.16
 
     private struct SemanticFrameSample: Equatable {
         let layoutEpoch: Int
@@ -100,26 +96,50 @@ final class ChatScrollCoordinator {
 
         var context: OpeningTailContext? {
             switch self {
-            case .idle: return nil
-            case .positioning(let context), .positioned(let context): return context
-            case .postReveal(let context): return context.base
+            case .idle: nil
+            case .positioning(let value), .positioned(let value): value
+            case .postReveal(let value): value.base
             }
         }
     }
 
-    private enum CatchUpPhase: Equatable {
-        case none
-        case staged
-        case final
-        case settling
+    private enum CatchUpPhase: Equatable { case none, staged, final, settling }
+
+    private struct LayoutRestore {
+        let token: Int
+        let anchor: ChatSemanticAnchor
+        var renderedAnchorID: String?
+        var expectedLayoutEpoch: Int?
+        var requiredSampleRevision: Int
+        var requiredGeometryRevision: Int
+        var readyForMeasurement = false
+        var correctionCount = 0
+        var correctionCommandToken: Int?
     }
 
+    private struct PrependContext {
+        let token: Int
+        let anchor: ChatSemanticAnchor
+        var interrupted = false
+        var renderedAnchorID: String?
+        var expectedLayoutEpoch: Int?
+        var readyForMeasurement = false
+        var requiredSampleRevision: Int
+        var requiredGeometryRevision: Int
+        var correctionCount = 0
+        var correctionCommandToken: Int?
+        let completion: @MainActor (PerformanceResult) -> Void
+    }
+
+    private(set) var viewportMode: ChatViewportMode = .pinned
     private(set) var isAtBottom = true
-    private(set) var userScrolledAway = false
+    var userScrolledAway: Bool { viewportMode == .anchored }
     private(set) var hasUnreadContent = false
     private(set) var isUserInteracting = false
-    private(set) var isScrollAnimating = false
-    private(set) var isPrependingHistory = false
+    var isPrependingHistory: Bool { prepend != nil }
+    var canRequestHistoryPage: Bool {
+        prepend == nil && catchUpPhase == .none && !openingTailSettlementPending
+    }
     private(set) var command: ChatScrollCommand?
     private(set) var commandRevision = 0
     private(set) var layoutEpoch = 0
@@ -132,55 +152,27 @@ final class ChatScrollCoordinator {
     private var presentation = 0
     private var sequence = 0
     private var geometry = ChatTranscriptGeometry.zero
+    private var geometryRevision = 0
     private var semanticFrames: [String: SemanticFrameSample] = [:]
     private var semanticFrameOrder: [String] = []
     private var semanticFrameRevision = 0
-
-    private var isNativeUserOwned = false
-    private var pendingNativeUserGeometry = false
-    private var hadUserInteraction = false
-    private var isUserDrivenSettling = false
-    private var directTailReturnArmed = false
-    private var boundaryCameFromViewportWithoutTailMovement = false
-    private var pendingGrowthFollow = false
-    private var pendingGrowthFollowAnimation: ChatScrollAnimation = .disabled
-    /// A command write is not a native acknowledgement. Automatic tail
-    /// commands remain owned until fresh geometry proves the physical tail.
-    private var pendingAutomaticTailCommandToken: Int?
-    /// The one correction issued for a physically invalid past-bottom sample.
-    /// Its applied edge binding owns settlement until plausible geometry or
-    /// direct cancellation; repeated stale samples cannot submit another write.
-    private var pastBottomCorrectionCommandToken: Int?
-    private var automaticTailCommandStartGeometryRevision: Int?
-    private var automaticTailCommandStartOffsetY: CGFloat?
-    private var pendingContinuousGrowthFollow = false
-    private var composerViewportSequence = 0
-    private var activeComposerViewportGeneration: Int?
-    private var composerViewportWasDetached = false
-    private var composerViewportAnchor: ChatSemanticAnchor?
-    private var discreteFollowRenderedIDs: Set<String> = []
-    private var discreteFollowRenderedIDOrder: [String] = []
-    private var pendingUnattributedOlderMovement = false
-    private var userInteractionStartOffsetY: CGFloat?
-    private var userInteractionStartDistanceFromBottom: CGFloat?
-    private var bindingIsReleased = false
     private var openingTailPhase: OpeningTailPhase = .idle
     private var openingTailContinuation: CheckedContinuation<Bool, Never>?
     private var openingTailFinalWaiters: [OpeningTailFinalWaiter] = []
     private var nextOpeningTailFinalWaiterID = 0
     private var openingTailFrameTaskGeneration = 0
-    private var geometryRevision = 0
+    private var catchUpPhase: CatchUpPhase = .none
+    private var catchUpCommandToken: Int?
+    private var catchUpUnreadBeforeJump = false
+    private var layoutRestore: LayoutRestore?
+    private var prepend: PrependContext?
 
-    @ObservationIgnored private var followFrameTask: Task<Void, Never>?
     @ObservationIgnored private var catchUpTask: Task<Void, Never>?
+    @ObservationIgnored private var layoutRestoreTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private var prependTask: Task<Void, Never>?
     @ObservationIgnored private var prependTimeoutTask: Task<Void, Never>?
     @ObservationIgnored private var openingTailFrameTask: Task<Void, Never>?
     @ObservationIgnored private var openingTailTimeoutTask: Task<Void, Never>?
-
-    private var catchUpPhase: CatchUpPhase = .none
-    private var catchUpCommandToken: Int?
-    private var catchUpUnreadBeforeJump = false
 
     #if HOSTED_TEST
     private struct HostedCommandWaiter {
@@ -193,41 +185,9 @@ final class ChatScrollCoordinator {
     }
     @ObservationIgnored private var hostedCommandWaiters: [HostedCommandWaiter] = []
     @ObservationIgnored private var hostedPrependSampleWaiters: [HostedPrependSampleWaiter] = []
-    @ObservationIgnored private var hostedFollowDecisionWaiters: [CheckedContinuation<Void, Never>] = []
     private var nextHostedCommandWaiterID = 0
     private var nextHostedPrependSampleWaiterID = 0
-    private(set) var hostedFollowDecisionRevision = 0
-    var hostedComposerViewportGeneration: Int? { activeComposerViewportGeneration }
-    var hostedComposerViewportWasDetached: Bool { composerViewportWasDetached }
-    var hostedComposerViewportAnchor: ChatSemanticAnchor? { composerViewportAnchor }
     #endif
-
-    private var layoutMutationAnchor: ChatSemanticAnchor?
-    private var layoutMutationWasDetached = false
-    private var layoutMutationPendingInstall = false
-    private var layoutMutationRenderedAnchorID: String?
-    private var layoutMutationExpectedLayoutEpoch: Int?
-    private var layoutMutationRequiredSampleRevision = 0
-    private var layoutMutationRequiredGeometryRevision = 0
-    private var layoutMutationReadyForMeasurement = false
-    private var layoutMutationCorrectionCount = 0
-    private var layoutMutationCorrectionCommandToken: Int?
-    private var layoutMutationAppliedOffset = false
-    private var pendingInstalledTailSettlement = false
-
-    private var prependToken: Int?
-    private var prependWasScrolledAway = false
-    private var prependInterrupted = false
-    private var prependAnchor: ChatSemanticAnchor?
-    private var prependRenderedAnchorID: String?
-    private var prependExpectedLayoutEpoch: Int?
-    private var prependReadyForMeasurement = false
-    private var prependRequiredSampleRevision = 0
-    private var prependRequiredGeometryRevision = 0
-    private var prependCorrectionCount = 0
-    private var prependCorrectionCommandToken: Int?
-    private var prependAppliedOffset = false
-    private var prependCompletion: (@MainActor (PerformanceResult) -> Void)?
 
     init(
         frameScheduler: DisplayFrameScheduler = .displayLink,
@@ -239,27 +199,15 @@ final class ChatScrollCoordinator {
         self.openingTailTimeout = openingTailTimeout
     }
 
-    /// The catch-up affordance projects one fact only: the reader has
-    /// intentionally left the latest tail. Unread events, native binding
-    /// ownership, and issued commands cannot keep the button visible.
-    var shouldShowCatchUpButton: Bool { userScrolledAway }
-
-    var shouldTrackUnreadResponse: Bool {
-        userScrolledAway || catchUpPhase != .none
-    }
-
+    var shouldShowCatchUpButton: Bool { viewportMode == .anchored }
+    var latestGeometry: ChatTranscriptGeometry { geometry }
+    var shouldTrackUnreadResponse: Bool { viewportMode == .anchored || catchUpPhase != .none }
     var isWaitingForPrependSemanticFrame: Bool {
-        isPrependingHistory && prependReadyForMeasurement && prependCorrectionCommandToken == nil
+        prepend?.readyForMeasurement == true && prepend?.correctionCommandToken == nil
     }
-
     var canAutomaticallyFollow: Bool {
-        canAutomaticallyFollowIgnoringOpening && !openingTailPhase.isActive
-    }
-
-    private var canAutomaticallyFollowIgnoringOpening: Bool {
-        !userScrolledAway && !isUserInteracting && !isNativeUserOwned
-            && !pendingNativeUserGeometry && !isUserDrivenSettling
-            && !isPrependingHistory && catchUpPhase == .none
+        viewportMode == .pinned && !isUserInteracting && prepend == nil
+            && catchUpPhase == .none && !openingTailPhase.isActive
     }
 
     private var openingTailSettlementPending: Bool { openingTailPhase.isActive }
@@ -272,42 +220,15 @@ final class ChatScrollCoordinator {
     ) {
         cancelAllOwnedWork(result: .discarded)
         self.presentation = presentation ?? (self.presentation &+ 1)
-        if retainingVisibleViewport {
-            // A same-session generation handoff keeps the physical viewport
-            // owner intact while the retained installed commit remains visible.
-            // Preserve measured semantic frames until the replacement commit
-            // emits its explicit installed-layout epoch. Clearing them here
-            // would erase the detached reader's only viewport anchor.
-            clearCommand()
-            return
-        }
+        viewportMode.reduce(.presentationReset(retainingViewport: retainingVisibleViewport))
+        clearCommand()
+        guard !retainingVisibleViewport else { return }
         isAtBottom = true
-        userScrolledAway = false
         hasUnreadContent = false
         isUserInteracting = false
-        isScrollAnimating = false
-        isNativeUserOwned = false
-        pendingNativeUserGeometry = false
-        hadUserInteraction = false
-        isUserDrivenSettling = false
-        directTailReturnArmed = false
-        boundaryCameFromViewportWithoutTailMovement = false
-        pendingGrowthFollow = false
-        pendingAutomaticTailCommandToken = nil
-        pastBottomCorrectionCommandToken = nil
-        automaticTailCommandStartGeometryRevision = nil
-        automaticTailCommandStartOffsetY = nil
-        pendingContinuousGrowthFollow = false
-        pendingUnattributedOlderMovement = false
-        userInteractionStartOffsetY = nil
-        userInteractionStartDistanceFromBottom = nil
         geometry = .zero
         geometryRevision = 0
         advanceLayoutEpoch()
-        bindingIsReleased = false
-        clearOpeningTailSettlement()
-        clearCommand()
-        publish(.resetToBottom, animation: .disabled, origin: .presentation)
     }
 
     func beginInstalledLayoutEpoch() -> ChatInstalledLayoutEpoch {
@@ -321,7 +242,7 @@ final class ChatScrollCoordinator {
     func semanticFrameChanged(renderedID: String, layoutEpoch: Int, frame: CGRect) {
         guard layoutEpoch == self.layoutEpoch else { return }
         semanticFrameRevision &+= 1
-        semanticFrames[renderedID] = .init(
+        semanticFrames[renderedID] = SemanticFrameSample(
             layoutEpoch: layoutEpoch,
             revision: semanticFrameRevision,
             frame: frame
@@ -335,30 +256,14 @@ final class ChatScrollCoordinator {
             for id in removed { semanticFrames[id] = nil }
         }
         recordPrependExcursionIfOwned(renderedID: renderedID, layoutEpoch: layoutEpoch, frame: frame)
-        evaluateLayoutMutationIfReady()
-        evaluatePrependMeasurementIfReady()
-        if let context = openingTailPhase.context,
-           context.presentation == presentation,
-           context.targetRenderedID == renderedID {
-            switch openingTailPhase {
-            case .positioning(var context):
-                context.targetSample = semanticFrames[renderedID]
-                openingTailPhase = .positioning(context)
-            case .positioned(var context):
-                context.targetSample = semanticFrames[renderedID]
-                openingTailPhase = .positioned(context)
-            case .postReveal(var context):
-                context.base.targetSample = semanticFrames[renderedID]
-                openingTailPhase = .postReveal(context)
-            case .idle:
-                break
-            }
+        evaluateLayoutRestoreIfReady()
+        evaluatePrependIfReady()
+        if openingTailPhase.context?.targetRenderedID == renderedID {
+            updateOpeningTargetSample(semanticFrames[renderedID])
             evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
         }
     }
 
-    /// Chooses the visually first measured row that actually intersects the
-    /// viewport. Visibility thresholds are deliberately not authority.
     func semanticAnchor(in timeline: ChatTranscriptTimeline) -> ChatSemanticAnchor? {
         let candidates = timeline.ids.compactMap { renderedID -> (String, String, CGRect)? in
             guard let semanticID = timeline.preferredSemanticIDByRenderedID[renderedID],
@@ -368,9 +273,10 @@ final class ChatScrollCoordinator {
                   sample.frame.minY < geometry.containerHeight else { return nil }
             return (renderedID, semanticID, sample.frame)
         }
-        guard let selected = candidates.min(by: { left, right in
-            if left.2.minY != right.2.minY { return left.2.minY < right.2.minY }
-            return timeline.ids.firstIndex(of: left.0) ?? 0 < timeline.ids.firstIndex(of: right.0) ?? 0
+        guard let selected = candidates.min(by: { lhs, rhs in
+            if lhs.2.minY != rhs.2.minY { return lhs.2.minY < rhs.2.minY }
+            return (timeline.ids.firstIndex(of: lhs.0) ?? 0)
+                < (timeline.ids.firstIndex(of: rhs.0) ?? 0)
         }) else { return nil }
         return ChatSemanticAnchor(
             semanticID: selected.1,
@@ -381,321 +287,67 @@ final class ChatScrollCoordinator {
     }
 
     func scrollPositionChanged(isPositionedByUser: Bool) {
-        if isPositionedByUser {
-            bindingIsReleased = false
-            directTailReturnArmed = true
-            interruptCatchUpIfAway()
-            cancelAutomaticWorkForUserInteraction()
-            pendingNativeUserGeometry = true
-            if pendingUnattributedOlderMovement {
-                pendingUnattributedOlderMovement = false
-                directTailReturnArmed = false
-                commitScrollAway()
-                pendingNativeUserGeometry = false
-            }
-
-            // SwiftUI can publish final bottom geometry before it marks the
-            // ScrollPosition as user-owned. For an already-detached reader,
-            // that callback pair is direct proof of a manual return to latest.
-            if userScrolledAway,
-               geometry.isAtCatchUpBoundary,
-               boundaryCameFromViewportWithoutTailMovement {
-                directTailReturnArmed = isUserInteracting || isUserDrivenSettling
-                pendingNativeUserGeometry = false
-                isNativeUserOwned = false
-                hadUserInteraction = false
-                return
-            }
-            if userScrolledAway,
-               geometry.isAtCatchUpBoundary,
-               !boundaryCameFromViewportWithoutTailMovement {
-                directTailReturnArmed = false
-                pendingNativeUserGeometry = false
-                isNativeUserOwned = false
-                admitTailBoundary(directlyOwned: true)
-                return
-            }
-        }
-        isNativeUserOwned = isPositionedByUser
+        guard isPositionedByUser else { return }
+        viewportMode.reduce(.userTookOver)
+        isAtBottom = false
+        abandonAutomaticTransactionsForDirectInteraction()
     }
 
-    /// Captures viewport intent before aggregate composer geometry changes.
-    /// Rapid retargets share one generation: pinned readers keep a disabled
-    /// tail attachment while detached readers retain their semantic locus and
-    /// never receive a tail command.
-    @discardableResult
-    func composerViewportTransitionWillBegin(
-        from installed: InstalledChatTranscript?
-    ) -> Int? {
-        guard catchUpPhase == .none, !isPrependingHistory,
-              !openingTailPhase.isActive else { return nil }
-        if let activeComposerViewportGeneration { return activeComposerViewportGeneration }
-
-        composerViewportSequence &+= 1
-        let generation = composerViewportSequence
-        activeComposerViewportGeneration = generation
-        let preservesReaderLocus = userScrolledAway || pendingUnattributedOlderMovement
-        composerViewportWasDetached = preservesReaderLocus
-        composerViewportAnchor = preservesReaderLocus
-            ? installed.flatMap { semanticAnchor(in: $0.timeline) }
-            : nil
-        if preservesReaderLocus {
-            retireAutomaticTailBindingForComposerDetachment()
-            return generation
-        }
-
-        let hasFreshNativeAuthority = isUserInteracting || pendingNativeUserGeometry
-            || isUserDrivenSettling || directTailReturnArmed
-        guard !hasFreshNativeAuthority else {
-            finishComposerViewportTransition()
-            return nil
-        }
-        if geometry.isAtCatchUpBoundary {
-            // Persistent native binding ownership is not fresh navigation intent.
-            isNativeUserOwned = false
-        }
-        pendingGrowthFollow = true
-        pendingContinuousGrowthFollow = true
-        pendingGrowthFollowAnimation = .disabled
-        // Install one persistent bottom binding before the safe-area height
-        // begins changing. Supersede a pending release or older smooth follow;
-        // neither may execute inside the composer-owned transaction.
-        guard installComposerTailBinding() else {
-            finishComposerViewportTransition()
-            return nil
-        }
-        scheduleTailFollow()
-        return generation
-    }
-
-    func composerViewportTransitionDidSettle(_ generation: Int) {
-        guard activeComposerViewportGeneration == generation else { return }
-        finishComposerViewportTransition()
-        // A projection installed during composer motion must not close its
-        // detached semantic-anchor transaction against pre-transition geometry.
-        // Settlement is the bounded final-layout barrier when UIKit coalesces an
-        // otherwise numerically identical native geometry callback.
-        geometryRevision &+= 1
-        evaluateLayoutMutationIfReady()
-        if pendingGrowthFollow { scheduleTailFollow() }
-        else { requestBindingReleaseIfSettled() }
-    }
-
-    /// HOSTED_TEST compatibility for existing driver probes.
-    func composerViewportTransitionBegan() {
-        _ = composerViewportTransitionWillBegin(from: nil)
-    }
-
-    func scrollPhaseChanged(from oldPhase: ScrollPhase, to newPhase: ScrollPhase, finalGeometry: ChatTranscriptGeometry?) {
-        if let finalGeometry {
-            geometry = finalGeometry
-            geometryRevision &+= 1
-            acknowledgeAutomaticTailIfSettled(finalGeometry)
-        }
-        let wasInteracting = isUserInteracting
-        let wasSettling = isUserDrivenSettling
+    func scrollPhaseChanged(
+        from oldPhase: ScrollPhase,
+        to newPhase: ScrollPhase,
+        finalGeometry: ChatTranscriptGeometry?
+    ) {
+        if let finalGeometry { admitGeometry(finalGeometry) }
+        let wasDirect = Self.isDirectUserPhase(oldPhase) || isUserInteracting
         isUserInteracting = Self.isDirectUserPhase(newPhase)
-        isScrollAnimating = newPhase == .animating
-        isUserDrivenSettling = isScrollAnimating && (wasSettling || Self.isDirectUserPhase(oldPhase))
-
-        if isUserInteracting && !wasInteracting {
-            directTailReturnArmed = true
-            interruptCatchUpIfAway()
-            cancelAutomaticWorkForUserInteraction()
-            hadUserInteraction = true
-            userInteractionStartOffsetY = finalGeometry?.offsetY
-            userInteractionStartDistanceFromBottom = finalGeometry?.distanceFromBottom
-        }
-        guard newPhase == .idle else { return }
-
-        let movedOlder: Bool
-        let movedTowardLatest: Bool
-        if let startY = userInteractionStartOffsetY,
-           let startDistance = userInteractionStartDistanceFromBottom,
-           let finalGeometry {
-            movedOlder = finalGeometry.offsetY < startY - 1
-                && finalGeometry.distanceFromBottom > startDistance + 1
-            movedTowardLatest = finalGeometry.offsetY > startY + 1
-                && finalGeometry.distanceFromBottom < startDistance - 1
-        } else {
-            movedOlder = false
-            movedTowardLatest = false
-        }
-        userInteractionStartOffsetY = nil
-        userInteractionStartDistanceFromBottom = nil
-
-        if let finalGeometry,
-           requestPinnedTailCorrectionIfNeeded(
-               finalGeometry,
-               hasDirectUserAuthority: wasInteracting || wasSettling || hadUserInteraction
-                   || pendingNativeUserGeometry || directTailReturnArmed
-           ) {
-            directTailReturnArmed = false
+        if isUserInteracting {
+            viewportMode.reduce(.userTookOver)
+            isAtBottom = false
+            abandonAutomaticTransactionsForDirectInteraction()
             return
         }
-        if finalGeometry?.isAtCatchUpBoundary == true {
-            let directlyOwnedReturn = directTailReturnArmed && movedTowardLatest
-            admitTailBoundary(directlyOwned: directlyOwnedReturn)
-            if userScrolledAway {
-                // A rejected viewport-only boundary consumes all transient
-                // native/direct authority. Later streaming geometry must not
-                // reinterpret that keyboard interaction as a tail return.
-                isNativeUserOwned = false
-                pendingNativeUserGeometry = false
-                hadUserInteraction = false
-                isUserDrivenSettling = false
-            }
-        } else if (wasInteracting || wasSettling) && movedOlder {
-            commitScrollAway()
-        } else if !userScrolledAway && catchUpPhase == .none {
-            isNativeUserOwned = false
-            pendingNativeUserGeometry = false
-            isUserDrivenSettling = false
-            if pendingGrowthFollow { scheduleTailFollow() }
+        guard newPhase == .idle else { return }
+        if wasDirect, geometry.isAtCatchUpBoundary {
+            pinAtTail()
         }
-        directTailReturnArmed = false
     }
 
-    /// Replays the geometry boundary for an installed layout even when native
-    /// scroll geometry reports identical numeric values. SwiftUI can coalesce
-    /// that observation while the semantic row frames still advance.
     func installedLayoutEpochChanged() {
-        // The epoch is semantic-frame authority, not proof that UIKit has
-        // installed a simultaneous safe-area viewport change. During composer
-        // motion, wait for native geometry or the bounded transition settlement
-        // barrier before correcting a detached anchor.
-        if activeComposerViewportGeneration == nil {
-            geometryRevision &+= 1
-        }
-        evaluateLayoutMutationIfReady()
-        evaluatePrependMeasurementIfReady()
+        geometryRevision &+= 1
+        evaluateLayoutRestoreIfReady()
+        evaluatePrependIfReady()
     }
 
     func geometryChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
-        geometry = current
-        geometryRevision &+= 1
-        acknowledgeAutomaticTailIfSettled(current)
-        evaluateLayoutMutationIfReady()
-        evaluatePrependMeasurementIfReady()
-        evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
-        if openingTailSettlementPending { return }
-        let grew = current.contentHeight > previous.contentHeight + 0.5
-        let movedOlder = previous.isValid
-            && current.offsetY < previous.offsetY - 1
-            && current.distanceFromBottom > previous.distanceFromBottom + 1
-        let movedTowardLatest = previous.isValid
-            && current.offsetY > previous.offsetY + 1
-            && current.distanceFromBottom < previous.distanceFromBottom - 1
-        let preservesRejectedViewportAuthority = userScrolledAway
-            && boundaryCameFromViewportWithoutTailMovement
-            && !movedTowardLatest
-        if !preservesRejectedViewportAuthority {
-            boundaryCameFromViewportWithoutTailMovement = false
-        }
-        // Persistent native binding ownership is not fresh navigation intent.
-        // Only the current direct phase/callback admission may release detachment.
-        let attributed = !preservesRejectedViewportAuthority
-            && (isUserInteracting || hadUserInteraction
-                || pendingNativeUserGeometry || isUserDrivenSettling || directTailReturnArmed)
-        if requestPinnedTailCorrectionIfNeeded(current, hasDirectUserAuthority: attributed) {
-            return
-        }
-
-        if current.isAtCatchUpBoundary {
-            admitTailBoundary(directlyOwned: attributed)
-            if !preservesRejectedViewportAuthority || !isUserInteracting {
-                directTailReturnArmed = false
-            }
-        } else {
-            if isAtBottom != current.isAtBottom { isAtBottom = current.isAtBottom }
-            if movedOlder && !attributed { pendingUnattributedOlderMovement = true }
-            if attributed && movedOlder {
-                // Publish detachment on the first measured upward movement,
-                // not only after the native scroll phase settles. The catch-up
-                // affordance should track the same live geometry that releases
-                // it when the reader returns to the tail.
-                commitScrollAway()
-            }
-        }
-        pendingNativeUserGeometry = false
-        if !isUserInteracting { hadUserInteraction = false }
-
-        guard grew, previous.isValid, !userScrolledAway,
-              catchUpPhase == .none, !isPrependingHistory else {
-            if pendingGrowthFollow { scheduleTailFollow() }
-            return
-        }
-        pendingGrowthFollow = true
-        pendingContinuousGrowthFollow = true
-        pendingGrowthFollowAnimation = .smooth(duration: Self.liveGrowthFollowDuration)
-        scheduleTailFollow()
+        admitGeometry(current)
     }
 
     func viewportChanged(previous: ChatTranscriptGeometry, current: ChatTranscriptGeometry) {
-        geometry = current
-        geometryRevision &+= 1
-        acknowledgeAutomaticTailIfSettled(current)
-        evaluateLayoutMutationIfReady()
-        evaluatePrependMeasurementIfReady()
-        evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
-        if openingTailSettlementPending { return }
-        guard current.hasViewportChange(from: previous) else { return }
-        pendingUnattributedOlderMovement = false
-        let hasDirectUserAuthority = isUserInteracting || isUserDrivenSettling
-            || pendingNativeUserGeometry || directTailReturnArmed
-        if requestPinnedTailCorrectionIfNeeded(
-            current,
-            hasDirectUserAuthority: hasDirectUserAuthority
-        ) {
-            return
-        }
-        if userScrolledAway {
-            let movedTowardLatest = (
-                current.offsetY > previous.offsetY + 1
-                    && current.distanceFromBottom < previous.distanceFromBottom - 1
-            ) || (
-                userInteractionStartOffsetY.map { current.offsetY > $0 + 1 } == true
-                    && userInteractionStartDistanceFromBottom.map {
-                        current.distanceFromBottom < $0 - 1
-                    } == true
-            )
-            boundaryCameFromViewportWithoutTailMovement = current.isAtCatchUpBoundary
-                && !movedTowardLatest
-            let directlyOwned = isUserInteracting || isUserDrivenSettling
-                || pendingNativeUserGeometry || directTailReturnArmed
-            if current.isAtCatchUpBoundary, directlyOwned, movedTowardLatest {
-                admitTailBoundary(directlyOwned: true)
-                directTailReturnArmed = false
-                return
-            }
-            // Preserve authority throughout an active direct gesture so an
-            // intermediate keyboard viewport frame cannot erase a later
-            // coalesced return-to-tail settlement. Outside that gesture,
-            // consume stale one-shot authority so resize alone cannot re-pin.
-            if !isUserInteracting && !isUserDrivenSettling {
-                directTailReturnArmed = false
-            }
-            isAtBottom = false
-            return
-        }
-        if current.isAtCatchUpBoundary {
-            admitTailBoundary(directlyOwned: false)
-            return
-        }
-        isAtBottom = false
-        guard catchUpPhase == .none else { return }
-        pendingGrowthFollow = true
-        pendingContinuousGrowthFollow = true
-        scheduleTailFollow()
+        admitGeometry(current)
     }
 
-    /// Positions the exact installed physical tail before the transcript is
-    /// revealed. Submission of a `ScrollPosition` write is not completion: the
-    /// continuation resumes only after fresh semantic and native geometry prove
-    /// that the target intersects a plausible bottom viewport.
+    private func admitGeometry(_ current: ChatTranscriptGeometry) {
+        geometry = current
+        geometryRevision &+= 1
+        evaluateLayoutRestoreIfReady()
+        evaluatePrependIfReady()
+        evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
+        guard !openingTailSettlementPending else { return }
+        let nextIsAtBottom = viewportMode == .pinned
+            && (current.isAtBottom || current.isAtCatchUpBoundary)
+        if isAtBottom != nextIsAtBottom { isAtBottom = nextIsAtBottom }
+        if catchUpPhase == .settling, current.isAtCatchUpBoundary {
+            finishCatchUpPinned()
+        }
+    }
+
     func positionOpeningTail(targetRenderedID: String?) async -> Bool {
-        guard let targetRenderedID else { return true }
-        guard !isPrependingHistory else { return false }
+        guard let targetRenderedID else {
+            viewportMode.reduce(.opened)
+            return true
+        }
+        guard prepend == nil else { return false }
         clearOpeningTailSettlement(positioningSucceeded: false)
         sequence &+= 1
         let token = sequence
@@ -723,9 +375,8 @@ final class ChatScrollCoordinator {
         }
     }
 
-    /// Test and preview seam for callback-order characterization.
     func requestOpeningTail(targetRenderedID: String?) {
-        guard !isPrependingHistory else { return }
+        guard prepend == nil else { return }
         clearOpeningTailSettlement(positioningSucceeded: false)
         guard let targetRenderedID else { return }
         sequence &+= 1
@@ -736,9 +387,6 @@ final class ChatScrollCoordinator {
         )
     }
 
-    /// The first visible frame starts only after physical positioning succeeds.
-    /// Keep the edge binding through the fade/slide transaction, then release it
-    /// after animation completion and two unchanged display-frame barriers.
     func openingRevealCompleted() {
         guard case .positioned(let context) = openingTailPhase,
               context.presentation == presentation else { return }
@@ -748,25 +396,286 @@ final class ChatScrollCoordinator {
 
     func waitForOpeningTailSettlement() async {
         guard let token = openingTailToken else { return }
-        let waiterID = nextOpeningTailFinalWaiterID
+        let id = nextOpeningTailFinalWaiterID
         nextOpeningTailFinalWaiterID &+= 1
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 if openingTailSettlementPending, openingTailToken == token {
-                    openingTailFinalWaiters.append(.init(
-                        id: waiterID,
-                        token: token,
-                        continuation: continuation
-                    ))
+                    openingTailFinalWaiters.append(.init(id: id, token: token, continuation: continuation))
                 } else {
                     continuation.resume()
                 }
             }
         } onCancel: {
-            Task { @MainActor [weak self] in
-                self?.resumeOpeningTailFinalWaiter(id: waiterID, token: token)
+            Task { @MainActor [weak self] in self?.resumeOpeningTailFinalWaiter(id: id, token: token) }
+        }
+    }
+
+    func requestCatchUp(reduceMotion: Bool) {
+        cancelLayoutRestore()
+        cancelCatchUp(restoringAnchored: false)
+        if prepend != nil { finishPrepend(result: .discarded) }
+        catchUpUnreadBeforeJump = hasUnreadContent
+        viewportMode.reduce(.catchUpRequested)
+        isAtBottom = false
+        let threshold = max(320, geometry.containerHeight * 0.8)
+        if !reduceMotion, geometry.distanceFromBottom > threshold {
+            let reveal = min(140, max(80, geometry.containerHeight * 0.18))
+            let bottomOffset = geometry.contentHeight + geometry.bottomInset - geometry.containerHeight
+            catchUpPhase = .staged
+            publish(.offsetY(max(0, bottomOffset - reveal)), animation: .disabled, origin: .catchUp)
+        } else {
+            catchUpPhase = .final
+            publish(.tail, animation: reduceMotion ? .disabled : .smooth(duration: 0.30), origin: .catchUp)
+        }
+        catchUpCommandToken = command?.token
+    }
+
+    func transcriptProjectionWillChange(from installed: InstalledChatTranscript?) {
+        guard prepend == nil, viewportMode == .anchored, layoutRestore == nil,
+              let installed, let anchor = semanticAnchor(in: installed.timeline) else { return }
+        sequence &+= 1
+        let token = sequence
+        let admittedPresentation = presentation
+        layoutRestore = LayoutRestore(
+            token: token,
+            anchor: anchor,
+            requiredSampleRevision: semanticFrameRevision,
+            requiredGeometryRevision: geometryRevision
+        )
+        layoutRestoreTimeoutTask?.cancel()
+        layoutRestoreTimeoutTask = Task { [weak self, clock] in
+            do { try await clock.sleep(.seconds(1)); try Task.checkCancellation() }
+            catch { return }
+            guard let self, self.presentation == admittedPresentation,
+                  self.layoutRestore?.token == token else { return }
+            self.cancelLayoutRestore()
+        }
+    }
+
+    func installedLifecycleChanged(_ installed: InstalledChatTranscript) {
+        // Pinned lifecycle growth is absorbed by the held bottom edge. Anchored
+        // readers intentionally receive no command.
+    }
+
+    func installedTranscriptChanged(_ installed: InstalledChatTranscript?) {
+        guard var restore = layoutRestore else { return }
+        guard let installed else { return }
+        guard viewportMode == .anchored,
+              let renderedID = installed.timeline.renderedIDBySemanticID[restore.anchor.semanticID] else {
+            cancelLayoutRestore()
+            return
+        }
+        let installedLayout = beginInstalledLayoutEpoch()
+        restore.renderedAnchorID = renderedID
+        restore.expectedLayoutEpoch = installedLayout.value
+        restore.requiredSampleRevision = installedLayout.firstValidSampleRevision
+        restore.requiredGeometryRevision = geometryRevision
+        restore.readyForMeasurement = true
+        layoutRestore = restore
+        evaluateLayoutRestoreIfReady()
+    }
+
+    func discreteContentInserted(renderedID: String) {
+        // Native edge pinning owns growth. This callback remains the entrance
+        // admission seam but emits no viewport command.
+    }
+
+    func submitted() {
+        viewportMode.reduce(.submitted)
+    }
+
+    func semanticResponseArrived() {
+        if shouldTrackUnreadResponse { hasUnreadContent = true }
+    }
+
+    @discardableResult
+    func beginPrepend(
+        anchor: ChatSemanticAnchor?,
+        load: @escaping @MainActor @Sendable () async -> ChatPrependPage?,
+        completion: @escaping @MainActor (PerformanceResult) -> Void
+    ) -> Bool {
+        guard canRequestHistoryPage else {
+            completion(.discarded)
+            return false
+        }
+        // Loading earlier is explicit reader intent. It supersedes a pending
+        // semantic-restore command before anchored or unanchored paging starts,
+        // so that stale write cannot land after page installation. Catch-up and
+        // opening retain their stronger ownership and reject paging above.
+        cancelLayoutRestore()
+        clearCommand()
+        guard let anchor, anchor.layoutEpoch == layoutEpoch,
+              let sample = semanticFrames[anchor.renderedID],
+              sample.layoutEpoch == anchor.layoutEpoch,
+              abs(sample.frame.minY - anchor.viewportOffsetY) <= 0.5,
+              sample.frame.maxY > 0,
+              sample.frame.minY < geometry.containerHeight else {
+            completion(.discarded)
+            return false
+        }
+        sequence &+= 1
+        let token = sequence
+        let admittedPresentation = presentation
+        viewportMode.reduce(.prependBegan)
+        prepend = PrependContext(
+            token: token,
+            anchor: anchor,
+            requiredSampleRevision: semanticFrameRevision,
+            requiredGeometryRevision: geometryRevision,
+            completion: completion
+        )
+        maximumPrependSemanticExcursion = 0
+        prependTimeoutTask = Task { [weak self, clock] in
+            do { try await clock.sleep(.seconds(8)) } catch { return }
+            guard let self, self.prepend?.token == token,
+                  self.presentation == admittedPresentation else { return }
+            self.prependTask?.cancel()
+            self.finishPrepend(result: .failure)
+        }
+        prependTask = Task { [weak self] in
+            let page = await load()
+            guard let self, var context = self.prepend,
+                  context.token == token,
+                  self.presentation == admittedPresentation else { return }
+            self.prependTask = nil
+            guard let page,
+                  page.installedLayout.value == self.layoutEpoch,
+                  page.installedLayout.value != anchor.layoutEpoch,
+                  !context.interrupted else {
+                self.finishPrepend(result: .discarded)
+                return
+            }
+            context.renderedAnchorID = page.renderedAnchorID
+            context.expectedLayoutEpoch = page.installedLayout.value
+            context.requiredSampleRevision = page.installedLayout.firstValidSampleRevision
+            context.readyForMeasurement = true
+            self.prepend = context
+            self.evaluatePrependIfReady()
+            #if HOSTED_TEST
+            self.resumeHostedPrependSampleWaiters()
+            #endif
+        }
+        return true
+    }
+
+    func commandApplied(_ applied: ChatScrollCommand) {
+        guard command?.token == applied.token, applied.presentation == presentation else { return }
+        command = nil
+        commandRevision &+= 1
+
+        if openingTailPhase.context?.commandToken == applied.token { scheduleOpeningTailFrame() }
+        if catchUpCommandToken == applied.token {
+            catchUpCommandToken = nil
+            if catchUpPhase == .staged {
+                let admittedPresentation = presentation
+                catchUpTask = Task { [weak self, frameScheduler] in
+                    do { try await frameScheduler.nextFrame(); try Task.checkCancellation() }
+                    catch {
+                        guard let self, self.presentation == admittedPresentation else { return }
+                        self.cancelCatchUp(restoringAnchored: true)
+                        return
+                    }
+                    guard let self, self.presentation == admittedPresentation,
+                          self.catchUpPhase == .staged, !self.isUserInteracting else { return }
+                    self.catchUpTask = nil
+                    self.catchUpPhase = .final
+                    self.publish(.tail, animation: .smooth(duration: 0.30), origin: .catchUp)
+                    self.catchUpCommandToken = self.command?.token
+                }
+            } else if catchUpPhase == .final {
+                catchUpPhase = .settling
             }
         }
+        if var restore = layoutRestore, restore.correctionCommandToken == applied.token {
+            restore.correctionCommandToken = nil
+            restore.requiredSampleRevision = semanticFrameRevision
+            restore.requiredGeometryRevision = geometryRevision
+            restore.readyForMeasurement = true
+            layoutRestore = restore
+        }
+        if var context = prepend, context.correctionCommandToken == applied.token {
+            context.correctionCommandToken = nil
+            context.requiredSampleRevision = semanticFrameRevision
+            context.requiredGeometryRevision = geometryRevision
+            context.readyForMeasurement = true
+            prepend = context
+        }
+        evaluateLayoutRestoreIfReady()
+        evaluatePrependIfReady()
+    }
+
+    func cancel() {
+        cancelAllOwnedWork(result: .cancelled)
+        clearCommand()
+    }
+
+    private func evaluateLayoutRestoreIfReady() {
+        guard var restore = layoutRestore, restore.readyForMeasurement,
+              command == nil, restore.correctionCommandToken == nil,
+              viewportMode == .anchored, !isUserInteracting,
+              let renderedID = restore.renderedAnchorID,
+              restore.expectedLayoutEpoch == layoutEpoch,
+              let sample = semanticFrames[renderedID],
+              sample.layoutEpoch == layoutEpoch,
+              sample.revision > restore.requiredSampleRevision,
+              geometryRevision > restore.requiredGeometryRevision else { return }
+        restore.readyForMeasurement = false
+        let residual = sample.frame.minY - restore.anchor.viewportOffsetY
+        if abs(residual) <= 1 || restore.correctionCount >= 2 {
+            cancelLayoutRestore()
+            return
+        }
+        restore.correctionCount &+= 1
+        let requested = Self.prependCorrectionOffset(
+            currentOffsetY: geometry.offsetY,
+            capturedViewportOffsetY: restore.anchor.viewportOffsetY,
+            installedFrameMinY: sample.frame.minY
+        )
+        publish(.offsetY(requested), animation: .disabled, origin: .layout)
+        restore.correctionCommandToken = command?.token
+        layoutRestore = restore
+    }
+
+    private func evaluatePrependIfReady() {
+        guard var context = prepend, context.readyForMeasurement,
+              command == nil, context.correctionCommandToken == nil, !context.interrupted,
+              let renderedID = context.renderedAnchorID,
+              context.expectedLayoutEpoch == layoutEpoch,
+              let sample = semanticFrames[renderedID], sample.layoutEpoch == layoutEpoch,
+              sample.revision > context.requiredSampleRevision,
+              geometryRevision > context.requiredGeometryRevision else { return }
+        context.readyForMeasurement = false
+        let residual = sample.frame.minY - context.anchor.viewportOffsetY
+        maximumPrependSemanticExcursion = max(maximumPrependSemanticExcursion, abs(residual))
+        if abs(residual) <= 1 {
+            prepend = context
+            finishPrepend(result: .success)
+            return
+        }
+        guard context.correctionCount < 2 else {
+            prepend = context
+            finishPrepend(result: .failure)
+            return
+        }
+        context.correctionCount &+= 1
+        let requested = Self.prependCorrectionOffset(
+            currentOffsetY: geometry.offsetY,
+            capturedViewportOffsetY: context.anchor.viewportOffsetY,
+            installedFrameMinY: sample.frame.minY
+        )
+        publish(.offsetY(requested), animation: .disabled, origin: .prepend)
+        context.correctionCommandToken = command?.token
+        prepend = context
+    }
+
+    private func recordPrependExcursionIfOwned(renderedID: String, layoutEpoch: Int, frame: CGRect) {
+        guard let context = prepend, context.renderedAnchorID == renderedID,
+              context.expectedLayoutEpoch == layoutEpoch else { return }
+        maximumPrependSemanticExcursion = max(
+            maximumPrependSemanticExcursion,
+            abs(frame.minY - context.anchor.viewportOffsetY)
+        )
     }
 
     private func beginOpeningTailSettlement(
@@ -789,794 +698,22 @@ final class ChatScrollCoordinator {
         openingTailContinuation = continuation
         scheduleOpeningTailTimeout(token: token, presentation: presentation)
         evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
-        if case .positioning = openingTailPhase {
-            scheduleOpeningTailFrame()
-        }
+        if case .positioning = openingTailPhase { scheduleOpeningTailFrame() }
     }
 
-    func requestCatchUp(reduceMotion: Bool) {
-        cancelLayoutMutation()
-        cancelCatchUp(restoringDetached: false)
-        if isPrependingHistory {
-            prependInterrupted = true
-            if prependRenderedAnchorID != nil { finishPrepend(token: prependToken, result: .discarded) }
-        }
-        cancelAutomaticTasks()
-        catchUpUnreadBeforeJump = hasUnreadContent
-        catchUpPhase = .final
-        userScrolledAway = false
-        isAtBottom = false
-
-        if reduceMotion {
-            publishCatchUpTail(animation: .disabled)
-            return
-        }
-        let threshold = max(320, geometry.containerHeight * 0.8)
-        guard geometry.distanceFromBottom > threshold else {
-            publishCatchUpTail(animation: .smooth(duration: 0.30))
-            return
-        }
-        let reveal = min(140, max(80, geometry.containerHeight * 0.18))
-        let bottomOffset = geometry.contentHeight + geometry.bottomInset - geometry.containerHeight
-        catchUpPhase = .staged
-        publish(.offsetY(max(0, bottomOffset - reveal)), animation: .disabled, origin: .catchUp)
-        catchUpCommandToken = command?.token
-    }
-
-    /// Captures the currently visible semantic locus before an ordinary projection
-    /// install. Repeated desired sources coalesce around the first captured locus;
-    /// the exact installed generation retargets it after publication.
-    func transcriptProjectionWillChange(from installed: InstalledChatTranscript?) {
-        guard !isPrependingHistory, let installed else { return }
-        if !layoutMutationPendingInstall,
-           layoutMutationExpectedLayoutEpoch == nil,
-           layoutMutationCorrectionCommandToken == nil {
-            let preservesReaderLocus = userScrolledAway || pendingUnattributedOlderMovement
-            layoutMutationWasDetached = preservesReaderLocus
-            layoutMutationAnchor = preservesReaderLocus ? semanticAnchor(in: installed.timeline) : nil
-            layoutMutationCorrectionCount = 0
-        }
-        // Geometry may settle before the frame-gated projection waiter resumes.
-        // The pre-submission revision is therefore the mutation boundary; using
-        // the later installed-layout epoch could wait forever for another callback.
-        layoutMutationRequiredGeometryRevision = geometryRevision
-        layoutMutationPendingInstall = true
-    }
-
-    /// A lifecycle-only graft publishes a complete local row without advancing
-    /// canonical payload. It may request one pinned-tail follow, but deliberately
-    /// leaves any authoritative projection mutation boundary untouched.
-    func installedLifecycleChanged(_ installed: InstalledChatTranscript) {
-        guard installed.hasUniqueDisplayedIDs, canAutomaticallyFollow else { return }
-        pendingInstalledTailSettlement = true
-        pendingGrowthFollow = true
-        pendingContinuousGrowthFollow = true
-        scheduleTailFollow()
-    }
-
-    /// An actual installed transition retains a pending entrance entitlement only
-    /// while that exact rendered row remains displayed, then starts one owned
-    /// layout settlement for the installed generation.
-    func installedTranscriptChanged(_ installed: InstalledChatTranscript?) {
-        guard let installed else {
-            cancelDiscreteFollowOwnership()
-            // Identity-changing submissions synchronously clear the installed
-            // value before publishing their replacement. Preserve the anchor
-            // transaction already captured for that admitted work.
-            if !layoutMutationPendingInstall {
-                finishLayoutMutation(releasesCorrectedBinding: true)
-            }
-            return
-        }
-        if !discreteFollowRenderedIDs.isEmpty {
-            discreteFollowRenderedIDOrder.removeAll {
-                !discreteFollowRenderedIDs.contains($0) || !installed.containsDisplayedID($0)
-            }
-            discreteFollowRenderedIDs = Set(discreteFollowRenderedIDOrder)
-            if discreteFollowRenderedIDs.isEmpty { cancelDiscreteFollowOwnership() }
-        }
-
-        guard layoutMutationPendingInstall else { return }
-        layoutMutationPendingInstall = false
-        if layoutMutationWasDetached {
-            guard (userScrolledAway || pendingUnattributedOlderMovement), !isUserInteracting,
-                  !pendingNativeUserGeometry, !isUserDrivenSettling,
-                  let anchor = layoutMutationAnchor,
-                  let renderedID = installed.timeline.renderedIDBySemanticID[anchor.semanticID] else {
-                finishLayoutMutation(releasesCorrectedBinding: true)
-                return
-            }
-            retireLayoutMutationCorrectionCommand()
-            releaseLayoutMutationBindingIfNeeded()
-            let installedLayout = beginInstalledLayoutEpoch()
-            layoutMutationRenderedAnchorID = renderedID
-            layoutMutationExpectedLayoutEpoch = installedLayout.value
-            layoutMutationRequiredSampleRevision = installedLayout.firstValidSampleRevision
-            layoutMutationReadyForMeasurement = true
-            layoutMutationCorrectionCount = 0
-            evaluateLayoutMutationIfReady()
-        } else {
-            guard canAutomaticallyFollow else {
-                finishLayoutMutation()
-                return
-            }
-            pendingInstalledTailSettlement = true
-            pendingGrowthFollow = true
-            pendingContinuousGrowthFollow = true
-            finishLayoutMutation(keepingTailSettlement: true)
-            scheduleTailFollow()
-        }
-    }
-
-    /// A geometry-admitted visible row insertion requests one coalesced smooth
-    /// pinned-tail settlement. Detached/native-owned readers remain inert, and
-    /// physical overshoot correction is forced nonanimated at publication.
-    func discreteContentInserted(
-        renderedID: String,
-        followAnimation: ChatScrollAnimation = .smooth(
-            duration: ChatScrollCoordinator.liveGrowthFollowDuration
-        )
-    ) {
-        guard canAutomaticallyFollow else { return }
-        if discreteFollowRenderedIDs.insert(renderedID).inserted {
-            discreteFollowRenderedIDOrder.append(renderedID)
-            let maximum = ChatTranscriptPageRequest.maximumItemCount
-            if discreteFollowRenderedIDOrder.count > maximum {
-                let excess = discreteFollowRenderedIDOrder.count - maximum
-                let retired = Array(discreteFollowRenderedIDOrder.prefix(excess))
-                discreteFollowRenderedIDOrder.removeFirst(excess)
-                discreteFollowRenderedIDs.subtract(retired)
-            }
-        }
-        pendingGrowthFollow = true
-        if case .smooth = followAnimation {
-            pendingGrowthFollowAnimation = followAnimation
-        }
-        scheduleTailFollow()
-    }
-
-    func semanticResponseArrived() {
-        if shouldTrackUnreadResponse { hasUnreadContent = true }
-    }
-
-    @discardableResult
-    func beginPrepend(
-        anchor: ChatSemanticAnchor?,
-        load: @escaping @MainActor @Sendable () async -> ChatPrependPage?,
-        completion: @escaping @MainActor (PerformanceResult) -> Void
-    ) -> Bool {
-        guard !isPrependingHistory, catchUpPhase == .none,
-              !openingTailSettlementPending, command == nil,
-              let anchor, anchor.layoutEpoch == layoutEpoch,
-              let admittedSample = semanticFrames[anchor.renderedID],
-              admittedSample.layoutEpoch == anchor.layoutEpoch,
-              abs(admittedSample.frame.minY - anchor.viewportOffsetY) <= 0.5,
-              admittedSample.frame.maxY > 0,
-              admittedSample.frame.minY < geometry.containerHeight else {
-            completion(.discarded)
-            return false
-        }
-        cancelLayoutMutation()
-        sequence &+= 1
-        let token = sequence
-        let admittedPresentation = presentation
-        isPrependingHistory = true
-        prependToken = token
-        prependWasScrolledAway = userScrolledAway
-        prependInterrupted = false
-        prependAnchor = anchor
-        prependRenderedAnchorID = nil
-        prependExpectedLayoutEpoch = nil
-        prependReadyForMeasurement = false
-        prependRequiredSampleRevision = semanticFrameRevision
-        prependRequiredGeometryRevision = geometryRevision
-        prependCorrectionCount = 0
-        prependCorrectionCommandToken = nil
-        prependAppliedOffset = false
-        prependCompletion = completion
-        maximumPrependSemanticExcursion = 0
-        pendingGrowthFollow = false
-        cancelAutomaticTasks()
-        prependTimeoutTask?.cancel()
-        prependTimeoutTask = Task { [weak self, clock] in
-            do { try await clock.sleep(.seconds(8)) }
-            catch { return }
-            guard let self,
-                  self.prependToken == token,
-                  self.presentation == admittedPresentation else { return }
-            self.prependTask?.cancel()
-            self.finishPrepend(token: token, result: .failure)
-        }
-
-        prependTask = Task { [weak self] in
-            let page = await load()
-            guard let self, self.prependToken == token, self.presentation == admittedPresentation else { return }
-            self.prependTask = nil
-            guard let page,
-                  page.installedLayout.value == self.layoutEpoch,
-                  page.installedLayout.value != anchor.layoutEpoch else {
-                self.finishPrepend(token: token, result: .discarded)
-                return
-            }
-            guard !self.prependInterrupted else {
-                self.finishPrepend(token: token, result: .discarded)
-                return
-            }
-            self.prependRenderedAnchorID = page.renderedAnchorID
-            self.prependExpectedLayoutEpoch = page.installedLayout.value
-            // The epoch boundary, not load-continuation timing, is authority.
-            // A valid sample may already have arrived after publication.
-            self.prependRequiredSampleRevision = page.installedLayout.firstValidSampleRevision
-            // Keep the pre-load geometry boundary captured by beginPrepend.
-            // Installation can settle geometry before this continuation resumes.
-            self.prependReadyForMeasurement = true
-            self.evaluatePrependMeasurementIfReady()
-            #if HOSTED_TEST
-            self.resumeHostedPrependSampleWaiters()
-            #endif
-        }
-        return true
-    }
-
-    private func acknowledgeAutomaticTailIfSettled(_ current: ChatTranscriptGeometry) {
-        guard pendingAutomaticTailCommandToken != nil,
-              command?.destination == .tail,
-              !current.isPastBottomEdge,
-              let startRevision = automaticTailCommandStartGeometryRevision,
-              geometryRevision > startRevision else { return }
-        let movedNativeViewport = automaticTailCommandStartOffsetY.map {
-            abs(current.offsetY - $0) > 1
-        } == true
-        guard movedNativeViewport || current.isAtCatchUpBoundary else { return }
-        pendingAutomaticTailCommandToken = nil
-        pastBottomCorrectionCommandToken = nil
-        automaticTailCommandStartGeometryRevision = nil
-        automaticTailCommandStartOffsetY = nil
-        command = nil
-        commandRevision &+= 1
-    }
-
-    func commandApplied(_ applied: ChatScrollCommand) {
-        guard command?.token == applied.token, applied.presentation == presentation else { return }
-        let awaitsNativeTailEvidence = applied.origin == .automaticFollow
-            && applied.destination == .tail
-        if awaitsNativeTailEvidence {
-            pendingAutomaticTailCommandToken = applied.token
-            automaticTailCommandStartGeometryRevision = geometryRevision
-            automaticTailCommandStartOffsetY = geometry.offsetY
-        } else {
-            command = nil
-        }
-        switch applied.destination {
-        case .resetToBottom:
-            bindingIsReleased = false
-        case .releaseBinding:
-            bindingIsReleased = true
-        case .tail, .openingTail, .offsetY:
-            bindingIsReleased = false
-        }
-
-        if case .positioning(let context) = openingTailPhase,
-           context.presentation == applied.presentation,
-           context.commandToken == applied.token {
-            // Submission is not physical completion. Retain the token until a
-            // later display-frame/evidence pair proves settlement, preventing
-            // multiple SwiftUI binding writes in one render transaction.
-            scheduleOpeningTailFrame()
-        }
-
-        if catchUpCommandToken == applied.token {
-            catchUpCommandToken = nil
-            if catchUpPhase == .staged {
-                let admittedPresentation = presentation
-                catchUpTask = Task { [weak self, frameScheduler] in
-                    do {
-                        try await frameScheduler.nextFrame()
-                        try Task.checkCancellation()
-                    } catch {
-                        guard let self, self.presentation == admittedPresentation else { return }
-                        self.cancelCatchUp(restoringDetached: true)
-                        return
-                    }
-                    guard let self, self.presentation == admittedPresentation,
-                          self.catchUpPhase == .staged,
-                          !self.isUserInteracting else { return }
-                    self.catchUpTask = nil
-                    self.catchUpPhase = .final
-                    self.publishCatchUpTail(animation: .smooth(duration: 0.30))
-                }
-            } else if catchUpPhase == .final {
-                catchUpPhase = .settling
-            }
-        }
-
-        if layoutMutationCorrectionCommandToken == applied.token {
-            layoutMutationCorrectionCommandToken = nil
-            layoutMutationAppliedOffset = true
-            layoutMutationRequiredSampleRevision = semanticFrameRevision
-            layoutMutationRequiredGeometryRevision = geometryRevision
-            layoutMutationReadyForMeasurement = true
-        }
-
-        if prependCorrectionCommandToken == applied.token {
-            prependCorrectionCommandToken = nil
-            prependAppliedOffset = true
-            prependRequiredSampleRevision = semanticFrameRevision
-            prependRequiredGeometryRevision = geometryRevision
-            prependReadyForMeasurement = true
-        }
-
-        evaluateLayoutMutationIfReady()
-        evaluatePrependMeasurementIfReady()
-        // Geometry can grow again while the previous automatic command is
-        // still being consumed by SwiftUI. Keep that growth pending and issue
-        // the next command only after the current token is acknowledged; two
-        // writes in one render transaction are a primary source of jumps.
-        if pendingGrowthFollow { scheduleTailFollow() }
-    }
-
-    func cancel() {
-        cancelAllOwnedWork(result: .cancelled)
-        clearCommand()
-    }
-
-    private func admitTailBoundary(directlyOwned: Bool) {
-        if catchUpPhase == .settling {
-            finishCatchUpPinned()
-            requestBindingReleaseIfSettled()
-            return
-        }
-        if userScrolledAway && !directlyOwned {
-            isAtBottom = false
-            return
-        }
-        if userScrolledAway && directlyOwned { userScrolledAway = false }
-        releaseAtBottom()
-        requestBindingReleaseIfSettled()
-    }
-
-    private func interruptCatchUpIfAway() {
-        guard catchUpPhase != .none, !geometry.isAtCatchUpBoundary else { return }
-        cancelCatchUp(restoringDetached: true)
-    }
-
-    private func publishCatchUpTail(animation: ChatScrollAnimation) {
-        publish(.tail, animation: animation, origin: .catchUp)
-        catchUpCommandToken = command?.token
-    }
-
-    private func finishCatchUpPinned() {
-        catchUpTask?.cancel()
-        catchUpTask = nil
-        catchUpPhase = .none
-        catchUpCommandToken = nil
-        catchUpUnreadBeforeJump = false
-        releaseAtBottom()
-    }
-
-    private func cancelCatchUp(restoringDetached: Bool) {
-        catchUpTask?.cancel()
-        catchUpTask = nil
-        let ownedToken = catchUpCommandToken
-        catchUpCommandToken = nil
-        let wasActive = catchUpPhase != .none
-        catchUpPhase = .none
-        if let ownedToken, command?.token == ownedToken { clearCommand() }
-        if restoringDetached && wasActive {
-            userScrolledAway = true
-            hasUnreadContent = catchUpUnreadBeforeJump || hasUnreadContent
-            isAtBottom = false
-        }
-        catchUpUnreadBeforeJump = false
-    }
-
-    private func evaluateLayoutMutationIfReady() {
-        guard layoutMutationReadyForMeasurement,
-              command == nil, layoutMutationCorrectionCommandToken == nil,
-              layoutMutationWasDetached, userScrolledAway,
-              !isUserInteracting, !pendingNativeUserGeometry, !isUserDrivenSettling,
-              let anchor = layoutMutationAnchor,
-              let renderedID = layoutMutationRenderedAnchorID,
-              let expectedEpoch = layoutMutationExpectedLayoutEpoch,
-              expectedEpoch == layoutEpoch,
-              let sample = semanticFrames[renderedID],
-              sample.layoutEpoch == expectedEpoch,
-              sample.revision > layoutMutationRequiredSampleRevision,
-              geometryRevision > layoutMutationRequiredGeometryRevision else { return }
-        layoutMutationReadyForMeasurement = false
-        let residual = sample.frame.minY - anchor.viewportOffsetY
-        if abs(residual) <= 1 {
-            finishLayoutMutation(releasesCorrectedBinding: true)
-            return
-        }
-        guard layoutMutationCorrectionCount < 2 else {
-            // The bounded transaction failed to converge, but this decision is
-            // still paired with fresh semantic and geometry evidence.
-            finishLayoutMutation(releasesCorrectedBinding: true)
-            return
-        }
-        layoutMutationCorrectionCount &+= 1
-        let requested = Self.prependCorrectionOffset(
-            currentOffsetY: geometry.offsetY,
-            capturedViewportOffsetY: anchor.viewportOffsetY,
-            installedFrameMinY: sample.frame.minY
-        )
-        publish(.offsetY(requested), animation: .disabled, origin: .layout)
-        layoutMutationCorrectionCommandToken = command?.token
-    }
-
-    private func evaluatePrependMeasurementIfReady() {
-        guard prependReadyForMeasurement,
-              command == nil, prependCorrectionCommandToken == nil,
-              let token = prependToken, !prependInterrupted,
-              let anchor = prependAnchor,
-              let renderedID = prependRenderedAnchorID,
-              let expectedEpoch = prependExpectedLayoutEpoch,
-              expectedEpoch == layoutEpoch,
-              let sample = semanticFrames[renderedID],
-              sample.layoutEpoch == expectedEpoch,
-              sample.revision > prependRequiredSampleRevision,
-              geometryRevision > prependRequiredGeometryRevision else { return }
-        prependReadyForMeasurement = false
-        let residual = sample.frame.minY - anchor.viewportOffsetY
-        maximumPrependSemanticExcursion = max(maximumPrependSemanticExcursion, abs(residual))
-        if abs(residual) <= 1 {
-            finishPrepend(
-                token: token,
-                result: .success,
-                releasesCorrectedBinding: prependCorrectionCount > 0
-            )
-            return
-        }
-        guard prependCorrectionCount < 2 else {
-            finishPrepend(
-                token: token,
-                result: .failure,
-                releasesCorrectedBinding: true
-            )
-            return
-        }
-        prependCorrectionCount &+= 1
-        let requested = Self.prependCorrectionOffset(
-            currentOffsetY: geometry.offsetY,
-            capturedViewportOffsetY: anchor.viewportOffsetY,
-            installedFrameMinY: sample.frame.minY
-        )
-        publish(.offsetY(requested), animation: .disabled, origin: .prepend)
-        prependCorrectionCommandToken = command?.token
-    }
-
-    private func recordPrependExcursionIfOwned(renderedID: String, layoutEpoch: Int, frame: CGRect) {
-        guard renderedID == prependRenderedAnchorID,
-              layoutEpoch == prependExpectedLayoutEpoch,
-              let anchor = prependAnchor else { return }
-        maximumPrependSemanticExcursion = max(
-            maximumPrependSemanticExcursion,
-            abs(frame.minY - anchor.viewportOffsetY)
-        )
-    }
-
-    @discardableResult
-    private func requestPinnedTailCorrectionIfNeeded(
-        _ current: ChatTranscriptGeometry,
-        hasDirectUserAuthority: Bool
-    ) -> Bool {
-        guard current.isPastBottomEdge,
-              !hasDirectUserAuthority,
-              !userScrolledAway,
-              catchUpPhase == .none,
-              !isPrependingHistory,
-              !openingTailSettlementPending else { return false }
-        // A released edge binding can retain an obsolete absolute offset when
-        // canonical settlement, compaction, or reconciliation shortens/replaces
-        // the stack. Negative bottom distance is clamped by presentation
-        // geometry, so explicitly restore the physical tail instead of
-        // accepting the blank overshoot as settled.
-        isAtBottom = false
-        isNativeUserOwned = false
-        pendingNativeUserGeometry = false
-        hadUserInteraction = false
-        directTailReturnArmed = false
-        if command?.origin == .automaticFollow,
-           command?.destination == .tail,
-           pendingAutomaticTailCommandToken != nil {
-            if command?.token == pastBottomCorrectionCommandToken {
-                // The one corrective edge binding is already applied. It owns
-                // settlement until plausible geometry or direct cancellation;
-                // repeated stale layout samples must not submit another write.
-                return true
-            }
-            // An ordinary growth-tail token predating the structural shrink
-            // cannot block this frame's proof-or-correction decision.
-            clearCommand()
-        }
-        pendingGrowthFollow = true
-        pendingContinuousGrowthFollow = true
-        pendingInstalledTailSettlement = true
-        scheduleTailFollow()
-        return true
-    }
-
-    private func scheduleTailFollow() {
-        guard pendingGrowthFollow, command == nil, canAutomaticallyFollow,
-              (pendingInstalledTailSettlement
-                || !discreteFollowRenderedIDs.isEmpty
-                || geometry.distanceFromBottom > ChatTranscriptGeometry.catchUpDistance),
-              followFrameTask == nil else { return }
-        let admittedPresentation = presentation
-        followFrameTask = Task { [weak self, frameScheduler] in
-            do {
-                try await frameScheduler.nextFrame()
-                try Task.checkCancellation()
-            } catch { return }
-            guard let self else { return }
-            #if HOSTED_TEST
-            defer { self.completeHostedFollowDecision() }
-            #endif
-            self.followFrameTask = nil
-            guard self.presentation == admittedPresentation,
-                  self.pendingGrowthFollow, self.canAutomaticallyFollow else { return }
-            self.pendingGrowthFollow = false
-            self.pendingContinuousGrowthFollow = false
-            self.pendingInstalledTailSettlement = false
-            self.clearDiscreteFollowIDs()
-            let followAnimation = self.activeComposerViewportGeneration == nil
-                ? self.pendingGrowthFollowAnimation
-                : .disabled
-            self.pendingGrowthFollowAnimation = .disabled
-            if self.geometry.isPastBottomEdge
-                || self.geometry.distanceFromBottom > ChatTranscriptGeometry.catchUpDistance {
-                let correctsPastBottom = self.geometry.isPastBottomEdge
-                self.publish(
-                    .tail,
-                    animation: correctsPastBottom ? .disabled : followAnimation,
-                    origin: .automaticFollow
-                )
-                if correctsPastBottom {
-                    self.pastBottomCorrectionCommandToken = self.command?.token
-                }
-            } else {
-                // A previously applied edge binding may have corrected the
-                // structural overshoot before this frame. Release it only after
-                // the now-plausible native tail sample.
-                self.requestBindingReleaseIfSettled()
-            }
-        }
-    }
-
-    private func requestBindingReleaseIfSettled() {
-        guard activeComposerViewportGeneration == nil,
-              !bindingIsReleased, command == nil,
-              followFrameTask == nil, catchUpTask == nil,
-              catchUpPhase == .none, !isPrependingHistory,
-              !openingTailSettlementPending,
-              !isUserInteracting, !isScrollAnimating,
-              geometry.isAtCatchUpBoundary else { return }
-        publish(.releaseBinding, animation: .disabled, origin: .binding)
-    }
-
-    private func publish(
-        _ destination: ChatScrollCommand.Destination,
-        animation: ChatScrollAnimation,
-        origin: ChatScrollCommand.Origin
-    ) {
-        sequence &+= 1
-        command = .init(
-            token: sequence,
-            presentation: presentation,
-            origin: origin,
-            destination: destination,
-            animation: animation
-        )
-        commandRevision &+= 1
-        #if HOSTED_TEST
-        let waiters = hostedCommandWaiters
-        hostedCommandWaiters.removeAll()
-        waiters.forEach { $0.continuation.resume(returning: command!) }
-        #endif
-    }
-
-    private func clearCommand() {
-        guard command != nil || pendingAutomaticTailCommandToken != nil else { return }
-        command = nil
-        pendingAutomaticTailCommandToken = nil
-        pastBottomCorrectionCommandToken = nil
-        automaticTailCommandStartGeometryRevision = nil
-        automaticTailCommandStartOffsetY = nil
-        commandRevision &+= 1
-    }
-
-    private func cancelAutomaticWorkForUserInteraction() {
-        clearOpeningTailSettlement()
-        cancelLayoutMutation()
-        cancelAutomaticTasks()
-        if isPrependingHistory {
-            prependInterrupted = true
-            let token = prependToken
-            prependTask?.cancel()
-            finishPrepend(token: token, result: .discarded)
-        }
-        clearCommand()
-    }
-
-    private func cancelAutomaticTasks() {
-        finishComposerViewportTransition()
-        followFrameTask?.cancel()
-        followFrameTask = nil
-        pendingGrowthFollow = false
-        pendingGrowthFollowAnimation = .disabled
-        pendingAutomaticTailCommandToken = nil
-        pastBottomCorrectionCommandToken = nil
-        automaticTailCommandStartGeometryRevision = nil
-        automaticTailCommandStartOffsetY = nil
-        pendingContinuousGrowthFollow = false
-        pendingInstalledTailSettlement = false
-        clearDiscreteFollowIDs()
-    }
-
-    private func cancelDiscreteFollowOwnership() {
-        clearDiscreteFollowIDs()
-        guard !pendingContinuousGrowthFollow else { return }
-        followFrameTask?.cancel()
-        followFrameTask = nil
-        pendingGrowthFollow = false
-        pendingGrowthFollowAnimation = .disabled
-    }
-
-    private func clearDiscreteFollowIDs() {
-        discreteFollowRenderedIDs.removeAll(keepingCapacity: true)
-        discreteFollowRenderedIDOrder.removeAll(keepingCapacity: true)
-    }
-
-    private func finishComposerViewportTransition() {
-        activeComposerViewportGeneration = nil
-        composerViewportWasDetached = false
-        composerViewportAnchor = nil
-    }
-
-    private func installComposerTailBinding() -> Bool {
-        if let command {
-            let supersedableRelease = command.destination == .releaseBinding
-            let supersedableTail = command.origin == .automaticFollow
-                && command.destination == .tail
-            guard supersedableRelease || supersedableTail else { return false }
-            clearCommand()
-        }
-        publish(.tail, animation: .disabled, origin: .automaticFollow)
-        return true
-    }
-
-    private func retireAutomaticTailBindingForComposerDetachment() {
-        followFrameTask?.cancel()
-        followFrameTask = nil
-        pendingGrowthFollow = false
-        pendingContinuousGrowthFollow = false
-        pendingInstalledTailSettlement = false
-        pendingGrowthFollowAnimation = .disabled
-        clearDiscreteFollowIDs()
-
-        if command?.origin == .automaticFollow, command?.destination == .tail {
-            clearCommand()
-        }
-        guard command == nil, !bindingIsReleased else { return }
-        // Releasing the ScrollPosition binding changes no physical offset; it
-        // only prevents an older automatic tail owner from pulling the reader
-        // while the composer changes underneath a geometry-first gesture.
-        publish(.releaseBinding, animation: .disabled, origin: .binding)
-    }
-
-    private func retireLayoutMutationCorrectionCommand() {
-        guard let token = layoutMutationCorrectionCommandToken else { return }
-        if command?.token == token { clearCommand() }
-        layoutMutationCorrectionCommandToken = nil
-    }
-
-    private func releaseLayoutMutationBindingIfNeeded() {
-        guard layoutMutationAppliedOffset else { return }
-        layoutMutationAppliedOffset = false
-        if command == nil {
-            publish(.releaseBinding, animation: .disabled, origin: .binding)
-        }
-    }
-
-    private func finishLayoutMutation(
-        keepingTailSettlement: Bool = false,
-        releasesCorrectedBinding: Bool = false
-    ) {
-        let shouldReleaseBinding = releasesCorrectedBinding
-            && layoutMutationAppliedOffset
-            && layoutMutationCorrectionCommandToken == nil
-            && userScrolledAway && !isUserInteracting
-            && !pendingNativeUserGeometry && !isUserDrivenSettling
-        retireLayoutMutationCorrectionCommand()
-        layoutMutationAnchor = nil
-        layoutMutationWasDetached = false
-        layoutMutationPendingInstall = false
-        layoutMutationRenderedAnchorID = nil
-        layoutMutationExpectedLayoutEpoch = nil
-        layoutMutationRequiredSampleRevision = semanticFrameRevision
-        layoutMutationRequiredGeometryRevision = geometryRevision
-        layoutMutationReadyForMeasurement = false
-        layoutMutationCorrectionCount = 0
-        layoutMutationAppliedOffset = false
-        if !keepingTailSettlement { pendingInstalledTailSettlement = false }
-        if shouldReleaseBinding, command == nil {
-            publish(.releaseBinding, animation: .disabled, origin: .binding)
-        }
-    }
-
-    private func cancelLayoutMutation() {
-        finishLayoutMutation(releasesCorrectedBinding: false)
-    }
-
-    private func cancelAllOwnedWork(result: PerformanceResult) {
-        clearOpeningTailSettlement()
-        cancelLayoutMutation()
-        cancelAutomaticTasks()
-        cancelCatchUp(restoringDetached: false)
-        prependTask?.cancel()
-        prependTask = nil
-        prependTimeoutTask?.cancel()
-        prependTimeoutTask = nil
-        if isPrependingHistory { prependCompletion?(result) }
-        prependCompletion = nil
-        prependToken = nil
-        prependAnchor = nil
-        prependRenderedAnchorID = nil
-        prependExpectedLayoutEpoch = nil
-        prependReadyForMeasurement = false
-        prependRequiredSampleRevision = semanticFrameRevision
-        prependRequiredGeometryRevision = geometryRevision
-        prependCorrectionCommandToken = nil
-        prependAppliedOffset = false
-        isPrependingHistory = false
-        #if HOSTED_TEST
-        cancelHostedPrependSampleWaiters()
-        #endif
-    }
-
-    private func finishPrepend(
-        token: Int?,
-        result: PerformanceResult,
-        releasesCorrectedBinding: Bool = false
-    ) {
-        guard token == prependToken else { return }
-        let shouldReleaseBinding = releasesCorrectedBinding
-            && prependAppliedOffset
-            && prependCorrectionCommandToken == nil
-            && !prependInterrupted && !isUserInteracting
-            && !pendingNativeUserGeometry && !isUserDrivenSettling
-        prependTask = nil
-        prependTimeoutTask?.cancel()
-        prependTimeoutTask = nil
-        if let correctionToken = prependCorrectionCommandToken,
-           command?.token == correctionToken {
-            clearCommand()
-        }
-        prependToken = nil
-        prependAnchor = nil
-        prependRenderedAnchorID = nil
-        prependExpectedLayoutEpoch = nil
-        prependReadyForMeasurement = false
-        prependRequiredSampleRevision = semanticFrameRevision
-        prependRequiredGeometryRevision = geometryRevision
-        prependCorrectionCommandToken = nil
-        prependAppliedOffset = false
-        isPrependingHistory = false
-        #if HOSTED_TEST
-        cancelHostedPrependSampleWaiters()
-        #endif
-        if !prependInterrupted {
-            userScrolledAway = prependWasScrolledAway
-            if prependWasScrolledAway { isAtBottom = false }
-        }
-        let completion = prependCompletion
-        prependCompletion = nil
-        completion?(result)
-        if shouldReleaseBinding, command == nil {
-            publish(.releaseBinding, animation: .disabled, origin: .binding)
-        } else if pendingGrowthFollow {
-            scheduleTailFollow()
+    private func updateOpeningTargetSample(_ sample: SemanticFrameSample?) {
+        switch openingTailPhase {
+        case .positioning(var context):
+            context.targetSample = sample
+            openingTailPhase = .positioning(context)
+        case .positioned(var context):
+            context.targetSample = sample
+            openingTailPhase = .positioned(context)
+        case .postReveal(var context):
+            context.base.targetSample = sample
+            openingTailPhase = .postReveal(context)
+        case .idle:
+            break
         }
     }
 
@@ -1586,53 +723,41 @@ final class ChatScrollCoordinator {
     ) {
         guard let context = openingTailPhase.context,
               context.presentation == presentation else { return }
-
-        let targetSample = context.targetSample
-        let hasCurrentTarget = targetSample?.layoutEpoch == layoutEpoch
-        let targetIsVisible = hasCurrentTarget
-            && targetSample!.frame.maxY > 0
-            && targetSample!.frame.minY < geometry.containerHeight
+        let targetIsVisible = context.targetSample?.layoutEpoch == layoutEpoch
+            && context.targetSample!.frame.maxY > 0
+            && context.targetSample!.frame.minY < geometry.containerHeight
         let physicallyPositioned = geometry.isPlausibleOpeningViewport
-            && geometry.isAtCatchUpBoundary
-            && targetIsVisible
-
+            && geometry.isAtCatchUpBoundary && targetIsVisible
         if physicallyPositioned {
             switch openingTailPhase {
-            case .positioning(var context):
-                context.commandToken = nil
-                context.commandSemanticRevision = nil
-                context.commandGeometryRevision = nil
-                openingTailPhase = .positioned(context)
+            case .positioning(var value):
+                clearOpeningCommand(matching: value.commandToken)
+                value.commandToken = nil
+                openingTailPhase = .positioned(value)
                 openingTailTimeoutTask?.cancel()
                 openingTailTimeoutTask = nil
                 let continuation = openingTailContinuation
                 openingTailContinuation = nil
                 continuation?.resume(returning: true)
-            case .positioned:
-                break
             case .postReveal:
                 if schedulesPositionedFrame { scheduleOpeningTailFrame() }
-            case .idle:
-                return
+            case .positioned, .idle:
+                break
             }
             return
         }
-
-        guard case .positioning(let context) = openingTailPhase else { return }
-        if let openingCommandToken = context.commandToken {
-            let hasFreshEvidence = semanticFrameRevision > (context.commandSemanticRevision ?? semanticFrameRevision)
-                || geometryRevision > (context.commandGeometryRevision ?? geometryRevision)
-            if hasFreshEvidence, command?.token != openingCommandToken {
-                scheduleOpeningTailFrame()
-            }
+        guard case .positioning(let value) = openingTailPhase else { return }
+        if let commandToken = value.commandToken {
+            let fresh = semanticFrameRevision > (value.commandSemanticRevision ?? semanticFrameRevision)
+                || geometryRevision > (value.commandGeometryRevision ?? geometryRevision)
+            if fresh, command?.token != commandToken { scheduleOpeningTailFrame() }
             return
         }
-
-        guard canAutomaticallyFollowIgnoringOpening, command == nil,
-              hasCurrentTarget || allowsUnrealizedTailCommand,
+        guard viewportMode == .pinned, !isUserInteracting, command == nil,
+              value.targetSample?.layoutEpoch == layoutEpoch || allowsUnrealizedTailCommand,
               geometry.isValid || allowsUnrealizedTailCommand else { return }
-        publish(.openingTail(context.targetRenderedID), animation: .disabled, origin: .presentation)
-        var updated = context
+        publish(.openingTail(value.targetRenderedID), animation: .disabled, origin: .presentation)
+        var updated = value
         updated.commandToken = command?.token
         updated.commandSemanticRevision = semanticFrameRevision
         updated.commandGeometryRevision = geometryRevision
@@ -1645,122 +770,77 @@ final class ChatScrollCoordinator {
               context.presentation == presentation else { return }
         openingTailFrameTask?.cancel()
         openingTailFrameTaskGeneration &+= 1
-        let taskGeneration = openingTailFrameTaskGeneration
-        let admittedToken = context.token
+        let generation = openingTailFrameTaskGeneration
+        let token = context.token
         let admittedPresentation = context.presentation
-        let admittedSemanticRevision = semanticFrameRevision
+        let semanticRevision = semanticFrameRevision
         let admittedGeometryRevision = geometryRevision
         openingTailFrameTask = Task { [weak self, frameScheduler] in
-            do {
-                try await frameScheduler.nextFrame()
-                try Task.checkCancellation()
-            } catch {
-                guard let self,
-                      self.openingTailPhase.context?.token == admittedToken,
-                      self.openingTailPhase.context?.presentation == admittedPresentation,
-                      self.openingTailFrameTaskGeneration == taskGeneration else { return }
-                // A display-frame helper can be cancelled independently of the
-                // owning presentation task. Physical semantic/geometry callbacks
-                // remain authoritative and may still complete positioning.
-                self.openingTailFrameTask = nil
-                return
-            }
-            guard let self,
-                  self.openingTailPhase.context?.token == admittedToken,
-                  self.openingTailPhase.context?.presentation == admittedPresentation,
-                  self.openingTailFrameTaskGeneration == taskGeneration else { return }
+            do { try await frameScheduler.nextFrame(); try Task.checkCancellation() }
+            catch { return }
+            guard let self, self.openingTailFrameTaskGeneration == generation,
+                  self.openingTailPhase.context?.token == token,
+                  self.openingTailPhase.context?.presentation == admittedPresentation else { return }
             self.openingTailFrameTask = nil
-            let revisionsAreStable = self.semanticFrameRevision == admittedSemanticRevision
-                && self.geometryRevision == admittedGeometryRevision
-            if case .positioning(var context) = self.openingTailPhase,
-               let openingCommandToken = context.commandToken,
-               self.command?.token != openingCommandToken {
-                let hasFreshCommandEvidence = self.semanticFrameRevision
-                    > (context.commandSemanticRevision ?? self.semanticFrameRevision)
-                    || self.geometryRevision
-                    > (context.commandGeometryRevision ?? self.geometryRevision)
-                if hasFreshCommandEvidence || context.commandAttemptCount < 2 {
-                    // Permit one bounded second exact-ID submission if SwiftUI
-                    // consumed the first against a provisional lazy layout. Further
-                    // writes require new semantic or geometry evidence.
-                    context.commandToken = nil
-                    context.commandSemanticRevision = nil
-                    context.commandGeometryRevision = nil
-                    self.openingTailPhase = .positioning(context)
+            if case .positioning(var value) = self.openingTailPhase,
+               let commandToken = value.commandToken,
+               self.command?.token != commandToken {
+                let fresh = self.semanticFrameRevision > (value.commandSemanticRevision ?? self.semanticFrameRevision)
+                    || self.geometryRevision > (value.commandGeometryRevision ?? self.geometryRevision)
+                if fresh || value.commandAttemptCount < 2 {
+                    value.commandToken = nil
+                    value.commandSemanticRevision = nil
+                    value.commandGeometryRevision = nil
+                    self.openingTailPhase = .positioning(value)
                 }
             }
             self.evaluateOpeningTailIfPossible(
                 allowsUnrealizedTailCommand: true,
                 schedulesPositionedFrame: false
             )
-            guard self.openingTailPhase.context?.token == admittedToken,
-                  self.openingTailPhase.context?.presentation == admittedPresentation,
-                  self.openingTailFrameTaskGeneration == taskGeneration else { return }
-            if case .postReveal(var context) = self.openingTailPhase,
-               context.base.positionedBestEffort {
-                context.stableFrameCount &+= 1
-                self.openingTailPhase = .postReveal(context)
-                if context.stableFrameCount >= 2 {
-                    self.finishOpeningTailSettlement()
-                } else {
-                    self.scheduleOpeningTailFrame()
-                }
-            } else if case .postReveal(var context) = self.openingTailPhase,
-               revisionsAreStable,
-               self.openingTailViewportIsPhysicallySettled {
-                if context.stableSemanticRevision == admittedSemanticRevision,
-                   context.stableGeometryRevision == admittedGeometryRevision {
-                    context.stableFrameCount &+= 1
-                } else {
-                    context.stableSemanticRevision = admittedSemanticRevision
-                    context.stableGeometryRevision = admittedGeometryRevision
-                    context.stableFrameCount = 1
-                }
-                self.openingTailPhase = .postReveal(context)
-                if context.stableFrameCount >= 2 {
-                    self.finishOpeningTailSettlement()
-                } else {
-                    self.scheduleOpeningTailFrame()
-                }
-            } else if case .postReveal(var context) = self.openingTailPhase {
-                context.stableFrameCount = 0
-                context.stableSemanticRevision = nil
-                context.stableGeometryRevision = nil
-                self.openingTailPhase = .postReveal(context)
+            guard case .postReveal(var value) = self.openingTailPhase else { return }
+            let stable = self.semanticFrameRevision == semanticRevision
+                && self.geometryRevision == admittedGeometryRevision
+                && (value.base.positionedBestEffort || self.openingTailViewportIsPhysicallySettled)
+            if stable {
+                value.stableFrameCount &+= 1
+                self.openingTailPhase = .postReveal(value)
+                if value.stableFrameCount >= 2 { self.finishOpeningTailSettlement() }
+                else { self.scheduleOpeningTailFrame() }
+            } else {
+                value.stableFrameCount = 0
+                self.openingTailPhase = .postReveal(value)
                 self.scheduleOpeningTailFrame()
             }
         }
     }
 
     private var openingTailViewportIsPhysicallySettled: Bool {
-        guard let context = openingTailPhase.context,
-              let targetSample = context.targetSample,
-              targetSample.layoutEpoch == layoutEpoch else { return false }
-        return geometry.isPlausibleOpeningViewport
-            && geometry.isAtCatchUpBoundary
-            && targetSample.frame.maxY > 0
-            && targetSample.frame.minY < geometry.containerHeight
+        guard let sample = openingTailPhase.context?.targetSample,
+              sample.layoutEpoch == layoutEpoch else { return false }
+        return geometry.isPlausibleOpeningViewport && geometry.isAtCatchUpBoundary
+            && sample.frame.maxY > 0 && sample.frame.minY < geometry.containerHeight
     }
 
     private func finishOpeningTailSettlement() {
         let token = openingTailToken
-        let releasesBestEffortBinding = openingTailPhase.context?.positionedBestEffort == true
         openingTailTimeoutTask?.cancel()
         openingTailTimeoutTask = nil
         openingTailFrameTaskGeneration &+= 1
         openingTailFrameTask?.cancel()
         openingTailFrameTask = nil
         openingTailPhase = .idle
-        let continuation = openingTailContinuation
+        openingTailContinuation?.resume(returning: true)
         openingTailContinuation = nil
-        continuation?.resume(returning: true)
         if let token { resumeOpeningTailFinalWaiters(token: token) }
-        releaseAtBottom()
-        if releasesBestEffortBinding, !bindingIsReleased, command == nil {
-            publish(.releaseBinding, animation: .disabled, origin: .binding)
-        } else {
-            requestBindingReleaseIfSettled()
-        }
+        viewportMode.reduce(.opened)
+        isAtBottom = true
+        tailSettlementGeneration &+= 1
+    }
+
+    private func clearOpeningCommand(matching token: Int?) {
+        guard let token, command?.token == token else { return }
+        clearCommand()
     }
 
     private func clearOpeningTailSettlement(
@@ -1779,61 +859,148 @@ final class ChatScrollCoordinator {
         if let commandToken = openingTailPhase.context?.commandToken,
            command?.token == commandToken { clearCommand() }
         openingTailPhase = .idle
-        let continuation = openingTailContinuation
+        openingTailContinuation?.resume(returning: positioningSucceeded)
         openingTailContinuation = nil
-        continuation?.resume(returning: positioningSucceeded)
         if let token { resumeOpeningTailFinalWaiters(token: token) }
     }
 
     private func scheduleOpeningTailTimeout(token: Int, presentation: Int) {
         openingTailTimeoutTask?.cancel()
         openingTailTimeoutTask = Task { [weak self, clock, openingTailTimeout] in
-            do {
-                try await clock.sleep(openingTailTimeout)
-                try Task.checkCancellation()
-            } catch {
-                return
-            }
-            guard let self,
-                  self.openingTailPhase.context?.token == token,
-                  self.openingTailPhase.context?.presentation == presentation else { return }
-            // Native proof is preferred, but presentation must not become
-            // unavailable solely because SwiftUI omits/coalesces geometry.
-            // The coordinator already made its bounded exact-ID attempts; keep
-            // that binding and reveal the authoritative transcript best-effort.
-            self.finishOpeningTailPositioningAfterTimeout(
-                token: token,
-                presentation: presentation
-            )
+            do { try await clock.sleep(openingTailTimeout); try Task.checkCancellation() }
+            catch { return }
+            guard let self, case .positioning(var value) = self.openingTailPhase,
+                  value.token == token, value.presentation == presentation else { return }
+            self.clearOpeningCommand(matching: value.commandToken)
+            value.commandToken = nil
+            value.positionedBestEffort = true
+            self.openingTailPhase = .positioned(value)
+            self.openingTailContinuation?.resume(returning: true)
+            self.openingTailContinuation = nil
         }
     }
 
-    private func finishOpeningTailPositioningAfterTimeout(token: Int, presentation: Int) {
-        guard case .positioning(var context) = openingTailPhase,
-              context.token == token,
-              context.presentation == presentation else { return }
-        openingTailTimeoutTask = nil
-        context.commandToken = nil
-        context.commandSemanticRevision = nil
-        context.commandGeometryRevision = nil
-        context.positionedBestEffort = true
-        openingTailPhase = .positioned(context)
-        let continuation = openingTailContinuation
-        openingTailContinuation = nil
-        continuation?.resume(returning: true)
-    }
-
     private func resumeOpeningTailFinalWaiter(id: Int, token: Int) {
-        guard let index = openingTailFinalWaiters.firstIndex(where: {
-            $0.id == id && $0.token == token
-        }) else { return }
+        guard let index = openingTailFinalWaiters.firstIndex(where: { $0.id == id && $0.token == token }) else { return }
         openingTailFinalWaiters.remove(at: index).continuation.resume()
     }
 
     private func resumeOpeningTailFinalWaiters(token: Int) {
-        let admitted = openingTailFinalWaiters.filter { $0.token == token }
+        let waiters = openingTailFinalWaiters.filter { $0.token == token }
         openingTailFinalWaiters.removeAll { $0.token == token }
-        admitted.forEach { $0.continuation.resume() }
+        waiters.forEach { $0.continuation.resume() }
+    }
+
+    private func pinAtTail() {
+        let changed = viewportMode == .anchored || !isAtBottom
+        viewportMode.reduce(.userReturnedToTail)
+        isAtBottom = true
+        hasUnreadContent = false
+        if changed { tailSettlementGeneration &+= 1 }
+    }
+
+    private func finishCatchUpPinned() {
+        catchUpTask?.cancel()
+        catchUpTask = nil
+        catchUpPhase = .none
+        catchUpCommandToken = nil
+        catchUpUnreadBeforeJump = false
+        pinAtTail()
+    }
+
+    private func cancelCatchUp(restoringAnchored: Bool) {
+        catchUpTask?.cancel()
+        catchUpTask = nil
+        let token = catchUpCommandToken
+        catchUpCommandToken = nil
+        let wasActive = catchUpPhase != .none
+        catchUpPhase = .none
+        if let token, command?.token == token { clearCommand() }
+        if restoringAnchored, wasActive {
+            viewportMode.reduce(.userTookOver)
+            isAtBottom = false
+            hasUnreadContent = catchUpUnreadBeforeJump || hasUnreadContent
+        }
+        catchUpUnreadBeforeJump = false
+    }
+
+    private func abandonAutomaticTransactionsForDirectInteraction() {
+        clearOpeningTailSettlement()
+        cancelLayoutRestore()
+        cancelCatchUp(restoringAnchored: true)
+        if var context = prepend {
+            context.interrupted = true
+            prepend = context
+            prependTask?.cancel()
+            finishPrepend(result: .discarded)
+        }
+        clearCommand()
+    }
+
+    private func cancelLayoutRestore() {
+        layoutRestoreTimeoutTask?.cancel()
+        layoutRestoreTimeoutTask = nil
+        if let token = layoutRestore?.correctionCommandToken, command?.token == token {
+            clearCommand()
+        }
+        layoutRestore = nil
+    }
+
+    private func finishPrepend(result: PerformanceResult) {
+        guard let context = prepend else { return }
+        prependTask = nil
+        prependTimeoutTask?.cancel()
+        prependTimeoutTask = nil
+        if let token = context.correctionCommandToken, command?.token == token { clearCommand() }
+        prepend = nil
+        viewportMode.reduce(.prependEnded)
+        #if HOSTED_TEST
+        cancelHostedPrependSampleWaiters()
+        #endif
+        context.completion(result)
+    }
+
+    private func cancelAllOwnedWork(result: PerformanceResult) {
+        clearOpeningTailSettlement()
+        cancelLayoutRestore()
+        cancelCatchUp(restoringAnchored: false)
+        prependTask?.cancel()
+        prependTimeoutTask?.cancel()
+        if let completion = prepend?.completion { completion(result) }
+        prependTask = nil
+        prependTimeoutTask = nil
+        prepend = nil
+        #if HOSTED_TEST
+        cancelHostedPrependSampleWaiters()
+        #endif
+    }
+
+    private func publish(
+        _ destination: ChatScrollCommand.Destination,
+        animation: ChatScrollAnimation,
+        origin: ChatScrollCommand.Origin
+    ) {
+        guard command == nil else { return }
+        sequence &+= 1
+        command = ChatScrollCommand(
+            token: sequence,
+            presentation: presentation,
+            origin: origin,
+            destination: destination,
+            animation: animation
+        )
+        commandRevision &+= 1
+        #if HOSTED_TEST
+        let waiters = hostedCommandWaiters
+        hostedCommandWaiters.removeAll()
+        waiters.forEach { $0.continuation.resume(returning: command!) }
+        #endif
+    }
+
+    private func clearCommand() {
+        guard command != nil else { return }
+        command = nil
+        commandRevision &+= 1
     }
 
     private func advanceLayoutEpoch() {
@@ -1844,25 +1011,6 @@ final class ChatScrollCoordinator {
 
     #if HOSTED_TEST
     var hostedSemanticFrameCount: Int { semanticFrames.count }
-    var hostedDiscreteFollowRenderedIDs: Set<String> { discreteFollowRenderedIDs }
-    var hostedIsNativeUserOwned: Bool { isNativeUserOwned }
-    var hostedPendingNativeUserGeometry: Bool { pendingNativeUserGeometry }
-    var hostedDirectTailReturnArmed: Bool { directTailReturnArmed }
-    var hostedIsUserDrivenSettling: Bool { isUserDrivenSettling }
-
-    func hostedWaitForFollowDecision(after revision: Int) async {
-        guard hostedFollowDecisionRevision <= revision else { return }
-        await withCheckedContinuation { continuation in
-            hostedFollowDecisionWaiters.append(continuation)
-        }
-    }
-
-    private func completeHostedFollowDecision() {
-        hostedFollowDecisionRevision &+= 1
-        let waiters = hostedFollowDecisionWaiters
-        hostedFollowDecisionWaiters.removeAll()
-        waiters.forEach { $0.resume() }
-    }
 
     func hostedNextCommand() async throws -> ChatScrollCommand {
         if let command { return command }
@@ -1885,11 +1033,7 @@ final class ChatScrollCoordinator {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 if Task.isCancelled { continuation.resume(throwing: CancellationError()) }
-                else if hostedPrependSampleWaiters.count >= 8 {
-                    continuation.resume(throwing: CancellationError())
-                } else {
-                    hostedPrependSampleWaiters.append(.init(id: id, continuation: continuation))
-                }
+                else { hostedPrependSampleWaiters.append(.init(id: id, continuation: continuation)) }
             }
         } onCancel: {
             Task { @MainActor in self.cancelHostedPrependSampleWaiter(id: id) }
@@ -1925,33 +1069,6 @@ final class ChatScrollCoordinator {
         installedFrameMinY: CGFloat
     ) -> CGFloat {
         max(0, currentOffsetY + installedFrameMinY - capturedViewportOffsetY)
-    }
-
-    private func commitScrollAway() {
-        userScrolledAway = true
-        isAtBottom = false
-        pendingGrowthFollow = false
-        pendingUnattributedOlderMovement = false
-        cancelAutomaticTasks()
-    }
-
-    private func releaseAtBottom() {
-        let publishesSettlement = userScrolledAway || !isAtBottom
-        followFrameTask?.cancel()
-        boundaryCameFromViewportWithoutTailMovement = false
-        followFrameTask = nil
-        isAtBottom = true
-        userScrolledAway = false
-        hasUnreadContent = false
-        pendingGrowthFollow = false
-        pendingGrowthFollowAnimation = .disabled
-        pendingUnattributedOlderMovement = false
-        if !isUserInteracting {
-            isNativeUserOwned = false
-            pendingNativeUserGeometry = false
-            isUserDrivenSettling = false
-        }
-        if publishesSettlement { tailSettlementGeneration &+= 1 }
     }
 
     private static func isDirectUserPhase(_ phase: ScrollPhase) -> Bool {

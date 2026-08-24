@@ -196,6 +196,7 @@ struct ChatPendingPromptRow: View, Equatable {
 struct ChatOutgoingSubmissionRow: View, Equatable {
     let presentation: ChatOutgoingSubmissionPresentation
     let attachments: [PendingAttachment]
+    let morphRegistry: ChatMorphFrameRegistry
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.presentation == rhs.presentation && lhs.attachments == rhs.attachments
@@ -212,6 +213,10 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                     attachmentContent: { queuedAttachmentChips },
                     statusContent: { EmptyView() }
                 )
+                .chatMorphDestination(
+                    id: ChatMorphID(lifecycleID: presentation.id, element: .prompt),
+                    registry: morphRegistry
+                )
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .accessibilityElement(children: .contain)
@@ -227,6 +232,13 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                             .padding(.top, ChatPromptContainerStyle.topPadding)
                             .padding(.bottom, ChatPromptContainerStyle.userPromptBottomPadding)
                             .modifier(UserPromptGlassModifier())
+                            .chatMorphDestination(
+                                id: ChatMorphID(
+                                    lifecycleID: presentation.id,
+                                    element: .prompt
+                                ),
+                                registry: morphRegistry
+                            )
                     }
                 }
             }
@@ -254,7 +266,20 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
         if !chips.isEmpty {
             QueuedMessageAttachmentChipRow(
                 chips: chips,
-                accent: presentation.promptBehavior == .followUp ? .tronPurple : .tronEmerald
+                accent: presentation.promptBehavior == .followUp ? .tronPurple : .tronEmerald,
+                morphDestinationIDs: Dictionary(uniqueKeysWithValues: chips.compactMap { chip in
+                    guard let blobID = chip.attachment?.id, blobID.hasPrefix("upload:") else {
+                        return nil
+                    }
+                    return (
+                        chip.id,
+                        ChatMorphID(
+                            lifecycleID: presentation.id,
+                            element: .attachment(String(blobID.dropFirst("upload:".count)))
+                        )
+                    )
+                }),
+                morphRegistry: morphRegistry
             )
         }
     }
@@ -271,6 +296,13 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                                 name: attachment.name,
                                 mimeType: attachment.mimeType
                             )
+                            .chatMorphDestination(
+                                id: ChatMorphID(
+                                    lifecycleID: presentation.id,
+                                    element: .attachment(attachment.id)
+                                ),
+                                registry: morphRegistry
+                            )
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel("Attachment \(attachment.name)")
                         } else {
@@ -279,6 +311,13 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                                 mimeType: attachment.mimeType,
                                 size: attachment.size,
                                 blobID: "upload:\(attachment.id)"
+                            )
+                            .chatMorphDestination(
+                                id: ChatMorphID(
+                                    lifecycleID: presentation.id,
+                                    element: .attachment(attachment.id)
+                                ),
+                                registry: morphRegistry
                             )
                         }
                     }

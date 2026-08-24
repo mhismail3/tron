@@ -90,7 +90,7 @@ struct MultilineComposerTextViewTests {
         ))
     }
 
-    @Test("active chats keep text entry available for steering")
+    @Test("active chats dismiss the keyboard after steering")
     func activeChatComposerPolicy() {
         for phase in [SessionPhase.running, .compacting, .retrying] {
             #expect(ChatComposerPolicy.isTextEditable(isTranscriptReady: true))
@@ -100,7 +100,7 @@ struct MultilineComposerTextViewTests {
             ) == .send)
             let behavior = ChatComposerPolicy.submissionBehavior(phase: phase)
             #expect(behavior == "steer")
-            #expect(ChatComposerPolicy.preservesFocus(submissionBehavior: behavior))
+            #expect(!ChatComposerPolicy.preservesFocus(submissionBehavior: behavior))
         }
     }
 

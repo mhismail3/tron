@@ -22,7 +22,7 @@ struct ChatTranscriptPresentationTests {
                 presentation: ChatOutgoingSubmissionPresentation(
                     snapshot: ComposerSubmissionSnapshot(
                         target: target, textRevision: 1, outgoingText: "prompt",
-                        attachmentIDs: [], behavior: raw
+                        attachmentIDs: [], behavior: raw, localNonce: 1
                     ),
                     transportActive: true
                 ),
@@ -927,7 +927,8 @@ struct ChatTranscriptPresentationTests {
                 textRevision: 4,
                 outgoingText: String(repeating: "large prompt ", count: 100),
                 attachmentIDs: ["photo"],
-                behavior: "steer"
+                behavior: "steer",
+                localNonce: 4
             ),
             transportActive: true
         )
@@ -1943,12 +1944,58 @@ struct ChatTranscriptPresentationTests {
         var baseSnapshot = snapshot
         baseSnapshot.streaming = nil
         let base = ChatTranscriptPresentation.timeline(in: baseSnapshot)
-        let live = try #require(ChatTranscriptPresentation.isolatedStreamingTimeline(streaming))
+        let live = try #require(ChatTranscriptProjectionKernel.isolatedStreamingTimeline(streaming))
         let incremental = base.appendingLive(live)
 
         #expect(incremental == cold)
         #expect(incremental.items.canonical.count == base.items.count)
         #expect(incremental.items.live.count == 1)
+    }
+
+    @Test("one canonical collision keeps unrelated live rows and semantic indexes")
+    func liveCollisionFiltersOnlyTheDuplicate() throws {
+        let canonical = ChatTranscriptRenderItem.transcript(try message("""
+        {"id":"collision","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"message","role":"assistant","content":[{"id":"canonical","type":"text","text":"settled"}]}
+        """))
+        let duplicate = ChatTranscriptRenderItem.transcript(try message("""
+        {"id":"collision","parentId":null,"timestamp":"2026-01-01T00:00:01Z","kind":"message","role":"assistant","content":[{"id":"duplicate","type":"text","text":"live duplicate"}]}
+        """))
+        let survivor = ChatTranscriptRenderItem.transcript(try message("""
+        {"id":"survivor","parentId":null,"timestamp":"2026-01-01T00:00:02Z","kind":"message","role":"assistant","content":[{"id":"survivor-text","type":"text","text":"still live"}]}
+        """))
+        let base = ChatTranscriptTimeline(
+            items: ChatTranscriptItems(canonical: [canonical]),
+            preferredSemanticIDByRenderedID: ChatSemanticIndex(
+                canonical: ["collision": "semantic-collision"]
+            ),
+            renderedIDBySemanticID: ChatSemanticIndex(
+                canonical: ["semantic-collision": "collision"]
+            )
+        )
+        let live = ChatTranscriptTimeline(
+            items: ChatTranscriptItems(canonical: [], live: [duplicate, survivor]),
+            preferredSemanticIDByRenderedID: ChatSemanticIndex(
+                canonical: [:],
+                live: [
+                    "collision": "semantic-collision",
+                    "survivor": "semantic-survivor",
+                ]
+            ),
+            renderedIDBySemanticID: ChatSemanticIndex(
+                canonical: [:],
+                live: [
+                    "semantic-collision": "collision",
+                    "semantic-survivor": "survivor",
+                ]
+            )
+        )
+
+        let result = base.appendingLive(live)
+
+        #expect(result.items.live.map { $0.id } == ["survivor"])
+        #expect(result.preferredSemanticIDByRenderedID["survivor"] == "semantic-survivor")
+        #expect(result.renderedIDBySemanticID["semantic-survivor"] == "survivor")
+        #expect(result.isInternallyConsistent)
     }
 
     @Test("explicit empty tool output never falls back to duplicated request content")

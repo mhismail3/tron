@@ -55,10 +55,15 @@ struct ChatTextPreparationSnapshot: Hashable, Sendable {
         }
     }
 
-    static let empty = ChatTextPreparationSnapshot(markdown: [:], thinking: [:], revision: [])
+    static let empty = ChatTextPreparationSnapshot(
+        markdown: [:], thinking: [:], revision: [], hiddenThinkingLabel: nil
+    )
 
     let markdown: [String: MarkdownEntry]
     let thinking: [String: ThinkingEntry]
+    /// Present only on a row slice that actually renders thinking. Extension
+    /// label changes therefore cannot invalidate unrelated committed rows.
+    let hiddenThinkingLabel: String?
     /// Globally unique cache-entry revisions make this sorted membership token
     /// exact while keeping render-row equality independent of prepared payloads.
     let revision: [UInt64]
@@ -66,11 +71,22 @@ struct ChatTextPreparationSnapshot: Hashable, Sendable {
     init(
         markdown: [String: MarkdownEntry],
         thinking: [String: ThinkingEntry],
-        revision: [UInt64] = []
+        revision: [UInt64] = [],
+        hiddenThinkingLabel: String? = nil
     ) {
         self.markdown = markdown
         self.thinking = thinking
         self.revision = revision
+        self.hiddenThinkingLabel = hiddenThinkingLabel
+    }
+
+    func withHiddenThinkingLabel(_ label: String?) -> Self {
+        Self(
+            markdown: markdown,
+            thinking: thinking,
+            revision: revision,
+            hiddenThinkingLabel: label
+        )
     }
 
     func markdownDocument(identity: String, source: String) -> MarkdownPresentation.Document? {
@@ -99,6 +115,7 @@ struct ChatTextPreparationSnapshot: Hashable, Sendable {
 
         var markdownSlice: [String: MarkdownEntry] = [:]
         var thinkingSlice: [String: ThinkingEntry] = [:]
+        var rendersThinking = false
         for part in parts {
             switch part {
             case .content(let content):
@@ -106,6 +123,7 @@ struct ChatTextPreparationSnapshot: Hashable, Sendable {
                 let global = ChatTextPreparationKey.global(item: sourceItem, local: local)
                 if let entry = markdown[global] { markdownSlice[local] = entry }
             case .thinking(let run):
+                rendersThinking = true
                 for segment in run.segments {
                     let local = ChatTextPreparationKey.thinking(segment)
                     let global = ChatTextPreparationKey.global(item: sourceItem, local: local)
@@ -119,7 +137,8 @@ struct ChatTextPreparationSnapshot: Hashable, Sendable {
         return ChatTextPreparationSnapshot(
             markdown: markdownSlice,
             thinking: thinkingSlice,
-            revision: sliceRevision
+            revision: sliceRevision,
+            hiddenThinkingLabel: rendersThinking ? hiddenThinkingLabel : nil
         )
     }
 }

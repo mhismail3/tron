@@ -8,7 +8,6 @@ struct TranscriptRow: View, Equatable {
     var projectedMessageParts: [ChatMessagePart]? = nil
     var preparedText: ChatTextPreparationSnapshot = .empty
     var showsMessageFooter = true
-    var hiddenThinkingLabel: String? = nil
 
     var body: some View {
         VStack(alignment: item.role == .user ? .trailing : .leading, spacing: 4) {
@@ -69,7 +68,7 @@ struct TranscriptRow: View, Equatable {
                         ThinkingBlock(
                             segments: run.segments,
                             preparedText: preparedText,
-                            label: hiddenThinkingLabel,
+                            label: preparedText.hiddenThinkingLabel,
                             animatesInsertion: streaming
                         )
                         // Keep the incremental visibility ledger attached to
@@ -348,7 +347,7 @@ private struct ThinkingBlock: View {
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .animation(
             reduceMotion ? nil : .smooth(
-                duration: ChatScrollCoordinator.liveGrowthFollowDuration
+                duration: ChatScrollCoordinator.liveGrowthAnimationDuration
             ),
             value: CGSize(width: traceHeight, height: tailOffset)
         )

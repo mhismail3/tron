@@ -392,7 +392,7 @@ multi-page scrolling up to the 512-page safety cap. Live composer files retain e
 25 MiB aggregate limit; frozen handoff strips them before queued/canonical settlement. Physical pixel and
 peak-memory calibration remains required.
 
-`ChatViewScrollHarnessTests` mount the actual `ChatView`, `LazyVStack`, composer inset, and native `UIScrollView` in a fixed hosted window. The aggregate composer host stays mounted inside that one inset, measures natural content before its bottom-aligned clipped frame, and animates only structural identity changes; focused policy/style cases pin picker/result, attachment, skill, extension, submission, one-inset, no-independent-move, and Reduce Motion behavior. The multiline composer uses pure synchronous capped representable fitting plus post-layout TextKit overflow/caret reconciliation; focused tests pin trailing-newline caret visibility, manual-scroll-then-type direction, 9→8 collapse, and inset ownership. Active-turn admission captures composer viewport intent before grafting one immutable lifecycle row into the current complete installed projection; focused coordinator/composer/store tests pin pinned disabled coupling, detached zero-write preservation, retarget and direct-interaction cancellation, active-upload rejection/retry, immediate collapse, metadata-only reuse, stale-worker rejection, and snapshot-before-response provisional queue identity without granting canonical settlement. Test-only authority
+`ChatView` is the lifecycle/composition root. `ChatTranscriptScrollView` owns the actual `LazyVStack`, persistent native scroll binding, semantic frames, and hosted evidence; its native geometry feeds the coordinator directly instead of invalidating root view state; `ChatComposerView` is value/intent driven inside the root's single bottom inset; `ChatRoutes` owns modal modifiers; and `ChatSessionPresentation` groups disposable opening, import, queue-deferral, route, and handoff-ledger state without copying canonical session facts. `ChatSessionPresentationTests` require cold reopen to discard those local receipts/routes and require suspension to cancel import/picker targets while retaining compatible presentation authority. `ChatViewScrollHarnessTests` mount the actual `ChatView`, `LazyVStack`, composer inset, and native `UIScrollView` in a fixed hosted window. The aggregate composer host stays mounted inside that one inset, measures natural content before its bottom-aligned clipped frame, and installs structural height changes atomically with animation disabled. Submission and morph motion retain their explicit layout generation, but typing, picker, attachment, skill, and extension height changes never animate the safe-area inset through intermediate frames or redraw the installed transcript; focused policy/style cases pin picker/result, attachment, skill, extension, submission, one-inset, and no-independent-move behavior. The multiline composer uses pure synchronous capped representable fitting plus post-layout TextKit overflow/caret reconciliation; focused tests pin trailing-newline caret visibility, manual-scroll-then-type direction, 9→8 collapse, and inset ownership. Active-turn admission opens one layout generation before grafting one immutable lifecycle row into the current complete installed projection. Viewport submission intent preserves `.pinned` or `.anchored`; focused coordinator/composer/store tests pin native bottom-edge growth with zero offset writes, detached semantic preservation, direct-interaction cancellation, active-upload rejection/retry, immediate collapse, metadata-only reuse, stale-worker rejection, and snapshot-before-response provisional queue identity without granting canonical settlement. `ChatMorphFlightTests` exercise bounded global-frame admission, lifecycle-derived endpoint uniqueness, missing-frame and Reduce Motion suppression, and idempotent reconciliation/background retirement. Device checks must additionally send with text, photos, and files while streaming, then background/foreground and relaunch both active and passive sessions: current canonical rows must appear immediately and no pre-suspension flight may replay. Test-only authority
 admission bypasses network I/O without bypassing `AppModel`'s authoritative read
 gate. Raw geometry, visible semantic IDs, and row frames are reduced to one latest
 sample on each `CADisplayLink` tick; added evidence is aggregate command/frame/count
@@ -400,7 +400,7 @@ data only. A maximum-512-row opening case requires the very first ready sample t
 the exact physical tail marker and latest message in the same plausible native bottom
 viewport, so an eventual manual/lazy correction cannot make the test pass. The production
 `DisplayFrameScheduler` is a one-shot, cancellation-aware display-link boundary used by
-first-ready, frame-gated unrealized-tail correction, pinned follow, and long-distance
+first-ready, frame-gated unrealized-tail correction, and long-distance
 catch-up staging. Semantic prepend settlement instead waits passively
 for exact epoch-qualified row callbacks and requires a strictly newer callback after
 each correction. First-ready timing cannot end before the exact initial transcript
@@ -411,7 +411,15 @@ paging-tag distinction, monotonic reset retirement, session/runtime scope reject
 responsiveness, and deterministic completed-before-frame replacement/reset races without sleeps or
 polling. They also cover atomic installation, runtime-only exact-key reuse, 512-item FIFO bounds for
 both pending and admitted geometry-owned entrances across more than 512 accumulated rows, and isolated
-suffix work across thirty updates of a 10,000-entry text stream. The
+suffix work across thirty updates of a 10,000-entry text stream. `ChatCommittedLedgerTests` require
+streaming and compatible foreground replacement to retain both the committed revision and every
+committed row's equatable render identity; the hosted streaming-burst journey also requires the aggregate
+committed-history body-evaluation counter to remain unchanged. Canonical append/prepend advance once, while a fresh store
+rebuilds identical canonical rows deterministically at revision one. The same suite checks that
+foreground entrance suppression remains empty on both retained and cold owners and that hidden thinking
+labels appear only on thinking-row preparation slices. This is the active/passive resume contract: both
+modes install one complete authoritative commit, live-region replacement never mutates history lineage,
+and relaunch has no local entrance or morph receipt to replay. The
 gate can delay work but cannot manufacture output or disable production projection semantics.
 `ChatTranscriptProjectionKernelTests` characterize raw atoms and the sole global assembler across
 barriers, canonical call/result joins, orphan results, bootstrap configuration, exact compaction
@@ -429,22 +437,18 @@ modes plus numeric entry/fragment/tool/atom/rendered counts; a pure patch must r
 entries and atoms, inspect the complete unique runtime membership, and count only distinct patched tools. `SessionPresentationStoreTests` also
 prove exact page `start`/`end`/count admission and that return-to-latest compacts loaded
 history back to the retained authoritative tail. Opening ownership is one mutually exclusive
-`OpeningTailPhase` (`idle`, `positioning`, `positioned`, or `postReveal`); ordinary follow,
-insertion, and pinned correction stay independent and are suppressed until it is idle. `ChatScrollCoordinatorTests` use watchdog-bounded
-barriers rather than sleeps or yields to prove callback-order equivalence, immediate
-catch-up dismissal for geometry-first manual return to the tail, generation-owned keyboard/composer following with disabled pinned coupling, semantic-locus preservation and zero writes while detached, rapid structural retarget coalescing, direct-interaction cancellation, one short smooth pinned-tail command per frame for admitted discrete and continuous growth outside composer ownership, disabled physical-overshoot correction, native-geometry acknowledgement before a subsequent follow,
-no writes for detached layout/stream/keyboard
-settlement, viewport geometry-first expansion detachment, frame-separated catch-up with unread admission
-through every interruption stage, Reduce Motion, exact reset/release command admission,
-exact physical-tail opening settlement, phase-keyed native-geometry replay, bounded exact-binding fallback,
-frame-gated unrealized-target correction without geometry, overflow-overshoot rejection, both geometry/frame callback orders,
-empty/undersized top alignment, post-reveal stable-frame binding release, pre-settlement user cancellation,
-stale-presentation rejection, repeat-prepend ownership, post-install layout-epoch rejection, unchanged-frame epoch
-callbacks, lifecycle-graft isolation from a pending authoritative mutation, and exact semantic remeasurement with at most one late correction and no
-frame retry or total-height polling. Hosted controls drive the production
-coordinator/executor; new evidence is bounded aggregate callback/command/frame and
-maximum-excursion data only. Hosted discrete-insertion cases record aggregate entrance and automatic-follow
-counts, prove a visible insertion admits once, and prove detached insertion emits no automatic write.
+`OpeningTailPhase` (`idle`, `positioning`, `positioned`, or `postReveal`). `ChatViewportModeTests`
+prove that only explicit takeover, return, catch-up, opening, submission, prepend, and presentation
+intents can change durable viewport authority. `ChatScrollCoordinatorTests` assert observable outcomes:
+pinned stream/composer/keyboard growth emits zero app offset writes; detached growth remains anchored;
+direct return clears catch-up and unread; catch-up emits one explicit tail intent and restores unread if
+interrupted; retained resets preserve anchoring; opening targets only the exact physical tail; semantic
+frames remain bounded; and anchor correction preserves the captured offset. Exact layout-epoch restore
+and prepend transactions still require newer semantic and geometry evidence, remain bounded to two
+corrections, and retire missing restore evidence after one second. Explicit paging supersedes a stale
+semantic-restore command while active opening/catch-up rejects paging; anchorless page work is
+session-owned and cancels on suspension. Hosted controls drive the production coordinator/executor and record bounded aggregate
+callback, command, frame, and maximum-excursion evidence.
 Hosted streaming bursts must install only their newest exact source while detached composer/viewport work
 remains writable and creates no projection work. `ChatCompactPillTests` own intrinsic-width trailing placement for short prompts, the 364-point
 long-prompt bound, intrinsic-width glass selection, equal user-prompt vertical padding, logical-leading
@@ -465,10 +469,33 @@ retain intrinsic cards capped at the user-prompt bound, full-shape whole-card in
 leading-toolbar removal, an explicit legacy lock, and Tron surfaces instead of stock forms.
 Native bottom evidence compares `ScrollGeometry.visibleRect.maxY` with the physical
 content edge (`contentSize.height + contentInsets.bottom`); the harness no longer substitutes
-a hard-coded settled distance. A released pinned offset beyond a structurally shortened edge
-receives one frame-gated tail clamp, while ordinary shrink and detached readers remain inert.
+a hard-coded settled distance. Pinned structural shrink is handled by the persistent native bottom
+edge, while anchored readers remain inert.
 The obsolete visibility modifier is removed; the native SwiftUI geometry modifier still
 reports a multiple-update-per-frame diagnostic in hosted runs and remains a physical checkpoint.
+
+### Viewport test migration matrix
+
+The pre-pinning coordinator suite contained 81 cases. The 50 observable Group A cases keep
+their original function names and now assert outcomes against native pinning: detached semantic
+restore (12); shrink/overshoot ownership (23–25); detached composer and direct-return behavior
+(32–34, 36, 38–40, 42–44); catch-up (46–49); opening (50–63); Reduce Motion and prepend
+(64–77); and growth/row motion (78–81). The 31 deleted command-arbitration mechanism cases
+have these explicit observable replacements:
+
+| Retired tests | Observable replacement |
+|---|---|
+| `pinnedGrowthCoalesces` through `pinnedProjectionShorteningCorrectsPhysicalTail` (1–7), `appliedAutomaticTailDoesNotBlockShrinkCorrection` through `lifecycleGraftPreservesAuthoritativeMutation` (9–11) | `pinnedNativeEdgeEliminatesFollowCommandStream`, `stickyModeHasNoOffsetCommandDestination` — pinned content/inset/topology changes emit zero app writes and remain pinned. |
+| `projectionShorteningDefersToDirectTakeover` (8) | `directTakeoverCancelsPendingSemanticRestore` — direct authority leaves anchored mode and no command. |
+| `layoutCorrectionGeometryFirstSettlement` (13) | `anchoredRestoreRequiresFreshEvidence` — one semantic correction appears only after both newer semantic and geometry evidence. |
+| `interactionCancelsProjectionMutation` through `catchUpCancelsAppliedLayoutBinding` (14–17) | `directTakeoverCancelsPendingSemanticRestore`, `stickyModeHasNoOffsetCommandDestination`, `nativeEdgeStateFollowsModeWithoutOffsetCommand` — takeover/catch-up replace mode; no release-binding command exists. |
+| `installedRemovalPreservesContinuousFollow` (18), `continuousGrowthWhileSettling` through `noWriteInsideTolerance` (20–22) | `pinnedNativeBindingEliminatesFollowCommandStream` — native edge retention removes pending-follow arbitration and all ordinary writes. |
+| `detachedDiscreteInsertionIsInert` (19) | `stickyModeHasNoOffsetCommandDestination`, `detachedGrowthIsInert` — anchored insertion remains anchored with zero writes. |
+| `composerPreservesFreshNativeAuthority` through `geometryFirstComposerTransitionPreservesLocus` (26–31) | `composerMutationsDoNotOwnScrollCommands` — submission/composer/keyboard geometry preserves explicit mode and emits no command. |
+| `geometryFirstDetachmentConsumesDirectReturn` (35) | `geometryCannotConsumeExplicitReturn` — only the explicit return intent pins. |
+| `nativeVisibleEdgeAdmitsManualTail` (37) | `explicitReturnPinsDespiteStaleGeometry` — return intent wins independently of stale inset arithmetic. |
+| `nativePositioningRetainsExplicitEdgeAuthority` (41) | `nativeEdgeStateFollowsModeWithoutOffsetCommand` — mode directly selects native edge authority without an offset command. |
+| `interactionCancelsPendingFollow` (45) | `directTakeoverCancelsPendingAutomaticWork` plus the coordinator opening/catch-up/restore interruption cases — direct takeover wins synchronously and leaves no write. |
 
 ```bash
 xcodebuild test-without-building -project TronMobile.xcodeproj -scheme 'Tron Fast' \

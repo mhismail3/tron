@@ -340,11 +340,13 @@ enum ChatTranscriptProjectionKernel {
         }
     }
 
-    /// Public compatibility entry point; suffix production remains inside this
-    /// kernel rather than in the presentation facade or worker.
+    #if HOSTED_TEST
+    /// Test oracle for the isolated streaming suffix. Production assembly uses
+    /// the fragment overload below and does not expose this seam.
     static func isolatedStreamingTimeline(_ item: TranscriptItem) -> ChatTranscriptTimeline? {
         isolatedStreamingTimeline(fragment: fragment(for: item))
     }
+    #endif
 
     private static func isolatedStreamingTimeline(
         fragment: ChatTranscriptProjectionFragment
@@ -1101,7 +1103,8 @@ enum ChatTranscriptProjectionKernel {
         switch status { case .running: "Running"; case .completed: "Completed"; case .failed: "Failed" }
     }
 
-    /// Required compatibility normalization for older Gateway snapshots.
+    /// An inactive authoritative snapshot cannot leave a live tool presentation
+    /// running. Cached projections preserve their explicitly retained activity.
     private static func foregroundPresentation(
         _ tool: ChatToolPresentation,
         phase: SessionPhase,
