@@ -544,7 +544,7 @@ struct TronSearchBar: View {
                     onClose()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
+                        .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .heavy))
                         .foregroundStyle(accent)
                         .frame(width: 44, height: 44)
                         .contentShape(Circle())
@@ -661,6 +661,7 @@ struct TronConfirmationSheet: View {
     let confirmTitle: String
     let destructive: Bool
     let secondaryTitle: String?
+    let centersTitle: Bool
     let onConfirm: () -> Void
     let onSecondary: (() -> Void)?
     let icon: String
@@ -674,6 +675,7 @@ struct TronConfirmationSheet: View {
         confirmTitle: String,
         destructive: Bool = false,
         secondaryTitle: String? = nil,
+        centersTitle: Bool = false,
         icon: String = "exclamationmark.triangle.fill",
         onConfirm: @escaping () -> Void,
         onSecondary: (() -> Void)? = nil
@@ -683,6 +685,7 @@ struct TronConfirmationSheet: View {
         self.confirmTitle = confirmTitle
         self.destructive = destructive
         self.secondaryTitle = secondaryTitle
+        self.centersTitle = centersTitle
         self.icon = icon
         self.onConfirm = onConfirm
         self.onSecondary = onSecondary
@@ -706,6 +709,7 @@ struct TronConfirmationSheet: View {
                             .font(TronTypography.largeTitle)
                             .foregroundStyle(Color.tronTextPrimary)
                             .multilineTextAlignment(.center)
+                            .frame(maxWidth: centersTitle ? .infinity : nil, alignment: .center)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(message)
                             .font(TronTypography.body)

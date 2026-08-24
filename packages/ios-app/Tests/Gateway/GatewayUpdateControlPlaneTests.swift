@@ -144,6 +144,9 @@ struct GatewayUpdateControlPlaneTests {
         #expect(GatewayUpdateIntent.admitted(info: capableInfo, status: available, config: nil) == nil)
         #expect(GatewayUpdateIntent.admitted(info: capableInfo, status: available, config: config) == .source)
         #expect(GatewayUpdateIntent.source.actionTitle == "Rebuild Gateway from Source")
+        #expect(GatewayUpdateIntent.source.confirmationPresentation.confirmTitle == "Rebuild")
+        #expect(GatewayUpdateIntent.source.confirmationPresentation.centersTitle)
+        #expect(!GatewayUpdateIntent.debug(provenDebug).confirmationPresentation.centersTitle)
         let unprovenDebug = GatewayUpdateStatus(
             state: "prepared", channel: "stable", currentIdentity: nil,
             candidateIdentity: available.candidateIdentity, candidateAvailable: true,
@@ -293,6 +296,9 @@ struct GatewayUpdateControlPlaneTests {
             UUID(uuidString: "00000000-0000-0000-0000-000000000201")!,
             UUID(uuidString: "00000000-0000-0000-0000-000000000202")!,
             UUID(uuidString: "00000000-0000-0000-0000-000000000203")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000204")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000205")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000206")!,
         ]
         let model = AppModel(
             client: client,

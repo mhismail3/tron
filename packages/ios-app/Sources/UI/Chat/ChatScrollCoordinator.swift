@@ -156,6 +156,7 @@ final class ChatScrollCoordinator {
     private var sequence = 0
     private var geometry = ChatTranscriptGeometry.zero
     private var geometryRevision = 0
+    private var retainedViewportReconciliationPending = false
     private var semanticFrames: [String: SemanticFrameSample] = [:]
     private var semanticFrameOrder: [String] = []
     private var semanticFrameRevision = 0
@@ -229,6 +230,7 @@ final class ChatScrollCoordinator {
         cancelAllOwnedWork(result: .discarded)
         self.presentation = presentation ?? (self.presentation &+ 1)
         viewportMode.reduce(.presentationReset(retainingViewport: retainingVisibleViewport))
+        retainedViewportReconciliationPending = retainingVisibleViewport
         clearCommand()
         guard !retainingVisibleViewport else { return }
         isAtBottom = true
@@ -296,6 +298,7 @@ final class ChatScrollCoordinator {
 
     func scrollPositionChanged(isPositionedByUser: Bool) {
         guard isPositionedByUser else { return }
+        retainedViewportReconciliationPending = false
         retireAppliedTargetWithoutCallback()
         viewportMode.reduce(.userTookOver)
         isAtBottom = false
@@ -311,6 +314,7 @@ final class ChatScrollCoordinator {
         let wasDirect = Self.isDirectUserPhase(oldPhase) || isUserInteracting
         isUserInteracting = Self.isDirectUserPhase(newPhase)
         if isUserInteracting {
+            retainedViewportReconciliationPending = false
             retireAppliedTargetWithoutCallback()
             viewportMode.reduce(.userTookOver)
             isAtBottom = false
@@ -343,6 +347,7 @@ final class ChatScrollCoordinator {
         // identical fact feeds that callback back into layout and can create an
         // OnScrollGeometryChange cycle without adding any evidence.
         if current == geometry {
+            reconcileRetainedViewport(with: current)
             // Owned semantic restore/prepend transactions may require a fresh
             // sample revision even when the native values are unchanged. Do
             // not assign the observed geometry again.
@@ -354,6 +359,7 @@ final class ChatScrollCoordinator {
         }
         geometry = current
         geometryRevision &+= 1
+        reconcileRetainedViewport(with: current)
         evaluateLayoutRestoreIfReady()
         evaluatePrependIfReady()
         evaluateOpeningTailIfPossible(allowsUnrealizedTailCommand: false)
@@ -364,6 +370,12 @@ final class ChatScrollCoordinator {
         if catchUpPhase == .settling, current.isAtCatchUpBoundary {
             finishCatchUpPinned()
         }
+    }
+
+    private func reconcileRetainedViewport(with current: ChatTranscriptGeometry) {
+        guard retainedViewportReconciliationPending, current.isValid else { return }
+        retainedViewportReconciliationPending = false
+        if !isUserInteracting, current.isAtCatchUpBoundary { pinAtTail() }
     }
 
     func positionOpeningTail(targetRenderedID: String?) async -> Bool {
@@ -500,8 +512,8 @@ final class ChatScrollCoordinator {
     }
 
     func installedLifecycleChanged(_ installed: InstalledChatTranscript) {
-        // Pinned lifecycle growth is absorbed by the held bottom edge. Anchored
-        // readers intentionally receive no command.
+        // Native edge pinning owns growth. Pinned lifecycle growth is absorbed
+        // by the held bottom edge; anchored readers receive no command.
     }
 
     func installedTranscriptChanged(_ installed: InstalledChatTranscript?) {

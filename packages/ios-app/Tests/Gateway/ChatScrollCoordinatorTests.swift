@@ -490,13 +490,24 @@ struct ChatScrollCoordinatorTests {
         #expect(coordinator.viewportMode == .pinned)
     }
 
-    @Test("same-session presentation handoff retains viewport without reset-to-bottom")
-    func retainedPresentationHandoffDoesNotResetViewport() {
-        let coordinator = detachedCoordinator(at: away)
-        coordinator.resetForPresentation(2, retainingVisibleViewport: true)
-        #expect(coordinator.viewportMode == .anchored)
-        #expect(!coordinator.isAtBottom)
-        #expect(coordinator.command == nil)
+    @Test("same-session presentation handoff reconciles physical tail without moving a reader")
+    func retainedPresentationHandoffReconcilesViewport() {
+        let reader = detachedCoordinator(at: away)
+        reader.resetForPresentation(2, retainingVisibleViewport: true)
+        reader.geometryChanged(previous: away, current: away)
+        #expect(reader.viewportMode == .anchored)
+        #expect(!reader.isAtBottom)
+        #expect(reader.command == nil)
+
+        let tail = detachedCoordinator(at: away)
+        tail.resetForPresentation(2, retainingVisibleViewport: true)
+        tail.geometryChanged(previous: away, current: .zero)
+        #expect(tail.viewportMode == .anchored)
+        #expect(!tail.isAtBottom)
+        tail.geometryChanged(previous: .zero, current: bottom)
+        #expect(tail.viewportMode == .pinned)
+        #expect(tail.isAtBottom)
+        #expect(tail.command == nil)
     }
 
     @Test("opening tail opaque fallback defaults to 750 milliseconds")

@@ -392,7 +392,7 @@ the transport-only `skill:` prefix, while leading `/` completion excludes skills
 text. The one staged skill is captured separately from user-visible text, replaced atomically by a newer selection,
 restored only after a definitive send rejection, and cleared if the authoritative catalog no longer contains the exact
 entry. Skill and leading slash-command choices are mutually exclusive, and a staged skill still requires prompt text or an attachment so every lifecycle has visible content. The Gateway receives its raw name as bounded prompt metadata and owns Pi invocation expansion, keeping optimistic,
-queued, edited-queue, and canonical text identical. The inline glass picker remains inside the sole composer safe-area owner, below attachments and the skill chip but immediately above the input row. One permanently mounted, bottom-aligned measured host installs ordinary composer height changes in one animation-disabled transaction. Only explicit resource-picker insertion and removal receive a bounded 240 ms aggregate-height transition; it is local to the existing inset owner, issues no scroll command, adds no root geometry feedback, and becomes atomic under Reduce Motion. Removing the host clip lets extension/subagent pills follow that same bounded displacement instead of being cut off at an intermediate frame. While the keyboard and picker are both visible, the picker keeps its existing internal scroll owner but caps itself to three rows and the native editor to four visible lines, preventing the panel from displacing the input below the keyboard without changing transcript geometry ownership. Multiline measurement remains direct, UIKit owns keyboard motion plus the one responder, and UTF-16 selection and caret geometry stay native. The active lease is the immutable session/presentation generation plus lifecycle generation.
+queued, edited-queue, and canonical text identical. The inline glass picker remains inside the sole composer safe-area owner, below attachments and the skill chip but immediately above the input row. One permanently mounted, bottom-aligned measured host installs ordinary composer height changes in one animation-disabled transaction. Only explicit resource-picker insertion and removal receive a bounded 240 ms aggregate-height transition; both command and skill panels share that owner, removal travels back down toward the composer, and the transition issues no scroll command, adds no root geometry feedback, and becomes atomic under Reduce Motion. Removing the host clip lets extension/subagent pills follow that same bounded displacement instead of being cut off at an intermediate frame. While the keyboard and picker are both visible, the picker keeps its existing internal scroll owner but caps itself to three rows and the native editor to four visible lines, preventing the panel from displacing the input below the keyboard without changing transcript geometry ownership. Multiline measurement remains direct, UIKit owns keyboard motion plus the one responder, and UTF-16 selection and caret geometry stay native. The active lease is the immutable session/presentation generation plus lifecycle generation.
 Unsent attachment bytes and metadata belong to draft scope, while prepared previews, concurrent upload admissions, editor requests, submission snapshots, and handoffs remain exact-presentation scoped. Revocation cancels upload work and discards disposable Gateway upload IDs without erasing the scoped strip. A newly admitted mount restores chips only for that exact profile/session target, rebuilds bounded thumbnails through the existing off-main preparation seam, and reacquires every Gateway upload ID before enabling submission. Restore never auto-sends; transient re-upload failure retains the payload and chip for a later mount/retry. In-flight bytes remain recoverable through a definitive rejection, while transport acceptance or authoritative queue/canonical settlement removes the captured submission from the durable draft without disturbing newer edits. Completed plus active uploads are admitted against one 10-item/25 MiB draft budget before network work; each image chip uses
 an orientation-correct 192-pixel PNG preview with 1 MiB decoded/encoded ceilings, so normal composer rendering
 never decodes the full attachment. The original bounded payload remains scope-owned for persistence and the existing
@@ -465,7 +465,9 @@ Markdown has one pure `Sendable` cold presentation model. It classifies the exis
 constructs each inline `AttributedString` once with the established plain-`Text` fallback, and supplies
 the exact immutable document to `TronMarkdownView`; tables intentionally remain raw cell `Text`.
 Block and list identities combine exact content with UTF-8 source ranges, so equal duplicates remain
-distinct. An unchanged exact block retains identity and its subtree-local interaction state; changed
+distinct. Code-header progress is eligible only for the one unterminated fence while its owning response
+is still streaming; closed fences settle immediately and every fence is terminal when the response settles.
+An unchanged exact block retains identity and its subtree-local interaction state; changed
 content or block type resets identity, intentionally clearing `CodeBlock` copy confirmation and any
 other stale subtree state rather than transferring it to different source. The projection worker now
 prepares exact-source Markdown documents and attributed thinking segments off-MainActor under one
@@ -501,7 +503,7 @@ proxy architecture. Explicit scroll commands keep their exact target until their
 semantic-restore, prepend, or pinned-growth settlement evidence arrives, then release only that token on the next presented frame; submission retires a still-applied app target
 before changing layout. Native bottom size-change anchoring owns continuous streaming, keyboard, and
 composer growth. A newly inserted prompt/activity row receives one exact nonanimated tail lease so a
-physically pinned reader remains at the latest content even when lazy-row and safe-area updates arrive
+physically pinned reader remains at the latest content even when lazy-row and safe-area updates arrive; a retained presentation reconciles its first native geometry sample so a view physically at the tail regains pinned authority while a genuinely displaced reader remains anchored
 in an order native anchoring cannot retain; anchored readers receive no automatic follow. Compact
 measured prompts may use one clipped composer-to-row morph; long prompts fail over to the row-local
 fade/slide entrance, and attachment/skill/resource surfaces animate only inside the composer's
@@ -1035,12 +1037,12 @@ row height. Only pending rows include the tag
 in their geometry observation, allowing an installed replacement to re-emit exact evidence without
 invalidating every realized row. Visible/pinned discrete rows fade with a small non-layout transform
 exactly once, realized offscreen rows become visible without replay, and direct interaction discards
-unresolved candidates. `ChatScrollCoordinator` alone may consume one coalesced short smooth pinned-tail
-settlement for an admitted discrete insertion. Its bounded rendered-ID entitlement is intersected only on
+unresolved candidates. `ChatScrollCoordinator` alone may consume one coalesced nonanimated pinned-tail
+correction for an admitted discrete insertion. Its bounded rendered-ID entitlement is intersected only on
 actual installed transitions, so a surviving tool/group row retains the same one-shot settlement through
 completion while replacement removes it. Continuity-preserved assistant/tool rows do not manufacture a new
-entrance. A newly admitted visible agent row may pair its one local reveal with the coordinator's one short smooth pinned-tail command; those remain separate owners and coalesce rather than issuing competing viewport writes.
-Continuous Markdown growth remains display-frame-coalesced and smoothly follows the pinned tail, while capped thinking traces animate both viewport height and tail offset locally inside their clipped row. Detached readers receive no writes and Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
+entrance. A newly admitted visible agent row may pair its one local reveal with the coordinator's one nonanimated pinned-tail correction; those remain separate owners and coalesce rather than issuing competing viewport writes.
+Continuous Markdown growth remains display-frame-coalesced and smoothly follows the pinned tail through native size anchoring, while capped thinking traces animate both viewport height and tail offset locally inside their clipped row. Detached readers receive no writes and Reduce Motion removes spatial effects. Agent tool and grouped-run buttons use
 the same capsule primitives while retaining left alignment, immutable routes, and detail sheets.
 
 Every tool chip owns a tappable, top-anchored detail sheet, including
@@ -1215,8 +1217,8 @@ maps every tool call to its single compact grouped transcript chip, so page-boun
 regrouping cannot lose that visible semantic anchor. Exact detached-reader ordinary installs and
 page installs advance a layout/projection epoch, and the row geometry transform includes that epoch
 so an exact post-install sample is emitted even when its numeric frame is unchanged. Ordinary
-installs reuse the same bounded semantic correction contract for detached readers; pinned readers receive one
-coalesced short smooth tail settlement for growth, while physical overshoot correction remains nonanimated. Settlement
+installs reuse the same bounded semantic correction contract for detached readers; pinned readers use native smooth
+size anchoring for continuous growth and receive one coalesced nonanimated tail correction for discrete overshoot. Settlement
 waits passively for that exact sample; after each disabled-animation correction the
 owner requires both a strictly newer sample of the same semantic frame and a newer scroll-geometry
 revision, accepts either callback order, permits at most one late correction, and succeeds only within

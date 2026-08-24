@@ -97,6 +97,7 @@ struct ChatContentTransitionTests {
             != ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true))
         #expect(ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: false)
             != ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: true))
+        #expect(ChatContentTransitionPolicy.composerSurfaceRemovalEdge == .bottom)
         #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
             current: 44,
             measured: 88

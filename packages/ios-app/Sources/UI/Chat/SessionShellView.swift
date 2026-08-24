@@ -45,11 +45,7 @@ struct SessionShellView: View {
     @State private var openingSessionID: String?
 
     init() {
-        _serverFilter = State(
-            initialValue: DashboardServerFilterState(
-                sortMode: DashboardServerFilterPreferences.loadSortMode()
-            )
-        )
+        _serverFilter = State(initialValue: DashboardServerFilterPreferences.load())
     }
 
     var body: some View {
@@ -112,6 +108,7 @@ struct SessionShellView: View {
         }
         .onChange(of: model.dashboardServerSources, initial: true) { _, sources in
             serverFilter.reconcile(profileIDs: sources.map(\.profileID))
+            if !sources.isEmpty { DashboardServerFilterPreferences.save(serverFilter) }
         }
     }
 
@@ -252,7 +249,7 @@ struct SessionShellView: View {
                         detail: "Show sessions from every paired server.",
                         selected: serverFilter.isAllSelected
                     ) {
-                        serverFilter.selectAll()
+                        updateServerFilter { $0.selectAll() }
                     }
 
                     ForEach(model.dashboardServerSources) { source in
@@ -261,7 +258,7 @@ struct SessionShellView: View {
                             detail: "\(source.sessionCount) session\(source.sessionCount == 1 ? "" : "s") · \(source.state.label)",
                             selected: serverFilter.isSelected(source.profileID)
                         ) {
-                            serverFilter.toggle(source.profileID)
+                            updateServerFilter { $0.toggle(source.profileID) }
                         }
                     }
                 }
@@ -280,8 +277,12 @@ struct SessionShellView: View {
     }
 
     private func setSortMode(_ mode: DashboardSessionSortMode) {
-        serverFilter.setSortMode(mode)
-        DashboardServerFilterPreferences.saveSortMode(mode)
+        updateServerFilter { $0.setSortMode(mode) }
+    }
+
+    private func updateServerFilter(_ update: (inout DashboardServerFilterState) -> Void) {
+        update(&serverFilter)
+        DashboardServerFilterPreferences.save(serverFilter)
     }
 
     private func filterOption(
@@ -358,6 +359,7 @@ struct SessionShellView: View {
                 showingServerFilter = true
             } label: {
                 Image(systemName: "line.3.horizontal.decrease")
+                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
                     .foregroundStyle(Color.tronEmerald)
             }
             .accessibilityLabel(serverFilter.accessibilityLabel)
@@ -597,7 +599,10 @@ struct SessionShellView: View {
 
     private var filteredSessions: [SessionSummary] {
         model.visibleSessions.filter { session in
-            serverFilter.allows(session.gatewayProfileID)
+            serverFilter.allows(
+                session.gatewayProfileID,
+                selectedProfileID: model.profiles.selected?.id
+            )
                 && (search.isEmpty
                     || session.title.localizedCaseInsensitiveContains(search)
                     || session.cwd.localizedCaseInsensitiveContains(search))

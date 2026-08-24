@@ -92,6 +92,7 @@ enum MarkdownPresentation: Sendable {
         let id: SourceIdentity
         let sourceRange: SourceRange
         let kind: Kind
+        let isOpenCodeFence: Bool
 
         var accountedByteCount: Int {
             id.content.utf8.count + kind.accountedByteCount
@@ -138,13 +139,15 @@ enum MarkdownPresentation: Sendable {
                         code.append(lines[index].text)
                         index += 1
                     }
-                    if index < lines.count { index += 1 }
+                    let isOpenCodeFence = index == lines.count
+                    if !isOpenCodeFence { index += 1 }
                     append(
                         .code(language: language.isEmpty ? nil : language, code: code.joined(separator: "\n")),
                         lines: lines,
                         start: start,
                         end: index,
                         source: source,
+                        isOpenCodeFence: isOpenCodeFence,
                         to: &result
                     )
                     continue
@@ -266,6 +269,7 @@ enum MarkdownPresentation: Sendable {
             start: Int,
             end: Int,
             source: String,
+            isOpenCodeFence: Bool = false,
             to result: inout [Block]
         ) {
             let range = SourceRange(
@@ -275,7 +279,8 @@ enum MarkdownPresentation: Sendable {
             result.append(Block(
                 id: identity(range: range, source: source),
                 sourceRange: range,
-                kind: kind
+                kind: kind,
+                isOpenCodeFence: isOpenCodeFence
             ))
         }
 

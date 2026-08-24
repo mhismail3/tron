@@ -49,6 +49,7 @@ struct MarkdownPresentationTests {
         #expect(items.map(\.marker) == ["•", "2."])
         #expect(items.map(\.inline.source) == ["one", "two"])
         #expect(code == " code  ")
+        #expect(!document.blocks[3].isOpenCodeFence)
         #expect(rows == [["a", "b"], ["c", "d"]])
     }
 
@@ -134,6 +135,7 @@ struct MarkdownPresentationTests {
         #expect(items.map(\.marker) == ["01."])
         #expect(items.map(\.inline.source) == ["yes"])
         #expect(quote.source == "x")
+        #expect(document.blocks[3].isOpenCodeFence)
 
         let incompleteInline = MarkdownPresentation.Document(source: "*open [link]( and `code")
         guard case .paragraph(let inline) = try #require(incompleteInline.blocks.first).kind else {
@@ -208,6 +210,18 @@ struct MarkdownPresentationTests {
             #expect(inline.source == value)
             #expect(inline.accessibilitySource == value)
         }
+    }
+
+    @Test("only an unterminated code fence is eligible for streaming progress")
+    func codeFenceSettlement() throws {
+        let document = MarkdownPresentation.Document(source: "```swift\nclosed\n```\n\ntext\n\n```json\nopen")
+        let codeBlocks = document.blocks.filter { block in
+            if case .code = block.kind { return true }
+            return false
+        }
+        #expect(codeBlocks.count == 2)
+        #expect(!codeBlocks[0].isOpenCodeFence)
+        #expect(codeBlocks[1].isOpenCodeFence)
     }
 
     @Test("renderer accepts the exact parsed document and convenience initialization delegates to the cold oracle")

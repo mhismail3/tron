@@ -269,6 +269,13 @@ enum GatewayConnectionDetailPresentation {
     }
 }
 
+struct GatewayUpdateConfirmationPresentation: Equatable {
+    let title: String
+    let message: String
+    let confirmTitle: String
+    let centersTitle: Bool
+}
+
 enum GatewayUpdateIntent: Identifiable, Equatable {
     case debug(GatewayDebugPromotionCandidate)
     case source
@@ -284,6 +291,25 @@ enum GatewayUpdateIntent: Identifiable, Equatable {
         switch self {
         case .debug: return "Promote Debug Gateway to Stable"
         case .source: return "Rebuild Gateway from Source"
+        }
+    }
+
+    var confirmationPresentation: GatewayUpdateConfirmationPresentation {
+        switch self {
+        case .debug(let candidate):
+            return GatewayUpdateConfirmationPresentation(
+                title: "Promote Debug Gateway to Stable?",
+                message: "Select exact version \(candidate.version) (fingerprint \(candidate.payloadFingerprint.prefix(12))). It activates when accepted runs finish and Tron restarts automatically.",
+                confirmTitle: "Promote and restart",
+                centersTitle: false
+            )
+        case .source:
+            return GatewayUpdateConfirmationPresentation(
+                title: "Rebuild Tron Gateway from source?",
+                message: "This is an on-demand maintenance rebuild, not a pending-update warning. Tron builds and selects a verified candidate, then activates it when accepted runs finish and the Gateway restarts automatically.",
+                confirmTitle: "Rebuild",
+                centersTitle: true
+            )
         }
     }
 
@@ -517,12 +543,13 @@ struct GatewayConnectionDetailView: View {
             GatewayTechnicalDetailsSheet(details: technicalDetails)
         }
         .sheet(item: $updateIntent) { intent in
-            let presentation = updatePresentation(for: intent)
+            let presentation = intent.confirmationPresentation
             TronConfirmationSheet(
                 title: presentation.title,
                 message: presentation.message,
                 confirmTitle: presentation.confirmTitle,
                 destructive: false,
+                centersTitle: presentation.centersTitle,
                 icon: "arrow.down.circle",
                 onConfirm: {
                     Task {
@@ -637,23 +664,6 @@ struct GatewayConnectionDetailView: View {
         .tronGlassSurface(accent: accent, tintOpacity: 0.16, interactive: true)
         .opacity(disabled ? 0.48 : 1)
         .disabled(disabled)
-    }
-
-    private func updatePresentation(for intent: GatewayUpdateIntent) -> (title: String, message: String, confirmTitle: String) {
-        switch intent {
-        case .debug(let candidate):
-            return (
-                "Promote Debug Gateway to Stable?",
-                "Select exact version \(candidate.version) (fingerprint \(candidate.payloadFingerprint.prefix(12))). It activates when accepted runs finish and Tron restarts automatically.",
-                "Promote and restart"
-            )
-        case .source:
-            return (
-                "Rebuild Tron Gateway from source?",
-                "This is an on-demand maintenance rebuild, not a pending-update warning. Tron builds and selects a verified candidate, then activates it when accepted runs finish and the Gateway restarts automatically.",
-                "Rebuild from source"
-            )
-        }
     }
 
     private var supportsSafeRestart: Bool {

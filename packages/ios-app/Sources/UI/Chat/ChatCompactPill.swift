@@ -37,11 +37,11 @@ extension ChatNotificationTone {
 }
 
 enum ChatCompactPillLayoutPolicy {
-    static let horizontalPadding: CGFloat = 11
+    static let horizontalPadding: CGFloat = 10
     static let verticalPadding: CGFloat = 6
-    static let itemSpacing: CGFloat = 7
-    static let standardIconSize: CGFloat = 10
-    static let toolIconSize: CGFloat = 11
+    static let itemSpacing: CGFloat = 6
+    static let standardIconSize: CGFloat = 12
+    static let toolIconSize: CGFloat = 12
     static let errorCornerRadius: CGFloat = 18
     static let capsuleCornerRadius: CGFloat = 999
 

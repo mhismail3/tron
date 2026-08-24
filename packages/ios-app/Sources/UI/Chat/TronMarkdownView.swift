@@ -34,8 +34,12 @@ struct TronMarkdownView: View {
                         .font(TronFont.body(max(14, 22 - CGFloat(level * 2)), weight: level <= 2 ? .bold : .semibold))
                         .padding(.top, level <= 2 ? 6 : 2)
                 case .code(let language, let value):
-                    CodeBlock(language: language, code: value, streaming: streaming)
-                        .id(block.id)
+                    CodeBlock(
+                        language: language,
+                        code: value,
+                        streaming: streaming && block.isOpenCodeFence
+                    )
+                    .id(block.id)
                 case .quote(let value):
                     HStack(alignment: .top, spacing: 10) {
                         RoundedRectangle(cornerRadius: 2).fill(Color.tronBorder).frame(width: 3)

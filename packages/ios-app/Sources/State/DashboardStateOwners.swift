@@ -101,25 +101,64 @@ enum DashboardSessionSortMode: String, CaseIterable, Identifiable, Sendable {
 }
 
 enum DashboardServerFilterPreferences {
-    static let sortModeKey = "dashboard.serverFilter.sortMode.v1"
-
-    static func loadSortMode(from defaults: UserDefaults = .standard) -> DashboardSessionSortMode {
-        defaults.string(forKey: sortModeKey)
-            .flatMap(DashboardSessionSortMode.init(rawValue:))
-            ?? .projectServer
+    private struct Document: Codable {
+        let version: Int
+        let sortMode: String
+        let selectedProfileIDs: [String]
     }
 
-    static func saveSortMode(_ mode: DashboardSessionSortMode, to defaults: UserDefaults = .standard) {
-        defaults.set(mode.rawValue, forKey: sortModeKey)
+    static let documentKey = "dashboard.serverFilter.preferences.v2"
+    static let legacySortModeKey = "dashboard.serverFilter.sortMode.v1"
+    private static let version = 1
+    private static let maximumProfileCount = 128
+    private static let maximumProfileIDBytes = 160
+    private static let maximumDocumentBytes = 32 * 1024
+
+    static func load(from defaults: UserDefaults = .standard) -> DashboardServerFilterState {
+        if let data = defaults.data(forKey: documentKey),
+           data.count <= maximumDocumentBytes,
+           let document = try? JSONDecoder().decode(Document.self, from: data),
+           document.version == version,
+           document.selectedProfileIDs.count <= maximumProfileCount,
+           Set(document.selectedProfileIDs).count == document.selectedProfileIDs.count,
+           document.selectedProfileIDs.allSatisfy(Self.admitsProfileID),
+           let sortMode = DashboardSessionSortMode(rawValue: document.sortMode) {
+            return DashboardServerFilterState(
+                selectedProfileIDs: Set(document.selectedProfileIDs),
+                sortMode: sortMode
+            )
+        }
+        let legacy = defaults.string(forKey: legacySortModeKey)
+            .flatMap(DashboardSessionSortMode.init(rawValue:))
+            ?? .projectServer
+        return DashboardServerFilterState(sortMode: legacy)
+    }
+
+    static func save(_ state: DashboardServerFilterState, to defaults: UserDefaults = .standard) {
+        let selected = state.selectedProfileIDs.sorted()
+        guard selected.count <= maximumProfileCount,
+              selected.allSatisfy(admitsProfileID) else { return }
+        let document = Document(version: version, sortMode: state.sortMode.rawValue, selectedProfileIDs: selected)
+        guard let data = try? JSONEncoder().encode(document), data.count <= maximumDocumentBytes else { return }
+        defaults.set(data, forKey: documentKey)
+        defaults.removeObject(forKey: legacySortModeKey)
+    }
+
+    private static func admitsProfileID(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= maximumProfileIDBytes
     }
 }
 
 struct DashboardServerFilterState: Equatable, Sendable {
-    private(set) var selectedProfileIDs: Set<String> = []
+    private(set) var selectedProfileIDs: Set<String>
     private var availableProfileIDs: Set<String> = []
     private(set) var sortMode: DashboardSessionSortMode
 
-    init(sortMode: DashboardSessionSortMode = .projectServer) {
+    init(
+        selectedProfileIDs: Set<String> = [],
+        sortMode: DashboardSessionSortMode = .projectServer
+    ) {
+        self.selectedProfileIDs = selectedProfileIDs
         self.sortMode = sortMode
     }
 
@@ -134,14 +173,23 @@ struct DashboardServerFilterState: Equatable, Sendable {
     }
 
     mutating func reconcile(profileIDs: [String]) {
-        availableProfileIDs = Set(profileIDs)
-        selectedProfileIDs = selectedProfileIDs.intersection(availableProfileIDs)
-        if selectedProfileIDs.count == availableProfileIDs.count { selectedProfileIDs.removeAll() }
+        let admitted = Set(profileIDs)
+        availableProfileIDs = admitted
+        // An empty source list is a transient startup/offline projection. Keep
+        // the persisted choice until an authoritative non-empty set can
+        // reconcile removed or re-paired profiles.
+        guard !admitted.isEmpty else { return }
+        selectedProfileIDs = selectedProfileIDs.intersection(admitted)
+        if selectedProfileIDs.count == admitted.count { selectedProfileIDs.removeAll() }
     }
 
     func allows(_ profileID: String?) -> Bool {
         guard let profileID else { return selectedProfileIDs.isEmpty }
         return selectedProfileIDs.isEmpty || selectedProfileIDs.contains(profileID)
+    }
+
+    func allows(_ profileID: String?, selectedProfileID: String?) -> Bool {
+        allows(profileID ?? selectedProfileID)
     }
 
     func isSelected(_ profileID: String) -> Bool {

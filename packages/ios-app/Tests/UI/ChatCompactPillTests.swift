@@ -213,11 +213,11 @@ struct ChatCompactPillTests {
 
     @Test("compact transcript pills retain pre-shared vertical rhythm")
     func compactPillGeometry() {
-        #expect(ChatCompactPillLayoutPolicy.horizontalPadding == 11)
+        #expect(ChatCompactPillLayoutPolicy.horizontalPadding == 10)
         #expect(ChatCompactPillLayoutPolicy.verticalPadding == 6)
-        #expect(ChatCompactPillLayoutPolicy.itemSpacing == 7)
-        #expect(ChatCompactPillLayoutPolicy.standardIconSize == 10)
-        #expect(ChatCompactPillLayoutPolicy.toolIconSize == 11)
+        #expect(ChatCompactPillLayoutPolicy.itemSpacing == 6)
+        #expect(ChatCompactPillLayoutPolicy.standardIconSize == 12)
+        #expect(ChatCompactPillLayoutPolicy.toolIconSize == 12)
     }
 
     @Test("tool chip visual state excludes timing and provenance payload churn")

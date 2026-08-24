@@ -226,13 +226,15 @@ enum ChatContentTransitionPolicy {
             : .spring(response: 0.36, dampingFraction: 0.86, blendDuration: 0.06)
     }
 
+    static let composerSurfaceRemovalEdge: Edge = .bottom
+
     static func composerSurfaceTransition(reduceMotion: Bool) -> AnyTransition {
         guard !reduceMotion else { return .opacity }
         return .asymmetric(
             insertion: .move(edge: .bottom)
                 .combined(with: .scale(scale: 0.97, anchor: .bottom))
                 .combined(with: .opacity),
-            removal: .move(edge: .top).combined(with: .opacity)
+            removal: .move(edge: composerSurfaceRemovalEdge).combined(with: .opacity)
         )
     }
 

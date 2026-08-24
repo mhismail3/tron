@@ -483,6 +483,8 @@ struct DashboardStateOwnerTests {
         #expect(filter.isFiltering)
         #expect(filter.allows("a"))
         #expect(!filter.allows("b"))
+        #expect(filter.allows(nil, selectedProfileID: "a"))
+        #expect(!filter.allows(nil, selectedProfileID: "b"))
         #expect(filter.isSelected("c"))
 
         filter.toggle("b")
@@ -497,20 +499,40 @@ struct DashboardStateOwnerTests {
         #expect(!filter.isFiltering)
     }
 
-    @Test("recent dashboard ordering persists through the preference store")
-    func recentSortPreferencePersistence() {
+    @Test("dashboard ordering and server choices persist and reconcile safely")
+    func filterPreferencePersistence() {
         let suiteName = "DashboardStateOwnerTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        #expect(DashboardServerFilterPreferences.loadSortMode(from: defaults) == .projectServer)
-        DashboardServerFilterPreferences.saveSortMode(.recent, to: defaults)
-        #expect(DashboardServerFilterPreferences.loadSortMode(from: defaults) == .recent)
+        var stored = DashboardServerFilterPreferences.load(from: defaults)
+        #expect(stored.sortMode == .projectServer)
+        stored.reconcile(profileIDs: ["a", "b", "c"])
+        stored.toggle("b")
+        stored.setSortMode(.recent)
+        DashboardServerFilterPreferences.save(stored, to: defaults)
 
-        let restored = DashboardServerFilterState(
-            sortMode: DashboardServerFilterPreferences.loadSortMode(from: defaults)
-        )
+        var restored = DashboardServerFilterPreferences.load(from: defaults)
         #expect(restored.sortMode == .recent)
+        #expect(!restored.isSelected("b"))
+        restored.reconcile(profileIDs: [])
+        #expect(!restored.isSelected("b"))
+        restored.reconcile(profileIDs: ["b", "c"])
+        #expect(!restored.isAllSelected)
+        #expect(!restored.isSelected("b"))
+        #expect(restored.isSelected("c"))
+    }
+
+    @Test("malformed or oversized dashboard preferences fail closed")
+    func invalidFilterPreferences() {
+        let suiteName = "DashboardStateOwnerTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        defaults.set(Data(#"{"version":1,"sortMode":"Recent Activity","selectedProfileIDs":["duplicate","duplicate"]}"#.utf8), forKey: DashboardServerFilterPreferences.documentKey)
+        #expect(DashboardServerFilterPreferences.load(from: defaults) == DashboardServerFilterState())
+        defaults.set(Data(repeating: 0x41, count: 32 * 1024 + 1), forKey: DashboardServerFilterPreferences.documentKey)
+        #expect(DashboardServerFilterPreferences.load(from: defaults) == DashboardServerFilterState())
     }
 
     @Test("direct navigation invalidates pending asynchronous navigation")
