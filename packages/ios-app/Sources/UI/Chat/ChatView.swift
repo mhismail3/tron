@@ -22,7 +22,6 @@ struct ChatView: View {
     @State private var composerScope: ComposerDraftScope?
     @State private var initialModelSettled = true
     @State private var toolbarContainerWidth = ChatToolbarTitleLayout.defaultContainerWidth
-    @State private var availableChatHeight: CGFloat?
     @State private var scrollCoordinator: ChatScrollCoordinator
     @State private var transcriptPresentation: ChatTranscriptPresentationStore
     @State private var performanceTracker: ChatPerformanceTracker
@@ -111,11 +110,10 @@ struct ChatView: View {
                     reduceMotion: reduceMotion
                 )
             }
-        .onGeometryChange(for: CGSize.self) { geometry in
-            geometry.size
-        } action: { size in
-            toolbarContainerWidth = size.width
-            availableChatHeight = size.height.isFinite && size.height > 0 ? size.height : nil
+        .onGeometryChange(for: CGFloat.self) { geometry in
+            geometry.size.width
+        } action: { width in
+            toolbarContainerWidth = width
         }
         .background { Color.tronBackground.ignoresSafeArea(.all) }
         .navigationTitle("")
@@ -836,9 +834,7 @@ struct ChatView: View {
                     return .none
                 }
                 let attachments = model.composerDrafts.submittedAttachments(for: target)
-                    .filter { attachment in
-                        attachment.gatewayUploadID.map(submission.attachmentIDs.contains) == true
-                    }
+                    .filter { submission.attachmentIDs.contains($0.id) }
                     .prefix(ComposerAttachmentPolicy.maximumCount)
                     .map { $0.frozenForHandoff() }
                 return .outgoing(
@@ -1521,7 +1517,6 @@ struct ChatView: View {
             showsCatchUp: scrollCoordinator.shouldShowCatchUpButton,
             showsAmbientWorkingBlur: showsAmbientWorkingBlur,
             keyboardVisible: keyboardObserver.isVisible,
-            maximumHeight: availableChatHeight,
             text: composerTextBinding,
             isFocused: Binding(
                 get: { composerFocused },
@@ -2067,9 +2062,7 @@ struct ChatView: View {
                     queuedMessages: selectedAuthoritativeSnapshot?.displayedQueuedMessages ?? []
                 )
                 let submittedAttachments = model.composerDrafts.submittedAttachments(for: target)
-                    .filter { attachment in
-                        attachment.gatewayUploadID.map(submission.attachmentIDs.contains) == true
-                    }
+                    .filter { submission.attachmentIDs.contains($0.id) }
                     .prefix(ComposerAttachmentPolicy.maximumCount)
                     .map { $0.frozenForHandoff() }
                 let morphGeneration = layoutTransaction.join(.morphFlight)

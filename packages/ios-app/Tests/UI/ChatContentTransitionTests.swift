@@ -91,45 +91,20 @@ struct ChatContentTransitionTests {
         #expect(centered.offsetX == 0)
     }
 
-    @Test("composer reserves fixed surfaces and gives only bounded remainder to picker")
-    func composerHeightAllocation() {
-        let opened = ChatComposerLayoutPolicy.allocation(
-            maximumHeight: 300,
-            fixedHeight: 120,
-            desiredFlexibleHeight: 240,
-            fixedSurfaceCount: 3,
-            spacing: 10
-        )
-        #expect(opened == ChatComposerLayoutAllocation(flexibleHeight: 150, totalHeight: 300))
-
-        let expandedInput = ChatComposerLayoutPolicy.allocation(
-            maximumHeight: 300,
-            fixedHeight: 220,
-            desiredFlexibleHeight: 240,
-            fixedSurfaceCount: 3,
-            spacing: 10
-        )
-        #expect(expandedInput == ChatComposerLayoutAllocation(
-            flexibleHeight: 50,
-            totalHeight: 300
-        ))
-
-        let closed = ChatComposerLayoutPolicy.allocation(
-            maximumHeight: 300,
-            fixedHeight: 120,
-            desiredFlexibleHeight: 0,
-            fixedSurfaceCount: 3,
-            spacing: 10
-        )
-        #expect(closed == ChatComposerLayoutAllocation(flexibleHeight: 0, totalHeight: 140))
-    }
-
-    @Test("composer panel geometry is value coordinated and Reduce Motion is immediate")
+    @Test("composer child surfaces retain scoped motion without structural height animation")
     func composerChildMotion() {
-        #expect(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: false) != nil)
-        #expect(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true) == nil)
-        #expect(ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: false) != nil)
-        #expect(ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: true) == nil)
+        #expect(ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: false)
+            != ChatContentTransitionPolicy.attachmentAnimation(reduceMotion: true))
+        #expect(ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: false)
+            != ChatContentTransitionPolicy.composerSurfaceAnimation(reduceMotion: true))
+        #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: 44,
+            measured: 88
+        ))
+        #expect(!ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: 44,
+            measured: 44.2
+        ))
     }
 
     @Test("Reduce Motion removes every spatial entrance component")

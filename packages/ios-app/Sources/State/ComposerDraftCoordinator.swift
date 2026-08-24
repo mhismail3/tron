@@ -8,10 +8,7 @@ struct ComposerDraftScope: Hashable, Sendable {
 }
 
 struct PendingAttachment: Identifiable, Hashable, Sendable {
-    /// Stable chip identity. Restored drafts use a local opaque value.
     let id: String
-    /// Disposable exact-presentation Gateway identity. It is never durable.
-    let gatewayUploadID: String?
     let name: String
     let mimeType: String
     let size: Int
@@ -36,32 +33,7 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
         previewIdentity: UInt64? = nil,
         preparedThumbnail: ComposerPreparedAttachmentThumbnail? = nil
     ) {
-        self.init(
-            id: id,
-            gatewayUploadID: id,
-            name: name,
-            mimeType: mimeType,
-            size: size,
-            previewData: previewData,
-            fullPreviewData: fullPreviewData,
-            previewIdentity: previewIdentity,
-            preparedThumbnail: preparedThumbnail
-        )
-    }
-
-    init(
-        id: String,
-        gatewayUploadID: String?,
-        name: String,
-        mimeType: String,
-        size: Int,
-        previewData: Data?,
-        fullPreviewData: Data? = nil,
-        previewIdentity: UInt64? = nil,
-        preparedThumbnail: ComposerPreparedAttachmentThumbnail? = nil
-    ) {
         self.id = id
-        self.gatewayUploadID = gatewayUploadID
         self.name = name
         self.mimeType = mimeType
         self.size = size
@@ -78,19 +50,12 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
         }
     }
 
-    /// Canonical upload blob identity. Local `id` remains the stable chip,
-    /// removal, and morph identity even when a restored attachment is re-uploaded.
-    var transportBlobID: String? {
-        gatewayUploadID.map { "upload:\($0)" }
-    }
-
     /// A frozen handoff owns only the bounded thumbnail used by the row. The
     /// upload's full bytes remain available only to the live composer until
     /// this source is admitted to transcript presentation.
     func frozenForHandoff() -> Self {
         Self(
             id: id,
-            gatewayUploadID: gatewayUploadID,
             name: name,
             mimeType: mimeType,
             size: size,
@@ -101,37 +66,8 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
         )
     }
 
-    func requiringUpload() -> Self {
-        Self(
-            id: id,
-            gatewayUploadID: nil,
-            name: name,
-            mimeType: mimeType,
-            size: size,
-            previewData: previewData,
-            fullPreviewData: fullPreviewData,
-            previewIdentity: previewIdentity,
-            preparedThumbnail: preparedThumbnail
-        )
-    }
-
-    func replacingGatewayUploadID(_ uploadID: String) -> Self {
-        Self(
-            id: id,
-            gatewayUploadID: uploadID,
-            name: name,
-            mimeType: mimeType,
-            size: size,
-            previewData: previewData,
-            fullPreviewData: fullPreviewData,
-            previewIdentity: previewIdentity,
-            preparedThumbnail: preparedThumbnail
-        )
-    }
-
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.id == rhs.id
-            && lhs.gatewayUploadID == rhs.gatewayUploadID
             && lhs.name == rhs.name
             && lhs.mimeType == rhs.mimeType
             && lhs.size == rhs.size
@@ -141,7 +77,6 @@ struct PendingAttachment: Identifiable, Hashable, Sendable {
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
-        hasher.combine(gatewayUploadID)
         hasher.combine(name)
         hasher.combine(mimeType)
         hasher.combine(size)
@@ -340,12 +275,6 @@ typealias ComposerSendOperation = @MainActor @Sendable (
     _ skillName: String?
 ) async throws -> String
 
-typealias ComposerAttachmentPreviewPreparation = @Sendable (
-    _ data: Data,
-    _ mimeType: String,
-    _ name: String
-) async -> ComposerPreparedAttachmentThumbnail?
-
 enum ComposerDraftTextPolicy {
     static func restoredDraft(outgoing: String, currentDraft: String) -> String {
         guard !outgoing.isEmpty else { return currentDraft }
@@ -430,9 +359,7 @@ final class ComposerDraftCoordinator {
     private let uploadOperation: ComposerUploadOperation
     private let fileUploadOperation: ComposerFileUploadOperation
     private let attachmentFileAccess: ComposerAttachmentFileAccess
-    private let prepareAttachmentPreview: ComposerAttachmentPreviewPreparation
     private let sendOperation: ComposerSendOperation
-    private let draftStore: ComposerDraftStore
     @ObservationIgnored private let admitsLifecycleGeneration: @MainActor (Int) -> Bool
 
     private var drafts: [ComposerDraftScope: Draft] = [:]
@@ -440,9 +367,7 @@ final class ComposerDraftCoordinator {
     private var skillMutationRevisionByScope: [ComposerDraftScope: Int] = [:]
     private var preparedOpenBySession: [String: PreparedOpen] = [:]
     private var lease: PresentationLease?
-    /// Unsent attachment payloads follow durable profile/session scope. Only
-    /// their disposable upload work and IDs are presentation-bound.
-    private var attachmentsByScope: [ComposerDraftScope: [PendingAttachment]] = [:]
+    private var attachmentsByTarget: [SessionPresentationIdentity: [PendingAttachment]] = [:]
     private var editorRequestByTarget: [SessionPresentationIdentity: ComposerEditorRequest] = [:]
     private var uploadAdmissions = Set<UploadAdmission>()
     private var uploadTasks: [UploadAdmission: Task<String, Error>] = [:]
@@ -456,33 +381,18 @@ final class ComposerDraftCoordinator {
     /// presentation until its canonical user entry resolves. Attachments may be
     /// empty; rich previews therefore remain bounded to one prompt lifecycle.
     private var settledQueueHandoffs: [SessionPresentationIdentity: SettledQueueHandoff] = [:]
-    /// Scopes whose durable value and attachment thumbnails have completed one
-    /// merge. Text edits alone never advance this boundary.
-    @ObservationIgnored private var loadedScopes: Set<ComposerDraftScope> = []
-    @ObservationIgnored private var textMutationRevisionByScope: [ComposerDraftScope: UInt64] = [:]
-    @ObservationIgnored private var restoreTasks: [ComposerDraftScope: Task<ComposerDraftStore.Value?, Never>] = [:]
-    @ObservationIgnored private var restoredUploadTasks: [SessionPresentationIdentity: Task<Void, Never>] = [:]
-    @ObservationIgnored private var dirtyScopes: Set<ComposerDraftScope> = []
-    @ObservationIgnored private var storageGenerationByScope: [ComposerDraftScope: UInt64] = [:]
-    @ObservationIgnored private var persistenceTask: Task<Void, Never>?
     private var sequence: UInt64 = 0
 
     init(
         upload: @escaping ComposerUploadOperation,
         fileUpload: @escaping ComposerFileUploadOperation,
         attachmentFileAccess: ComposerAttachmentFileAccess = .live,
-        prepareAttachmentPreview: @escaping ComposerAttachmentPreviewPreparation = {
-            await ComposerAttachmentPreviewPolicy.prepare($0, mimeType: $1, name: $2)
-        },
-        draftStore: ComposerDraftStore = ComposerDraftStore(),
         send: @escaping ComposerSendOperation,
         admitsLifecycleGeneration: @escaping @MainActor (Int) -> Bool
     ) {
         uploadOperation = upload
         fileUploadOperation = fileUpload
         self.attachmentFileAccess = attachmentFileAccess
-        self.prepareAttachmentPreview = prepareAttachmentPreview
-        self.draftStore = draftStore
         sendOperation = send
         self.admitsLifecycleGeneration = admitsLifecycleGeneration
     }
@@ -517,8 +427,6 @@ final class ComposerDraftCoordinator {
         draft.revision &+= 1
         draft.lastAccess = sequence
         drafts[scope] = draft
-        textMutationRevisionByScope[scope, default: 0] &+= 1
-        schedulePersistence(for: scope)
         evictInactiveDraftsIfNeeded()
     }
 
@@ -570,7 +478,6 @@ final class ComposerDraftCoordinator {
         revokePresentation: (SessionPresentationIdentity) -> Void,
         closePresentation: (SessionPresentationIdentity) async -> Void
     ) async throws -> Int {
-        await restoreDraftIfNeeded(scope)
         let openID = beginOpening(scope: scope, lifecycleGeneration: lifecycleGeneration)
         do {
             let generation = try await open()
@@ -630,7 +537,6 @@ final class ComposerDraftCoordinator {
         )
         restoreRejectedSubmissionIfNeeded(scope: prepared.scope, target: target)
         touch(prepared.scope, installing: nil)
-        beginRestoredAttachmentUploads(scope: prepared.scope, target: target)
         return true
     }
 
@@ -645,8 +551,8 @@ final class ComposerDraftCoordinator {
     }
 
     func pendingAttachments(for target: SessionPresentationIdentity) -> [PendingAttachment] {
-        guard admits(target), let scope = lease?.scope else { return [] }
-        return attachmentsByScope[scope] ?? []
+        guard admits(target) else { return [] }
+        return attachmentsByTarget[target] ?? []
     }
 
     func submittedAttachments(for target: SessionPresentationIdentity) -> [PendingAttachment] {
@@ -904,9 +810,7 @@ final class ComposerDraftCoordinator {
             submissionByTarget[target] = admission
             return
         }
-        let newlySettled = !admission.canonicalObserved
         admission.canonicalObserved = true
-        if newlySettled { schedulePersistence(for: admission.scope) }
         if admission.transportState == .accepted {
             // Publish the enriched local admission before retirement so the
             // exact canonical ID receipt survives this synchronous boundary.
@@ -944,10 +848,13 @@ final class ComposerDraftCoordinator {
             try require(admission)
             throw error
         }
-        let preparedThumbnail = await prepareAttachmentPreview(data, mimeType, name)
+        let preparedThumbnail = await ComposerAttachmentPreviewPolicy.prepare(
+            data,
+            mimeType: mimeType,
+            name: name
+        )
         try require(admission)
-        guard let scope = scope(for: target) else { throw CancellationError() }
-        attachmentsByScope[scope, default: []].append(PendingAttachment(
+        attachmentsByTarget[target, default: []].append(PendingAttachment(
             id: id,
             name: name,
             mimeType: mimeType,
@@ -956,7 +863,6 @@ final class ComposerDraftCoordinator {
             fullPreviewData: data,
             preparedThumbnail: preparedThumbnail
         ))
-        schedulePersistence(for: scope)
     }
 
     func uploadFile(
@@ -1045,11 +951,14 @@ final class ComposerDraftCoordinator {
             throw error
         }
         let data = try await attachmentFileAccess.previewData(staged, size)
-        let preparedThumbnail = await prepareAttachmentPreview(data, mimeType, name)
+        let preparedThumbnail = await ComposerAttachmentPreviewPolicy.prepare(
+            data,
+            mimeType: mimeType,
+            name: name
+        )
         let fullPreviewData = data
         try require(admission)
-        guard let scope = scope(for: target) else { throw CancellationError() }
-        attachmentsByScope[scope, default: []].append(PendingAttachment(
+        attachmentsByTarget[target, default: []].append(PendingAttachment(
             id: id,
             name: name,
             mimeType: mimeType,
@@ -1058,22 +967,16 @@ final class ComposerDraftCoordinator {
             fullPreviewData: fullPreviewData,
             preparedThumbnail: preparedThumbnail
         ))
-        schedulePersistence(for: scope)
     }
 
     func removeAttachment(_ id: String, target: SessionPresentationIdentity) {
-        guard admits(target), let scope = lease?.scope,
-              var attachments = attachmentsByScope[scope] else { return }
+        guard admits(target), var attachments = attachmentsByTarget[target] else { return }
         attachments.removeAll { $0.id == id }
-        attachmentsByScope[scope] = attachments.isEmpty ? nil : attachments
-        schedulePersistence(for: scope)
+        attachmentsByTarget[target] = attachments.isEmpty ? nil : attachments
     }
 
     func hasActiveUploads(for target: SessionPresentationIdentity) -> Bool {
-        admits(target) && (
-            uploadAdmissions.contains { $0.target == target }
-                || restoredUploadTasks[target] != nil
-        )
+        admits(target) && uploadAdmissions.contains { $0.target == target }
     }
 
     func send(
@@ -1178,242 +1081,23 @@ final class ComposerDraftCoordinator {
         revokePresentation()
     }
 
-    @discardableResult
-    func removeSession(profileID: String, sessionID: String) -> Task<Void, Never> {
+    func removeSession(profileID: String, sessionID: String) {
         let scope = ComposerDraftScope(profileID: profileID, sessionID: sessionID)
-        dirtyScopes.remove(scope)
-        storageGenerationByScope[scope, default: 0] &+= 1
         drafts[scope] = nil
-        attachmentsByScope[scope] = nil
-        loadedScopes.remove(scope)
-        textMutationRevisionByScope[scope] = nil
-        restoreTasks[scope]?.cancel()
-        restoreTasks[scope] = nil
         selectedSkillByScope[scope] = nil
         skillMutationRevisionByScope[scope] = nil
         preparedOpenBySession[sessionID] = nil
         submissionByTarget = submissionByTarget.filter { $0.value.scope != scope }
         if lease?.scope == scope { revokePresentation() }
-        return enqueuePersistence { store in await store.remove(scope) }
     }
 
-    @discardableResult
-    func removeProfile(_ profileID: String) -> Task<Void, Never> {
-        let invalidatedScopes = Set(drafts.keys)
-            .union(attachmentsByScope.keys)
-            .union(restoreTasks.keys)
-            .filter { $0.profileID == profileID }
-        for scope in invalidatedScopes {
-            storageGenerationByScope[scope, default: 0] &+= 1
-            restoreTasks[scope]?.cancel()
-        }
-        dirtyScopes = dirtyScopes.filter { $0.profileID != profileID }
+    func removeProfile(_ profileID: String) {
         drafts = drafts.filter { $0.key.profileID != profileID }
-        attachmentsByScope = attachmentsByScope.filter { $0.key.profileID != profileID }
-        loadedScopes = loadedScopes.filter { $0.profileID != profileID }
-        textMutationRevisionByScope = textMutationRevisionByScope.filter {
-            $0.key.profileID != profileID
-        }
-        restoreTasks = restoreTasks.filter { $0.key.profileID != profileID }
         selectedSkillByScope = selectedSkillByScope.filter { $0.key.profileID != profileID }
         skillMutationRevisionByScope = skillMutationRevisionByScope.filter { $0.key.profileID != profileID }
         preparedOpenBySession = preparedOpenBySession.filter { $0.value.scope.profileID != profileID }
         submissionByTarget = submissionByTarget.filter { $0.value.scope.profileID != profileID }
         if lease?.scope.profileID == profileID { revokePresentation() }
-        return enqueuePersistence { store in await store.removeProfile(profileID) }
-    }
-
-    /// Forces the latest coalesced local draft values to the owned store. The
-    /// returned task lets lifecycle tests and teardown boundaries await the
-    /// checkpoint without making ordinary keystrokes synchronous.
-    @discardableResult
-    func checkpointDrafts() -> Task<Void, Never> {
-        let predecessor = persistenceTask
-        predecessor?.cancel()
-        let task = Task { @MainActor [weak self] in
-            await predecessor?.value
-            guard !Task.isCancelled, let self else { return }
-            await self.flushDirtyDrafts()
-        }
-        persistenceTask = task
-        return task
-    }
-
-    private func restoreDraftIfNeeded(_ scope: ComposerDraftScope) async {
-        guard !loadedScopes.contains(scope) else { return }
-        let startingStorageGeneration = storageGenerationByScope[scope, default: 0]
-        let task: Task<ComposerDraftStore.Value?, Never>
-        if let existing = restoreTasks[scope] {
-            task = existing
-        } else {
-            let store = draftStore
-            task = Task { await store.load(scope) }
-            restoreTasks[scope] = task
-        }
-        let value = await task.value
-        restoreTasks[scope] = nil
-        guard !loadedScopes.contains(scope),
-              storageGenerationByScope[scope, default: 0] == startingStorageGeneration else { return }
-
-        var restoredAttachments: [PendingAttachment] = []
-        if let value {
-            restoredAttachments.reserveCapacity(value.attachments.count)
-            for attachment in value.attachments {
-                let thumbnail = await prepareAttachmentPreview(
-                    attachment.data,
-                    attachment.mimeType,
-                    attachment.name
-                )
-                restoredAttachments.append(PendingAttachment(
-                    id: "restored-\(UUID().uuidString)",
-                    gatewayUploadID: nil,
-                    name: attachment.name,
-                    mimeType: attachment.mimeType,
-                    size: attachment.data.count,
-                    previewData: thumbnail?.encodedData,
-                    fullPreviewData: attachment.data,
-                    preparedThumbnail: thumbnail
-                ))
-            }
-        }
-        guard !loadedScopes.contains(scope),
-              storageGenerationByScope[scope, default: 0] == startingStorageGeneration else { return }
-
-        sequence &+= 1
-        var draft = drafts[scope] ?? Draft(text: "", revision: 0, lastAccess: sequence)
-        if let value,
-           textMutationRevisionByScope[scope, default: 0] == 0,
-           draft.text != value.text {
-            draft.text = value.text
-            draft.revision &+= 1
-        }
-        draft.lastAccess = sequence
-        drafts[scope] = draft
-        let liveAttachments = attachmentsByScope[scope] ?? []
-        let mergedAttachments = restoredAttachments + liveAttachments
-        attachmentsByScope[scope] = mergedAttachments.isEmpty ? nil : mergedAttachments
-        // Persistence may now replace the durable directory because attachment
-        // bytes have completed their merge. A newer text mutation remains dirty
-        // and is checkpointed together with the restored payloads.
-        loadedScopes.insert(scope)
-        evictInactiveDraftsIfNeeded()
-    }
-
-    private func beginRestoredAttachmentUploads(
-        scope: ComposerDraftScope,
-        target: SessionPresentationIdentity
-    ) {
-        guard restoredUploadTasks[target] == nil,
-              attachmentsByScope[scope]?.contains(where: { $0.gatewayUploadID == nil }) == true else {
-            return
-        }
-        restoredUploadTasks[target] = Task { @MainActor [weak self] in
-            guard let self else { return }
-            let identities = self.attachmentsByScope[scope]?.compactMap {
-                $0.gatewayUploadID == nil ? $0.id : nil
-            } ?? []
-            for identity in identities {
-                guard !Task.isCancelled, self.admits(target), self.lease?.scope == scope,
-                      let attachment = self.attachmentsByScope[scope]?.first(where: { $0.id == identity }),
-                      let data = attachment.fullPreviewData else { continue }
-                do {
-                    let uploadID = try await self.uploadOperation(
-                        attachment.name,
-                        attachment.mimeType,
-                        data
-                    )
-                    guard !Task.isCancelled, self.admits(target), self.lease?.scope == scope,
-                          let index = self.attachmentsByScope[scope]?.firstIndex(where: {
-                              $0.id == identity && $0.gatewayUploadID == nil
-                          }) else { continue }
-                    self.attachmentsByScope[scope]?[index] = attachment.replacingGatewayUploadID(uploadID)
-                } catch {
-                    // Payload and chip remain durable. A later exact mount retries;
-                    // no restored draft is ever sent automatically.
-                }
-            }
-            if self.lease?.target == target { self.restoredUploadTasks[target] = nil }
-        }
-    }
-
-    private func schedulePersistence(for scope: ComposerDraftScope) {
-        dirtyScopes.insert(scope)
-        let predecessor = persistenceTask
-        predecessor?.cancel()
-        let task = Task { @MainActor [weak self] in
-            await predecessor?.value
-            do { try await Task.sleep(for: .milliseconds(200)) }
-            catch { return }
-            await self?.flushDirtyDrafts()
-        }
-        persistenceTask = task
-    }
-
-    @discardableResult
-    private func enqueuePersistence(
-        _ operation: @escaping @Sendable (ComposerDraftStore) async -> Void
-    ) -> Task<Void, Never> {
-        let predecessor = persistenceTask
-        predecessor?.cancel()
-        let store = draftStore
-        let task = Task { @MainActor [weak self] in
-            await predecessor?.value
-            guard !Task.isCancelled, let self else { return }
-            await self.flushDirtyDrafts()
-            guard !Task.isCancelled else { return }
-            await operation(store)
-        }
-        persistenceTask = task
-        return task
-    }
-
-    private func flushDirtyDrafts() async {
-        let candidates = dirtyScopes
-        for scope in candidates where !loadedScopes.contains(scope) {
-            await restoreDraftIfNeeded(scope)
-        }
-        let scopes = candidates.filter { loadedScopes.contains($0) }
-        dirtyScopes.subtract(scopes)
-        let checkpoints = scopes.map { ($0, persistentValue(for: $0)) }
-        for (scope, value) in checkpoints {
-            if let value {
-                await draftStore.save(value, for: scope)
-            } else {
-                await draftStore.remove(scope)
-            }
-        }
-    }
-
-    private func persistentValue(for scope: ComposerDraftScope) -> ComposerDraftStore.Value? {
-        var text = drafts[scope]?.text ?? ""
-        let admission = submissionByTarget.values.first(where: { $0.scope == scope })
-        let retainsInFlightSubmission = admission.map {
-            $0.transportState == .sending && !$0.canonicalObserved
-        } ?? false
-        let submissionIsSettled = admission.map {
-            $0.transportState == .accepted || $0.canonicalObserved
-        } ?? false
-        if let admission, retainsInFlightSubmission {
-            text = ComposerDraftTextPolicy.restoredDraft(
-                outgoing: admission.snapshot.outgoingText,
-                currentDraft: text
-            )
-        }
-        let settledAttachmentIDs = submissionIsSettled
-            ? Set(admission?.submittedAttachments.map(\.id) ?? [])
-            : Set<String>()
-        let attachments = (attachmentsByScope[scope] ?? []).compactMap { attachment -> ComposerDraftStore.Attachment? in
-            guard !settledAttachmentIDs.contains(attachment.id),
-                  let data = attachment.fullPreviewData,
-                  data.count == attachment.size else { return nil }
-            return ComposerDraftStore.Attachment(
-                name: attachment.name,
-                mimeType: attachment.mimeType,
-                data: data
-            )
-        }
-        guard !text.isEmpty || !attachments.isEmpty else { return nil }
-        return ComposerDraftStore.Value(text: text, attachments: attachments)
     }
 
     private func touch(_ scope: ComposerDraftScope, installing initialText: String?) {
@@ -1424,19 +1108,14 @@ final class ComposerDraftCoordinator {
             draft.lastAccess = sequence
             drafts[scope] = draft
         } else {
-            let seed = initialText ?? ""
-            drafts[scope] = Draft(
-                text: seed,
-                revision: seed.isEmpty ? 0 : 1,
-                lastAccess: sequence
-            )
+            drafts[scope] = Draft(text: initialText ?? "", revision: initialText == nil ? 0 : 1, lastAccess: sequence)
         }
         evictInactiveDraftsIfNeeded()
     }
 
     private func beginUpload(target: SessionPresentationIdentity, bytes: Int) throws -> UploadAdmission {
         guard let lease, admits(target) else { throw CancellationError() }
-        let existing = (attachmentsByScope[lease.scope] ?? []).map(\.size)
+        let existing = (attachmentsByTarget[target] ?? []).map(\.size)
         let active = uploadAdmissions.filter { $0.target == target }.map(\.bytes)
         guard ComposerAttachmentPolicy.admits(existing: existing, active: active, candidate: bytes) else {
             throw GatewayFailure(
@@ -1474,8 +1153,7 @@ final class ComposerDraftCoordinator {
         guard let lease, admits(target), submissionByTarget[target] == nil else {
             throw CancellationError()
         }
-        guard !uploadAdmissions.contains(where: { $0.target == target }),
-              restoredUploadTasks[target] == nil else {
+        guard !uploadAdmissions.contains(where: { $0.target == target }) else {
             throw GatewayFailure(
                 code: "upload_in_progress",
                 message: "Wait for attachments to finish uploading before sending.",
@@ -1494,18 +1172,10 @@ final class ComposerDraftCoordinator {
         }
         let draft = drafts[scope] ?? Draft(text: "", revision: 0, lastAccess: sequence)
         let outgoing = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let submittedAttachments = attachmentsByScope[scope] ?? []
+        let submittedAttachments = attachmentsByTarget[target] ?? []
         let submittedSkill = selectedSkillByScope[scope]
         let skillName = submittedSkill.map { String($0.name.dropFirst("skill:".count)) }
-        guard submittedAttachments.allSatisfy({ $0.gatewayUploadID != nil }) else {
-            throw GatewayFailure(
-                code: "upload_failed",
-                message: "Attachments are still being restored. They remain available to retry.",
-                retryable: true,
-                details: nil
-            )
-        }
-        let attachmentIDs = submittedAttachments.compactMap(\.gatewayUploadID)
+        let attachmentIDs = submittedAttachments.map(\.id)
         guard !outgoing.isEmpty || !attachmentIDs.isEmpty else { throw CancellationError() }
         sequence &+= 1
         let snapshot = ComposerSubmissionSnapshot(
@@ -1579,12 +1249,11 @@ final class ComposerDraftCoordinator {
             ),
             for: scope
         )
-        let submittedIDs = Set(currentAdmission.submittedAttachments.map(\.id))
-        if lease?.scope == scope {
-            let newerAttachments = attachmentsByScope[scope] ?? []
-            attachmentsByScope[scope] = currentAdmission.submittedAttachments
+        let submittedIDs = Set(currentAdmission.snapshot.attachmentIDs)
+        if let restoredTarget = lease?.scope == scope ? lease?.target : nil {
+            let newerAttachments = attachmentsByTarget[restoredTarget] ?? []
+            attachmentsByTarget[restoredTarget] = currentAdmission.submittedAttachments
                 + newerAttachments.filter { !submittedIDs.contains($0.id) }
-            schedulePersistence(for: scope)
         }
         if currentAdmission.canRestoreSubmittedSkill,
            skillMutationRevisionByScope[scope, default: 0] == currentAdmission.skillMutationRevision,
@@ -1607,12 +1276,11 @@ final class ComposerDraftCoordinator {
         guard let rejected = submissionByTarget.values.first(where: {
             $0.scope == scope && $0.transportState == .rejected
         }) else { return }
-        let submittedIDs = Set(rejected.submittedAttachments.map(\.id))
-        let newerAttachments = attachmentsByScope[scope] ?? []
-        attachmentsByScope[scope] = rejected.submittedAttachments
+        let submittedIDs = Set(rejected.snapshot.attachmentIDs)
+        let newerAttachments = attachmentsByTarget[target] ?? []
+        attachmentsByTarget[target] = rejected.submittedAttachments
             + newerAttachments.filter { !submittedIDs.contains($0.id) }
         submissionByTarget[rejected.snapshot.target] = nil
-        schedulePersistence(for: scope)
     }
 
     private func markOperationAccepted(_ operationID: String, admission: SubmissionAdmission) {
@@ -1632,14 +1300,13 @@ final class ComposerDraftCoordinator {
         guard var accepted = submissionByTarget[admission.snapshot.target],
               accepted.id == admission.id else { return }
         accepted.transportState = .accepted
-        schedulePersistence(for: accepted.scope)
         // Keep the exact captured IDs addressable by the ephemeral row even if
         // the user edited the staged attachment strip while transport awaited
         // acknowledgement. They are removed only at canonical reconciliation.
-        let retained = attachmentsByScope[admission.scope] ?? []
+        let retained = attachmentsByTarget[admission.snapshot.target] ?? []
         let retainedIDs = Set(retained.map(\.id))
         let captured = admission.submittedAttachments.filter { !retainedIDs.contains($0.id) }
-        attachmentsByScope[admission.scope] = captured + retained
+        attachmentsByTarget[admission.snapshot.target] = captured + retained
         if accepted.canonicalObserved || lease?.target != admission.snapshot.target {
             finishSubmission(accepted)
         } else {
@@ -1651,11 +1318,10 @@ final class ComposerDraftCoordinator {
         let target = admission.snapshot.target
         guard let current = submissionByTarget[target], current.id == admission.id else { return }
         guard lease?.target == target else {
-            let submitted = Set(current.submittedAttachments.map(\.id))
-            attachmentsByScope[current.scope]?.removeAll { submitted.contains($0.id) }
-            if attachmentsByScope[current.scope]?.isEmpty == true { attachmentsByScope[current.scope] = nil }
+            let submitted = Set(current.snapshot.attachmentIDs)
+            attachmentsByTarget[target]?.removeAll { submitted.contains($0.id) }
+            if attachmentsByTarget[target]?.isEmpty == true { attachmentsByTarget[target] = nil }
             submissionByTarget[target] = nil
-            schedulePersistence(for: current.scope)
             return
         }
         if let canonicalHandoffID = current.canonicalHandoffID {
@@ -1687,11 +1353,10 @@ final class ComposerDraftCoordinator {
                 )
             }
         }
-        let submitted = Set(current.submittedAttachments.map(\.id))
-        attachmentsByScope[current.scope]?.removeAll { submitted.contains($0.id) }
-        if attachmentsByScope[current.scope]?.isEmpty == true { attachmentsByScope[current.scope] = nil }
+        let submitted = Set(current.snapshot.attachmentIDs)
+        attachmentsByTarget[target]?.removeAll { submitted.contains($0.id) }
+        if attachmentsByTarget[target]?.isEmpty == true { attachmentsByTarget[target] = nil }
         submissionByTarget[target] = nil
-        schedulePersistence(for: current.scope)
     }
 
     private func retireSettledQueueAliases(
@@ -1801,12 +1466,7 @@ final class ComposerDraftCoordinator {
 
     private func revokePresentation() {
         guard let lease else { return }
-        restoredUploadTasks[lease.target]?.cancel()
-        restoredUploadTasks[lease.target] = nil
-        if let attachments = attachmentsByScope[lease.scope] {
-            attachmentsByScope[lease.scope] = attachments.map { $0.requiringUpload() }
-            schedulePersistence(for: lease.scope)
-        }
+        attachmentsByTarget[lease.target] = nil
         editorRequestByTarget[lease.target] = nil
         // Keep an unresolved exact submission admission alive after route
         // revocation so a definite transport rejection can restore its scoped
@@ -1836,11 +1496,6 @@ final class ComposerDraftCoordinator {
         }
         for (scope, _) in inactive.prefix(inactive.count - Self.maxInactiveDrafts) {
             drafts[scope] = nil
-            attachmentsByScope[scope] = nil
-            loadedScopes.remove(scope)
-            textMutationRevisionByScope[scope] = nil
-            dirtyScopes.remove(scope)
-            enqueuePersistence { store in await store.remove(scope) }
             selectedSkillByScope[scope] = nil
             skillMutationRevisionByScope[scope] = nil
         }
@@ -1862,27 +1517,9 @@ final class ComposerDraftCoordinator {
         return scope
     }
 
-    func installHostedRestoredPresentation(
-        profileID: String,
-        target: SessionPresentationIdentity,
-        lifecycleGeneration: Int,
-        initialText: String? = nil
-    ) async -> ComposerDraftScope {
-        let scope = prepareDraft(
-            profileID: profileID,
-            sessionID: target.sessionID,
-            initialText: initialText
-        )
-        await restoreDraftIfNeeded(scope)
-        _ = beginOpening(scope: scope, lifecycleGeneration: lifecycleGeneration)
-        _ = mountPreparedPresentation(target)
-        return scope
-    }
-
     func installHostedAttachment(_ attachment: PendingAttachment, target: SessionPresentationIdentity) {
-        guard admits(target), let scope = lease?.scope else { return }
-        attachmentsByScope[scope, default: []].append(attachment)
-        schedulePersistence(for: scope)
+        guard admits(target) else { return }
+        attachmentsByTarget[target, default: []].append(attachment)
     }
     #endif
 }

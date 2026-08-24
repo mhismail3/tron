@@ -173,8 +173,7 @@ struct ChatTranscriptPresentationTests {
                 previewData: photoPreview
             ),
             PendingAttachment(
-                id: "local-file-chip", gatewayUploadID: "file-upload",
-                name: "notes.txt", mimeType: "text/plain", size: 2,
+                id: "file-upload", name: "notes.txt", mimeType: "text/plain", size: 2,
                 previewData: filePreview
             ),
         ]
@@ -894,30 +893,6 @@ struct ChatTranscriptPresentationTests {
         #expect(active.count == 1)
         #expect(active.first?.title == "Compacting context")
         #expect(active.first?.id == "runtime-working")
-    }
-
-    @Test("exact canonical compaction suppresses queued and active overlap through trailing metadata")
-    func canonicalCompactionOverlapSuppression() throws {
-        var snapshot = try fixture(transcript: """
-        [
-          {"id":"compact","parentId":null,"timestamp":"2026-01-01T00:00:00Z","kind":"compaction","summary":"done","tokensBefore":100},
-          {"id":"model","parentId":"compact","timestamp":"2026-01-01T00:00:01Z","kind":"modelChange","modelRef":{"provider":"openai","id":"next"}},
-          {"id":"thinking","parentId":"model","timestamp":"2026-01-01T00:00:02Z","kind":"thinkingChange","level":"high"},
-          {"id":"label","parentId":"thinking","timestamp":"2026-01-01T00:00:03Z","kind":"label","targetId":"compact","label":"checkpoint"}
-        ]
-        """)
-        snapshot.phase = .compacting
-        snapshot.compactionQueued = true
-        snapshot.extensionPresentation.semanticState.working = .init(message: nil, visible: true)
-        snapshot.transcriptStart = 8
-        snapshot.transcriptTotal = 12
-
-        #expect(ChatNotificationPresentation.runtime(in: snapshot).isEmpty)
-
-        snapshot.transcriptTotal = 13
-        #expect(ChatNotificationPresentation.runtime(in: snapshot).map(\.id) == [
-            "runtime-compaction-queued", "runtime-working",
-        ])
     }
 
     @Test("pending prompts retain their requested delivery label across reconstruction")

@@ -1276,7 +1276,7 @@ struct ChatTranscriptPresentationStoreTests {
         }
     }
 
-    @Test("pending, canonical-overlap, and idle compaction installs retain one physical row")
+    @Test("exact pending compaction becomes canonical in place")
     func compactionTransitionIdentity() async throws {
         try await withTestWatchdog { @MainActor in
             var snapshot = try SessionScenarioBuilder(seed: 1_217)
@@ -1293,17 +1293,6 @@ struct ChatTranscriptPresentationStoreTests {
 
             snapshot.transcript.append(try compactionItem(id: "finished-compaction"))
             snapshot.transcriptTotal! += 1
-            snapshot.revision += 1
-            snapshot.eventSequence += 1
-            tag = ChatTranscriptProjectionTag(snapshot: snapshot, presentationGeneration: 19)
-            store.submit(snapshot: snapshot, tag: tag)
-            let overlapping = try await store.waitForInstall(of: tag)
-
-            #expect(snapshot.phase == .compacting)
-            #expect(overlapping.runtimeItems.isEmpty)
-            #expect(overlapping.timeline.items.last?.id == pendingID)
-            #expect(overlapping.hasUniqueDisplayedIDs)
-
             snapshot.phase = .idle
             snapshot.extensionPresentation.semanticState.working.visible = false
             snapshot.revision += 1
@@ -1314,7 +1303,6 @@ struct ChatTranscriptPresentationStoreTests {
 
             #expect(completed.runtimeItems.isEmpty)
             #expect(completed.timeline.items.last?.id == pendingID)
-            #expect(completed.hasUniqueDisplayedIDs)
             #expect(store.pendingEntranceIDs.isEmpty)
         }
     }

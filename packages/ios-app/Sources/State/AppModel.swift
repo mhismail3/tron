@@ -247,7 +247,6 @@ final class AppModel {
         composerUpload: ComposerUploadOperation? = nil,
         composerFileUpload: ComposerFileUploadOperation? = nil,
         composerAttachmentFileAccess: ComposerAttachmentFileAccess = .live,
-        composerDraftStore: ComposerDraftStore = ComposerDraftStore(),
         exportArtifacts: SessionExportArtifactStore = SessionExportArtifactStore()
     ) {
         let resolvedPairingCommit = pairingCommit ?? { profile, token in
@@ -328,7 +327,6 @@ final class AppModel {
                 )
             },
             attachmentFileAccess: composerAttachmentFileAccess,
-            draftStore: composerDraftStore,
             send: { text, sessionID, uploadIDs, behavior, skillName in
                 try await sessionMutations.prompt(
                     text,
@@ -782,8 +780,7 @@ final class AppModel {
         return task
     }
 
-    @discardableResult
-    func enteredBackground() -> Task<Void, Never> {
+    func enteredBackground() {
         sceneAllowsCatalogRefresh = false
         noticeCenter.setBackgrounded(true)
         diagnosticsAreReady = false
@@ -791,11 +788,9 @@ final class AppModel {
         // The canonical session may still be running on the Gateway, but this
         // mobile projection is intentionally retiring its transport lease.
         sessionCatalog.markDisconnected()
-        let draftCheckpoint = composerDrafts.checkpointDrafts()
         lifecycle.enteredBackground()
         catalogInvalidationGeneration &+= 1
         cancelCatalogRefresh()
-        return draftCheckpoint
     }
 
     func pair(_ invitation: PairingInvitation, selectingProfile: Bool = true) async throws {
@@ -898,7 +893,7 @@ final class AppModel {
         }
         do {
             try profiles.remove(profile)
-            await composerDrafts.removeProfile(profile.id).value
+            composerDrafts.removeProfile(profile.id)
             await cache.remove(profileID: profile.id)
             profileRevision &+= 1
             reconcileDashboardConnections()
@@ -911,7 +906,7 @@ final class AppModel {
         let forgottenProfileID = profiles.selected?.id
         if await lifecycle.forgetCurrentGateway() {
             if let forgottenProfileID {
-                await composerDrafts.removeProfile(forgottenProfileID).value
+                composerDrafts.removeProfile(forgottenProfileID)
                 await cache.remove(profileID: forgottenProfileID)
             }
             profileRevision &+= 1
@@ -921,7 +916,6 @@ final class AppModel {
     }
 
     func teardown() async {
-        await composerDrafts.checkpointDrafts().value
         await lifecycle.teardown()
     }
 
@@ -1460,7 +1454,7 @@ final class AppModel {
             pairedDevices.removeAll { $0.id == id }
             if let profile = profiles.selected, profile.deviceId == id,
                await lifecycle.forget(profile: profile) {
-                await composerDrafts.removeProfile(profile.id).value
+                composerDrafts.removeProfile(profile.id)
                 await cache.remove(profileID: profile.id)
                 profileRevision &+= 1
                 reconcileDashboardConnections()
@@ -1903,7 +1897,7 @@ final class AppModel {
         try await sessionMutations.delete(sessionID: id)
         sessionPresentation.remove(sessionID: id)
         if let profileID = lifecycle.selectedProfileID {
-            await composerDrafts.removeSession(profileID: profileID, sessionID: id).value
+            composerDrafts.removeSession(profileID: profileID, sessionID: id)
         }
         sessionCatalog.remove(id)
         installSelectedDashboardCatalog()

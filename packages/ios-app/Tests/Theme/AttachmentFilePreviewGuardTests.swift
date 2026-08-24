@@ -35,9 +35,7 @@ struct AttachmentFilePreviewGuardTests {
 
         let outgoingRow = outgoing.components(separatedBy: "struct ChatOutgoingSubmissionRow").dropFirst().first ?? ""
         #expect(outgoingRow.contains("TranscriptFileChip("))
-        #expect(outgoingRow.contains("else if let blobID = attachment.transportBlobID"))
-        #expect(outgoingRow.contains("blobID: blobID"))
-        #expect(!outgoingRow.contains("blobID: \"upload:\\(attachment.id)\""))
+        #expect(outgoingRow.contains("blobID: \"upload:\\(attachment.id)\""))
         #expect(outgoingRow.contains("QueuedMessageAttachmentPresentation.chips(for: attachments)"))
 
         let compact = queue.components(separatedBy: "struct QueuedMessageAttachmentChipRow").dropFirst().first ?? ""

@@ -6,30 +6,23 @@ import UIKit
 @MainActor
 @Suite("Hosted ChatView scroll harness", .serialized)
 struct ChatViewScrollHarnessTests {
-    @Test("composer height is finite and picker gives way to fixed surfaces")
+    @Test("composer height changes are atomic and coalesced")
     func composerLayoutGenerationPolicy() {
-        let allocation = ChatComposerLayoutPolicy.allocation(
-            maximumHeight: 260,
-            fixedHeight: 210,
-            desiredFlexibleHeight: 180,
-            fixedSurfaceCount: 2,
-            spacing: 10
-        )
-        #expect(allocation == ChatComposerLayoutAllocation(
-            flexibleHeight: 40,
-            totalHeight: 260
+        #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: nil,
+            measured: 44
         ))
-
-        let invalidMeasurements = ChatComposerLayoutPolicy.allocation(
-            maximumHeight: 260,
-            fixedHeight: .infinity,
-            desiredFlexibleHeight: .nan,
-            fixedSurfaceCount: 2,
-            spacing: 10
-        )
-        #expect(invalidMeasurements == ChatComposerLayoutAllocation(
-            flexibleHeight: 0,
-            totalHeight: 10
+        #expect(ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: 44,
+            measured: 88
+        ))
+        #expect(!ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: 44,
+            measured: 44.2
+        ))
+        #expect(!ChatComposerStructuralTransitionPolicy.admitsHeightChange(
+            current: 44,
+            measured: .infinity
         ))
     }
 

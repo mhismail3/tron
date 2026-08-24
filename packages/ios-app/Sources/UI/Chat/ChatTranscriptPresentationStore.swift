@@ -40,7 +40,6 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
     struct HandoffIdentity: Hashable, Sendable {
         struct Attachment: Hashable, Sendable {
             let id: String
-            let gatewayUploadID: String?
             let name: String
             let mimeType: String
             let size: Int
@@ -48,7 +47,6 @@ struct ChatTranscriptProjectionTag: Hashable, Sendable {
 
             init(_ attachment: PendingAttachment) {
                 id = attachment.id
-                gatewayUploadID = attachment.gatewayUploadID
                 name = attachment.name
                 mimeType = attachment.mimeType
                 size = attachment.size

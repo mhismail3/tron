@@ -267,32 +267,21 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
             QueuedMessageAttachmentChipRow(
                 chips: chips,
                 accent: presentation.promptBehavior == .followUp ? .tronPurple : .tronEmerald,
-                morphDestinationIDs: queuedMorphDestinationIDs,
+                morphDestinationIDs: Dictionary(uniqueKeysWithValues: chips.compactMap { chip in
+                    guard let blobID = chip.attachment?.id, blobID.hasPrefix("upload:") else {
+                        return nil
+                    }
+                    return (
+                        chip.id,
+                        ChatMorphID(
+                            lifecycleID: presentation.id,
+                            element: .attachment(String(blobID.dropFirst("upload:".count)))
+                        )
+                    )
+                }),
                 morphRegistry: morphRegistry
             )
         }
-    }
-
-    private var queuedMorphDestinationIDs: [String: ChatMorphID] {
-        let photos = attachments.filter {
-            $0.mimeType.hasPrefix("image/") && $0.transportBlobID != nil
-        }
-        let files = attachments.filter {
-            !$0.mimeType.hasPrefix("image/") && $0.transportBlobID != nil
-        }
-        return Dictionary(uniqueKeysWithValues:
-            photos.enumerated().map { index, attachment in
-                ("photo-\(index)", ChatMorphID(
-                    lifecycleID: presentation.id,
-                    element: .attachment(attachment.id)
-                ))
-            } + files.enumerated().map { index, attachment in
-                ("file-\(index)", ChatMorphID(
-                    lifecycleID: presentation.id,
-                    element: .attachment(attachment.id)
-                ))
-            }
-        )
     }
 
     @ViewBuilder
@@ -316,12 +305,12 @@ struct ChatOutgoingSubmissionRow: View, Equatable {
                             )
                             .accessibilityElement(children: .ignore)
                             .accessibilityLabel("Attachment \(attachment.name)")
-                        } else if let blobID = attachment.transportBlobID {
+                        } else {
                             TranscriptFileChip(
                                 name: attachment.name,
                                 mimeType: attachment.mimeType,
                                 size: attachment.size,
-                                blobID: blobID
+                                blobID: "upload:\(attachment.id)"
                             )
                             .chatMorphDestination(
                                 id: ChatMorphID(
