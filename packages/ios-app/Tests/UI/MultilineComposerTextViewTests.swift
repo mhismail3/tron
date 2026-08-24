@@ -227,6 +227,12 @@ struct MultilineComposerTextViewTests {
         coordinator.textViewDidChange(view)
         view.frame.size.height = coordinator.resolvedHeight(of: view, width: width)
         coordinator.textViewDidLayout(view)
+        #expect(view.isScrollEnabled)
+
+        view.text = (1...7).map { "line \($0)" }.joined(separator: "\n")
+        coordinator.textViewDidChange(view)
+        view.frame.size.height = coordinator.resolvedHeight(of: view, width: width)
+        coordinator.textViewDidLayout(view)
         #expect(!view.isScrollEnabled)
         #expect(abs(view.contentOffset.y) < 0.5)
 
@@ -315,6 +321,84 @@ struct MultilineComposerTextViewTests {
 
         #expect(view.isScrollEnabled)
         #expect(coordinator.hostedCaretIsVisible(in: view))
+    }
+
+    @Test("invalid and speculative widths fail closed before TextKit measurement")
+    func invalidWidthProposals() {
+        #expect(!MultilineComposerTextView.isAdmittedWidth(.nan))
+        #expect(!MultilineComposerTextView.isAdmittedWidth(.infinity))
+        #expect(!MultilineComposerTextView.isAdmittedWidth(-.infinity))
+        #expect(!MultilineComposerTextView.isAdmittedWidth(0))
+        #expect(!MultilineComposerTextView.isAdmittedWidth(-1))
+        #expect(MultilineComposerTextView.isAdmittedWidth(240))
+
+        var text = "wrapped text"
+        var focused = true
+        let control = MultilineComposerTextView(
+            text: Binding(get: { text }, set: { text = $0 }),
+            isFocused: Binding(get: { focused }, set: { focused = $0 }),
+            isEditable: true,
+            keyboardAppearance: .dark
+        )
+        let coordinator = control.makeCoordinator()
+        let view = makeTextView(coordinator: coordinator, width: 240)
+        #expect(coordinator.resolvedHeight(of: view, width: .nan) == 0)
+        #expect(coordinator.resolvedHeight(of: view, width: .infinity) == 0)
+        #expect(coordinator.resolvedHeight(of: view, width: 0) == 0)
+        let finite = coordinator.resolvedHeight(of: view, width: 240)
+        for _ in 0..<4 {
+            #expect(coordinator.resolvedHeight(of: view, width: .infinity) == 0)
+            #expect(coordinator.resolvedHeight(of: view, width: 240) == finite)
+        }
+    }
+
+    @Test("internal scroll ownership has a one-point hysteresis band")
+    func scrollHysteresis() {
+        let maximum: CGFloat = 100
+        #expect(!MultilineComposerTextView.Coordinator.shouldUseInternalScrolling(
+            fittingHeight: 100.5, maximumHeight: maximum, currentlyScrolling: false
+        ))
+        #expect(MultilineComposerTextView.Coordinator.shouldUseInternalScrolling(
+            fittingHeight: 100.51, maximumHeight: maximum, currentlyScrolling: false
+        ))
+        #expect(MultilineComposerTextView.Coordinator.shouldUseInternalScrolling(
+            fittingHeight: 99.5, maximumHeight: maximum, currentlyScrolling: true
+        ))
+        #expect(!MultilineComposerTextView.Coordinator.shouldUseInternalScrolling(
+            fittingHeight: 99.49, maximumHeight: maximum, currentlyScrolling: true
+        ))
+    }
+
+    @Test("wrapped typing around the cap does not oscillate scroll ownership")
+    func wrappedCapStability() {
+        var text = ""
+        var focused = true
+        let control = MultilineComposerTextView(
+            text: Binding(get: { text }, set: { text = $0 }),
+            isFocused: Binding(get: { focused }, set: { focused = $0 }),
+            isEditable: true,
+            keyboardAppearance: .dark,
+            maximumLines: 2
+        )
+        let coordinator = control.makeCoordinator()
+        let width: CGFloat = 120
+        let view = makeTextView(coordinator: coordinator, width: width)
+        view.text = String(repeating: "wrapped ", count: 20)
+        view.selectedRange = NSRange(location: (view.text as NSString).length, length: 0)
+        coordinator.textViewDidChange(view)
+        view.frame.size.height = coordinator.resolvedHeight(of: view, width: width)
+        coordinator.textViewDidLayout(view)
+        #expect(coordinator.usesInternalScrolling)
+
+        for suffix in ["a", "ab", "abc", "abcd", "abcde"] {
+            view.text += suffix
+            view.selectedRange = NSRange(location: (view.text as NSString).length, length: 0)
+            coordinator.textViewDidChange(view)
+            view.frame.size.height = coordinator.resolvedHeight(of: view, width: width)
+            coordinator.textViewDidLayout(view)
+            #expect(coordinator.usesInternalScrolling)
+            #expect(coordinator.hostedCaretIsVisible(in: view))
+        }
     }
 
     @Test("composer measurement is side-effect free and owns no safe-area inset")

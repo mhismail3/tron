@@ -116,11 +116,15 @@ struct MultilineComposerTextView: UIViewRepresentable {
         uiView: LayoutAwareTextView,
         context: Context
     ) -> CGSize? {
-        guard let width = proposal.width, width > 0 else { return nil }
+        guard let width = proposal.width, Self.isAdmittedWidth(width) else { return nil }
         return CGSize(
             width: width,
             height: context.coordinator.resolvedHeight(of: uiView, width: width)
         )
+    }
+
+    static func isAdmittedWidth(_ width: CGFloat) -> Bool {
+        width.isFinite && width > 0
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
@@ -219,7 +223,7 @@ struct MultilineComposerTextView: UIViewRepresentable {
         }
 
         func resolvedHeight(of view: UITextView, width: CGFloat) -> CGFloat {
-            guard width > 0, let font = view.font else { return 0 }
+            guard MultilineComposerTextView.isAdmittedWidth(width), let font = view.font else { return 0 }
             let fitting = view.sizeThatFits(
                 CGSize(width: width, height: .greatestFiniteMagnitude)
             ).height
@@ -251,7 +255,11 @@ struct MultilineComposerTextView: UIViewRepresentable {
                 height: .greatestFiniteMagnitude
             )).height
             let maximum = ceil(font.lineHeight * CGFloat(max(parent.maximumLines, 1)))
-            let shouldScroll = fitting > maximum + 0.5
+            let shouldScroll = Self.shouldUseInternalScrolling(
+                fittingHeight: fitting,
+                maximumHeight: maximum,
+                currentlyScrolling: usesInternalScrolling
+            )
             let sizeChanged = abs(lastLayoutSize.width - view.bounds.width) > 0.5
                 || abs(lastLayoutSize.height - view.bounds.height) > 0.5
             lastLayoutSize = view.bounds.size
@@ -272,6 +280,19 @@ struct MultilineComposerTextView: UIViewRepresentable {
             guard usesInternalScrolling, view.isScrollEnabled, needsCaretReveal else { return }
             needsCaretReveal = false
             revealCaret(in: view, measuredContentHeight: fitting)
+        }
+
+        static func shouldUseInternalScrolling(
+            fittingHeight: CGFloat,
+            maximumHeight: CGFloat,
+            currentlyScrolling: Bool
+        ) -> Bool {
+            guard fittingHeight.isFinite, maximumHeight.isFinite, maximumHeight > 0 else {
+                return currentlyScrolling
+            }
+            return currentlyScrolling
+                ? fittingHeight >= maximumHeight - 0.5
+                : fittingHeight > maximumHeight + 0.5
         }
 
         private func revealCaret(in view: UITextView, measuredContentHeight: CGFloat) {
